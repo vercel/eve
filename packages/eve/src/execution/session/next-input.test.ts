@@ -49,6 +49,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
     takeLeading: () => [],
     async claimSessionHook() {},
     async claimSessionHooks() {},
+    async releaseSessionHooks() {},
     drain() {
       return remaining.splice(0).map((read) => read.result.value);
     },
@@ -115,7 +116,7 @@ function waitInput(inbox: MockInbox): WaitInput {
 }
 
 function createCursor(
-  inbox: Pick<SessionInbox, "claimSessionHooks">,
+  inbox: Pick<SessionInbox, "claimSessionHooks" | "releaseSessionHooks">,
   state = sessionState,
 ): SessionStateCursor {
   return new SessionStateCursor({

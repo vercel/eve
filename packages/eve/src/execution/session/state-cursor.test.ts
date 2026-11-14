@@ -13,6 +13,7 @@ describe("SessionStateCursor", () => {
     const claimSessionHooks = vi.fn(async () => {});
     const inbox = {
       claimSessionHooks,
+      releaseSessionHooks: vi.fn(async () => {}),
     };
     const initialState = state("channel:initial");
     const cursor = new SessionStateCursor({
@@ -41,12 +42,58 @@ describe("SessionStateCursor", () => {
     expect(cursor.sessionState).toEqual(nextState);
   });
 
+  it("releases the addresses a step dropped after claiming the ones it kept", async () => {
+    const calls: string[] = [];
+    const claimSessionHooks = vi.fn(async () => {
+      calls.push("claim");
+    });
+    const releaseSessionHooks = vi.fn(async () => {
+      calls.push("release");
+    });
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks, releaseSessionHooks },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { [ContinuationHookTokensKey.name]: ["channel:thread"] },
+      sessionState: state("channel:thread"),
+    });
+
+    await cursor.advance((input) =>
+      withSessionStateDelta(input, async () => ({
+        serializedContext: { [ContinuationHookTokensKey.name]: ["channel:code"] },
+        sessionState: state("channel:code"),
+      })),
+    );
+
+    expect(claimSessionHooks).toHaveBeenCalledWith([stableToken, "channel:code"]);
+    expect(releaseSessionHooks).toHaveBeenCalledWith(["channel:thread"]);
+    expect(calls).toEqual(["claim", "release"]);
+  });
+
+  it("releases nothing when a step keeps every address", async () => {
+    const releaseSessionHooks = vi.fn(async () => {});
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: vi.fn(async () => {}), releaseSessionHooks },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state("channel:initial"),
+    });
+
+    await cursor.advance((input) =>
+      withSessionStateDelta(input, async () => ({ sessionState: state("channel:initial") })),
+    );
+
+    expect(releaseSessionHooks).not.toHaveBeenCalled();
+  });
+
   it("claims the current continuation when no address history was recorded", async () => {
     const claimSessionHooks = vi.fn(async () => {});
     const cursor = new SessionStateCursor({
       history: [],
       inbox: {
         claimSessionHooks,
+        releaseSessionHooks: vi.fn(async () => {}),
       },
       sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -63,7 +110,10 @@ describe("SessionStateCursor", () => {
   it("adopts exactly the values a step returned, including edits it made to its input in place", async () => {
     const cursor = new SessionStateCursor({
       history: [{ content: "Alice asks for the status.", kind: "user", role: "user" }],
-      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      inbox: {
+        claimSessionHooks: vi.fn(async () => {}),
+        releaseSessionHooks: vi.fn(async () => {}),
+      },
       sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: { "eve.channel": { kind: "slack", state: { threadTs: "1.0" } } },
       sessionState: state("channel:initial"),
@@ -102,7 +152,10 @@ describe("SessionStateCursor", () => {
     ];
     const cursor = new SessionStateCursor({
       history,
-      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      inbox: {
+        claimSessionHooks: vi.fn(async () => {}),
+        releaseSessionHooks: vi.fn(async () => {}),
+      },
       sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state("channel:initial"),
@@ -117,7 +170,10 @@ describe("SessionStateCursor", () => {
   it("rejects a step's delta when another step changed the state while it ran", async () => {
     const cursor = new SessionStateCursor({
       history: [],
-      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      inbox: {
+        claimSessionHooks: vi.fn(async () => {}),
+        releaseSessionHooks: vi.fn(async () => {}),
+      },
       sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state("channel:initial"),
@@ -145,15 +201,18 @@ describe("SessionStateCursor", () => {
     { meanwhile: "a running step", adopted: false },
     { meanwhile: "losing interest", adopted: false },
     { meanwhile: "a new session address in its delta", adopted: false },
+    { meanwhile: "a released session address in its delta", adopted: false },
   ])(
     "adopts a step run beside the others only after $meanwhile",
     async ({ meanwhile, adopted }) => {
       const claimSessionHooks = vi.fn(async () => {});
       const cursor = new SessionStateCursor({
         history: [],
-        inbox: { claimSessionHooks },
+        inbox: { claimSessionHooks, releaseSessionHooks: vi.fn(async () => {}) },
         sessionWritable: new WritableStream<Uint8Array>(),
-        serializedContext: {},
+        serializedContext: {
+          [ContinuationHookTokensKey.name]: ["channel:initial", "channel:earlier"],
+        },
         sessionState: state("channel:initial"),
       });
       const beside = Promise.withResolvers<void>();
@@ -163,11 +222,18 @@ describe("SessionStateCursor", () => {
         meanwhile === "a new session address in its delta"
           ? state("channel:beside")
           : { ...state("channel:initial"), hasProxyInputRequests: true };
+      const besideContext =
+        meanwhile === "a released session address in its delta"
+          ? { [ContinuationHookTokensKey.name]: ["channel:initial"] }
+          : undefined;
       const result = cursor.advanceBeside(
         (input) =>
           withSessionStateDelta(input, async () => {
             await beside.promise;
-            return { sessionState: besideState };
+            return {
+              sessionState: besideState,
+              ...(besideContext !== undefined && { serializedContext: besideContext }),
+            };
           }),
         () => wanted,
       );

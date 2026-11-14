@@ -626,6 +626,32 @@ describe("createSessionInbox", () => {
     expect(replacement.dispose).toHaveBeenCalledOnce();
   });
 
+  it("releases an address on request, keeping what it already accepted and letting it be claimed again", async () => {
+    const threadRead = createDeferred<IteratorResult<SessionInboxPayload>>();
+    const stable = createMockHook({ token: "stable" });
+    const thread = createMockHook({ reads: [threadRead.promise], token: "thread" });
+    const reclaimed = createMockHook({ token: "thread" });
+    installHooks(stable, thread, reclaimed);
+    const inbox = createSessionInbox("session-1");
+
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("thread");
+    threadRead.resolve(resolved(send("before release")));
+    await threadRead.promise;
+    await inbox.releaseSessionHooks(["thread", "unknown"]);
+
+    expect(thread.dispose).toHaveBeenCalledOnce();
+    expect(stable.dispose).not.toHaveBeenCalled();
+    expect(hookTokens(inbox)).toEqual(["stable"]);
+    expect(inbox.drain()).toEqual([send("before release")]);
+
+    await inbox.claimSessionHook("thread");
+    expect(hookTokens(inbox)).toEqual(["stable", "thread"]);
+    await inbox.dispose();
+    expect(thread.dispose).toHaveBeenCalledOnce();
+    expect(reclaimed.dispose).toHaveBeenCalledOnce();
+  });
+
   it("adds a first continuation alias to an existing stable wait", async () => {
     installHooks(
       createMockHook({ token: "stable" }),

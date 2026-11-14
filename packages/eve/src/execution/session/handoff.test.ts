@@ -532,6 +532,7 @@ function createInbox(
     whenHandoverSettled: () => new Promise<void>(() => {}),
     claimSessionHook: vi.fn(async () => {}),
     claimSessionHooks: vi.fn(async () => {}),
+    releaseSessionHooks: vi.fn(async () => {}),
     claimedTokens: TOKENS,
     ownerRunId: () => "owner-1",
     takeLeading: () => [],
