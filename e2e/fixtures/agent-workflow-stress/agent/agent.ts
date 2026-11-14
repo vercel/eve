@@ -3,15 +3,18 @@ import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 import { FANOUT_LABELS, FANOUT_REPLY, FANOUT_TOOL_NAME } from "./lib/fanout";
+import { slackNewThreadReply } from "./lib/slack-new-thread";
 
 const agent: DefinedAgent = defineAgent({
   // Harness config wires the workflow world; the model is always this
   // fixture's scripted mock.
   ...e2eAgentConfig(),
-  model: mockModel((request) =>
-    request.lastUserMessage?.includes(`\`${FANOUT_TOOL_NAME}\``)
-      ? respondToFanout(request)
-      : `stress-ack:${request.userMessageCount}:${request.lastUserMessage ?? ""}`,
+  model: mockModel(
+    (request) =>
+      slackNewThreadReply(request.lastUserMessage) ??
+      (request.lastUserMessage?.includes(`\`${FANOUT_TOOL_NAME}\``)
+        ? respondToFanout(request)
+        : `stress-ack:${request.userMessageCount}:${request.lastUserMessage ?? ""}`),
   ),
   modelContextWindowTokens: 1_000_000,
 });
