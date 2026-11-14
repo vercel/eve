@@ -13,56 +13,50 @@ export interface SessionSchedule {
   readonly occurrenceId?: string;
 }
 
-export function readSerializedSessionSchedule(
+/**
+ * The provenance eve carries between its own hops: the public {@link SessionSchedule} plus the
+ * provider namespace, which `currentSchedule()` uses to address the schedule. Public surfaces
+ * read it through {@link publicSchedule}.
+ */
+export interface ScheduleProvenance extends SessionSchedule {
+  readonly namespace?: string;
+}
+
+export function readSerializedScheduleProvenance(
   values: Readonly<Record<string, unknown>>,
-): SessionSchedule | undefined {
+): ScheduleProvenance | undefined {
   const definition = values[ScheduleIdKey.name];
   if (typeof definition !== "string") return undefined;
-  const instance = values[ScheduleInstanceKey.name];
-  const occurrenceId = values[OccurrenceIdKey.name];
   return {
     definition,
-    instance: typeof instance === "string" ? instance : undefined,
-    occurrenceId: typeof occurrenceId === "string" ? occurrenceId : undefined,
+    instance: stringOrUndefined(values[ScheduleInstanceKey.name]),
+    occurrenceId: stringOrUndefined(values[OccurrenceIdKey.name]),
+    namespace: stringOrUndefined(values[ScheduleNamespaceKey.name]),
   };
 }
 
-export function readSessionSchedule(
+export function readScheduleProvenance(
   context: Pick<ContextReader, "get">,
-): SessionSchedule | undefined {
+): ScheduleProvenance | undefined {
   const definition = context.get(ScheduleIdKey);
   if (definition === undefined) return undefined;
   return {
     definition,
     instance: context.get(ScheduleInstanceKey),
     occurrenceId: context.get(OccurrenceIdKey),
+    namespace: context.get(ScheduleNamespaceKey),
   };
 }
 
-/**
- * Schedule provenance on a scheduled send: the public {@link SessionSchedule} plus the provider
- * namespace. `currentSchedule()` addresses the schedule with that namespace. eve keeps
- * `namespace` internal; sessions and remote agents see only the public fields.
- */
-export interface ScheduleProvenance extends SessionSchedule {
-  readonly namespace?: string;
+/** The provenance without its namespace, for sessions, frames, and remote agents. */
+export function publicSchedule(
+  provenance: ScheduleProvenance | undefined,
+): SessionSchedule | undefined {
+  if (provenance === undefined) return undefined;
+  const { namespace: _namespace, ...schedule } = provenance;
+  return schedule;
 }
 
-export function readScheduleProvenance(
-  context: Pick<ContextReader, "get">,
-): ScheduleProvenance | undefined {
-  const schedule = readSessionSchedule(context);
-  return schedule === undefined
-    ? undefined
-    : { ...schedule, namespace: context.get(ScheduleNamespaceKey) };
-}
-
-export function readSerializedScheduleProvenance(
-  values: Readonly<Record<string, unknown>>,
-): ScheduleProvenance | undefined {
-  const schedule = readSerializedSessionSchedule(values);
-  const namespace = values[ScheduleNamespaceKey.name];
-  return schedule === undefined
-    ? undefined
-    : { ...schedule, namespace: typeof namespace === "string" ? namespace : undefined };
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }

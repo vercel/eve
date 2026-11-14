@@ -63,7 +63,7 @@ export function buildSubagentRunInput(input: {
    * parent capabilities produce an undefined child capability set.
    */
   readonly capabilities?: SessionCapabilities;
-  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
+  readonly schedule?: import("#context/session-schedule.js").ScheduleProvenance;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   /** Replay-stable key the child's continuation token derives from. */
   readonly continuationKey: string;

@@ -13,7 +13,9 @@ import {
   type ApprovalPolicy,
 } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
-import { AuthKey } from "#context/keys.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { createSession } from "#channel/session.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -556,9 +558,10 @@ describe("schedule creation and invocation", () => {
     });
   });
 
-  it("lets an occurrence's session disable its schedule from a turn", async () => {
+  it("lets an occurrence's session disable its schedule until a person writes to it", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
     const seen: boolean[] = [];
+    let sessionId: string | undefined;
     const outbox = defineChannel<undefined, void, { inbox: string }>({
       routes: [POST("/outbox", async () => new Response("ok"))],
       async receive({ message, target, ...send }, { from }) {
@@ -591,6 +594,7 @@ describe("schedule creation and invocation", () => {
             default: defineHook({
               events: {
                 async "turn.started"() {
+                  sessionId = loadContext().get(SessionIdKey);
                   const schedule = await currentSchedule();
                   seen.push(schedule !== undefined);
                   await schedule?.disable();
@@ -613,6 +617,14 @@ describe("schedule creation and invocation", () => {
       await client.invoke(created.name);
       await vi.waitFor(() => expect(seen).toEqual([true]), { timeout: 20_000 });
       expect(await client.get(created.name)).toMatchObject({ state: "inactive" });
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      await createSession(sessionId!, runtime).send("Thanks, that's all.", {
+        auth: alice,
+        turnPolicy: "queue",
+      });
+      await vi.waitFor(() => expect(seen).toEqual([true, false]), { timeout: 20_000 });
     });
   }, 60_000);
 });

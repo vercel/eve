@@ -41,7 +41,7 @@ import {
 import { liveProjection } from "#harness/session-machine/current.js";
 import { SIGN_IN_DECLINED, terminalSignInFailure } from "#harness/hitl/sign-ins.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
-import { readSessionSchedule } from "#context/session-schedule.js";
+import { readScheduleProvenance } from "#context/session-schedule.js";
 import {
   type AuthorizationDefinition,
   type ConnectionAuthorizationContext,
@@ -189,7 +189,7 @@ export async function handleAuthorizationError(
   const store = contextStorage.getStore();
   if (
     store !== undefined &&
-    readSessionSchedule(store) !== undefined &&
+    readScheduleProvenance(store) !== undefined &&
     supportsInteractiveAuthorization(scoped.authorization)
   ) {
     throw new ConnectionAuthorizationFailedError(scoped.scope, {

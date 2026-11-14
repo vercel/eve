@@ -51,6 +51,26 @@ describe("postCompletedSlackReply", () => {
     expect(posted?.id).toBe("1700000001.000002");
   });
 
+  it("returns undefined when Slack refuses both posts and eve uploads a snippet", async () => {
+    const operations: string[] = [];
+    stubSlack((operation) => {
+      operations.push(operation);
+      if (operation === "chat.postMessage") return { ok: false, error: "msg_blocks_too_long" };
+      return {
+        ok: true,
+        ts: "1700000001.000004",
+        file_id: "F01",
+        upload_url: "https://files.example",
+      };
+    });
+    const posted = await postCompletedSlackReply(threadChannel("1700000000.000001"), {
+      blocks: [{ type: "markdown", text: "hello" }],
+      markdown: "hello",
+    });
+    expect(posted).toBe(undefined);
+    expect(operations).toContain("files.getUploadURLExternal");
+  });
+
   it("returns undefined when the thread's root is gone", async () => {
     stubSlack((operation) =>
       operation === "chat.getPermalink"

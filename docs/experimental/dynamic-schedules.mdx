@@ -300,6 +300,8 @@ const schedule = await currentSchedule();
 await schedule?.disable();
 ```
 
+A later message from a person clears the session's schedule provenance, so `currentSchedule()` returns `undefined` from then on.
+
 After the callback and its `waitUntil` promises finish, eve calls `occurrence.dispatched` with `sessionIds`. That event means the callback succeeded, not that the agent finished its task. Channels send the output and report session failures.
 
 Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback. Deduplicate your own side effects with `occurrence.executionId` plus the schedule or resource identity.

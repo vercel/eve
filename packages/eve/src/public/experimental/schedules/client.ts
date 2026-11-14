@@ -18,7 +18,7 @@ import type {
   ScheduleClient,
   ScheduleHandle,
 } from "#public/schedules/subscription.js";
-import { readSessionSchedule } from "#context/session-schedule.js";
+import { publicSchedule, readScheduleProvenance } from "#context/session-schedule.js";
 import { namedScopeDefinition } from "#runtime/schedules/named-scope.js";
 import {
   createScheduleCollectionClient,
@@ -71,7 +71,7 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
     abortSignal: new AbortController().signal,
     session: {
       id: context.get(SessionIdKey) ?? "",
-      schedule: readSessionSchedule(context),
+      schedule: publicSchedule(readScheduleProvenance(context)),
       auth: {
         current: context.get(AuthKey) ?? null,
         initiator: context.get(InitiatorAuthKey) ?? null,
@@ -106,14 +106,20 @@ export async function currentSchedule(): Promise<ScheduleHandle | undefined> {
   const namespace = context.get(ScheduleNamespaceKey);
   if (collection === undefined || name === undefined || namespace === undefined) return undefined;
   const bundle = requireCompiledBundle(context);
-  const { application, definition } = await loadScheduleCollectionDefinition(bundle, collection);
-  return scheduleHandle({
-    application,
-    bundle,
-    collection,
-    definition,
-    name,
-    namespace,
-    runtime: scheduledRunsRuntime(bundle),
-  });
+  const handle = async () => {
+    const { application, definition } = await loadScheduleCollectionDefinition(bundle, collection);
+    return scheduleHandle({
+      application,
+      bundle,
+      collection,
+      definition,
+      name,
+      namespace,
+      runtime: scheduledRunsRuntime(bundle),
+    });
+  };
+  return {
+    disable: async () => await (await handle()).disable(),
+    delete: async () => await (await handle()).delete(),
+  };
 }
