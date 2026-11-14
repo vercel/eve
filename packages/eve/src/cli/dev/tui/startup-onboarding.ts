@@ -1,6 +1,7 @@
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 
 import type { PromptCommandOutcome } from "./runner.js";
+import type { TuiSetupCommandInput } from "./setup-commands.js";
 import type { DevelopmentTuiStartup } from "./startup.js";
 
 /** Fresh-agent onboarding that finished on the startup screen, for the runner to settle. */
@@ -18,10 +19,10 @@ export interface StartupOnboardingResult {
 export async function runStartupOnboarding(input: {
   readonly startup: DevelopmentTuiStartup;
   readonly workspaceRoot: string;
-  readonly agentRoot?: string;
+  readonly agentRoot: string | undefined;
   readonly withExclusiveTerminal: <T>(task: () => Promise<T>) => Promise<T>;
-  readonly onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
-  readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
+  readonly onOnboardingStep?: ((input: EveCliSetupStepEvent) => void) | undefined;
+  readonly onOnboardingTerminal?: ((input: EveCliSetupTerminalEvent) => void) | undefined;
 }): Promise<StartupOnboardingResult> {
   const { renderer } = input.startup;
   renderer.setStartupPhase("connecting");
@@ -32,14 +33,15 @@ export async function runStartupOnboarding(input: {
   let preserveDiagnostics = true;
   let outcome: PromptCommandOutcome;
   try {
-    const result = await runTuiSetupCommand({
+    const commandInput: TuiSetupCommandInput = {
       command: "login",
       appRoot: input.workspaceRoot,
-      ...(input.agentRoot === undefined ? {} : { agentRoot: input.agentRoot }),
       renderer: flow,
       initialModelStep: "provider",
       withExclusiveTerminal: input.withExclusiveTerminal,
-    });
+    };
+    if (input.agentRoot !== undefined) commandInput.agentRoot = input.agentRoot;
+    const result = await runTuiSetupCommand(commandInput);
     const { preserveFlowDiagnostics, partial: _partial, ...rest } = result;
     preserveDiagnostics = preserveFlowDiagnostics;
     outcome = rest;

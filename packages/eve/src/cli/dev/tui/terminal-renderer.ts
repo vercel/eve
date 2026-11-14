@@ -363,7 +363,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #initialPromptPlaceholder = "Send a message…";
   /** The agent's local subagents, whose tools render as delegations. */
   #subagentNames?: readonly string[];
-  #startupPhase?: "starting" | "connecting" | "updating";
+  #startupPhase?: "installing" | "starting" | "connecting" | "updating";
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
   #startupStartedAt = 0;
@@ -629,7 +629,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       : [];
   }
 
-  setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
+  setStartupPhase(phase: "installing" | "starting" | "connecting" | "updating" | undefined): void {
     this.#startupPhase = phase;
     if (phase === undefined) this.#stopTicker();
     else this.#startTicker();
@@ -3791,6 +3791,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushStatusLine(rows: string[], width: number): void {
     if (this.#startupPhase !== undefined) {
       const labels = {
+        installing: "Installing dependencies…",
         starting: "Starting agent…",
         connecting: "Reading saved connection…",
         updating: "Loading selected model…",

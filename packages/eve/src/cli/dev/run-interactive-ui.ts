@@ -30,7 +30,7 @@ export async function runInteractiveDevelopmentUi(input: {
   readonly server: { readonly appRoot?: string; readonly serverUrl: string };
   readonly startup?: DevelopmentTuiStartup;
   /** Onboarding that already ran on the startup screen while the server booted. */
-  readonly startupOnboarding?: StartupOnboardingResult;
+  readonly startupOnboarding?: StartupOnboardingResult | undefined;
 }): Promise<void> {
   const runDevelopmentTui = await devBootPhase(
     "loading interactive UI",
@@ -53,7 +53,7 @@ export async function runInteractiveDevelopmentUi(input: {
   const tuiInput: RunDevelopmentTuiInput = {
     target,
     initialInput: input.options.input,
-    onboard: input.options.onboard,
+    onboard: input.options.onboard === true || input.options.onboarded === true,
     onBootProgress: input.report,
     onOnboardingStep: input.onOnboardingStep,
     onOnboardingTerminal: input.onOnboardingTerminal,

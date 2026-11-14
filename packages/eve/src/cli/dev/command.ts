@@ -71,9 +71,8 @@ async function runOnboardingWhileServerStarts(input: {
   return await runStartupOnboarding({
     startup: input.startup,
     workspaceRoot: projectContext?.environmentRoot ?? input.applicationRoot,
-    ...(projectContext?.kind === "workspace-member"
-      ? { agentRoot: projectContext.member.appRoot }
-      : {}),
+    agentRoot:
+      projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined,
     onOnboardingStep: input.telemetry.trackSetupStep,
     onOnboardingTerminal: input.telemetry.trackSetupTerminal,
     withExclusiveTerminal: async (task) => {
@@ -266,7 +265,8 @@ export function registerDevelopmentCommand(input: {
       .option("--no-default-extensions", "Do not mount default development extensions")
       .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
       .option("--input <text>", "Pre-fill the prompt input")
-      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp()),
+      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
+      .addOption(new Option("--onboarded", "Continue onboarding that eve init ran").hideHelp()),
   ).action(async (options: DevelopmentCliOptions) => {
     const interactive = hasInteractiveTerminal();
     const mode = resolveDevUiMode({ options, interactive });
@@ -330,16 +330,18 @@ export function registerDevelopmentCommand(input: {
       // Fresh-agent onboarding needs only the project files until it saves, so the person
       // picks a provider and signs in while the server boots.
       const startupOnboardingPromise =
-        options.onboard === true
-          ? tuiStartupPromise?.then((startup) =>
-              runOnboardingWhileServerStarts({
-                applicationRoot: applicationContext.root,
-                started,
-                startup,
-                telemetry,
-              }),
-            )
-          : undefined;
+        options.onboarded === true
+          ? Promise.resolve({ outcome: undefined })
+          : options.onboard === true
+            ? tuiStartupPromise?.then((startup) =>
+                runOnboardingWhileServerStarts({
+                  applicationRoot: applicationContext.root,
+                  started,
+                  startup,
+                  telemetry,
+                }),
+              )
+            : undefined;
       const [outcome, startup, startupOnboarding] = await Promise.all([
         started,
         tuiStartupPromise,
@@ -393,7 +395,7 @@ export function registerDevelopmentCommand(input: {
             runDevelopmentTui: runtime.runDevelopmentTui,
             server: { appRoot: handle.appRoot, serverUrl: handle.url },
             startup: tuiStartup,
-            ...(startupOnboarding === undefined ? {} : { startupOnboarding }),
+            startupOnboarding,
           }),
       });
     } finally {
