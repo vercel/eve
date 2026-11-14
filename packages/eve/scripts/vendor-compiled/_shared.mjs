@@ -41,7 +41,7 @@
  * ```
  */
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
@@ -784,7 +784,11 @@ async function bundleStandaloneModule({
     external: module.external ?? [],
     moduleTypes: module.loader ?? {},
     platform,
-    plugins: [...(module.plugins ?? []), createSharedSpecifierPlugin(sharedSpecifiers, [module])],
+    plugins: [
+      ...(module.plugins ?? []),
+      createSharedSpecifierPlugin(sharedSpecifiers, [module]),
+      createRuntimeDependencyPlugin(packageRoot),
+    ],
     resolve: module.resolve ?? getDefaultResolve(),
     treeshake: true,
     output: {
@@ -834,6 +838,7 @@ async function bundleModuleGroup({
       sharedSpecifiers,
       preparedModules.map(({ module }) => module),
     ),
+    createRuntimeDependencyPlugin(packageRoot),
   ];
 
   await buildWithRolldown({
@@ -938,6 +943,38 @@ function collectSharedSpecifiers(preparedModules) {
     }
   }
   return shared;
+}
+
+/**
+ * A vendored package that resolves one of eve's own runtime `dependencies` to the very install
+ * eve depends on imports it at runtime instead of bundling another copy. A different version
+ * stays bundled, as the package was tested with it, and so does a CommonJS `require()`, which
+ * an ESM bundle cannot leave external.
+ */
+function createRuntimeDependencyPlugin(packageRoot) {
+  const manifestPath = join(packageRoot, "package.json");
+  const dependencies = existsSync(manifestPath)
+    ? Object.keys(JSON.parse(readFileSync(manifestPath, "utf8")).dependencies ?? {})
+    : [];
+  const requireFromEve = createRequire(manifestPath);
+  const installs = new Map(
+    dependencies.map((name) => [
+      name,
+      realpathSync(dirname(requireFromEve.resolve(`${name}/package.json`))),
+    ]),
+  );
+  return {
+    name: "eve:vendored-runtime-dependencies",
+    async resolveId(source, importer, options) {
+      const install = installs.get(packageNameOf(source));
+      if (install === undefined || options.kind === "require-call") return null;
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+      if (resolved === null || resolved.external || !isInsideDirectory(resolved.id, install)) {
+        return null;
+      }
+      return { id: source, external: true };
+    },
+  };
 }
 
 const SHARED_FACADE_PREFIX = "\0eve-shared-facade:";
@@ -1078,9 +1115,16 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     }
   }
 
+  // Which runtime dependencies a bundle imports instead of bundling depends on their versions.
+  const manifestPath = join(packageRoot, "package.json");
+  const runtimeDependencies = existsSync(manifestPath)
+    ? (JSON.parse(await readFile(manifestPath, "utf8")).dependencies ?? {})
+    : {};
+
   return {
     moduleFingerprints,
     moduleVersions,
+    runtimeDependencies,
     scriptHash: scriptHash.digest("hex"),
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
