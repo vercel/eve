@@ -1,0 +1,13 @@
+{
+  "Article": ["headline", "image", "datePublished", "author"],
+  "BlogPosting": ["headline", "image", "datePublished", "author"],
+  "BreadcrumbList": ["itemListElement"],
+  "Event": ["name", "startDate", "location"],
+  "FAQPage": ["mainEntity"],
+  "HowTo": ["name", "step"],
+  "LocalBusiness": ["name", "address"],
+  "Organization": ["name", "url"],
+  "Product": ["name", "image", "offers"],
+  "SoftwareApplication": ["name", "offers"],
+  "WebSite": ["name", "url"]
+}

@@ -253,9 +253,12 @@ const checkTemplate = async (template, tarball, tarballName) => {
   await run(template, "pnpm", ["typecheck"], { cwd: destination });
   // Preparing a Vercel Sandbox snapshot needs Vercel credentials, which this
   // check does not have. Such templates skip the prewarm.
-  const sandboxPath = join(destination, "agent", "sandbox.ts");
-  const vercelSandbox =
-    existsSync(sandboxPath) && readFileSync(sandboxPath, "utf8").includes("eve/sandbox/vercel");
+  const agentDirectory = join(destination, "agent");
+  const vercelSandbox = readdirSync(agentDirectory, { recursive: true }).some(
+    (path) =>
+      basename(path) === "sandbox.ts" &&
+      readFileSync(join(agentDirectory, path), "utf8").includes("eve/sandbox/vercel"),
+  );
   // Non-secret build fixtures preserve fail-fast production configuration
   // without giving this compatibility check credentials to external services.
   const buildEnv = { ...process.env };
