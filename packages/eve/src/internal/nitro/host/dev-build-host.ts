@@ -26,6 +26,8 @@ export interface DevelopmentPrepareInput {
 /** Worker entry and data for a built Nitro host. */
 export interface DevelopmentHostBuild {
   readonly entry: string;
+  /** Modification time and size of each file the build read, by path. */
+  readonly inputs?: Readonly<Record<string, readonly [number, number]>>;
   readonly workerData: Readonly<Record<string, unknown>>;
 }
 

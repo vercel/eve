@@ -30,6 +30,8 @@ const buildCodeHashes = new Map<string, Promise<Record<string, string>>>();
 
 export interface DriverChunk {
   readonly code: string;
+  /** Files the chunk was built from. */
+  readonly inputs?: readonly string[];
   readonly manifest: WorkflowManifest;
 }
 
@@ -168,7 +170,7 @@ async function readEntry(path: string, key: string): Promise<DriverChunk | undef
   if (recorded.length === 0 || recorded.some(([id, hash]) => current[id] !== hash)) {
     return undefined;
   }
-  return { code: entry.code, manifest: entry.manifest };
+  return { code: entry.code, inputs: Object.keys(entry.modules ?? {}), manifest: entry.manifest };
 }
 
 /** Virtual modules have no file; the cache key covers what produces them. */

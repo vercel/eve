@@ -294,6 +294,8 @@ A second interactive `eve dev` for the same app root reconnects to the running s
 
 Each rebuild saves a snapshot of the built code under `.eve/dev-runtime/snapshots/`. In-flight turns finish on the code they started with, and new turns use the latest rebuild. The terminal REPL keeps its session across rebuilds, so the next turn continues the conversation. `/new` ends that session and clears the transcript; the next prompt starts a fresh session with a new sandbox.
 
+When `eve dev` stops, it keeps its built dev host under `.eve/dev-hosts/`. The next start reuses that host if nothing it was built from changed: the agent's structure, env files, tsconfig, lockfiles, the files the host bundles, and the eve and Node versions. Edits to tools, instructions, and other authored code still apply on a reused host, as they do on a rebuild while `eve dev` runs. Each start logs whether it reused or rebuilt the host, and why. Set `EVE_DEV_HOST_REUSE=0` to rebuild on every start.
+
 With any Workflow World, eve keeps each replaced snapshot for at least 30 minutes, and keeps the five most recently replaced snapshots. It never prunes the active snapshot. eve prunes old snapshots and local sandbox templates in the background, and a turn left unfinished past the retention window can't resume. To clean up manually, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`.
 
 Local dev records traces under `.eve/traces/`, bounded by age, size, and a keep-newest floor. Configure the store with `EVE_TRACES*` in `.env.local`, or disable it with `agent/instrumentation/local.ts`; see [`eve traces`](#retention).

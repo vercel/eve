@@ -70,7 +70,10 @@ function createNitroLoadOptions(buildDir: string): LoadConfigOptions {
  * Creates eve's Nitro host: one isolated candidate for `eve dev`, or one
  * production build. The returned Nitro is configured entirely by its config.
  */
-export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
+export async function createHostNitro(
+  spec: HostSpec,
+  options: { readonly onBuildInputs?: (ids: readonly string[]) => void } = {},
+): Promise<Nitro> {
   const { locations } = spec;
   const workflowArtifacts = await new WorkflowBundleBuilder({
     agentName: spec.agentName,
@@ -81,6 +84,7 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     inlineSourcemap: spec.development,
     rootDir: resolvePackageRoot(),
   }).build();
+  options.onBuildInputs?.(workflowArtifacts.inputs ?? []);
   const skillFilesPlugin = spec.runtimePlugins.includes("skill-files")
     ? await writeSkillFilesPlugin({
         skills: spec.skills,
@@ -106,7 +110,13 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     : undefined;
 
   const nitro = await createNitro(
-    toNitroConfig(spec, { routes, skillFilesPlugin, timezoneSchedulesPlugin, workflowArtifacts }),
+    toNitroConfig(spec, {
+      onBuildInputs: options.onBuildInputs,
+      routes,
+      skillFilesPlugin,
+      timezoneSchedulesPlugin,
+      workflowArtifacts,
+    }),
     createNitroLoadOptions(locations.buildDir),
   );
   if (timezoneSchedulesPlugin !== undefined) {
@@ -135,6 +145,7 @@ function createTimezoneSchedulesPlugin(configPath: string): string {
 function toNitroConfig(
   spec: HostSpec,
   built: {
+    readonly onBuildInputs: ((ids: readonly string[]) => void) | undefined;
     readonly routes: HostNitroRoutes;
     readonly skillFilesPlugin: string | undefined;
     readonly timezoneSchedulesPlugin: string | undefined;
@@ -172,6 +183,7 @@ function toNitroConfig(
       // condition, which a natively loaded module would not use.
       loadVendoredDependenciesNatively: spec.development && !import.meta.url.endsWith(".ts"),
       externals: spec.externals,
+      onBuildInputs: built.onBuildInputs,
       extensionMounts: spec.extensionMounts,
       extensionOverridePaths: spec.extensionOverridePaths,
       instrumentationEntryPlugin: instrumentationEntry?.plugin,
