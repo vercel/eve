@@ -311,7 +311,7 @@ async function publishInSessionScope<T>(
     });
   } finally {
     await instrumentation?.flush();
-    publisher.writer.release();
+    await publisher.release();
   }
 }
 
@@ -364,15 +364,21 @@ interface EventDispatcher extends SessionEventDispatcher {
 /** A session's stream held by one step, with the dispatch of the events that step publishes. */
 export interface SessionEventPublisher {
   readonly dispatcher: SessionEventDispatcher;
-  readonly writer: SessionEventWriter;
+  /** Closes the stream once the handlers of everything emitted have run. */
+  readonly writer: Pick<SessionEventWriter, "close">;
   /**
    * Writes one publication (a commit's facts on one line, each progress record on its own),
-   * folds each line into the step's projection, then runs the channel's handlers. Returns the
-   * events as written, for their hooks.
+   * folds each line into the step's projection, then queues the channel's handlers (see
+   * `drain`). Returns the events as written, for their hooks.
    */
   emit(publication: SessionPublication): Promise<readonly WrittenEvent[]>;
   /** `emit`, then the events' stream-event hooks. */
   publish(publication: SessionPublication): Promise<void>;
+  /**
+   * Waits for the channel handlers of everything emitted so far, which run behind the
+   * publications, and rethrows the first delivery that failed.
+   */
+  drain(): Promise<void>;
   /**
    * Ends a unit of the step's progress: publishes what the tables now say about the open
    * turn waiting on people (`announceWaiting`). Steps call it as they end. A turn step passes
@@ -380,6 +386,13 @@ export interface SessionEventPublisher {
    * tables.
    */
   finish(options?: { readonly announce?: boolean }): Promise<void>;
+  /**
+   * Waits for the handlers still running, then releases the stream for the next step. Every step
+   * ends with it, so no handler outlives its step; a step that saves drains first, so a delivery
+   * that fails only here is one a failing step left behind, and is logged rather than masking
+   * the step's own error.
+   */
+  release(): Promise<void>;
 }
 
 /** A line an interrupted attempt of the current step wrote after the step's checkpoint. */
@@ -573,8 +586,24 @@ export function openSessionEventPublisher(input: {
         written.push({ event, position: event.meta.position, progress, view }),
       );
     }
-    await dispatcher.deliver(written);
+    // Channel handlers often call a platform (a status update, a posted reply). They run in
+    // order behind the publication instead of holding the turn, and the step drains them before
+    // it saves the channel's state.
+    const delivered = deliveryTail.then(() => dispatcher.deliver(written));
+    deliveryTail = delivered.catch((error: unknown) => {
+      deliveryFailure ??= { error };
+    });
     return written;
+  };
+  let deliveryTail: Promise<void> = Promise.resolve();
+  let deliveryFailure: { readonly error: unknown } | undefined;
+  const drain = async (): Promise<void> => {
+    await publicationTail;
+    await deliveryTail;
+    if (deliveryFailure === undefined) return;
+    const { error } = deliveryFailure;
+    deliveryFailure = undefined;
+    throw error;
   };
   // Local calls execute concurrently. Serialize publication through write, fold and channel
   // delivery so two calls cannot reserve the same position or overwrite channel state. A
@@ -597,15 +626,32 @@ export function openSessionEventPublisher(input: {
   };
   return {
     dispatcher,
-    writer,
+    writer: {
+      async close() {
+        try {
+          await drain();
+        } finally {
+          await writer.close();
+        }
+      },
+    },
     emit,
     publish,
+    drain,
     async finish(options) {
+      await drain();
       if (before === undefined) return;
       const announced =
         options?.announce === false ? undefined : announceWaiting(before, currentView(ctx));
       before = undefined;
       if (announced !== undefined && announced.length > 0) await publish(announced);
+      await drain();
+    },
+    async release() {
+      await drain().catch((error: unknown) => {
+        log.error("a channel event handler failed in a step that failed", { error });
+      });
+      writer.release();
     },
   };
 }
@@ -640,7 +686,7 @@ function createSessionEventDispatcher(input: {
       };
       for (const { event, position, progress, view } of written) {
         if (line !== undefined && line.position.line !== position.line) await committed();
-        if (await forwardSessionInput(ctx, event, inputSource)) continue;
+        if (await forwardSessionInput(ctx, event, view, inputSource)) continue;
         if (!progress) (line ??= { facts: [], position, view }).facts.push(event);
         const scope = "scope" in event ? event.scope : undefined;
         await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope, view });
@@ -774,7 +820,7 @@ export async function publishTerminalSessionEvent(input: {
     } catch {
       // The terminal fact survived an earlier attempt that already closed the stream.
     } finally {
-      publisher.writer.release();
+      await publisher.release();
     }
     return;
   }
@@ -813,7 +859,7 @@ export async function publishTerminalSessionEvent(input: {
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
-    publisher.writer.release();
+    await publisher.release();
     try {
       await instrumentation?.flush();
     } catch (error) {
