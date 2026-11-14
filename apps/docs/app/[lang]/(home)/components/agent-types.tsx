@@ -20,7 +20,7 @@ import {
   useState,
 } from "react";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
-import { templateGalleryUrl } from "@/lib/templates/links";
+import { dataAgentTemplateUrl, templateGalleryUrl } from "@/lib/templates/links";
 import { cn } from "@/lib/utils";
 import {
   type Author,
@@ -989,8 +989,8 @@ interface UseCase {
   id: string;
   name: string;
   text: string;
-  /** Vercel template gallery slug, or null to send people to the full gallery. */
-  template: string | null;
+  /** Where the call to action goes: a template's listing or source, or the full gallery. */
+  href: string;
   cta: string;
   /** What the agent does, a short title and line each. */
   features: { title: string; text: string }[];
@@ -1009,7 +1009,7 @@ const USE_CASES: UseCase[] = [
     id: "data-agent",
     name: "Data agent",
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
-    template: "eve-data-agent-template",
+    href: dataAgentTemplateUrl,
     cta: "Use the data agent template",
     features: [
       { title: "Answers in Slack", text: "Only for the people and channels you allow." },
@@ -1024,7 +1024,7 @@ const USE_CASES: UseCase[] = [
     id: "software-factory",
     name: "Software factory",
     text: "Build an agent that turns issues into reviewed draft pull requests, from triage and planning to implementation.",
-    template: "eve-software-factory",
+    href: `${templateGalleryUrl}/eve-software-factory`,
     cta: "Use the software factory template",
     features: [
       { title: "GitHub and Linear", text: "Picks up tasks where your team already files them." },
@@ -1045,7 +1045,7 @@ const USE_CASES: UseCase[] = [
     id: "agentic-apps",
     name: "Agentic apps",
     text: "Agents inside your product, over web, voice, or iMessage, with memory for every user.",
-    template: null,
+    href: templateGalleryUrl,
     cta: "Browse app templates",
     features: [
       { title: "Web chat", text: "Inside your app, with long-term memory for each user." },
@@ -1177,13 +1177,7 @@ export function AgentTypes(): JSX.Element {
   return (
     <HomeSection
       action={
-        <Button
-          className="w-fit rounded-full text-base"
-          href={
-            selected.template ? `${templateGalleryUrl}/${selected.template}` : templateGalleryUrl
-          }
-          size="large"
-        >
+        <Button className="w-fit rounded-full text-base" href={selected.href} size="large">
           {selected.cta}
         </Button>
       }
