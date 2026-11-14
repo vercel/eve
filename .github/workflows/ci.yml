@@ -583,7 +583,9 @@ jobs:
         with:
           pull: "background"
 
-      # The smoke tests start their agent apps from the shared fixtures.
+      # The smoke tests start their agent apps from the shared fixtures. The
+      # e2e workflows install the same package set and restore the store this
+      # job saves from main, so keep their filters in step with these.
       - name: Install dependencies
         uses: ./.github/actions/pnpm-install
         with:
