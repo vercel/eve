@@ -266,7 +266,8 @@ export function registerDevelopmentCommand(input: {
       .option("--no-default-extensions", "Do not mount default development extensions")
       .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
       .option("--input <text>", "Pre-fill the prompt input")
-      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp()),
+      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
+      .addOption(new Option("--onboarded", "Continue onboarding that eve init ran").hideHelp()),
   ).action(async (options: DevelopmentCliOptions) => {
     const interactive = hasInteractiveTerminal();
     const mode = resolveDevUiMode({ options, interactive });
@@ -359,20 +360,22 @@ export function registerDevelopmentCommand(input: {
         });
       };
       const startupOnboardingPromise =
-        options.onboard === true
-          ? tuiStartupPromise?.then((startup) =>
-              runOnboardingWhileServerStarts({
-                applicationRoot: applicationContext.root,
-                onOnboardingStep: (event) => {
-                  onboardingOpened = true;
-                  telemetry.trackSetupStep(event);
-                },
-                signal: AbortSignal.any([lifecycle.signal, stopOnboarding.signal]),
-                started,
-                startup,
-              }),
-            )
-          : undefined;
+        options.onboarded === true
+          ? Promise.resolve({ outcome: undefined, reported: true as const })
+          : options.onboard === true
+            ? tuiStartupPromise?.then((startup) =>
+                runOnboardingWhileServerStarts({
+                  applicationRoot: applicationContext.root,
+                  onOnboardingStep: (event) => {
+                    onboardingOpened = true;
+                    telemetry.trackSetupStep(event);
+                  },
+                  signal: AbortSignal.any([lifecycle.signal, stopOnboarding.signal]),
+                  started,
+                  startup,
+                }),
+              )
+            : undefined;
       const [outcome, startup, startupOnboarding] = await Promise.all([
         started,
         tuiStartupPromise,
