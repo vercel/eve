@@ -7,7 +7,10 @@ import { forgetRunnableOwnerRun } from "#execution/session-inbox/runnable-owner.
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
+import {
+  createTestInProcessRuntime,
+  type InProcessVariant,
+} from "#internal/testing/in-process-runtime.js";
 import {
   currentTestWorld,
   type CrashedWait,
@@ -21,7 +24,11 @@ import type { WorkflowBody } from "#tools/workflow-body.js";
 // it rests, and the faults a test injects into it. Workflow runs on the test file's local World;
 // the in-process host runs in memory. A host without a capability skips the cases that need it.
 
-export type HostName = "workflow" | "in-process";
+export type HostName =
+  | "workflow"
+  | "in-process"
+  | "in-process-world"
+  | "in-process-world-restart";
 
 export interface HostCapabilities {
   /** A step that loses its completion or throws runs again, up to a limit (`HostSetup.faults`). */
@@ -136,17 +143,36 @@ export const inProcessHost: SessionHostKind = {
   make: makeInProcessHost,
 };
 
+/** The in-process host keeping its sessions on a World in this process's memory. */
+export const inProcessWorldHost: SessionHostKind = {
+  capabilities: IN_PROCESS_CAPABILITIES,
+  make: (setup) => makeInProcessHost(setup, "world"),
+};
+
+/**
+ * The in-process host on a World, restarted each time it comes to rest after progress: every
+ * session goes on from what the World kept (`restartable-in-process.ts`).
+ */
+export const inProcessWorldRestartHost: SessionHostKind = {
+  capabilities: IN_PROCESS_CAPABILITIES,
+  make: (setup) => makeInProcessHost(setup, "world-restart"),
+};
+
 export const workflowHost: SessionHostKind = {
   capabilities: WORKFLOW_CAPABILITIES,
   dispatchStep: "publishDispatchedCallsStep",
   make: makeWorkflowHost,
 };
 
-async function makeInProcessHost(setup: HostSetup = {}): Promise<HostUnderTest> {
+async function makeInProcessHost(
+  setup: HostSetup = {},
+  variant?: InProcessVariant,
+): Promise<HostUnderTest> {
   const failed = { writes: 0 };
   const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
     {
+      ...(variant !== undefined && { variant }),
       callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL,
       ...(setup.faults !== undefined && { stepFaults: inProcessFaults(setup.faults, failed) }),
     },
@@ -159,7 +185,12 @@ async function makeInProcessHost(setup: HostSetup = {}): Promise<HostUnderTest> 
     });
   }
   return {
-    name: "in-process",
+    name:
+      variant === "world-restart"
+        ? "in-process-world-restart"
+        : variant === "world"
+          ? "in-process-world"
+          : "in-process",
     runtime,
     capabilities: IN_PROCESS_CAPABILITIES,
     settled: () => runtime.idle(),

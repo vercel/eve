@@ -1,0 +1,585 @@
+{
+  "after": [
+    {
+      "kind": "eve.delta",
+      "value": {
+        "b": {
+          "append": [],
+          "from": 0,
+          "state": {
+            "checkpoint": {
+              "admittedDeliveryKeys": [],
+              "history": [],
+              "serializedContext": {
+                "eve.bundle": {
+                  "source": {
+                    "kind": "bundled"
+                  }
+                },
+                "eve.channel": {
+                  "kind": "http",
+                  "state": {}
+                },
+                "eve.channelInstrumentation": {
+                  "channelType": "http",
+                  "kind": "channel:http",
+                  "metadata": {}
+                },
+                "eve.conversation": {
+                  "audience": "unknown",
+                  "channel": {
+                    "kind": "channel:http",
+                    "name": "http"
+                  },
+                  "environment": "production",
+                  "principalType": "anonymous"
+                },
+                "eve.sessionTitle": "Deploy the change.",
+                "eve.continuationToken": "http:alice-fixture",
+                "eve.continuationHookTokens": [
+                  "http:alice-fixture"
+                ],
+                "eve.auth": null,
+                "eve.initiatorAuth": null,
+                "eve.capabilities": {
+                  "requestInput": true
+                },
+                "eve.channelDelivery": {
+                  "channelKind": "channel:http",
+                  "channelName": "http",
+                  "deliveryId": "7736ad9c-29e5-4b01-95a7-a83f5bfb1853"
+                },
+                "eve.otelTraceEnabled": false,
+                "eve.stateLayout": 1,
+                "eve.sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+                "eve.sessionInbox": {
+                  "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T"
+                }
+              },
+              "sessionState": {
+                "continuationToken": "http:alice-fixture",
+                "hasProxyInputRequests": false,
+                "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+                "version": 2,
+                "snapshot": {
+                  "session": {
+                    "continuationToken": "http:alice-fixture",
+                    "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T"
+                  }
+                }
+              },
+              "sessionTimeoutMs": 2592000000,
+              "version": 19,
+              "capabilities": {
+                "requestInput": true
+              },
+              "retention": 0
+            },
+            "format": "eve.in-process-session/2",
+            "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+            "takenAt": "2026-11-14T17:42:44.701Z",
+            "open": {
+              "at": "step",
+              "input": {
+                "delivery": {
+                  "auth": null,
+                  "deliveryMetadata": [
+                    {
+                      "channelKind": "channel:http",
+                      "channelName": "http",
+                      "deliveryId": "7736ad9c-29e5-4b01-95a7-a83f5bfb1853",
+                      "payloadIndex": 0
+                    }
+                  ],
+                  "kind": "deliver",
+                  "payloads": [
+                    {
+                      "message": "Deploy the change."
+                    }
+                  ]
+                }
+              }
+            },
+            "deadline": "2026-12-14T17:42:44.696Z"
+          }
+        },
+        "v": 1
+      }
+    },
+    {
+      "kind": "eve.delta",
+      "value": {
+        "b": {
+          "append": [
+            {
+              "content": "Deploy the change.",
+              "kind": "user",
+              "role": "user",
+              "metadata": {
+                "eve.turn": "turn_0"
+              }
+            }
+          ],
+          "from": 0,
+          "state": {
+            "checkpoint": {
+              "admittedDeliveryKeys": [],
+              "history": [],
+              "serializedContext": {
+                "eve.bundle": {
+                  "source": {
+                    "kind": "bundled"
+                  }
+                },
+                "eve.channel": {
+                  "kind": "http",
+                  "state": {}
+                },
+                "eve.channelInstrumentation": {
+                  "channelType": "http",
+                  "kind": "channel:http",
+                  "metadata": {}
+                },
+                "eve.conversation": {
+                  "audience": "unknown",
+                  "channel": {
+                    "kind": "channel:http",
+                    "name": "http"
+                  },
+                  "environment": "production",
+                  "principalType": "anonymous"
+                },
+                "eve.sessionTitle": "Deploy the change.",
+                "eve.continuationToken": "http:alice-fixture",
+                "eve.continuationHookTokens": [
+                  "http:alice-fixture"
+                ],
+                "eve.auth": null,
+                "eve.initiatorAuth": null,
+                "eve.capabilities": {
+                  "requestInput": true
+                },
+                "eve.channelDelivery": {
+                  "channelKind": "channel:http",
+                  "channelName": "http",
+                  "deliveryId": "7736ad9c-29e5-4b01-95a7-a83f5bfb1853"
+                },
+                "eve.otelTraceEnabled": false,
+                "eve.sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+                "eve.sessionInbox": {
+                  "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T"
+                },
+                "eve.conversationId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+                "eve.turnDeliveryIds": [
+                  "7736ad9c-29e5-4b01-95a7-a83f5bfb1853"
+                ],
+                "eve.reactions": {
+                  "latest": {
+                    "session.started": 0,
+                    "*": 7,
+                    "delivery.admitted": 0,
+                    "turn.started": 1,
+                    "delivery.consumed": 1,
+                    "model.requested": 2,
+                    "model.started": 3,
+                    "call.requested": 4,
+                    "model.settled": 5,
+                    "usage.recorded": 5,
+                    "interaction.opened": 6,
+                    "turn.paused": 7,
+                    "delivery.settled": 7
+                  },
+                  "slots": {
+                    "model:agent": {
+                      "digest": "CduKFD-6Kyc6VY4Y7FjE7b",
+                      "since": 1,
+                      "value": {
+                        "reference": {
+                          "id": "eve-test/session-fixture",
+                          "contextWindowTokens": 200000
+                        }
+                      },
+                      "live": true
+                    }
+                  },
+                  "revision": "bundled",
+                  "at": "2026-11-14T17:42:44.768Z"
+                },
+                "eve.model": {
+                  "reference": {
+                    "id": "eve-test/session-fixture",
+                    "contextWindowTokens": 200000
+                  }
+                },
+                "eve.historyState": {},
+                "eve.stateLayout": 1
+              },
+              "sessionState": {
+                "continuationToken": "http:alice-fixture",
+                "hasProxyInputRequests": false,
+                "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+                "version": 2,
+                "snapshot": {
+                  "session": {
+                    "continuationToken": "http:alice-fixture",
+                    "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+                    "compaction": {
+                      "estimateRatio": 0.0003937007874015748,
+                      "lastKnownInputTokens": 1,
+                      "lastKnownPromptMessageCount": 1,
+                      "requestEnvelopeTokens": 2516,
+                      "measurementsByModel": {
+                        "eve-test/session-fixture": {
+                          "inputTokens": 1,
+                          "promptMessageCount": 1,
+                          "requestEnvelopeTokens": 2516
+                        }
+                      }
+                    },
+                    "sandboxState": {
+                      "session": null
+                    },
+                    "state": {
+                      "eve.harness.turnState": {
+                        "remembered": {},
+                        "suspended": [
+                          {
+                            "event": {
+                              "sequence": 0,
+                              "stepIndex": 0,
+                              "turnId": "turn_0"
+                            },
+                            "messages": [
+                              {
+                                "role": "assistant",
+                                "content": [
+                                  {
+                                    "type": "tool-call",
+                                    "toolCallId": "call-deploy",
+                                    "toolName": "deploy_change",
+                                    "input": {}
+                                  }
+                                ]
+                              }
+                            ],
+                            "requester": null,
+                            "requests": [
+                              {
+                                "call": {
+                                  "callId": "call-deploy",
+                                  "input": {},
+                                  "toolName": "deploy_change"
+                                },
+                                "interactionId": "w5WyWU3uEPrQl52x",
+                                "request": {
+                                  "allowFreeform": false,
+                                  "display": "confirmation",
+                                  "kind": "approval",
+                                  "options": [
+                                    {
+                                      "id": "approve",
+                                      "label": "Approve"
+                                    },
+                                    {
+                                      "id": "deny",
+                                      "label": "Deny"
+                                    }
+                                  ],
+                                  "prompt": "Approve Deploy change?"
+                                }
+                              }
+                            ],
+                            "responseAuthRequiredRequestIds": [],
+                            "tasks": []
+                          }
+                        ]
+                      },
+                      "eve.harness.sessionProjection": {
+                        "counters": {
+                          "changes": 0,
+                          "runs": 1
+                        },
+                        "view": {
+                          "calls": {
+                            "call-deploy": {
+                              "introducedAt": 4,
+                              "startedAt": "2026-11-14T17:42:44.752Z",
+                              "callId": "call-deploy",
+                              "capability": {
+                                "kind": "tool",
+                                "name": "deploy_change"
+                              },
+                              "input": {},
+                              "owner": {
+                                "runId": "run_0"
+                              },
+                              "status": "requested"
+                            }
+                          },
+                          "changes": {},
+                          "children": {},
+                          "deliveries": {
+                            "7736ad9c-29e5-4b01-95a7-a83f5bfb1853": {
+                              "introducedAt": 0,
+                              "startedAt": "2026-11-14T17:42:44.710Z",
+                              "deliveryId": "7736ad9c-29e5-4b01-95a7-a83f5bfb1853",
+                              "source": {
+                                "channel": "channel:http"
+                              },
+                              "status": "settled",
+                              "parts": [
+                                {
+                                  "kind": "text",
+                                  "text": "Deploy the change."
+                                }
+                              ],
+                              "turnId": "turn_0",
+                              "consumedAt": 1,
+                              "outcome": "awaiting-input",
+                              "closedAt": 7,
+                              "endedAt": "2026-11-14T17:42:44.768Z"
+                            }
+                          },
+                          "interactions": {
+                            "w5WyWU3uEPrQl52x": {
+                              "introducedAt": 6,
+                              "startedAt": "2026-11-14T17:42:44.766Z",
+                              "interactionId": "w5WyWU3uEPrQl52x",
+                              "request": {
+                                "allowFreeform": false,
+                                "display": "confirmation",
+                                "kind": "approval",
+                                "options": [
+                                  {
+                                    "id": "approve",
+                                    "label": "Approve"
+                                  },
+                                  {
+                                    "id": "deny",
+                                    "label": "Deny"
+                                  }
+                                ],
+                                "prompt": "Approve Deploy change?"
+                              },
+                              "subject": {
+                                "callId": "call-deploy"
+                              },
+                              "status": "open"
+                            }
+                          },
+                          "parts": {},
+                          "position": 8,
+                          "responses": {},
+                          "runs": {
+                            "run_0": {
+                              "introducedAt": 2,
+                              "startedAt": "2026-11-14T17:42:44.728Z",
+                              "owner": {
+                                "turnId": "turn_0"
+                              },
+                              "runId": "run_0",
+                              "status": "settled",
+                              "step": 0,
+                              "attempt": 0,
+                              "modelId": "eve-test/session-fixture",
+                              "finishReason": "tool-calls",
+                              "outcome": "completed",
+                              "closedAt": 5,
+                              "endedAt": "2026-11-14T17:42:44.762Z",
+                              "usage": {
+                                "cacheReadTokens": 0,
+                                "cacheWriteTokens": 0,
+                                "inputTokens": 1,
+                                "outputTokens": 1
+                              }
+                            }
+                          },
+                          "session": {
+                            "status": "open",
+                            "turnCount": 1,
+                            "runtime": {
+                              "agentId": "session-fixture",
+                              "agentName": "session-fixture",
+                              "eveVersion": "1.0.0-rc.17"
+                            },
+                            "startedAt": "2026-11-14T17:42:44.710Z",
+                            "latestTurnId": "turn_0"
+                          },
+                          "tasks": {},
+                          "turns": {
+                            "turn_0": {
+                              "introducedAt": 1,
+                              "startedAt": "2026-11-14T17:42:44.721Z",
+                              "cause": {
+                                "deliveryId": "7736ad9c-29e5-4b01-95a7-a83f5bfb1853"
+                              },
+                              "follows": null,
+                              "turnId": "turn_0",
+                              "status": "running",
+                              "runs": 1
+                            }
+                          },
+                          "usage": {
+                            "byKind": {
+                              "model": {
+                                "cacheReadTokens": 0,
+                                "cacheWriteTokens": 0,
+                                "inputTokens": 1,
+                                "outputTokens": 1
+                              }
+                            },
+                            "total": {
+                              "cacheReadTokens": 0,
+                              "cacheWriteTokens": 0,
+                              "inputTokens": 1,
+                              "outputTokens": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "sessionTimeoutMs": 2592000000,
+              "version": 19,
+              "capabilities": {
+                "requestInput": true
+              },
+              "retention": 0
+            },
+            "format": "eve.in-process-session/2",
+            "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+            "takenAt": "2026-11-14T17:42:44.774Z",
+            "open": {
+              "at": "pause",
+              "pause": {
+                "attemptIds": [],
+                "on": "interaction",
+                "requestIds": [
+                  "w5WyWU3uEPrQl52x"
+                ]
+              }
+            },
+            "deadline": "2026-12-14T17:42:44.696Z"
+          }
+        },
+        "v": 1
+      }
+    }
+  ],
+  "lines": [
+    "{\"at\":\"2026-11-14T17:42:44.710Z\",\"facts\":[{\"data\":{\"runtime\":{\"agentId\":\"session-fixture\",\"agentName\":\"session-fixture\",\"eveVersion\":\"1.0.0-rc.17\"}},\"type\":\"session.started\"},{\"data\":{\"deliveryId\":\"7736ad9c-29e5-4b01-95a7-a83f5bfb1853\",\"source\":{\"channel\":\"channel:http\"}},\"type\":\"delivery.admitted\"}]}\n",
+    "{\"at\":\"2026-11-14T17:42:44.721Z\",\"facts\":[{\"data\":{\"cause\":{\"deliveryId\":\"7736ad9c-29e5-4b01-95a7-a83f5bfb1853\"},\"follows\":null,\"turnId\":\"turn_0\"},\"type\":\"turn.started\",\"scope\":{\"turnId\":\"turn_0\"}},{\"data\":{\"deliveryId\":\"7736ad9c-29e5-4b01-95a7-a83f5bfb1853\",\"parts\":[{\"kind\":\"text\",\"text\":\"Deploy the change.\"}],\"turnId\":\"turn_0\"},\"type\":\"delivery.consumed\",\"scope\":{\"turnId\":\"turn_0\"}}]}\n",
+    "{\"at\":\"2026-11-14T17:42:44.728Z\",\"facts\":[{\"data\":{\"owner\":{\"turnId\":\"turn_0\"},\"runId\":\"run_0\"},\"type\":\"model.requested\",\"scope\":{\"runId\":\"run_0\",\"turnId\":\"turn_0\"}}]}\n",
+    "{\"at\":\"2026-11-14T17:42:44.733Z\",\"facts\":[{\"data\":{\"attempt\":0,\"modelId\":\"eve-test/session-fixture\",\"runId\":\"run_0\"},\"type\":\"model.started\",\"scope\":{\"runId\":\"run_0\",\"turnId\":\"turn_0\"}}]}\n",
+    "{\"at\":\"2026-11-14T17:42:44.752Z\",\"facts\":[{\"data\":{\"callId\":\"call-deploy\",\"capability\":{\"kind\":\"tool\",\"name\":\"deploy_change\"},\"input\":{},\"owner\":{\"runId\":\"run_0\"}},\"type\":\"call.requested\",\"scope\":{\"runId\":\"run_0\",\"turnId\":\"turn_0\"}}]}\n",
+    "{\"at\":\"2026-11-14T17:42:44.762Z\",\"facts\":[{\"data\":{\"finishReason\":\"tool-calls\",\"outcome\":\"completed\",\"runId\":\"run_0\"},\"type\":\"model.settled\",\"scope\":{\"runId\":\"run_0\",\"turnId\":\"turn_0\"}},{\"data\":{\"kind\":\"model\",\"owner\":{\"runId\":\"run_0\"},\"usage\":{\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"inputTokens\":1,\"outputTokens\":1}},\"type\":\"usage.recorded\",\"scope\":{\"runId\":\"run_0\",\"turnId\":\"turn_0\"}}]}\n",
+    "{\"at\":\"2026-11-14T17:42:44.766Z\",\"facts\":[{\"data\":{\"interactionId\":\"w5WyWU3uEPrQl52x\",\"request\":{\"allowFreeform\":false,\"display\":\"confirmation\",\"kind\":\"approval\",\"options\":[{\"id\":\"approve\",\"label\":\"Approve\"},{\"id\":\"deny\",\"label\":\"Deny\"}],\"prompt\":\"Approve Deploy change?\"},\"subject\":{\"callId\":\"call-deploy\"}},\"type\":\"interaction.opened\",\"scope\":{\"turnId\":\"turn_0\"}}]}\n",
+    "{\"at\":\"2026-11-14T17:42:44.768Z\",\"facts\":[{\"data\":{\"awaiting\":[{\"interactionId\":\"w5WyWU3uEPrQl52x\"}],\"turnId\":\"turn_0\"},\"type\":\"turn.paused\",\"scope\":{\"turnId\":\"turn_0\"}},{\"data\":{\"deliveryId\":\"7736ad9c-29e5-4b01-95a7-a83f5bfb1853\",\"outcome\":\"awaiting-input\",\"turnId\":\"turn_0\"},\"type\":\"delivery.settled\"}]}\n"
+  ],
+  "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+  "snapshot": {
+    "kind": "eve.state",
+    "value": {
+      "b": {
+        "checkpoint": {
+          "admittedDeliveryKeys": [],
+          "history": [],
+          "serializedContext": {
+            "eve.bundle": {
+              "source": {
+                "kind": "bundled"
+              }
+            },
+            "eve.channel": {
+              "kind": "http",
+              "state": {}
+            },
+            "eve.channelInstrumentation": {
+              "channelType": "http",
+              "kind": "channel:http",
+              "metadata": {}
+            },
+            "eve.conversation": {
+              "audience": "unknown",
+              "channel": {
+                "kind": "channel:http",
+                "name": "http"
+              },
+              "environment": "production",
+              "principalType": "anonymous"
+            },
+            "eve.sessionTitle": "Deploy the change.",
+            "eve.continuationToken": "http:alice-fixture",
+            "eve.continuationHookTokens": [
+              "http:alice-fixture"
+            ],
+            "eve.auth": null,
+            "eve.initiatorAuth": null,
+            "eve.capabilities": {
+              "requestInput": true
+            },
+            "eve.channelDelivery": {
+              "channelKind": "channel:http",
+              "channelName": "http",
+              "deliveryId": "7736ad9c-29e5-4b01-95a7-a83f5bfb1853"
+            },
+            "eve.otelTraceEnabled": false,
+            "eve.stateLayout": 1,
+            "eve.sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+            "eve.sessionInbox": {
+              "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T"
+            }
+          },
+          "sessionState": {
+            "continuationToken": "http:alice-fixture",
+            "hasProxyInputRequests": false,
+            "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+            "version": 2,
+            "snapshot": {
+              "session": {
+                "continuationToken": "http:alice-fixture",
+                "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T"
+              }
+            }
+          },
+          "sessionTimeoutMs": 2592000000,
+          "version": 19,
+          "capabilities": {
+            "requestInput": true
+          },
+          "retention": 0
+        },
+        "format": "eve.in-process-session/2",
+        "sessionId": "session_01M7DJF36QV69D3D3Y27HDJH9T",
+        "takenAt": "2026-11-14T17:42:44.697Z",
+        "open": {
+          "at": "step",
+          "input": {
+            "delivery": {
+              "auth": null,
+              "deliveryMetadata": [
+                {
+                  "channelKind": "channel:http",
+                  "channelName": "http",
+                  "deliveryId": "7736ad9c-29e5-4b01-95a7-a83f5bfb1853",
+                  "payloadIndex": 0
+                }
+              ],
+              "kind": "deliver",
+              "payloads": [
+                {
+                  "message": "Deploy the change."
+                }
+              ]
+            }
+          }
+        },
+        "deadline": "2026-12-14T17:42:44.696Z"
+      },
+      "v": 1
+    }
+  },
+  "version": 1
+}

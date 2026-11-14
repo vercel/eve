@@ -17,8 +17,12 @@ const TEST_CALLBACK_BASE_URL = "http://test-session.in-process";
 // `resumeRoutedHook`, which reaches a session wherever it runs. Tests that check what Workflow
 // itself does (its runs, its replay) keep running on Workflow.
 
-/** Which host a session test runs its sessions on. */
-export type TestSessionHostKind = "workflow" | "in-process";
+/**
+ * Which host a session test runs its sessions on. `in-process` keeps them in memory, unless
+ * `EVE_TEST_IN_PROCESS_VARIANT` says otherwise (`in-process-runtime.ts`);
+ * `in-process-world-restart` keeps them on a World and restarts the host at every rest.
+ */
+export type TestSessionHostKind = "workflow" | "in-process" | "in-process-world-restart";
 
 /** A started session, as Workflow's run handle names it. */
 export interface TestSessionRun {
@@ -63,6 +67,7 @@ export async function startTestSession(
   const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
     {
+      ...(host === "in-process-world-restart" && { variant: "world-restart" as const }),
       callbackBaseUrl: options.callbackBaseUrl ?? TEST_CALLBACK_BASE_URL,
       ...(options.stepFaults !== undefined && { stepFaults: options.stepFaults }),
     },
