@@ -2,7 +2,11 @@ import { defineTool } from "eve/tools";
 import { never } from "eve/tools/approval";
 import { z } from "zod";
 
-const FALLBACK_TIMEOUT_MS = 90_000;
+// A cancel aborts the tool within a second. The fallback only ends a wait
+// whose abort never arrives, which the eval reports as a soft check: on
+// Anthropic that has happened every run (the turn still settles cancelled),
+// and waiting 90 s for it made this the slowest e2e-local leg.
+const FALLBACK_TIMEOUT_MS = 15_000;
 
 export default defineTool({
   description: "Waits until the current turn is cancelled.",

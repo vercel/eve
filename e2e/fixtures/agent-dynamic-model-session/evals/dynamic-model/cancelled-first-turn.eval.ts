@@ -34,6 +34,12 @@ export default defineEval({
     cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
     cancelledTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
     cancelledTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    // The cancel should stop the waiting tool; a call that completes ran out the
+    // tool's fallback instead. Tracked, not gated, until that is explained.
+    cancelledTurn
+      .notEvent("call.settled", { data: { outcome: "completed" } })
+      .soft()
+      .label("tool-aborted-by-cancel");
     cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const resumed = await session.send(
