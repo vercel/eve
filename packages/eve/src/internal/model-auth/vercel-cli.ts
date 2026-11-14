@@ -56,6 +56,25 @@ export async function readVercelCliToken(): Promise<string | undefined> {
   return readCliToken(await readCliConfiguration());
 }
 
+/**
+ * The selected team with the login the CLI stored in a file. Skips `VERCEL_TOKEN`, which may
+ * belong to another account, and the keyring, which can prompt from a background process.
+ */
+export async function readVercelCliFileConnection(): Promise<
+  { token: string; teamId: string } | undefined
+> {
+  const configuration = await readCliConfiguration();
+  if (!configuration?.teamId) return undefined;
+  const storage = process.env.VERCEL_TOKEN_STORAGE ?? configuration.config.credStorage ?? "file";
+  if (storage !== "file" && storage !== "auto") return undefined;
+  const token = authToken(await readObject(join(configuration.directory, "auth.json")));
+  return token === undefined ? undefined : { token, teamId: configuration.teamId };
+}
+
+function authToken(auth: Record<string, unknown> | undefined): string | undefined {
+  return typeof auth?.token === "string" && auth.token ? auth.token : undefined;
+}
+
 async function readCliToken(
   configuration: Awaited<ReturnType<typeof readCliConfiguration>>,
 ): Promise<string | undefined> {
@@ -77,8 +96,7 @@ async function readCliToken(
     }
     if (!auth && storage === "auto") auth = await readObject(path);
   }
-  if (typeof auth?.token !== "string" || !auth.token) return undefined;
-  return auth.token;
+  return authToken(auth);
 }
 
 export async function refreshVercelCliConnection(): Promise<void> {

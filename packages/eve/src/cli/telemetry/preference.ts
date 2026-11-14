@@ -47,6 +47,9 @@ const EveConfigSchema = z.looseObject({
       noticeVersion: z.number().int().positive().optional(),
       notifiedAt: z.string().optional(),
       projectSalt: z.string().optional(),
+      internalTeamHash: z.string().optional(),
+      internal: z.boolean().nullable().optional(),
+      internalCheckedAt: z.number().optional(),
     })
     .optional(),
 });
@@ -91,7 +94,7 @@ export async function readOrCreateEveTelemetryIdentity(): Promise<EveCliTelemetr
 }
 
 async function updateEveTelemetryPreference(
-  update: Record<string, boolean | number | string>,
+  update: Record<string, boolean | number | string | null>,
 ): Promise<void> {
   const path = eveConfigPath();
   let existing: Record<string, unknown> = {};
@@ -124,5 +127,42 @@ export async function markEveTelemetryNotified(): Promise<void> {
   await updateEveTelemetryPreference({
     noticeVersion: EVE_TELEMETRY_NOTICE_VERSION,
     notifiedAt: new Date().toISOString(),
+  });
+}
+
+type EveTelemetryInternalTeam = {
+  readonly teamHash: string;
+  /** Undefined when the lookup got an error response. */
+  readonly internal: boolean | undefined;
+  readonly checkedAt: number;
+};
+
+export async function readEveTelemetryInternalTeam(): Promise<
+  EveTelemetryInternalTeam | undefined
+> {
+  try {
+    const telemetry = EveConfigSchema.safeParse(
+      JSON.parse(await readFile(eveConfigPath(), "utf8")) as unknown,
+    ).data?.telemetry;
+    if (telemetry?.internalTeamHash === undefined || telemetry.internal === undefined) {
+      return undefined;
+    }
+    return {
+      teamHash: telemetry.internalTeamHash,
+      internal: telemetry.internal ?? undefined,
+      checkedAt: telemetry.internalCheckedAt ?? 0,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeEveTelemetryInternalTeam(
+  entry: EveTelemetryInternalTeam,
+): Promise<void> {
+  await updateEveTelemetryPreference({
+    internalTeamHash: entry.teamHash,
+    internal: entry.internal ?? null,
+    internalCheckedAt: entry.checkedAt,
   });
 }
