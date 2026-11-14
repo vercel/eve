@@ -3,7 +3,13 @@ import { existsSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { eveDevArguments, runPackageManagerInstall, runPnpmInstall, spawnPnpm } from "./pm/run.js";
+import {
+  eveDevArguments,
+  runPackageManagerInstall,
+  runPnpmInstall,
+  spawnPackageManager,
+  spawnPnpm,
+} from "./pm/run.js";
 import { packageManagerInstallSucceeded } from "./pm/run.js";
 import { resultSucceeded } from "./pm/process-result.js";
 import { pnpmPackageManager } from "./pm/pnpm.js";
@@ -314,6 +320,19 @@ describe("pnpmPackageManager", () => {
       command: "pnpm",
       shell: process.platform === "win32",
     });
+  });
+});
+
+describe("spawnPackageManager", () => {
+  test("starts eve dev without the package selection npx exported to init", async () => {
+    vi.stubEnv("npm_config_package", "/tmp/eve.tgz");
+    vi.stubEnv("npm_config_yes", "true");
+
+    await spawnPackageManager("npm", "/tmp/app", eveDevArguments("npm"));
+
+    const env = mockedSpawn.mock.calls[0]?.[2]?.env;
+    expect(env).toMatchObject({ npm_config_yes: "true" });
+    expect(env).not.toHaveProperty("npm_config_package");
   });
 });
 
