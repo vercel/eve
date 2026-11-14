@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
-import { resolveEveDistImport } from "./package-imports-hook.js";
+import { resolveEveDistImport } from "./package-imports.js";
 
 const root = "file:///app/node_modules/eve/dist/src/";
 const parent = `${root}cli/run.js`;
@@ -34,6 +34,12 @@ describe("resolveEveDistImport", () => {
     ["a node_modules segment", "#compiled/node_modules/x.js", parent, []],
     ["an encoded character", "#internal/%2e%2e/x.js", parent, []],
     ["a bare specifier", "zod", parent, []],
+    [
+      "a dependency inlined under dist",
+      "#internal/logging.js",
+      `${root}node_modules/dep/index.js`,
+      [],
+    ],
     ["a relative import leaving dist", "../../package.json.js", parent, []],
     ["a relative import without .js", "./data.json", parent, []],
   ])("leaves %s to Node", (_case, specifier, parentUrl, conditions) => {
