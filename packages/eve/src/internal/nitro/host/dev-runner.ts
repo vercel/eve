@@ -1,4 +1,6 @@
 import { NodeWorkerEnvRunner } from "#compiled/env-runner/index.js";
+import { fileURLToPath } from "node:url";
+
 import { resolvePackageCompiledFilePath } from "#internal/application/package.js";
 
 /** In-flight requests get half of this, then Nitro's close hooks run. */
@@ -24,7 +26,9 @@ export class EveDevRunner extends NodeWorkerEnvRunner {
     super({
       data: { entry: input.entry, ...input.workerData },
       name: input.name,
-      workerEntry: resolvePackageCompiledFilePath("src/compiled/env-runner/node-worker.js"),
+      workerEntry: import.meta.url.endsWith(".ts")
+        ? resolvePackageCompiledFilePath("src/compiled/env-runner/node-worker.js")
+        : fileURLToPath(new URL("./dev-worker-entry.js", import.meta.url)),
     });
   }
 

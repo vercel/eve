@@ -323,6 +323,15 @@ export async function runEveCli(argv = process.argv.slice(2), overrides = {}, de
 
   const cliEntrypointPath = await ensureBuiltCli(options, dependencies);
   const importModule = dependencies.importModule ?? ((specifier) => import(specifier));
+  const packageImportsHookPath = resolve(
+    dirname(cliEntrypointPath),
+    "..",
+    "internal",
+    "package-imports-hook.js",
+  );
+  if (await (dependencies.exists ?? fileExists)(packageImportsHookPath)) {
+    await importModule(pathToFileURL(packageImportsHookPath).href);
+  }
   const cliModule = await importModule(pathToFileURL(cliEntrypointPath).href);
 
   if (typeof cliModule.runCli !== "function") {
