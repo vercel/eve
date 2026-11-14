@@ -16,8 +16,10 @@
 //   start        `eve start` → first `/eve/v1/health` 200 on the same legs
 //                (leg probes/start.json: { readyMs }), and on the
 //                dev-startup job's builds of its benchmark agents
-//   dev-startup  `eve dev` ready, then a first turn accepted and completed, from
-//                packages/eve/scripts/benchmark-startup.mjs
+//   dev-startup  `eve dev` ready, then a first turn accepted and completed, and
+//                `eve dev` with its terminal UI to the first frame showing the
+//                prompt (input is taken and queued before the agent is ready),
+//                from packages/eve/scripts/benchmark-startup.mjs
 //                (<dev-startup-dir>/<subject>.jsonl: its stdout)
 //
 // A planned probe without data is a `missing` record, as in records.jsonl.
@@ -43,6 +45,7 @@ export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   // dominates cold builds; this is the rest of the build.
   "build.without_sandbox_prewarm_ms": framework("ms"),
   "start.ready_ms": framework("ms"),
+  "dev_startup.prompt_visible_ms": framework("ms"),
   "dev_startup.ready_ms": framework("ms"),
   "dev_startup.session_accepted_ms": framework("ms"),
   "dev_startup.first_turn_ms": framework("ms"),
@@ -160,6 +163,9 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
               ? "probe-missing"
               : "run-missing";
         const dev = lines?.find((line) => line.mode === "dev" && line.run === run);
+        // A separate `eve dev` process with the TUI; runs before its release
+        // (or without a terminal) have none, so the metric is unavailable.
+        const devTui = lines?.find((line) => line.mode === "dev-tui" && line.run === run);
         records.push(
           dev === undefined
             ? record({ ...base, probe: "dev-startup", missing: missingReason })
@@ -168,6 +174,7 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
                 probe: "dev-startup",
                 path: DEV_STARTUP_ARTIFACT_PATH,
                 metrics: {
+                  "dev_startup.prompt_visible_ms": duration(devTui?.promptVisibleMs),
                   "dev_startup.ready_ms": duration(dev.wallMs),
                   "dev_startup.session_accepted_ms": duration(dev.sessionAcceptedMs),
                   "dev_startup.first_turn_ms": duration(dev.firstTurnMs),

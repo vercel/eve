@@ -278,6 +278,7 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     [
       { root: "/tmp/x", toolCount: 0 },
       { run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, firstTurnMs: 1100 },
+      { run: 1, mode: "dev-tui", wallMs: 920, promptVisibleMs: 300 },
       { run: 1, mode: "build", wallMs: 3000, profile: profile(2800) },
       {
         run: 1,
@@ -323,6 +324,7 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
   });
   assert.equal(records[0].artifact_path, "raw/agent-tools/mock/postgres/1");
   assert.deepEqual(records[2].metrics, {
+    "dev_startup.prompt_visible_ms": { status: "measured", value: 300 },
     "dev_startup.ready_ms": { status: "measured", value: 900 },
     "dev_startup.session_accepted_ms": { status: "measured", value: 950 },
     "dev_startup.first_turn_ms": { status: "measured", value: 1100 },
