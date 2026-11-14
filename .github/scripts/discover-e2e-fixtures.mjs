@@ -44,10 +44,18 @@ export function discoverE2eFixtures({ registry, fixtures }) {
 
   const outputs = [`model_matrix=${JSON.stringify(modelMatrix)}`];
   for (const world of worlds) {
+    // A world with a `fixtures` list runs only those; every fixture costs a deployment there.
+    for (const name of world.fixtures ?? []) {
+      if (!normalizedFixtures.some((fixture) => fixture.name === name)) {
+        throw new Error(`e2e/matrix.json: world "${world.name}" lists unknown fixture "${name}".`);
+      }
+    }
     const legs = normalizedFixtures
       .filter(
-        ({ selectedWorlds, modelSuiteEvals }) =>
-          selectedWorlds.includes(world.name) && runsInWorldSuites(modelSuiteEvals),
+        ({ name, selectedWorlds, modelSuiteEvals }) =>
+          selectedWorlds.includes(world.name) &&
+          (world.fixtures === undefined || world.fixtures.includes(name)) &&
+          runsInWorldSuites(modelSuiteEvals),
       )
       .map(({ name, packageName, dir }) => {
         const fixture = { name, package: packageName, dir };

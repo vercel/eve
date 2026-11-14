@@ -226,7 +226,12 @@ matrices from the registry:
   workflow, including its workspace package name for Turbo filtering. A
   fixture can set `e2e.worlds` to a subset of registered world
   names, or to `[]` when its evals require local dev behavior; omitting it
-  selects every world. A fixture whose evals are all tagged `real-model` gets no
+  selects every world. A world in `e2e/matrix.json` can list `fixtures` to run
+  only those: `vercel` does, because each fixture there is a deployment on
+  every relevant PR. List a fixture there only when it exercises something
+  that differs on a Vercel deployment, such as Workflow on Vercel's queues,
+  function packaging, Vercel Sandbox, Blob or cron, or the deployment's own
+  address. A fixture whose evals are all tagged `real-model` gets no
   world legs, since the world suites would have nothing to run. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
   deploy target's default).

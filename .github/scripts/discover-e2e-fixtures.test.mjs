@@ -363,3 +363,27 @@ test("a fixture whose evals are all real-model gets no world legs", () => {
     ["real-model"],
   );
 });
+
+test("a world with a fixtures list runs only those fixtures", () => {
+  const listed = {
+    ...registry,
+    worlds: [{ name: "vercel", fixtures: ["listed"] }, { name: "postgres" }],
+  };
+  const result = discover({}, [{ name: "listed", dir: "fixtures/listed" }], undefined, listed);
+  assert.deepEqual(
+    worldMatrix(result, "vercel").map(({ name }) => name),
+    ["listed"],
+  );
+  assert.deepEqual(
+    worldMatrix(result, "postgres").map(({ name }) => name),
+    ["fixture", "listed"],
+  );
+});
+
+test("a world's fixtures list rejects unknown fixtures", () => {
+  const listed = { ...registry, worlds: [{ name: "vercel", fixtures: ["missing"] }] };
+  assert.throws(
+    () => discover({}, [], undefined, listed),
+    /world "vercel" lists unknown fixture "missing"/u,
+  );
+});
