@@ -206,7 +206,13 @@ test("dates a backfill at its npm publish time and passes only flags its runner 
     ["0.9.0", "0.83.0", "0.83.1", "0.100.0"].map((version) => evalFlags(version).keepState),
     [false, false, true, true],
   );
+  // A prerelease predates its version.
+  assert.deepEqual(
+    ["0.83.1-rc.1", "1.0.0-rc.17"].map((version) => evalFlags(version).keepState),
+    [false, true],
+  );
   assert.equal(releaseTag("0.61.0"), "eve@0.61.0");
+  assert.equal(releaseTag("1.0.0-rc.17"), "eve@1.0.0-rc.17");
   assert.throws(() => releaseTag("eve@0.61.0"), /must be a published eve version/);
 });
 
