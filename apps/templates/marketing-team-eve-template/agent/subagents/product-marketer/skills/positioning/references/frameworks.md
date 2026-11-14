@@ -4,13 +4,13 @@
 
 Fill these in order. Each row constrains the one below it, so a weak answer high up quietly invalidates everything under it.
 
-| Input | The question | A weak answer | A usable answer |
-| --- | --- | --- | --- |
-| Alternatives | What would they do without you? | "Other tools in the space" | "A shared Google Sheet plus a Slack channel" |
-| Unique attributes | What do you have that those don't? | "Better UX" | "Reads the ledger directly, so there's no CSV step" |
-| Value | What does that let them do? | "Improved efficiency" | "Closes the month in two days instead of nine" |
-| Segment | Who feels that most? | "Finance teams" | "Series B finance teams with one accountant and no ERP" |
-| Category | What are they looking for? | "Fintech platform" | "Close-management software, which they search as 'month-end close tool'" |
+| Input             | The question                       | A weak answer              | A usable answer                                                          |
+| ----------------- | ---------------------------------- | -------------------------- | ------------------------------------------------------------------------ |
+| Alternatives      | What would they do without you?    | "Other tools in the space" | "A shared Google Sheet plus a Slack channel"                             |
+| Unique attributes | What do you have that those don't? | "Better UX"                | "Reads the ledger directly, so there's no CSV step"                      |
+| Value             | What does that let them do?        | "Improved efficiency"      | "Closes the month in two days instead of nine"                           |
+| Segment           | Who feels that most?               | "Finance teams"            | "Series B finance teams with one accountant and no ERP"                  |
+| Category          | What are they looking for?         | "Fintech platform"         | "Close-management software, which they search as 'month-end close tool'" |
 
 The category answer has a fork in it. Entering an existing category means competing on comparison and being findable by a term people already search. Creating one means you have to teach the term before anyone searches it, which is far more expensive and only worth it when no existing category fits.
 

@@ -6,14 +6,14 @@ Read these as rendering constraints rather than as goals. A subject line gets tr
 
 ## Subject line
 
-| Thing | Figure | Source |
-| --- | --- | --- |
-| Front-load the hook within the first | 35 to 40 characters | Litmus, Anatomy of a Good Email (2026) |
-| Displayed on iPhone in portrait | about 41 characters | Campaign Monitor (2021) |
-| Displayed in Gmail | about 70 characters | Campaign Monitor (2021) |
-| Mailchimp's recommended ceiling | 9 words and 60 characters | Mailchimp, Best Practices for Email Subject Lines |
-| Punctuation marks | no more than 3 | Mailchimp, same page |
-| Emoji | no more than 1 | Mailchimp, same page |
+| Thing                                | Figure                    | Source                                            |
+| ------------------------------------ | ------------------------- | ------------------------------------------------- |
+| Front-load the hook within the first | 35 to 40 characters       | Litmus, Anatomy of a Good Email (2026)            |
+| Displayed on iPhone in portrait      | about 41 characters       | Campaign Monitor (2021)                           |
+| Displayed in Gmail                   | about 70 characters       | Campaign Monitor (2021)                           |
+| Mailchimp's recommended ceiling      | 9 words and 60 characters | Mailchimp, Best Practices for Email Subject Lines |
+| Punctuation marks                    | no more than 3            | Mailchimp, same page                              |
+| Emoji                                | no more than 1            | Mailchimp, same page                              |
 
 The sources disagree on length and the disagreement is worth carrying rather than resolving. Campaign Monitor recommends 41 characters, citing a Marketo study, and frames the real decision as device-driven: optimize somewhere between 41 characters for iPhone portrait and 70 for Gmail, based on which clients your own list uses. Mailchimp caps at 9 words and 60 characters, drawn from open rate performance across the mail sent through its platform. Litmus takes the opposite position and says there are no hard rules on subject line length, that you should front-load a long one and test length against your own list, and that you should not focus too much on character counts.
 
@@ -23,13 +23,13 @@ Two figures that used to sit in this table have been removed for want of a sourc
 
 ## Preview text
 
-| Thing | Figure | Source |
-| --- | --- | --- |
-| Truncation typically begins | 35 to 75 characters | Litmus, Anatomy of a Good Email (2026) |
-| Litmus's recommended ceiling | under 90 characters | Litmus, Preview Text guide (2024) |
-| What a subscriber may actually see | 5 lines, about 278 characters, down to 0 lines | Litmus, Preview Text guide (2024) |
-| Repeating the subject or the first headline | never | judgment, not a measurement |
-| Leaving it unset | never | judgment, not a measurement |
+| Thing                                       | Figure                                         | Source                                 |
+| ------------------------------------------- | ---------------------------------------------- | -------------------------------------- |
+| Truncation typically begins                 | 35 to 75 characters                            | Litmus, Anatomy of a Good Email (2026) |
+| Litmus's recommended ceiling                | under 90 characters                            | Litmus, Preview Text guide (2024)      |
+| What a subscriber may actually see          | 5 lines, about 278 characters, down to 0 lines | Litmus, Preview Text guide (2024)      |
+| Repeating the subject or the first headline | never                                          | judgment, not a measurement            |
+| Leaving it unset                            | never                                          | judgment, not a measurement            |
 
 There is no single character limit. Litmus states plainly that the limit varies by client and by device, that subscriber settings change it, and that there is no way to track how much preview text showed up for a given recipient. Gmail lets users turn snippets off entirely. In webmail, the subject line and the preview text compete for the same row, so a long subject leaves less room for the preview. Front-load the keywords and treat anything past the first 35 characters as a bonus.
 
@@ -39,11 +39,11 @@ One date-sensitive behavior: since iOS 18.1, iPadOS 18.1, and macOS Sequoia 15.1
 
 ## Message size and layout
 
-| Thing | Figure | Source |
-| --- | --- | --- |
-| Gmail clipping threshold | 102 KB of HTML | Litmus (2024), Mailchimp, Email on Acid (2021) |
-| Working target to build under | below 80 KB | Email on Acid (2021) |
-| Gmail iOS app clipping, as measured in 2014 | about 20,540 characters, roughly 20 KB | Email on Acid (2014) |
+| Thing                                       | Figure                                 | Source                                         |
+| ------------------------------------------- | -------------------------------------- | ---------------------------------------------- |
+| Gmail clipping threshold                    | 102 KB of HTML                         | Litmus (2024), Mailchimp, Email on Acid (2021) |
+| Working target to build under               | below 80 KB                            | Email on Acid (2021)                           |
+| Gmail iOS app clipping, as measured in 2014 | about 20,540 characters, roughly 20 KB | Email on Acid (2014)                           |
 
 The 102 KB figure is the one number here that three independent publishers state, so it is the one to trust. Email on Acid adds two caveats from its own testing: the exact point Gmail clips is not consistent and smaller emails sometimes clip anyway, and because an ESP adds tracking markup after you hand the file over, you should build to a lower target than the limit itself.
 
@@ -59,17 +59,17 @@ Container width is a convention rather than a spec, and the honest version is wo
 
 ## Images and alt text
 
-| Thing | Guidance | Source |
-| --- | --- | --- |
-| Alt text on every informative image | required | Mailchimp, Email on Acid |
-| Length | 1 to 2 sentences, no more than two lines | Mailchimp, Email on Acid (2023) |
-| Alt text longer than the image is wide | some clients will not display it | Mailchimp |
-| Information carried only by an image | none | Litmus, Mailchimp |
-| Calls to action inside alt text | no, alt text is functional | Email on Acid (2023) |
-| Quotation marks inside alt text | never, they break the HTML | Mailchimp, Email on Acid |
-| Openers like "image of" or "picture of" | cut them | Email on Acid (2023) |
-| Punctuation inside longer alt text | keep it, screen readers use it to pause | Mailchimp, Email on Acid |
-| `title` alongside `alt` | avoid | Mailchimp, Email on Acid (2023) |
+| Thing                                   | Guidance                                 | Source                          |
+| --------------------------------------- | ---------------------------------------- | ------------------------------- |
+| Alt text on every informative image     | required                                 | Mailchimp, Email on Acid        |
+| Length                                  | 1 to 2 sentences, no more than two lines | Mailchimp, Email on Acid (2023) |
+| Alt text longer than the image is wide  | some clients will not display it         | Mailchimp                       |
+| Information carried only by an image    | none                                     | Litmus, Mailchimp               |
+| Calls to action inside alt text         | no, alt text is functional               | Email on Acid (2023)            |
+| Quotation marks inside alt text         | never, they break the HTML               | Mailchimp, Email on Acid        |
+| Openers like "image of" or "picture of" | cut them                                 | Email on Acid (2023)            |
+| Punctuation inside longer alt text      | keep it, screen readers use it to pause  | Mailchimp, Email on Acid        |
+| `title` alongside `alt`                 | avoid                                    | Mailchimp, Email on Acid (2023) |
 
 Decorative images are a place the sources disagree, and the disagreement matters because the two answers produce opposite output for a screen reader. W3C's WAI images tutorial says a decorative image takes a null alt attribute, `alt=""`, so assistive technology ignores it, and says a description on such an image adds audible clutter or distracts. It also warns against dropping the attribute entirely, since some screen readers then announce the file name. Email on Acid agrees and recommends `alt=""`. Litmus says to leave alt text blank for decorative images. Mailchimp is the outlier: it tells you to state that the image is decorative, giving "Decorative image" as the sample value.
 
@@ -83,11 +83,11 @@ Live HTML beats alt text either way. Litmus's stated position is that the most a
 
 ## Plain text
 
-| Thing | Guidance |
-| --- | --- |
-| Plain text version | always written, never autogenerated |
-| Link handling | full URLs written out, since there is no anchor text |
-| Structure | keep the headings and the single call to action |
+| Thing              | Guidance                                             |
+| ------------------ | ---------------------------------------------------- |
+| Plain text version | always written, never autogenerated                  |
+| Link handling      | full URLs written out, since there is no anchor text |
+| Structure          | keep the headings and the single call to action      |
 
 No figures here, by design. This is craft rather than a rendering limit, and nothing in the sources below puts a number on it.
 

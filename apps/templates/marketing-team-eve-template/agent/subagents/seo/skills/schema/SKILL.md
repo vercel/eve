@@ -15,18 +15,18 @@ Four rules govern everything below:
 
 ## Choosing the type
 
-| Type | Use on | Required |
-| --- | --- | --- |
-| Organization | Homepage, about page | `name`, `url` |
-| WebSite | Homepage, to declare a site search | `name`, `url` |
-| Article, BlogPosting | Posts and news | `headline`, `image`, `datePublished`, `author` |
-| Product | Product pages | `name`, `image`, `offers` |
-| SoftwareApplication | App and SaaS pages | `name`, `offers` |
-| FAQPage | A page with real questions and answers | `mainEntity` |
-| HowTo | Step-by-step instructions | `name`, `step` |
-| BreadcrumbList | Any page with breadcrumbs | `itemListElement` |
-| LocalBusiness | A location page | `name`, `address` |
-| Event | Events and webinars | `name`, `startDate`, `location` |
+| Type                 | Use on                                 | Required                                       |
+| -------------------- | -------------------------------------- | ---------------------------------------------- |
+| Organization         | Homepage, about page                   | `name`, `url`                                  |
+| WebSite              | Homepage, to declare a site search     | `name`, `url`                                  |
+| Article, BlogPosting | Posts and news                         | `headline`, `image`, `datePublished`, `author` |
+| Product              | Product pages                          | `name`, `image`, `offers`                      |
+| SoftwareApplication  | App and SaaS pages                     | `name`, `offers`                               |
+| FAQPage              | A page with real questions and answers | `mainEntity`                                   |
+| HowTo                | Step-by-step instructions              | `name`, `step`                                 |
+| BreadcrumbList       | Any page with breadcrumbs              | `itemListElement`                              |
+| LocalBusiness        | A location page                        | `name`, `address`                              |
+| Event                | Events and webinars                    | `name`, `startDate`, `location`                |
 
 `references/schema-examples.md` has a complete, valid block for each of these plus a combined `@graph` and a Next.js pattern. `references/required-properties.json` is the same table in the form `validate_schema` reads, so adding a type means editing both.
 

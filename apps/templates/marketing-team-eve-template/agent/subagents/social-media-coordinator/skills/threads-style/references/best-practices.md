@@ -7,7 +7,7 @@ A sourced checklist of current tactics for writing on Threads. Use it as a pre-f
 - [ ] Write like a person, not a brand. The platform's own framing is "Twitter's casual, meme-fluent cousin": funny, bold, low-polish content fits here in a way it doesn't on LinkedIn or a press release.
 - [ ] Authenticity and vulnerability outperform polished, promotional copy. An unpolished, honest take resonates; a curated announcement does not.
 - [ ] Treat Threads as a brand-awareness and conversation play, not a lead-gen or sales channel. Pitches and product demos land badly.
-- [ ] Make it native. Don't repost an X/Twitter post verbatim: write for this audience, or use the post to *react to* and *extend* something you published elsewhere rather than mirror it.
+- [ ] Make it native. Don't repost an X/Twitter post verbatim: write for this audience, or use the post to _react to_ and _extend_ something you published elsewhere rather than mirror it.
 
 ## The hook
 

@@ -2,20 +2,20 @@
 
 ## URL pattern per page type
 
-| Page type | Pattern | Example |
-| --- | --- | --- |
-| Homepage | `/` | `example.com` |
-| Feature | `/features/{name}` | `/features/analytics` |
-| Pricing | `/pricing` | `/pricing` |
-| Blog post | `/blog/{slug}` | `/blog/seo-guide` |
-| Blog category | `/blog/category/{slug}` | `/blog/category/seo` |
-| Case study | `/customers/{slug}` | `/customers/acme` |
-| Documentation | `/docs/{section}/{page}` | `/docs/api/authentication` |
-| Comparison | `/compare/{competitor}` | `/compare/competitor-name` |
-| Integration | `/integrations/{name}` | `/integrations/slack` |
-| Template | `/templates/{slug}` | `/templates/marketing-plan` |
-| Landing page | `/{slug}` or `/lp/{slug}` | `/free-trial` |
-| Legal | `/{page}` | `/privacy`, `/terms` |
+| Page type     | Pattern                   | Example                     |
+| ------------- | ------------------------- | --------------------------- |
+| Homepage      | `/`                       | `example.com`               |
+| Feature       | `/features/{name}`        | `/features/analytics`       |
+| Pricing       | `/pricing`                | `/pricing`                  |
+| Blog post     | `/blog/{slug}`            | `/blog/seo-guide`           |
+| Blog category | `/blog/category/{slug}`   | `/blog/category/seo`        |
+| Case study    | `/customers/{slug}`       | `/customers/acme`           |
+| Documentation | `/docs/{section}/{page}`  | `/docs/api/authentication`  |
+| Comparison    | `/compare/{competitor}`   | `/compare/competitor-name`  |
+| Integration   | `/integrations/{name}`    | `/integrations/slack`       |
+| Template      | `/templates/{slug}`       | `/templates/marketing-plan` |
+| Landing page  | `/{slug}` or `/lp/{slug}` | `/free-trial`               |
+| Legal         | `/{page}`                 | `/privacy`, `/terms`        |
 
 Pick one parent per page class and keep it. Half the site under `/features/` and half under `/product/` is the most common inconsistency, and it splits the internal linking that should have accumulated on one section.
 
@@ -55,11 +55,11 @@ Home > Blog > SEO > Internal linking that actually works
 Home > Docs > API > Authentication
 ```
 
-| URL | Breadcrumb |
-| --- | --- |
-| `/features/analytics` | Home > Features > Analytics |
-| `/blog/seo-guide` | Home > Blog > SEO Guide |
-| `/docs/api/auth` | Home > Docs > API > Authentication |
+| URL                   | Breadcrumb                         |
+| --------------------- | ---------------------------------- |
+| `/features/analytics` | Home > Features > Analytics        |
+| `/blog/seo-guide`     | Home > Blog > SEO Guide            |
+| `/docs/api/auth`      | Home > Docs > API > Authentication |
 
 ## ASCII tree
 
@@ -143,23 +143,23 @@ graph TD
 
 The deliverable a developer or a CMS owner can work from directly.
 
-| Page | URL | Parent | Navigation | Priority |
-| --- | --- | --- | --- | --- |
-| Homepage | `/` | none | Header | High |
-| Features | `/features` | Homepage | Header | High |
-| Analytics | `/features/analytics` | Features | Header dropdown | High |
-| Pricing | `/pricing` | Homepage | Header | High |
-| Blog | `/blog` | Homepage | Header | Medium |
-| About | `/about` | Homepage | Footer | Low |
+| Page      | URL                   | Parent   | Navigation      | Priority |
+| --------- | --------------------- | -------- | --------------- | -------- |
+| Homepage  | `/`                   | none     | Header          | High     |
+| Features  | `/features`           | Homepage | Header          | High     |
+| Analytics | `/features/analytics` | Features | Header dropdown | High     |
+| Pricing   | `/pricing`            | Homepage | Header          | High     |
+| Blog      | `/blog`               | Homepage | Header          | Medium   |
+| About     | `/about`              | Homepage | Footer          | Low      |
 
 ## Redirect list
 
 Required output whenever a URL moves. Without it, the links pointing at the old URL stop counting.
 
-| Old URL | New URL | Type |
-| --- | --- | --- |
-| `/product/analytics` | `/features/analytics` | 301 |
-| `/blog/2026/07/post-title` | `/blog/post-title` | 301 |
+| Old URL                    | New URL               | Type |
+| -------------------------- | --------------------- | ---- |
+| `/product/analytics`       | `/features/analytics` | 301  |
+| `/blog/2026/07/post-title` | `/blog/post-title`    | 301  |
 
 Redirect to the final destination rather than through a chain, and check that no redirect target is itself redirected.
 

@@ -4,51 +4,51 @@ Per-area checks in priority order. The Evidence column says what it takes to ver
 
 ## 1. Crawl and index
 
-| Check | Evidence |
-| --- | --- |
-| `robots.txt` exists and doesn't block anything important | fetch |
-| `robots.txt` references the sitemap | fetch |
-| `sitemap.xml` exists, parses, and lists canonical indexable URLs only | fetch |
-| Sitemap has no redirected, 404, or noindexed URLs in it | fetch |
-| Page has a canonical tag, self-referencing when the page is the original | fetch |
-| No `noindex` on a page that should rank | fetch |
-| One canonical host (www or not, http or https) with the others redirecting | fetch |
-| Trailing-slash handling is consistent | fetch |
-| No redirect chains or loops on key paths | fetch |
-| The URL is actually indexed | tool: Search Console |
-| Indexed count matches expected count | tool: Search Console |
-| Crawl budget, faceted-navigation explosion, parameter duplication | tool: crawler |
-| Orphan pages across the site | tool: crawler |
+| Check                                                                      | Evidence             |
+| -------------------------------------------------------------------------- | -------------------- |
+| `robots.txt` exists and doesn't block anything important                   | fetch                |
+| `robots.txt` references the sitemap                                        | fetch                |
+| `sitemap.xml` exists, parses, and lists canonical indexable URLs only      | fetch                |
+| Sitemap has no redirected, 404, or noindexed URLs in it                    | fetch                |
+| Page has a canonical tag, self-referencing when the page is the original   | fetch                |
+| No `noindex` on a page that should rank                                    | fetch                |
+| One canonical host (www or not, http or https) with the others redirecting | fetch                |
+| Trailing-slash handling is consistent                                      | fetch                |
+| No redirect chains or loops on key paths                                   | fetch                |
+| The URL is actually indexed                                                | tool: Search Console |
+| Indexed count matches expected count                                       | tool: Search Console |
+| Crawl budget, faceted-navigation explosion, parameter duplication          | tool: crawler        |
+| Orphan pages across the site                                               | tool: crawler        |
 
 Soft 404s and near-duplicate clusters need Search Console. A page that returns 200 with no real content is visible from a fetch, so call that out directly.
 
 ## 2. Foundations
 
-| Check | Evidence |
-| --- | --- |
-| HTTPS everywhere, valid certificate, no mixed content | fetch |
-| Viewport meta present, layout not fixed-width | fetch |
-| URLs readable, lowercase, hyphenated, no session IDs or content in query strings | fetch |
-| Largest Contentful Paint under 2.5s | tool: PageSpeed Insights |
-| Interaction to Next Paint under 200ms | tool: PageSpeed Insights |
-| Cumulative Layout Shift under 0.1 | tool: PageSpeed Insights |
-| Server response time, caching headers, CDN, font loading | tool: PageSpeed Insights or WebPageTest |
+| Check                                                                            | Evidence                                |
+| -------------------------------------------------------------------------------- | --------------------------------------- |
+| HTTPS everywhere, valid certificate, no mixed content                            | fetch                                   |
+| Viewport meta present, layout not fixed-width                                    | fetch                                   |
+| URLs readable, lowercase, hyphenated, no session IDs or content in query strings | fetch                                   |
+| Largest Contentful Paint under 2.5s                                              | tool: PageSpeed Insights                |
+| Interaction to Next Paint under 200ms                                            | tool: PageSpeed Insights                |
+| Cumulative Layout Shift under 0.1                                                | tool: PageSpeed Insights                |
+| Server response time, caching headers, CDN, font loading                         | tool: PageSpeed Insights or WebPageTest |
 
 Page weight and blocking scripts are partly visible in fetched HTML: a head full of synchronous third-party scripts is worth flagging as a likely speed problem, framed as a hypothesis for them to confirm.
 
 ## 3. On-page
 
-| Check | Target |
-| --- | --- |
-| Title tag | Unique per page, primary keyword near the front, roughly 50 to 60 characters, brand at the end if included |
-| Meta description | Unique, roughly 150 characters or under since mobile truncates near 120, states the value and earns the click. Not a ranking factor |
-| H1 | Exactly one, describes the page, contains the target query or its clear paraphrase |
-| Heading order | H1 then H2 then H3 with no skipped levels, subheads readable as a map of the page |
-| Target query | Appears in the first 100 words, naturally, along with the phrasings a reader would actually use |
-| Keyword alignment | Title, H1, URL, and opening all point at the same query |
-| Cannibalization | No other page on the site targets the same query |
-| Internal links | Descriptive anchor text, no "click here", important pages linked more often, no broken links |
-| Images | Descriptive filenames, alt text that describes the image, compressed, modern format, lazy loaded below the fold |
+| Check             | Target                                                                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Title tag         | Unique per page, primary keyword near the front, roughly 50 to 60 characters, brand at the end if included                          |
+| Meta description  | Unique, roughly 150 characters or under since mobile truncates near 120, states the value and earns the click. Not a ranking factor |
+| H1                | Exactly one, describes the page, contains the target query or its clear paraphrase                                                  |
+| Heading order     | H1 then H2 then H3 with no skipped levels, subheads readable as a map of the page                                                   |
+| Target query      | Appears in the first 100 words, naturally, along with the phrasings a reader would actually use                                     |
+| Keyword alignment | Title, H1, URL, and opening all point at the same query                                                                             |
+| Cannibalization   | No other page on the site targets the same query                                                                                    |
+| Internal links    | Descriptive anchor text, no "click here", important pages linked more often, no broken links                                        |
+| Images            | Descriptive filenames, alt text that describes the image, compressed, modern format, lazy loaded below the fold                     |
 
 All of the above are fetch-verifiable except cannibalization, which needs either a site-wide crawl or the caller telling you what else exists. Ask.
 

@@ -19,6 +19,7 @@ Not for: [who should not buy, and why]
 
 Real alternative: [what they'd do instead]
 Differentiators:
+
 - [claim]. Proof: [proof]. Grade: [proven | plausible | assumption]
 - [claim]. Proof: [proof]. Grade: [grade]
 
@@ -26,6 +27,7 @@ Differentiators:
 
 Core message: [one sentence, repeatable after one read]
 Pillars:
+
 1. [benefit]. Mechanism: [mechanism]. Proof: [proof]. Grade: [grade]
 2. [...]
 3. [...]
@@ -65,6 +67,7 @@ Not for: companies already on NetSuite, where this duplicates work they've paid 
 
 Real alternative: a shared spreadsheet plus a Slack channel. Rarely another product.
 Differentiators:
+
 - Reads the ledger over API, so there is no CSV step. Proof: one customer went from 9 days to 2.
   Grade: proven
 - One accountant can run it, because rules are plain language not scripts. Proof: three customers
@@ -76,6 +79,7 @@ Differentiators:
 
 Core message: Close the books in two days without an ERP.
 Pillars:
+
 1. No CSV step. Reads the ledger directly. Proof: 9 days to 2 at one customer. Grade: proven
 2. One person can run it. Plain-language rules. Proof: three customers, no engineer. Grade: plausible
 3. Audit-ready trail. Adjustments keep their source. Proof: audit in progress. Grade: assumption

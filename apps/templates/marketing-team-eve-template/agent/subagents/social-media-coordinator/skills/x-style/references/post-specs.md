@@ -4,16 +4,16 @@ Quick-lookup specs for drafting and publishing on X. Default to free-account lim
 
 ## Character limits
 
-| Surface | Limit |
-| --- | --- |
-| Post (free account) | 280 characters |
-| Post (X Premium, any tier) | up to 25,000 characters |
-| In-feed preview of a long post | ~280 characters, then "Show more" |
-| Bio | 160 characters |
-| Display name | 50 characters |
-| Username / handle | 4–15 characters |
-| Direct message | 10,000 characters |
-| URL (auto-shortened) | counts as 23 characters, any length |
+| Surface                        | Limit                               |
+| ------------------------------ | ----------------------------------- |
+| Post (free account)            | 280 characters                      |
+| Post (X Premium, any tier)     | up to 25,000 characters             |
+| In-feed preview of a long post | ~280 characters, then "Show more"   |
+| Bio                            | 160 characters                      |
+| Display name                   | 50 characters                       |
+| Username / handle              | 4–15 characters                     |
+| Direct message                 | 10,000 characters                   |
+| URL (auto-shortened)           | counts as 23 characters, any length |
 
 - Counts include spaces, punctuation, emojis, and hashtags.
 - Free accounts can't create long posts; their text truncates at 280.

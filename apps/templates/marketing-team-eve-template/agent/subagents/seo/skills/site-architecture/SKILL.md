@@ -10,11 +10,11 @@ Architecture is one decision repeated: how does someone get from the homepage to
 
 Aim to put any page that matters within three clicks of the homepage. It isn't a law, but a critical page four or more levels down is a symptom worth chasing.
 
-| Shape | Fits | Costs |
-| --- | --- | --- |
-| Flat, 2 levels | Small sites, portfolios | Stops scaling once a nav item has 20 children |
-| Moderate, 3 levels | Most SaaS and content sites | Usually the right answer |
-| Deep, 4 or more | Large catalogs, big docs | Scales, but buries things without strong linking |
+| Shape              | Fits                        | Costs                                            |
+| ------------------ | --------------------------- | ------------------------------------------------ |
+| Flat, 2 levels     | Small sites, portfolios     | Stops scaling once a nav item has 20 children    |
+| Moderate, 3 levels | Most SaaS and content sites | Usually the right answer                         |
+| Deep, 4 or more    | Large catalogs, big docs    | Scales, but buries things without strong linking |
 
 Go as flat as the navigation tolerates. When a dropdown passes roughly 20 items, that's the signal to add a level rather than keep the list flat.
 
@@ -22,14 +22,14 @@ Levels: L0 is the homepage, L1 is a primary section (`/features`, `/blog`), L2 i
 
 ## Site types as starting points
 
-| Type | Depth | Sections | URL shape |
-| --- | --- | --- | --- |
-| SaaS marketing | 2 to 3 | Home, Features, Pricing, Blog, Docs | `/features/{name}`, `/blog/{slug}` |
-| Content site | 2 to 3 | Home, Blog, Categories, About | `/blog/{slug}`, `/blog/category/{slug}` |
-| Ecommerce | 3 to 4 | Home, Categories, Products | `/{category}/{subcategory}/{product}` |
-| Documentation | 3 to 4 | Home, Guides, Reference | `/docs/{section}/{page}` |
-| SaaS plus content | 3 to 4 | Home, Product, Blog, Resources, Docs | `/product/{feature}`, `/blog/{slug}` |
-| Small business | 1 to 2 | Home, Services, About, Contact | `/services/{name}` |
+| Type              | Depth  | Sections                             | URL shape                               |
+| ----------------- | ------ | ------------------------------------ | --------------------------------------- |
+| SaaS marketing    | 2 to 3 | Home, Features, Pricing, Blog, Docs  | `/features/{name}`, `/blog/{slug}`      |
+| Content site      | 2 to 3 | Home, Blog, Categories, About        | `/blog/{slug}`, `/blog/category/{slug}` |
+| Ecommerce         | 3 to 4 | Home, Categories, Products           | `/{category}/{subcategory}/{product}`   |
+| Documentation     | 3 to 4 | Home, Guides, Reference              | `/docs/{section}/{page}`                |
+| SaaS plus content | 3 to 4 | Home, Product, Blog, Resources, Docs | `/product/{feature}`, `/blog/{slug}`    |
+| Small business    | 1 to 2 | Home, Services, About, Contact       | `/services/{name}`                      |
 
 ## URLs
 

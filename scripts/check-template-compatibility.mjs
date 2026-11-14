@@ -25,6 +25,27 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibilit
 // a 4-vCPU runner.
 const MAX_CONCURRENT_TEMPLATES = 3;
 
+// These values satisfy build-time validation without granting service access.
+// Runtime requests still require the deployment's real configuration.
+const BUILD_ENV_BY_TEMPLATE = {
+  "eve-software-factory-template": {
+    FACTORY_REPO: "acme/widgets",
+    LINEAR_CONNECTOR: "linear/template-ci",
+  },
+  "kody-eve-template": {
+    LINEAR_CONNECTOR: "linear/template-ci",
+    REDIS_URL: "redis://127.0.0.1:6379",
+    RESEND_FROM_ADDRESS: "kody@example.com",
+    DIGEST_REPO: "acme/widgets",
+    DIGEST_EMAIL: "team@example.com",
+  },
+  openinstinct: {
+    DATABASE_URL: "postgresql://compatibility:compatibility@127.0.0.1:1/compatibility",
+    KERNEL_API_KEY: "compatibility-build-only",
+    BETTER_AUTH_URL: "http://localhost:3000",
+  },
+};
+
 // Templates ordered by their measured wall time in CI, longest first, so the
 // expensive `next build`/`nuxt build` templates start on the first worker slots
 // instead of queueing behind cheap ones. Durations come from the per-command
@@ -259,29 +280,15 @@ const checkTemplate = async (template, tarball, tarballName) => {
       basename(path) === "sandbox.ts" &&
       readFileSync(join(agentDirectory, path), "utf8").includes("eve/sandbox/vercel"),
   );
-  // Non-secret build fixtures preserve fail-fast production configuration
-  // without giving this compatibility check credentials to external services.
-  const buildEnv = { ...process.env };
-  if (template === "eve-software-factory-template") {
-    Object.assign(buildEnv, {
-      FACTORY_REPO: "acme/widgets",
-      LINEAR_CONNECTOR: "linear/template-ci",
-    });
-  }
-  if (template === "kody-eve-template") {
-    Object.assign(buildEnv, {
-      LINEAR_CONNECTOR: "linear/template-ci",
-      REDIS_URL: "redis://127.0.0.1:6379",
-      RESEND_FROM_ADDRESS: "kody@example.com",
-      DIGEST_REPO: "acme/widgets",
-      DIGEST_EMAIL: "team@example.com",
-    });
-  }
+  const buildOptions = {
+    cwd: destination,
+    env: { ...process.env, ...BUILD_ENV_BY_TEMPLATE[template] },
+  };
   await run(
     template,
     "pnpm",
     ["exec", "eve", "build", ...(vercelSandbox ? ["--skip-sandbox-prewarm"] : [])],
-    { cwd: destination, env: buildEnv },
+    buildOptions,
   );
   // A template's `pnpm build` is `eve build` plus, at most, its web app, which
   // the service builds just produced the way Vercel does. Run it only when
@@ -289,7 +296,7 @@ const checkTemplate = async (template, tarball, tarballName) => {
   const builtServices = await checkVercelServices(template, destination);
   const build = manifest.scripts?.build;
   if (!vercelSandbox && build && build !== "eve build" && builtServices === 0) {
-    await run(template, "pnpm", ["build"], { cwd: destination });
+    await run(template, "pnpm", ["build"], buildOptions);
   }
   if (manifest.scripts?.["test:smoke"]) {
     await run(template, "pnpm", ["test:smoke"], { cwd: destination });

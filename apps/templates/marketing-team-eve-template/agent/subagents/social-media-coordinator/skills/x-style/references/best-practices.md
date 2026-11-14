@@ -6,7 +6,7 @@ A sourced checklist of current tactics for writing on X. Use it as a pre-flight 
 
 - [ ] The first line earns the stop. Open on the surprising claim, the number, the contradiction, or the visceral moment. No throat-clearing, no "A thread on…".
 - [ ] Create an open question in the reader's mind, but don't give away the full answer in line one.
-- [ ] A hook is not clickbait: it promises only value the post actually delivers. Test it: would *you* stop scrolling, and feel satisfied after?
+- [ ] A hook is not clickbait: it promises only value the post actually delivers. Test it: would _you_ stop scrolling, and feel satisfied after?
 - [ ] Emotional or numeric specificity beats vague inspiration every time.
 - [ ] On X the preview shows ~280 characters; if your hook isn't in those first characters, most people never tap to read more.
 
@@ -32,7 +32,7 @@ A sourced checklist of current tactics for writing on X. Use it as a pre-flight 
 - [ ] The algorithm rewards fast early engagement and prioritizes replies: open questions and genuine conversation starters beat like-bait.
 - [ ] No engagement bait ("RT if you agree", "read that again", "let that sink in"). It reads as spam and undercuts the voice, whatever old "ask for the retweet" advice says.
 - [ ] Consistency beats bursts: a sustainable daily cadence (Buffer suggests ~3–5 posts/day for growth-focused accounts) outperforms posting hard for two weeks and burning out.
-- [ ] Engagement skews to weekday mornings (Buffer: ~9–11 AM, Tue–Thu strongest), but post when *your* audience is active. This is a scheduling note, not a drafting rule.
+- [ ] Engagement skews to weekday mornings (Buffer: ~9–11 AM, Tue–Thu strongest), but post when _your_ audience is active. This is a scheduling note, not a drafting rule.
 
 ## Threads
 

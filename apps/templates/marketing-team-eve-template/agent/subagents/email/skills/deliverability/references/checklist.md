@@ -6,17 +6,17 @@ Every number in the Thresholds section names the page it came from, and those pa
 
 ## 1. Sending domain
 
-| Check | Evidence |
-| --- | --- |
-| The domain exists in this Resend workspace | `list-domains` |
-| Its status is verified | `get-domain` |
-| SPF and DKIM records are the ones Resend issued | `get-domain` |
-| The from address in the campaign uses a verified domain | `get-domain` plus `get-broadcast` |
-| Sending from a subdomain rather than the root domain | `list-domains`, by inspection of the name |
-| The DNS records are currently published and unmodified | none: verification status reflects what Resend last confirmed |
-| DMARC is published, and at what policy | none: DMARC is a DNS record Resend does not issue |
-| Reverse DNS and TLS on the sending path | none: managed by Resend |
-| BIMI | none |
+| Check                                                   | Evidence                                                      |
+| ------------------------------------------------------- | ------------------------------------------------------------- |
+| The domain exists in this Resend workspace              | `list-domains`                                                |
+| Its status is verified                                  | `get-domain`                                                  |
+| SPF and DKIM records are the ones Resend issued         | `get-domain`                                                  |
+| The from address in the campaign uses a verified domain | `get-domain` plus `get-broadcast`                             |
+| Sending from a subdomain rather than the root domain    | `list-domains`, by inspection of the name                     |
+| The DNS records are currently published and unmodified  | none: verification status reflects what Resend last confirmed |
+| DMARC is published, and at what policy                  | none: DMARC is a DNS record Resend does not issue             |
+| Reverse DNS and TLS on the sending path                 | none: managed by Resend                                       |
+| BIMI                                                    | none                                                          |
 
 Resend recommends sending from one or more subdomains, such as `updates.example.com`, rather than the root domain, so that marketing reputation stays separate from the rest of the domain's mail. It does not lower the Gmail bulk sender count: Google counts messages sent from the same primary domain and all of its subdomains together.
 
@@ -24,18 +24,18 @@ Resend's DMARC guidance is to publish `p=none` with a working `rua` address firs
 
 ## 2. Results of sends that already happened
 
-| Check | Evidence |
-| --- | --- |
-| Whether a specific email was delivered, bounced, or complained | `get-email` |
-| Delivery outcomes across recent sends | `list-emails` |
-| A broadcast's send state and recipient counts | `get-broadcast` |
-| API-level failures and their responses | `list-logs`, `get-log` |
-| Bounce rate for a campaign | `list-emails`, computed from the results you can read |
-| Complaint rate for a campaign | `list-emails`, if complaint events are present; otherwise none |
-| Inbox versus spam placement | none: this is the number people mean by deliverability, and no tool here reports it |
-| Domain or IP reputation over time | none: Google Postmaster Tools, Microsoft SNDS, Yahoo's Complaint Feedback Loop |
-| Blocklist status | none |
-| Whether opens are real | none on Apple clients: Mail Privacy Protection inflates them |
+| Check                                                          | Evidence                                                                            |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Whether a specific email was delivered, bounced, or complained | `get-email`                                                                         |
+| Delivery outcomes across recent sends                          | `list-emails`                                                                       |
+| A broadcast's send state and recipient counts                  | `get-broadcast`                                                                     |
+| API-level failures and their responses                         | `list-logs`, `get-log`                                                              |
+| Bounce rate for a campaign                                     | `list-emails`, computed from the results you can read                               |
+| Complaint rate for a campaign                                  | `list-emails`, if complaint events are present; otherwise none                      |
+| Inbox versus spam placement                                    | none: this is the number people mean by deliverability, and no tool here reports it |
+| Domain or IP reputation over time                              | none: Google Postmaster Tools, Microsoft SNDS, Yahoo's Complaint Feedback Loop      |
+| Blocklist status                                               | none                                                                                |
+| Whether opens are real                                         | none on Apple clients: Mail Privacy Protection inflates them                        |
 
 Compute rates from what you actually read and say how many messages the rate is over. A complaint rate across 40 sends is noise, and presenting it as a trend is worse than not presenting it.
 
@@ -43,18 +43,18 @@ A rate you computed and a rate a provider computed are not the same measurement.
 
 ## 3. Thresholds
 
-| Thing | Threshold | Source |
-| --- | --- | --- |
-| Spam complaint rate, where Google enforcement begins | 0.30% | Google, sender guidelines |
-| Spam complaint rate, Google's recommended ceiling | 0.10% | Google, sender guidelines |
-| Spam complaint rate at Yahoo, measured over inbox-delivered mail | 0.3% | Yahoo, sending best practices |
-| Spam complaint rate while warming up | 0.08% | Resend, warm-up guide |
-| Bounce rate while warming up | 4% | Resend, warm-up guide |
-| Gmail bulk sender threshold | close to 5,000 messages or more to personal Gmail accounts within 24 hours | Google, sender guidelines FAQ |
-| Microsoft high-volume sender threshold | over 5,000 messages a day to Microsoft's consumer domains | Microsoft, Outlook.com Postmaster |
-| Yahoo bulk sender threshold | not published: Yahoo states it will not specify a volume threshold | Yahoo, FAQs |
-| DKIM key length | 1024 bits minimum, 2048 recommended | Google, sender guidelines; Yahoo, FAQs |
-| Time to honor an unsubscribe | 2 days, required at Yahoo; 48 hours, recommended by Google | Yahoo, sending best practices; Google, sender guidelines FAQ |
+| Thing                                                            | Threshold                                                                  | Source                                                       |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Spam complaint rate, where Google enforcement begins             | 0.30%                                                                      | Google, sender guidelines                                    |
+| Spam complaint rate, Google's recommended ceiling                | 0.10%                                                                      | Google, sender guidelines                                    |
+| Spam complaint rate at Yahoo, measured over inbox-delivered mail | 0.3%                                                                       | Yahoo, sending best practices                                |
+| Spam complaint rate while warming up                             | 0.08%                                                                      | Resend, warm-up guide                                        |
+| Bounce rate while warming up                                     | 4%                                                                         | Resend, warm-up guide                                        |
+| Gmail bulk sender threshold                                      | close to 5,000 messages or more to personal Gmail accounts within 24 hours | Google, sender guidelines FAQ                                |
+| Microsoft high-volume sender threshold                           | over 5,000 messages a day to Microsoft's consumer domains                  | Microsoft, Outlook.com Postmaster                            |
+| Yahoo bulk sender threshold                                      | not published: Yahoo states it will not specify a volume threshold         | Yahoo, FAQs                                                  |
+| DKIM key length                                                  | 1024 bits minimum, 2048 recommended                                        | Google, sender guidelines; Yahoo, FAQs                       |
+| Time to honor an unsubscribe                                     | 2 days, required at Yahoo; 48 hours, recommended by Google                 | Yahoo, sending best practices; Google, sender guidelines FAQ |
 
 Four notes on these.
 
@@ -70,17 +70,17 @@ Enforcement has moved since the February 2024 rollout, so treat undated advice a
 
 ## 4. List hygiene
 
-| Check | Evidence |
-| --- | --- |
-| Contacts in the target segment, and how many | `get-segment`, `list-contacts` |
-| Whether contacts carry topic subscriptions | `list-contact-topics` |
-| How the target segment is defined | `get-segment` |
+| Check                                                                 | Evidence                                                                                    |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Contacts in the target segment, and how many                          | `get-segment`, `list-contacts`                                                              |
+| Whether contacts carry topic subscriptions                            | `list-contact-topics`                                                                       |
+| How the target segment is defined                                     | `get-segment`                                                                               |
 | Whether that definition actually excludes people who stopped engaging | none: the definition is readable, whether it reflects engagement is a question for the user |
-| How the list was built, and whether consent was recorded | none: ask the user |
-| Whether addresses are valid before sending | none: bounces are the feedback, which is why ramping matters |
-| Spam traps in the list | none, ever |
-| What else has gone to this segment recently, and when | `list-broadcasts`, `get-broadcast` |
-| Whether this segment overlaps another one you also mail | none: overlap is not readable from the definitions, so ask |
+| How the list was built, and whether consent was recorded              | none: ask the user                                                                          |
+| Whether addresses are valid before sending                            | none: bounces are the feedback, which is why ramping matters                                |
+| Spam traps in the list                                                | none, ever                                                                                  |
+| What else has gone to this segment recently, and when                 | `list-broadcasts`, `get-broadcast`                                                          |
+| Whether this segment overlaps another one you also mail               | none: overlap is not readable from the definitions, so ask                                  |
 
 Cadence is the check people skip, and it feeds straight back into the complaint rate. The same person receiving three campaigns in a week reports the third one, and the segment definitions will not tell you that, because two segments can cover the same person without either looking wrong. Read the recent sends before proposing a time, and if something went out in the last few days, say so and let the user decide rather than scheduling over it.
 
@@ -90,15 +90,15 @@ A list imported from a previous tool is the case worth stopping on. It arrives w
 
 These are checkable from the copy rather than from Resend, so they belong in the same report. `email-style` owns the copy rules themselves, `lint_against_style` checks the word-level ones, and `check_send_readiness` checks the placeholders.
 
-| Check | Evidence |
-| --- | --- |
-| A visible unsubscribe link in the body | `check_send_readiness` |
-| Link domains match the sending domain | read the copy |
-| Not a single large image with almost no text | read the copy |
-| No manufactured urgency or the banned phrases | `lint_against_style` |
-| Sender name and reply-to are recognizable | `get-broadcast` |
-| Whether the `List-Unsubscribe` and `List-Unsubscribe-Post` headers are on the message | none: on a one-off send they are whatever the call passed, so ask what was sent |
-| Whether the one-click endpoint takes a POST, returns 200 or 202, and asks nothing further of the user | none: the endpoint lives outside Resend, so ask who owns it |
+| Check                                                                                                 | Evidence                                                                        |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| A visible unsubscribe link in the body                                                                | `check_send_readiness`                                                          |
+| Link domains match the sending domain                                                                 | read the copy                                                                   |
+| Not a single large image with almost no text                                                          | read the copy                                                                   |
+| No manufactured urgency or the banned phrases                                                         | `lint_against_style`                                                            |
+| Sender name and reply-to are recognizable                                                             | `get-broadcast`                                                                 |
+| Whether the `List-Unsubscribe` and `List-Unsubscribe-Post` headers are on the message                 | none: on a one-off send they are whatever the call passed, so ask what was sent |
+| Whether the one-click endpoint takes a POST, returns 200 or 202, and asks nothing further of the user | none: the endpoint lives outside Resend, so ask who owns it                     |
 
 Mismatched link domains are worth calling out specifically. Sending from one domain and linking to another is a pattern filters weight against, because it is what phishing does.
 
@@ -108,18 +108,18 @@ One-click unsubscribe has mechanics that quietly break it, all of them from RFC 
 
 These sit outside the priority order above, because they are not deliverability checks. A send that fails one should not go out at all, however good its authentication is. Name them as requirements rather than as legal advice, and say that US, UK, and EU rules are not the whole world.
 
-| Check | Evidence |
-| --- | --- |
-| A valid physical postal address of the sender is in the message | `check_send_readiness` |
-| The message is clearly identifiable as an advertisement | `check_send_readiness` |
-| Clear notice of how to decline further mail | `check_send_readiness` |
-| The subject line does not mislead about what is inside | `check_send_readiness` |
-| The from and header information is not false or misleading | read the copy, `get-broadcast` |
-| The opt-out stays live for at least 30 days after the send | none: a process question for whoever runs the list |
-| Opt-out requests are honored within 10 business days | none: same, and it happens after the send |
-| A lawful basis exists for marketing to this list | none: ask the user |
-| Whether the soft opt-in exception applies | none: it turns on how the details were collected, which only the user knows |
-| Which countries the recipients are in | none: ask the user, because it changes which rules apply |
+| Check                                                           | Evidence                                                                    |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| A valid physical postal address of the sender is in the message | `check_send_readiness`                                                      |
+| The message is clearly identifiable as an advertisement         | `check_send_readiness`                                                      |
+| Clear notice of how to decline further mail                     | `check_send_readiness`                                                      |
+| The subject line does not mislead about what is inside          | `check_send_readiness`                                                      |
+| The from and header information is not false or misleading      | read the copy, `get-broadcast`                                              |
+| The opt-out stays live for at least 30 days after the send      | none: a process question for whoever runs the list                          |
+| Opt-out requests are honored within 10 business days            | none: same, and it happens after the send                                   |
+| A lawful basis exists for marketing to this list                | none: ask the user                                                          |
+| Whether the soft opt-in exception applies                       | none: it turns on how the details were collected, which only the user knows |
+| Which countries the recipients are in                           | none: ask the user, because it changes which rules apply                    |
 
 The physical postal address is the one to check first, because it is required in every commercial message, it is verifiable from the body alone, and it is the element most often missing. US law states the requirement as "a valid physical postal address of the sender".
 

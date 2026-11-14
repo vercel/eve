@@ -1,8 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import requiredPropertiesFile from "../skills/schema/references/required-properties.json" with {
-  type: "json",
-};
+import requiredPropertiesFile from "../skills/schema/references/required-properties.json" with { type: "json" };
 
 /**
  * Maximum length of the JSON-LD accepted, in characters.

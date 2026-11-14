@@ -4,13 +4,13 @@ Quick lookup for hard constraints. All facts from Mastodon's own docs unless not
 
 ## Limits
 
-| Spec | Value |
-| --- | --- |
-| Character limit | 500 by default; some instances allow more. Write for 500. |
-| Link length | Any URL counts as a flat **23 characters**, regardless of actual length. |
-| Link shorteners | Discouraged: links are already counted as 23, so shorteners add nothing. |
-| Mentions | Only the `@username` part counts toward the limit; the `@domain` does not. |
-| Editing | Posts can be edited after publishing. |
+| Spec            | Value                                                                      |
+| --------------- | -------------------------------------------------------------------------- |
+| Character limit | 500 by default; some instances allow more. Write for 500.                  |
+| Link length     | Any URL counts as a flat **23 characters**, regardless of actual length.   |
+| Link shorteners | Discouraged: links are already counted as 23, so shorteners add nothing.   |
+| Mentions        | Only the `@username` part counts toward the limit; the `@domain` does not. |
+| Editing         | Posts can be edited after publishing.                                      |
 
 ## Alt text
 

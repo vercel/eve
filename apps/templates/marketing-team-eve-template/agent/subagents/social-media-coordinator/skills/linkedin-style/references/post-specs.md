@@ -4,12 +4,12 @@ Concrete limits and specs for quick reference. Only the numbers below are source
 
 ## Text post
 
-| Thing | Value |
-| --- | --- |
-| Individual post (status update) max | 3,000 characters |
-| Company page status update max | 3,000 characters |
-| Visible before "…see more" (mobile) | ~140 characters |
-| Visible before "…see more" (desktop) | ~210 characters |
+| Thing                                | Value            |
+| ------------------------------------ | ---------------- |
+| Individual post (status update) max  | 3,000 characters |
+| Company page status update max       | 3,000 characters |
+| Visible before "…see more" (mobile)  | ~140 characters  |
+| Visible before "…see more" (desktop) | ~210 characters  |
 
 The truncation point is the practical budget for the hook: get the reader to click before the fold. There is no published "ideal" length beyond the truncation threshold, so write only as long as the one idea needs.
 
@@ -17,12 +17,12 @@ The truncation point is the practical budget for the hook: get the reader to cli
 
 Carousels are uploaded as a PDF (image files like JPG/PNG won't work as a carousel).
 
-| Thing | Value |
-| --- | --- |
-| File type | PDF |
-| Page size | 1080×1080 (square) or 1920×1080 (landscape) |
-| Max pages | < 300 |
-| Max file size | 100 MB |
+| Thing         | Value                                       |
+| ------------- | ------------------------------------------- |
+| File type     | PDF                                         |
+| Page size     | 1080×1080 (square) or 1920×1080 (landscape) |
+| Max pages     | < 300                                       |
+| Max file size | 100 MB                                      |
 
 Carousel ads (paid, via Campaign Manager) are a different format with their own rules: max 10 cards plus a CTA button.
 

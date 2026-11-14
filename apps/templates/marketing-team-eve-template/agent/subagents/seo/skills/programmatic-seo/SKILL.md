@@ -24,16 +24,16 @@ Then check demand actually exists: aggregate volume across the pattern, how it s
 
 ## Choosing a pattern
 
-| You have | Consider |
-| --- | --- |
-| Proprietary data set | Directory, Profiles |
-| A product with integrations | Integrations |
-| A design or creative product | Templates, Examples |
-| Several distinct audience segments | Personas |
-| A local footprint | Locations |
-| A utility or calculator | Conversions |
-| Deep subject expertise | Glossary, Curation |
-| A crowded competitive field | Comparisons |
+| You have                           | Consider            |
+| ---------------------------------- | ------------------- |
+| Proprietary data set               | Directory, Profiles |
+| A product with integrations        | Integrations        |
+| A design or creative product       | Templates, Examples |
+| Several distinct audience segments | Personas            |
+| A local footprint                  | Locations           |
+| A utility or calculator            | Conversions         |
+| Deep subject expertise             | Glossary, Curation  |
+| A crowded competitive field        | Comparisons         |
 
 `references/playbooks.md` covers the twelve patterns, each with its query shape, what data it needs, and how it usually fails.
 
