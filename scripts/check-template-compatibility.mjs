@@ -262,6 +262,12 @@ const checkTemplate = async (template, tarball, tarballName) => {
   // Non-secret build fixtures preserve fail-fast production configuration
   // without giving this compatibility check credentials to external services.
   const buildEnv = { ...process.env };
+  if (template === "eve-software-factory-template") {
+    Object.assign(buildEnv, {
+      FACTORY_REPO: "acme/widgets",
+      LINEAR_CONNECTOR: "linear/template-ci",
+    });
+  }
   if (template === "kody-eve-template") {
     Object.assign(buildEnv, {
       LINEAR_CONNECTOR: "linear/template-ci",
