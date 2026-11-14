@@ -98,7 +98,7 @@ Redaction matches token formats with a recognizable prefix, plus credentials in 
 | Structured tokens | JWTs and PEM private keys                                                                                                                  |
 | In context        | `Bearer` and `Authorization: Basic` values, URL passwords, Slack webhook paths, signed-URL and token query parameters, Azure `AccountKey=` |
 
-Only the secret is replaced, so `postgres://alice:hunter2@db` becomes `postgres://alice:[REDACTED]@db`. Free-form values such as `password=...` are not matched, and attributes outside this list are not scanned. This applies to every destination, including local traces and Agent Runs, and the span itself is unchanged. Use an `attribute` policy to remove or replace anything else your agent handles.
+Only the secret is replaced, so `postgres://alice:hunter2@db` becomes `postgres://alice:[REDACTED]@db`.
 
 ## Local traces
 
