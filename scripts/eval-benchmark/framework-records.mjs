@@ -21,6 +21,11 @@
 //                prompt (input is taken and queued before the agent is ready),
 //                from packages/eve/scripts/benchmark-startup.mjs
 //                (<dev-startup-dir>/<subject>.jsonl: its stdout)
+//   package      eve's tarball and unpacked size, and a cold `npm install` of
+//                it into an empty project: time, size, and package count,
+//                from packages/eve/scripts/benchmark-package.mjs in the same
+//                job (<dev-startup-dir>/package.jsonl: its stdout); subject
+//                `eve`, every run cold (empty npm cache)
 //
 // A planned probe without data is a `missing` record, as in records.jsonl.
 //
@@ -49,7 +54,16 @@ export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   "dev_startup.ready_ms": framework("ms"),
   "dev_startup.session_accepted_ms": framework("ms"),
   "dev_startup.first_turn_ms": framework("ms"),
+  "package.packed_bytes": framework("bytes"),
+  "package.unpacked_bytes": framework("bytes"),
+  "package.install_bytes": framework("bytes"),
+  "package.install_packages": framework("count"),
+  "package.install_ms": framework("ms"),
 });
+
+/** The package probe's file in the dev-startup directory, and its subject. */
+export const PACKAGE_RESULTS_FILE = "package.jsonl";
+const PACKAGE_SUBJECT = "eve";
 
 /** Legs that build and start a local production server, and so carry build and start probes. */
 export function probedLegs(legs) {
@@ -141,10 +155,14 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
   }
 
   const devStartup = plan.registry.dev_startup;
+  const packageProbe = plan.registry.package;
+  const meta =
+    devStartup || packageProbe
+      ? readOptionalJson(devStartupDir && join(devStartupDir, "meta.json"))
+      : undefined;
+  if (meta !== undefined && meta.sha !== plan.sha)
+    throw new Error(`dev-startup ran at ${meta.sha}, but the plan is for ${plan.sha}.`);
   if (devStartup) {
-    const meta = readOptionalJson(devStartupDir && join(devStartupDir, "meta.json"));
-    if (meta !== undefined && meta.sha !== plan.sha)
-      throw new Error(`dev-startup ran at ${meta.sha}, but the plan is for ${plan.sha}.`);
     for (const { name, digest } of devStartup.subjects) {
       const lines = readJsonLines(devStartupDir && join(devStartupDir, `${name}.jsonl`));
       for (let run = 1; run <= devStartup.runs; run += 1) {
@@ -208,6 +226,45 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
       }
     }
   }
+
+  if (packageProbe) {
+    const lines = readJsonLines(devStartupDir && join(devStartupDir, PACKAGE_RESULTS_FILE));
+    for (let run = 1; run <= packageProbe.runs; run += 1) {
+      const base = {
+        probe: "package",
+        subject: PACKAGE_SUBJECT,
+        subjectDigest: packageProbe.digest,
+        world: "local",
+        attempt: run,
+        cold: true,
+        runnerOs: meta?.runner_os,
+      };
+      const line = lines?.find((entry) => entry.mode === "package" && entry.run === run);
+      records.push(
+        line === undefined
+          ? record({
+              ...base,
+              missing:
+                meta === undefined
+                  ? "job-missing"
+                  : lines === undefined
+                    ? "probe-missing"
+                    : "run-missing",
+            })
+          : record({
+              ...base,
+              path: DEV_STARTUP_ARTIFACT_PATH,
+              metrics: {
+                "package.packed_bytes": amount(line.packedBytes, "missing-size"),
+                "package.unpacked_bytes": amount(line.unpackedBytes, "missing-size"),
+                "package.install_bytes": amount(line.installBytes, "missing-size"),
+                "package.install_packages": amount(line.installPackages, "missing-count"),
+                "package.install_ms": duration(line.installMs),
+              },
+            }),
+      );
+    }
+  }
   return records;
 }
 
@@ -230,9 +287,13 @@ function buildMetrics(value) {
 }
 
 function duration(value) {
+  return amount(value, "missing-duration");
+}
+
+function amount(value, reason) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? { status: "measured", value }
-    : { status: "unavailable", reason: "missing-duration" };
+    : { status: "unavailable", reason };
 }
 
 function readOptionalJson(path) {
