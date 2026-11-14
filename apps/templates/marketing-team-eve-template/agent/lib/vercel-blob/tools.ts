@@ -30,6 +30,34 @@ import {
  * @packageDocumentation
  */
 
+const MAX_TEXT_BYTES = 1024 * 1024;
+const MAX_BINARY_BYTES = (MAX_TEXT_BYTES / 4) * 3;
+
+const readAssetBytes = async (
+  stream: ReadableStream<Uint8Array>,
+  size: number,
+  maxBytes: number
+): Promise<Buffer> => {
+  const tooLarge = () =>
+    new Error(
+      `Asset too large: the download limit is ${maxBytes} bytes. Use a smaller asset or split the file before downloading.`
+    );
+  if (size > maxBytes) {
+    await stream.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  const bytes = Buffer.alloc(maxBytes);
+  let length = 0;
+  for await (const value of stream) {
+    if (value.byteLength > maxBytes - length) {
+      throw tooLarge();
+    }
+    bytes.set(value, length);
+    length += value.byteLength;
+  }
+  return bytes.subarray(0, length);
+};
+
 /**
  * Build the tool that uploads text or binary content to Blob storage.
  *
@@ -159,7 +187,9 @@ export const listAssetsTool = () =>
     description:
       "List assets in Vercel Blob storage, optionally filtered by a path prefix. Returns each " +
       "asset's URL, size, and upload date. Use to browse stored content or locate an asset. " +
-      "Each URL is an identifier for the asset tools, not a link the user can open.",
+      "Each URL is an identifier for the asset tools, not a link the user can open. " +
+      "When hasMore is true, pass the returned cursor with the same prefix to get the next " +
+      "page, even if the current page has no visible assets.",
     /**
      * List matching assets.
      *
@@ -167,9 +197,10 @@ export const listAssetsTool = () =>
      * @returns The matching `assets`, their `count`, a `hasMore` flag, and a pagination
      * `cursor`, or an empty list with an `error` message on failure.
      */
-    async execute({ prefix, limit }) {
+    async execute({ prefix, limit, cursor: inputCursor }) {
       try {
         const { blobs, hasMore, cursor } = await list({
+          cursor: inputCursor,
           limit,
           prefix,
         });
@@ -198,6 +229,13 @@ export const listAssetsTool = () =>
       }
     },
     inputSchema: z.object({
+      cursor: z
+        .string()
+        .max(8192)
+        .optional()
+        .describe(
+          "The cursor returned by the previous page. Keep the same prefix."
+        ),
       limit: z
         .number()
         .int()
@@ -292,7 +330,10 @@ export const getAssetInfoTool = () =>
  * @remarks
  * The `url` is model-supplied, so it is checked against {@link BLOB_HOST_SUFFIX} before the fetch:
  * without that check this tool is an SSRF primitive. Text content is returned raw; binary content
- * comes back base64-encoded with `isBase64: true`.
+ * comes back base64-encoded with `isBase64: true`. Downloads are limited to 1 MiB of text bytes
+ * or 768 KiB of binary bytes, keeping base64 output within 1 MiB. The reader enforces the
+ * limit independently of Blob metadata and uses one fixed buffer to bound memory even
+ * when a stream sends many tiny chunks.
  *
  * @returns The `download_asset` tool definition.
  */
@@ -300,7 +341,8 @@ export const downloadAssetTool = () =>
   defineTool({
     description:
       "Download and return the contents of a Vercel Blob asset. Use when the user wants to " +
-      "read or reuse a stored file. Text is returned raw; binary files come back base64-encoded.",
+      "read or reuse a stored file. Text is returned raw (up to 1 MiB); binary files come back " +
+      "base64-encoded (up to 768 KiB before encoding). Split larger files before downloading.",
     /**
      * Fetch and return the asset contents.
      *
@@ -337,10 +379,15 @@ export const downloadAssetTool = () =>
           result.blob.contentType ?? "application/octet-stream";
         const isText =
           contentType.startsWith("text/") || contentType.includes("json");
-        const response = new Response(result.stream);
+        const maxBytes = isText ? MAX_TEXT_BYTES : MAX_BINARY_BYTES;
+        const body = await readAssetBytes(
+          result.stream,
+          result.blob.size,
+          maxBytes
+        );
         const content = isText
-          ? await response.text()
-          : Buffer.from(await response.arrayBuffer()).toString("base64");
+          ? new TextDecoder().decode(body)
+          : body.toString("base64");
 
         return { content, contentType, isBase64: !isText, success: true, url };
       } catch (error) {

@@ -15,6 +15,7 @@
     "eval:offline": "EVE_MOCK_MODEL=1 eve eval offline",
     "fix": "ultracite fix",
     "start": "eve start",
+    "test:smoke": "node --experimental-test-module-mocks --test tests/*.test.mjs",
     "typecheck": "tsc",
     "validate": "pnpm run check && pnpm run typecheck && eve info && pnpm run eval:offline"
   },
