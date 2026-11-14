@@ -304,6 +304,9 @@ function parseIssueEvent(base: GitHubInboundEventBase): GitHubIssueWebhookEvent 
     issue: {
       action: readAction(base.raw),
       issueNumber,
+      ...(isObject(base.raw.label) && typeof base.raw.label.name === "string"
+        ? { label: { name: base.raw.label.name } }
+        : {}),
       raw: parseJsonObject(issue),
     },
     kind: "issues",

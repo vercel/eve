@@ -116,6 +116,8 @@ export default githubChannel({
 });
 ```
 
+The issue hook exposes `action`, `issueNumber`, and the issue object as `raw`. For label events, `issue.label?.name` identifies the label added or removed by that event; it is not the issue's complete label set. To dispatch only when a particular label is added, check both `issue.action === "labeled"` and `issue.label?.name`. Labels attached at issue creation also produce `labeled` events, so handling `opened` as well can duplicate intake.
+
 The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `headSha`, and `pullRequests` fields, plus `checkSuiteId`, `checkRunId`, or `workflowRunId`. For `workflow_run`, which only GitHub Actions sends, `app.slug` is `"github-actions"`. A CI turn replies on the first PR in `pullRequests`. When the array is empty, the hook still runs but must return `null`, because there is no thread to reply in.
 
 ## Delivery

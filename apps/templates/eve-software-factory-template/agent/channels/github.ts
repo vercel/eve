@@ -160,9 +160,8 @@ const CI_FIX_TASK = [
  *   because GitHub fires `labeled` even for labels attached at creation time
  *   and issue templates let unauthenticated reporters do exactly that; below
  *   triage, the event is acknowledged without a session. The factory label is
- *   matched against the issue's current `labels` array rather than a single
- *   "added label" field, because eve exposes the issue object as `issue.raw`,
- *   not the raw webhook payload that carries the just-added label. The turn
+ *   matched against `issue.label`, the webhook's changed label, so adding an
+ *   unrelated label cannot restart the pipeline. The turn
  *   itself runs unattended: the auth is rewritten to the constructed
  *   autonomous principal with the intake issue number stamped in, and the
  *   approval policies deny it everything except labels, progress comments on
@@ -255,15 +254,9 @@ export default githubChannel({
     if (!(await isFactoryRepository(ctx))) {
       return null;
     }
-    const { labels } = issue.raw as {
-      labels?: ReadonlyArray<{ name?: unknown }>;
-    };
-    const hasFactoryLabel =
-      Array.isArray(labels) &&
-      labels.some((entry) => entry?.name === FACTORY_LABEL);
     if (
       issue.action !== "labeled" ||
-      !hasFactoryLabel ||
+      issue.label?.name !== FACTORY_LABEL ||
       ctx.sender.type === "Bot" ||
       !(await hasRepositoryRole(ctx, TRUSTED_LABELER_ROLES))
     ) {

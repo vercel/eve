@@ -95,6 +95,36 @@ test("only verified writers on the canonical factory repository can authorize sh
   );
 });
 
+test("issue intake dispatches only when the factory label itself is added", async () => {
+  const issue = {
+    action: "labeled",
+    issueNumber: 7,
+    raw: { labels: [{ name: "factory" }, { name: "bug" }] },
+  };
+  assert.equal(
+    await channel.onIssue(context(), { ...issue, label: { name: "bug" } }),
+    null
+  );
+  assert.equal(await channel.onIssue(context(), issue), null);
+  assert.equal(
+    await channel.onIssue(context(), {
+      ...issue,
+      action: "opened",
+      label: { name: "factory" },
+    }),
+    null
+  );
+  const dispatch = await channel.onIssue(context(), {
+    ...issue,
+    label: { name: "factory" },
+  });
+  assert.ok(
+    dispatch?.auth,
+    "adding factory must still start an unattended run"
+  );
+  assert.equal(dispatch.auth.principalId, "github:foreman-factory");
+});
+
 test("public PRs cannot dispatch privileged factory sessions, regardless of injected task content", async () => {
   assert.equal(
     await channel.onPullRequest(context(), {

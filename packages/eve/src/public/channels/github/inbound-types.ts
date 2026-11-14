@@ -105,6 +105,8 @@ export type GitHubPullRequestAction =
 export interface GitHubIssueEvent {
   readonly action: GitHubIssueAction;
   readonly issueNumber: number;
+  /** The changed label from the webhook, not the issue's complete label set. */
+  readonly label?: { readonly name: string };
   readonly raw: JsonObject;
 }
 
