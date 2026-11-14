@@ -68,6 +68,7 @@ import {
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import { describeRemoteAuthCompletedMutations } from "./remote-auth-result.js";
 import { prepareRemoteTuiAccess } from "./remote-startup.js";
+import type { StartupOnboardingResult } from "./startup-onboarding.js";
 import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   BOOT_DETECTIONS,
@@ -365,6 +366,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   onboard?: boolean;
+  /** Onboarding that already ran on the startup screen; the runner settles its outcome. */
+  startupOnboarding?: StartupOnboardingResult;
   /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
   onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
   onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
@@ -434,6 +437,7 @@ export class EveTUIRunner {
   #startupPrompt?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
+  readonly #startupOnboarding: StartupOnboardingResult | undefined;
   #reportedFirstResponse = false;
   readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
   readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
@@ -518,6 +522,7 @@ export class EveTUIRunner {
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
     if (options.startup !== undefined) this.#startup = options.startup;
     this.#onboard = options.onboard === true;
+    this.#startupOnboarding = options.startupOnboarding;
     this.#onOnboardingStep = options.onOnboardingStep;
     this.#onOnboardingTerminal = options.onOnboardingTerminal;
     if (options.appRoot !== undefined) {
@@ -703,7 +708,11 @@ export class EveTUIRunner {
     }
     if (initialAgentOnboarding) {
       this.#renderer.setStartupPhase?.("connecting");
-      startupOutcome = await this.#runInitialAgentOnboarding(title);
+      startupOutcome =
+        this.#startupOnboarding === undefined
+          ? await this.#runInitialAgentOnboarding(title)
+          : this.#startupOnboarding.outcome &&
+            (await this.#settleCommandOutcome(this.#startupOnboarding.outcome));
     }
 
     let initialDraft = this.#finishStartup();

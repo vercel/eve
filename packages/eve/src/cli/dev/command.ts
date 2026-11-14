@@ -13,6 +13,7 @@ import { createDevBootProgressReporter } from "./boot-progress.js";
 import type { DevelopmentCliOptions } from "./command-options.js";
 import { runInteractiveDevelopmentUi } from "./run-interactive-ui.js";
 import type { DevelopmentTuiStartup } from "./tui/startup.js";
+import type { StartupOnboardingResult } from "./tui/startup-onboarding.js";
 import type { RunDevelopmentTuiInput } from "./tui/tui.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "./ui-options.js";
 import {
@@ -52,6 +53,35 @@ async function loadDevelopmentTuiStartupModule() {
 
 async function loadStartHost(): Promise<NonNullable<DevelopmentCommandRuntime["startHost"]>> {
   return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
+}
+
+async function runOnboardingWhileServerStarts(input: {
+  readonly applicationRoot: string;
+  readonly started: Promise<{ readonly handle: { readonly url: string } | undefined }>;
+  readonly startup: DevelopmentTuiStartup;
+  readonly telemetry: DevelopmentCommandTelemetry;
+}): Promise<StartupOnboardingResult> {
+  const [{ runStartupOnboarding }, { withDevelopmentServerPaused }, { findEveProjectContext }] =
+    await Promise.all([
+      import("#cli/dev/tui/startup-onboarding.js"),
+      import("./run-interactive-ui.js"),
+      import("#internal/project-context.js"),
+    ]);
+  const projectContext = await findEveProjectContext(input.applicationRoot);
+  return await runStartupOnboarding({
+    startup: input.startup,
+    workspaceRoot: projectContext?.environmentRoot ?? input.applicationRoot,
+    ...(projectContext?.kind === "workspace-member"
+      ? { agentRoot: projectContext.member.appRoot }
+      : {}),
+    onOnboardingStep: input.telemetry.trackSetupStep,
+    onOnboardingTerminal: input.telemetry.trackSetupTerminal,
+    withExclusiveTerminal: async (task) => {
+      const { handle } = await input.started;
+      if (handle === undefined) throw new Error("eve dev stopped before setup finished.");
+      return await withDevelopmentServerPaused(handle.url, task);
+    },
+  });
 }
 
 function hasInteractiveTerminal(): boolean {
@@ -293,12 +323,27 @@ export function registerDevelopmentCommand(input: {
         onBootProgress,
         port: options.port,
       });
-      const [outcome, startup] = await Promise.all([
-        Promise.race([
-          server.start().then((handle) => ({ handle })),
-          lifecycle.stopped.then(() => ({ handle: undefined })),
-        ]),
+      const started = Promise.race([
+        server.start().then((handle) => ({ handle })),
+        lifecycle.stopped.then(() => ({ handle: undefined })),
+      ]);
+      // Fresh-agent onboarding needs only the project files until it saves, so the person
+      // picks a provider and signs in while the server boots.
+      const startupOnboardingPromise =
+        options.onboard === true
+          ? tuiStartupPromise?.then((startup) =>
+              runOnboardingWhileServerStarts({
+                applicationRoot: applicationContext.root,
+                started,
+                startup,
+                telemetry,
+              }),
+            )
+          : undefined;
+      const [outcome, startup, startupOnboarding] = await Promise.all([
+        started,
         tuiStartupPromise,
+        startupOnboardingPromise,
       ]);
       const handle = outcome.handle;
       if (handle === undefined) {
@@ -348,6 +393,7 @@ export function registerDevelopmentCommand(input: {
             runDevelopmentTui: runtime.runDevelopmentTui,
             server: { appRoot: handle.appRoot, serverUrl: handle.url },
             startup: tuiStartup,
+            ...(startupOnboarding === undefined ? {} : { startupOnboarding }),
           }),
       });
     } finally {
