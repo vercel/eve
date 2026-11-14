@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "eve/context";
+import { FACTORY_REPO } from "./constants.js";
 
 /**
  * Constructed principal for unattended factory runs (an issue labeled
@@ -19,9 +20,9 @@ export const AUTONOMOUS_PRINCIPAL = "github:foreman-factory";
  *
  * @remarks
  * Trust is decided once, at dispatch, on the signed webhook: the GitHub
- * channel stamps it only for commenters whose `author_association` is
- * OWNER, MEMBER, or COLLABORATOR; the Linear channel stamps it for every
- * Agent Session, because workspace membership is the gate there. Nothing
+ * channel verifies write permission on the canonical factory repository;
+ * the Linear channel accepts only members of the configured workspace.
+ * The stamp is bound to FACTORY_REPO. Nothing
  * downstream re-derives trust from model-readable content.
  */
 export const TRUSTED_ATTRIBUTE = "trusted";
@@ -36,7 +37,11 @@ export const TRUSTED_ATTRIBUTE = "trusted";
 export function stampTrusted(auth: SessionAuthContext): SessionAuthContext {
   return {
     ...auth,
-    attributes: { ...auth.attributes, [TRUSTED_ATTRIBUTE]: "true" },
+    attributes: {
+      ...auth.attributes,
+      [TRUSTED_ATTRIBUTE]: "true",
+      factoryRepository: FACTORY_REPO.toLowerCase(),
+    },
   };
 }
 
@@ -111,7 +116,15 @@ export function isAutonomous(auth: SessionAuthContext | null): boolean {
  * {@link isScheduleAppAuth}) rather than inventing their own.
  */
 export function isTrusted(auth: SessionAuthContext | null): boolean {
-  return auth !== null && auth.attributes[TRUSTED_ATTRIBUTE] === "true";
+  return (
+    auth !== null &&
+    auth.attributes[TRUSTED_ATTRIBUTE] === "true" &&
+    auth.attributes.factoryRepository === FACTORY_REPO.toLowerCase() &&
+    (auth.authenticator !== "github-webhook" ||
+      (typeof auth.attributes.repository === "string" &&
+        auth.attributes.repository.toLowerCase() ===
+          FACTORY_REPO.toLowerCase()))
+  );
 }
 
 /**

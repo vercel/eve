@@ -18,7 +18,7 @@ export const GITHUB_CONNECTOR =
  *
  * @remarks
  * Tokens are resolved lazily per use and never exposed to the model; the git
- * helpers inject them at the sandbox firewall (see
- * `agent/lib/github/git-remote.ts`), so they never enter the sandbox either.
+ * helpers inject them only at a fresh transfer sandbox's firewall (see
+ * `agent/lib/github/git-transfer.ts`), never in a repository-code station.
  */
 export const githubCredentials = connectGitHubCredentials(GITHUB_CONNECTOR);

@@ -24,11 +24,11 @@ Each station is its own agent with its own instructions, sandbox, and tools. The
 ## How work arrives
 
 - **Label an issue `factory`.** The pipeline runs on its own, posts progress as stations complete, and ends with a draft PR linked to the issue.
-- **@mention it on an issue or PR.** Mentions from repo owners, members, and collaborators start an interactive session.
-- **Delegate in Linear.** Linear Agent Sessions run the same pipeline and report progress back in Linear.
+- **@mention it on an issue or PR.** Mentions start an interactive session only after GitHub verifies write, maintain, or admin permission on `FACTORY_REPO`.
+- **Delegate in Linear.** Agent Sessions from `LINEAR_WORKSPACE_ID` run the same pipeline and report progress back in Linear; other workspaces are rejected.
 - **The dev TUI.** Hand it a task locally. Changes to GitHub wait for your approval.
 - **Red CI on a factory PR.** Foreman diagnoses the failure and pushes a fix to its own branches, never yours.
-- **Someone opens a pull request.** Foreman posts one orienting comment for reviewers: a summary, not a review.
+  Automatic PR-open summaries are disabled. Public PR content cannot start a session with the factory's privileged tools. GitHub sessions cannot use the app-scoped Linear connection, including read tools; delegate from the configured Linear workspace instead.
 
 ## Deploy
 
@@ -38,20 +38,23 @@ The Vercel deploy flow sets up everything: the **GitHub** connector, **Linear** 
 
 Existing deployments must replace public stores with private stores and remove old public documents. Updating the app does not revoke existing public URLs.
 
-Two things must line up before Foreman can do any real work. `FACTORY_REPO` must name a real repository in `owner/repo` format, and the GitHub App behind the connector you select must be installed with access to that repository. A station's sandbox clones `FACTORY_REPO` on its first session, not at deploy time, so a repository the app cannot reach surfaces as a `Cannot access <owner/repo>` error on the first task you hand it, not the deploy itself; install the app on the repository (or fix the value), then try again.
+Two things must line up before Foreman can do any real work. `FACTORY_REPO` must name a real repository in `owner/repo` format, and the GitHub App behind the connector you select must be installed with access to that repository. A station's sandbox clones `FACTORY_REPO` on its first session, not at deploy time, so a repository the app cannot reach surfaces as a repository-access error on the first task you hand it, not the deploy itself; install the app on the repository (or fix the value), then try again.
 
-Protect the default branch with GitHub rules that prevent the connected GitHub App from pushing directly or bypassing review. The sandbox broker grants repository credentials briefly; branch-name validation is not a boundary against other sandbox processes.
+Authenticated Git operations run in fresh disposable transfer sandboxes, never in the stations that execute repository code. Only bounded Git object bundles cross that boundary, without hooks, configuration, executables, or background processes. Pushes target one `FACTORY_BRANCH_PREFIX` ref, refuse the repository's actual default branch and protected branches, and never force-push. Keep GitHub branch protection enabled as defense in depth.
+
+Each transfer has a 120-second sandbox lifetime and a 64 MiB bundle limit. Transfers include the selected branch's full history; larger repositories fail closed instead of falling back to credentialed station commands. The channel's built-in credentialed checkout is disabled. Set `LINEAR_WORKSPACE_ID` to the organization ID of the connected Linear workspace to enable its intake and MCP tools; leaving it unset disables both. Remove or restart existing sessions when upgrading so old auth and checkout state do not survive the authorization change.
 
 Configuration (see `.env.example`):
 
-| Variable                                | Required | Default               | What it does                                                                                                                                     |
-| --------------------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `FACTORY_REPO`                          | Yes      | —                     | An existing GitHub repository in `owner/repo` format; the selected GitHub App must have access to it (a station's first session fails otherwise) |
-| `FACTORY_SETUP_COMMAND`                 | No       | —                     | Runs once per session inside the station sandbox checkout (e.g. `pnpm install`), so the station starts with dependencies already installed       |
-| `FACTORY_LABEL`                         | No       | `factory`             | The issue label that hands an issue to the factory                                                                                               |
-| `FACTORY_BRANCH_PREFIX`                 | No       | `factory/`            | Branch prefix marking the factory's own PRs, which are the only branches automated CI fixes touch                                                |
-| `FACTORY_BOT_NAME`                      | No       | the GitHub App's slug | The `@mention` name, resolved from the connector automatically when unset                                                                        |
-| `GITHUB_CONNECTOR` / `LINEAR_CONNECTOR` | Yes      | —                     | Set automatically from Vercel Connect connector UIDs                                                                                             |
+| Variable                                | Required   | Default               | What it does                                                                                                                                     |
+| --------------------------------------- | ---------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FACTORY_REPO`                          | Yes        | —                     | An existing GitHub repository in `owner/repo` format; the selected GitHub App must have access to it (a station's first session fails otherwise) |
+| `LINEAR_WORKSPACE_ID`                   | For Linear | —                     | Connected Linear organization ID; intake and app-scoped tools fail closed when unset or mismatched                                               |
+| `FACTORY_SETUP_COMMAND`                 | No         | —                     | Runs once per session inside the station sandbox checkout (e.g. `pnpm install`), so the station starts with dependencies already installed       |
+| `FACTORY_LABEL`                         | No         | `factory`             | The issue label that hands an issue to the factory                                                                                               |
+| `FACTORY_BRANCH_PREFIX`                 | No         | `factory/`            | Branch prefix marking the factory's own PRs, which are the only branches automated CI fixes touch                                                |
+| `FACTORY_BOT_NAME`                      | No         | the GitHub App's slug | The `@mention` name, resolved from the connector automatically when unset                                                                        |
+| `GITHUB_CONNECTOR` / `LINEAR_CONNECTOR` | Yes        | —                     | Set automatically from Vercel Connect connector UIDs                                                                                             |
 
 ## Local development
 

@@ -4,21 +4,32 @@ import {
   type GitHubInboundContext,
   githubChannel,
 } from "eve/channels/github";
-import { FACTORY_BRANCH_PREFIX, FACTORY_LABEL } from "../lib/constants.js";
+import {
+  FACTORY_BRANCH_PREFIX,
+  FACTORY_LABEL,
+  FACTORY_REPO,
+} from "../lib/constants.js";
 import { mentionPattern, resolveBotName } from "../lib/github/bot-name.js";
 import { githubCredentials } from "../lib/github/credentials.js";
 import { stampAutonomous, stampTrusted } from "../lib/trust.js";
 
-/**
- * Commenter roles allowed to start a session by mentioning the agent.
- *
- * @remarks
- * GitHub's `author_association` on the comment payload. Anything outside this
- * set (CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE, MANNEQUIN) is a user the
- * repo hasn't trusted with write access, so their mentions are acknowledged
- * without dispatching.
- */
-const TRUSTED_ASSOCIATIONS = new Set(["COLLABORATOR", "MEMBER", "OWNER"]);
+// Resolve the configured resource, not an association on an arbitrary event.
+async function isFactoryRepository(
+  ctx: GitHubInboundContext
+): Promise<boolean> {
+  if (ctx.repository.fullName.toLowerCase() !== FACTORY_REPO.toLowerCase()) {
+    return false;
+  }
+  try {
+    const response = await ctx.github.request<{ id: number }>({
+      method: "GET",
+      path: `/repos/${FACTORY_REPO}`,
+    });
+    return response.ok && response.body.id === ctx.repository.id;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Replicates the channel's built-in ignore rules: eve's own marker comments,
@@ -35,13 +46,6 @@ const isIgnoredComment = (comment: GitHubComment, botName: string): boolean => {
   return (
     author.type === "Bot" ||
     author.login.toLowerCase() === `${botName.toLowerCase()}[bot]`
-  );
-};
-
-const isTrustedCommenter = (comment: GitHubComment): boolean => {
-  const association = comment.raw.author_association;
-  return (
-    typeof association === "string" && TRUSTED_ASSOCIATIONS.has(association)
   );
 };
 
@@ -66,8 +70,9 @@ const TRUSTED_LABELER_ROLES = new Set(["admin", "maintain", "write", "triage"]);
  * unattended pipeline maintainer-triggered. Fails closed: an API error
  * acknowledges the event without dispatching.
  */
-const isTrustedLabeler = async (
-  ctx: GitHubInboundContext
+const hasRepositoryRole = async (
+  ctx: GitHubInboundContext,
+  roles: ReadonlySet<string>
 ): Promise<boolean> => {
   try {
     const response = await ctx.github.request<{
@@ -75,13 +80,13 @@ const isTrustedLabeler = async (
       role_name?: string;
     }>({
       method: "GET",
-      path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/collaborators/${encodeURIComponent(ctx.sender.login)}/permission`,
+      path: `/repos/${FACTORY_REPO}/collaborators/${encodeURIComponent(ctx.sender.login)}/permission`,
     });
     if (!response.ok) {
       return false;
     }
     const role = response.body.role_name ?? response.body.permission;
-    return typeof role === "string" && TRUSTED_LABELER_ROLES.has(role);
+    return typeof role === "string" && roles.has(role);
   } catch {
     return false;
   }
@@ -125,18 +130,6 @@ const CI_FIX_TASK = [
 ].join("\n\n");
 
 /**
- * Task injected into the session dispatched when a pull request opens. The
- * PR's metadata and changed-file patches are already in the session's context
- * when this runs; the repo itself is checked out into the sandbox.
- */
-const PR_SUMMARY_TASK = [
-  "A pull request was just opened. Post one comment that helps reviewers get oriented.",
-  "Open with a short paragraph saying what the PR does and why, grounded in its title, description, and diff. Never guess at intent the diff doesn't show.",
-  "Then add a markdown table breaking down the changed files: the file path, the kind of change (added, modified, removed, renamed), and what changed in one short phrase. For a very large PR, list the files that carry the substance and roll the rest into a final count row.",
-  "Close with one line pointing reviewers at where to start. This comment is a summary, not a review: don't approve, request changes, or ask the author for anything.",
-].join("\n\n");
-
-/**
  * GitHub channel: the factory's main intake and delivery surface, as
  * "Foreman".
  *
@@ -155,9 +148,9 @@ const PR_SUMMARY_TASK = [
  *   event.
  * - `onComment` replaces the built-in mention gate to add an authorization
  *   check: it keeps the default mention and ignore rules, then dispatches
- *   only when the commenter's `author_association` marks them as trusted with
- *   the repo (owner, member, or collaborator). The dispatch stamps the
- *   `trusted` auth attribute, which is what lets the approval policies run
+ *   only after verifying the canonical factory repository and the sender's
+ *   write, maintain, or admin permission through GitHub. The dispatch stamps
+ *   repository-bound trust, which is what lets the approval policies run
  *   reversible writes without a card. Mentions from anyone else are
  *   acknowledged without a session, so arbitrary accounts on a public repo
  *   cannot drive the agent's write tools.
@@ -174,11 +167,8 @@ const PR_SUMMARY_TASK = [
  *   autonomous principal with the intake issue number stamped in, and the
  *   approval policies deny it everything except labels, progress comments on
  *   that one issue, closing or reopening issues, and draft pull requests.
- * - `onPullRequest` dispatches only on the `opened` action and skips PRs
- *   opened by bots, which covers Dependabot and the factory's own
- *   `foreman[bot]` pull requests. It is deliberately not gated by
- *   `author_association`: summarizing outside contributors' PRs is the point,
- *   and the injected task is scoped to posting a single summary comment.
+ * - Automatic PR summaries are disabled until they have a separate,
+ *   capability-limited agent; untrusted content must not start factory sessions.
  * - `onCheckSuite` is the red-CI fix loop, scoped to the factory's own work:
  *   it dispatches only when a suite completes with a failure conclusion on a
  *   pull request whose head branch carries the factory prefix, so a person's
@@ -192,13 +182,23 @@ const PR_SUMMARY_TASK = [
  *   the request as a comment with a mention-based reply instruction. Passing
  *   the `botName` resolver is what makes both the instruction and the reply's
  *   mention-stripping correct, and `onComment`'s gate is what keeps a reply
- *   an authorization signal: only mentions from owners, members, and
- *   collaborators ever reach the waiting session.
+ *   an authorization signal: only verified writers on the configured
+ *   repository ever reach the waiting session.
  */
 export default githubChannel({
   botName: resolveBotName,
   credentials: githubCredentials,
-  onCheckSuite: (ctx, suite) => {
+  // The built-in handler checks out with channel credentials in the station.
+  // factoryInit already imports objects without exposing those credentials.
+  events: {
+    "turn.started": () => {
+      /* Credentialed checkout is intentionally disabled. */
+    },
+  },
+  onCheckSuite: async (ctx, suite) => {
+    if (!(await isFactoryRepository(ctx))) {
+      return null;
+    }
     const raw = suite.raw as {
       head_branch?: unknown;
       check_suite?: { head_branch?: unknown };
@@ -214,12 +214,31 @@ export default githubChannel({
     ) {
       return null;
     }
+    const pull = await ctx.github
+      .request<{ head: { repo: { id: number } | null; ref: string } }>({
+        method: "GET",
+        path: `/repos/${FACTORY_REPO}/pulls/${pullNumber}`,
+      })
+      .catch(() => null);
+    if (
+      !pull?.ok ||
+      pull.body.head.repo?.id !== ctx.repository.id ||
+      !pull.body.head.ref.startsWith(FACTORY_BRANCH_PREFIX)
+    ) {
+      return null;
+    }
     return {
       auth: stampAutonomous(defaultGitHubAuth(ctx), pullNumber),
       context: [CI_FIX_TASK],
     };
   },
   onComment: async (ctx, comment) => {
+    if (
+      !(await isFactoryRepository(ctx)) ||
+      comment.author?.id !== ctx.sender.id
+    ) {
+      return null;
+    }
     // A resolution failure means the mention can't be matched; acknowledge
     // without dispatching and let the next event retry.
     const botName = await resolveBotName().catch(() => null);
@@ -228,11 +247,14 @@ export default githubChannel({
     }
     return !isIgnoredComment(comment, botName) &&
       mentionPattern(botName).test(comment.body) &&
-      isTrustedCommenter(comment)
+      (await hasRepositoryRole(ctx, new Set(["admin", "maintain", "write"])))
       ? { auth: stampTrusted(defaultGitHubAuth(ctx)) }
       : null;
   },
   onIssue: async (ctx, issue) => {
+    if (!(await isFactoryRepository(ctx))) {
+      return null;
+    }
     const { labels } = issue.raw as {
       labels?: ReadonlyArray<{ name?: unknown }>;
     };
@@ -243,7 +265,7 @@ export default githubChannel({
       issue.action !== "labeled" ||
       !hasFactoryLabel ||
       ctx.sender.type === "Bot" ||
-      !(await isTrustedLabeler(ctx))
+      !(await hasRepositoryRole(ctx, TRUSTED_LABELER_ROLES))
     ) {
       return null;
     }
@@ -252,8 +274,7 @@ export default githubChannel({
       context: [FACTORY_INTAKE_TASK],
     };
   },
-  onPullRequest: (ctx, pullRequest) =>
-    pullRequest.action === "opened" && ctx.sender.type !== "Bot"
-      ? { auth: defaultGitHubAuth(ctx), context: [PR_SUMMARY_TASK] }
-      : null,
+  // Public PR content must not start a session with the factory's app tools.
+  // Automatic summaries require a separate, capability-limited agent first.
+  onPullRequest: () => null,
 });

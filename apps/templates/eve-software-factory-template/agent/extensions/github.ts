@@ -1,5 +1,5 @@
 import githubExtension from "@github-tools/eve-extension";
-import { factoryRepo } from "../lib/constants.js";
+import { FACTORY_REPO, factoryRepo } from "../lib/constants.js";
 import {
   closeIssuePolicy,
   commentPolicy,
@@ -36,6 +36,7 @@ import { GITHUB_CONNECTOR } from "../lib/github/credentials.js";
 export default githubExtension({
   connector: GITHUB_CONNECTOR,
   context: factoryRepo,
+  guardrails: { repositories: [FACTORY_REPO] },
   include: [
     "getRepository",
     "getRepositoryTree",

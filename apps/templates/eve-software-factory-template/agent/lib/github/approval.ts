@@ -122,8 +122,8 @@ export function shipPolicy(ctx: ApprovalContext): ApprovalStatus {
 }
 
 /**
- * Closing and reopening issues: routine, reversible triage, so it runs for
- * every caller that can reach it, unattended runs included.
+ * Closing and reopening issues: routine, reversible triage for trusted and
+ * unattended callers. Other authenticated callers still need approval.
  *
  * @remarks
  * Closing a duplicate or stale issue is everyday triage, and a reopen undoes
@@ -135,8 +135,10 @@ export function shipPolicy(ctx: ApprovalContext): ApprovalStatus {
  * this is deliberately not scoped to one issue, because deduplication closes
  * the duplicates, not the intake issue.
  */
-export function closeIssuePolicy(): ApprovalStatus {
-  return "not-applicable";
+export function closeIssuePolicy(ctx: ApprovalContext): ApprovalStatus {
+  return isAutonomous(ctx.session.auth.current)
+    ? "not-applicable"
+    : writePolicy(ctx);
 }
 
 /**
@@ -168,8 +170,15 @@ export function createPullRequestPolicy(ctx: ApprovalContext): ApprovalStatus {
  */
 export function updateIssuePolicy(ctx: ApprovalContext): ApprovalStatus {
   const input = ctx.toolInput as { state?: unknown } | undefined;
-  if (input?.state !== undefined) {
-    return closeIssuePolicy();
+  if (
+    input?.state !== undefined &&
+    Object.entries(input).every(
+      ([key, value]) =>
+        value === undefined ||
+        ["owner", "repo", "issueNumber", "state", "stateReason"].includes(key)
+    )
+  ) {
+    return closeIssuePolicy(ctx);
   }
   return writePolicy(ctx);
 }

@@ -16,7 +16,7 @@
     "eval": "eve eval",
     "fix": "ultracite fix",
     "start": "eve start",
-    "test": "node --test --experimental-test-module-mocks agent/lib/blob.test.ts",
+    "test": "node --import tsx --test --experimental-test-module-mocks agent/lib/*.test.ts",
     "test:smoke": "pnpm test",
     "typecheck": "tsc",
     "validate": "pnpm run check && pnpm run typecheck && eve info"
@@ -25,6 +25,7 @@
     "@github-tools/eve-extension": "^0.13.0",
     "@vercel/blob": "^2.8.0",
     "@vercel/connect": "2.9.2",
+    "@vercel/sandbox": "3.9.0",
     "ai": "^7.0.120",
     "eve": "1.0.0-rc.17",
     "zod": "4.6.7"
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
     "@types/node": "~24.19.0",
+    "tsx": "4.21.0",
     "typescript": "7.0.2",
     "ultracite": "^7.12.1"
   },

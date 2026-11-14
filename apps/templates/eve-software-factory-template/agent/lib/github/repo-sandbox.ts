@@ -3,20 +3,9 @@ import {
   VercelSandbox,
   type VercelSandboxEnvironmentOptions,
 } from "eve/sandbox/vercel";
-import { FACTORY_REPO } from "../constants.js";
-import {
-  appAccessMessage,
-  describeCloneFailure,
-  safeErrorMessage,
-  sanitizeCommandOutput,
-} from "./bootstrap-diagnostics.js";
+import { sanitizeCommandOutput } from "./bootstrap-diagnostics.js";
 import { FALLBACK_BOT_NAME, resolveBotName } from "./bot-name.js";
-import { githubCredentials } from "./credentials.js";
-import {
-  brokerPolicy,
-  mintInstallationToken,
-  REMOTE_URL,
-} from "./git-remote.js";
+import { fetchRepository } from "./git-transfer.js";
 
 // Snapshot settings shared by every factory sandbox environment. One kept
 // snapshot keeps storage flat across template rebuilds; the 14-day expiration
@@ -61,20 +50,6 @@ async function runOrThrow(
   }
 }
 
-// Mints the brokered installation token, translating a refusal (typically
-// "App authorization required" from Connect) into the actionable message.
-// The original error rides along as the cause; the token itself never
-// appears in either.
-async function mintTokenOrExplain(
-  mint: () => Promise<string>
-): Promise<string> {
-  try {
-    return await mint();
-  } catch (error) {
-    throw new Error(appAccessMessage(FACTORY_REPO), { cause: error });
-  }
-}
-
 /**
  * Characters allowed in a bot name interpolated into a shell-quoted git
  * config command.
@@ -106,15 +81,8 @@ async function gitIdentity(): Promise<{ email: string; name: string }> {
  * clone the factory repository.
  *
  * @remarks
- * - eve's build-time snapshot `prepare()` sandbox has no `setNetworkPolicy`
- *   (only a session-scoped sandbox from `environment.open()` does), so the
- *   credentialed clone that used to run once per template, shared by every
- *   session, now runs once per session instead: a session pays a full clone
- *   rather than the shallow fetch a pre-cloned snapshot used to leave it. The
- *   clone still authenticates through the sandbox firewall (the installation
- *   token is injected as a header transform and never enters the sandbox),
- *   and `FACTORY_SETUP_COMMAND` (e.g. `pnpm install`) still runs inside the
- *   fresh checkout when set.
+ * - Authenticated Git runs in a disposable transfer sandbox. Stations receive
+ *   object bundles only, so setup commands never share a credential window.
  * - The template snapshot is owned by the builder uid, not the session user;
  *   without the `safe.directory` entries every git command dies on "dubious
  *   ownership".
@@ -130,24 +98,9 @@ export async function factoryInit(
     sandbox,
     `git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/repo && git config --global user.name "${identity.name}" && git config --global user.email "${identity.email}"`
   );
-  const token = await mintTokenOrExplain(() =>
-    mintInstallationToken(githubCredentials)
-  );
-  await sandbox.setNetworkPolicy(brokerPolicy(token));
-  try {
-    try {
-      await runOrThrow(sandbox, `git clone --depth 50 ${REMOTE_URL} repo`);
-    } catch (error) {
-      throw new Error(
-        describeCloneFailure(FACTORY_REPO, safeErrorMessage(error)),
-        { cause: error }
-      );
-    }
-    const setup = process.env.FACTORY_SETUP_COMMAND;
-    if (setup) {
-      await runOrThrow(sandbox, `cd repo && ${setup}`);
-    }
-  } finally {
-    await sandbox.setNetworkPolicy("allow-all");
+  await fetchRepository(sandbox);
+  const setup = process.env.FACTORY_SETUP_COMMAND;
+  if (setup) {
+    await runOrThrow(sandbox, `cd repo && ${setup}`);
   }
 }

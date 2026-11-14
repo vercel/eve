@@ -1,5 +1,6 @@
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
+import { fetchRepository } from "./lib/github/git-transfer.js";
 import { FACTORY_SANDBOX_CREATE_OPTIONS } from "./lib/github/repo-sandbox.js";
 
 /**
@@ -10,12 +11,9 @@ import { FACTORY_SANDBOX_CREATE_OPTIONS } from "./lib/github/repo-sandbox.js";
  * same environment runs everywhere. Running locally requires the project to be linked and
  * authenticated to Vercel.
  *
- * The post-open init marks `/workspace` as a safe git directory before the GitHub channel's
- * built-in per-turn checkout runs there. The sandbox filesystem is owned by the builder uid,
- * not the session user, so without this git aborts every command with "detected dubious
- * ownership in repository at '/workspace'", the channel swallows the failed checkout, and the
- * turn runs with no working tree. The station sandboxes handle the same hazard for
- * `/workspace/repo` in `agent/lib/github/repo-sandbox.ts`.
+ * The channel's built-in credentialed checkout is disabled. Import the default
+ * branch through the same isolated object transfer the stations use, so root
+ * shell commands cannot inherit GitHub write credentials either.
  *
  * @see {@link https://vercel.com/docs/sandbox | Vercel Sandbox}
  */
@@ -26,7 +24,8 @@ export const environment = VercelSandbox.environment(
 export default defineSandbox(async () => {
   const sandbox = await environment.open();
   const result = await sandbox.run({
-    command: "git config --global --add safe.directory /workspace",
+    command:
+      "git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/repo",
   });
   if (result.exitCode !== 0) {
     throw new Error(
@@ -35,5 +34,6 @@ export default defineSandbox(async () => {
       ).trim()}`
     );
   }
+  await fetchRepository(sandbox);
   return sandbox;
 });

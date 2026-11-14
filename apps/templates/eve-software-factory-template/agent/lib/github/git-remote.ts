@@ -60,21 +60,20 @@ export function validateBranch(branch: string): string | null {
  *
  * @remarks
  * The token never enters the sandbox process; the firewall injects the header
- * on the way out. `"*": []` keeps general egress open so package installs and
- * test runs keep working while the policy is active.
+ * on the way out. This policy is used only in a fresh transfer sandbox,
+ * never in a station that runs repository code.
  */
-export function brokerPolicy(installationToken: string): SandboxNetworkPolicy {
+export function brokerPolicy(installationToken: string) {
   const authorization = `Basic ${Buffer.from(
     `x-access-token:${installationToken}`
   ).toString("base64")}`;
   return {
     allow: {
-      "*": [],
       "github.com": [
         { transform: [{ headers: { Authorization: authorization } }] },
       ],
     },
-  };
+  } satisfies SandboxNetworkPolicy;
 }
 
 /**

@@ -9,8 +9,8 @@ import { MODELS } from "../../lib/models.js";
  * verifies the work with the repository's own checks, commits on a feature
  * branch, and pushes it with the `push_branch` tool. The push is the
  * station's only side effect. Its push tool accepts feature branches only
- * and disables Git hooks, but the repository must enforce default-branch
- * protection because sandbox processes can share the brokered credential.
+ * and transfers only Git objects into a fresh bare repository in a disposable
+ * sandbox. Repository code never shares a brokered credential window.
  * The orchestrator opens the pull request after review.
  *
  * `tool: false` hides the station from the orchestrator; it calls it through
