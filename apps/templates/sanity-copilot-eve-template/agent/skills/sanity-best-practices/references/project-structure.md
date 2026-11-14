@@ -22,7 +22,6 @@ your-project/
 ```
 
 **Use cases:**
-
 - Content modeling with MCP/AI tools (no frontend needed)
 - Headless CMS with external consumers
 - Prototyping and content design
@@ -56,7 +55,6 @@ your-project/
 No workspace tooling is required — each app manages its own dependencies. For larger repos, the same shape works under `apps/` with npm or pnpm workspaces.
 
 **Setup:**
-
 1. Add the web app URL to CORS origins: `npx sanity cors add http://localhost:3000 --credentials` (or via [Sanity Manage](https://www.sanity.io/manage))
 2. Configure `typegen` in `studio/sanity.cli.ts` to read queries from `../web` and output types to `../web/sanity.types.ts` (see `typegen.md`)
 3. Optionally add a root `package.json` with scripts that run both dev servers
@@ -91,8 +89,8 @@ schemaTypes/
 
 ## Key Files
 
-| File               | Purpose                                                 |
-| ------------------ | ------------------------------------------------------- |
-| `sanity.config.ts` | Studio configuration (plugins, schema, structure)       |
-| `sanity.cli.ts`    | CLI configuration (project ID, dataset, TypeGen config) |
-| `structure.ts`     | Custom desk structure                                   |
+| File | Purpose |
+|------|---------|
+| `sanity.config.ts` | Studio configuration (plugins, schema, structure) |
+| `sanity.cli.ts` | CLI configuration (project ID, dataset, TypeGen config) |
+| `structure.ts` | Custom desk structure |

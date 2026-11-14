@@ -15,31 +15,23 @@ npm install @portabletext/markdown
 ## Basic Usage
 
 ```ts
-import { markdownToPortableText } from "@portabletext/markdown";
+import {markdownToPortableText} from '@portabletext/markdown'
 
-const blocks = markdownToPortableText("# Hello **world**");
+const blocks = markdownToPortableText('# Hello **world**')
 ```
 
 Output:
-
 ```json
-[
-  {
-    "_type": "block",
-    "_key": "f4s8k2",
-    "style": "h1",
-    "children": [
-      { "_type": "span", "_key": "a9c3x1", "text": "Hello ", "marks": [] },
-      {
-        "_type": "span",
-        "_key": "b7d2m5",
-        "text": "world",
-        "marks": ["strong"]
-      }
-    ],
-    "markDefs": []
-  }
-]
+[{
+  "_type": "block",
+  "_key": "f4s8k2",
+  "style": "h1",
+  "children": [
+    {"_type": "span", "_key": "a9c3x1", "text": "Hello ", "marks": []},
+    {"_type": "span", "_key": "b7d2m5", "text": "world", "marks": ["strong"]}
+  ],
+  "markDefs": []
+}]
 ```
 
 ## Supported Markdown Features
@@ -63,26 +55,24 @@ Out of the box:
 Control how Markdown elements map to your PT schema. Define a schema with `@portabletext/schema`:
 
 ```ts
-import { markdownToPortableText } from "@portabletext/markdown";
-import { defineSchema, compileSchema } from "@portabletext/schema";
+import {markdownToPortableText} from '@portabletext/markdown'
+import {defineSchema, compileSchema} from '@portabletext/schema'
 
-const schema = compileSchema(
-  defineSchema({
-    styles: [{ name: "normal" }, { name: "heading 1" }, { name: "heading 2" }],
-    decorators: [{ name: "strong" }, { name: "em" }],
-    annotations: [{ name: "link" }],
-    lists: [{ name: "bullet" }, { name: "number" }],
-  })
-);
+const schema = compileSchema(defineSchema({
+  styles: [{name: 'normal'}, {name: 'heading 1'}, {name: 'heading 2'}],
+  decorators: [{name: 'strong'}, {name: 'em'}],
+  annotations: [{name: 'link'}],
+  lists: [{name: 'bullet'}, {name: 'number'}],
+}))
 
 const blocks = markdownToPortableText(markdown, {
   schema,
   // Map Markdown heading levels to custom style names
   block: {
-    h1: ({ context }) => "heading 1",
-    h2: ({ context }) => "heading 2",
+    h1: ({context}) => 'heading 1',
+    h2: ({context}) => 'heading 2',
   },
-});
+})
 ```
 
 ### Using a Sanity Studio Schema
@@ -90,13 +80,13 @@ const blocks = markdownToPortableText(markdown, {
 Use `@portabletext/sanity-bridge` to convert your Sanity block array schema:
 
 ```ts
-import { markdownToPortableText } from "@portabletext/markdown";
-import { sanitySchemaToPortableTextSchema } from "@portabletext/sanity-bridge";
+import {markdownToPortableText} from '@portabletext/markdown'
+import {sanitySchemaToPortableTextSchema} from '@portabletext/sanity-bridge'
 
 // Convert a Sanity block array schema to a Portable Text schema
-const schema = sanitySchemaToPortableTextSchema(sanityBlockArraySchema);
+const schema = sanitySchemaToPortableTextSchema(sanityBlockArraySchema)
 
-const blocks = markdownToPortableText(markdown, { schema });
+const blocks = markdownToPortableText(markdown, {schema})
 ```
 
 ## Custom Matchers
@@ -107,31 +97,29 @@ Matchers are top-level options (not nested under a `matchers` key). Each receive
 const blocks = markdownToPortableText(markdown, {
   // Block matchers — map Markdown block elements to PT styles
   block: {
-    h1: ({ context }) => {
-      const style = context.schema.styles.find((s) => s.name === "heading 1");
-      return style?.name; // Return undefined to skip
+    h1: ({context}) => {
+      const style = context.schema.styles.find((s) => s.name === 'heading 1')
+      return style?.name // Return undefined to skip
     },
   },
   // Mark matchers — map Markdown inline elements to PT marks
   marks: {
-    strong: ({ context }) => "strong",
+    strong: ({context}) => 'strong',
   },
   // Type matchers — map Markdown elements to custom PT block types
   types: {
-    table: ({ context, value }) => {
-      const tableType = context.schema.blockObjects.find(
-        (obj) => obj.name === "table"
-      );
-      if (!tableType) return undefined;
+    table: ({context, value}) => {
+      const tableType = context.schema.blockObjects.find((obj) => obj.name === 'table')
+      if (!tableType) return undefined
       return {
-        _type: "table",
+        _type: 'table',
         _key: context.keyGenerator(),
         rows: value.rows,
         headerRows: value.headerRows,
-      };
+      }
     },
   },
-});
+})
 ```
 
 ## Handling Inline HTML
@@ -141,9 +129,9 @@ Configure how inline HTML in Markdown is processed:
 ```ts
 const blocks = markdownToPortableText(markdown, {
   html: {
-    inline: "text", // 'text' preserves as text, 'skip' removes
+    inline: 'text', // 'text' preserves as text, 'skip' removes
   },
-});
+})
 ```
 
 ## Custom Key Generation
@@ -151,11 +139,11 @@ const blocks = markdownToPortableText(markdown, {
 Provide your own key generator:
 
 ```ts
-import { randomKey } from "@sanity/util/content";
+import {randomKey} from '@sanity/util/content'
 
 const blocks = markdownToPortableText(markdown, {
   keyGenerator: () => randomKey(12),
-});
+})
 ```
 
 ## Bidirectional: Also Converts PT → Markdown
@@ -163,9 +151,9 @@ const blocks = markdownToPortableText(markdown, {
 The same package provides `portableTextToMarkdown()`:
 
 ```ts
-import { portableTextToMarkdown } from "@portabletext/markdown";
+import {portableTextToMarkdown} from '@portabletext/markdown'
 
-const markdown = portableTextToMarkdown(blocks);
+const markdown = portableTextToMarkdown(blocks)
 ```
 
 See the `portable-text-serialization` skill's `rules/markdown.md` for details on PT → Markdown.
@@ -173,40 +161,35 @@ See the `portable-text-serialization` skill's `rules/markdown.md` for details on
 ## Migration Example
 
 ```ts
-import { markdownToPortableText } from "@portabletext/markdown";
-import { createClient } from "@sanity/client";
-import fs from "fs";
-import path from "path";
-import matter from "gray-matter";
+import {markdownToPortableText} from '@portabletext/markdown'
+import {createClient} from '@sanity/client'
+import fs from 'fs'
+import path from 'path'
+import matter from 'gray-matter'
 
-const client = createClient({
-  projectId: "xxx",
-  dataset: "production",
-  token: "...",
-});
+const client = createClient({projectId: 'xxx', dataset: 'production', token: '...'})
 
 // Import a directory of Markdown files
-const mdFiles = fs.readdirSync("./content").filter((f) => f.endsWith(".md"));
+const mdFiles = fs.readdirSync('./content').filter(f => f.endsWith('.md'))
 
 for (const file of mdFiles) {
-  const raw = fs.readFileSync(path.join("./content", file), "utf-8");
-  const { data: frontmatter, content } = matter(raw);
+  const raw = fs.readFileSync(path.join('./content', file), 'utf-8')
+  const {data: frontmatter, content} = matter(raw)
 
-  const body = markdownToPortableText(content);
+  const body = markdownToPortableText(content)
 
   await client.createOrReplace({
-    _id: `post-${path.basename(file, ".md")}`,
-    _type: "post",
+    _id: `post-${path.basename(file, '.md')}`,
+    _type: 'post',
     title: frontmatter.title,
     body,
-  });
+  })
 }
 ```
 
 ## When to Use htmlToBlocks Instead
 
 Use `@portabletext/block-tools` (`htmlToBlocks`) when:
-
 - Your source is HTML, not Markdown
 - You need custom deserializer rules for non-standard HTML elements
 - You're migrating from a CMS that exports HTML (WordPress, Contentful, etc.)

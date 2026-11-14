@@ -57,7 +57,6 @@ export default defineConfig({
 Inside `.astro` files and components you can keep using `import.meta.env.PUBLIC_SANITY_*` directly; the `loadEnv` shim above is config-only.
 
 ### Client Type Safety
-
 Enable types in `tsconfig.json`.
 
 ```json
@@ -71,7 +70,6 @@ Enable types in `tsconfig.json`.
 ## 2. Data Fetching
 
 ### Basic Fetching
-
 Use `sanityClient` from `sanity:client` in the frontmatter of your `.astro` files.
 
 ```astro
@@ -88,7 +86,6 @@ const posts = await sanityClient.fetch(POSTS_QUERY);
 ```
 
 ### Helper Functions
-
 It's best practice to abstract queries into a utility file (e.g., `src/utils/sanity.ts`).
 
 ```typescript
@@ -133,7 +130,6 @@ const post = await sanityClient.fetch(POST_QUERY, { slug });
 ```
 
 ## 3. Portable Text
-
 Use `astro-portabletext` for rendering rich text.
 
 ```astro
@@ -147,7 +143,6 @@ const { body } = Astro.props;
 ```
 
 ## 4. Image Handling
-
 Use `@sanity/image-url` to generate optimized image URLs.
 
 ```typescript
@@ -162,13 +157,11 @@ export function urlFor(source) {
 ```
 
 ## 5. Visual Editing (Live Preview)
-
 Astro handles visual editing slightly differently depending on if you are using Hybrid or Static mode.
 
 ### Setup
-
 Ensure `stega` is enabled in your client configuration if you want clickable overlays.
 
 For real-time updates in the presentation tool, you typically need a React component wrapper (since Astro components don't re-render on the client) or use the View Transitions API with a loader.
 
-_Note: The `@sanity/astro` integration is evolving. Check the latest docs for "Visual Editing" support._
+*Note: The `@sanity/astro` integration is evolving. Check the latest docs for "Visual Editing" support.*

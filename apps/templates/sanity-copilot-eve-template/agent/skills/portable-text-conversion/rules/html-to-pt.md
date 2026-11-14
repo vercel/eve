@@ -21,9 +21,9 @@ npm install @portabletext/block-tools jsdom @sanity/schema
 In Node.js, you must provide a `parseHtml` function that returns a DOM `Document`. Use JSDOM for this:
 
 ```ts
-import { htmlToBlocks } from "@portabletext/block-tools";
-import { JSDOM } from "jsdom";
-import Schema from "@sanity/schema";
+import {htmlToBlocks} from '@portabletext/block-tools'
+import {JSDOM} from 'jsdom'
+import Schema from '@sanity/schema'
 
 // JSDOM is passed to htmlToBlocks via the parseHtml option:
 // htmlToBlocks(html, blockContentType, {
@@ -37,68 +37,68 @@ import Schema from "@sanity/schema";
 
 ```ts
 const defaultSchema = Schema.compile({
-  name: "mySchema",
+  name: 'mySchema',
   types: [
     {
-      name: "post",
-      type: "document",
+      name: 'post',
+      type: 'document',
       fields: [
         {
-          name: "body",
-          type: "array",
+          name: 'body',
+          type: 'array',
           of: [
             {
-              type: "block",
+              type: 'block',
               marks: {
                 decorators: [
-                  { title: "Strong", value: "strong" },
-                  { title: "Emphasis", value: "em" },
-                  { title: "Code", value: "code" },
+                  {title: 'Strong', value: 'strong'},
+                  {title: 'Emphasis', value: 'em'},
+                  {title: 'Code', value: 'code'},
                 ],
                 annotations: [
                   {
-                    name: "link",
-                    type: "object",
-                    fields: [{ name: "href", type: "url" }],
+                    name: 'link',
+                    type: 'object',
+                    fields: [{name: 'href', type: 'url'}],
                   },
                 ],
               },
               styles: [
-                { title: "Normal", value: "normal" },
-                { title: "H2", value: "h2" },
-                { title: "H3", value: "h3" },
-                { title: "Quote", value: "blockquote" },
+                {title: 'Normal', value: 'normal'},
+                {title: 'H2', value: 'h2'},
+                {title: 'H3', value: 'h3'},
+                {title: 'Quote', value: 'blockquote'},
               ],
               lists: [
-                { title: "Bullet", value: "bullet" },
-                { title: "Number", value: "number" },
+                {title: 'Bullet', value: 'bullet'},
+                {title: 'Number', value: 'number'},
               ],
             },
             {
-              name: "image",
-              type: "image",
-              fields: [{ name: "alt", type: "string" }],
+              name: 'image',
+              type: 'image',
+              fields: [{name: 'alt', type: 'string'}],
             },
           ],
         },
       ],
     },
   ],
-});
+})
 
 const blockContentType = defaultSchema
-  .get("post")
-  .fields.find((f) => f.name === "body").type;
+  .get('post')
+  .fields.find((f) => f.name === 'body').type
 ```
 
 ## Basic Conversion
 
 ```ts
-const html = "<p>Hello <strong>world</strong></p><h2>Heading</h2>";
+const html = '<p>Hello <strong>world</strong></p><h2>Heading</h2>'
 
 const blocks = htmlToBlocks(html, blockContentType, {
   parseHtml: (html) => new JSDOM(html).window.document,
-});
+})
 ```
 
 ## Custom Deserializers
@@ -112,51 +112,51 @@ const blocks = htmlToBlocks(html, blockContentType, {
     // Convert <img> to image blocks
     {
       deserialize(el, next, block) {
-        if (el.tagName?.toLowerCase() !== "img") return undefined;
+        if (el.tagName?.toLowerCase() !== 'img') return undefined
 
         return block({
-          _type: "image",
+          _type: 'image',
           asset: {
-            _type: "reference",
-            _ref: "", // Upload image separately, set ref after
+            _type: 'reference',
+            _ref: '', // Upload image separately, set ref after
           },
-          alt: el.getAttribute("alt") || "",
-          _sanityAsset: `image@${el.getAttribute("src")}`, // for migration tooling
-        });
+          alt: el.getAttribute('alt') || '',
+          _sanityAsset: `image@${el.getAttribute('src')}`, // for migration tooling
+        })
       },
     },
     // Convert <a> with custom attributes
     {
       deserialize(el, next, block) {
-        if (el.tagName?.toLowerCase() !== "a") return undefined;
+        if (el.tagName?.toLowerCase() !== 'a') return undefined
 
-        const href = el.getAttribute("href") || "";
-        const target = el.getAttribute("target") || "";
+        const href = el.getAttribute('href') || ''
+        const target = el.getAttribute('target') || ''
 
         return {
-          _type: "__annotation",
+          _type: '__annotation',
           markDef: {
-            _type: "link",
+            _type: 'link',
             href,
-            ...(target ? { target } : {}),
+            ...(target ? {target} : {}),
           },
           children: next(el.childNodes),
-        };
+        }
       },
     },
     // Convert <iframe> to embed blocks
     {
       deserialize(el, next, block) {
-        if (el.tagName?.toLowerCase() !== "iframe") return undefined;
+        if (el.tagName?.toLowerCase() !== 'iframe') return undefined
 
         return block({
-          _type: "embed",
-          url: el.getAttribute("src") || "",
-        });
+          _type: 'embed',
+          url: el.getAttribute('src') || '',
+        })
       },
     },
   ],
-});
+})
 ```
 
 ## Pre-Process HTML Before Conversion
@@ -165,33 +165,23 @@ Strip layout elements and extract metadata:
 
 ```ts
 function preprocessHtml(rawHtml: string) {
-  const dom = new JSDOM(rawHtml);
-  const doc = dom.window.document;
+  const dom = new JSDOM(rawHtml)
+  const doc = dom.window.document
 
   // Remove layout elements
-  const removeSelectors = [
-    "header",
-    "footer",
-    "nav",
-    ".sidebar",
-    ".menu",
-    "script",
-    "style",
-  ];
+  const removeSelectors = ['header', 'footer', 'nav', '.sidebar', '.menu', 'script', 'style']
   removeSelectors.forEach((sel) => {
-    doc.querySelectorAll(sel).forEach((el) => el.remove());
-  });
+    doc.querySelectorAll(sel).forEach((el) => el.remove())
+  })
 
   // Extract metadata
-  const title = doc.querySelector("h1")?.textContent || doc.title || "";
-  const description =
-    doc.querySelector('meta[name="description"]')?.getAttribute("content") ||
-    "";
+  const title = doc.querySelector('h1')?.textContent || doc.title || ''
+  const description = doc.querySelector('meta[name="description"]')?.getAttribute('content') || ''
 
   // Get cleaned body
-  const body = doc.querySelector("article")?.innerHTML || doc.body.innerHTML;
+  const body = doc.querySelector('article')?.innerHTML || doc.body.innerHTML
 
-  return { title, description, body };
+  return {title, description, body}
 }
 ```
 
@@ -200,47 +190,47 @@ function preprocessHtml(rawHtml: string) {
 Don't just link external images — upload them to Sanity:
 
 ```ts
-import type { SanityClient } from "@sanity/client";
+import type {SanityClient} from '@sanity/client'
 
 async function uploadImage(client: SanityClient, url: string) {
-  const response = await fetch(url);
-  const buffer = await response.arrayBuffer();
-  const asset = await client.assets.upload("image", Buffer.from(buffer), {
-    filename: url.split("/").pop(),
-  });
+  const response = await fetch(url)
+  const buffer = await response.arrayBuffer()
+  const asset = await client.assets.upload('image', Buffer.from(buffer), {
+    filename: url.split('/').pop(),
+  })
   return {
-    _type: "image",
-    asset: { _type: "reference", _ref: asset._id },
-  };
+    _type: 'image',
+    asset: {_type: 'reference', _ref: asset._id},
+  }
 }
 ```
 
 ## Full Migration Example
 
 ```ts
-import { defineMigration, createOrReplace } from "sanity/migrate";
+import {defineMigration, createOrReplace} from 'sanity/migrate'
 
 export default defineMigration({
-  title: "Import WordPress posts",
+  title: 'Import WordPress posts',
   async *migrate(documents, context) {
-    const posts = await fetchWordPressPosts();
+    const posts = await fetchWordPressPosts()
 
     for (const post of posts) {
-      const { title, description, body } = preprocessHtml(post.content);
+      const {title, description, body} = preprocessHtml(post.content)
       const blocks = htmlToBlocks(body, blockContentType, {
         parseHtml: (html) => new JSDOM(html).window.document,
         rules: [/* custom rules */],
-      });
+      })
 
       yield createOrReplace({
         _id: `post-${post.slug}`,
-        _type: "post",
+        _type: 'post',
         title: title || post.title,
         body: blocks,
-      });
+      })
     }
   },
-});
+})
 ```
 
 Run with: `sanity migration run import-wordpress-posts --no-dry-run`

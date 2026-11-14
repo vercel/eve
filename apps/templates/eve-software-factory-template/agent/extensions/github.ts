@@ -34,6 +34,8 @@ import { GITHUB_CONNECTOR } from "../lib/github/credentials.js";
  *   approval-by-default.
  */
 export default githubExtension({
+  // Search tools have no owner/repo input, so guardrails alone cannot scope them.
+  connect: { repositories: [FACTORY_REPO] },
   connector: GITHUB_CONNECTOR,
   context: factoryRepo,
   guardrails: { repositories: [FACTORY_REPO] },

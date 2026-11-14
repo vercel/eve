@@ -5,7 +5,6 @@ The most important principle in structured content: **separate what content IS f
 ## The Problem
 
 When content is tied to presentation:
-
 - Redesigns require content migration
 - Content can't be reused across channels (web, mobile, voice)
 - Editors make design decisions instead of content decisions
@@ -48,22 +47,14 @@ Ask: "If we completely redesigned the site, would these field names still make s
 
 ```typescript
 // ❌ Avoid presentation-focused names
-defineField({ name: "bigHeroText", type: "string" });
-defineField({ name: "fontSize", type: "number" });
-defineField({ name: "backgroundColor", type: "color" });
+defineField({ name: 'bigHeroText', type: 'string' })
+defineField({ name: 'fontSize', type: 'number' })
+defineField({ name: 'backgroundColor', type: 'color' })
 
 // ✅ Use meaning-focused names
-defineField({ name: "headline", type: "string" });
-defineField({
-  name: "emphasis",
-  type: "string",
-  options: { list: ["standard", "prominent"] },
-});
-defineField({
-  name: "tone",
-  type: "string",
-  options: { list: ["neutral", "warning", "success"] },
-});
+defineField({ name: 'headline', type: 'string' })
+defineField({ name: 'emphasis', type: 'string', options: { list: ['standard', 'prominent'] } })
+defineField({ name: 'tone', type: 'string', options: { list: ['neutral', 'warning', 'success'] } })
 ```
 
 The frontend translates `tone: 'warning'` to visual styles. Content stays semantic.
