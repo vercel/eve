@@ -54,6 +54,9 @@ export default await withEve({
 `;
 }
 
+/** The settings-free `vercel.json` the web channel scaffold writes (`ensureWebVercelJson`). */
+const SCAFFOLD_VERCEL_JSON = `${JSON.stringify({ $schema: "https://openapi.vercel.sh/vercel.json" }, null, 2)}\n`;
+
 export function runScriptCommand(packageManager: PackageManagerKind, script: string): string {
   switch (packageManager) {
     case "npm":
@@ -147,6 +150,10 @@ export interface WebChatHostingInput {
   vercelServices: boolean;
   /** The installer's `vercel.ts`, followed by any it wrote in earlier releases. */
   vercelConfigs: readonly [string, ...string[]];
+  /** The root `vercel.json` framework hosting needs to deploy, if any. */
+  vercelJson?: string;
+  /** Every root `vercel.json` the installer writes, so a hosting switch may replace it. */
+  vercelJsons: readonly string[];
 }
 
 /**
@@ -170,7 +177,12 @@ export async function prepareWebChatHosting(
   if (input.vercelServices) {
     assertNotAuthored(vercelTsPath, vercelTsOwnership);
   }
-  if (input.vercelServices && (await deps.pathExists(vercelJsonPath))) {
+  const vercelJsonOwnership = await readFileOwnership(
+    vercelJsonPath,
+    [SCAFFOLD_VERCEL_JSON, ...input.vercelJsons],
+    deps,
+  );
+  if (input.vercelServices && vercelJsonOwnership === "authored") {
     throw new Error(
       `Could not configure Vercel services because ${vercelJsonPath} already exists. Preserve it and compose eve/vercel manually.`,
     );
@@ -187,6 +199,10 @@ export async function prepareWebChatHosting(
     );
     await deps.writeTextFile(hostConfig.path, hostConfig.source, { force: true });
     if (input.vercelServices) {
+      // A project reads one config source, so vercel.ts replaces the installer's vercel.json.
+      if (vercelJsonOwnership === "installer") {
+        await (deps.removeFile ?? removeFile)(vercelJsonPath);
+      }
       await deps.writeTextFile(vercelTsPath, input.vercelConfigs[0], { force: true });
       await updatePeerServiceScripts(project.environmentRoot, deps, (scripts) => {
         for (const [name, command] of Object.entries(PEER_SERVICE_SCRIPTS)) {
@@ -202,6 +218,15 @@ export async function prepareWebChatHosting(
           if (scripts[name] === PEER_SERVICE_SCRIPTS[name]) delete scripts[name];
         }
       });
+    }
+    // Authored Vercel config owns the build settings; the docs name the ones to add.
+    if (
+      !input.vercelServices &&
+      input.vercelJson !== undefined &&
+      vercelJsonOwnership !== "authored" &&
+      vercelTsOwnership !== "authored"
+    ) {
+      await deps.writeTextFile(vercelJsonPath, input.vercelJson, { force: true });
     }
   };
 }
