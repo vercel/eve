@@ -137,6 +137,7 @@ export const compatibilityRedirects: DocsRedirect[] = [
       ["eve-slack-agent", "eve-slack-agent"],
       ["eve-voice-template", "eve-voice-template"],
       ["eve-discord-agent", "eve-discord-agent"],
+      ["eve-company-brain-template", "eve-company-brain-template"],
       ["eve-coding-agent-template", "eve-coding-agent-template"],
       ["bell-stack", "bell-stack"],
       ["eve-design-template", "eve-design-template"],
@@ -159,15 +160,13 @@ export const compatibilityRedirects: DocsRedirect[] = [
         permanent: true as const,
       })),
     ),
-    // The data agent replaced the company brain template and has no gallery listing yet.
-    ...["eve-company-brain-template", "eve-data-agent-template"].flatMap((source) =>
-      extensions.map((extension) => ({
-        source: `${prefix}/templates/${source}${extension}`,
-        destination: dataAgentTemplateUrl,
-        // Temporary, so browsers don't cache it past the gallery listing going live.
-        permanent: false as const,
-      })),
-    ),
+    // The data agent has no gallery listing yet, so it goes to its source.
+    ...extensions.map((extension) => ({
+      source: `${prefix}/templates/eve-data-agent-template${extension}`,
+      destination: dataAgentTemplateUrl,
+      // Temporary, so browsers don't cache it past the gallery listing going live.
+      permanent: false as const,
+    })),
     ...extensions.map((extension) => ({
       source: `${prefix}/templates${extension}`,
       destination: templateGalleryUrl,

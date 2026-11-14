@@ -216,6 +216,7 @@ describe("compatibilityRedirects", () => {
     ["eve-slack-agent", "eve-slack-agent"],
     ["eve-voice-template", "eve-voice-template"],
     ["eve-discord-agent", "eve-discord-agent"],
+    ["eve-company-brain-template", "eve-company-brain-template"],
     ["eve-coding-agent-template", "eve-coding-agent-template"],
     ["bell-stack", "bell-stack"],
     ["eve-design-template", "eve-design-template"],
@@ -248,23 +249,20 @@ describe("compatibilityRedirects", () => {
     }
   });
 
-  it.each(["eve-company-brain-template", "eve-data-agent-template"])(
-    "redirects %s to the data agent template's source",
-    async (slug) => {
-      for (const prefix of ["", "/en"]) {
-        for (const extension of ["", ".md", ".mdx"]) {
-          const response = await unstable_getResponseFromNextConfig({
-            url: `https://eve.dev${prefix}/templates/${slug}${extension}`,
-            nextConfig: {
-              redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
-            },
-          });
-          expect(response.status).toBe(307);
-          expect(response.headers.get("location")).toBe(dataAgentTemplateUrl);
-        }
+  it("redirects the data agent template to its source", async () => {
+    for (const prefix of ["", "/en"]) {
+      for (const extension of ["", ".md", ".mdx"]) {
+        const response = await unstable_getResponseFromNextConfig({
+          url: `https://eve.dev${prefix}/templates/eve-data-agent-template${extension}`,
+          nextConfig: {
+            redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
+          },
+        });
+        expect(response.status).toBe(307);
+        expect(response.headers.get("location")).toBe(dataAgentTemplateUrl);
       }
-    },
-  );
+    }
+  });
 
   it("redirects the previous benchmark route", () => {
     expect(compatibilityRedirects).toContainEqual({
