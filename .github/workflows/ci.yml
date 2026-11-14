@@ -253,8 +253,8 @@ jobs:
           key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
   # The Linux integration tier in two halves. eve's vitest files split by
-  # vitest's own --shard; the first half also runs the other packages'
-  # integration tests. The `test-integration (ubuntu-latest)` check below
+  # vitest's own --shard; the second half, which measured lighter, also runs
+  # the other packages' integration tests. The `test-integration (ubuntu-latest)` check below
   # requires both halves.
   test-integration-linux:
     name: test-integration (ubuntu-latest, ${{ matrix.shard }})
@@ -313,10 +313,10 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          if [ "$SHARD" = "1/2" ]; then
+          pnpm exec turbo run test:integration --filter=eve -- --shard="$SHARD"
+          if [ "$SHARD" = "2/2" ]; then
             pnpm exec turbo run test:integration --filter='!eve'
           fi
-          pnpm exec turbo run test:integration --filter=eve -- --shard="$SHARD"
 
       - name: Save test file timings
         if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
