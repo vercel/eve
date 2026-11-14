@@ -1,0 +1,12 @@
+node_modules
+.eve
+.output
+.vercel
+.turbo
+.swc
+.workflow-data
+dist
+.env*
+!.env.example
+.zed
+.DS_Store
