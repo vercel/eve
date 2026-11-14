@@ -334,6 +334,13 @@ export class DevHostSupervisor implements DevHostSwitch {
     this.#wakeActiveWaiters();
   }
 
+  /** Sets `environment` in every running worker; see {@link EveDevRunner.shareEnvironment}. */
+  async shareEnvironment(environment: Readonly<Record<string, string>>): Promise<void> {
+    await Promise.all(
+      [...this.#workers].map(async ({ runner }) => await runner.shareEnvironment(environment)),
+    );
+  }
+
   #start(record: HostRecord): Worker {
     record.workers += 1;
     const runner = new EveDevRunner({

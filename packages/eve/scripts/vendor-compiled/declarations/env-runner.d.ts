@@ -27,6 +27,11 @@ export class NodeWorkerEnvRunner {
   constructor(options: NodeWorkerEnvRunnerOptions);
 
   close(cause?: unknown): Promise<void>;
+  /** Posts `message` to the worker thread. Throws before the thread starts. */
+  sendMessage(message: unknown): void;
+  /** Receives every message the worker thread posts. */
+  onMessage(listener: (message: unknown) => void): void;
+  offMessage(listener: (message: unknown) => void): void;
   fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
   /**
    * Shuts down gracefully, then closes: the worker stops accepting

@@ -38,7 +38,8 @@ const mocks = vi.hoisted(() => {
     prepareSpare: vi.fn(),
     setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
-    swapTo: vi.fn(async (_host: unknown) => undefined),
+    shareEnvironment: vi.fn(async (_environment: Readonly<Record<string, string>>) => undefined),
+    swapTo: vi.fn(async (_host: { readonly dispose: () => Promise<void> }) => undefined),
   };
   const closeRebuildCoordinator = vi.fn(async () => undefined);
   const files = new Map<string, string>();
@@ -1029,9 +1030,7 @@ describe("reusing the previous run's dev host", () => {
     workflowBuildDir: keptWorkspace.workflowBuildDir,
     workspace: keptWorkspace,
   };
-  const firstDispose = () =>
-    (mocks.devServer.swapTo.mock.calls[0] as unknown as [{ dispose: () => Promise<void> }])[0]
-      .dispose;
+  const firstDispose = () => mocks.devServer.swapTo.mock.calls[0]![0].dispose;
   const removedKept = () =>
     mocks.removeDevelopmentHostWorkspace.mock.calls.some(
       ([workspace]) => (workspace as { rootDir?: string }).rootDir === keptWorkspace.rootDir,
@@ -1074,6 +1073,31 @@ describe("reusing the previous run's dev host", () => {
     await server.close();
   });
 
+  it("gives the early worker the build's Docker probe before it serves", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({ kind: "reused", host: kept });
+    const prepare = mocks.prepareDevelopmentApplicationHost.getMockImplementation()!;
+    mocks.prepareDevelopmentApplicationHost.mockImplementationOnce(async (...args) => {
+      // The build publishes its probe with its first response.
+      process.env.EVE_DEVELOPMENT_LINUX_DOCKER_AVAILABLE = "1";
+      return await prepare(...args);
+    });
+    const releaseTraffic = vi.fn(() => {
+      expect(mocks.devServer.shareEnvironment).toHaveBeenCalledWith({
+        EVE_DEVELOPMENT_LINUX_DOCKER_AVAILABLE: "1",
+      });
+    });
+    mocks.devServer.holdTraffic.mockImplementationOnce(() => releaseTraffic);
+
+    try {
+      const server = await startDevelopmentServer("/tmp/eve-test");
+      expect(releaseTraffic).toHaveBeenCalledOnce();
+      await server.close();
+    } finally {
+      delete process.env.EVE_DEVELOPMENT_LINUX_DOCKER_AVAILABLE;
+    }
+  });
+
   it("abandons the early worker and swaps in a fresh host when the kept one is stale", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({
@@ -1106,9 +1130,9 @@ describe("reusing the previous run's dev host", () => {
 
   it("removes a stale kept host whose early worker already failed", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
-    mocks.devServer.swapTo.mockImplementationOnce(async (host: unknown) => {
+    mocks.devServer.swapTo.mockImplementationOnce(async (host) => {
       // A candidate that fails readiness releases its host before the swap rejects.
-      await (host as { dispose: () => Promise<void> }).dispose();
+      await host.dispose();
       throw new Error("candidate failed to boot");
     });
     mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({
@@ -1125,8 +1149,8 @@ describe("reusing the previous run's dev host", () => {
 
   it("starts the claimed host normally when its early worker failed", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
-    mocks.devServer.swapTo.mockImplementationOnce(async (host: unknown) => {
-      await (host as { dispose: () => Promise<void> }).dispose();
+    mocks.devServer.swapTo.mockImplementationOnce(async (host) => {
+      await host.dispose();
       throw new Error("candidate failed to boot");
     });
     mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({ kind: "reused", host: kept });

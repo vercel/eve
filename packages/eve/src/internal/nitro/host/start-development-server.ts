@@ -30,6 +30,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import { isLoopbackServerUrl } from "#shared/network-address.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { handleDevRuntimeArtifactsRequest } from "#internal/nitro/routes/dev-runtime-artifacts.js";
+import { LINUX_DOCKER_AVAILABILITY_ENV } from "#execution/sandbox/bindings/docker-cli.js";
 import {
   pruneLocalSandboxTemplatesInBackground,
   stopDevelopmentSandboxResources,
@@ -436,6 +437,7 @@ async function startNitroDevelopmentServer(
       await removeDevelopmentHostWorkspace(workspace);
     };
     const releaseTraffic = devServer.holdTraffic();
+    const earlyDockerAvailability = process.env[LINUX_DOCKER_AVAILABILITY_ENV];
     const earlyWorker =
       peeked === undefined
         ? undefined
@@ -562,6 +564,17 @@ async function startNitroDevelopmentServer(
             entry: payload.entry,
             workerData: payload.workerData,
           });
+        } else {
+          // The early worker started before the build published its Docker
+          // probe. Without it, the worker would probe again on its first
+          // sandbox, blocking its event loop, and could choose a different
+          // provider than the build did.
+          const dockerAvailability = process.env[LINUX_DOCKER_AVAILABILITY_ENV];
+          if (dockerAvailability !== undefined && dockerAvailability !== earlyDockerAvailability) {
+            await devServer.shareEnvironment({
+              [LINUX_DOCKER_AVAILABILITY_ENV]: dockerAvailability,
+            });
+          }
         }
         // Worker traffic waits for the published generation on the host this
         // run serves, so neither the previous generation nor a rejected early

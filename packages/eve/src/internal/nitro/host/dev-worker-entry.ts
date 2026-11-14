@@ -4,5 +4,10 @@
 // this covers `eve eval`, which starts the dev server inside the CLI process,
 // where bin/eve.js installed the hook in code and no `--import` carries it.
 import "../../package-imports-hook.js";
+import { parentPort } from "node:worker_threads";
+
+import { applyDevelopmentWorkerEnvironmentMessage } from "./dev-worker-environment.js";
+
+parentPort?.on("message", applyDevelopmentWorkerEnvironmentMessage);
 
 await import("#compiled/env-runner/node-worker.js");
