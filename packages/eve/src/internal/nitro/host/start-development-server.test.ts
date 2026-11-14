@@ -31,20 +31,33 @@ const mocks = vi.hoisted(() => {
     url: "http://localhost:2000/",
   };
   const devServer = {
+    abandonCandidate: vi.fn(),
     close: vi.fn(async () => undefined),
     holdTraffic: vi.fn((): (() => void) => () => {}),
     listen: vi.fn(() => listenerServer),
     prepareSpare: vi.fn(),
     setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
-    swapTo: vi.fn(async () => undefined),
+    swapTo: vi.fn(async (_host: unknown) => undefined),
   };
   const closeRebuildCoordinator = vi.fn(async () => undefined);
   const files = new Map<string, string>();
   const nitro = { close: vi.fn(async () => undefined) };
 
+  const reuse = {
+    claimReusableDevelopmentHost: vi.fn(
+      async (): Promise<{ kind: string; [key: string]: unknown }> => ({ kind: "none" }),
+    ),
+    computeDevelopmentHostEnvironmentKey: vi.fn(async (): Promise<string | undefined> => undefined),
+    computeDevelopmentHostReuseKey: vi.fn(async (): Promise<string | undefined> => undefined),
+    DEVELOPMENT_HOST_REUSE_ENV: "EVE_DEV_HOST_REUSE",
+    peekReusableDevelopmentHost: vi.fn(async (): Promise<unknown> => undefined),
+    writeReusableDevelopmentHost: vi.fn(async () => undefined),
+  };
+
   return {
     authoredSourceWatcher,
+    reuse,
     buildDevelopmentHostCandidate: vi.fn(async (input: { nitro: { close(): Promise<void> } }) => {
       await input.nitro.close();
       return {
@@ -94,7 +107,7 @@ const mocks = vi.hoisted(() => {
     createParentDevelopmentWorkflowWorld: vi.fn(() => mocksWorldInstance),
     worldInstance: mocksWorldInstance,
     discardDevelopmentGeneration: vi.fn(async () => undefined),
-    removeDevelopmentHostWorkspace: vi.fn(async () => undefined),
+    removeDevelopmentHostWorkspace: vi.fn(async (_workspace: unknown) => undefined),
     readFile: vi.fn(async (path: string) => {
       if (
         path.endsWith("/.eve/dev-server-state.v1.json") &&
@@ -152,6 +165,8 @@ vi.mock("./dev-host-candidate.js", () => ({
 vi.mock("./dev-authored-rebuild-coordinator.js", () => ({
   createDevelopmentAuthoredRebuildCoordinator: mocks.createDevelopmentAuthoredRebuildCoordinator,
 }));
+
+vi.mock("./dev-host-reuse.js", () => mocks.reuse);
 
 vi.mock("./dev-host-workspace.js", () => ({
   removeDevelopmentHostWorkspace: mocks.removeDevelopmentHostWorkspace,
@@ -994,5 +1009,148 @@ describe("createDevelopmentServer", () => {
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow(
       /Invalid PORT environment variable/,
     );
+  });
+});
+
+describe("reusing the previous run's dev host", () => {
+  const keptWorkspace = {
+    artifactsDir: "/tmp/eve-test/.eve/dev-hosts/kept/artifacts",
+    compilerArtifactsDir: "/tmp/eve-test/.eve/dev-hosts/kept/compiler",
+    nitroBuildDir: "/tmp/eve-test/.eve/dev-hosts/kept/nitro",
+    nitroOutputDir: "/tmp/eve-test/.eve/dev-hosts/kept/output",
+    rootDir: "/tmp/eve-test/.eve/dev-hosts/kept",
+    workflowBuildDir: "/tmp/eve-test/.eve/dev-hosts/kept/workflow",
+  };
+  const kept = {
+    compiledArtifacts: {},
+    environmentKey: "environment",
+    key: "key",
+    payload: { entry: `${keptWorkspace.rootDir}/nitro/dev/index.mjs`, workerData: {} },
+    workflowBuildDir: keptWorkspace.workflowBuildDir,
+    workspace: keptWorkspace,
+  };
+  const firstDispose = () =>
+    (mocks.devServer.swapTo.mock.calls[0] as unknown as [{ dispose: () => Promise<void> }])[0]
+      .dispose;
+  const removedKept = () =>
+    mocks.removeDevelopmentHostWorkspace.mock.calls.some(
+      ([workspace]) => (workspace as { rootDir?: string }).rootDir === keptWorkspace.rootDir,
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", mocks.fetch);
+    mocks.files.clear();
+    mocks.reuse.peekReusableDevelopmentHost.mockResolvedValue(kept);
+  });
+
+  afterEach(() => {
+    mocks.reuse.peekReusableDevelopmentHost.mockResolvedValue(undefined);
+    mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({ kind: "none" });
+    vi.unstubAllGlobals();
+  });
+
+  it("serves a reused host from the worker it booted while the agent compiled", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({ kind: "reused", host: kept });
+    const releaseTraffic = vi.fn(() => {
+      expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledOnce();
+    });
+    mocks.devServer.holdTraffic.mockImplementationOnce(() => releaseTraffic);
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
+    expect(mocks.devServer.swapTo).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: kept.payload.entry }),
+    );
+    expect(mocks.devServer.swapTo.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.prepareDevelopmentApplicationHost.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.createHostNitro).not.toHaveBeenCalled();
+    expect(mocks.devServer.abandonCandidate).not.toHaveBeenCalled();
+    expect(releaseTraffic).toHaveBeenCalledOnce();
+    expect(removedKept()).toBe(false);
+    await server.close();
+  });
+
+  it("abandons the early worker and swaps in a fresh host when the kept one is stale", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({
+      kind: "rebuilt",
+      reason: "a file it was built from changed",
+      rootDir: keptWorkspace.rootDir,
+    });
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.devServer.abandonCandidate).toHaveBeenCalledOnce();
+    expect(mocks.createHostNitro).toHaveBeenCalledOnce();
+    expect(mocks.devServer.swapTo).toHaveBeenCalledTimes(2);
+    // Retiring the early worker removes the rejected host.
+    await firstDispose()();
+    expect(removedKept()).toBe(true);
+    await server.close();
+  });
+
+  it("leaves a kept host alone when another server takes it first", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.devServer.abandonCandidate).toHaveBeenCalledOnce();
+    await firstDispose()();
+    expect(removedKept()).toBe(false);
+    await server.close();
+  });
+
+  it("removes a stale kept host whose early worker already failed", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.devServer.swapTo.mockImplementationOnce(async (host: unknown) => {
+      // A candidate that fails readiness releases its host before the swap rejects.
+      await (host as { dispose: () => Promise<void> }).dispose();
+      throw new Error("candidate failed to boot");
+    });
+    mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({
+      kind: "rebuilt",
+      reason: "a file it was built from changed",
+      rootDir: keptWorkspace.rootDir,
+    });
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(removedKept()).toBe(true);
+    await server.close();
+  });
+
+  it("starts the claimed host normally when its early worker failed", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.devServer.swapTo.mockImplementationOnce(async (host: unknown) => {
+      await (host as { dispose: () => Promise<void> }).dispose();
+      throw new Error("candidate failed to boot");
+    });
+    mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({ kind: "reused", host: kept });
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.devServer.swapTo).toHaveBeenCalledTimes(2);
+    expect(mocks.devServer.swapTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ entry: kept.payload.entry }),
+    );
+    expect(mocks.createHostNitro).not.toHaveBeenCalled();
+    expect(removedKept()).toBe(false);
+    await server.close();
+  });
+
+  it("keeps the kept host and its record when the agent fails to compile", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.prepareDevelopmentApplicationHost.mockRejectedValueOnce(new Error("compile failed"));
+
+    await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("compile failed");
+
+    await firstDispose()();
+    expect(mocks.reuse.claimReusableDevelopmentHost).not.toHaveBeenCalled();
+    expect(mocks.reuse.writeReusableDevelopmentHost).not.toHaveBeenCalled();
+    expect(removedKept()).toBe(false);
   });
 });

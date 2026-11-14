@@ -26,6 +26,8 @@ const LOCKFILES = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock
 /** A built development host kept after `eve dev` exits, for the next start to reuse. */
 export interface ReusableDevelopmentHost {
   readonly key: string;
+  /** The part of {@link key} known before the agent compiles, for {@link peekReusableDevelopmentHost}. */
+  readonly environmentKey?: string;
   readonly payload: DevelopmentHostBuild;
   readonly compiledArtifacts: PreparedDevelopmentApplicationHost["compiledArtifacts"];
   readonly workflowBuildDir: string;
@@ -55,21 +57,19 @@ function ownsWorkspace(appRoot: string, record: Partial<ReusableDevelopmentHost>
 }
 
 /**
- * The host fingerprint covers what eve's host build reads from the app. A host
- * also bundles eve's runtime and the app's installed packages with the app's
- * tsconfig transform options, so the key adds eve's identity and the code that
- * builds hosts, the Node runtime, the nearest lockfiles, and the tsconfig
- * chain's contents. Returns undefined when hosts must not be reused.
+ * What a host depends on besides the compiled agent: eve's identity and the
+ * code that builds hosts, the Node runtime, the nearest lockfiles, and the
+ * tsconfig chain's contents. Returns undefined when hosts must not be reused.
  */
-export async function computeDevelopmentHostReuseKey(
-  host: PreparedDevelopmentApplicationHost,
+export async function computeDevelopmentHostEnvironmentKey(
+  appRoot: string,
 ): Promise<string | undefined> {
   if (process.env[DEVELOPMENT_HOST_REUSE_ENV] === "0") return undefined;
   const evePackageRoot = realpathSync.native(resolvePackageRoot());
   // A linked or source checkout changes without a version bump.
   if (!evePackageRoot.split(/[\\/]/u).includes("node_modules")) return undefined;
   const lockfiles: string[] = [];
-  for (let directory = host.appRoot; ; directory = dirname(directory)) {
+  for (let directory = appRoot; ; directory = dirname(directory)) {
     for (const name of LOCKFILES) {
       const contents = await readFile(join(directory, name)).catch(() => undefined);
       if (contents !== undefined) {
@@ -78,9 +78,9 @@ export async function computeDevelopmentHostReuseKey(
     }
     if (dirname(directory) === directory || lockfiles.length > 0) break;
   }
-  const packageRoot = findAuthoredPackageRoot(host.appRoot) ?? host.appRoot;
+  const packageRoot = findAuthoredPackageRoot(appRoot) ?? appRoot;
   const tsconfigs = await Promise.all(
-    [...new Set([host.appRoot, packageRoot])].map(async (root) =>
+    [...new Set([appRoot, packageRoot])].map(async (root) =>
       Promise.all(
         (await resolveTsConfigDependencyPaths(root)).map(async (path) => [
           path,
@@ -94,7 +94,6 @@ export async function computeDevelopmentHostReuseKey(
   return createHash("sha256")
     .update(
       JSON.stringify([
-        await computeDevelopmentHostFingerprint(host),
         tsconfigs,
         await statHostBuilderCode(evePackageRoot),
         resolveInstalledPackageInfo().version,
@@ -107,10 +106,27 @@ export async function computeDevelopmentHostReuseKey(
     .digest("hex");
 }
 
+/**
+ * The host fingerprint covers what eve's host build reads from the app; the
+ * environment key covers the rest. Returns undefined when hosts must not be
+ * reused.
+ */
+export async function computeDevelopmentHostReuseKey(
+  host: PreparedDevelopmentApplicationHost,
+  environmentKey: Promise<string | undefined> = computeDevelopmentHostEnvironmentKey(host.appRoot),
+): Promise<string | undefined> {
+  const environment = await environmentKey;
+  if (environment === undefined) return undefined;
+  return createHash("sha256")
+    .update(JSON.stringify([await computeDevelopmentHostFingerprint(host), environment]))
+    .digest("hex");
+}
+
 export type DevelopmentHostClaim =
   | { readonly kind: "reused"; readonly host: ReusableDevelopmentHost }
-  /** A kept host was found and removed, for `reason`. */
-  | { readonly kind: "rebuilt"; readonly reason: string }
+  /** A kept host was taken and rejected for `reason`, and removed unless in use. */
+  | { readonly kind: "rebuilt"; readonly reason: string; readonly rootDir?: string }
+  /** No kept host, or another server took it first. */
   | { readonly kind: "none" };
 
 /**
@@ -122,6 +138,8 @@ export type DevelopmentHostClaim =
 export async function claimReusableDevelopmentHost(
   appRoot: string,
   key: Promise<string | undefined>,
+  /** A workspace an early worker runs from; its retirement removes it instead. */
+  inUse?: string,
 ): Promise<DevelopmentHostClaim> {
   const claimPath = `${recordPath(appRoot)}.${String(process.pid)}.claim`;
   try {
@@ -143,8 +161,9 @@ export async function claimReusableDevelopmentHost(
     }
     const reason = await staleReason(record, await key);
     if (reason === undefined) return { kind: "reused", host: record as ReusableDevelopmentHost };
-    await rm(record.workspace!.rootDir, { force: true, recursive: true });
-    return { kind: "rebuilt", reason };
+    const rootDir = record.workspace!.rootDir;
+    if (rootDir !== inUse) await rm(rootDir, { force: true, recursive: true });
+    return { kind: "rebuilt", reason, rootDir };
   } catch {
     return { kind: "none" };
   } finally {
@@ -194,6 +213,32 @@ async function statHostBuilderCode(evePackageRoot: string): Promise<string[]> {
     .sort();
   const stats = await mapConcurrent(files, async (file) => await stat(file).catch(() => undefined));
   return files.map((file, index) => `${file}:${stats[index]?.mtimeMs}:${stats[index]?.size}`);
+}
+
+/**
+ * Returns the kept host if nothing known before the agent compiles rules it
+ * out, without taking it, so a server can boot its worker while the agent
+ * compiles. Never throws.
+ */
+export async function peekReusableDevelopmentHost(
+  appRoot: string,
+  environmentKey: Promise<string | undefined>,
+): Promise<ReusableDevelopmentHost | undefined> {
+  try {
+    const record = JSON.parse(
+      await readFile(recordPath(appRoot), "utf8"),
+    ) as Partial<ReusableDevelopmentHost>;
+    return ownsWorkspace(appRoot, record) &&
+      record.payload !== undefined &&
+      existsSync(record.payload.entry) &&
+      record.environmentKey !== undefined &&
+      record.environmentKey === (await environmentKey) &&
+      (await inputsUnchanged(record.payload.inputs))
+      ? (record as ReusableDevelopmentHost)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** A host without recorded inputs is never reused. */
