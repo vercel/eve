@@ -1,0 +1,16 @@
+enableGlobalVirtualStore: false
+
+allowBuilds:
+  sharp: true
+  esbuild: true
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - "@vercel/*"
+  - "@workflow/*"
+  - ai
+  - eve
+  - workflow
+
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - "node-liblzma"
