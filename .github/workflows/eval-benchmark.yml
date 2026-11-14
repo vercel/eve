@@ -65,6 +65,7 @@ jobs:
       max_parallel: ${{ steps.plan.outputs.max_parallel }}
       evals_per_leg: ${{ steps.plan.outputs.evals_per_leg }}
       dev_startup: ${{ steps.plan.outputs.dev_startup }}
+      package: ${{ steps.plan.outputs.package }}
       keep_state: ${{ steps.plan.outputs.keep_state }}
     steps:
       - name: Require main
@@ -571,11 +572,12 @@ jobs:
           retention-days: 1
 
   # `eve dev` startup for the benchmark agents in e2e/benchmark.json
-  # `devStartup`, recorded as run-level framework records.
+  # `devStartup`, and eve's package and install size (`package`), recorded as
+  # run-level framework records.
   dev-startup:
     name: dev-startup
     needs: plan
-    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.dev_startup != 'null'
+    if: needs.plan.outputs.run == 'true' && (needs.plan.outputs.dev_startup != 'null' || needs.plan.outputs.package != 'null')
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 45
@@ -607,9 +609,8 @@ jobs:
       - name: Build eve package
         run: pnpm build:eve
 
-      - name: Run startup benchmark
+      - name: Record startup job metadata
         env:
-          DEV_STARTUP: ${{ needs.plan.outputs.dev_startup }}
           PLANNED_SHA: ${{ needs.plan.outputs.sha }}
           RUNNER_OS_NAME: ${{ runner.os }}
         run: |
@@ -617,12 +618,32 @@ jobs:
           mkdir -p "$out"
           jq -n --arg sha "$PLANNED_SHA" --arg runner_os "$RUNNER_OS_NAME" \
             '{sha: $sha, runner_os: $runner_os}' >"$out/meta.json"
+
+      - name: Run startup benchmark
+        if: needs.plan.outputs.dev_startup != 'null'
+        env:
+          DEV_STARTUP: ${{ needs.plan.outputs.dev_startup }}
+        run: |
+          out="$RUNNER_TEMP/dev-startup"
           runs="$(jq -r '.runs' <<<"$DEV_STARTUP")"
           while read -r name tools; do
             if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-startup.mjs" packages/eve "$runs" "$tools" >"$out/$name.jsonl"; then
               echo "::warning::Startup benchmark for $name failed; its runs are recorded as missing."
             fi
           done < <(jq -r '.subjects[] | "\(.name) \(.tools)"' <<<"$DEV_STARTUP")
+
+      # After the startup benchmark, so its installs never share the runner
+      # with a timed `eve dev`.
+      - name: Run package size benchmark
+        if: needs.plan.outputs.package != 'null'
+        env:
+          PACKAGE_PROBE: ${{ needs.plan.outputs.package }}
+        run: |
+          out="$RUNNER_TEMP/dev-startup"
+          runs="$(jq -r '.runs' <<<"$PACKAGE_PROBE")"
+          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-package.mjs" packages/eve "$runs" >"$out/package.jsonl"; then
+            echo "::warning::Package size benchmark failed; its runs are recorded as missing."
+          fi
 
       - name: Upload startup results
         if: always()

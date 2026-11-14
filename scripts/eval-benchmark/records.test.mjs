@@ -365,6 +365,61 @@ test("a dev-startup run without a TUI measurement keeps its other metrics", (t) 
   assert.deepEqual(dev.metrics["dev_startup.ready_ms"], { status: "measured", value: 900 });
 });
 
+test("turns package size runs into framework records", (t) => {
+  const devStartupDir = mkdtempSync(join(tmpdir(), "eve-dev-startup-"));
+  t.after(() => rmSync(devStartupDir, { recursive: true, force: true }));
+  writeFileSync(join(devStartupDir, "meta.json"), JSON.stringify({ sha: SHA, runner_os: "Linux" }));
+  const sizes = { packedBytes: 8_600_000, unpackedBytes: 29_900_000, installBytes: 78_800_000 };
+  writeFileSync(
+    join(devStartupDir, "package.jsonl"),
+    [
+      { root: "/tmp/x", npm: "11.0.0" },
+      { run: 1, mode: "package", ...sizes, installMs: 6500, installPackages: 23 },
+      // A run whose install time was lost keeps its sizes.
+      { run: 2, mode: "package", ...sizes, installPackages: 23 },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n"),
+  );
+  const packagePlan = {
+    ...plan,
+    registry: { ...plan.registry, dev_startup: null, package: { runs: 3, digest: "c".repeat(40) } },
+  };
+  const build = (dir) =>
+    buildFrameworkRecords({
+      plan: packagePlan,
+      legs: readLegs(packagePlan, legsDirectory(t)),
+      devStartupDir: dir,
+      githubRunId: "123",
+      runAttempt: 1,
+    }).filter((r) => r.probe === "package");
+  const records = build(devStartupDir);
+  // Every run installs from an empty npm cache.
+  assert.deepEqual(
+    records.map((r) => [r.subject, r.subject_digest, r.world, r.attempt, r.cold, r.missing]),
+    [
+      ["eve", "c".repeat(40), "local", 1, true, null],
+      ["eve", "c".repeat(40), "local", 2, true, null],
+      ["eve", "c".repeat(40), "local", 3, true, "run-missing"],
+    ],
+  );
+  assert.deepEqual(records[0].metrics, {
+    "package.packed_bytes": { status: "measured", value: 8_600_000 },
+    "package.unpacked_bytes": { status: "measured", value: 29_900_000 },
+    "package.install_bytes": { status: "measured", value: 78_800_000 },
+    "package.install_packages": { status: "measured", value: 23 },
+    "package.install_ms": { status: "measured", value: 6500 },
+  });
+  assert.equal(records[0].artifact_path, "raw/dev-startup");
+  assert.deepEqual(records[1].metrics["package.install_ms"], {
+    status: "unavailable",
+    reason: "missing-duration",
+  });
+  assert.equal(build(undefined)[0].missing, "job-missing");
+  rmSync(join(devStartupDir, "package.jsonl"));
+  assert.equal(build(devStartupDir)[0].missing, "probe-missing");
+});
+
 test("excludes live-leg evals whose model steps all ran on another model", (t) => {
   const legsDir = legsDirectory(t);
   const leg = join(legsDir, "benchmark-leg-live__agent-tools__alpha__local__1");
