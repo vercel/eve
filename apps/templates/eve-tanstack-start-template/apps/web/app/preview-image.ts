@@ -1,13 +1,15 @@
+import type { IncomingMessage } from "node:http";
+import { Readable } from "node:stream";
+
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { resolveAccessStatus } from "./access";
+import { requestPublicPage } from "./public-page";
 
 const MAX_BYTES = 256 * 1024;
 const TIMEOUT_MS = 4000;
 const MAX_CACHED = 500;
-
-const MAX_REDIRECTS = 3;
 
 const IMAGE_KEYS = [
   "og:image",
@@ -24,64 +26,6 @@ const CONTENT_ATTRIBUTE_PATTERN =
   /\scontent\s*=\s*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')/iu;
 
 const cache = new Map<string, Promise<string | null>>();
-
-/**
- * Checks that a URL is safe for the server to fetch: https on a public host
- * name, not an IP address or a local name.
- *
- * @param url - The URL to check.
- * @returns Whether the server may fetch it.
- */
-function isFetchable(url: URL): boolean {
-  const host = url.hostname;
-  return (
-    url.protocol === "https:" &&
-    host.includes(".") &&
-    !host.endsWith(".local") &&
-    !host.endsWith(".internal") &&
-    !/^[\d.]+$/u.test(host) &&
-    !host.includes(":")
-  );
-}
-
-/**
- * Fetches a page, following up to {@link MAX_REDIRECTS} redirects itself so
- * that every hop passes {@link isFetchable}.
- *
- * @param url - The URL to fetch.
- * @param signal - Aborts the request and every redirect after it.
- * @param hops - The redirects followed so far.
- * @returns The final response, or `null` when a hop isn't fetchable or there
- * are too many redirects.
- * @throws {@link Error} When a request fails or the final response isn't OK.
- */
-async function fetchPage(
-  url: URL,
-  signal: AbortSignal,
-  hops: number
-): Promise<Response | null> {
-  if (!isFetchable(url)) {
-    return null;
-  }
-  const response = await fetch(url, {
-    headers: { accept: "text/html" },
-    redirect: "manual",
-    signal,
-  });
-  const location = response.headers.get("location");
-  if (response.status >= 300 && response.status < 400 && location !== null) {
-    await response.body?.cancel();
-    if (hops >= MAX_REDIRECTS || !URL.canParse(location, url)) {
-      return null;
-    }
-    return await fetchPage(new URL(location, url), signal, hops + 1);
-  }
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(`Preview page responded with ${response.status}.`);
-  }
-  return response;
-}
 
 /**
  * Reads an attribute value from a single meta tag.
@@ -151,7 +95,8 @@ async function readChunks(
   return await readChunks(
     reader,
     decoder,
-    html + decoder.decode(value, { stream: true }),
+    html +
+      decoder.decode(value.subarray(0, MAX_BYTES - bytes), { stream: true }),
     bytes + value.byteLength
   );
 }
@@ -162,14 +107,13 @@ async function readChunks(
  * @param response - The page response.
  * @returns The decoded text.
  */
-async function readHead(response: Response): Promise<string> {
-  const reader = response.body?.getReader();
-  if (reader === undefined) {
-    return "";
+async function readHead(response: IncomingMessage): Promise<string> {
+  const reader = Readable.toWeb(response).getReader();
+  try {
+    return await readChunks(reader, new TextDecoder(), "", 0);
+  } finally {
+    await reader.cancel();
   }
-  const html = await readChunks(reader, new TextDecoder(), "", 0);
-  await reader.cancel();
-  return html;
 }
 
 /**
@@ -181,15 +125,14 @@ async function readHead(response: Response): Promise<string> {
  * @throws {@link Error} When the page can't be fetched, times out, or responds with an error.
  */
 async function findPreviewImage(pageUrl: string): Promise<string | null> {
-  const response = await fetchPage(
+  const response = await requestPublicPage(
     new URL(pageUrl),
-    AbortSignal.timeout(TIMEOUT_MS),
-    0
+    AbortSignal.timeout(TIMEOUT_MS)
   );
   if (response === null) {
     return null;
   }
-  const match = findImageMeta(await readHead(response));
+  const match = findImageMeta(await readHead(response.response));
   if (match === undefined) {
     return null;
   }

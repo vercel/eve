@@ -15,6 +15,7 @@
     "deploy": "eve deploy",
     "eval": "eve eval",
     "typecheck": "tsc && tsc -p apps/web",
+    "test:smoke": "vitest run --config vitest.config.ts apps/web/app/public-page.test.ts",
     "check": "oxlint --config lint.config.ts && oxfmt --check",
     "fix": "oxlint --config lint.config.ts --fix && oxfmt --write",
     "knip": "knip",
@@ -73,7 +74,8 @@
     "oxlint-plugin-react-doctor": "^0.9.17",
     "oxlint-tsgolint": "^7.0.2004",
     "typescript": "^6.0.3",
-    "ultracite": "^8.0.0"
+    "ultracite": "^8.0.0",
+    "vitest": "^5.1.0"
   },
   "engines": {
     "node": "24.x"

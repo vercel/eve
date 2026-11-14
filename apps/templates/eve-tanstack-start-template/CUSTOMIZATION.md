@@ -160,6 +160,8 @@ To add a component, such as a star rating:
 
 To accept child elements, as `CardRow` does, add `slots: ["default"]` to the catalog entry and render `children` in the component.
 
+Result cards can use an image the agent found or look up the linked page's preview image. The server fetches only HTTPS pages whose DNS answers are all public addresses, and checks every redirect the same way. Connections use those exact answers, so DNS changes cannot redirect a validated connection to a private address. Private pages, failed lookups, and pages without image metadata leave the card without a preview. Lookups share a four-second deadline, follow at most three redirects, and read at most 256 KiB of HTML.
+
 The catalog combines components from `@json-render/shadcn`, such as `Table` and `Alert`, with components written for this template, such as `ResultCard`, `Metric`, and `Steps`. To add another shadcn component from json-render, add `shadcnComponentDefinitions.<Name>` to the catalog and `shadcnComponents.<Name>` to the registry. To restyle one, replace its registry entry with your own component, as the template does for `Heading`, `Text`, `Progress`, and `Table`, which sorts by column with TanStack Table.
 
 ## Change who can use the chat
