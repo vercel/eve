@@ -51,6 +51,8 @@ test("expands fixtures × models × attempts and mock worlds the fixture selects
   assert.deepEqual(selection.devStartup, { runs: 3, subjects: [{ name: "minimal", tools: 0 }] });
   assert.equal(selection.package, null);
   assert.deepEqual(select({ package: { runs: 3 } }).package, { runs: 3 });
+  assert.equal(selection.init, null);
+  assert.deepEqual(select({ init: { runs: 3 } }).init, { runs: 3 });
   const { live, mock } = planLegs(selection);
   assert.equal(live.length, 2 * 2 * 2);
   // Models vary fastest so legs started together spread across models, and
@@ -236,6 +238,7 @@ test("registry errors name the offending entry", () => {
     [{ devStartup: { runs: 1, subjects: ["minimal"] } }, /must include a warm run/],
     [{ package: { runs: 0 } }, /"package.runs" must be an integer from 1 to 10/],
     [{ package: {} }, /"package.runs" must be an integer from 1 to 10/],
+    [{ init: { runs: 11 } }, /"init.runs" must be an integer from 1 to 10/],
     [
       { concurrency: { legs: 5, evalsPerLeg: 0 } },
       /"concurrency.evalsPerLeg" must be an integer from 1 to 16/,
