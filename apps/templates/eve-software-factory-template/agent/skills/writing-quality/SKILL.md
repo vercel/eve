@@ -1,6 +1,7 @@
 ---
 description: "Writing-quality guardrails for any prose the agent drafts or edits: pull request descriptions, issue comments, review reports, Linear replies. Use this skill whenever writing or revising content meant for humans to read, to keep the prose natural, plain, and free of AI-sounding phrasing. Not needed for code, queries, or tool plumbing."
 ---
+
 # Writing Quality
 
 House-neutral rules for making drafted content read like a person wrote it. They apply to any prose surface. Layer project- or brand-specific voice guidance on top of them.

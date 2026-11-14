@@ -1,6 +1,7 @@
 ---
 description: "Grounding a GitHub work item before running the factory pipeline: checking for duplicates, working with the repo's existing labels, deciding whether to ask for clarification or proceed, and asking for reproduction details well. Load whenever a work item arrives from a GitHub issue or mention, and whenever asked to triage, label, dedupe, or close issues. Not needed for work items that arrive as plain requests with no GitHub issue behind them."
 ---
+
 # Triaging Issues
 
 How to ground a GitHub issue before the factory pipeline runs on it, or when someone asks for a triage pass outright. The order matters: read, dedupe, label, then decide what the issue needs. Never comment on or change an issue you haven't read in full, including its existing comments and labels.

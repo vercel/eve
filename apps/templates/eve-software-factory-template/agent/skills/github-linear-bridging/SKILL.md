@@ -1,6 +1,7 @@
 ---
 description: "Conventions for bridging GitHub and Linear: creating Linear issues from GitHub issues, cross-referencing the two trackers, and checking whether a GitHub issue is already tracked in Linear. Load when asked to create Linear issues from GitHub issues, link the trackers in either direction, or report tracking status. Not needed for work that stays inside one tracker."
 ---
+
 # GitHub to Linear Bridging
 
 Rules for carrying a GitHub issue into Linear and keeping the two sides pointing at each other. The goal is one clear Linear issue per GitHub issue, findable from either end, with no duplicate tracking and no noise copied across.

@@ -1,5 +1,8 @@
 {
   "printWidth": 80,
   "trailingComma": "es5",
-  "proseWrap": "preserve"
+  "proseWrap": "preserve",
+  "overrides": [
+    { "files": ["**/*.jsonc"], "options": { "trailingComma": "none" } }
+  ]
 }
