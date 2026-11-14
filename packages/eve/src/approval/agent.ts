@@ -1,6 +1,7 @@
 import {
   type Approval,
   type ApprovalPolicy,
+  type ApprovalPresentation,
   type ApprovalStatus,
   resolveApprovalPolicy,
 } from "#approval/definition.js";
@@ -34,25 +35,46 @@ export function strictestApproval(policies: readonly ApprovalPolicy[]): Approval
 }
 
 /**
- * The approval an entry runs under with the agent's policy: whichever of the two is stricter. The
- * agent's policy can only add a gate, never remove the entry's own. Without an agent policy the
- * entry keeps its own approval object, so agents that don't author one behave exactly as before.
+ * The approval an entry runs under with the agent's: whichever policy is stricter, worded by the
+ * entry's own `prompt` and `labels`, else the agent's `presentation`. The agent's policy can only add
+ * a gate, never remove the entry's own. Without an agent policy or presentation the entry keeps its
+ * own approval object, so agents that don't author one behave exactly as before.
  */
 export function withAgentApproval(
   agent: ApprovalPolicy | undefined,
   own: Approval | undefined,
+  presentation?: ApprovalPresentation,
 ): Approval | undefined {
-  if (agent === undefined) return own;
-  if (own === undefined) return agent;
-  const request = strictestApproval([agent, resolveApprovalPolicy(own)]);
-  return typeof own === "function" ? request : { ...own, request };
+  if (agent === undefined && presentation === undefined) return own;
+  const ownPolicy = own === undefined ? undefined : resolveApprovalPolicy(own);
+  const request =
+    agent === undefined || ownPolicy === undefined
+      ? (agent ?? ownPolicy)
+      : strictestApproval([agent, ownPolicy]);
+  // Nothing gates the entry, so there is no approval to word.
+  if (request === undefined) return undefined;
+  const configured = typeof own === "object" ? own : undefined;
+  if (presentation === undefined) {
+    return configured === undefined ? request : { ...configured, request };
+  }
+  const prompt = configured?.prompt ?? presentation.prompt;
+  const labels =
+    presentation.labels === undefined && configured?.labels === undefined
+      ? undefined
+      : { ...presentation.labels, ...configured?.labels };
+  return {
+    ...configured,
+    request,
+    ...(prompt !== undefined && { prompt }),
+    ...(labels !== undefined && { labels }),
+  };
 }
 
 /**
- * Puts every entry in `entries` under the agent's policy. Task controls (`frameworkAction`) only
- * read or stop work the agent already started, and built-in interaction executors
- * (`interactionOnly`) act on nothing outside the conversation, so both stay ungated: gating them
- * would ask a person to approve being asked. Without a policy the entries are unchanged.
+ * Puts every entry in `entries` under the agent's policy and presentation. Task controls
+ * (`frameworkAction`) only read or stop work the agent already started, and built-in interaction
+ * executors (`interactionOnly`) act on nothing outside the conversation, so both stay ungated:
+ * gating them would ask a person to approve being asked. Without either the entries are unchanged.
  */
 export function withAgentApprovalOnEntries<
   T extends {
@@ -60,14 +82,18 @@ export function withAgentApprovalOnEntries<
     readonly frameworkAction?: unknown;
     readonly interactionOnly?: boolean;
   },
->(entries: ReadonlyMap<string, T>, agent: ApprovalPolicy | undefined): Map<string, T> {
-  if (agent === undefined) return new Map(entries);
+>(
+  entries: ReadonlyMap<string, T>,
+  agent: ApprovalPolicy | undefined,
+  presentation?: ApprovalPresentation,
+): Map<string, T> {
+  if (agent === undefined && presentation === undefined) return new Map(entries);
   return new Map(
     [...entries].map(([name, entry]) => [
       name,
       entry.frameworkAction !== undefined || entry.interactionOnly === true
         ? entry
-        : { ...entry, approval: withAgentApproval(agent, entry.approval) },
+        : { ...entry, approval: withAgentApproval(agent, entry.approval, presentation) },
     ]),
   );
 }

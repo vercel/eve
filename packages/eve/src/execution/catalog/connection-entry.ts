@@ -11,6 +11,7 @@ import {
   type Approval,
   type ApprovalContext,
   type ApprovalPolicy,
+  type ApprovalPresentation,
   type ApprovalResponseContext,
   type ApprovalResponseDecision,
   type ApprovalResponsePolicy,
@@ -81,10 +82,11 @@ export function connectionEntry(
   connection: ResolvedConnectionDefinition,
   toolName: string,
   agentApproval?: ApprovalPolicy,
+  presentation?: ApprovalPresentation,
 ): HarnessToolDefinition {
   const label = `${displayProperName(connection.connectionName)}: ${displayTitle(toolName)}`;
   // Wrapped inside the pin, so a call the agent's policy holds is pinned to this instance too.
-  const approval = withAgentApproval(agentApproval, connection.approval);
+  const approval = withAgentApproval(agentApproval, connection.approval, presentation);
   return {
     approval: connectionApproval(registry, connection, toolName, approval),
     deferred: true,
@@ -358,6 +360,7 @@ function connectionApproval(
   return {
     request,
     prompt: approval.prompt,
+    labels: approval.labels,
     response:
       response === undefined
         ? undefined

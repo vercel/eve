@@ -1,3 +1,4 @@
+import type { ApprovalConfiguration } from "#approval/definition.js";
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
@@ -626,8 +627,9 @@ export async function publishDenial(
 }
 
 /**
- * What a person answers to approve or cancel a call the model made. The prompt is the one the
- * tool's approval writes for the call, or names the call by the label its entry gives it.
+ * What a person answers to approve or cancel a call the model made. The prompt and option labels
+ * are the ones the tool's approval writes for the call, or name the call by the label its entry
+ * gives it. The option ids stay `approve` and `deny`, whatever the labels say.
  */
 function approvalRequest(
   call: TypedToolCall<ToolSet>,
@@ -636,7 +638,8 @@ function approvalRequest(
   const { toolCallId: callId, toolName } = call;
   const input = resolveToolCallInputObject(call.input, { callId, toolName });
   const label = projectToolLabel(definition, "start", input) ?? displayTitle(toolName);
-  const prompt = authoredApprovalPrompt(call, definition);
+  const approval = typeof definition?.approval === "object" ? definition.approval : undefined;
+  const prompt = authoredApprovalPrompt(call, approval, label);
   return {
     call: {
       callId,
@@ -650,8 +653,8 @@ function approvalRequest(
       display: "confirmation",
       kind: "approval",
       options: [
-        { id: "approve", label: "Approve" },
-        { id: "deny", label: "Deny" },
+        { id: "approve", label: approval?.labels?.approve ?? "Approve" },
+        { id: "deny", label: approval?.labels?.deny ?? "Deny" },
       ],
       prompt: prompt ?? `Approve ${label}?`,
     },
@@ -661,15 +664,20 @@ function approvalRequest(
 /** The prompt a tool's approval configuration writes for `call`, when it has one. */
 function authoredApprovalPrompt(
   call: TypedToolCall<ToolSet>,
-  definition: HarnessToolDefinition | undefined,
+  approval: ApprovalConfiguration | undefined,
+  toolLabel: string,
 ): string | undefined {
-  const approval = definition?.approval;
-  if (approval === undefined || typeof approval === "function") return undefined;
+  if (approval?.prompt === undefined) return undefined;
   const input =
     typeof call.input === "object" && call.input !== null && !Array.isArray(call.input)
       ? (call.input as Record<string, unknown>)
       : {};
-  const prompt = approval.prompt?.({ callId: call.toolCallId, input, toolName: call.toolName });
+  const prompt = approval.prompt({
+    callId: call.toolCallId,
+    input,
+    toolLabel,
+    toolName: call.toolName,
+  });
   if (prompt !== undefined && typeof prompt !== "string") {
     throw new Error(`Tool "${call.toolName}" approval prompt must return a string.`);
   }

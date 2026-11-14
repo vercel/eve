@@ -1,5 +1,5 @@
 import type { JsonObject } from "#shared/json.js";
-import type { ApprovalPolicy } from "#approval/definition.js";
+import type { AgentApproval } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import {
@@ -407,8 +407,20 @@ type PublicAgentDefinitionBase = {
    *     ? "user-approval"
    *     : undefined, // leave the tool's own decision
    * ```
+   *
+   * The object form takes the policy as `request` and can also word every approval the agent asks
+   * for: `prompt` replaces the default `Approve <tool label>?` and `labels` the **Approve** and
+   * **Deny** option labels. A tool's own `prompt` and `labels` win; option ids stay `approve` and
+   * `deny`. A subagent's own `prompt` and `labels` win over the root agent's in its sessions.
+   *
+   * ```ts
+   * approval: {
+   *   prompt: ({ toolLabel }) => `¿Aprobar ${toolLabel}?`,
+   *   labels: { approve: "Aprobar", deny: "Cancelar" },
+   * },
+   * ```
    */
-  readonly approval?: ApprovalPolicy;
+  readonly approval?: AgentApproval;
   readonly build?: AgentBuildDefinition;
   readonly compaction?: PublicAgentCompactionDefinition;
   /**

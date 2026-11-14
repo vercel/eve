@@ -1,4 +1,6 @@
 [
+  "AgentApproval",
+  "AgentApprovalConfiguration",
   "AgentBuildDefinition",
   "AgentCompactionDefinition",
   "AgentDefinition",
@@ -14,7 +16,10 @@
   "AgentWorkflowRetentionDefinition",
   "AgentWorkflowWorldDefinition",
   "ApprovalContext",
+  "ApprovalLabels",
   "ApprovalPolicy",
+  "ApprovalPrompt",
+  "ApprovalPromptContext",
   "ApprovalStatus",
   "ConnectionToolAnnotations",
   "DefinedAgent",

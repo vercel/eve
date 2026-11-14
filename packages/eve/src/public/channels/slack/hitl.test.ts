@@ -281,6 +281,30 @@ describe("renderInteractionBlocks", () => {
     ]);
   });
 
+  it("labels approval buttons with the request's localized option labels", () => {
+    const [container] = renderInteractionBlocks(
+      makeRequest({
+        call: { callId: "call_deploy", name: "deploy", input: { env: "prod" } },
+        display: "confirmation",
+        kind: "approval",
+        prompt: "¿Aprobar Despliegue?",
+        options: [
+          { id: "approve", label: "Aprobar" },
+          { id: "deny", label: "Cancelar" },
+        ],
+      }),
+    );
+
+    const { child_blocks } = container as {
+      child_blocks: { type: string; elements?: { text: { text: string }; value: string }[] }[];
+    };
+    const buttons = child_blocks.find((block) => block.type === "actions")?.elements ?? [];
+    expect(buttons.map((button) => [button.value, button.text.text])).toEqual([
+      ["approve", "Aprobar"],
+      ["deny", "Cancelar"],
+    ]);
+  });
+
   it("titles an approval with a blank prompt by its tool name, since Slack refuses an empty title", () => {
     const [container] = renderInteractionBlocks(
       makeRequest({

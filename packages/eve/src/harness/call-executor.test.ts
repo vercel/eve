@@ -154,6 +154,59 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
   expect(results.approvals.map((ask) => ask.request.prompt)).toEqual(["Send $125 to Ada?"]);
 });
 
+it("words the approval with a tool's labels and keeps the option ids", async () => {
+  const seen: unknown[] = [];
+  const refund: HarnessToolDefinition = {
+    approval: {
+      labels: { approve: "Aprobar", deny: "Cancelar" },
+      prompt: (context) => {
+        seen.push(context);
+        return `¿Aprobar ${context.toolLabel}?`;
+      },
+      request: () => "user-approval",
+    },
+    description: "Refund an order.",
+    execute: async () => "refunded",
+    inputSchema: jsonSchema({ type: "object" }),
+    label: { start: () => "Reembolso" },
+    name: "refund",
+  };
+  const ctx = new ContextContainer();
+  ctx.set(SessionKey, {
+    auth: { current: null, initiator: null },
+    sessionId: "session-1",
+    turn: { id: "turn_0", sequence: 0 },
+  });
+
+  const results = await contextStorage.run(ctx, () =>
+    executeInlineCalls({
+      abortSignal: undefined,
+      approvalMemory: { pending: [], remembered: {} },
+      beforeExecute: () => {},
+      excludedCallIds: new Set(),
+      messages: [],
+      publish: async () => {},
+      toolCalls: [
+        { input: { order: 7 }, toolCallId: "call-1", toolName: "refund", type: "tool-call" },
+      ],
+      tools: new Map([["refund", refund]]),
+    }),
+  );
+
+  expect(results.approvals.map((ask) => ask.request)).toEqual([
+    expect.objectContaining({
+      options: [
+        { id: "approve", label: "Aprobar" },
+        { id: "deny", label: "Cancelar" },
+      ],
+      prompt: "¿Aprobar Reembolso?",
+    }),
+  ]);
+  expect(seen).toEqual([
+    { callId: "call-1", input: { order: 7 }, toolLabel: "Reembolso", toolName: "refund" },
+  ]);
+});
+
 it("keeps a thrown tool error's name in the durable call ending", async () => {
   const events: import("#protocol/session-event.js").SessionEvent[] = [];
   await executeInlineCalls({

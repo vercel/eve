@@ -3,9 +3,12 @@
  */
 
 export type {
+  AgentApproval,
+  AgentApprovalConfiguration,
   Approval,
   ApprovalConfiguration,
   ApprovalContext,
+  ApprovalLabels,
   ApprovalPolicy,
   ApprovalPrompt,
   ApprovalPromptContext,

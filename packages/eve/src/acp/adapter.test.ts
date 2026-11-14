@@ -152,7 +152,7 @@ describe("EveAcpAdapter", () => {
     });
   });
 
-  it("asks the ACP client to approve a call, and answers eve with its choice", async () => {
+  it("asks the ACP client to approve a call with its labels, and answers eve with its choice", async () => {
     const approvalTurn: SessionEvent[] = [
       ...opening(),
       {
@@ -173,10 +173,10 @@ describe("EveAcpAdapter", () => {
             display: "confirmation",
             kind: "approval",
             options: [
-              { id: "approve", label: "Approve" },
-              { id: "cancel", label: "Cancel" },
+              { id: "approve", label: "Aprobar" },
+              { id: "deny", label: "Cancelar" },
             ],
-            prompt: "Approve deploy?",
+            prompt: "¿Aprobar deploy?",
           },
           subject: { callId: "call-1" },
         },
@@ -217,6 +217,16 @@ describe("EveAcpAdapter", () => {
     ).resolves.toEqual({ stopReason: "end_turn" });
 
     expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        options: [
+          { kind: "allow_once", name: "Aprobar", optionId: "approval-1:approve" },
+          { kind: "reject_once", name: "Cancelar", optionId: "approval-1:deny" },
+        ],
+      }),
+      expect.anything(),
+    );
     expect(session.sends.at(-1)).toEqual({
       answers: [{ optionId: "approve", interactionId: "approval-1" }],
     });

@@ -13,7 +13,7 @@ import { stepCatalog } from "#definitions/step.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { ApprovalPolicy } from "#approval/definition.js";
+import type { ApprovalPolicy, ApprovalPresentation } from "#approval/definition.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
@@ -108,6 +108,8 @@ export function catalogBundle(
   input: {
     /** The agent's `approval` from `agent.ts`. */
     readonly approval?: ApprovalPolicy;
+    /** How the agent's object-form `approval` words its approvals. */
+    readonly approvalPresentation?: ApprovalPresentation;
     /** The connections the agent declares. */
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
@@ -120,14 +122,28 @@ export function catalogBundle(
     // The root session: its agent is the graph's root node.
     graph: {
       nodesByNodeId: new Map([
-        [ROOT_RUNTIME_AGENT_NODE_ID, { agent: { config: { approval: input.approval } } }],
+        [
+          ROOT_RUNTIME_AGENT_NODE_ID,
+          {
+            agent: {
+              config: {
+                approval: input.approval,
+                approvalPresentation: input.approvalPresentation,
+              },
+            },
+          },
+        ],
       ]),
     } as never,
     modelMetadata: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
-      config: { approval: input.approval, name: "test-agent" },
+      config: {
+        approval: input.approval,
+        approvalPresentation: input.approvalPresentation,
+        name: "test-agent",
+      },
       connections: input.connections ?? [],
       definitions: [],
       instructions: [],
@@ -264,6 +280,7 @@ export function connectionTool(
 export async function catalogContext(
   input: {
     readonly approval?: ApprovalPolicy;
+    readonly approvalPresentation?: ApprovalPresentation;
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
     readonly session?: { readonly rootSessionId?: string };
@@ -285,6 +302,7 @@ export async function catalogContext(
     fromCompiledBundle(
       catalogBundle({
         approval: input.approval,
+        approvalPresentation: input.approvalPresentation,
         connections: input.connections?.map((connection) => connection.definition),
         dynamicSubagents: input.dynamicSubagents,
         skills: input.skills,

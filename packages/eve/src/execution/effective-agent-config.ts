@@ -2,7 +2,7 @@ import type { ContextReader } from "#context/key.js";
 import { DynamicSubagentAgentConfigKey } from "#context/keys.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import type { ApprovalPolicy } from "#approval/definition.js";
+import type { ApprovalPolicy, ApprovalPresentation } from "#approval/definition.js";
 import { strictestApproval } from "#approval/agent.js";
 import { sessionAgent } from "#definitions/agent.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -76,4 +76,30 @@ export function resolveAgentApproval(
   const own = bundle.resolvedAgent.config?.approval;
   if (own === undefined) return root;
   return root === undefined ? own : strictestApproval([root, own]);
+}
+
+/**
+ * How the session's approvals are worded: the agent's own `prompt` and `labels`, else the root
+ * agent's. Wording only changes what a person reads, so unlike the policy a subagent may replace it.
+ */
+export function resolveAgentApprovalPresentation(
+  bundle: Pick<CompiledBundle, "graph" | "nodeId" | "resolvedAgent">,
+): ApprovalPresentation | undefined {
+  const root = bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config
+    ?.approvalPresentation;
+  const own =
+    bundle.nodeId === undefined || bundle.nodeId === ROOT_RUNTIME_AGENT_NODE_ID
+      ? undefined
+      : bundle.resolvedAgent.config?.approvalPresentation;
+  if (own === undefined) return root;
+  if (root === undefined) return own;
+  const prompt = own.prompt ?? root.prompt;
+  const labels =
+    root.labels === undefined && own.labels === undefined
+      ? undefined
+      : { ...root.labels, ...own.labels };
+  return {
+    ...(prompt !== undefined && { prompt }),
+    ...(labels !== undefined && { labels }),
+  };
 }
