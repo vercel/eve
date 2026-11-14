@@ -40,6 +40,20 @@ function abortedTermination(signal: AbortSignal | undefined): PackageManagerProc
     : { kind: "aborted", reason: reason instanceof Error ? reason.message : String(reason) };
 }
 
+/**
+ * The environment for setup-owned package-manager commands. `npx --package`
+ * and `npm exec --package` export the package selection as
+ * `npm_config_package`; a nested `npm exec -- eve dev` that inherits it
+ * re-resolves that package and runs its copy of eve instead of the project's.
+ */
+function packageManagerEnvironment(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (name.toLowerCase() === "npm_config_package") delete env[name];
+  }
+  return env;
+}
+
 /** Runs one package-manager command and returns its complete process evidence. */
 export function spawnPackageManager(
   kind: PackageManagerKind,
@@ -72,6 +86,7 @@ export function spawnPackageManager(
     try {
       child = spawn(invocation.command, [...invocation.args], {
         cwd: projectRoot,
+        env: packageManagerEnvironment(),
         stdio: captureOutput
           ? [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"]
           : "inherit",
