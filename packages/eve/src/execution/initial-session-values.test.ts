@@ -6,7 +6,7 @@ import { createSession } from "#execution/session.js";
 import { withPendingHistory } from "#execution/session/pending-history.js";
 
 describe("createInitialSessionValues", () => {
-  // The workflow body computes it in place of `createSessionStep`, so both must agree.
+  // It skips the HITL state read `createDurableSessionValues` makes, so both must agree.
   it.each([
     { name: "a bare session", input: { continuationToken: "", sessionId: "s1" } },
     {

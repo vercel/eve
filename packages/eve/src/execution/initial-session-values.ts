@@ -6,9 +6,10 @@ import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /**
- * A new root session's initial durable state and history, as `createSessionStep` makes them.
- * It imports nothing the workflow bundle can't hold, so a workflow body computes it without a
- * step. A new session relays no input requests, so it needs no HITL state read.
+ * A new session's initial durable state and history. It imports nothing the workflow bundle can't
+ * hold, so a root session's workflow body computes it without a step, and `createSessionStep`
+ * returns it after checking a subagent node. A new session relays no input requests, so it needs
+ * no HITL state read.
  */
 export function createInitialSessionValues(input: {
   readonly continuationToken: string;
