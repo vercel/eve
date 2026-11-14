@@ -420,6 +420,69 @@ test("turns package size runs into framework records", (t) => {
   assert.equal(build(devStartupDir)[0].missing, "probe-missing");
 });
 
+test("turns npx eve init runs into framework records", (t) => {
+  const devStartupDir = mkdtempSync(join(tmpdir(), "eve-dev-startup-"));
+  t.after(() => rmSync(devStartupDir, { recursive: true, force: true }));
+  writeFileSync(join(devStartupDir, "meta.json"), JSON.stringify({ sha: SHA, runner_os: "Linux" }));
+  writeFileSync(
+    join(devStartupDir, "init.jsonl"),
+    [
+      { root: "/tmp/x", npm: "11.0.0" },
+      {
+        run: 1,
+        mode: "init",
+        downloadMs: 8000,
+        installMs: 6200,
+        createdMs: 14300,
+        promptVisibleMs: 18900,
+        readyMs: 22300,
+      },
+      // A run whose dev server never became ready keeps its other timings.
+      { run: 2, mode: "init", downloadMs: 8100, installMs: 6400, createdMs: 14500 },
+      { mode: "init", createdMedianMs: 14400 },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n"),
+  );
+  const initPlan = {
+    ...plan,
+    registry: { ...plan.registry, dev_startup: null, init: { runs: 3, digest: "d".repeat(40) } },
+  };
+  const build = (dir) =>
+    buildFrameworkRecords({
+      plan: initPlan,
+      legs: readLegs(initPlan, legsDirectory(t)),
+      devStartupDir: dir,
+      githubRunId: "123",
+      runAttempt: 1,
+    }).filter((r) => r.probe === "init");
+  const records = build(devStartupDir);
+  // Every run starts from an empty directory and npm cache.
+  assert.deepEqual(
+    records.map((r) => [r.subject, r.subject_digest, r.world, r.attempt, r.cold, r.missing]),
+    [
+      ["scaffold", "d".repeat(40), "local", 1, true, null],
+      ["scaffold", "d".repeat(40), "local", 2, true, null],
+      ["scaffold", "d".repeat(40), "local", 3, true, "run-missing"],
+    ],
+  );
+  assert.deepEqual(records[0].metrics, {
+    "init.download_ms": { status: "measured", value: 8000 },
+    "init.install_ms": { status: "measured", value: 6200 },
+    "init.created_ms": { status: "measured", value: 14300 },
+    "init.prompt_visible_ms": { status: "measured", value: 18900 },
+    "init.ready_ms": { status: "measured", value: 22300 },
+  });
+  assert.equal(records[0].artifact_path, "raw/dev-startup");
+  assert.deepEqual(records[1].metrics["init.ready_ms"], {
+    status: "unavailable",
+    reason: "missing-duration",
+  });
+  assert.equal(build(undefined)[0].missing, "job-missing");
+  rmSync(join(devStartupDir, "init.jsonl"));
+  assert.equal(build(devStartupDir)[0].missing, "probe-missing");
+});
+
 test("excludes live-leg evals whose model steps all ran on another model", (t) => {
   const legsDir = legsDirectory(t);
   const leg = join(legsDir, "benchmark-leg-live__agent-tools__alpha__local__1");

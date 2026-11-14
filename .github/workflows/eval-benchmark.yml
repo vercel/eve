@@ -66,6 +66,7 @@ jobs:
       evals_per_leg: ${{ steps.plan.outputs.evals_per_leg }}
       dev_startup: ${{ steps.plan.outputs.dev_startup }}
       package: ${{ steps.plan.outputs.package }}
+      init: ${{ steps.plan.outputs.init }}
       keep_state: ${{ steps.plan.outputs.keep_state }}
     steps:
       - name: Require main
@@ -572,12 +573,12 @@ jobs:
           retention-days: 1
 
   # `eve dev` startup for the benchmark agents in e2e/benchmark.json
-  # `devStartup`, and eve's package and install size (`package`), recorded as
-  # run-level framework records.
+  # `devStartup`, eve's package and install size (`package`), and a fresh
+  # `npx eve init` (`init`), recorded as run-level framework records.
   dev-startup:
     name: dev-startup
     needs: plan
-    if: needs.plan.outputs.run == 'true' && (needs.plan.outputs.dev_startup != 'null' || needs.plan.outputs.package != 'null')
+    if: needs.plan.outputs.run == 'true' && (needs.plan.outputs.dev_startup != 'null' || needs.plan.outputs.package != 'null' || needs.plan.outputs.init != 'null')
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 45
@@ -643,6 +644,20 @@ jobs:
           runs="$(jq -r '.runs' <<<"$PACKAGE_PROBE")"
           if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-package.mjs" packages/eve "$runs" >"$out/package.jsonl"; then
             echo "::warning::Package size benchmark failed; its runs are recorded as missing."
+          fi
+
+      # Last: each run installs from the registry and starts `eve dev`, so it
+      # never shares the runner with another probe. Each run's terminal output
+      # (init-<run>.log) is uploaded with the results.
+      - name: Run init benchmark
+        if: needs.plan.outputs.init != 'null'
+        env:
+          INIT_PROBE: ${{ needs.plan.outputs.init }}
+        run: |
+          out="$RUNNER_TEMP/dev-startup"
+          runs="$(jq -r '.runs' <<<"$INIT_PROBE")"
+          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-init.mjs" packages/eve "$runs" "$out" >"$out/init.jsonl"; then
+            echo "::warning::Init benchmark failed; its runs are recorded as missing."
           fi
 
       - name: Upload startup results
