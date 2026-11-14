@@ -6,6 +6,7 @@ import {
   type WorkflowToolAskRequest,
   type WorkflowToolRunMessage,
   type WorkflowToolRunOutcomeMessage,
+  type WorkflowToolRunRef,
   type WorkflowToolRunRequestMessage,
   type WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
@@ -28,6 +29,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
+import type { SessionStateMap } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {
@@ -106,14 +108,8 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  const { runId, taskId } = message.from;
-  const state = cursor.sessionState.snapshot.session.state;
-  if (
-    taskId !== undefined &&
-    (!isActiveTaskRun(readTaskTable(state), taskId, runId) ||
-      storedProjection(state).view?.tasks[taskId]?.status === "ended")
-  )
-    return;
+  const { runId } = message.from;
+  if (!isAwaitedRun(cursor.sessionState.snapshot.session.state, message.from)) return;
   const { request } = message;
   if (request.kind === "relay") {
     await deliverWorkflowRelay({ ...message, request }, async () => {
@@ -130,6 +126,21 @@ async function handleWorkflowToolRunRequest(
       workflowAsk: createWorkflowAskRoute(request),
       ...state,
     }),
+  );
+}
+
+/**
+ * Whether the session still waits on the run that sent a request. A run's request can arrive
+ * after the session stopped it, such as a question sent just before a cancel reached the run;
+ * nobody can answer it then.
+ */
+function isAwaitedRun(state: SessionStateMap | undefined, from: WorkflowToolRunRef): boolean {
+  const { runId, taskId } = from;
+  if (taskId === undefined)
+    return findBlockingWorkflowToolRun(state, from.callId, from.turnId)?.address.runId === runId;
+  return (
+    isActiveTaskRun(readTaskTable(state), taskId, runId) &&
+    storedProjection(state).view?.tasks[taskId]?.status !== "ended"
   );
 }
 
