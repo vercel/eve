@@ -26,7 +26,7 @@
     "@icons-pack/react-simple-icons": "13.15.1",
     "@streamdown/code": "2.0.0",
     "@vercel/analytics": "2.0.1",
-    "@vercel/geistdocs": "2.14.2",
+    "@vercel/geistdocs": "2.15.3",
     "@vercel/speed-insights": "2.1.0",
     "@vgpu/core": "0.0.7",
     "@vgpu/render": "0.0.7",
