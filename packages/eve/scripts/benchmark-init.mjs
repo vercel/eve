@@ -21,8 +21,9 @@ import { join, resolve } from "node:path";
 //
 // Per run, each timed from spawning npx:
 //   downloadMs       eve's first progress line ("Creating agent"): npx
-//                    fetching and installing eve and its dependencies, and
-//                    the CLI starting
+//                    downloading eve's dependencies, installing them with
+//                    eve, and the CLI starting; eve itself is the local
+//                    tarball, so its own download isn't included
 //   installMs        "Installing dependencies" to "Initializing Git": eve's
 //                    own install of the new project
 //   createdMs        "Created an eve agent": scaffold, install, and Git done
