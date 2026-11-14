@@ -38,6 +38,7 @@ import { remoteAnswers } from "#execution/proxied-deliver-step.js";
 import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol.js";
 import { protocolTwoAnswersSettledOnForward } from "#subagents/protocol-two-callback.js";
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
+import type { RelayedInteractionEvent } from "#channel/types.js";
 import type { SuspendedStep } from "#harness/session-machine/state.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -974,6 +975,99 @@ describe("routing answers", () => {
         },
       }).events,
     ).toEqual([]);
+  });
+
+  // #6158: two people's answers to one relayed approval are open here at once, Bob's first.
+  const twoForwarded = (order: readonly string[] = ["bob", "alice"]) => {
+    const parent = runningCall();
+    const mirrored = withPublished(
+      parent,
+      relay(viewOf(parent), {
+        payload: {
+          callId: "probe",
+          childSessionId: "child-1",
+          kind: "subagent-interaction",
+          subagentName: "deployer",
+          events: [
+            {
+              type: "interaction.opened",
+              data: {
+                interactionId: "approval-1",
+                subject: { turnId: "child-turn" },
+                request: { kind: "approval", prompt: "Deploy?" },
+              },
+            },
+          ],
+        },
+      }).events,
+    );
+    return withPublished(
+      mirrored,
+      order.flatMap((who): SessionEvent[] => [
+        { data: { deliveryId: `d-${who}` }, type: "delivery.admitted" },
+        {
+          data: { deliveryId: `d-${who}`, interactionId: "approval-1", responseId: `r-${who}` },
+          type: "response.submitted",
+        },
+      ]),
+    );
+  };
+  const childRelays = (session: HarnessSession, events: readonly RelayedInteractionEvent[]) =>
+    relay(viewOf(session), {
+      payload: {
+        callId: "probe",
+        childSessionId: "child-1",
+        events,
+        kind: "subagent-interaction",
+        subagentName: "deployer",
+      },
+    }).events;
+  const settledRows = (events: readonly SessionEvent[]) =>
+    events.flatMap((event) =>
+      event.type === "response.settled" ? [[event.data.responseId, event.data.outcome]] : [],
+    );
+
+  it.fails("never refuses a newer forwarded answer for a refusal that names no delivery", () => {
+    // A protocol-2 child refuses Bob's answer without naming its delivery.
+    const refused = childRelays(twoForwarded(), [
+      {
+        data: { interactionId: "approval-1", outcome: "refused", reason: "Not Bob." },
+        type: "response.settled",
+      },
+    ]);
+    expect(settledRows(refused)).not.toContainEqual(["r-alice", "refused"]);
+  });
+
+  it.fails("refuses no forwarded answer for a refusal naming a delivery it never forwarded", () => {
+    // A remote child names its own receipt for Bob's answer.
+    const refused = childRelays(twoForwarded(), [
+      {
+        data: {
+          deliveryId: "remote-receipt-1",
+          interactionId: "approval-1",
+          outcome: "refused",
+          reason: "Not Bob.",
+        },
+        type: "response.settled",
+      },
+    ]);
+    expect(settledRows(refused)).toEqual([]);
+  });
+
+  it.fails("credits the answer the child applied, not the newest one forwarded", () => {
+    // Alice's answer was forwarded first and the child applied it; Bob's arrived before it settled.
+    const settled = childRelays(twoForwarded(["alice", "bob"]), [
+      {
+        data: {
+          cause: { deliveryId: "d-alice" },
+          interactionId: "approval-1",
+          outcome: "accepted",
+        },
+        type: "interaction.settled",
+      },
+    ]);
+    expect(settledRows(settled)).toContainEqual(["r-alice", "applied"]);
+    expect(settledRows(settled)).not.toContainEqual(["r-bob", "applied"]);
   });
 });
 
