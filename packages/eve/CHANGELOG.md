@@ -1,5 +1,28 @@
 # eve
 
+## 1.0.0-rc.18
+
+Released 2026-11-14 · [Compare with 1.0.0-rc.17](https://github.com/vercel/eve/compare/eve%401.0.0-rc.17...eve%401.0.0-rc.18)
+
+### Features
+
+- Start eve commands faster by enabling Node's on-disk compile cache for the CLI process. ([#6423](https://github.com/vercel/eve/pull/6423))
+- Make `eve dev` agents ready sooner by loading eve's vendored dependencies from its install instead of bundling them into every development host. ([#6434](https://github.com/vercel/eve/pull/6434))
+- Start eve commands and `eve dev` agents faster by resolving eve's internal imports directly instead of through Node's package.json lookup. ([#6424](https://github.com/vercel/eve/pull/6424))
+- Show the `eve dev` prompt sooner by loading only the startup draft's modules before the first paint. ([#6433](https://github.com/vercel/eve/pull/6433))
+- Make the `eve dev` agent answer its first request sooner by loading the published generation in the worker as soon as the server starts. ([#6442](https://github.com/vercel/eve/pull/6442))
+- A new root session starts its first turn sooner: the workflow creates its initial state directly instead of in a separate durable step. ([#6421](https://github.com/vercel/eve/pull/6421))
+- A turn reuses the cancellation and steering controls an earlier turn left unaborted, so a message that arrives right after a turn no longer waits for new abort hooks. ([#6420](https://github.com/vercel/eve/pull/6420))
+- A followed session stream opens alongside its session check instead of after it, so its first lines arrive sooner. ([#6418](https://github.com/vercel/eve/pull/6418))
+- Session stream reads skip the earlier-eve version check for sessions the server created or already found current, so they start sooner. ([#6417](https://github.com/vercel/eve/pull/6417))
+- A turn settles without waiting for its model usage run attributes, which are now written behind it. ([#6419](https://github.com/vercel/eve/pull/6419))
+
+### Bug Fixes
+
+- Limit MCP tool validation feedback to ten issues and 4096 characters, and stop published tools' JSON Schema validation at the first failure. ([#6347](https://github.com/vercel/eve/pull/6347))
+- `defineWorkflowTool` now types the output that `endsTurn` and `toModelOutput` receive the way eve produces it.
+  A generator body's output includes its return value, not only its yields. A tool with an `outputSchema` gets that schema's output, as the definition `defineWorkflowTool` returns already does. ([#6430](https://github.com/vercel/eve/pull/6430))
+
 ## 1.0.0-rc.17
 
 Released 2026-11-13 · [Compare with 1.0.0-rc.16](https://github.com/vercel/eve/compare/eve%401.0.0-rc.16...eve%401.0.0-rc.17)
