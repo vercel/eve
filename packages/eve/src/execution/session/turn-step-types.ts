@@ -47,6 +47,12 @@ export interface TurnStepInput {
    * fail the turn, or cancel it when it was `stopped` meanwhile.
    */
   readonly recover?: { readonly error: { readonly name?: string }; readonly stopped?: true };
+  /**
+   * The host runs this step again after the process that ran it stopped: what that attempt
+   * wrote past the checkpoint is folded and recovered, as on a Workflow retry, whose attempt
+   * the step reads from Workflow's step metadata instead.
+   */
+  readonly rerun?: true;
 }
 
 /** The session state every step result carries. */

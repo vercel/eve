@@ -9,9 +9,9 @@ import type { ToolStubHost } from "#execution/tool-stub-host.js";
 
 // What a workflow tool run needs from the host it runs on: its own id, the hooks it listens on,
 // a clock, a way to resume the hooks others listen on, and the sessions its `ctx.agent` opens.
-// Workflow runs a run as a durable workflow (`tools/workflow/workflow-run-host.ts`); a host
-// without Workflow can run the same body its own way. The body and the run's owner loop read
-// only this.
+// Workflow runs a run as a durable workflow (`tools/workflow/workflow-run-host.ts`); the
+// in-process host runs the same body as a task in its process. The body and the run's owner
+// loop read only this.
 
 /** One address the run listens on: what arrives on it, in order. */
 export interface RunHook<T> extends AsyncIterable<T> {
