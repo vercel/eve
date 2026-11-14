@@ -1,9 +1,9 @@
 name: "Setup pnpm"
 description: >-
   Put package.json's pnpm on the PATH. pnpm/action-setup installs a bootstrap
-  pnpm with npm and then self-updates it to that version on every job (5-10 s
-  on Linux, about 25 s on Windows), so the installed pnpm is cached by version
-  and the action runs only when the cache misses. Every run restores the
+  pnpm with npm and then self-updates it to that version on every job (4-10 s
+  on Linux), so on Linux the installed pnpm is cached by version and the
+  action runs only when the cache misses. Every run restores the
   cache; only runs on main save it, as for the other caches.
 
 runs:
@@ -24,15 +24,18 @@ runs:
           );
         '
 
+    # Linux and macOS only: on Windows the restored pnpm fails from PowerShell
+    # ("The directory name is invalid"), so Windows always runs the action.
     - name: Restore pnpm
       id: cache
+      if: runner.os != 'Windows'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/setup-pnpm
         key: setup-pnpm-${{ runner.os }}-${{ steps.pnpm.outputs.version }}
 
     - name: Install pnpm
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: runner.os == 'Windows' || steps.cache.outputs.cache-hit != 'true'
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
     # The same PATH and PNPM_HOME pnpm/action-setup sets: the self-updated pnpm
@@ -51,7 +54,7 @@ runs:
     # Saved before any install, so the cache holds pnpm and not the packages
     # pnpm stores under PNPM_HOME on Linux.
     - name: Save pnpm
-      if: (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack') && steps.cache.outputs.cache-hit != 'true'
+      if: runner.os != 'Windows' && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack') && steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/setup-pnpm
