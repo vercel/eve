@@ -28,6 +28,13 @@ const MAX_CONCURRENT_TEMPLATES = 3;
 // These values satisfy build-time validation without granting service access.
 // Runtime requests still require the deployment's real configuration.
 const BUILD_ENV_BY_TEMPLATE = {
+  "kody-eve-template": {
+    LINEAR_CONNECTOR: "linear/template-ci",
+    REDIS_URL: "redis://127.0.0.1:6379",
+    RESEND_FROM_ADDRESS: "kody@example.com",
+    DIGEST_REPO: "acme/widgets",
+    DIGEST_EMAIL: "team@example.com",
+  },
   openinstinct: {
     DATABASE_URL: "postgresql://compatibility:compatibility@127.0.0.1:1/compatibility",
     KERNEL_API_KEY: "compatibility-build-only",
@@ -166,7 +173,7 @@ const checkVercelServices = async (template, destination) => {
       );
     }
     const serviceRoot = join(destination, service.root ?? ".");
-    if (existsSync(join(serviceRoot, "package.json"))) continue;
+    if (existsSync(join(serviceRoot, "package.json")) && !service.buildCommand) continue;
     if (!service.buildCommand) {
       throw new Error(
         `${label} has no package.json in ${service.root}, so Vercel cannot find the framework binary. Set buildCommand to run it from the root node_modules.`,
