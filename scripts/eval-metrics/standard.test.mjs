@@ -220,7 +220,10 @@ test("an attempt from before agent.started delegation measures nothing", () => {
       meta: { ...e.meta, id: `child:${e.meta.id}` },
     })),
   });
-  const { metrics } = deriveAttemptMetrics(artifact);
+  const { "overhead.slack_cold_start_ms": slack, ...metrics } =
+    deriveAttemptMetrics(artifact).metrics;
+  // The Slack cold start is the eval's log, not the session capture.
+  assert.equal(slack.reason, "no-slack-cold-start");
   assert.deepEqual(
     new Set(Object.values(metrics).map((m) => m.reason)),
     new Set(["legacy-delegation-events"]),
@@ -435,6 +438,39 @@ test("partial captures make attribution unavailable instead of guessing", () => 
   assert.equal(
     deriveAttemptMetrics(conflicting).metrics["counts.steps"].reason,
     "invalid-session-capture",
+  );
+});
+
+test("Slack cold start comes from the eval's log, not the session capture", () => {
+  const slack = (samples) =>
+    `EVE_SLACK_COLD_START_METRIC=${JSON.stringify({ schemaVersion: 1, samples })}`;
+  const withLogs = (logs, artifact = synthetic([])) => ({
+    ...artifact,
+    result: { ...artifact.result, logs },
+  });
+  const key = "overhead.slack_cold_start_ms";
+  const logged = deriveAttemptMetrics(
+    withLogs([
+      "trial 1/3",
+      slack([{ modelCallMs: 700 }, { modelCallMs: 640 }, { modelCallMs: 910 }]),
+    ]),
+  ).metrics[key];
+  assert.deepEqual(logged, { status: "measured", value: 700, count: 3, samples: [700, 640, 910] });
+  // A capture that can't be read loses the session metrics, not this one.
+  const noCapture = withLogs([slack([{ modelCallMs: 650 }])], { result: { status: "completed" } });
+  const metrics = deriveAttemptMetrics(noCapture).metrics;
+  assert.equal(metrics["latency.turn_ms"].reason, "missing-session-capture");
+  assert.equal(metrics[key].value, 650);
+  assert.deepEqual(Object.keys(metrics).sort(), Object.keys(STANDARD_METRICS).sort());
+  // Other evals log nothing; a Slack eval that measured no thread is a gap.
+  assert.equal(deriveAttemptMetrics(synthetic([])).metrics[key].reason, "no-slack-cold-start");
+  assert.equal(
+    deriveAttemptMetrics(withLogs([slack([])])).metrics[key].reason,
+    "no-slack-cold-start-samples",
+  );
+  assert.equal(
+    deriveAttemptMetrics(withLogs(["EVE_SLACK_COLD_START_METRIC={"])).metrics[key].reason,
+    "invalid-slack-cold-start-log",
   );
 });
 

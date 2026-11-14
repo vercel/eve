@@ -152,6 +152,11 @@ high-volume session execution and repeated session resumption respectively.
 Its parallel-tool-calls eval scripts ten tool calls into one model step and
 proves the durable runtime executes them concurrently, which a live model
 cannot guarantee because it may split the calls across steps.
+Its slack-cold-start eval benchmarks eve's Slack path: it posts signed
+`app_mention` webhooks that each start a new thread to the fixture's Slack
+channel, whose stubbed Slack answers every Web API call after 15 ms, and the
+mock model reports how long after the webhook arrived it was called. The eval
+logs those times for the benchmark's `overhead.slack_cold_start_ms`.
 
 ## Fixtures
 

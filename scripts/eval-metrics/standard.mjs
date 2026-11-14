@@ -27,7 +27,8 @@
 // response is framework time, as it is on /compare.
 //
 // Framework overhead (`overhead.*`, `session.*`, `durability.*`) is derived in
-// framework.mjs. Every metric has a scope: `model` metrics trend per model;
+// framework.mjs, except `overhead.slack_cold_start_ms`, which the Slack
+// cold-start eval measures on the server and logs (see slackColdStart below). Every metric has a scope: `model` metrics trend per model;
 // `framework` metrics trend per world and model class (mock or live), and the
 // `pooled` ones are normalized per unit of work, so live legs may pool them
 // across models.
@@ -101,6 +102,7 @@ export const STANDARD_METRICS = Object.freeze({
   "overhead.first_output_ms": framework("ms", "lower", { per: "turn", pooled: true }),
   "overhead.turn_ms": framework("ms", "lower", { per: "turn", pooled: true }),
   "overhead.tool_call_ms": framework("ms", "lower", { per: "batch", pooled: true }),
+  "overhead.slack_cold_start_ms": framework("ms", "lower", { per: "session", pooled: true }),
   "session.not_ready_ms": framework("ms", "lower", { per: "send", pooled: true }),
   "session.create_ms": framework("ms", "lower", { per: "session", pooled: true }),
   "durability.workflow_steps_per_turn": framework("ratio", "lower", { pooled: true }),
@@ -133,6 +135,12 @@ const TOOL_CAPABILITIES = new Set(["tool", "control"]);
  * }}
  */
 export function deriveAttemptMetrics(evalArtifact, { world } = {}) {
+  const logged = slackColdStart(evalArtifact);
+  const derived = deriveSessionMetrics(evalArtifact, { world });
+  return { ...derived, metrics: { ...derived.metrics, ...logged } };
+}
+
+function deriveSessionMetrics(evalArtifact, { world }) {
   const sessions = Array.isArray(evalArtifact?.result?.sessions)
     ? evalArtifact.result.sessions.filter((session) => typeof session?.sessionId === "string")
     : undefined;
@@ -175,6 +183,38 @@ export function deriveAttemptMetrics(evalArtifact, { world } = {}) {
     ...reliability(capture, indexes),
   };
   return { metrics_version: METRICS_VERSION, metrics, failures: failureCodes(capture, indexes) };
+}
+
+const SLACK_COLD_START_LOG_PREFIX = "EVE_SLACK_COLD_START_METRIC=";
+
+/**
+ * `overhead.slack_cold_start_ms`: Slack webhook arrival to the model call for
+ * an `app_mention` that starts a new thread, one sample per thread. The
+ * agent-workflow-stress Slack cold-start eval measures it on the server
+ * (both ends on the server's clock, with a stubbed Slack that answers each
+ * call after a fixed delay) and logs it, since nothing in the session stream
+ * marks the webhook's arrival. Evals that log nothing are not applicable.
+ */
+function slackColdStart(evalArtifact) {
+  const logs = Array.isArray(evalArtifact?.result?.logs) ? evalArtifact.result.logs : [];
+  const line = logs.findLast(
+    (log) => typeof log === "string" && log.includes(SLACK_COLD_START_LOG_PREFIX),
+  );
+  const key = "overhead.slack_cold_start_ms";
+  if (line === undefined) return { [key]: notApplicable("no-slack-cold-start") };
+  let samples;
+  try {
+    const logged = JSON.parse(
+      line.slice(line.indexOf(SLACK_COLD_START_LOG_PREFIX) + SLACK_COLD_START_LOG_PREFIX.length),
+    );
+    samples = (Array.isArray(logged?.samples) ? logged.samples : [])
+      .map((sample) => sample?.modelCallMs)
+      .filter((value) => Number.isFinite(value));
+  } catch {
+    return { [key]: unavailable("invalid-slack-cold-start-log") };
+  }
+  if (samples.length === 0) return { [key]: unavailable("no-slack-cold-start-samples") };
+  return { [key]: { status: "measured", value: median(samples), count: samples.length, samples } };
 }
 
 function everyMetric(measurement) {
