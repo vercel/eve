@@ -458,7 +458,13 @@ function internalContext(
 ): InternalContext {
   const frame = sessionFrameOf(ctx);
   const { history } = run;
-  const auth = createAuthorizationContext({ owner: definition.id, scope: DYNAMIC_AUTH_SCOPE });
+  const auth = createAuthorizationContext({
+    owner: definition.id,
+    scope: DYNAMIC_AUTH_SCOPE,
+    // A restore only reads the latest evaluation's results. The evaluation completes a pending
+    // sign-in, so the model call knows its token comes from that sign-in.
+    ...(run.mode === "restore" && { completeAuthorization: async () => false }),
+  });
   return Object.defineProperties(
     {
       ...frame,

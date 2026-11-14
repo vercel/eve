@@ -1,7 +1,7 @@
 // @linux-only: sign-in flow
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
@@ -177,6 +177,50 @@ describe("a dynamic model that needs a sign-in", () => {
   });
 });
 
+describe("a provider that rejects the token from sign-in", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["in the process that completed the sign-in", false],
+    ["in a fresh process", true],
+  ])("fails the turn without asking again, %s", async (_where, cold) => {
+    // Every step starts without built code, as a fresh process does.
+    if (cold) vi.stubEnv("EVE_DEFINITIONS_COLD", "1");
+    const billing = billingProvider({ token: "revoked-token" });
+    const runtime = await billingRuntime(`model-sign-in-refused-${cold}`, billing, {
+      rejectEveryToken: true,
+    });
+
+    await runtime.run(async () => {
+      const run = await startBillingRun(`http:model-sign-in-refused-${cold}`);
+      const stream = captureEvents(run);
+      try {
+        const asked = await stream.nextUntil("sign-in", isSignInOpened);
+        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [billingCallback(signInId(asked))],
+        });
+        const settled = await stream.nextUntil("refusal", isTurnSettled);
+        expect(settled.filter(isSignInOpened)).toEqual([]);
+        expect(billing.starts()).toBe(1);
+        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
+          { data: { outcome: "failed" } },
+        ]);
+        expect(JSON.stringify(filterEventsByType(settled, "turn.settled"))).toContain(
+          "rejected the token immediately after authorization",
+        );
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+});
+
 describe("dynamic values with plain providers", () => {
   it("gives each value its own provider's token", async () => {
     const seen: Record<string, string> = {};
@@ -282,7 +326,7 @@ function billingProvider(initial: { readonly token?: string } = {}): BillingProv
 async function billingRuntime(
   name: string,
   billing: BillingProvider,
-  options: { readonly bigFirstAnswer?: boolean } = {},
+  options: BilledModelOptions = {},
 ) {
   return await createTestRuntime({
     agent: {
@@ -300,11 +344,16 @@ async function billingRuntime(
   });
 }
 
+interface BilledModelOptions {
+  readonly bigFirstAnswer?: boolean;
+  readonly rejectEveryToken?: boolean;
+}
+
 function billedModel(
   ctx: DynamicModelContext,
   billing: BillingProvider,
   token: string,
-  options: { readonly bigFirstAnswer?: boolean },
+  options: BilledModelOptions,
 ) {
   return markMockModel(
     new MockLanguageModelV4({
@@ -315,6 +364,7 @@ function billedModel(
           return textStreamResult("Checkpoint: Alice asked for today's issues.");
         }
         billing.tokensSeen.push(token);
+        if (options.rejectEveryToken === true) ctx.requireAuth(billing.auth);
         if (options.bigFirstAnswer === true && billing.tokensSeen.length === 1) {
           return bigStreamResult("Here is the summary.");
         }
