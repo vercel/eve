@@ -341,6 +341,30 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
   );
 });
 
+test("a dev-startup run without a TUI measurement keeps its other metrics", (t) => {
+  const devStartupDir = mkdtempSync(join(tmpdir(), "eve-dev-startup-"));
+  t.after(() => rmSync(devStartupDir, { recursive: true, force: true }));
+  writeFileSync(join(devStartupDir, "meta.json"), JSON.stringify({ sha: SHA, runner_os: "Linux" }));
+  // Releases before the TUI probe, or runs where it failed, print no dev-tui line.
+  writeFileSync(
+    join(devStartupDir, "minimal.jsonl"),
+    JSON.stringify({ run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, firstTurnMs: 1100 }),
+  );
+  const dev = buildFrameworkRecords({
+    plan,
+    legs: readLegs(plan, legsDirectory(t)),
+    devStartupDir,
+    githubRunId: "123",
+    runAttempt: 1,
+  }).find((r) => r.probe === "dev-startup" && r.attempt === 1);
+  assert.equal(dev.missing, null);
+  assert.deepEqual(dev.metrics["dev_startup.prompt_visible_ms"], {
+    status: "unavailable",
+    reason: "missing-duration",
+  });
+  assert.deepEqual(dev.metrics["dev_startup.ready_ms"], { status: "measured", value: 900 });
+});
+
 test("excludes live-leg evals whose model steps all ran on another model", (t) => {
   const legsDir = legsDirectory(t);
   const leg = join(legsDir, "benchmark-leg-live__agent-tools__alpha__local__1");
