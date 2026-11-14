@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { statBuildInputs } from "#internal/nitro/host/dev-build-operations.js";
 import {
   claimReusableDevelopmentHost,
+  peekReusableDevelopmentHost,
   writeReusableDevelopmentHost,
 } from "#internal/nitro/host/dev-host-reuse.js";
 
@@ -38,6 +39,7 @@ async function keptHost(name = "kept") {
       bootstrapPath: join(rootDir, "artifacts", "compiled-artifacts-bootstrap.mjs"),
       workflowWorldPluginPath: join(rootDir, "artifacts", "compiled-artifacts-workflow-world.mjs"),
     },
+    environmentKey: "environment-1",
     key: "key-1",
     payload: {
       entry,
@@ -113,7 +115,11 @@ describe("claimReusableDevelopmentHost", () => {
     const host = await keptHost();
     await change(host);
 
-    expect(await claim(host.appRoot, key)).toEqual({ kind: "rebuilt", reason });
+    expect(await claim(host.appRoot, key)).toEqual({
+      kind: "rebuilt",
+      reason,
+      rootDir: host.rootDir,
+    });
     await expect(stat(host.rootDir)).rejects.toThrow();
   });
 });
@@ -174,5 +180,41 @@ describe("statBuildInputs", () => {
     const buildStartedAt = Date.now() - 1_000;
 
     expect(await statBuildInputs([input], rootDir, buildStartedAt)).toBeUndefined();
+  });
+});
+
+describe("peekReusableDevelopmentHost", () => {
+  it("returns the kept host without taking it while its environment and inputs match", async () => {
+    const { appRoot, record } = await keptHost();
+
+    expect(await peekReusableDevelopmentHost(appRoot, Promise.resolve("environment-1"))).toEqual(
+      record,
+    );
+    expect(await claim(appRoot, "key-1")).toEqual({ kind: "reused", host: record });
+  });
+
+  it("rules a kept host out when its environment or inputs changed", async () => {
+    const changedEnvironment = await keptHost();
+    expect(
+      await peekReusableDevelopmentHost(
+        changedEnvironment.appRoot,
+        Promise.resolve("environment-2"),
+      ),
+    ).toBeUndefined();
+
+    const changedInput = await keptHost();
+    await writeFile(changedInput.input, "export const value = 22;\n");
+    expect(
+      await peekReusableDevelopmentHost(changedInput.appRoot, Promise.resolve("environment-1")),
+    ).toBeUndefined();
+  });
+
+  it("leaves a rejected host an early worker runs from for its retirement to remove", async () => {
+    const { appRoot, rootDir } = await keptHost();
+
+    expect(await claimReusableDevelopmentHost(appRoot, Promise.resolve("key-2"), rootDir)).toEqual(
+      expect.objectContaining({ kind: "rebuilt", rootDir }),
+    );
+    await expect(stat(rootDir)).resolves.toBeDefined();
   });
 });

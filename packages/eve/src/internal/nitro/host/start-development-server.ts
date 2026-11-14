@@ -8,10 +8,14 @@ import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-autho
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import {
   claimReusableDevelopmentHost,
+  computeDevelopmentHostEnvironmentKey,
   computeDevelopmentHostReuseKey,
   DEVELOPMENT_HOST_REUSE_ENV,
+  peekReusableDevelopmentHost,
+  type ReusableDevelopmentHost,
   writeReusableDevelopmentHost,
 } from "#internal/nitro/host/dev-host-reuse.js";
+import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
@@ -124,7 +128,7 @@ function addDevelopmentControlHandler(input: {
   readonly appRoot: string;
   readonly devServer: DevHostSupervisor;
   readonly getWatcher: () => AuthoredSourceWatcherHandle | undefined;
-  readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
+  readonly workflowWorld: Promise<ParentDevelopmentWorkflowWorld | undefined>;
   readonly transportSecret: string;
 }): void {
   input.devServer.setControlHandler(async (request) => {
@@ -133,7 +137,7 @@ function addDevelopmentControlHandler(input: {
       secret: input.transportSecret,
     });
     if (credentialResponse !== undefined) return credentialResponse;
-    const worldResponse = await input.workflowWorld?.handleRequest(request);
+    const worldResponse = await (await input.workflowWorld)?.handleRequest(request);
     if (worldResponse !== undefined) {
       return worldResponse;
     }
@@ -343,51 +347,17 @@ async function startNitroDevelopmentServer(
   let initialGenerationPublished = false;
   let initialWorkspaceTransferred = false;
   let closing = false;
+  const workflowWorldReady = Promise.withResolvers<ParentDevelopmentWorkflowWorld | undefined>();
+  void workflowWorldReady.promise.catch(() => undefined);
 
   try {
-    const compiledHost = await devBootPhase(
-      "compiling agent",
-      () => build.prepare({ appRoot: project.appRoot, developmentExtensions }),
-      options.onBootProgress,
+    // A kept host's check needs no compiled agent, so a host that still looks
+    // reusable boots its worker while the agent compiles. Workers copy
+    // `process.env` when they start, so the port binds first.
+    const environmentKey = computeDevelopmentHostEnvironmentKey(project.appRoot).catch(
+      () => undefined,
     );
-    cleanup.defer(async () => {
-      if (!initialWorkspaceTransferred) {
-        await removeDevelopmentHostWorkspace(compiledHost.workspace);
-      }
-    });
-    // An unchanged host from the previous run skips the host build. Like a
-    // runtime-only rebuild, the new generation runs on the kept host's workspace.
-    // The key is needed only to check a kept host now and to keep this one at exit.
-    const reuseKey = computeDevelopmentHostReuseKey(compiledHost).catch(() => undefined);
-    const claim = await claimReusableDevelopmentHost(project.appRoot, reuseKey);
-    const reusable = claim.kind === "reused" ? claim.host : undefined;
-    if (claim.kind === "reused") {
-      console.info(
-        `[eve:dev] reusing the dev host from the last run; set ${DEVELOPMENT_HOST_REUSE_ENV}=0 to rebuild it every start.`,
-      );
-    } else if (claim.kind === "rebuilt") {
-      console.info(`[eve:dev] rebuilding the dev host because ${claim.reason}.`);
-    }
-    cleanup.defer(async () => {
-      if (!initialWorkspaceTransferred && reusable !== undefined) {
-        await removeDevelopmentHostWorkspace(reusable.workspace);
-      }
-    });
-    const preparedHost =
-      reusable === undefined
-        ? compiledHost
-        : {
-            ...compiledHost,
-            compiledArtifacts: reusable.compiledArtifacts,
-            workflowBuildDir: reusable.workflowBuildDir,
-            workspace: reusable.workspace,
-          };
-    cleanup.defer(async () => {
-      if (!initialGenerationPublished) {
-        await discardDevelopmentGeneration(preparedHost.generation);
-      }
-    });
-    pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
+    const peeked = await peekReusableDevelopmentHost(project.appRoot, environmentKey);
     const devServer = new DevHostSupervisor();
     cleanup.defer(async () => {
       try {
@@ -403,17 +373,8 @@ async function startNitroDevelopmentServer(
       project.appRoot,
       workflowTransportSecret,
     );
-    const workflowWorld = createDevelopmentWorkflowWorld({
-      appRoot: project.appRoot,
-      preparedHost,
-      resume: options.resume,
-      transportSecret: workflowTransportSecret,
-    });
-    if (workflowWorld !== undefined) {
-      cleanup.defer(async () => await workflowWorld.close());
-    }
-    const onRuntimePruned =
-      workflowWorld === undefined ? undefined : () => workflowWorld.reconcileExpiredRuns();
+    // World requests wait for the World, which needs the compiled agent.
+    cleanup.defer(() => workflowWorldReady.resolve(undefined));
     // Parent-owned control routes must answer before the World starts: queue
     // redelivery begins at start(), and a delivery's World calls would
     // otherwise fall through to the worker and 404.
@@ -421,7 +382,7 @@ async function startNitroDevelopmentServer(
       appRoot: project.appRoot,
       devServer: devServer,
       getWatcher: () => authoredSourceWatcher,
-      workflowWorld,
+      workflowWorld: workflowWorldReady.promise,
       transportSecret: workflowTransportSecret,
     });
     const hostname = options.host ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
@@ -450,44 +411,162 @@ async function startNitroDevelopmentServer(
       appRoot: project.appRoot,
       serverUrl,
     });
+
+    // The peeked host stays its record's until this run takes and rejects it,
+    // or takes it to serve. Another server may take it first.
+    let peekedHost: "pending" | "removable" = "pending";
+    let peekedReleased = false;
+    let keptHost: Omit<ReusableDevelopmentHost, "environmentKey" | "key"> | undefined;
+    let reuseKey: Promise<string | undefined> = Promise.resolve(undefined);
+    const disposeHost = (workspace: DevelopmentHostWorkspace) => async () => {
+      if (closing && keptHost?.workspace.rootDir === workspace.rootDir) {
+        const [key, environment] = await Promise.all([reuseKey, environmentKey]);
+        if (key !== undefined) {
+          await writeReusableDevelopmentHost(
+            { ...keptHost, environmentKey: environment, key },
+            project.appRoot,
+          );
+          return;
+        }
+      }
+      if (workspace.rootDir === peeked?.workspace.rootDir && peekedHost === "pending") {
+        peekedReleased = true;
+        return;
+      }
+      await removeDevelopmentHostWorkspace(workspace);
+    };
+    const releaseTraffic = devServer.holdTraffic();
+    const earlyWorker =
+      peeked === undefined
+        ? undefined
+        : devServer.swapTo({
+            dispose: disposeHost(peeked.workspace),
+            entry: peeked.payload.entry,
+            workerData: peeked.payload.workerData,
+          });
+    void earlyWorker?.catch(() => undefined);
+
+    const compiledHost = await devBootPhase(
+      "compiling agent",
+      () => build.prepare({ appRoot: project.appRoot, developmentExtensions }),
+      options.onBootProgress,
+    );
+    cleanup.defer(async () => {
+      if (!initialWorkspaceTransferred) {
+        await removeDevelopmentHostWorkspace(compiledHost.workspace);
+      }
+    });
+    // An unchanged host from the previous run skips the host build. Like a
+    // runtime-only rebuild, the new generation runs on the kept host's workspace.
+    reuseKey = computeDevelopmentHostReuseKey(compiledHost, environmentKey).catch(() => undefined);
+    const claim = await claimReusableDevelopmentHost(
+      project.appRoot,
+      reuseKey,
+      peeked?.workspace.rootDir,
+    );
+    const reusable = claim.kind === "reused" ? claim.host : undefined;
+    if (claim.kind === "reused") {
+      console.info(
+        `[eve:dev] reusing the dev host from the last run; set ${DEVELOPMENT_HOST_REUSE_ENV}=0 to rebuild it every start.`,
+      );
+    } else if (claim.kind === "rebuilt") {
+      console.info(`[eve:dev] rebuilding the dev host because ${claim.reason}.`);
+    }
+    const earlyWorkerHost =
+      peeked !== undefined && reusable?.workspace.rootDir === peeked.workspace.rootDir;
+    if (
+      peeked !== undefined &&
+      claim.kind === "rebuilt" &&
+      claim.rootDir === peeked.workspace.rootDir
+    ) {
+      peekedHost = "removable";
+      if (peekedReleased) await removeDevelopmentHostWorkspace(peeked.workspace);
+    }
+    // A host this run will not serve must not hold up the one it builds.
+    if (earlyWorker !== undefined && !earlyWorkerHost) devServer.abandonCandidate();
+    cleanup.defer(async () => {
+      if (!initialWorkspaceTransferred && reusable !== undefined) {
+        await removeDevelopmentHostWorkspace(reusable.workspace);
+      }
+    });
+    const preparedHost =
+      reusable === undefined
+        ? compiledHost
+        : {
+            ...compiledHost,
+            compiledArtifacts: reusable.compiledArtifacts,
+            workflowBuildDir: reusable.workflowBuildDir,
+            workspace: reusable.workspace,
+          };
+    cleanup.defer(async () => {
+      if (!initialGenerationPublished) {
+        await discardDevelopmentGeneration(preparedHost.generation);
+      }
+    });
+    pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
+    let workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
+    try {
+      workflowWorld = createDevelopmentWorkflowWorld({
+        appRoot: project.appRoot,
+        preparedHost,
+        resume: options.resume,
+        transportSecret: workflowTransportSecret,
+      });
+    } catch (error) {
+      workflowWorldReady.reject(error);
+      throw error;
+    }
+    workflowWorldReady.resolve(workflowWorld);
+    if (workflowWorld !== undefined) {
+      const world = workflowWorld;
+      cleanup.defer(async () => await world.close());
+    }
+    const onRuntimePruned =
+      workflowWorld === undefined ? undefined : () => workflowWorld?.reconcileExpiredRuns();
     await devBootPhase(
       "building dev bundle",
       async () => {
+        // The early worker serves the claimed host unless it failed to start,
+        // in which case the kept files remain for a normal start.
+        const earlyWorkerServes =
+          earlyWorkerHost &&
+          (await earlyWorker!.then(
+            () => true,
+            () => false,
+          ));
+        // From here the claimed host is this run's, and its retirement removes it.
+        if (earlyWorkerHost) peekedHost = "removable";
         const payload = reusable?.payload ?? (await build.buildHost(preparedHost));
         build.close();
-        // Publish before the first worker goes live. The supervisor holds
-        // requests until then, and with no generation published they would
-        // read artifacts from the app root, which `eve dev` never writes.
+        const workspace = preparedHost.workspace;
+        // Kept when the server closes with it still active, for the next start.
+        keptHost = {
+          compiledArtifacts: preparedHost.compiledArtifacts,
+          payload,
+          workflowBuildDir: preparedHost.workflowBuildDir,
+          workspace,
+        };
+        // Publish before a client can reach the worker. With no generation
+        // published, requests would read artifacts from the app root, which
+        // `eve dev` never writes.
         await activateDevelopmentGeneration({
           appRoot: preparedHost.appRoot,
           generation: preparedHost.generation,
         });
         initialGenerationPublished = true;
-        const workspace = preparedHost.workspace;
         if (reusable !== undefined) await removeDevelopmentHostWorkspace(compiledHost.workspace);
         initialWorkspaceTransferred = true;
-        await devServer.swapTo({
-          // Kept when the server closes with it still active, for the next start.
-          dispose: async () => {
-            const key = closing ? await reuseKey : undefined;
-            if (key !== undefined) {
-              await writeReusableDevelopmentHost(
-                {
-                  compiledArtifacts: preparedHost.compiledArtifacts,
-                  key,
-                  payload,
-                  workflowBuildDir: preparedHost.workflowBuildDir,
-                  workspace,
-                },
-                project.appRoot,
-              );
-              return;
-            }
-            await removeDevelopmentHostWorkspace(workspace);
-          },
-          entry: payload.entry,
-          workerData: payload.workerData,
-        });
+        if (!earlyWorkerServes) {
+          await devServer.swapTo({
+            dispose: disposeHost(workspace),
+            entry: payload.entry,
+            workerData: payload.workerData,
+          });
+        }
+        // Worker traffic waits for the published generation on the host this
+        // run serves, so neither the previous generation nor a rejected early
+        // host answers a client.
+        releaseTraffic();
       },
       options.onBootProgress,
     );

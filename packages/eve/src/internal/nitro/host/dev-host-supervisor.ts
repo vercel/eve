@@ -118,6 +118,14 @@ export class DevHostSupervisor implements DevHostSwitch {
     };
   }
 
+  /**
+   * Stops the worker a swap is still waiting on, so that swap rejects instead
+   * of waiting out readiness for a host the caller no longer wants.
+   */
+  abandonCandidate(): void {
+    void this.#candidate?.runner.close(new Error("Development worker candidate was abandoned."));
+  }
+
   setControlHandler(handler: (request: Request) => Promise<Response | undefined>): void {
     this.#controlHandler = handler;
   }
