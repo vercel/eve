@@ -20,9 +20,10 @@ const TEST_CALLBACK_BASE_URL = "http://test-session.in-process";
 /**
  * Which host a session test runs its sessions on. `in-process` keeps them in memory, unless
  * `EVE_TEST_IN_PROCESS_VARIANT` says otherwise (`in-process-runtime.ts`);
- * `in-process-world-restart` keeps them on a World and restarts the host at every rest.
+ * `in-process-world-restart` keeps them on a World and restarts the host at every rest; `world`
+ * runs them on a World host, only in the activations its queue delivers.
  */
-export type TestSessionHostKind = "workflow" | "in-process" | "in-process-world-restart";
+export type TestSessionHostKind = "workflow" | "in-process" | "in-process-world-restart" | "world";
 
 /** A started session, as Workflow's run handle names it. */
 export interface TestSessionRun {
@@ -68,6 +69,7 @@ export async function startTestSession(
     { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
     {
       ...(host === "in-process-world-restart" && { variant: "world-restart" as const }),
+      ...(host === "world" && { variant: "world-host" as const }),
       callbackBaseUrl: options.callbackBaseUrl ?? TEST_CALLBACK_BASE_URL,
       ...(options.stepFaults !== undefined && { stepFaults: options.stepFaults }),
     },
