@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -12,8 +12,13 @@ import { promisify } from "node:util";
 //
 // Sizes are apparent sizes (the sum of file lengths, not disk blocks), so
 // they don't depend on the runner's filesystem. The tarball and unpacked
-// sizes are eve alone; the install sizes are eve plus every dependency and
-// required peer npm installs with it.
+// sizes are eve alone and exact per commit. The install sizes are eve plus
+// every dependency and required peer npm installs with it, resolved from the
+// registry on the day the job runs: a dependency release (a new `ai` 7.x, say)
+// moves them with no eve change, and a release backfill installs today's
+// dependencies, not the ones the release shipped with. Each run line lists
+// every installed `name@version`, so a jump can be traced to eve or to a
+// dependency.
 //
 // One JSON object per line: a header, then one result per run.
 //
@@ -81,7 +86,11 @@ for (let run = 1; run <= runs; run++) {
   const packages = await installedPackages(modules);
   const largest = (
     await Promise.all(
-      packages.map(async ({ name, dir }) => ({ name, bytes: (await treeSize(dir, true)).bytes })),
+      packages.map(async ({ name, version, dir }) => ({
+        name,
+        version,
+        bytes: (await treeSize(dir, true)).bytes,
+      })),
     )
   )
     .sort((a, b) => b.bytes - a.bytes)
@@ -98,6 +107,7 @@ for (let run = 1; run <= runs; run++) {
       installFiles: installed.files,
       installPackages: packages.length,
       largest,
+      installed: packages.map(({ name, version }) => `${name}@${version}`).sort(),
     }),
   );
   // The next run starts from nothing; only the tarball is kept.
@@ -139,7 +149,7 @@ async function treeSize(dir, ownOnly = false) {
   return { bytes, files };
 }
 
-/** Every installed package (a directory with a package.json), nested copies included. */
+/** Every installed package (a directory with a package.json) and its version, nested copies included. */
 async function installedPackages(modules) {
   const found = [];
   const visit = async (dir) => {
@@ -159,11 +169,12 @@ async function installedPackages(modules) {
         : [entry.name];
       for (const name of names) {
         const packageDir = join(dir, name);
-        const hasManifest = await stat(join(packageDir, "package.json")).then(
-          () => true,
-          () => false,
+        const manifest = await readFile(join(packageDir, "package.json"), "utf8").then(
+          (text) => JSON.parse(text),
+          () => undefined,
         );
-        if (hasManifest) found.push({ name, dir: packageDir });
+        if (manifest !== undefined)
+          found.push({ name, version: String(manifest.version ?? "unknown"), dir: packageDir });
         await visit(join(packageDir, "node_modules"));
       }
     }
