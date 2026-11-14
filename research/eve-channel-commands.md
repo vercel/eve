@@ -18,8 +18,9 @@ The work lands as a stack:
 
 1. The command API, the eve channel routes, the client, and the TUI as a consumer. The TUI keeps
    its own `/new`, `/clear`, `/compact`, and `/cancel`.
-2. Those four controls move onto the API as `sessionCommands`, the eve channel's default
-   commands. This shows the API can express what the built-ins did.
+2. `/new`, `/clear`, and `/compact` move onto the API as `sessionCommands`, the eve channel's
+   default commands. This shows the API can express what the built-ins did. `/cancel` stays with
+   each client, which knows the turn it's showing.
 
 Slack is deliberately out of scope for now; see [Later](#later).
 
@@ -48,8 +49,11 @@ export const escalate = defineCommand({
 ```ts title="agent/channels/eve.ts"
 export default eveChannel({ auth, commands: { escalate } });
 
-// After the second PR, omitting `commands` offers `sessionCommands`:
-export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
+// After the second PR, a record adds to `sessionCommands`; a function changes or drops them:
+export default eveChannel({
+  auth,
+  commands: ({ clear, compact }) => ({ clear, compact, escalate }),
+});
 ```
 
 **Commands and names**
@@ -86,8 +90,11 @@ export default eveChannel({ auth, commands: { ...sessionCommands, escalate } });
 
 **Defaults (second PR)**
 
-- `sessionCommands` is `{ new (alias reset), clear, compact, cancel }`.
-- `eveChannel()` offers them when `commands` is omitted. Passing `commands` replaces them.
+- `sessionCommands` is `{ new (alias reset), clear, compact }`. Cancelling stays with each client,
+  which knows the turn it's showing: the TUI's `/cancel`, Web Chat's Stop button.
+- `eveChannel()` always offers them. A `commands` record adds to them, and a same-named entry
+  replaces one. `commands: (defaults) => …` returns the full set, to drop or rename defaults. The
+  function form is also the hook extensions would use to contribute commands later.
 
 ## Wire protocol
 

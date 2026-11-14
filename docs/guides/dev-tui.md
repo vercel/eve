@@ -18,10 +18,7 @@ The transcript stays in your terminal scrollback after you exit. Before your fir
 | Command     | Description                                                                                                                                                  |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/model`    | Choose the model, speed, and reasoning. Pass a model ID to set it directly: `/model provider/model-id`.                                                      |
-| `/new`      | Start a fresh session and clear the screen. `/reset` is an alias.                                                                                            |
-| `/clear`    | Cancel the running turn and every working task, then clear the session's model-message history and keep the session.                                         |
-| `/compact`  | Compact the current session's context.                                                                                                                       |
-| `/cancel`   | Cancel the current turn and keep the context from work that already finished.                                                                                |
+| `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
 | `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
 | `/add`      | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to install it directly: `/add channel/slack`. |
 | `/deploy`   | Deploy the agent to Vercel production. Installs the Vercel CLI, signs in, and links the directory if needed.                                                 |
@@ -35,7 +32,15 @@ The transcript stays in your terminal scrollback after you exit. Before your fir
 
 A [stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) accepts no new messages or approvals. When a message or a stream reconnect reaches one, the TUI says why and, when known, which eve version built it. Run `/new` to end it; your next message starts a fresh session. `/clear` is refused because it would keep the stranded session. A message accepted before the upgrade is not redelivered. A session from an earlier `eve dev` process built by the same eve version is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery).
 
-The agent can add its own commands through the [eve channel's `commands`](../channels/eve#slash-commands). They appear after the built-in commands, locally and through `eve remote connect`, and refresh when the agent reloads.
+The agent adds its own commands through the [eve channel's `commands`](../channels/eve#slash-commands). They appear after the built-in commands, locally and through `eve remote connect`, and refresh when the agent reloads. The default eve channel offers these conversation commands:
+
+| Command    | Description                                                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| `/new`     | End the session and start a fresh one. `/reset` is an alias.                                                         |
+| `/clear`   | Cancel the running turn and every working task, then clear the session's model-message history and keep the session. |
+| `/compact` | Compact the current session's context.                                                                               |
+
+An agent's own `commands` add to these. `/cancel`, Esc, and Ctrl+C are the TUI's own and cancel a running turn whatever commands the agent offers.
 
 ## Set up a new agent
 
