@@ -28,7 +28,8 @@
 //
 // Framework overhead (`overhead.*`, `session.*`, `durability.*`) is derived in
 // framework.mjs, except `overhead.slack_cold_start_ms`, which the Slack
-// cold-start eval measures on the server and logs (see slackColdStart below). Every metric has a scope: `model` metrics trend per model;
+// cold-start eval measures on the server and logs (see slackColdStart below).
+// Every metric has a scope: `model` metrics trend per model;
 // `framework` metrics trend per world and model class (mock or live), and the
 // `pooled` ones are normalized per unit of work, so live legs may pool them
 // across models.
@@ -194,6 +195,12 @@ const SLACK_COLD_START_LOG_PREFIX = "EVE_SLACK_COLD_START_METRIC=";
  * (both ends on the server's clock, with a stubbed Slack that answers each
  * call after a fixed delay) and logs it, since nothing in the session stream
  * marks the webhook's arrival. Evals that log nothing are not applicable.
+ *
+ * "Cold" means a new thread with no session yet, not a cold process: the
+ * clock starts when the webhook verifier runs, after the receiving instance
+ * has booted and read the body, so that instance's boot is not counted. The
+ * value is the median, so a slow first trial (first use of the Slack path in
+ * the process) drops out of it but stays in `samples`.
  */
 function slackColdStart(evalArtifact) {
   const logs = Array.isArray(evalArtifact?.result?.logs) ? evalArtifact.result.logs : [];

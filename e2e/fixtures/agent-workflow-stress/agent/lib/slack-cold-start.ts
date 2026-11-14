@@ -3,7 +3,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // The Slack cold-start benchmark: an `app_mention` that starts a new thread,
 // timed on the server from the webhook's arrival to the model call. Slack is
 // a stub that answers every Web API method after a fixed delay, so the time
-// is eve's, with Slack's latency held constant. On a hosted world the model
+// is eve's, with Slack's latency held constant. "Cold" is the thread's: the
+// clock starts in the webhook verifier, so the receiving instance's own boot
+// and body read come before it. On a hosted world the model
 // may run on another instance than the webhook did; their clocks agree to
 // within NTP sync.
 
