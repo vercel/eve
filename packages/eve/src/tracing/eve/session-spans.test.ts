@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { commitOf } from "#harness/session-machine/commit.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import {
@@ -756,10 +758,13 @@ describe("a session's spans, from its committed lines", () => {
   it.each(["production", "preview"] as const)(
     "openinstinct exports metadata, not private profile or conversation bodies in %s",
     async (environment) => {
-      const templatePath = new URL(
-        "../../../../../apps/templates/openinstinct/agent/instrumentation/otel.ts",
-        import.meta.url,
-      ).href;
+      // A filesystem path stays in Vitest's mocked graph; a file: URL can use native ESM.
+      const templatePath = fileURLToPath(
+        new URL(
+          "../../../../../apps/templates/openinstinct/agent/instrumentation/otel.ts",
+          import.meta.url,
+        ),
+      );
       const authored: { default: unknown } = await import(templatePath);
       if (!isOtelDeclaration(authored.default)) throw new Error("Expected OTel settings");
       const { commit, spans } = session(
