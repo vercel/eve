@@ -417,6 +417,7 @@ describe("delivery idempotency", () => {
           await dispatcher.triggerCollection({
             collectionId: "digests",
             definition,
+            namespace: "eve-digests",
             occurrence: occurrence(scheduleId),
             payload: createScheduleCollectionPayload({
               application: "fixture",

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { loadContext } from "#context/container.js";
@@ -9,14 +10,26 @@ import {
   SessionIdKey,
   ContinuationTokenKey,
   ChannelInstrumentationKey,
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  ScheduleNamespaceKey,
 } from "#context/keys.js";
-import type { DefinedDynamicSchedules, ScheduleClient } from "#public/schedules/subscription.js";
+import type {
+  DefinedDynamicSchedules,
+  ScheduleClient,
+  ScheduleHandle,
+} from "#public/schedules/subscription.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { namedScopeDefinition } from "#runtime/schedules/named-scope.js";
 import {
   createScheduleCollectionClient,
+  scheduledRunsRuntime,
   type ScheduleCollectionClient,
 } from "#runtime/schedules/collection-client.js";
+import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
+import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
+import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 /**
  * Binds a dynamic schedules definition to a client whose scope is authorized on every operation.
@@ -74,4 +87,48 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
     application: identity.application,
     collection: identity.collection,
   });
+}
+
+/**
+ * The dynamic schedule whose occurrence started this session, or `undefined` when no dynamic
+ * schedule started it. `disable()` pauses the schedule's future runs and `delete()` removes it,
+ * like the handle in `run`. Neither calls `scope`: the session reaches only the schedule that
+ * started it.
+ *
+ * @example
+ * ```ts
+ * const schedule = await currentSchedule();
+ * await schedule?.disable();
+ * ```
+ */
+export async function currentSchedule(): Promise<ScheduleHandle | undefined> {
+  const context = loadContext();
+  const collection = context.get(ScheduleIdKey);
+  const name = context.get(ScheduleInstanceKey);
+  const namespace = context.get(ScheduleNamespaceKey);
+  if (collection === undefined || name === undefined || namespace === undefined) return undefined;
+  const bundle = requireCompiledBundle(context);
+  const manifest = await loadCompiledManifest({
+    compiledArtifactsSource: bundle.compiledArtifactsSource,
+  });
+  const definition = await loadScheduleCollectionDefinition(bundle, collection, { manifest });
+  const providerContext = () =>
+    createScheduleProviderContext({
+      abortSignal: new AbortController().signal,
+      application: manifest.config.name,
+      bundle: () => bundle,
+      collection,
+      definition,
+      namespace,
+      operationId: randomUUID(),
+      runtime: () => scheduledRunsRuntime(bundle),
+    });
+  return {
+    async disable() {
+      await definition.provider.disable(providerContext(), name);
+    },
+    async delete() {
+      await definition.provider.delete(providerContext(), name);
+    },
+  };
 }

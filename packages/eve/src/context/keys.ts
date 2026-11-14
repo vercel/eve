@@ -111,6 +111,8 @@ export const OccurrenceIdKey = new ContextKey<string>("eve.scheduleOccurrenceId"
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 export const ScheduleInstanceKey = new ContextKey<string>("eve.scheduleInstance");
+/** Provider namespace of the dynamic schedule whose occurrence started this session. */
+export const ScheduleNamespaceKey = new ContextKey<string>("eve.scheduleNamespace");
 /** Display title derived from the session's initial input. */
 export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");

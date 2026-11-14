@@ -16,7 +16,13 @@ import type {
   SessionCommandResult,
 } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
+import {
+  AuthKey,
+  OccurrenceIdKey,
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  ScheduleNamespaceKey,
+} from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
 import type {
@@ -69,6 +75,8 @@ export interface ScheduleDispatchResult {
 export interface ScheduleCollectionDispatchInput {
   readonly collectionId: string;
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
+  /** The provider namespace of the schedule that fired the occurrence. */
+  readonly namespace: string;
   readonly payload: ScheduleCollectionPayload<unknown>;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly schedule: DynamicSchedulesRunArgs<unknown>["schedule"];
@@ -141,6 +149,7 @@ export class ScheduleDispatcher {
     scope.set(AuthKey, auth);
     scope.set(OccurrenceIdKey, occurrence.executionId);
     scope.set(ScheduleInstanceKey, occurrence.name);
+    scope.set(ScheduleNamespaceKey, input.namespace);
     // A scheduled send must not steer a conversation it didn't start, so it never reaches the
     // channel's address. A keyed send gets an address of its own, scoped to this schedule, so a
     // retried callback reaches the session its first attempt started.

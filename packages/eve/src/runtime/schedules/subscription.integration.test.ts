@@ -13,10 +13,15 @@ import {
   type ApprovalPolicy,
 } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
-import { AuthKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  ScheduleNamespaceKey,
+} from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
-import { schedules } from "#public/experimental/schedules/client.js";
+import { currentSchedule, schedules } from "#public/experimental/schedules/client.js";
 import { byPrincipal } from "#public/schedules/scope.js";
 import { declared } from "#runtime/types.js";
 import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
@@ -550,6 +555,45 @@ describe("schedule creation and invocation", () => {
         payload: { author: "bob", message: "Bob's reminder" },
         scope: "shared",
       });
+    });
+  });
+
+  it("lets a session from an occurrence disable the schedule that started it", async () => {
+    const started: { key: { name: string }; value: string | undefined }[] = [];
+    const subscription = defineDynamicSchedules({
+      inputSchema: z.object({ task: z.string() }).strict(),
+      provider: inMemoryScheduleProvider(),
+      tool: false,
+      scope: () => "shared",
+      auth: () => alice,
+      // The occurrence's sessions inherit these keys from the dispatch scope.
+      run: () => {
+        const context = loadContext();
+        for (const key of [ScheduleIdKey, ScheduleInstanceKey, ScheduleNamespaceKey])
+          started.push({ key, value: context.get(key) });
+      },
+    });
+    const app = await createTestRuntime({
+      modules: [
+        {
+          logicalPath: "schedules/reminders.ts",
+          loadNamespace: async () => ({ default: subscription }),
+        },
+      ],
+    });
+    await app.runAsSession(undefined, async () => {
+      await bindCaller();
+      expect(await currentSchedule()).toBeUndefined();
+      const client = await schedules(subscription);
+      const created = await client.create({
+        name: "daily",
+        expression: { type: "delay", minutes: 5 },
+        payload: { task: "Stand up" },
+      });
+      await client.invoke(created.name);
+      for (const { key, value } of started) loadContext().set(key as never, value as never);
+      await (await currentSchedule())!.disable();
+      expect(await client.get(created.name)).toMatchObject({ state: "inactive" });
     });
   });
 });

@@ -19,6 +19,7 @@ import {
   ParentTraceContextKey,
   ScheduleIdKey,
   ScheduleInstanceKey,
+  ScheduleNamespaceKey,
   EarlierRemoteCallerKey,
   SessionCallbackKey,
   SessionTitleKey,
@@ -103,6 +104,8 @@ export function buildRunContext(input: {
   if (scheduleId !== undefined) {
     ctx.set(ScheduleIdKey, scheduleId);
   }
+  const scheduleNamespace = contextStorage.getStore()?.get(ScheduleNamespaceKey);
+  if (scheduleNamespace !== undefined) ctx.set(ScheduleNamespaceKey, scheduleNamespace);
 
   if (run.delivery !== undefined) {
     ctx.set(ChannelDeliveryKey, run.delivery);

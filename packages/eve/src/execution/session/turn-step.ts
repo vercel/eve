@@ -16,6 +16,7 @@ import {
   AuthKey,
   ScheduleIdKey,
   ScheduleInstanceKey,
+  ScheduleNamespaceKey,
   OccurrenceIdKey,
   InitiatorAuthKey,
   SessionTitleKey,
@@ -267,6 +268,7 @@ async function runSessionStepBody(
   if (delivery?.payloads.some((payload) => payload.message !== undefined)) {
     ctx.delete(ScheduleIdKey);
     ctx.delete(ScheduleInstanceKey);
+    ctx.delete(ScheduleNamespaceKey);
     ctx.delete(OccurrenceIdKey);
     if (delivery.schedule !== undefined) {
       ctx.set(ScheduleIdKey, delivery.schedule.definition);
