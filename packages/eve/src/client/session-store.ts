@@ -14,7 +14,7 @@ import type {
 } from "#client/session-event-stream.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import { ConversationClient } from "#client/conversation-client.js";
-import type { ClientSession } from "#client/session.js";
+import { sendFollowedClientSession, type ClientSession } from "#client/session.js";
 import {
   assertAnswerable,
   assertExclusiveTurnInput,
@@ -487,9 +487,7 @@ export class SessionStore {
       return delivery;
     }
     this.#ensureStream(input);
-    return input.answers === undefined
-      ? await this.#session.send(input.message, input)
-      : await this.#session.respond(input.answers, input);
+    return await sendFollowedClientSession(this.#session, input);
   }
 
   #ensureStream(

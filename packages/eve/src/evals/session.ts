@@ -14,7 +14,11 @@ import { basename } from "node:path";
 
 import { createTextWithFileContent } from "#client/file-parts.js";
 import { getDeliveryReceipt, type ClientSendReceipt } from "#client/delivery.js";
-import { followClientSession, type ClientSession } from "#client/session.js";
+import {
+  followClientSession,
+  sendFollowedClientSession,
+  type ClientSession,
+} from "#client/session.js";
 import type {
   ClientSessionState,
   SendTurnInput,
@@ -269,10 +273,14 @@ export class EvalSessionDriver implements EveEvalSession {
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
     const { answers, message, ...options } = attachSignal(input, this.#signal);
     const startIndex = this.#session.state.streamIndex;
+    // The eval follows the session from its own cursor below, so the send opens no stream.
     const response =
       answers === undefined
-        ? await this.#session.send(message!, options)
-        : await this.#session.respond(answers, options);
+        ? await sendFollowedClientSession(this.#session, { ...options, message: message! })
+        : await sendFollowedClientSession(this.#session, {
+            ...withoutTurnPolicy(options),
+            answers,
+          });
     this.recordSend(answers === undefined ? "message" : "respond", getDeliveryReceipt(response));
     const deliveryId = response.deliveryId;
     // Delivery streams omit earlier facts, but the eval's cursor and view must not skip them.
@@ -788,4 +796,12 @@ function assertRequestHasOption(request: Interaction, optionId: string): void {
       `Input request "${request.interactionId}" does not offer option "${optionId}".`,
     );
   }
+}
+
+/** Answers take no turn policy. */
+function withoutTurnPolicy<T extends { readonly turnPolicy?: unknown }>(
+  options: T,
+): Omit<T, "turnPolicy"> {
+  const { turnPolicy: _turnPolicy, ...rest } = options;
+  return rest;
 }
