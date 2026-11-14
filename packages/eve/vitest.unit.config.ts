@@ -118,6 +118,10 @@ export default defineConfig({
     alias: [
       ...workspaceChannelPackages,
       {
+        find: /^eve\/instrumentation\/otel$/,
+        replacement: new URL("./src/public/instrumentation/otel.ts", import.meta.url).pathname,
+      },
+      {
         find: /^#compiled\/(.+)\.js$/,
         replacement: new URL("./.generated/compiled/$1.js", import.meta.url).pathname,
       },

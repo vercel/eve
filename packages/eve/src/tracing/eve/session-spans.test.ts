@@ -1,5 +1,3 @@
-import { fileURLToPath } from "node:url";
-
 import { commitOf } from "#harness/session-machine/commit.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import {
@@ -10,7 +8,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { AgentSpanIdGenerator, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -40,8 +38,6 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
 import { isOtelDeclaration, type TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
-// Templates install separately; exercise their policy with the framework under test.
-vi.mock("eve/instrumentation/otel", async () => import("#public/instrumentation/otel.js"));
 
 /**
  * The spans a session exports, from its committed lines through eve's own OTel provider: the
@@ -758,14 +754,11 @@ describe("a session's spans, from its committed lines", () => {
   it.each(["production", "preview"] as const)(
     "openinstinct exports metadata, not private profile or conversation bodies in %s",
     async (environment) => {
-      // A filesystem path stays in Vitest's mocked graph; a file: URL can use native ESM.
-      const templatePath = fileURLToPath(
-        new URL(
-          "../../../../../apps/templates/openinstinct/agent/instrumentation/otel.ts",
-          import.meta.url,
-        ),
+      // Widen only for TypeScript: the standalone template is outside this package's rootDir.
+      // Vite sees a literal import after stripping the type assertion.
+      const authored: { default: unknown } = await import(
+        "../../../../../apps/templates/openinstinct/agent/instrumentation/otel.ts" as string
       );
-      const authored: { default: unknown } = await import(templatePath);
       if (!isOtelDeclaration(authored.default)) throw new Error("Expected OTel settings");
       const { commit, spans } = session(
         authored.default.options.tracePolicy,
