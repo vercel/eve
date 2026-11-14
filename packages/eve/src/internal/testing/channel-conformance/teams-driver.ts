@@ -138,9 +138,18 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
           : new Response("Unauthorized", { status: 401 }),
       };
     }
+    const path = new URL(request.url).pathname;
+    // The default admit asks Teams for each person's tenant and role. Everyone here is a member.
+    const member = /\/members\/([^/]+)$/u.exec(path);
+    if (request.method === "GET" && member !== null) {
+      return {
+        body: {},
+        method: `GET ${path}`,
+        response: { id: decodeURIComponent(member[1]!), tenantId: TENANT, userRole: "user" },
+      };
+    }
     const bodyText = await request.text();
     const body = bodyText === "" ? {} : JSON.parse(bodyText);
-    const path = new URL(request.url).pathname;
     // An update keeps the id of the activity it replaces.
     const id = request.method === "PUT" ? path.split("/").at(-1)! : nextActivityId();
     return { body, method: `${request.method} ${path}`, response: { id } };

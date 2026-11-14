@@ -2,6 +2,10 @@
   "TeamsAccessTokenResult",
   "TeamsActivity",
   "TeamsActivityBase",
+  "TeamsAdmit",
+  "TeamsAdmitActor",
+  "TeamsAdmitKind",
+  "TeamsAdmitRequest",
   "TeamsAnswerResult",
   "TeamsApiOptions",
   "TeamsApiResponse",
@@ -41,6 +45,7 @@
   "TeamsThread",
   "TeamsTokenProvider",
   "TeamsWebhookVerifier",
+  "defaultTeamsAdmit",
   "defaultTeamsAuth",
   "teamsChannel",
   "teamsContinuationToken"
