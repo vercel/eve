@@ -296,16 +296,17 @@ describe("rendered host routes", () => {
   });
 
   it.each([
-    { world: undefined, registered: false },
-    { world: "@workflow/world-postgres", registered: true },
-  ])(
-    "registers the dev workflow bundle on the worker's own queue: $registered",
-    async ({ registered, world }) => {
+    { mode: "development", world: undefined, registered: false },
+    { mode: "development", world: "@workflow/world-postgres", registered: true },
+    { mode: "production", world: undefined, registered: true },
+  ] as const)(
+    "registers the $mode workflow bundle on the worker's own queue (world $world): $registered",
+    async ({ mode, registered, world }) => {
       const registerHandler = vi.fn();
       vi.doMock(resolveWorkflowModulePath("workflow/runtime"), () => ({
         getWorld: async () => ({ registerHandler }),
       }));
-      const host = await serve({ mode: "development", world });
+      const host = await serve({ mode, world });
 
       await host.load(
         host.routes.handlers.find((entry) => entry.route === EVE_WORKFLOW_FLOW_ROUTE_PATH)!.handler,
