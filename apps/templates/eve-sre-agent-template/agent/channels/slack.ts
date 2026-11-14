@@ -105,17 +105,10 @@ const investigationRenderer = defineSlackRenderer({
         return;
       }
 
-      try {
-        await channel.thread.post(
-          buildInvestigationResultMessage(data.value, evidence)
-        );
-      } catch (error) {
-        console.error("[sre/slack] failed to post investigation answer", {
-          error: error instanceof Error ? error.message : String(error),
-          evidenceCount: evidence.length,
-          turnId,
-        });
-      }
+      // Let eve's final-reply wrapper record failures and send its delivery notice.
+      await channel.thread.post(
+        buildInvestigationResultMessage(data.value, evidence)
+      );
     },
   },
 });

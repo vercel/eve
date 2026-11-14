@@ -21,7 +21,7 @@ An investigation starts from one of three places.
 - A new top-level message in a watched Slack channel.
 - A `POST /v1/investigate` webhook call.
 
-The agent records novel, decision-relevant findings with source links. Each investigation turn has its own evidence set. The agent records each finding-and-URL pair once, then adds recorded evidence to the Slack result.
+The agent records novel, decision-relevant findings with source links. Each investigation turn has its own evidence set. The agent records each finding-and-URL pair once, then adds recorded evidence to the Slack result. Slack footers include only complete evidence entries that fit within 3,000 characters and report how many entries were omitted. Answers retain a separate 35,000-character budget; longer answers end with an explicit truncation notice. Rejected posts reach eve's delivery-failure handler, which records the failure and attempts a content-free notice without resending the answer.
 
 Automated runs use webhook metadata and service-authenticated tools. They do not use per-user OAuth. The Slack history and thread read tools deny service identities, including webhook and channel-watch investigations; those runs must use the evidence supplied with the alert. Human Slack callers can read only conversations they currently belong to in the connected workspace. Missing membership permissions, lookup failures, and membership scans beyond 4,000 users deny access.
 
