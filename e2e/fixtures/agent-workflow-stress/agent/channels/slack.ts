@@ -1,23 +1,28 @@
 import { GET } from "eve/channels";
 import { localDev, vercelOidc } from "eve/channels/auth";
-import { defaultSlackAuth, slackChannel, type SlackChannel } from "eve/channels/slack";
+import {
+  defaultSlackAuth,
+  slackChannel,
+  slackContinuationToken,
+  type SlackChannel,
+} from "eve/channels/slack";
 
 import {
   SLACK_SESSION_ROUTE,
   slackApiStub,
-  slackColdStartGuidance,
+  slackNewThreadGuidance,
   verifySlackWebhook,
-} from "../lib/slack-cold-start";
+} from "../lib/slack-new-thread";
 
-// eve's Slack channel against a stubbed Slack, for the Slack cold-start eval
-// (lib/slack-cold-start.ts). The message hook is eve's default plus guidance
+// eve's Slack channel against a stubbed Slack, for the Slack new-thread eval
+// (lib/slack-new-thread.ts). The message hook is eve's default plus guidance
 // that carries the webhook's arrival time to the model.
 const slack = slackChannel({
   api: { fetch: slackApiStub },
-  credentials: { botToken: "xoxb-slack-cold-start", webhookVerifier: verifySlackWebhook },
+  credentials: { botToken: "xoxb-slack-new-thread", webhookVerifier: verifySlackWebhook },
   onAppMention: (ctx, message) => ({
     auth: defaultSlackAuth(message, ctx),
-    guidance: slackColdStartGuidance(message),
+    guidance: slackNewThreadGuidance(message),
   }),
 });
 
@@ -34,10 +39,10 @@ const channel: SlackChannel = {
       );
       if (results.every((auth) => auth === null)) return new Response(null, { status: 401 });
       const url = new URL(request.url);
-      const channel = url.searchParams.get("channel");
-      const ts = url.searchParams.get("ts");
-      if (channel === null || ts === null) return new Response(null, { status: 400 });
-      const session = await resolveSession(`${channel}:${ts}`);
+      const channelId = url.searchParams.get("channel");
+      const threadTs = url.searchParams.get("ts");
+      if (channelId === null || threadTs === null) return new Response(null, { status: 400 });
+      const session = await resolveSession(slackContinuationToken({ channelId, threadTs }));
       return Response.json({ sessionId: session?.id ?? null });
     }),
   ],

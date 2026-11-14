@@ -220,10 +220,10 @@ test("an attempt from before agent.started delegation measures nothing", () => {
       meta: { ...e.meta, id: `child:${e.meta.id}` },
     })),
   });
-  const { "overhead.slack_cold_start_ms": slack, ...metrics } =
+  const { "overhead.slack_new_thread_ms": slack, ...metrics } =
     deriveAttemptMetrics(artifact).metrics;
-  // The Slack cold start is the eval's log, not the session capture.
-  assert.equal(slack.reason, "no-slack-cold-start");
+  // The Slack new-thread time is the eval's log, not the session capture.
+  assert.equal(slack.reason, "no-slack-new-thread");
   assert.deepEqual(
     new Set(Object.values(metrics).map((m) => m.reason)),
     new Set(["legacy-delegation-events"]),
@@ -441,14 +441,14 @@ test("partial captures make attribution unavailable instead of guessing", () => 
   );
 });
 
-test("Slack cold start comes from the eval's log, not the session capture", () => {
-  const slack = (samples) =>
-    `EVE_SLACK_COLD_START_METRIC=${JSON.stringify({ schemaVersion: 1, samples })}`;
+test("Slack new-thread time comes from the eval's log, not the session capture", () => {
+  const slack = (samples, fields = {}) =>
+    `EVE_SLACK_NEW_THREAD_METRIC=${JSON.stringify({ schemaVersion: 1, slackApiLatencyMs: 15, samples, ...fields })}`;
   const withLogs = (logs, artifact = synthetic([])) => ({
     ...artifact,
     result: { ...artifact.result, logs },
   });
-  const key = "overhead.slack_cold_start_ms";
+  const key = "overhead.slack_new_thread_ms";
   const logged = deriveAttemptMetrics(
     withLogs([
       "trial 1/3",
@@ -463,14 +463,24 @@ test("Slack cold start comes from the eval's log, not the session capture", () =
   assert.equal(metrics[key].value, 650);
   assert.deepEqual(Object.keys(metrics).sort(), Object.keys(STANDARD_METRICS).sort());
   // Other evals log nothing; a Slack eval that measured no thread is a gap.
-  assert.equal(deriveAttemptMetrics(synthetic([])).metrics[key].reason, "no-slack-cold-start");
+  assert.equal(deriveAttemptMetrics(synthetic([])).metrics[key].reason, "no-slack-new-thread");
   assert.equal(
     deriveAttemptMetrics(withLogs([slack([])])).metrics[key].reason,
-    "no-slack-cold-start-samples",
+    "no-slack-new-thread-samples",
   );
+  // A log of another shape or stub latency measures something else.
+  for (const fields of [
+    { schemaVersion: 2 },
+    { slackApiLatencyMs: 0 },
+    { schemaVersion: undefined },
+  ])
+    assert.equal(
+      deriveAttemptMetrics(withLogs([slack([{ modelCallMs: 650 }], fields)])).metrics[key].reason,
+      "unsupported-slack-new-thread-log",
+    );
   assert.equal(
-    deriveAttemptMetrics(withLogs(["EVE_SLACK_COLD_START_METRIC={"])).metrics[key].reason,
-    "invalid-slack-cold-start-log",
+    deriveAttemptMetrics(withLogs(["EVE_SLACK_NEW_THREAD_METRIC={"])).metrics[key].reason,
+    "invalid-slack-new-thread-log",
   );
 });
 
