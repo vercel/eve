@@ -493,6 +493,34 @@ describe("slackChannel messageContext.users", () => {
     expect(runtime.createSession).toHaveBeenCalledOnce();
   });
 
+  it("sends a mention to its session while Slack is still confirming the acknowledgement", async () => {
+    const acknowledged = Promise.withResolvers<Response>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) =>
+      String(request).endsWith("assistant.threads.setStatus")
+        ? await acknowledged.promise
+        : await answer(request, init),
+    );
+    let statusPending = false;
+    const send = vi.fn(async () => {
+      statusPending = slackCalls("assistant.threads.setStatus").length === 1;
+      acknowledged.resolve(Response.json({ ok: true }));
+      return { sessionId: "s1" };
+    });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      mention({ ts: "1700000000.000001" }),
+      send,
+    );
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(statusPending).toBe(true);
+  });
+
   it("uses an authored resolve instead of the built-in users.info cache", async () => {
     const resolve = vi.fn(async ({ userId }: { readonly userId: string }) => ({
       realName: `cached-${userId}`,
