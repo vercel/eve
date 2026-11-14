@@ -1,18 +1,66 @@
 import type { SessionLineStore } from "#execution/session-line-store.js";
 
 // Session streams kept in memory: each write is one line, as the session's writer writes one
-// chunk per line. Readers follow a stream until its writer closes it. Nothing survives the
-// process.
+// chunk per line. Readers follow a stream until its writer closes it. What survives the process
+// is what `persist` kept.
+//
+// With `persist`, a reader sees a line only once it's kept, and lines are kept in batches: a line
+// written while a batch is being kept waits for the next one, so a store far away (a remote
+// World, at hundreds of milliseconds a write) keeps a streamed reply in a few writes, not one per
+// line. A write resolves at once, except a barrier's (`isBarrier`: a line that must be kept
+// before the writer goes on, such as a call's start before the tool runs), which resolves once
+// it and everything before it are kept. `flush` waits for every line written so far.
 
 interface MemoryStream {
+  /** The position of `chunks`' first line: a stream opened on its tail holds no line before. */
+  readonly from: number;
+  /** The lines readers see: those kept, from `from` on. */
   readonly chunks: Uint8Array[];
   closed: boolean;
+  /** Why readers get no more lines, once the stream's writer can't go on. */
+  failed?: { readonly error: unknown };
   readonly waiters: Set<() => void>;
+  /** Keeps what was written and not yet kept; resolves once it's kept. */
+  flush: () => Promise<void>;
+  /** The writer whose writes reach it: the latest `open`'s, until `detachAll`. */
+  writer: object | undefined;
 }
 
 export interface MemoryLineStore extends SessionLineStore {
-  /** Opens `sessionId`'s stream and returns the writable its writer writes lines to. */
-  open(sessionId: string): WritableStream<Uint8Array>;
+  /**
+   * Opens `sessionId`'s stream and returns the writable its writer writes lines to. A restored
+   * session's stream starts with the lines it recorded before. With `persist`, lines are kept in
+   * batches, each at the position of its first line, and no reader sees a line a store didn't
+   * keep. A write that fails to be kept fails the writes after it. With `from`, `recorded`'s first
+   * line is at that position, and the stream holds none before it.
+   */
+  open(
+    sessionId: string,
+    recorded?: readonly Uint8Array[],
+    persist?: (position: number, lines: readonly Uint8Array[]) => Promise<void>,
+    isBarrier?: (line: Uint8Array) => boolean,
+    from?: number,
+  ): WritableStream<Uint8Array>;
+  /** Resolves once every line written to `sessionId`'s stream so far is kept. */
+  flush(sessionId: string): Promise<void>;
+  /** `flush` for every stream. */
+  flushAll(): Promise<void>;
+  /**
+   * Stops every stream's writer from reaching it: what they write from now on is dropped, and
+   * readers go on waiting for the stream's next writer, which reopens it with what it recorded.
+   * A host that suspends its sessions detaches them, so a store that outlives the host (a test's
+   * restart) holds what the World kept.
+   */
+  detachAll(): void;
+  /**
+   * Ends `sessionId`'s stream for its readers with `error`, after the lines they haven't read:
+   * its writer will write no more (another process took the session over).
+   */
+  fail(sessionId: string, error: unknown): void;
+  /** Every line `sessionId`'s stream holds so far, from `heldFrom` on. */
+  recorded(sessionId: string): readonly Uint8Array[];
+  /** The position of the first line `recorded` returns: 0 unless the stream opened on its tail. */
+  heldFrom(sessionId: string): number;
   /** The sessions this store holds a stream for. */
   sessions(): readonly string[];
 }
@@ -31,23 +79,110 @@ export function createMemoryLineStore(): MemoryLineStore {
 
   return {
     sessions: () => [...streams.keys()],
+    flush: async (sessionId) => await streams.get(sessionId)?.flush(),
+    fail(sessionId, error) {
+      const stream = streams.get(sessionId);
+      if (stream === undefined || stream.closed) return;
+      stream.failed = { error };
+      wake(stream);
+    },
+    async flushAll() {
+      await Promise.all([...streams.values()].map((stream) => stream.flush()));
+    },
+    detachAll() {
+      for (const stream of streams.values()) {
+        stream.writer = undefined;
+        stream.flush = async () => {};
+      }
+    },
     async assertReadable(sessionId) {
       streamOf(sessionId);
     },
     async tail(sessionId) {
-      return streamOf(sessionId).chunks.length - 1;
+      const stream = streamOf(sessionId);
+      return stream.from + stream.chunks.length - 1;
     },
-    open(sessionId) {
-      if (streams.has(sessionId)) throw new Error(`Session "${sessionId}" already has a stream.`);
-      const stream: MemoryStream = { chunks: [], closed: false, waiters: new Set() };
+    recorded: (sessionId) => [...streamOf(sessionId).chunks],
+    heldFrom: (sessionId) => streamOf(sessionId).from,
+    open(sessionId, recorded = [], persist, isBarrier, from = 0) {
+      const detached = streams.get(sessionId);
+      if (detached !== undefined && (detached.writer !== undefined || detached.closed))
+        throw new Error(`Session "${sessionId}" already has a stream.`);
+      // A detached stream is reopened by its next writer, which must start from what it holds.
+      if (
+        detached !== undefined &&
+        (detached.from !== from || !sameLines(detached.chunks, recorded))
+      )
+        throw new Error(
+          `Session "${sessionId}"'s stream holds ${String(detached.chunks.length)} lines here, but its writer recorded ${String(recorded.length)} others.`,
+        );
+      const writer = {};
+      const pending: Uint8Array[] = [];
+      let keeping: Promise<void> = Promise.resolve();
+      let scheduled = false;
+      let failure: { readonly error: unknown } | undefined;
+      // One batch at a time, in order: whatever is pending when the batch before it is kept.
+      const keepPending = async (): Promise<void> => {
+        scheduled = false;
+        if (failure !== undefined || pending.length === 0) return;
+        const batch = pending.splice(0);
+        if (stream.writer !== writer) return;
+        try {
+          await persist!(stream.from + stream.chunks.length, batch);
+        } catch (error) {
+          failure = { error };
+          throw error;
+        }
+        // A batch the store started keeping before its writer was detached is kept: the World
+        // holds it too.
+        stream.chunks.push(...batch);
+        wake(stream);
+      };
+      const schedule = (): Promise<void> => {
+        if (!scheduled) {
+          scheduled = true;
+          keeping = keeping.then(keepPending, keepPending);
+        }
+        return keeping;
+      };
+      const flush = async () => {
+        if (persist === undefined) return;
+        if (pending.length > 0) schedule();
+        await keeping;
+        if (failure !== undefined) throw failure.error;
+      };
+      const stream: MemoryStream = detached ?? {
+        chunks: [...recorded],
+        from,
+        closed: false,
+        waiters: new Set(),
+        flush,
+        writer,
+      };
+      stream.flush = flush;
+      stream.writer = writer;
       streams.set(sessionId, stream);
       return new WritableStream<Uint8Array>({
-        write(chunk) {
+        async write(chunk) {
           // The writer may reuse its buffer; the stream keeps what was written.
-          stream.chunks.push(chunk.slice());
-          wake(stream);
+          const line = chunk.slice();
+          if (stream.writer !== writer) return;
+          if (persist === undefined) {
+            stream.chunks.push(line);
+            wake(stream);
+            return;
+          }
+          if (failure !== undefined) throw failure.error;
+          pending.push(line);
+          const kept = schedule();
+          // Not awaited unless it's a barrier: a failed batch fails the next write, or a flush.
+          kept.catch(() => {});
+          if (isBarrier?.(line)) await stream.flush();
         },
-        close() {
+        async close() {
+          if (stream.writer !== writer) return;
+          await stream.flush();
+          if (stream.writer !== writer) return;
           stream.closed = true;
           wake(stream);
         },
@@ -55,12 +190,17 @@ export function createMemoryLineStore(): MemoryLineStore {
     },
     readable(sessionId, startIndex = 0) {
       const stream = streamOf(sessionId);
-      let next = startIndex < 0 ? Math.max(0, stream.chunks.length + startIndex) : startIndex;
+      const total = stream.from + stream.chunks.length;
+      let next = startIndex < 0 ? Math.max(stream.from, total + startIndex) : startIndex;
+      if (next < stream.from)
+        throw new Error(
+          `Session "${sessionId}"'s stream here holds lines from ${String(stream.from)}, not ${String(next)}.`,
+        );
       let cancelled = false;
       return new ReadableStream<Uint8Array>({
         async pull(controller) {
           while (!cancelled) {
-            const chunk = stream.chunks[next];
+            const chunk = stream.chunks[next - stream.from];
             if (chunk !== undefined) {
               next += 1;
               controller.enqueue(chunk);
@@ -68,6 +208,10 @@ export function createMemoryLineStore(): MemoryLineStore {
             }
             if (stream.closed) {
               controller.close();
+              return;
+            }
+            if (stream.failed !== undefined) {
+              controller.error(stream.failed.error);
               return;
             }
             await new Promise<void>((resolve) => stream.waiters.add(resolve));
@@ -80,4 +224,15 @@ export function createMemoryLineStore(): MemoryLineStore {
       });
     },
   };
+}
+
+/** Whether `a` and `b` hold the same lines, byte for byte. */
+function sameLines(a: readonly Uint8Array[], b: readonly Uint8Array[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (line, index) =>
+        line.length === b[index]!.length && line.every((byte, at) => byte === b[index]![at]),
+    )
+  );
 }

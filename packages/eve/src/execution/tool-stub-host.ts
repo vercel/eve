@@ -23,8 +23,9 @@ function requireToolStubs(host: ToolStubHost | undefined): ToolStubHost {
 }
 
 /**
- * Runs a session's loop. The root of a stubbed eval serves its stubs while it runs; its child
- * sessions (whose scope names the root) and unstubbed sessions just run.
+ * Runs a session's loop. The root of a stubbed eval serves its stubs while it runs, again when a
+ * host continues it from its record; its child sessions (whose scope names the root) and
+ * unstubbed sessions just run.
  */
 export async function runServingToolStubs<T>(
   host: ToolStubHost | undefined,
@@ -32,7 +33,8 @@ export async function runServingToolStubs<T>(
   sessionId: string,
   run: () => Promise<T>,
 ): Promise<T> {
-  if (scope === undefined || scope.rootSessionId !== undefined) return await run();
+  // A root restored from its record names itself as the root already, and serves them again.
+  if (scope === undefined || (scope.rootSessionId ?? sessionId) !== sessionId) return await run();
   return await requireToolStubs(host).serve(scope, sessionId, run);
 }
 

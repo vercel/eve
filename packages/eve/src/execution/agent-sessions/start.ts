@@ -118,6 +118,9 @@ export function localAgentSendCommand(
     },
     kind: "send",
     delivery: { channelKind: "subagent", channelName: "subagent", deliveryId },
+    // A run that sends again what it sent before (a retried step, a run replayed after a restore)
+    // names the same delivery, which the session admits once.
+    idempotencyKey: deliveryId,
     payload: { message: input.message, outputSchema: input.outputSchema },
   } as const satisfies SessionCommand;
 }

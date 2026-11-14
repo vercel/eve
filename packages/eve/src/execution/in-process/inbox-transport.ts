@@ -80,10 +80,20 @@ export interface MemoryInboxRegistry {
   ): () => void;
   /** Delivers `payload` to `token`, kept by its owner first. */
   deliver(token: string, payload: unknown): Promise<Delivery>;
+  /** Queues at a session's address what its session kept already, as it kept it: a restore's. */
+  requeue(token: string, arrival: Arrival): void;
+  /** Queues at a run's hook what the run kept already: a resumed run's, as it reads it again. */
+  replay(token: string, payload: unknown): Promise<void>;
   /** The owner of the address `token` names, if one is open. */
   holder(token: string): string | undefined;
+  /** Whether a session (not a run) holds the address `token` names. */
+  holdsForSession(token: string): boolean;
   /** Whether `owner` still holds any open address. */
   holdsAny(owner: string): boolean;
+  /** Whether no delivery is on its way and no open address holds what its owner hasn't read. */
+  quiet(): boolean;
+  /** Whether `owner` (a session, or a run) waits on one of its open addresses for what's next. */
+  waiting(owner: string): boolean;
   /** Closes every open address, so each owner reads nothing more. */
   closeAll(): void;
   /**
@@ -212,12 +222,25 @@ export function createMemoryInboxRegistry(
 
   return {
     holder: (token) => held.get(token)?.owner,
+    holdsForSession: (token) => sessionAddresses.has(token),
     async heard() {
       if (options.deliveries !== "batched") return;
       await nextMacrotask();
       while (flushing !== undefined) await flushing;
     },
     holdsAny: (owner) => [...held.values()].some((address) => address.owner === owner),
+
+    quiet() {
+      if (lanes.size > 0) return false;
+      for (const open of opened) if (!open.disposed && open.queue.length > 0) return false;
+      return true;
+    },
+
+    waiting(owner) {
+      for (const open of opened)
+        if (open.owner === owner && !open.disposed && open.waiters.size > 0) return true;
+      return false;
+    },
 
     async deliver(token, payload) {
       return await inLane(token, async (): Promise<Delivery> => {
@@ -235,6 +258,19 @@ export function createMemoryInboxRegistry(
         }
         return everHeld.has(token) ? { kind: "gone" } : undefined;
       });
+    },
+
+    requeue(token, arrival) {
+      const target = sessionAddresses.get(token);
+      if (target === undefined) throw new Error(`No session holds the address "${token}".`);
+      target.queue.push(arrival);
+      wake(target);
+    },
+
+    async replay(token, payload) {
+      const holder = held.get(token);
+      if (holder === undefined) throw new Error(`No run holds the hook "${token}".`);
+      await holder.accept(await boundary.send(payload), { keep: false });
     },
 
     reserve(owner, tokens, options) {

@@ -4,6 +4,7 @@ import {
   type InProcessRuntime,
   type InProcessRuntimeOptions,
 } from "#execution/in-process/runtime.js";
+import { createRestartableInProcessRuntime } from "#internal/testing/restartable-in-process.js";
 import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 
 /**
@@ -14,11 +15,40 @@ import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js"
  */
 export function createTestInProcessRuntime(
   config: SessionRuntimeConfig,
-  options: InProcessRuntimeOptions = {},
+  options: InProcessRuntimeOptions & { readonly variant?: InProcessVariant } = {},
 ): InProcessRuntime {
-  return createInProcessRuntime(config, {
+  const { variant = inProcessVariantFromEnv(), ...rest } = options;
+  const strict: InProcessRuntimeOptions = {
     deliveries: "batched",
     stepBoundary: workflowStepBoundary,
-    ...options,
-  });
+    ...rest,
+  };
+  switch (variant) {
+    case "memory":
+      return createInProcessRuntime(config, strict);
+    case "world":
+      return createRestartableInProcessRuntime(config, strict);
+    case "world-restart":
+      return createRestartableInProcessRuntime(config, { ...strict, restartAtRest: true });
+  }
+}
+
+/**
+ * How a test's in-process runtime keeps its sessions: in memory (`memory`); on a World in this
+ * process's memory (`world`); or on one, restarted each time it comes to rest after progress
+ * (`world-restart`), so every session goes on from what the World kept.
+ */
+export type InProcessVariant = "memory" | "world" | "world-restart";
+
+/**
+ * The variant `EVE_TEST_IN_PROCESS_VARIANT` names, which runs every in-process session test on
+ * it without changing the tests; `memory` without it.
+ */
+export function inProcessVariantFromEnv(): InProcessVariant {
+  const named = process.env.EVE_TEST_IN_PROCESS_VARIANT;
+  if (named === undefined || named === "" || named === "memory") return "memory";
+  if (named === "world" || named === "world-restart") return named;
+  throw new Error(
+    `EVE_TEST_IN_PROCESS_VARIANT must be memory, world or world-restart, not "${named}".`,
+  );
 }
