@@ -119,12 +119,11 @@ jobs:
           path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
           key: ${{ steps.verdict-cache.outputs.cache-primary-key }}
 
-      - name: Run typecheck
-        run: pnpm typecheck
-
-      # Packs eve from the dist the typecheck build left in Turbo's cache.
-      - name: Type-check the published declarations
-        run: pnpm test:public-types
+      # One turbo run, so the published-declaration check (which packs eve
+      # from its build) runs alongside the other packages' typechecks instead
+      # of after all of them.
+      - name: Run typecheck and type-check the published declarations
+        run: pnpm exec turbo run typecheck test:public-types
 
   test-unit:
     runs-on: ubuntu-latest
