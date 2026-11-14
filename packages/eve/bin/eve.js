@@ -2,11 +2,22 @@
 
 import { spawn } from "node:child_process";
 import { access, readdir, realpath, stat } from "node:fs/promises";
-import { createRequire } from "node:module";
+import * as nodeModule from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const require = createRequire(import.meta.url);
+// Every eve command loads hundreds of modules from the installed package.
+// Child processes keep their own setting: `eve dev` children also load
+// per-run build output, which would add cache entries on every start.
+// Runtimes without the API (Bun) skip it.
+if (nodeModule.enableCompileCache?.() !== undefined) {
+  // Node writes the cache on a normal exit, but closing the terminal ends
+  // `eve dev` with SIGHUP, which skips that write. Write once startup has
+  // loaded its modules.
+  setTimeout(() => nodeModule.flushCompileCache?.(), 1000).unref();
+}
+
+const require = nodeModule.createRequire(import.meta.url);
 const packageJson = require("../package.json");
 const packageNodeEngine = packageJson.engines?.node;
 const bootstrapPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
