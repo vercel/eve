@@ -156,7 +156,7 @@ const checkVercelServices = async (template, destination) => {
       );
     }
     const serviceRoot = join(destination, service.root ?? ".");
-    if (existsSync(join(serviceRoot, "package.json"))) continue;
+    if (existsSync(join(serviceRoot, "package.json")) && !service.buildCommand) continue;
     if (!service.buildCommand) {
       throw new Error(
         `${label} has no package.json in ${service.root}, so Vercel cannot find the framework binary. Set buildCommand to run it from the root node_modules.`,
@@ -218,6 +218,15 @@ const checkTemplate = async (template, tarball, tarballName) => {
     Object.assign(buildEnv, {
       FACTORY_REPO: "acme/widgets",
       LINEAR_CONNECTOR: "linear/template-ci",
+    });
+  }
+  if (template === "kody-eve-template") {
+    Object.assign(buildEnv, {
+      LINEAR_CONNECTOR: "linear/template-ci",
+      REDIS_URL: "redis://127.0.0.1:6379",
+      RESEND_FROM_ADDRESS: "kody@example.com",
+      DIGEST_REPO: "acme/widgets",
+      DIGEST_EMAIL: "team@example.com",
     });
   }
   await run(

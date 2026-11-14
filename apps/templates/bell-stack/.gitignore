@@ -1,0 +1,17 @@
+node_modules/
+.next/
+.eve/
+.bell/
+contexts.json
+*.enc.json
+.output/
+.vercel/
+.env*
+!.env.example
+*.tsbuildinfo
+coverage/
+.DS_Store
+.pnpm-store/
+AGENT.md
+AGENTS.md
+CLAUDE.md
