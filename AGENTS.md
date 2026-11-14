@@ -33,6 +33,12 @@ the DCO `Signed-off-by` trailer. Use `git commit -s` for every commit, and if a
 commit is missing the trailer, amend it with `git commit --amend -s --no-edit`
 before pushing.
 
+After pushing and before opening or updating a PR, confirm that GitHub marks
+every commit as `Verified`. A local signature is not sufficient when GitHub
+does not recognize its key. Re-sign and force-push unsigned commits on a branch
+you control. If you cannot update the source branch, create a signed replacement
+PR, link to it from the original PR, and close the original PR.
+
 PR descriptions are reviewer-oriented explanations of the problem or decision
 behind the change, the solution, and meaningful behavior changes—not file lists
 or commit logs. Keep the Summary short and lead with that justification. Follow
