@@ -37,7 +37,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|package\.json$|tsconfig\.json$|turbo\.json$|packages/eve/|packages/eve-catalog/|packages/tracing/|packages/eve-code/extension/|packages/eve-git/extension/|packages/eve-computer-use/extension/|packages/eve-custom-skills/extension/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/sandbox-image-tag\.mjs$|\.github/actions/sandbox-image/|\.github/workflows/e2e-postgres\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|package\.json$|tsconfig\.json$|turbo\.json$|packages/eve/|packages/eve-catalog/|packages/tracing/|packages/eve-code/extension/|packages/eve-git/extension/|packages/eve-computer-use/extension/|packages/eve-custom-skills/extension/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/sandbox-image-tag\.mjs$|\.github/actions/sandbox-image/|\.github/actions/setup-pnpm/|\.github/actions/pnpm-install/|\.github/workflows/e2e-postgres\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -106,7 +106,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
