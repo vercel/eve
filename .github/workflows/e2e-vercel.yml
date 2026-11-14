@@ -211,25 +211,42 @@ jobs:
           }
 
           wait_for_target "$DEPLOYMENT_URL"
-          npx eve eval --strict --verbose --exclude-tag real-model \
-            --url "$DEPLOYMENT_URL" \
-            --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
 
           # Redeploy-tagged evals rebuild and redeploy the fixture from inside
           # the eval body, repointing a run-scoped alias at each new
           # deployment. They run against the alias (immutable deployment URLs
           # never change what they serve) and are skipped in the main suite
-          # above because EVE_E2E_REDEPLOY_ALIAS is unset there.
+          # because EVE_E2E_REDEPLOY_ALIAS is unset there. The main suite keeps
+          # the first deployment's immutable URL, so the two run at once; the
+          # main suite's output prints after the redeploy suite ends.
+          main_log="$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-main.log"
+          redeploy_status=0
           if npx eve eval --tag redeploy --list >/dev/null 2>&1; then
             ALIAS="eve-e2e-${{ matrix.name }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ strategy.job-index }}.vercel.app"
             # vercel alias does not infer the team from the project link the way
             # link/deploy do, so pass the scope explicitly.
             vercel alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
             wait_for_target "https://$ALIAS"
+            npx eve eval --strict --verbose --exclude-tag real-model \
+              --url "$DEPLOYMENT_URL" \
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml" >"$main_log" 2>&1 &
+            main_pid=$!
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
               npx eve eval --tag redeploy --strict --verbose --exclude-tag real-model \
               --url "https://$ALIAS" \
-              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml"
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml" || redeploy_status=$?
+            main_status=0
+            wait "$main_pid" || main_status=$?
+            echo "----- main suite output -----"
+            cat "$main_log"
+            if [ "$main_status" -ne 0 ] || [ "$redeploy_status" -ne 0 ]; then
+              echo "Main suite exit $main_status, redeploy suite exit $redeploy_status."
+              exit 1
+            fi
+          else
+            npx eve eval --strict --verbose --exclude-tag real-model \
+              --url "$DEPLOYMENT_URL" \
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
           fi
 
       - name: Log deployable build timing
