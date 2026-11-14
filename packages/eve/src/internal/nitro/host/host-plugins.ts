@@ -22,8 +22,8 @@ import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-build
 
 export interface HostPluginsInput {
   readonly appRoot: string;
-  /** Development hosts load eve's vendored dependencies natively instead of bundling them. */
-  readonly development?: boolean;
+  /** Loads eve's vendored dependencies from its install instead of bundling them (development hosts). */
+  readonly loadVendoredDependenciesNatively?: boolean;
   /** Package root authored assets may not escape. */
   readonly authoredPackageRoot: string;
   readonly externals: ExternalsPolicy;
@@ -46,7 +46,9 @@ export interface HostPluginsInput {
 export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
   const plugins: (NitroBuildPlugin | null)[] = [
-    input.development === true ? createDevelopmentCompiledExternalsPlugin() : null,
+    input.loadVendoredDependenciesNatively === true
+      ? createDevelopmentCompiledExternalsPlugin()
+      : null,
     stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,

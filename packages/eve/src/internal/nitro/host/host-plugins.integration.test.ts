@@ -179,8 +179,12 @@ describe("createHostPlugins", () => {
       [appModule]: 'export { z } from "#compiled/zod/index.js";\n',
       [nestedDependency]: 'export { z } from "#compiled/zod/index.js";\n',
     };
-    const bundle = async (development: boolean, id: string) =>
-      await bundleThroughPlugins({ files, plugins: plugins({ development }), reexports: [id] });
+    const bundle = async (native: boolean, id: string) =>
+      await bundleThroughPlugins({
+        files,
+        plugins: plugins({ loadVendoredDependenciesNatively: native }),
+        reexports: [id],
+      });
     const nativeUrl = pathToFileURL(
       resolvePackageCompiledFilePath("src/compiled/zod/index.js"),
     ).href;
