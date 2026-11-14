@@ -278,6 +278,7 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     [
       { root: "/tmp/x", toolCount: 0 },
       { run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, firstTurnMs: 1100 },
+      { run: 1, mode: "dev-tui", wallMs: 920, promptVisibleMs: 300 },
       { run: 1, mode: "build", wallMs: 3000, profile: profile(2800) },
       {
         run: 1,
@@ -323,6 +324,7 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
   });
   assert.equal(records[0].artifact_path, "raw/agent-tools/mock/postgres/1");
   assert.deepEqual(records[2].metrics, {
+    "dev_startup.prompt_visible_ms": { status: "measured", value: 300 },
     "dev_startup.ready_ms": { status: "measured", value: 900 },
     "dev_startup.session_accepted_ms": { status: "measured", value: 950 },
     "dev_startup.first_turn_ms": { status: "measured", value: 1100 },
@@ -337,6 +339,30 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     })[2].missing,
     "job-missing",
   );
+});
+
+test("a dev-startup run without a TUI measurement keeps its other metrics", (t) => {
+  const devStartupDir = mkdtempSync(join(tmpdir(), "eve-dev-startup-"));
+  t.after(() => rmSync(devStartupDir, { recursive: true, force: true }));
+  writeFileSync(join(devStartupDir, "meta.json"), JSON.stringify({ sha: SHA, runner_os: "Linux" }));
+  // Releases before the TUI probe, or runs where it failed, print no dev-tui line.
+  writeFileSync(
+    join(devStartupDir, "minimal.jsonl"),
+    JSON.stringify({ run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, firstTurnMs: 1100 }),
+  );
+  const dev = buildFrameworkRecords({
+    plan,
+    legs: readLegs(plan, legsDirectory(t)),
+    devStartupDir,
+    githubRunId: "123",
+    runAttempt: 1,
+  }).find((r) => r.probe === "dev-startup" && r.attempt === 1);
+  assert.equal(dev.missing, null);
+  assert.deepEqual(dev.metrics["dev_startup.prompt_visible_ms"], {
+    status: "unavailable",
+    reason: "missing-duration",
+  });
+  assert.deepEqual(dev.metrics["dev_startup.ready_ms"], { status: "measured", value: 900 });
 });
 
 test("excludes live-leg evals whose model steps all ran on another model", (t) => {
