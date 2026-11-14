@@ -99,11 +99,11 @@ export interface DynamicModelContext extends SessionFrame {
   /** The conversation history as of the latest commit, assembled when something reads it. */
   messages(): Promise<readonly ModelMessage[]>;
   /**
-   * Returns the caller's token for an inline auth provider, such as `connect("github/myagent")`
-   * or a custom interactive definition. A `connect()` provider shares its sign-in with tools that
-   * use the same connector. When the caller hasn't signed in, eve opens the sign-in and pauses
-   * the turn before the model call, then evaluates the value again after sign-in. When eve can't
-   * finish the sign-in, as in a turn from a schedule, the turn fails with `SIGN_IN_FAILED`.
+   * Returns the caller's token for an auth provider, such as the `anthropicKey` definition below,
+   * so the model call can use the caller's own credential. When the caller hasn't signed in, eve
+   * opens the sign-in and pauses the turn before the model call, then evaluates the model again
+   * after sign-in. When eve can't finish the sign-in, as in a turn from a schedule, the turn fails
+   * with `SIGN_IN_FAILED`.
    *
    * Call it outside `ctx.memo`. A memo keeps its result in the session, and eve already reuses
    * the token within a step.
