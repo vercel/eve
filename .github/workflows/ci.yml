@@ -161,8 +161,26 @@ jobs:
           path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
           key: ${{ steps.verdict-cache.outputs.cache-primary-key }}
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-unit-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-unit-
+
       - name: Run unit tests
         run: pnpm test:unit
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
       - name: Test workflow and guard helpers
         run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs scripts/public-exports.test.mjs
@@ -212,8 +230,26 @@ jobs:
             ./e2e/fixtures/*
             ./apps/docs/registry
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-integration-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-integration-
+
       - name: Run integration tests
         run: pnpm test:integration
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
   test-scenario:
     runs-on: ubuntu-latest
@@ -262,8 +298,26 @@ jobs:
           path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
           key: ${{ steps.verdict-cache.outputs.cache-primary-key }}
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-scenario-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-scenario-
+
       - name: Run scenario tests
         run: pnpm test:scenario
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
   # The desktop job installs apt packages and pulls agent-desktop from npm, so it
   # runs only when its package changes. It skips at the job level instead of
@@ -374,8 +428,26 @@ jobs:
             eve...
             ./apps/frameworks/*
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-build-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-build-
+
       - name: Build and package apps with the workspace eve
         run: pnpm test:build
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
   test-webchat:
     runs-on: ubuntu-latest
