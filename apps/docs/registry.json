@@ -1361,6 +1361,39 @@
       ]
     },
     {
+      "name": "connection/klaviyo",
+      "type": "registry:item",
+      "title": "Klaviyo",
+      "description": "Manage email and SMS marketing: profiles, segments, campaigns, flows, and reporting.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "klaviyo",
+              "mcp.klaviyo.com",
+              "klaviyo"
+            ]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/klaviyo.ts",
+          "type": "registry:file",
+          "target": "agent/connections/klaviyo.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/local-falcon",
       "type": "registry:item",
       "title": "Local Falcon",

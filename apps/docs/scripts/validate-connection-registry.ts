@@ -62,6 +62,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   context: "mcp.context.dev",
   flora: "agents.flora.ai/mcp",
   natural: "mcp.natural.com",
+  klaviyo: "mcp.klaviyo.com",
 };
 const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
   agentcard: "agentcard",
