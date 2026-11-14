@@ -275,7 +275,7 @@ describe("database services", () => {
       "worker-alice"
     );
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ id: "evt_01", label: "Task received" });
+    expect(events[0]).toMatchObject({ label: "Task received" });
     expect(
       await browserTraces.listBrowserTraceEvents(bob, "worker-alice")
     ).toEqual([]);
@@ -291,6 +291,94 @@ describe("database services", () => {
       task: "Order the blue mug",
     });
     expect((await browserTraces.listBrowserTraces(bob)).traces).toEqual([]);
+
+    const timelineRows = [
+      {
+        at: "2026-08-31T00:00:01.000Z",
+        detail: "First action",
+        id: "1:0",
+        label: "Action",
+        type: "call.requested",
+      },
+      {
+        at: "2026-08-31T00:00:02.000Z",
+        detail: "Second action",
+        id: "2:0",
+        label: "Action",
+        type: "call.settled",
+      },
+    ];
+    await browserTraces.beginBrowserTrace(alice, {
+      sessionId: "worker-alice-second",
+      startedAt: "2026-08-31T00:00:00.000Z",
+      task: "Alice's second task",
+    });
+    await browserTraces.beginBrowserTrace(bob, {
+      sessionId: "worker-bob",
+      startedAt: "2026-08-31T00:00:00.000Z",
+      task: "Bob's task",
+    });
+    await browserTraces.recordBrowserTraceEvents(
+      alice,
+      "worker-alice",
+      timelineRows
+    );
+    await browserTraces.recordBrowserTraceEvents(
+      alice,
+      "worker-alice-second",
+      timelineRows.toReversed()
+    );
+    await browserTraces.recordBrowserTraceEvents(
+      bob,
+      "worker-bob",
+      timelineRows.toReversed()
+    );
+    const aliceTimeline = await browserTraces.listBrowserTraceEvents(
+      alice,
+      "worker-alice-second"
+    );
+    const bobTimeline = await browserTraces.listBrowserTraceEvents(
+      bob,
+      "worker-bob"
+    );
+    expect(bobTimeline.map(({ detail }) => detail)).toEqual([
+      "First action",
+      "Second action",
+    ]);
+    expect(aliceTimeline.map(({ detail }) => detail)).toEqual([
+      "First action",
+      "Second action",
+    ]);
+    expect(
+      new Set([...aliceTimeline, ...bobTimeline].map(({ id }) => id)).size
+    ).toBe(4);
+    await browserTraces.recordBrowserTraceEvents(
+      bob,
+      "worker-bob",
+      timelineRows.map((row) => ({
+        ...row,
+        detail: "Retry must not replace the original",
+      }))
+    );
+    expect(
+      await browserTraces.listBrowserTraceEvents(bob, "worker-bob")
+    ).toEqual(bobTimeline);
+    const firstRow = timelineRows[0];
+    if (!firstRow) throw new Error("Expected the first timeline event.");
+    await expect(
+      browserTraces.recordBrowserTraceEvents(bob, "worker-bob", [
+        { ...firstRow, id: "x".repeat(129) },
+      ])
+    ).rejects.toThrow("Too big");
+    await browserTraces.recordBrowserTraceEvents(bob, "worker-bob", [
+      { ...firstRow, id: "x".repeat(128) },
+    ]);
+    const boundedTimeline = await browserTraces.listBrowserTraceEvents(
+      bob,
+      "worker-bob"
+    );
+    expect(boundedTimeline).toHaveLength(3);
+    expect(boundedTimeline.every(({ id }) => id.length <= 196)).toBe(true);
 
     await vault.saveVaultItem(alice, {
       account: "alice@example.com",

@@ -12,6 +12,7 @@ import {
   type AccessScope,
 } from "@shared/identity/access-scope";
 import { getAuthSession } from "@db/services/auth/session";
+import { applicationOrigin } from "@shared/environment/origin";
 import { sendMessageToolResultSchema } from "@shared/chat/message-delivery";
 import { settledToolResult } from "@agent/lib/settled-tool-result";
 import {
@@ -28,6 +29,14 @@ const authenticate: Parameters<typeof routeAuth>[1] = [
     if (!identity) return null;
     const { phoneNumber, scope } = identity;
 
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+      request.headers.get("origin") !== applicationOrigin()
+    ) {
+      throw new ForbiddenError({
+        message: "A trusted application Origin is required.",
+      });
+    }
     await requireOwnedRouteSubject(scope, request);
 
     return {

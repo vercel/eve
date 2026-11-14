@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AccessScope } from "@shared/identity/access-scope";
@@ -158,12 +159,17 @@ export async function recordBrowserTraceEvents(
     .limit(1);
   if (owned.length === 0) return;
 
+  const namespace = createHash("sha256")
+    .update(JSON.stringify([scope.workspaceId, traceSessionId]))
+    .digest("hex");
+  const eventId = z.string().min(1).max(128);
   await db
     .insert(browserTraceEvents)
     .values(
       events.map((event) => ({
         ...event,
         at: new Date(event.at),
+        id: `${namespace}:${eventId.parse(event.id)}`,
         traceSessionId,
       }))
     )

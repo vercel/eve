@@ -2,6 +2,7 @@ import type { RouteHandlerArgs } from "eve/channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as AuthSession from "@db/services/auth/session";
 import * as SessionService from "@db/services/sessions";
+import * as Environment from "@shared/environment";
 import { authSessionFor } from "@tests/helpers/auth-session";
 import eveChannel, { sessionIdFromPath } from "@agent/channels/eve";
 
@@ -23,9 +24,97 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe("Eve channel authentication", () => {
+  it.each([
+    undefined,
+    "null",
+    "https://sibling.example.com",
+    "https://example.com.attacker.test",
+    "http://example.com",
+    "https://example.com:444",
+  ])("rejects cookie-authenticated writes from Origin %s", async (origin) => {
+    const route = findRoute("POST", "/eve/v1/session");
+    const headers = new Headers({
+      cookie: "better-auth.session_token=victim",
+      "content-type": "text/plain",
+      host: "sibling.example.com",
+      "x-forwarded-host": "sibling.example.com",
+      "x-forwarded-proto": "https",
+      authorization: "Bearer unverified-cannot-bypass-cookie-policy",
+    });
+    if (origin !== undefined) headers.set("origin", origin);
+    const response = await route.handler(
+      new Request("https://sibling.example.com/eve/v1/session", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ message: "Please organize Alice's calendar." }),
+      }),
+      unexpectedRouteContext()
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "A trusted application Origin is required.",
+    });
+  });
+
+  it.each(["", "/cancel", "/compact", "/clear", "/end"])(
+    "checks Origin on cookie-authenticated session writes%s",
+    async (suffix) => {
+      isSessionOwnedMock.mockResolvedValue(true);
+      const route = findRoute("POST", `/eve/v1/session/:sessionId${suffix}`);
+      const response = await route.handler(
+        new Request(`https://example.com/eve/v1/session/owned${suffix}`, {
+          method: "POST",
+          headers: { origin: "https://sibling.example.com" },
+          body: "not JSON",
+        }),
+        unexpectedRouteContext()
+      );
+      expect(response.status).toBe(403);
+    }
+  );
+
+  it.each(["https://example.com", "http://localhost:3000"])(
+    "admits same-origin cookie requests from configured origin %s",
+    async (origin) => {
+      const environment = vi.spyOn(Environment, "env", "get").mockReturnValue({
+        ...Environment.env,
+        BETTER_AUTH_URL: origin,
+      });
+      const route = findRoute("POST", "/eve/v1/session");
+      const response = await route.handler(
+        new Request(`${origin}/eve/v1/session`, {
+          method: "POST",
+          headers: { origin },
+          body: JSON.stringify({
+            message: "Please organize Alice's calendar.",
+          }),
+        }),
+        unexpectedRouteContext()
+      );
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({
+        error: "Session creation requires internal channel dispatch context.",
+      });
+      environment.mockRestore();
+    }
+  );
+
+  it("preserves non-cookie local development requests without Origin", async () => {
+    getAuthSessionMock.mockResolvedValue(null);
+    vi.stubEnv("EVE_DEV", "1");
+    const response = await findRoute("POST", "/eve/v1/session").handler(
+      new Request("http://localhost:3000/eve/v1/session", {
+        method: "POST",
+        body: "not JSON",
+      }),
+      unexpectedRouteContext()
+    );
+    expect(response.status).toBe(400);
+  });
   it("checks decoded session route ids against workspace ownership", async () => {
     const route = eveChannel.routes.find(
       (candidate) =>
@@ -59,7 +148,11 @@ describe("Eve channel authentication", () => {
     const responsePromise = route.handler(
       new Request(
         "https://assistant.example/eve/v1/callback/eve%3Asession%3Awrun_victim%3Ainbox",
-        { body: "{}", method: "POST" }
+        {
+          body: "{}",
+          headers: { origin: "https://example.com" },
+          method: "POST",
+        }
       ),
       unexpectedRouteContext()
     );
@@ -104,7 +197,10 @@ describe("Eve channel authentication", () => {
     async (method, pattern, path) => {
       const route = findRoute(method, pattern);
       const pending = route.handler(
-        new Request(`https://assistant.example${path}`, { method }),
+        new Request(`https://assistant.example${path}`, {
+          method,
+          headers: { origin: "https://example.com" },
+        }),
         unexpectedRouteContext()
       );
       await vi.runAllTimersAsync();
@@ -122,7 +218,11 @@ describe("Eve channel authentication", () => {
     const response = await route.handler(
       new Request(
         "https://assistant.example/eve/v1/callback/task:task_1:0123456789abcdef0123456789abcdef",
-        { body: "{}", method: "POST" }
+        {
+          body: "{}",
+          headers: { origin: "https://example.com" },
+          method: "POST",
+        }
       ),
       unexpectedRouteContext()
     );

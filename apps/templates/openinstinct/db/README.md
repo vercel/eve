@@ -22,6 +22,16 @@ therefore provide the direct URL for its intended database. Migrations must
 remain backward compatible with the previously deployed application while a
 rollout is in progress.
 
+## Browser timeline event identity
+
+Browser timeline inserts namespace each local event ID with a stable hash of its
+workspace and trace session. Local IDs must contain 1–128 characters; stored IDs
+are opaque, bounded keys. Retrying an event in the same trace preserves the first
+row, while identical local positions in other traces remain independent. The
+namespace is constant within a trace, preserving local ID sort order. This uses
+the existing text primary key and requires no schema migration. Existing rows
+remain readable; events previously discarded by a collision are not recovered.
+
 ## Adopting an existing database
 
 Migration `0000` supports both an empty database and one containing the tables

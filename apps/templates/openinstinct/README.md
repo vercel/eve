@@ -78,6 +78,15 @@ keys in the private Blob store. The deploy flow supplies the application URL
 and required service configuration automatically; you do not need to copy
 environment-variable values for the base installation.
 
+Cookie-authenticated writes to the eve API require an `Origin` header matching
+this installation's exact application origin (scheme, host, and port). Set
+`BETTER_AUTH_URL` to the browser-facing origin for custom domains, previews, and
+local ports; without an override, Vercel derives the origin from its configured
+production hostname. Missing, opaque, and sibling-site origins are rejected,
+including requests carrying an unrelated `Authorization` header. Same-origin
+browser clients need no extra token. The separate non-cookie local-development
+and internal runtime authenticators retain their own credential policies.
+
 <details>
 <summary>Database, storage, and installation secrets</summary>
 
