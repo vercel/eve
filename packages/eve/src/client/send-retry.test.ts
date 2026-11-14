@@ -20,6 +20,17 @@ function accepted() {
   return Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 });
 }
 
+/** The send's POST attempts; a send also opens its delivery's stream with a GET beside them. */
+function posts(fetchMock: { mock: { calls: readonly (readonly unknown[])[] } }) {
+  return fetchMock.mock.calls.filter(
+    ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+  );
+}
+
+function notFound() {
+  return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+}
+
 function conflict(code: string) {
   return Response.json({ code, error: "The request conflicts.", ok: false }, { status: 409 });
 }
@@ -29,10 +40,13 @@ describe("session send readiness retries", () => {
     let headerResolution = 0;
     const observedHeaders: string[] = [];
     const observedPaths: string[] = [];
+    let attempts = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if (init?.method !== "POST") return notFound();
       observedPaths.push(new URL(String(request)).pathname);
       observedHeaders.push(new Headers(init?.headers).get("x-attempt") ?? "");
-      return fetchMock.mock.calls.length <= 4 ? conflict("session_not_ready") : accepted();
+      attempts += 1;
+      return attempts <= 4 ? conflict("session_not_ready") : accepted();
     });
     const handle = session(
       async () => new Headers({ "x-attempt": String((headerResolution += 1)) }),
@@ -42,7 +56,7 @@ describe("session send readiness retries", () => {
     const startedAt = Date.now();
     const sent = handle.send("ready soon");
     await vi.advanceTimersByTimeAsync(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(posts(fetchMock)).toHaveLength(1);
     for (const [delayMs, calls] of [
       [250, 2],
       [500, 3],
@@ -50,9 +64,9 @@ describe("session send readiness retries", () => {
       [2_000, 5],
     ] as const) {
       await vi.advanceTimersByTimeAsync(delayMs - 1);
-      expect(fetchMock).toHaveBeenCalledTimes(calls - 1);
+      expect(posts(fetchMock)).toHaveLength(calls - 1);
       await vi.advanceTimersByTimeAsync(1);
-      expect(fetchMock).toHaveBeenCalledTimes(calls);
+      expect(posts(fetchMock)).toHaveLength(calls);
     }
     const delivery = await sent;
 
@@ -64,7 +78,10 @@ describe("session send readiness retries", () => {
       acceptedAt: startedAt + 3_750,
     });
     // Each attempt resolves fresh headers so rotated credentials apply to retries.
-    expect(observedHeaders).toEqual(["1", "2", "3", "4", "5"]);
+    expect(new Set(observedHeaders).size).toBe(5);
+    expect(observedHeaders.map(Number)).toEqual(
+      [...observedHeaders.map(Number)].sort((a, b) => a - b),
+    );
     expect(new Set(observedPaths)).toEqual(new Set(["/eve/v1/session/session_1"]));
   });
 
@@ -82,7 +99,7 @@ describe("session send readiness retries", () => {
 
     expect(SessionNotActiveError.is(error)).toBe(true);
     expect(error).toMatchObject({ retryable: true });
-    expect(fetchMock).toHaveBeenCalledTimes(14);
+    expect(posts(fetchMock)).toHaveLength(14);
   });
 
   it.each([
@@ -97,6 +114,6 @@ describe("session send readiness retries", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(conflict(code));
 
     await expect(act(session())).rejects.toBeDefined();
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(posts(fetchMock)).toHaveLength(1);
   });
 });

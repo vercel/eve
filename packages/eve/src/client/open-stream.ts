@@ -96,6 +96,11 @@ interface FollowStreamInput {
   readonly startIndex: number;
   /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
   readonly follow?: boolean;
+  /**
+   * A following connection at `startIndex` that's already opening. The first read uses it if it
+   * opened, and opens its own if it didn't; a read that needs the tail index closes it unused.
+   */
+  readonly opened?: Promise<OpenedStream | undefined>;
 }
 
 /** One connection open; `requestTailIndex` asks the server to report the durable tail index. */
@@ -142,16 +147,22 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
     return input.follow === false && passedTail();
   };
 
+  let opened = input.opened;
   while (true) {
     const retryPolicy = resolvePolicy();
+    const requestTailIndex = (bounded || startIndex < 0) && tailIndex === undefined;
+    const early = opened;
+    opened = undefined;
     let connection: OpenedStream;
     try {
-      connection = await openStreamBody({
-        ...input,
-        retryPolicy,
-        startIndex,
-        requestTailIndex: (bounded || startIndex < 0) && tailIndex === undefined,
-      });
+      const adopted =
+        early === undefined
+          ? undefined
+          : requestTailIndex || input.follow === false
+            ? void early.then((unused) => unused?.close())
+            : await early;
+      connection =
+        adopted ?? (await openStreamBody({ ...input, retryPolicy, startIndex, requestTailIndex }));
     } catch (error) {
       if (input.signal?.aborted) return;
       throw error;
@@ -276,7 +287,7 @@ export async function* followStreamIterable(
 }
 
 /** An opened connection: the response body plus the tail index from the response header, if any. */
-interface OpenedStream {
+export interface OpenedStream {
   readonly headers: Headers;
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
