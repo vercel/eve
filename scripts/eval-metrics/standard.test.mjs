@@ -443,7 +443,7 @@ test("partial captures make attribution unavailable instead of guessing", () => 
 
 test("Slack new-thread time comes from the eval's log, not the session capture", () => {
   const slack = (samples, fields = {}) =>
-    `EVE_SLACK_NEW_THREAD_METRIC=${JSON.stringify({ schemaVersion: 1, slackApiLatencyMs: 15, samples, ...fields })}`;
+    `EVE_SLACK_NEW_THREAD_METRIC=${JSON.stringify({ schemaVersion: 1, slackApiLatencyMs: 15, trials: samples.length, samples, ...fields })}`;
   const withLogs = (logs, artifact = synthetic([])) => ({
     ...artifact,
     result: { ...artifact.result, logs },
@@ -477,6 +477,12 @@ test("Slack new-thread time comes from the eval's log, not the session capture",
     assert.equal(
       deriveAttemptMetrics(withLogs([slack([{ modelCallMs: 650 }], fields)])).metrics[key].reason,
       "unsupported-slack-new-thread-log",
+    );
+  // A failed trial leaves the attempt unmeasured rather than flattering it.
+  for (const fields of [{ trials: 5 }, { trials: undefined }])
+    assert.equal(
+      deriveAttemptMetrics(withLogs([slack([{ modelCallMs: 650 }], fields)])).metrics[key].reason,
+      "incomplete-slack-new-thread-trials",
     );
   assert.equal(
     deriveAttemptMetrics(withLogs(["EVE_SLACK_NEW_THREAD_METRIC={"])).metrics[key].reason,

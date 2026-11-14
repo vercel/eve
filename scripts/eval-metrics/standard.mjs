@@ -50,7 +50,12 @@ import { coveredLengthBetween, pairIntervals } from "./measurements/intervals.mj
 import { sessionMarks } from "./measurements/marks.mjs";
 import { indexSession, sessionFailures } from "./measurements/session.mjs";
 
-/** Bump whenever a definition below changes meaning. */
+/**
+ * Bump whenever a definition below changes meaning. Adding a metric needs no
+ * bump: published runs without its key read as not applicable (eve-evals
+ * drops absent keys like `not-applicable` ones), so re-deriving them would
+ * only spell that out.
+ */
 export const METRICS_VERSION = 4;
 
 /**
@@ -233,6 +238,10 @@ function slackNewThread(evalArtifact) {
     .map((sample) => sample?.modelCallMs)
     .filter((value) => Number.isFinite(value));
   if (samples.length === 0) return { [key]: unavailable("no-slack-new-thread-samples") };
+  // A trial that failed is likely the slow one, so the others' median would
+  // flatter the attempt: it is measured only when every planned trial was.
+  if (!Number.isInteger(logged.trials) || samples.length < logged.trials)
+    return { [key]: unavailable("incomplete-slack-new-thread-trials") };
   return { [key]: { status: "measured", value: median(samples), count: samples.length, samples } };
 }
 
