@@ -42,11 +42,11 @@ mock.module(channelDefinitionUrl, {
   },
 });
 const { default: slack } = await import("./slack.ts");
-const adapter = (
-  slack as unknown as {
-    events: Record<string, (event: unknown, ctx: unknown) => Promise<void>>;
-  }
-).events;
+assert.ok("events" in slack);
+const adapter = slack.events as Record<
+  string,
+  (event: unknown, ctx: unknown) => Promise<void>
+>;
 
 test("rejected investigation posts reach eve's delivery notice without resending the answer", async () => {
   const posts: unknown[] = [];
