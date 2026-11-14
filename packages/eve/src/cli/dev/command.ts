@@ -71,9 +71,8 @@ async function runOnboardingWhileServerStarts(input: {
   return await runStartupOnboarding({
     startup: input.startup,
     workspaceRoot: projectContext?.environmentRoot ?? input.applicationRoot,
-    ...(projectContext?.kind === "workspace-member"
-      ? { agentRoot: projectContext.member.appRoot }
-      : {}),
+    agentRoot:
+      projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined,
     onOnboardingStep: input.telemetry.trackSetupStep,
     onOnboardingTerminal: input.telemetry.trackSetupTerminal,
     withExclusiveTerminal: async (task) => {
@@ -393,7 +392,7 @@ export function registerDevelopmentCommand(input: {
             runDevelopmentTui: runtime.runDevelopmentTui,
             server: { appRoot: handle.appRoot, serverUrl: handle.url },
             startup: tuiStartup,
-            ...(startupOnboarding === undefined ? {} : { startupOnboarding }),
+            startupOnboarding,
           }),
       });
     } finally {
