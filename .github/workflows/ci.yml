@@ -399,7 +399,8 @@ jobs:
           fi
 
   # The scenario tier in two halves. eve's vitest files split by vitest's own
-  # --shard; the second half also runs the other packages' scenario tests. The
+  # --shard; the first half, which measured lighter, also runs the other
+  # packages' scenario tests. The
   # `test-scenario` check below requires both halves.
   test-scenario-shard:
     name: test-scenario (${{ matrix.shard }})
@@ -469,7 +470,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           pnpm exec turbo run test:scenario --filter=eve -- --shard="$SHARD"
-          if [ "$SHARD" = "2/2" ]; then
+          if [ "$SHARD" = "1/2" ]; then
             pnpm exec turbo run test:scenario --filter='!eve'
           fi
 
