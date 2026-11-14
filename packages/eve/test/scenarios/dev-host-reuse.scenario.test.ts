@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -9,7 +9,9 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 const scenarioApp = useScenarioApp();
 
 /** Starts headless `eve dev`, reads its agent info, and stops it with SIGINT. */
-async function runDevelopmentServer(appRoot: string): Promise<{ readonly agentName: string }> {
+async function runDevelopmentServer(
+  appRoot: string,
+): Promise<{ readonly agentName: string; readonly instructions: string }> {
   const child = spawn(
     process.execPath,
     [join(appRoot, "node_modules", "eve", "bin", "eve.js"), "dev", "--no-ui", "--port", "0"],
@@ -36,8 +38,12 @@ async function runDevelopmentServer(appRoot: string): Promise<{ readonly agentNa
     });
     const info = (await (await fetch(new URL("/eve/v1/info", url))).json()) as {
       readonly agent: { readonly name: string };
+      readonly instructions: { readonly static: readonly { readonly content: string }[] };
     };
-    return { agentName: info.agent.name };
+    return {
+      agentName: info.agent.name,
+      instructions: info.instructions.static.map((source) => source.content).join("\n"),
+    };
   } finally {
     child.kill("SIGINT");
     await exited;
@@ -53,7 +59,7 @@ async function keptWorkspace(appRoot: string): Promise<string> {
 
 // A packed install, where eve lives under node_modules and may reuse a host.
 describe("eve dev host reuse", () => {
-  it("keeps the host at exit and serves the next start from it", async () => {
+  it("serves authored edits from the kept host and rebuilds it when the host changes", async () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.mjs":
@@ -63,15 +69,24 @@ describe("eve dev host reuse", () => {
       installDependencies: true,
       name: "dev-host-reuse",
     });
+    const hosts = async () =>
+      (await readdir(join(app.appRoot, ".eve", "dev-hosts"))).filter(
+        (name) => name !== "reusable-host.json",
+      );
 
-    expect(await runDevelopmentServer(app.appRoot)).toEqual({ agentName: "dev-host-reuse" });
+    expect(await runDevelopmentServer(app.appRoot)).toMatchObject({ agentName: "dev-host-reuse" });
     const firstHost = await keptWorkspace(app.appRoot);
 
-    expect(await runDevelopmentServer(app.appRoot)).toEqual({ agentName: "dev-host-reuse" });
+    // Instructions are generation content: the kept host serves the edit.
+    await writeFile(join(app.appRoot, "agent", "instructions.md"), "You answer in haiku.\n");
+    expect((await runDevelopmentServer(app.appRoot)).instructions).toContain("haiku");
     expect(await keptWorkspace(app.appRoot)).toBe(firstHost);
-    expect(await readdir(join(app.appRoot, ".eve", "dev-hosts"))).toEqual(
-      expect.arrayContaining(["reusable-host.json"]),
-    );
-    expect(await readdir(join(app.appRoot, ".eve", "dev-hosts"))).toHaveLength(2);
-  }, 240_000);
+
+    // Env files shape the host, so the next start builds a new one.
+    await writeFile(join(app.appRoot, ".env.local"), "REUSE_SCENARIO=1\n");
+    await runDevelopmentServer(app.appRoot);
+    const rebuiltHost = await keptWorkspace(app.appRoot);
+    expect(rebuiltHost).not.toBe(firstHost);
+    expect(await hosts()).toEqual([basename(rebuiltHost)]);
+  }, 300_000);
 });

@@ -9,6 +9,7 @@ import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-wo
 import {
   claimReusableDevelopmentHost,
   computeDevelopmentHostReuseKey,
+  DEVELOPMENT_HOST_REUSE_ENV,
   writeReusableDevelopmentHost,
 } from "#internal/nitro/host/dev-host-reuse.js";
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
@@ -356,8 +357,17 @@ async function startNitroDevelopmentServer(
     });
     // An unchanged host from the previous run skips the host build. Like a
     // runtime-only rebuild, the new generation runs on the kept host's workspace.
-    const reuseKey = await computeDevelopmentHostReuseKey(compiledHost).catch(() => undefined);
-    const reusable = await claimReusableDevelopmentHost(project.appRoot, reuseKey);
+    // The key is needed only to check a kept host now and to keep this one at exit.
+    const reuseKey = computeDevelopmentHostReuseKey(compiledHost).catch(() => undefined);
+    const claim = await claimReusableDevelopmentHost(project.appRoot, reuseKey);
+    const reusable = claim.kind === "reused" ? claim.host : undefined;
+    if (claim.kind === "reused") {
+      console.info(
+        `[eve:dev] reusing the dev host from the last run; set ${DEVELOPMENT_HOST_REUSE_ENV}=0 to rebuild it every start.`,
+      );
+    } else if (claim.kind === "rebuilt") {
+      console.info(`[eve:dev] rebuilding the dev host because ${claim.reason}.`);
+    }
     cleanup.defer(async () => {
       if (!initialWorkspaceTransferred && reusable !== undefined) {
         await removeDevelopmentHostWorkspace(reusable.workspace);
@@ -459,11 +469,12 @@ async function startNitroDevelopmentServer(
         await devServer.swapTo({
           // Kept when the server closes with it still active, for the next start.
           dispose: async () => {
-            if (closing && reuseKey !== undefined) {
+            const key = closing ? await reuseKey : undefined;
+            if (key !== undefined) {
               await writeReusableDevelopmentHost(
                 {
                   compiledArtifacts: preparedHost.compiledArtifacts,
-                  key: reuseKey,
+                  key,
                   payload,
                   workflowBuildDir: preparedHost.workflowBuildDir,
                   workspace,
