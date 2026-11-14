@@ -1,0 +1,11 @@
+packages:
+  - "."
+minimumReleaseAgeExclude:
+  - eve
+  - ai
+  - "@ai-sdk/*"
+  - "@stripe/link-integrations-eve@0.5.0"
+  - "@stripe/link-sdk@3.1.0"
+onlyBuiltDependencies:
+  - esbuild
+  - unrs-resolver

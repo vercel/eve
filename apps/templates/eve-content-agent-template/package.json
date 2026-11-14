@@ -1,0 +1,43 @@
+{
+  "name": "eve-content-agent-template",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A Slack-based content assistant on eve that drafts blog posts, LinkedIn and X posts, release notes, and newsletters in your house voice from Notion source material.",
+  "license": "MIT",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "prebuild": "node scripts/sync-shared.mjs",
+    "build": "eve build",
+    "check": "ultracite check",
+    "predev": "node scripts/sync-shared.mjs",
+    "dev": "eve dev",
+    "eval": "eve eval live",
+    "eval:offline": "EVE_MOCK_MODEL=1 eve eval offline",
+    "fix": "ultracite fix",
+    "start": "eve start",
+    "sync:shared": "node scripts/sync-shared.mjs",
+    "test:smoke": "node --experimental-test-module-mocks --test tests/*.test.mjs",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.8.2",
+    "@vercel/connect": "2.9.1",
+    "ai": "7.0.150",
+    "eve": "1.0.0-rc.9",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "26.6.5",
+    "just-bash": "^3.6.0",
+    "typescript": "7.0.2",
+    "ultracite": "8.0.1"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
