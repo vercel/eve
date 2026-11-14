@@ -1,7 +1,8 @@
 import { posix, relative, win32 } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  resolvePackageCompiledFilePath,
   resolvePackageRoot,
   resolveWorkflowModulePath,
   WORKFLOW_MODULE_SPECIFIERS,
@@ -12,6 +13,7 @@ import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-pl
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import type { CompiledExtensionMount } from "#compiler/manifest.js";
 import { escapeRegex, exactRegex, pathsRegex } from "#internal/bundler/filters.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
@@ -21,6 +23,8 @@ import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-build
 
 export interface HostPluginsInput {
   readonly appRoot: string;
+  /** Loads eve's vendored dependencies from its install instead of bundling them (development hosts). */
+  readonly loadVendoredDependenciesNatively?: boolean;
   /** Package root authored assets may not escape. */
   readonly authoredPackageRoot: string;
   readonly externals: ExternalsPolicy;
@@ -43,6 +47,9 @@ export interface HostPluginsInput {
 export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
   const plugins: (NitroBuildPlugin | null)[] = [
+    input.loadVendoredDependenciesNatively === true
+      ? createDevelopmentCompiledExternalsPlugin()
+      : null,
     stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,
@@ -74,6 +81,39 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   return plugins
     .filter((plugin) => plugin !== null)
     .map((plugin) => ({ ...plugin, enforce: "pre" as const }));
+}
+
+/**
+ * eve's `#compiled/*` modules are prebuilt vendored dependencies, about two
+ * thirds of a development host's input. Loading them from eve's install saves
+ * re-bundling and re-emitting them on every start. Production hosts still
+ * bundle them. They are not entirely self-contained: peer dependencies such as
+ * `ai` (kept external by `@ai-sdk/otel`) stay bare imports, which resolve from
+ * eve's install, the same file Nitro's dev externals resolve for the bundle.
+ */
+function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
+  const packageRoot = resolvePackageRoot();
+  return {
+    name: "eve:development-compiled-externals",
+    resolveId: {
+      filter: { id: /^#compiled\// },
+      handler(source, importer) {
+        // Only eve's own modules: a dependency nested under eve has its own `#` imports.
+        const path = importer?.replace(/\?.*$/su, "");
+        if (
+          path === undefined ||
+          !isPathInsideOrEqual(path, packageRoot) ||
+          relative(packageRoot, path).split(/[\\/]/u).includes("node_modules")
+        ) {
+          return null;
+        }
+        return {
+          external: true,
+          id: pathToFileURL(resolvePackageCompiledFilePath(`src/${source.slice(1)}`)).href,
+        };
+      },
+    },
+  };
 }
 
 function normalizePath(path: string): string {

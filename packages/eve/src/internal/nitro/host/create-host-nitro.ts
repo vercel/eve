@@ -168,6 +168,9 @@ function toNitroConfig(
     buildPlugins: createHostPlugins({
       appRoot: locations.appRoot,
       authoredPackageRoot: spec.authored.packageRoot,
+      // A source checkout resolves eve's vendored modules through the `eve-source`
+      // condition, which a natively loaded module would not use.
+      loadVendoredDependenciesNatively: spec.development && !import.meta.url.endsWith(".ts"),
       externals: spec.externals,
       extensionMounts: spec.extensionMounts,
       extensionOverridePaths: spec.extensionOverridePaths,
