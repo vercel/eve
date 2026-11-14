@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
 
-import type { GitHubAccess } from "../../extension/lib/github-policy.ts";
+import {
+  createInstallationCheckCache,
+  type GitHubAccess,
+} from "../../extension/lib/github-policy.ts";
 import {
   executeGitHubShell,
   type GitHubLeaseRule,
@@ -400,6 +403,7 @@ function runUser(
   authorized: string[] = [],
   requireAuth: () => never = () => assert.fail("must not request re-authorization"),
   repository: string | null = "acme/vault",
+  installationChecks = createInstallationCheckCache(),
 ) {
   return executeGitHubShell(
     input(repository ?? undefined, repository ? WRITE_COMMAND : "gh search repos --owner acme"),
@@ -418,6 +422,7 @@ function runUser(
       fetch: github.fetch,
       getToken: async () => ({ token }),
       requireAuth,
+      installationChecks,
       getSandbox: async () => fakeSandbox(runs, leases),
     },
   );
@@ -454,7 +459,7 @@ test("private-write user commands are refused, naming the repository, when the i
   const authorized: string[] = [];
   await assert.rejects(
     runUser("private-write", "user-b", github, runs, leases, authorized),
-    /access "private-write" refused: the GitHub App installation includes public repositories \(acme\/site\)\. Any user with read access can comment on a public repository/u,
+    /access "private-write" refused: the GitHub App installation includes a public repository \(acme\/site\)\. Any user with read access can comment on a public repository/u,
   );
   assert.deepEqual([runs, leases, authorized], [[], [], []]);
 });
@@ -477,7 +482,7 @@ test("public-write user commands run on public-only installations and are refuse
       fakeGitHub({ installs: { "user-b": [[PUBLIC, PRIVATE, INTERNAL]] } }),
       refused,
     ),
-    /access "public-write" refused: the GitHub App installation includes private or internal repositories \(acme\/vault, acme\/wiki\)/u,
+    /access "public-write" refused: the GitHub App installation includes a private or internal repository \(acme\/vault\)/u,
   );
   assert.deepEqual(refused, []);
 });
@@ -570,11 +575,65 @@ test("the installation check reads every page", async () => {
   });
   await assert.rejects(
     runUser("private-write", "user-b", github),
-    /includes public repositories \(acme\/site\)/u,
+    /includes a public repository \(acme\/site\)/u,
   );
   assert.ok(
     github.requests.some((request) => request.url.endsWith("repositories?per_page=100&page=2")),
   );
+});
+
+test("the installation check stops at the first refused repository", async () => {
+  const github = fakeGitHub({
+    installs: {
+      "user-b": [
+        [{ ...PUBLIC }, ...Array.from({ length: 100 }, () => ({ ...PRIVATE }))],
+        [PRIVATE],
+      ],
+    },
+  });
+  await assert.rejects(runUser("private-write", "user-b", github), /acme\/site/u);
+  assert.deepEqual(
+    github.requests.map((request) => request.url),
+    [
+      "/user/installations?per_page=100&page=1",
+      "/user/installations/0/repositories?per_page=100&page=1",
+    ],
+  );
+});
+
+test("a passed installation check is reused for 60 seconds, per caller and access value", async () => {
+  let clock = 1_000;
+  const checks = createInstallationCheckCache(() => clock);
+  const github = fakeGitHub({
+    installs: { "user-a": [[{ ...PRIVATE }]], "user-c": [[{ ...PRIVATE }]] },
+  });
+  const run = (access: "private-write" | "public-write", token: string) =>
+    runUser(access, token, github, [], [], [], undefined, "acme/vault", checks);
+  await run("private-write", "user-a");
+  const afterFirst = github.requests.length;
+  clock += 59_999;
+  await run("private-write", "user-a");
+  assert.equal(github.requests.length, afterFirst, "reused inside the window");
+  await run("private-write", "user-c");
+  assert.ok(github.requests.length > afterFirst, "another caller is checked");
+  const afterOther = github.requests.length;
+  await assert.rejects(run("public-write", "user-a"), /acme\/vault/u);
+  assert.ok(github.requests.length > afterOther, "another access value is checked");
+  clock += 1;
+  const beforeExpiry = github.requests.length;
+  await run("private-write", "user-a");
+  assert.ok(github.requests.length > beforeExpiry, "checked again once the window ends");
+});
+
+test("a refused installation check is not reused once the installation is narrowed", async () => {
+  const checks = createInstallationCheckCache(() => 1_000);
+  const installs: Record<string, Repo[][]> = { "user-a": [[{ ...PUBLIC }]] };
+  const github = fakeGitHub({ installs });
+  const run = () =>
+    runUser("private-write", "user-a", github, [], [], [], undefined, "acme/vault", checks);
+  await assert.rejects(run(), /acme\/site/u);
+  installs["user-a"] = [[{ ...PRIVATE }]];
+  await run();
 });
 
 test("the user installation check fails closed when GitHub does not answer", async () => {

@@ -16,6 +16,8 @@ import { connectUserAuthorization } from "./connect-user-auth.ts";
 import {
   appTokenPermissions,
   assertUserInstallation,
+  createInstallationCheckCache,
+  type InstallationCheckCache,
   GitHubPolicyLookupError,
   repositoryRequiredMessage,
   type GitHubAccess,
@@ -25,6 +27,8 @@ import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
 export type { GitHubCoAuthor } from "./attribution.ts";
+
+const installationChecks = createInstallationCheckCache();
 
 export type { GitHubAccess } from "./github-policy.ts";
 
@@ -150,6 +154,8 @@ interface GitHubShellDependencies {
   /** Resolves and re-authorizes user-scoped providers; the tool's `ctx.getToken` and `ctx.requireAuth`. */
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
+  /** Passed user installation checks; defaults to one cache shared by every command in the process. */
+  readonly installationChecks?: InstallationCheckCache;
   readonly getSandbox: () => Promise<SandboxSession>;
   /**
    * Orders this session's own credential leases in process; every `ctx.getSandbox()` call returns
@@ -244,7 +250,12 @@ export async function executeGitHubShell(
     ({ token } = await dependencies.getToken(userAuth));
     if (access) {
       try {
-        await assertUserInstallation({ access, fetch: fetchGitHub, token });
+        await assertUserInstallation({
+          access,
+          cache: dependencies.installationChecks ?? installationChecks,
+          fetch: fetchGitHub,
+          token,
+        });
       } catch (error) {
         if (error instanceof GitHubPolicyLookupError && error.status === 401) {
           dependencies.requireAuth(userAuth);

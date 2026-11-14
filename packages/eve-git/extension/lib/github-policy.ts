@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 /**
@@ -16,6 +18,8 @@ const PAGE_SIZE = 100;
 /** An installation larger than this many pages (3,000 repositories) is refused, not sampled. */
 const MAX_PAGES = 30;
 const REQUEST_TIMEOUT_MS = 10_000;
+/** How long a passed installation check is reused for the same caller and access value. */
+const INSTALLATION_CHECK_TTL_MS = 60_000;
 
 const visibilitySchema = z.enum(["public", "private", "internal"]);
 const repositorySchema = z.object({ visibility: visibilitySchema });
@@ -119,23 +123,43 @@ function privateWritePermissions(configured: readonly string[] | undefined): rea
   return configured;
 }
 
+/** Installation checks that passed, by caller and access value, with when each stops being reused. */
+export interface InstallationCheckCache {
+  readonly now: () => number;
+  readonly passed: Map<string, number>;
+}
+
+export function createInstallationCheckCache(now: () => number = Date.now): InstallationCheckCache {
+  return { now, passed: new Map() };
+}
+
 /**
  * Refuses the command when the caller's App installation reaches a repository
  * the access setting rules out. A user token can't be narrowed when it is
- * minted, so the installation is the boundary.
+ * minted, so the installation is the boundary. The check stops at the first
+ * refused repository. A passed check is reused for 60 seconds; a refusal or a
+ * failed lookup is never reused.
  */
 export async function assertUserInstallation(options: {
   readonly access: GitHubAccess;
+  readonly cache: InstallationCheckCache;
   readonly fetch: GitHubFetch;
   readonly token: string;
 }): Promise<void> {
-  const { access, token } = options;
-  const installations = await githubPages(
+  const { access, cache, token } = options;
+  const key = `${access}:${createHash("sha256").update(token).digest("hex")}`;
+  const now = cache.now();
+  const reusableUntil = cache.passed.get(key);
+  if (reusableUntil !== undefined && now < reusableUntil) return;
+  const installations: z.infer<typeof installationsSchema>["installations"] = [];
+  for await (const batch of githubPages(
     options.fetch,
     token,
     "/user/installations",
     (body) => installationsSchema.parse(body).installations,
-  );
+  )) {
+    installations.push(...batch);
+  }
   if (access === "private-write") {
     for (const installation of installations) {
       const outside = installation.permissions
@@ -151,29 +175,29 @@ export async function assertUserInstallation(options: {
       }
     }
   }
-  const offending: string[] = [];
   for (const { id } of installations) {
-    const repositories = await githubPages(
+    for await (const batch of githubPages(
       options.fetch,
       token,
       `/user/installations/${id}/repositories`,
       (body) => installationRepositoriesSchema.parse(body).repositories,
-    );
-    for (const repository of repositories) {
-      const refused =
-        access === "private-write"
-          ? repository.visibility === "public"
-          : repository.visibility !== "public";
-      if (refused) offending.push(repository.full_name);
+    )) {
+      for (const repository of batch) {
+        if (access === "private-write" && repository.visibility === "public") {
+          throw new Error(
+            `access "private-write" refused: the GitHub App installation includes a public repository (${repository.full_name}). Any user with read access can comment on a public repository, so narrow the App installation to private repositories.`,
+          );
+        }
+        if (access === "public-write" && repository.visibility !== "public") {
+          throw new Error(
+            `access "public-write" refused: the GitHub App installation includes a private or internal repository (${repository.full_name}). Narrow the App installation to public repositories.`,
+          );
+        }
+      }
     }
   }
-  if (offending.length === 0) return;
-  const names = `${offending.slice(0, 10).join(", ")}${offending.length > 10 ? `, and ${offending.length - 10} more` : ""}`;
-  throw new Error(
-    access === "private-write"
-      ? `access "private-write" refused: the GitHub App installation includes public repositories (${names}). Any user with read access can comment on a public repository, so narrow the App installation to private repositories.`
-      : `access "public-write" refused: the GitHub App installation includes private or internal repositories (${names}). Narrow the App installation to public repositories.`,
-  );
+  for (const [passedKey, until] of cache.passed) if (until <= now) cache.passed.delete(passedKey);
+  cache.passed.set(key, now + INSTALLATION_CHECK_TTL_MS);
 }
 
 function readOnly(configured: readonly string[]): readonly string[] {
@@ -182,19 +206,18 @@ function readOnly(configured: readonly string[]): readonly string[] {
   ];
 }
 
-async function githubPages<T>(
+async function* githubPages<T>(
   fetch: GitHubFetch,
   token: string,
   path: string,
   items: (body: unknown) => T[],
-): Promise<T[]> {
-  const all: T[] = [];
+): AsyncGenerator<T[]> {
   for (let page = 1; page <= MAX_PAGES; page++) {
     const batch = items(
       await githubGet(fetch, token, `${path}?per_page=${PAGE_SIZE}&page=${page}`),
     );
-    all.push(...batch);
-    if (batch.length < PAGE_SIZE) return all;
+    yield batch;
+    if (batch.length < PAGE_SIZE) return;
   }
   throw new Error(
     `The access policy can't check ${path}: it lists more than ${MAX_PAGES * PAGE_SIZE} entries. Narrow the GitHub App installation.`,
