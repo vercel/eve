@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
+import type { ClientAuth } from "#client/types.js";
 import type { DevelopmentOidcTokenResolution } from "#services/dev-client/request-headers.js";
 import {
   resolveVercelDeployment,
@@ -75,6 +76,42 @@ describe("resolveEvalClientOptions", () => {
     expect(() =>
       resolveEvalClientOptions({ kind: "remote", url: "https://example.vercel.app" }),
     ).toThrow("Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both");
+  });
+
+  it("resolves a config targetAuth token before every local request", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ ok: true, status: "ready", workflowId: "wf" }),
+      );
+    const token = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("first-token")
+      .mockResolvedValueOnce("second-token");
+    const client = await createEvalClient(
+      { kind: "local", url: "http://127.0.0.1:3000" },
+      { targetAuth: { bearer: token } },
+    );
+
+    await client.health();
+    await client.health();
+
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer first-token",
+    );
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer second-token",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
+  });
+
+  it("lets EVE_EVAL_AUTH_TOKEN override a remote config targetAuth", () => {
+    vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "static-token");
+    const options = resolveEvalClientOptions(
+      { kind: "remote", url: "https://example.vercel.app" },
+      { bearer: () => "config-token" },
+    );
+    expect(options.auth).toEqual({ bearer: "static-token" });
   });
 
   it("ignores a blank EVE_EVAL_AUTH_TOKEN", () => {
@@ -201,11 +238,12 @@ describe("remote eval project verification", () => {
     vi.unstubAllEnvs();
   });
 
-  function createRemoteClient() {
+  function createRemoteClient(targetAuth?: ClientAuth) {
     return createEvalClient(
       { kind: "remote", url: "https://target.vercel.app" },
       {
         workspaceRoot: "/workspace",
+        targetAuth,
         deps: {
           resolveVercelDeployment: (input) =>
             resolveVercelDeployment({ ...input, deps: { captureVercel } }),
@@ -306,6 +344,27 @@ describe("remote eval project verification", () => {
     const headers = new Headers(vi.mocked(fetch).mock.calls[0]?.[1]?.headers);
     expect(headers.get("authorization")).toBe("Bearer static-token");
     expect(headers.get("x-vercel-trusted-oidc-idp-token")).toBeNull();
+    expect(vi.mocked(readFile)).not.toHaveBeenCalled();
+    expect(captureVercel).not.toHaveBeenCalled();
+    expect(resolveDevelopmentOidcToken).not.toHaveBeenCalled();
+  });
+
+  it("refreshes a config targetAuth bearer per request without resolving a Vercel project", async () => {
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({ ok: true, status: "ready", workflowId: "wf" }),
+    );
+    let calls = 0;
+    const client = await createRemoteClient({ bearer: async () => `session-token-${++calls}` });
+    await client.health();
+    await client.health();
+
+    const [first, second] = vi
+      .mocked(fetch)
+      .mock.calls.map(([, init]) => new Headers(init?.headers));
+    expect(first?.get("authorization")).toBe("Bearer session-token-1");
+    expect(second?.get("authorization")).toBe("Bearer session-token-2");
+    expect(first?.get("x-vercel-protection-bypass")).toBeNull();
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.redirect).toBe("manual");
     expect(vi.mocked(readFile)).not.toHaveBeenCalled();
     expect(captureVercel).not.toHaveBeenCalled();
     expect(resolveDevelopmentOidcToken).not.toHaveBeenCalled();

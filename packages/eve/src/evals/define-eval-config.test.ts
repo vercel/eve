@@ -86,6 +86,48 @@ describe("defineEvalConfig", () => {
     expect(defineEvalConfig({ judge: {} }).judge).toEqual({});
   });
 
+  it("accepts targetAuth with a per-request token resolver", () => {
+    const token = () => "fresh-token";
+    expect(defineEvalConfig({ targetAuth: { bearer: token } }).targetAuth).toEqual({
+      bearer: token,
+    });
+  });
+
+  it("accepts each targetAuth scheme with string or function tokens", () => {
+    const token = () => "fresh-token";
+    for (const targetAuth of [
+      { bearer: "static-token" },
+      { basic: { username: "eve", password: "secret" } },
+      { basic: { username: "eve", password: token } },
+      { vercelOidc: { token: "oidc-token" } },
+      { vercelOidc: { token } },
+    ]) {
+      expect(defineEvalConfig({ targetAuth }).targetAuth).toBe(targetAuth);
+    }
+  });
+
+  it("rejects a targetAuth without exactly one valid scheme", () => {
+    for (const targetAuth of [
+      "token",
+      null,
+      {},
+      { bearer: "a", vercelOidc: { token: "b" } },
+      // An unset environment variable, as in `{ bearer: process.env.TOKEN }`.
+      { bearer: undefined },
+      { bearer: 42 },
+      { basic: undefined },
+      { basic: { password: "secret" } },
+      { basic: { username: "eve" } },
+      { vercelOidc: undefined },
+      { vercelOidc: {} },
+      { vercelOidc: { token: undefined } },
+    ]) {
+      expect(() => defineInvalidConfig({ targetAuth: targetAuth as never })).toThrow(
+        "`targetAuth` must set exactly one of `bearer`",
+      );
+    }
+  });
+
   it("rejects a non-positive maxConcurrency", () => {
     expect(() => defineInvalidConfig({ maxConcurrency: 0 })).toThrow(
       "`maxConcurrency` must be a positive integer",

@@ -11,6 +11,7 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import type { ClientAgentSession } from "#client/agent-session.js";
 import type { RuntimeIdentity, TraceContext } from "#protocol/session-events/families/session.js";
 import type {
+  ClientAuth,
   ClientSessionState,
   CreateSessionOptions,
   SendTurnInput,
@@ -799,6 +800,14 @@ export interface EveEvalConfigInput<TContext = unknown> {
    * attempt is a separate result tagged with its 1-based `attempt`.
    */
   readonly repeat?: number;
+  /**
+   * Credentials `eve eval` sends to the target, local or `--url`, in the same
+   * shape as the eve client's `auth`. A function token runs before every
+   * request, so short-lived tokens stay fresh for the whole run. For a remote
+   * target, `EVE_EVAL_AUTH_TOKEN` or `EVE_EVAL_OIDC_TOKEN` takes precedence.
+   * Either way, eve skips the Vercel credential lookup.
+   */
+  readonly targetAuth?: ClientAuth;
 }
 
 /**
