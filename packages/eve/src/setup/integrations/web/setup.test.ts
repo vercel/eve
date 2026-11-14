@@ -76,54 +76,16 @@ export default await withEve({
 `;
 
 describe("Web setup", () => {
-  it("presents the hosting topology with concise guidance", async () => {
+  it("deploys as Vercel services without asking about hosting", async () => {
     const effects = deps();
-    const fake = createFakePrompter({
-      single: (question) => (question.message.includes("sign in") ? "custom" : "vercel"),
-    });
+    const fake = createFakePrompter({ single: () => "custom" });
     const select = vi.spyOn(fake.prompter, "select");
+    const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
     const ctx = createSetupContexts({
       appRoot: "/project",
       asker: interactiveAsker(fake.prompter),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: fake.prompter,
-      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
-    });
-
-    await prepareWebSetup(ctx.prepare, effects);
-
-    expect(select).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "How should Web Chat and your agents be deployed?",
-        initialValue: "vercel",
-        options: [
-          {
-            value: "vercel",
-            label: "Vercel services",
-            hint: "(Recommended) Web Chat and agents deploy as separate services.",
-            featured: undefined,
-          },
-          {
-            value: "next",
-            label: "Next.js",
-            hint: "One Next.js app serves Web Chat and routes agent requests.",
-            featured: undefined,
-          },
-        ],
-      }),
-    );
-  });
-
-  it("does not require a Vercel project when Vercel services are selected", async () => {
-    const effects = deps();
-    const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
-    const ctx = createSetupContexts({
-      appRoot: "/project",
-      asker: withAnswers({ "web-hosting": "vercel", "web-authentication": "custom" })(
-        headlessAsker(),
-      ),
-      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
-      prompter: createFakePrompter().prompter,
       resolveVercelProject,
     });
 
@@ -132,22 +94,31 @@ describe("Web setup", () => {
       hosting: "vercel",
       packageManager: "pnpm",
     });
+    expect(select).toHaveBeenCalledOnce();
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("sign in") }),
+    );
     expect(resolveVercelProject).not.toHaveBeenCalled();
   });
 
-  it("does not require a Vercel project for other hosts", async () => {
-    const effects = deps();
-    const resolveVercelProject = vi.fn(async () => {
-      throw new Error("eve link");
+  it("keeps Next.js hosting for an app an earlier install set up to host the agent", async () => {
+    const effects = withFiles(deps(), {
+      "/project/apps/web/next.config.ts": `import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+import { fileURLToPath } from "node:url";
+
+const nextConfig: NextConfig = {};
+const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
+
+export default withEve(nextConfig, { eveRoot });
+`,
     });
     const ctx = createSetupContexts({
       appRoot: "/project",
-      asker: withAnswers({ "web-hosting": "next", "web-authentication": "custom" })(
-        headlessAsker(),
-      ),
+      asker: withAnswers({ "web-authentication": "custom" })(headlessAsker()),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
-      resolveVercelProject,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
     await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({
@@ -155,7 +126,6 @@ describe("Web setup", () => {
       hosting: "next",
       packageManager: "pnpm",
     });
-    expect(resolveVercelProject).not.toHaveBeenCalled();
   });
 
   it("rejects an unselected workspace before writing an agent directory", async () => {
@@ -420,9 +390,7 @@ describe("Web setup", () => {
     const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
     const ctx = createSetupContexts({
       appRoot: "/project",
-      asker: withAnswers({ "web-hosting": "vercel", "web-authentication": "vercel" })(
-        headlessAsker(),
-      ),
+      asker: withAnswers({ "web-authentication": "vercel" })(headlessAsker()),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
       resolveVercelProject,
@@ -503,12 +471,12 @@ const supportMember: EveProjectContext = {
 describe("Web setup for a TanStack Start app", () => {
   const tanStackApp = { "/project/apps/web/vite.config.ts": "export default {};\n" };
 
-  it("offers TanStack Start hosting and skips the Next.js-only sign-in question", async () => {
+  it("deploys as Vercel services and skips the Next.js-only sign-in question", async () => {
     const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
     const ctx = createSetupContexts({
       appRoot: "/project",
-      // Headless refuses unanswered required questions, so a sign-in prompt would throw.
-      asker: withAnswers({ "web-hosting": "tanstack" })(headlessAsker()),
+      // Headless refuses unanswered required questions, so any prompt would throw.
+      asker: headlessAsker(),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
       resolveVercelProject,
@@ -516,13 +484,13 @@ describe("Web setup for a TanStack Start app", () => {
 
     await expect(prepareWebSetup(ctx.prepare, withFiles(deps(), tanStackApp))).resolves.toEqual({
       framework: "tanstack",
-      hosting: "tanstack",
+      hosting: "vercel",
       packageManager: "pnpm",
     });
     expect(resolveVercelProject).not.toHaveBeenCalled();
   });
 
-  it("deploys a workspace member as a peer service without asking", async () => {
+  it("deploys a workspace member as a peer service", async () => {
     const effects = withFiles(deps(), tanStackApp);
     vi.mocked(effects.resolveEveProjectContext).mockResolvedValue(supportMember);
 
