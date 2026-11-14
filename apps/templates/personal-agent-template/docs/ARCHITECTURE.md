@@ -57,7 +57,7 @@ personal-agent-template/
 │   ├── skills/               # e.g. daily-summary.md
 │   ├── connections/          # Linear MCP
 │   ├── lib/                  # base-instructions, memory-internal, slack-internal
-│   └── instructions.ts       # session.started hooks (memory injection)
+│   └── instructions.ts       # defineDynamic instructions (memory injection)
 ├── apps/web/                 # Nuxt frontend, Nitro API, and shared code
 │   ├── app/                  # pages, components, composables
 │   ├── server/               # API, database, and server utilities
@@ -77,8 +77,8 @@ personal-agent-template/
 
 ### Session memory injection
 
-1. Eve fires `session.started` ([`agent/instructions.ts`](../agent/instructions.ts))
-2. Agent calls `GET /api/internal/memory?userId=...` with bearer token
+1. Eve resolves the dynamic instructions in [`agent/instructions.ts`](../agent/instructions.ts) (`defineDynamic`) before each model call
+2. On first use in a session, the agent calls `GET /api/internal/memory?userId=...` with bearer token; `ctx.memo` caches the result per user for the rest of the session
 3. [`agent/lib/memory-internal.ts`](../agent/lib/memory-internal.ts) builds prompt section
 4. Appended to agent instructions for the session
 

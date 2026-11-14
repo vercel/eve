@@ -48,9 +48,10 @@ including saved personal profiles. Local development traces can include content.
 ## Requirements and costs
 
 You can use free tiers for the supporting services. **Vercel requires the Pro
-plan.** OpenInstinct checks for scheduled work every minute; Vercel's Hobby plan
-only allows cron jobs that run once per day, so it cannot deploy this schedule.
-See [Vercel's cron limits](https://vercel.com/docs/cron-jobs/usage-and-pricing).
+plan.** OpenInstinct checks for scheduled work every minute with
+[Vercel Schedules](https://vercel.com/docs/schedules); on the Hobby plan a
+schedule can run at most once every 15 minutes, so it cannot deploy this
+schedule. See [Vercel Schedules limits](https://vercel.com/docs/schedules/limits).
 
 Choose the free plans for Kernel and Neon during deployment.
 [Kernel](https://kernel.sh/pricing) includes free usage credits, and
@@ -316,7 +317,7 @@ require additional financial-data scopes and connected-source permissions.
 <details>
 <summary>Eve version and active-session compatibility</summary>
 
-This repository pins Eve `1.0.0-rc.1`. Eve 1.0 refuses to load extensions
+This repository pins Eve `1.0.0-rc.17`. Eve 1.0 refuses to load extensions
 built with Eve 0.83 or earlier, so the Link extension is disabled until Stripe
 ships a compatible release (see [Link wallet](#link-wallet)). Browser work uses
 the resumable `run_browser` task: the coordinator continues a worker by its

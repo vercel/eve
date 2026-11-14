@@ -27,6 +27,7 @@ function mergeThreadState(incoming: ThreadState): ThreadState {
 
   return {
     session: {
+      ...(session.inbox ? { inbox: session.inbox } : {}),
       sessionId: session.sessionId,
       streamIndex: session.streamIndex,
     },

@@ -23,7 +23,7 @@ agent/
   agent.ts                              model and reasoning
   instructions.md                       identity, workspace, delivery
   instructions/code-channels.ts         when to open a code channel and how to work in one
-  sandbox.ts                            Vercel Sandbox with gh, git, and TypeScript tooling
+  sandbox.ts                            Vercel Sandbox with gh and git tooling
   extensions/code.ts                    mounts eve/extensions/code
   extensions/git.ts                     mounts eve/extensions/git with Connect-brokered GitHub access
   lib/github.ts                         Connect connector and the firewall credential broker
@@ -33,15 +33,15 @@ agent/
   channels/github.ts                    @coding-agent comments from trusted repository members
   tools/open_code_channel.ts            moves a Slack thread into a new code channel (wraps openCodeChannel())
   tools/update_code_channel_status.ts   reports pull request and test status
-  tools/write_file.ts, tools/agent.ts   disable write_file and agent (see below)
+  tools/grep.ts                         adds eve's structured `grep` search tool
 ```
 
 - **Slack code channels.** In a Slack thread, the agent answers quick questions in place. For anything that needs a repository, it calls `open_code_channel`. The tool opens a code channel from the message, and Slack links it in the thread. The new channel's session starts with the thread's conversation. Everyone in the code channel can talk to the agent without mentioning it. The agent acknowledges each request and reports milestones as it works: a code channel has no thread status, so the Slack renderer posts the text the agent writes before a tool call.
 - **Context bar and diff view.** After each tool that can change the workspace, the Slack channel's renderer reads every repository under `/workspace/repos/` in the sandbox. It shows the repository, branch, and number of changed files in the code channel's context bar, and every change against the base branch, untracked files included, in the channel's diff view. The agent reports what only it knows, the pull request and test status, with `update_code_channel_status`, which only code channels offer.
-- **Tools.** The code extension adds an editing tool and `code__grep` for search, next to eve's `bash` and `read_file`. The editing tool is `code__apply_patch` in the eve release this template pins; newer releases replace it with eve's default `edit_file`, and their instructions create new files with `write_file`. The git extension adds `git__gh` for authenticated GitHub commands. `write_file` is disabled so edits go through the editing tool as small reviewable changes.
+- **Tools.** The agent edits with eve's default `edit_file`, which makes small reviewable replacements, and creates new files with `write_file`; the code extension's instructions keep `write_file` for new files and complete rewrites. `tools/grep.ts` adds eve's structured `grep` search next to `bash` and `read_file`. The git extension adds `git__gh` for authenticated GitHub commands.
 - **Skills.** `code__investigate`, `code__review`, and `git__pr` load on demand.
-- **Delegation.** `code__worker` is a read-only subagent for independent slices of a task. The root `agent` tool is disabled so all writes stay in one session.
-- **Credentials.** Each `gh` command gets a token scoped to one repository, minted by [Vercel Connect](https://vercel.com/docs/connect). The sandbox only sees a placeholder. `lib/github.ts` swaps it in at the sandbox firewall for that command and removes it afterward. The GitHub channel's checkout attaches a broader token to `github.com`, so `hooks/reset-github-egress.ts` removes it before the model runs.
+- **Delegation.** The built-in `agent` tool hands independent read-only slices of a task to a copy of the agent, which shares its sandbox. The instructions keep every edit and publication in the root session.
+- **Credentials.** Each `gh` command gets a token scoped to the repository it declares, or to the owner's installation when it declares only an owner, minted by [Vercel Connect](https://vercel.com/docs/connect). The sandbox only sees a placeholder. `lib/github.ts` swaps it in at the sandbox firewall for that command and removes it afterward. The GitHub channel's checkout attaches a broader token to `github.com`, so `hooks/reset-github-egress.ts` removes it before the model runs.
 - **GitHub.** The triggering repository is checked out at `/workspace` before each GitHub turn, and pull request turns include the diff. Only comments from owners, members, and collaborators start a turn, so strangers on a public repository cannot drive the agent.
 
 ## Local development
