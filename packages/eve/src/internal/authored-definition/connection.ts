@@ -20,6 +20,7 @@ const KNOWN_TOP_LEVEL_KEYS = [
   "description",
   "forwardPrincipal",
   "experimental",
+  "fetch",
   "headers",
   "instanceKey",
   "protocolVersionDiscovery",
@@ -149,6 +150,13 @@ export function normalizeMcpClientConnectionDefinition(
       throw new Error(`${message} "forwardPrincipal" must be a boolean.`);
     }
     result.forwardPrincipal = record.forwardPrincipal;
+  }
+
+  if (record.fetch !== undefined) {
+    if (typeof record.fetch !== "function") {
+      throw new Error(`${message} "fetch" must be a function.`);
+    }
+    result.fetch = record.fetch as typeof globalThis.fetch;
   }
 
   if (record.instanceKey !== undefined) {
