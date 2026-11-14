@@ -14,7 +14,7 @@ import {
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
+import { holdsModelCall, park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
@@ -117,13 +117,14 @@ export async function admitHumanInput(
   // A typed approval answers like a press, so the approval's response policy decides it.
   const typed = typedAnswers ? resolveTypedApproval(step.view(), delivered.input) : delivered.input;
   const limit = openLimit(step.view());
-  // A new message steers the held turn, unless it waits behind the budget prompt. A typed answer
-  // is not a new message. A message queued behind a policy's answer or a responder's sign-in
-  // still steers: without it, the turn re-runs a step that parks again, forever.
+  // A new message steers the held turn, unless it waits behind the budget prompt or a model
+  // call's sign-in. A typed answer is not a new message. A message queued behind a policy's
+  // answer or a responder's sign-in still steers: without it, the turn re-runs a step that parks
+  // again, forever.
   const messaged =
     (delivered.input?.message !== undefined && typed?.message !== undefined) ||
     delivered.displayMessage !== undefined;
-  const steer = messaged && limit === undefined;
+  const steer = messaged && limit === undefined && !holdsModelCall(step.view());
   const steered = steer ? await withdrawSteeredSignIns(step, typed) : typed;
 
   // A typed answer to the budget prompt is an answer like a press.

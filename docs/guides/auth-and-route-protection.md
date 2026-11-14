@@ -492,6 +492,56 @@ Vercel Connect providers usually supply their own display name for the authoriza
 
 Inline providers derive a stable auth key from Vercel Connect metadata when available. Give each custom provider without that metadata an explicit key, for example `ctx.getToken(auth, { authKey: "github" })`. `authKey` sets eve's cache and callback keys; it is not an OAuth scope.
 
+### Before a model call
+
+When the model call needs the caller's own credential, get it in the agent's dynamic `model`. A dynamic value's `ctx` has the same `getToken` and `requireAuth` as a tool's. In this example, each person's model calls run on their own Anthropic API key:
+
+```ts title="agent/agent.ts"
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { defineAgent, defineDynamic } from "eve";
+import {
+  ConnectionAuthorizationFailedError,
+  ConnectionAuthorizationRequiredError,
+  defineInteractiveAuthorization,
+} from "eve/connections";
+
+// Each person enters their own Anthropic API key on a page in your app.
+const anthropicKey = defineInteractiveAuthorization({
+  displayName: "Anthropic",
+  getToken: async ({ principal }) => {
+    const key = await loadAnthropicKey(principal);
+    if (!key) throw new ConnectionAuthorizationRequiredError("anthropic");
+    return { token: key };
+  },
+  // The page signs the person in, saves the key for `principal`, then redirects to `callbackUrl`.
+  startAuthorization: async ({ principal, callbackUrl }) => ({
+    challenge: { url: anthropicKeyPageUrl(principal, callbackUrl) },
+  }),
+  completeAuthorization: async ({ principal }) => {
+    const key = await loadAnthropicKey(principal);
+    if (!key)
+      throw new ConnectionAuthorizationFailedError("anthropic", {
+        message: "Save your API key, then send a message to try again.",
+        reason: "no_key_saved",
+      });
+    return { token: key };
+  },
+});
+
+export default defineAgent({
+  model: defineDynamic(async (ctx) => {
+    const { token } = await ctx.getToken(anthropicKey, { authKey: "anthropic" });
+    return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
+  }),
+});
+```
+
+- When the caller has no token, eve opens the sign-in and pauses the turn before the model call. After sign-in, eve evaluates the model again and continues the same turn. If the caller sends a message in the meantime, it waits for the sign-in.
+- When the provider rejects the token during a model call, call `ctx.requireAuth(provider)` from your model code, for example from AI SDK middleware. eve ends that model call and runs it again after sign-in.
+- When eve can't finish the sign-in, as in a scheduled turn or after a decline, the turn fails with `code: "SIGN_IN_FAILED"`. Its `message` shows the provider's display name, plus the message when your provider throws a `ConnectionAuthorizationFailedError`.
+
+Every `ctx.getToken` call with the same `authKey`, in a tool, a connection, or a dynamic value, shares one token and one sign-in. Call `ctx.getToken` outside `ctx.memo`; eve already reuses the token within a step.
+
 ## What to read next
 
 - [Security model](../concepts/security-model): trust boundaries and the pre-production checklist

@@ -8,7 +8,7 @@ url: /guides/dynamic-capabilities
 
 eve runs the function before every ordinary model call, including when a turn continues after steering, a sign-in, or an approval. It doesn't run for compaction's summary call or `auto()`'s routing call. Introspection reads the values it last returned.
 
-Because the function runs before every model call, not once per turn, a turn with 20 model calls runs it 20 times. Wrap every network request, database query, API call, and sandbox read in [`ctx.memo`](#context-and-memoization). Outside a memo, each of those calls adds its latency to every model call and counts against the service's rate limits every time. Choose the memo key for how long the result should stay fixed; see [Choose a lifetime](#choose-a-lifetime).
+Because the function runs before every model call, not once per turn, a turn with 20 model calls runs it 20 times. Wrap every network request, database query, API call, and sandbox read in [`ctx.memo`](#context-and-memoization). Outside a memo, each of those calls adds its latency to every model call and counts against the service's rate limits every time. Choose the memo key for how long the result should stay fixed; see [Choose a lifetime](#choose-a-lifetime). Call `ctx.getToken` outside the memo: eve already reuses the token within a step.
 
 The module's top-level code runs at build time and at runtime, so keep caller-specific work inside the function. See [Authored module lifecycle](/docs/reference/typescript-api#authored-module-lifecycle).
 
@@ -16,19 +16,21 @@ The module's top-level code runs at build time and at runtime, so keep caller-sp
 
 Every dynamic function receives:
 
-| Field                     | Contents                                                                                                                                             |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                               |
-| `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.              |
-| `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                              |
-| `ctx.conversation`        | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                  |
-| `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                           |
-| `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                           |
-| `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                              |
-| `ctx.model.id`            | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                                 |
-| `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                                            |
-| `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                       |
-| `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
+| Field                          | Contents                                                                                                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ctx.session`                  | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                                                                                 |
+| `ctx.session.parent`           | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.                                                                |
+| `ctx.channel`                  | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                                                                                |
+| `ctx.conversation`             | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                                                                    |
+| `ctx.view`                     | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                                                                             |
+| `ctx.turn`                     | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                                                                             |
+| `ctx.now`                      | Time of the latest recorded session event, as a `Date`.                                                                                                                                                |
+| `ctx.model.id`                 | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                                                                                   |
+| `await ctx.messages()`         | The conversation so far, assembled only when you call it.                                                                                                                                              |
+| `await ctx.memo(key, fn)`      | A saved JSON result for a key.                                                                                                                                                                         |
+| `await ctx.getSandbox()`       | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox).                                                   |
+| `await ctx.getToken(provider)` | The caller's token for an auth provider. When the caller hasn't signed in, eve pauses the turn for the sign-in. See [Before a model call](/docs/guides/auth-and-route-protection#before-a-model-call). |
+| `ctx.requireAuth(provider)`    | Drops the cached token and asks the caller to sign in again. See [Before a model call](/docs/guides/auth-and-route-protection#before-a-model-call).                                                    |
 
 For session state inside a dynamic function, query `ctx.view` with selectors from `eve/events` instead of reconstructing it yourself. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
 
@@ -249,7 +251,7 @@ A dynamic connection or skill overrides a static one of the same kind and name. 
 
 ### Steering and sign-in
 
-Because eve runs dynamic functions before every model call, they see a steering message or completed sign-in without a new turn. A turn-keyed memo stays fixed until the next turn.
+Because eve runs dynamic functions before every model call, they see a steering message or completed sign-in without a new turn. A turn-keyed memo stays fixed until the next turn. While a sign-in for `ctx.getToken` is open, a new message waits for it; see [Before a model call](/docs/guides/auth-and-route-protection#before-a-model-call).
 
 ### Execution order
 

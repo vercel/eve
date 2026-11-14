@@ -899,13 +899,14 @@ function signInCallbackFacts(
 }
 
 /**
- * A call a sign-in stopped settled: the sign-ins it waited on end with it, accepted if it returned,
- * declined if the person refused consent, and failed with the reason it didn't otherwise. A
- * failure with `retryable: false` is terminal, recorded as the settlement's `response.retryable`. Published before the call's own settlement.
+ * A call or a model call completed its sign-ins: they end accepted if it returned, declined if the
+ * person refused consent, and failed with the reason it didn't otherwise. A failure with
+ * `retryable: false` is terminal, recorded as the settlement's `response.retryable`. Published
+ * before the call's own settlement.
  */
 export function callSignInsSettled(
   view: Pick<SessionView, "projection">,
-  call: ApprovedCall,
+  call: Pick<ApprovedCall, "signIns">,
   failure?: { readonly reason?: string; readonly retryable?: boolean },
 ): SessionEvent[] {
   const tables = view.projection.view;
@@ -924,19 +925,23 @@ export function callSignInsSettled(
 
 /**
  * Sign-in callbacks arrived: each attempt the session still waits on is accepted. A sign-in a
- * call stopped on settles with the call instead (`callSignInsSettled`).
+ * call or a model call waits on settles when that call completes it (`callSignInsSettled`).
  */
 export function completeSignIn(
   view: SessionView,
   input: { readonly completions: readonly AuthorizationChallenge[] },
 ): Transition {
   const tables = view.projection.view;
-  // A call a sign-in stopped reports it when the call settles.
+  // Only a responder's sign-in settles here. A call reports its own sign-ins when it settles, and
+  // a model call's dynamic value reports its own when it completes it.
   const reportedByCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
   return unchanged(
     view,
     input.completions
-      .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
+      .filter(
+        (challenge) =>
+          challenge.candidateId !== undefined && !reportedByCalls.has(signInAttemptKey(challenge)),
+      )
       .flatMap((challenge) => signInCallbackFacts(tables, challenge, { outcome: "accepted" })),
   );
 }

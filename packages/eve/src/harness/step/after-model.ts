@@ -23,7 +23,7 @@ import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
+import { askStepApprovals, stopForSignIn } from "#harness/hitl/index.js";
 import { hasQueuedTurnInput, park } from "#harness/step/park.js";
 import {
   getInvalidToolCallInputError,
@@ -152,7 +152,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       await step.apply(suspendStep(step.view(), parked));
     }
     // Approval only precedes sign-in for the same call, not an executing sibling.
-    if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
+    if (authorizationInterrupt) return stopForSignIn(step, authorizationInterrupt);
     return park(step);
   }
 

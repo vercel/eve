@@ -13,6 +13,8 @@ import { announcementDigest } from "#harness/announcements.js";
 import { withUsageInEffect } from "#harness/usage-sink.js";
 import { sessionFrameOf } from "#definitions/frame.js";
 import { reportEffectFailure } from "#definitions/intents.js";
+import { createAuthorizationContext } from "#runtime/authorization-context.js";
+import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import { openMemos } from "#definitions/memos.js";
 import {
   clearLive,
@@ -116,15 +118,17 @@ async function keepOne(
     result = await evaluate(ctx, definition, fn, run);
   } catch (error) {
     if (run.mode === "evaluate") {
-      log.error(`Dynamic value "${definition.label}" failed; the turn fails.`, {
-        error: toErrorMessage(error),
-      });
+      if (!isScopedAuthorizationRequiredError(error))
+        log.error(`Dynamic value "${definition.label}" failed; the turn fails.`, {
+          error: toErrorMessage(error),
+        });
       throw new DefinitionFailedError(definition.label, error);
     }
     // The next model call evaluates it again, and fails the turn if it still fails.
-    log.warn(`Dynamic value "${definition.label}" didn't evaluate for this step.`, {
-      error: toErrorMessage(error),
-    });
+    if (!isScopedAuthorizationRequiredError(error))
+      log.warn(`Dynamic value "${definition.label}" didn't evaluate for this step.`, {
+        error: toErrorMessage(error),
+      });
     return { value: readSlot(ctx, definition.id)!.value };
   }
   log.debug("Evaluated a dynamic value", {
@@ -214,8 +218,8 @@ export class DefinitionFailedError extends Error {
  * Prepares a step: on a move to another deployment, discards memos; drops what definitions the
  * bundle no longer has kept; and reads the call as it stands, which evaluates again each kept
  * value whose code this process doesn't hold, so a step that runs a tool call or reaches a
- * connection before its model call has them. Its memos return what they kept, so this asks
- * nothing of the outside world again.
+ * connection before its model call has them. Its memos return what they kept. A value can still
+ * read a token with `ctx.getToken`, but a restore never completes or opens a sign-in.
  */
 export async function restoreDefinitions(
   ctx: ContextContainer,
@@ -441,6 +445,13 @@ async function withMemos<T>(
   return { result, used };
 }
 
+/**
+ * Dynamic values sign in under this scope: `connect("x/y")` keys as `eve:dynamic__x_y`, and a
+ * provider without Connect metadata keys under its definition. A tool name can't contain `:`. An
+ * `authKey` replaces the scope, so every tool and connection with the same key shares the token.
+ */
+const DYNAMIC_AUTH_SCOPE = "eve:dynamic";
+
 function internalContext(
   ctx: ContextContainer,
   definition: Definition,
@@ -448,11 +459,20 @@ function internalContext(
 ): InternalContext {
   const frame = sessionFrameOf(ctx);
   const { history } = run;
+  const auth = createAuthorizationContext({
+    owner: definition.id,
+    scope: DYNAMIC_AUTH_SCOPE,
+    // A restore only reads the latest evaluation's results. The evaluation completes a pending
+    // sign-in, so the model call knows its token comes from that sign-in.
+    ...(run.mode === "restore" && { completeAuthorization: async () => false }),
+  });
   return Object.defineProperties(
     {
       ...frame,
       abortSignal: run.signal,
       ctx,
+      getToken: auth.getToken,
+      requireAuth: auth.requireAuth,
       getSandbox: run.choosesModel
         ? () => {
             throw new Error(

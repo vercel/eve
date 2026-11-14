@@ -14,6 +14,13 @@ import { takeTurnFailure } from "#definitions/intents.js";
 import { isDynamicModelSelectionError } from "#definitions/model.js";
 import { DefinitionFailedError } from "#definitions/kernel.js";
 import { evaluateStepValues } from "#definitions/step.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { SignInCompletedKey } from "#harness/authorization.js";
+import { modelSignInReporter } from "#harness/hitl/index.js";
+import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
+import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
+import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -164,22 +171,78 @@ export async function openTurn(
 }
 
 /**
- * Before a model call: the session's dynamic values are evaluated with the conversation the call
- * reads. A value that fails fails the turn; returns the step's result then.
+ * Before a model call: eve evaluates the session's dynamic values with the call's conversation.
+ * Then the call runs, the turn handles a value's sign-in, or the turn fails.
  */
-export async function prepareModelCall(
-  step: Step,
-  preview: Prompt,
-): Promise<StepResult | undefined> {
+export async function prepareModelCall(step: Step, preview: Prompt): Promise<ModelCallPreparation> {
   throwIfTurnAborted(step.config.abortSignal);
   const conversation = validateHarnessModelMessages(withClientContext(preview));
+  step.ctx.setVirtualContext(SignInCompletedKey, modelSignInReporter(step));
   try {
     await evaluateStepValues(step, { abortSignal: step.config.abortSignal, conversation });
   } catch (error) {
     if (!(error instanceof DefinitionFailedError)) throw error;
-    return failTurn(step, error, "REACTION_FAILED");
+    if (isSignInError(error.cause)) return { kind: "sign-in", error: error.cause };
+    return { kind: "failed", result: await failTurn(step, error, "REACTION_FAILED") };
+  } finally {
+    step.ctx.delete(SignInCompletedKey);
   }
-  return undefined;
+  return { kind: "ready" };
+}
+
+/** What a model call does next: it runs, it handles a value's sign-in, or the turn failed. */
+export type ModelCallPreparation =
+  | { readonly kind: "ready" }
+  | { readonly kind: "sign-in"; readonly error: unknown }
+  | { readonly kind: "failed"; readonly result: StepResult };
+
+/** Whether `error` asks for a sign-in, or reports that one failed. */
+export function isSignInError(error: unknown): boolean {
+  return isScopedAuthorizationRequiredError(error) || isConnectionAuthorizationFailedError(error);
+}
+
+/** Reasons eve sets itself. Their messages speak to the model, so the person reads one line. */
+const EVE_SIGN_IN_REASONS: ReadonlySet<string | undefined> = new Set([
+  SIGN_IN_DECLINED,
+  "app_not_installed",
+  "principal_required",
+  "sign_in_cancelled",
+  "sign_in_unavailable",
+  "token_rejected_after_authorization",
+]);
+
+/**
+ * A model call's sign-in didn't finish, so the turn fails with `SIGN_IN_FAILED`. The person reads
+ * the provider's name, with the provider's own message when the author's code threw one.
+ */
+export async function failSignIn(
+  step: Step,
+  error: unknown,
+  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
+): Promise<StepResult> {
+  const name = providerName(step.view(), signIn);
+  const message =
+    isConnectionAuthorizationFailedError(error) && !EVE_SIGN_IN_REASONS.has(error.reason)
+      ? `${name}: ${error.message}`
+      : `The sign-in to ${name} didn't finish.`;
+  return await failTurn(step, error, "SIGN_IN_FAILED", message);
+}
+
+/** The provider's display name, from its definition or the session's latest sign-in card. */
+function providerName(
+  view: SessionView,
+  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
+): string {
+  const cards = Object.values(view.projection.view.interactions).flatMap(
+    (row) => row.request.signIn ?? [],
+  );
+  const card = cards.findLast((asked) => asked.name === signIn.scope) ?? cards.at(-1);
+  const connector = signIn.authorization?.vercelConnect?.connector.split("/").at(-1);
+  return (
+    signIn.authorization?.displayName ??
+    card?.displayName ??
+    (connector === undefined ? "the service" : displayProperName(connector))
+  );
 }
 
 /** A hook failed during the turn: the turn fails. Returns the step's result then. */
@@ -189,11 +252,15 @@ export async function failTurnForEffect(step: Step): Promise<StepResult | undefi
   return failTurn(step, new Error(reason), "HOOK_FAILED");
 }
 
-/** The turn fails with `error`; the session waits for its next message. */
-async function failTurn(step: Step, error: unknown, code: string): Promise<StepResult> {
+/** The turn fails with `error` and shows `message`; the session waits for its next message. */
+async function failTurn(
+  step: Step,
+  error: unknown,
+  code: string,
+  message = toErrorMessage(error),
+): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   step.instrumentation?.recordError(error);
-  const message = toErrorMessage(error);
   const errorId = createErrorId();
   log.error("turn failed", {
     code,
