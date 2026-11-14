@@ -67,7 +67,7 @@ export async function startInitOnboarding(input: {
     finished,
     setInstalling(next) {
       installing = next;
-      if (!onboarding) renderer.setStartupPhase(next ? "installing" : "starting");
+      renderer.setStartupPhase(next ? "installing" : "starting");
     },
     close() {
       closed ??= (async () => {

@@ -3560,6 +3560,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const elapsedMs = Date.now() - startedAtMs;
         const elapsed = elapsedMs >= 5_000 ? ` ${formatTurnDuration(elapsedMs)}` : "";
         status = { ...flowStatus, text: `${flowStatus.text}${elapsed}`, indicator };
+      } else if (this.#startupPhase === "installing") {
+        // `eve init` runs onboarding while it installs; the panel hides the status line.
+        status = { text: "Installing dependencies…", indicator };
       }
       let content: FlowPanelContent;
       // A live status indicator rides alongside an open question only when one is
