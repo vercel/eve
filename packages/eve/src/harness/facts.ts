@@ -35,18 +35,22 @@ export function usageOf(counts: Partial<Usage>): Usage {
   });
 }
 
-/** A failure as the stream reports it: its code and message, with its support id and remedy. */
+/**
+ * A failure as the stream reports it: its code and message, with the thrown error's class name,
+ * its support id and remedy.
+ */
 export function errorInfoOf(failure: {
   readonly code: string;
   readonly details?: JsonObject;
   readonly message: string;
 }): ErrorInfo {
-  const { errorId, hint } = failure.details ?? {};
+  const { errorId, hint, name } = failure.details ?? {};
   return defined({
     code: failure.code,
     hint: typeof hint === "string" && hint.trim().length > 0 ? hint.trim() : undefined,
     id: typeof errorId === "string" ? errorId : undefined,
     message: failure.message,
+    name: typeof name === "string" && name.length > 0 && name !== "Error" ? name : undefined,
   });
 }
 
