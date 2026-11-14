@@ -1103,8 +1103,6 @@ export default slackChannel({ renderers: [sourcedReplies] });
 
 Pass a string, as in `postCompletedSlackReply(ctx.channel, reply)`, to post Markdown alone, as eve's default does.
 
-`postCompletedSlackReply` returns the posted message when eve posts your blocks or your Markdown. Its `id` is the message's `ts`, empty if Slack returned none; pass it to `chat.update` to edit the reply later. It returns `undefined` when eve uploads the snippet or drops a reply to a deleted thread.
-
 `taskCard` runs for every turn that calls a tool, including a turn without tasks. It receives:
 
 - `calls`: the turn's tool calls on this card as `CallObservation` values that you can't change, in call order. A call that started a task has a `taskId`. eve leaves out its own task controls and calls a tool makes for the model.
