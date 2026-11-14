@@ -86,6 +86,20 @@ export default localTraces({
 
 A redaction decision implies emission and needs at least one direction.
 
+## Secret redaction
+
+Before any `exportPolicy` runs, eve replaces common credential formats with `[REDACTED]` in model and tool content, in span event attributes such as `exception.message`, and in the span status message. Content means the GenAI attributes (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`, `gen_ai.decision.results`), their AI SDK counterparts (`ai.prompt`, `ai.prompt.messages`, `ai.response.text`, `ai.response.reasoning`, `ai.response.object`, `ai.response.toolCalls`, `ai.response.tool_results`, `ai.toolCall.args`, `ai.toolCall.result`), `agent.channel.delivery.input`, and `eve.instructions`.
+
+Redaction matches token formats with a recognizable prefix, plus credentials in a few fixed spots:
+
+| Kind              | Matches                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Provider tokens   | GitHub, GitLab, npm, Hugging Face, OpenAI, Anthropic, Stripe, Slack, SendGrid, Vercel, Google API and OAuth, AWS access keys               |
+| Structured tokens | JWTs and PEM private keys                                                                                                                  |
+| In context        | `Bearer` and `Authorization: Basic` values, URL passwords, Slack webhook paths, signed-URL and token query parameters, Azure `AccountKey=` |
+
+Only the secret is replaced, so `postgres://alice:hunter2@db` becomes `postgres://alice:[REDACTED]@db`. Free-form values such as `password=...` are not matched, and attributes outside this list are not scanned. This applies to every destination, including local traces and Agent Runs, and the span itself is unchanged. Use an `attribute` policy to remove or replace anything else your agent handles.
+
 ## Local traces
 
 Omit `agent/instrumentation/local.ts` to keep `eve dev`'s local traces. Export

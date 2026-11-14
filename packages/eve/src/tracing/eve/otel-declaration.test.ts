@@ -20,6 +20,15 @@ function processor(): SpanProcessor {
   };
 }
 
+/** A processor that records `name` when a span ends, to observe pipeline order through wrappers. */
+function namedProcessor(name: string, ended: string[]): SpanProcessor {
+  return { ...processor(), onEnd: () => void ended.push(name) };
+}
+
+function endOnEach(processors: readonly unknown[]): void {
+  for (const each of processors) (each as SpanProcessor).onEnd(testSpan({}));
+}
+
 function exporter(): SpanExporter {
   return {
     export: (_spans, resultCallback) => {
@@ -47,14 +56,15 @@ describe("otel", () => {
 
 describe("otelIntegration", () => {
   it("wraps an exporter in a batching processor, after any declared ones", () => {
-    const first = processor();
+    const ended: string[] = [];
     const integration = otelIntegration({
-      spanProcessors: [first],
+      spanProcessors: [namedProcessor("first", ended)],
       traceExporter: exporter(),
     });
 
     expect(integration.spanProcessors).toHaveLength(2);
-    expect(integration.spanProcessors[0]).toBe(first);
+    endOnEach(integration.spanProcessors.slice(0, 1));
+    expect(ended).toEqual(["first"]);
   });
 
   it("rejects removed destination content options", () => {
@@ -133,17 +143,18 @@ describe("collectOtelPipeline", () => {
   });
 
   it("concatenates destinations in declaration order", () => {
-    const [first, second, third] = [processor(), processor(), processor()];
+    const ended: string[] = [];
     const collected = collectOtelPipeline([
       otelIntegration({
-        spanProcessors: [first, second],
+        spanProcessors: [namedProcessor("first", ended), namedProcessor("second", ended)],
       }),
-      otelIntegration({ spanProcessors: [third] }),
+      otelIntegration({ spanProcessors: [namedProcessor("third", ended)] }),
       otel(),
     ]);
 
     expect(collected.declared).toBe(true);
-    expect(collected.configuration.spanProcessors).toStrictEqual([first, second, third]);
+    endOnEach(collected.configuration.spanProcessors);
+    expect(ended).toEqual(["first", "second", "third"]);
   });
 
   it("is declared by a destination alone, with no otel() beside it", () => {

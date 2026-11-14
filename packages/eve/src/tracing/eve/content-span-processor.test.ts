@@ -36,13 +36,144 @@ function span(attributes: Record<string, unknown>): unknown {
 }
 
 describe("contentFilteringProcessor", () => {
-  it("forwards the span untouched when the destination declined nothing", () => {
+  it("forwards content unchanged when the destination declined nothing", () => {
     const downstream = recordingProcessor();
-    const original = span({ "gen_ai.input.messages": "what the user said" });
 
-    contentFilteringProcessor(downstream).onEnd(original as never);
+    contentFilteringProcessor(downstream).onEnd(
+      span({ "gen_ai.input.messages": "what the user said" }) as never,
+    );
 
-    expect(downstream.ended).toEqual([original]);
+    expect((downstream.ended[0] as { attributes: unknown }).attributes).toEqual({
+      "gen_ai.input.messages": "what the user said",
+    });
+  });
+
+  it("redacts credentials in content attributes before any destination policy sees them", () => {
+    // Built at runtime so secret scanners do not flag this file.
+    const secrets = [
+      "ghp_" + "a1".repeat(18),
+      "github_pat_" + "B2".repeat(20),
+      "sk-proj-" + "c3".repeat(16),
+      "sk-ant-api03-" + "d4".repeat(16),
+      "sk_live_" + "e5".repeat(12),
+      "xoxb-" + "1234567890-abcdef",
+      "AKIA" + "ABCDEFGHIJKLMNOP",
+      "AIza" + "f6".repeat(17) + "g",
+      ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "dozjgNryP4J3jVmNHl0w5N"].join("."),
+      "-----BEGIN RSA " + "PRIVATE KEY-----\\nMIIEow\\n-----END RSA " + "PRIVATE KEY-----",
+      "glpat-" + "h7".repeat(10),
+      "npm_" + "i8".repeat(18),
+      "hf_" + "j9".repeat(16),
+      "xapp-1-" + "A0123456789-abcdef",
+      "SG." + "k1".repeat(11) + "." + "l2".repeat(21),
+      "vcp_" + "m3".repeat(12),
+      "vercel_blob_rw_" + "n4".repeat(10),
+      "ya29." + "o5".repeat(12),
+    ];
+    const keys = [
+      "gen_ai.input.messages",
+      "gen_ai.output.messages",
+      "gen_ai.system_instructions",
+      "gen_ai.tool.call.arguments",
+      "gen_ai.tool.call.result",
+      "gen_ai.decision.results",
+      "ai.prompt",
+      "ai.prompt.messages",
+      "ai.response.text",
+      "ai.response.reasoning",
+      "ai.response.object",
+      "ai.response.toolCalls",
+      "ai.response.tool_results",
+      "ai.toolCall.args",
+      "ai.toolCall.result",
+      "agent.channel.delivery.input",
+      "eve.instructions",
+    ];
+    const content = (secret: string) => JSON.stringify({ text: `use ${secret} for the deploy` });
+    const downstream = recordingProcessor();
+    const seen: unknown[] = [];
+
+    for (const secret of secrets) {
+      const original = span({
+        ...Object.fromEntries(keys.map((key) => [key, content(secret)])),
+        "http.request.header.authorization": `Bearer ${secret}`,
+      });
+      contentFilteringProcessor(downstream, {
+        attribute: ({ value }) => {
+          seen.push(value);
+          return { emit: true };
+        },
+      }).onEnd(original as never);
+
+      expect((downstream.ended.at(-1) as { attributes: unknown }).attributes).toEqual({
+        ...Object.fromEntries(
+          keys.map((key) => [key, JSON.stringify({ text: "use [REDACTED] for the deploy" })]),
+        ),
+        "http.request.header.authorization": `Bearer ${secret}`,
+      });
+      expect((original as { attributes: Record<string, unknown> }).attributes[keys[0]!]).toBe(
+        content(secret),
+      );
+    }
+    const contentSeen = seen.filter((value) => String(value).startsWith('{"text"'));
+    expect(contentSeen.length).toBeGreaterThan(0);
+    expect(contentSeen.every((value) => String(value).includes("use [REDACTED]"))).toBe(true);
+  });
+
+  it.each([
+    ['{"Authorization":"Bearer abcdefghijklmnop1234"}', '{"Authorization":"Bearer [REDACTED]"}'],
+    ['{"Authorization":"Basic YWxpY2U6aHVudGVyMg=="}', '{"Authorization":"Basic [REDACTED]"}'],
+    [
+      "connect to postgres://alice:hunter2pass@db.internal:5432/app",
+      "connect to postgres://alice:[REDACTED]@db.internal:5432/app",
+    ],
+    [
+      "GET https://bucket.s3.amazonaws.com/a.png?X-Amz-Signature=abc123def&x=1",
+      "GET https://bucket.s3.amazonaws.com/a.png?X-Amz-Signature=[REDACTED]&x=1",
+    ],
+    [
+      "post to https://hooks.slack.com/services/T0000/B0000/XXXXXXXXXXXX",
+      "post to https://hooks.slack.com/services/[REDACTED]",
+    ],
+    [
+      "DefaultEndpointsProtocol=https;AccountKey=" + "p6".repeat(12) + "==;",
+      "DefaultEndpointsProtocol=https;AccountKey=[REDACTED];",
+    ],
+    [
+      "Ask the risk-assessment-team-lead about the sk-learn upgrade and Basic understanding of https://example.com/docs?page=2.",
+      "Ask the risk-assessment-team-lead about the sk-learn upgrade and Basic understanding of https://example.com/docs?page=2.",
+    ],
+  ])("redacts only the secret part of %s", (input, expected) => {
+    const downstream = recordingProcessor();
+
+    contentFilteringProcessor(downstream).onEnd(
+      span({ "gen_ai.tool.call.arguments": input }) as never,
+    );
+
+    expect((downstream.ended[0] as { attributes: unknown }).attributes).toEqual({
+      "gen_ai.tool.call.arguments": expected,
+    });
+  });
+
+  it("redacts credentials in span events and the status message", () => {
+    const downstream = recordingProcessor();
+    const token = "ghp_" + "q7".repeat(18);
+
+    contentFilteringProcessor(downstream).onEnd({
+      ...(span({}) as object),
+      events: [
+        { name: "exception", attributes: { "exception.message": `401 for token ${token}` } },
+        { name: "ai.stream.firstChunk", attributes: { "ai.response.msToFirstChunk": 12 } },
+      ],
+      status: { code: 2, message: `request failed with ${token}` },
+    } as never);
+
+    const ended = downstream.ended[0] as { events: unknown; status: unknown };
+    expect(ended.events).toEqual([
+      { name: "exception", attributes: { "exception.message": "401 for token [REDACTED]" } },
+      { name: "ai.stream.firstChunk", attributes: { "ai.response.msToFirstChunk": 12 } },
+    ]);
+    expect(ended.status).toEqual({ code: 2, message: "request failed with [REDACTED]" });
   });
 
   it("forwards a copy without what the destination declined", () => {

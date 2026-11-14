@@ -14,6 +14,11 @@ import {
   type SpanExportPolicy,
 } from "#tracing/eve/span-export-policy.js";
 import { channelAudienceFromContext } from "#tracing/eve/channel-audience-context.js";
+import {
+  redactEventSecrets,
+  redactSecrets,
+  secretRedactionPolicy,
+} from "#tracing/eve/secret-redaction.js";
 
 /**
  * Puts one destination's content policy in front of it.
@@ -29,15 +34,15 @@ import { channelAudienceFromContext } from "#tracing/eve/channel-audience-contex
  * span or its attribute map. Methods stay bound to the original, so private SDK
  * state remains reachable without eve knowing that SDK's concrete span shape.
  *
+ * Secret redaction always runs first, ahead of the destination's own policies.
+ *
  * @internal
  */
 export function contentFilteringProcessor(
   downstream: SpanProcessor,
   exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],
 ): SpanProcessor {
-  const policies = normalizeSpanExportPolicies(exportPolicy);
-  if (policies.length === 0) return downstream;
-
+  const policies = [secretRedactionPolicy, ...normalizeSpanExportPolicies(exportPolicy)];
   let processor = downstream;
   for (const policy of policies.toReversed()) {
     processor = policyFilteringProcessor(processor, policy);
@@ -312,7 +317,7 @@ function refreshEvents(
   const source = (span as { readonly events?: unknown }).events;
   if (!Array.isArray(source)) return;
   if (content.recordOutputs) {
-    destination.push(...source);
+    destination.push(...source.map(redactEventSecrets));
     return;
   }
   for (const event of source) {
@@ -333,7 +338,8 @@ function refreshStatus(
   if (typeof source !== "object" || source === null) return;
   const record = source as Readonly<Record<string, unknown>>;
   if (record["code"] !== undefined) destination["code"] = record["code"];
-  if (content.recordOutputs && record["message"] !== undefined) {
-    destination["message"] = record["message"];
+  const message = record["message"];
+  if (content.recordOutputs && message !== undefined) {
+    destination["message"] = typeof message === "string" ? redactSecrets(message) : message;
   }
 }
