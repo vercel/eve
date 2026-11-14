@@ -2,6 +2,7 @@ import { Pool } from "pg";
 import type { CustomTypesConfig, PoolClient } from "pg";
 import { z } from "zod";
 
+import { queryBounded } from "#lib/analyst/bounded-query";
 import {
   analystConfig,
   MAX_CELL_CHARS,
@@ -110,13 +111,8 @@ const sharedPool = (): Pool => {
   return pool;
 };
 
-/* @types/pg doesn't declare queryMode, so pass the query as a plain config object. */
 const fromPoolClient = (client: PoolClient): AnalystClient => ({
-  query: (query) => {
-    const { values, ...rest } = query;
-    const config = { ...rest, ...(values && { values: [...values] }) };
-    return client.query(config);
-  },
+  query: (query) => queryBounded(client, query),
   release: (destroy) => client.release(destroy),
 });
 

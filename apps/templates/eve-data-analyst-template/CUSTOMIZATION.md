@@ -198,6 +198,8 @@ Cost estimates depend on your data and hardware, so the default only catches ver
 
 `ANALYST_STATEMENT_TIMEOUT_MS` stops any query that runs longer than the limit. `ANALYST_MAX_ROWS` caps the rows the agent reads from a result, and when a result is cut short, the agent summarizes the data in SQL instead.
 
+Every database response, including `EXPLAIN`, has a fixed 1 MiB budget before the driver buffers or parses it. Crossing that budget closes the connection and rejects the query, even when one large cell is still arriving. Ask for fewer columns or summarize large values in SQL. The existing cell and answer limits still shorten results that fit this budget.
+
 ## Set the reporting time zone
 
 `ANALYST_TIMEZONE` sets the time zone for every query, so dates and times in SQL and in answers all use it. The agent also knows the local date, so "last month" and "yesterday" match your team's calendar. Use a time zone name such as `America/New_York` or `Europe/London`.

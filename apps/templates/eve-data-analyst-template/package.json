@@ -22,6 +22,7 @@
     "check": "oxlint --config lint.config.ts && oxfmt --check",
     "fix": "oxlint --config lint.config.ts --fix && oxfmt --write",
     "test": "vitest run",
+    "test:smoke": "vitest run --config vitest.config.ts agent/lib/analyst/bounded-query.test.ts",
     "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run knip",
     "knip": "knip"
   },
