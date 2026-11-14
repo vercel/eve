@@ -22,6 +22,8 @@ Writers tag the agent on Slack and it drafts blog posts, LinkedIn and X posts, r
 - **Stores files in Vercel Blob.** Export drafts, save images and attachments, and read them
   back, authenticated by the project's OIDC token.
 
+`download_asset` accepts up to 1 MiB of text or 768 KiB of binary data per call; base64 output stays within 1 MiB. Larger assets must be split or reduced before downloading. `list_assets` returns one page at a time. When `hasMore` is true, pass its `cursor` with the same `prefix` to continue, even if reserved memory objects leave the current page empty.
+
 ## Quick start with an AI coding agent
 
 If you're working with an AI coding agent like Claude Code or Cursor, you can use this prompt to have it help you with building your agent:
@@ -138,7 +140,7 @@ eve deploy
 Asset tools check decoded paths without leading slashes before accessing storage. Reserved memory paths and malformed or ambiguous encodings are refused, including nested escapes and traversal segments.
 
 ```bash
-pnpm test:smoke     # asset-path security regressions, no network or credentials
+pnpm test:smoke     # asset security and pagination regressions, no network or credentials
 pnpm eval:offline   # mock models, no model calls, a few seconds
 pnpm eval           # real models through the AI Gateway
 ```
