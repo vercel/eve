@@ -76,6 +76,14 @@ describe("eve-discord-agent-template", () => {
     ]);
     for (const [path, content] of generated) {
       let expected = content;
+      if (path === "agent/channels/discord.ts" || path === "daemon/main.ts") {
+        // The template reads the connector UID that the Deploy with Vercel button stores in
+        // DISCORD_CONNECTOR, and falls back to the UID setup writes.
+        expected = expected.replace(
+          `connectDiscordCredentials(${JSON.stringify(connectorUid)})`,
+          `connectDiscordCredentials(\n    process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)},\n  )`,
+        );
+      }
       if (path === "daemon/package.json") {
         // Setup stamps the running eve's versions; the template pins the ones its agent uses.
         const manifest = JSON.parse(content) as { dependencies: Record<string, string> };
@@ -98,7 +106,7 @@ describe("eve-discord-agent-template", () => {
     }
     // Setup doesn't rewrite the tool, so it has to name the same connector.
     expect(await readTemplateFile("agent/tools/read_recent_messages.ts")).toContain(
-      `const DISCORD_CONNECTOR = ${JSON.stringify(connectorUid)};`,
+      `process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)};`,
     );
   });
 });

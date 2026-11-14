@@ -2,10 +2,12 @@ import { getToken } from "@vercel/connect";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-// The connector `eve add channel/discord` creates for this project by default.
-// Setup rewrites agent/channels/discord.ts and daemon/main.ts, but not this
-// file, so keep it in sync if your connector's ID differs.
-const DISCORD_CONNECTOR = "discord/eve-discord-agent-template";
+// The "Deploy with Vercel" button stores its connector's UID in
+// DISCORD_CONNECTOR. Otherwise this falls back to the connector
+// `eve add channel/discord` creates for this project by default. Setup rewrites
+// agent/channels/discord.ts and daemon/main.ts, but not this file, so keep the
+// fallback in sync if your connector's ID differs.
+const DISCORD_CONNECTOR = process.env.DISCORD_CONNECTOR ?? "discord/eve-discord-agent-template";
 
 const MAX_CONTENT_LENGTH = 1000;
 
