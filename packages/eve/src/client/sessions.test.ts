@@ -227,13 +227,15 @@ describe("Client.sessions", () => {
 
     expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
       "/eve/v1/session/wrun_A",
+      // The send opens its delivery's stream as it goes out.
+      "/eve/v1/session/wrun_A/stream",
       "/eve/v1/session/wrun_A/cancel",
       "/eve/v1/session/wrun_A/compact",
       "/eve/v1/session/wrun_A/clear",
       "/eve/v1/session/wrun_A/end",
     ]);
     expect(JSON.parse(requests[0]!.body!)).toEqual({ message: "follow-up" });
-    expect(JSON.parse(requests[4]!.body!)).toEqual({ reason: "fresh start" });
+    expect(JSON.parse(requests[5]!.body!)).toEqual({ reason: "fresh start" });
     expect(session.state).toEqual({ sessionId: "wrun_A", streamIndex: 0 });
   });
 

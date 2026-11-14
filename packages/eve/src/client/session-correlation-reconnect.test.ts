@@ -128,10 +128,11 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
 
   it("does not regress the cursor when concurrent sends are consumed out of order", async () => {
     const events = [...turn(1, "FIRST", "first"), ...turn(2, "SECOND", "second")];
+    // Each send opens its delivery's stream as it goes out.
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(accepted("first"))
-      .mockResolvedValueOnce(accepted("second"))
       .mockResolvedValueOnce(stream(events))
+      .mockResolvedValueOnce(accepted("second"))
       .mockResolvedValueOnce(stream(events));
     const resumed = session();
     const first = await resumed.send("first");
