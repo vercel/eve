@@ -440,8 +440,11 @@ async function startNitroDevelopmentServer(
       options.onBootProgress,
     );
     devServer.prepareSpare();
-    // A worker loads a generation on its first request. Asking now overlaps that
-    // load with the rest of startup and the client's own first request.
+    // A worker loads a generation on its first channel request. Asking now
+    // overlaps that load with the rest of startup and the client's own first
+    // request. An app without the eve channel has no health route, so this
+    // does nothing there. A generation that fails to load logs its error under
+    // this request first, and again when a client asks.
     void fetch(new URL(EVE_HEALTH_ROUTE_PATH, serverUrl))
       .then(async (response) => await response.body?.cancel())
       .catch(() => undefined);
