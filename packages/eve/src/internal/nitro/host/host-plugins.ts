@@ -1,4 +1,4 @@
-import { posix, relative, sep, win32 } from "node:path";
+import { posix, relative, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -13,6 +13,7 @@ import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-pl
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import type { CompiledExtensionMount } from "#compiler/manifest.js";
 import { escapeRegex, exactRegex, pathsRegex } from "#internal/bundler/filters.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
@@ -83,10 +84,12 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
 }
 
 /**
- * eve's `#compiled/*` modules are prebuilt, self-contained vendored
- * dependencies, about two thirds of a development host's input. Loading them
- * from eve's install saves re-bundling and re-emitting them on every start.
- * Production hosts still bundle them.
+ * eve's `#compiled/*` modules are prebuilt vendored dependencies, about two
+ * thirds of a development host's input. Loading them from eve's install saves
+ * re-bundling and re-emitting them on every start. Production hosts still
+ * bundle them. They are not entirely self-contained: peer dependencies such as
+ * `ai` (kept external by `@ai-sdk/otel`) stay bare imports, which resolve from
+ * eve's install, the same file Nitro's dev externals resolve for the bundle.
  */
 function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
   const packageRoot = resolvePackageRoot();
@@ -96,10 +99,11 @@ function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
       filter: { id: /^#compiled\// },
       handler(source, importer) {
         // Only eve's own modules: a dependency nested under eve has its own `#` imports.
+        const path = importer?.replace(/\?.*$/su, "");
         if (
-          importer === undefined ||
-          !importer.startsWith(`${packageRoot}${sep}`) ||
-          importer.includes(`${sep}node_modules${sep}`, packageRoot.length)
+          path === undefined ||
+          !isPathInsideOrEqual(path, packageRoot) ||
+          relative(packageRoot, path).split(/[\\/]/u).includes("node_modules")
         ) {
           return null;
         }
