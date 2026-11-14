@@ -84,18 +84,35 @@ export function createV26HistoryReader(): V26HistoryReader {
   };
 }
 
+/** Where this process's last read of each session ended, newest last, to resume the next one. */
+const endedReads = new Map<string, { readonly next: number; readonly reader: V26HistoryReader }>();
+const ENDED_READS_LIMIT = 32;
+
 /**
- * The v27 lines a v26 session's stored records read as, from position `from` on: one output per
+ * The v27 lines one v26 session's stored records read as, from position `from` on: one output per
  * record, a `position` marker for a record that reads as none, so cursors keep counting stored
- * lines. `records` must start at position 0: each record reads in light of those before it.
+ * lines. Each record reads in light of those before it, so `open` is asked for the records from
+ * position 0, or from where this process's last read of the session ended: a follower reconnects
+ * every lease, and reading the whole history again each time would cost more as the session grows.
  */
-export function v26LineStream(
-  records: ReadableStream<unknown>,
+export async function v26LineStream(
+  sessionId: string,
   from: number,
-): ReadableStream<unknown> {
-  const reader = createV26HistoryReader();
-  let position = 0;
-  return records.pipeThrough(
+  open: (startIndex: number) => Promise<ReadableStream<unknown>>,
+): Promise<ReadableStream<unknown>> {
+  const ended = endedReads.get(sessionId);
+  // A reader serves one read at a time, and a read can't start before where its reader is.
+  const resumed = ended !== undefined && ended.next <= from ? ended : undefined;
+  if (resumed !== undefined) endedReads.delete(sessionId);
+  const reader = resumed?.reader ?? createV26HistoryReader();
+  let position = resumed?.next ?? 0;
+  const keep = () => {
+    endedReads.delete(sessionId);
+    endedReads.set(sessionId, { next: position, reader });
+    const oldest = endedReads.keys().next().value;
+    if (endedReads.size > ENDED_READS_LIMIT && oldest !== undefined) endedReads.delete(oldest);
+  };
+  return (await open(position)).pipeThrough(
     new TransformStream<unknown, unknown>({
       transform(record, controller) {
         const at = position;
@@ -104,6 +121,9 @@ export function v26LineStream(
         if (at < from) return;
         controller.enqueue(line ?? { $eve: "position", next: at + 1 });
       },
+      // A record that fails to read keeps nothing: the reader may have stopped partway through it.
+      flush: keep,
+      cancel: keep,
     }),
   );
 }

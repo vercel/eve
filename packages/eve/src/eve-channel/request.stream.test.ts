@@ -160,7 +160,7 @@ describe("createSessionStreamResponse", () => {
 
   // #5782: a followed v26 session reconnects every lease, so re-reading its history from the
   // first line on each reconnect costs CPU that grows with the session.
-  it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {
+  it("reconnects a followed earlier eve's session without reading its history again", async () => {
     vi.useFakeTimers();
     const v26 = (type: string, data: object) => ({
       data: { sequence: 0, turnId: "turn_0", ...data },
