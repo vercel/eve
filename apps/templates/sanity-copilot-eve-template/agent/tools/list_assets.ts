@@ -13,7 +13,8 @@ import { isReservedPath } from "#lib/reserved-paths.js";
 export default defineTool({
   description:
     "List assets in Vercel Blob storage, optionally filtered by a path prefix. Returns each " +
-    "asset's URL, size, and upload date. Use to browse stored content or locate an asset.",
+    "asset's URL, size, and upload date. When hasMore is true, pass the returned cursor " +
+    "with the same prefix to get the next page, even if the current page has no visible assets.",
   /**
    * List matching assets.
    *
@@ -21,9 +22,13 @@ export default defineTool({
    * @returns The matching `assets`, their `count`, a `hasMore` flag, and a pagination
    * `cursor`, or an empty list with an `error` message on failure.
    */
-  async execute({ prefix, limit }) {
+  async execute({ prefix, limit, cursor: inputCursor }) {
     try {
-      const { blobs, hasMore, cursor } = await list({ limit, prefix });
+      const { blobs, hasMore, cursor } = await list({
+        cursor: inputCursor,
+        limit,
+        prefix,
+      });
       const visible = blobs.filter((blob) => !isReservedPath(blob.pathname));
       return {
         assets: visible.map((blob) => ({
@@ -46,6 +51,12 @@ export default defineTool({
     }
   },
   inputSchema: z.object({
+    cursor: z
+      .string()
+      .optional()
+      .describe(
+        "The cursor returned by the previous page. Keep the same prefix."
+      ),
     limit: z
       .number()
       .int()
