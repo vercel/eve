@@ -25,7 +25,9 @@ your commits appear as `Verified`.
 
 A `Signed-off-by` line in the commit message is not enough to satisfy this
 requirement. A verified commit signature alone does not satisfy the DCO either;
-commits need both.
+commits need both. See
+[Developer Certificate of Origin (DCO)](#developer-certificate-of-origin-dco)
+for how to add the sign-off.
 
 ## Prerequisites
 
