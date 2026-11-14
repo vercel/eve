@@ -23,6 +23,29 @@ mock.module("eve/connections", {
 mock.module("@vercel/connect/eve", {
   namedExports: { connect: () => ({}), connectGitHubCredentials: () => ({}) },
 });
+const claims = new Set<string>();
+let storageFailure = false;
+mock.module("@vercel/blob", {
+  namedExports: {
+    BlobNotFoundError: class extends Error {},
+    del: () => assert.fail("intake must never release claims"),
+    get: () => assert.fail("intake must not read before claiming"),
+    head: () => assert.fail("intake must not check before claiming"),
+    put: async (key: string, _body: string, options: unknown) => {
+      await Promise.resolve();
+      assert.deepEqual(options, {
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        contentType: "text/markdown",
+      });
+      if (storageFailure || claims.has(key)) {
+        throw new Error("Blob write rejected");
+      }
+      claims.add(key);
+    },
+  },
+});
 const { default: channel } = (await import("../channels/github.js")) as any;
 const { default: linear } = (await import("../connections/linear.js")) as any;
 const policies = await import("./github/approval.js");
@@ -95,34 +118,74 @@ test("only verified writers on the canonical factory repository can authorize sh
   );
 });
 
-test("issue intake dispatches only when the factory label itself is added", async () => {
+test("published issue hooks claim automatic intake once per repository and issue", async () => {
+  // rc.17 supplies current labels in raw, not the webhook's changed label.
   const issue = {
     action: "labeled",
     issueNumber: 7,
-    raw: { labels: [{ name: "factory" }, { name: "bug" }] },
+    raw: { labels: [{ name: "factory" }] },
   };
-  assert.equal(
-    await channel.onIssue(context(), { ...issue, label: { name: "bug" } }),
-    null
+  await Promise.all(
+    [
+      context("other/project"),
+      context("acme/widgets", "read"),
+      context("acme/widgets", "write", 2),
+      { ...context(), sender: { id: 42, login: "bot", type: "Bot" } },
+    ].map(async (ctx) => {
+      assert.equal(await channel.onIssue(ctx, issue), null);
+    })
   );
-  assert.equal(await channel.onIssue(context(), issue), null);
+  await Promise.all(
+    [
+      { ...issue, action: "opened" },
+      { ...issue, raw: { labels: [{ name: "bug" }] } },
+      { ...issue, raw: { labels: [null, "factory", {}] } },
+      { ...issue, raw: {} },
+    ].map(async (event) => {
+      assert.equal(await channel.onIssue(context(), event), null);
+    })
+  );
+  assert.equal(claims.size, 0, "rejected events must not consume the claim");
+  const deliveries = await Promise.all([
+    channel.onIssue(context("acme/widgets", "triage"), issue),
+    channel.onIssue(context(), issue),
+  ]);
+  const dispatches = deliveries.filter(Boolean);
+  assert.equal(
+    dispatches.length,
+    1,
+    "concurrent deliveries dispatch only once"
+  );
+  assert.equal(dispatches[0].auth.principalId, "github:foreman-factory");
+  assert.deepEqual([...claims], ["issue-intake/acme/widgets/7.md"]);
+  assert.equal(await channel.onIssue(context(), issue), null, "redelivery");
   assert.equal(
     await channel.onIssue(context(), {
       ...issue,
-      action: "opened",
-      label: { name: "factory" },
+      raw: { labels: [{ name: "factory" }, { name: "bug" }] },
     }),
+    null,
+    "adding an unrelated label must not restart the pipeline"
+  );
+  assert.equal(
+    await channel.onIssue(context(), { ...issue, action: "unlabeled" }),
     null
   );
-  const dispatch = await channel.onIssue(context(), {
-    ...issue,
-    label: { name: "factory" },
-  });
-  assert.ok(
-    dispatch?.auth,
-    "adding factory must still start an unattended run"
+  assert.equal(await channel.onIssue(context(), issue), null, "relabeling");
+  assert.ok(await channel.onIssue(context(), { ...issue, issueNumber: 8 }));
+
+  storageFailure = true;
+  assert.equal(
+    await channel.onIssue(context(), { ...issue, issueNumber: 9 }),
+    null,
+    "storage failures must not dispatch unclaimed work"
   );
-  assert.equal(dispatch.auth.principalId, "github:foreman-factory");
+  storageFailure = false;
+  assert.ok(await channel.onIssue(context(), { ...issue, issueNumber: 9 }));
+  assert.ok(
+    (await channel.onComment(context(), comment))?.auth,
+    "trusted explicit mentions remain available after claiming"
+  );
 });
 
 test("public PRs cannot dispatch privileged factory sessions, regardless of injected task content", async () => {

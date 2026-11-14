@@ -31,6 +31,9 @@ export const FACTORY_BRAIN_PREFIX = "factory-brain/";
 /** Blob path prefix holding handoff artifacts passed between stations. */
 export const ARTIFACTS_PREFIX = "artifacts/";
 
+/** Write-once claims owned by GitHub issue intake, not agent tools. */
+export const ISSUE_INTAKE_PREFIX = "issue-intake/";
+
 /**
  * A Blob path prefix that a general-purpose Blob tool must not touch.
  *
@@ -55,6 +58,11 @@ interface ReservedNamespace {
  * call sites.
  */
 const RESERVED_NAMESPACES: Readonly<Record<string, ReservedNamespace>> = {
+  [ISSUE_INTAKE_PREFIX]: {
+    label: "automatic issue intake claims",
+    readTool: "the GitHub intake channel (no model tool)",
+    writeTool: "the GitHub intake channel (no model tool)",
+  },
   [ARTIFACTS_PREFIX]: {
     label: "handoff artifacts",
     readTool: "read_artifact",

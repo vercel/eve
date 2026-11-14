@@ -23,12 +23,18 @@ Each station is its own agent with its own instructions, sandbox, and tools. The
 
 ## How work arrives
 
-- **Label an issue `factory`.** The pipeline runs on its own, posts progress as stations complete, and ends with a draft PR linked to the issue.
+- **Label an issue `factory`.** A label event from a GitHub-verified triage, write, maintain, or admin user on `FACTORY_REPO` can start the unattended pipeline once per issue. It posts progress as stations complete and ends with a draft PR linked to the issue.
 - **@mention it on an issue or PR.** Mentions start an interactive session only after GitHub verifies write, maintain, or admin permission on `FACTORY_REPO`.
 - **Delegate in Linear.** Agent Sessions from `LINEAR_WORKSPACE_ID` run the same pipeline and report progress back in Linear; other workspaces are rejected.
 - **The dev TUI.** Hand it a task locally. Changes to GitHub wait for your approval.
 - **Red CI on a factory PR.** Foreman diagnoses the failure and pushes a fix to its own branches, never yours.
   Automatic PR-open summaries are disabled. Public PR content cannot start a session with the factory's privileged tools. GitHub sessions cannot use the app-scoped Linear connection, including read tools; delegate from the configured Linear workspace instead.
+
+### Label intake and retries
+
+The pinned published eve release exposes an issue's current labels, not which label changed. Intake therefore accepts the first authorized `labeled` event whose issue contains `FACTORY_LABEL`, including labels attached at creation. For an existing, never-claimed labeled issue, adding another label can also trigger its first intake. Later unrelated labels, webhook redeliveries, and removing and re-adding the factory label cannot restart it.
+
+Before dispatch, the channel atomically creates a private, write-once Blob claim at `issue-intake/<lowercase-owner>/<lowercase-repo>/<issue-number>.md`. Claims persist across sessions and deployments sharing that store. This is at-most-once automatic intake, not guaranteed delivery: if the process stops after claiming but before starting a session, automatic delivery is lost. Storage errors (including uncertain write results) fail closed without dispatch; they are acknowledged, not automatically retried by the template. Claims are never automatically removed, even after a failed or completed run. To retry, requeue, or answer clarification questions, a repository writer must explicitly @mention the bot on the issue. Do not delete claims to requeue, since an old webhook delivery could then start another run. Retain the claim prefix when migrating stores; losing claims resets automatic intake history.
 
 ## Deploy
 

@@ -4,6 +4,7 @@ import {
   type GitHubInboundContext,
   githubChannel,
 } from "eve/channels/github";
+import { ISSUE_INTAKE_PREFIX, writeDocument } from "../lib/blob.js";
 import {
   FACTORY_BRANCH_PREFIX,
   FACTORY_LABEL,
@@ -99,7 +100,7 @@ const hasRepositoryRole = async (
  */
 const FACTORY_INTAKE_TASK = [
   `This issue was handed to the factory with the "${FACTORY_LABEL}" label, and this run is unattended: nobody is watching to answer a question or approve an action, so never attempt an action that needs approval.`,
-  "Run the work item through the full pipeline. If the classifier needs clarification, post its questions as a comment on the issue and stop; someone will re-label the issue when they've answered.",
+  "Run the work item through the full pipeline. If the classifier needs clarification, post its questions as a comment on the issue and stop; a repository writer can explicitly @mention you to continue after answering. Re-labeling does not requeue an issue.",
   "Keep the requester in the loop as you go: post a short comment on this issue when a station completes, except the last one. Comments on this issue are the one conversational write this run has; you cannot comment anywhere else.",
   "Deliver the finished work as a draft pull request. The message you end the run with appears on this issue for you: link the pull request there, and let it stand in for the progress comment for this final step.",
 ].join("\n\n");
@@ -159,9 +160,11 @@ const CI_FIX_TASK = [
  *   labeler's repository permission is verified against the API first,
  *   because GitHub fires `labeled` even for labels attached at creation time
  *   and issue templates let unauthenticated reporters do exactly that; below
- *   triage, the event is acknowledged without a session. The factory label is
- *   matched against `issue.label`, the webhook's changed label, so adding an
- *   unrelated label cannot restart the pipeline. The turn
+ *   triage, the event is acknowledged without a session. Published eve exposes
+ *   only the issue's current labels. A write-once private Blob claim per repo
+ *   and issue prevents later label events or redeliveries from restarting it.
+ *   This is at-most-once intake, not guaranteed delivery: a failed dispatch
+ *   after claiming must be retried with a trusted explicit mention. The turn
  *   itself runs unattended: the auth is rewritten to the constructed
  *   autonomous principal with the intake issue number stamped in, and the
  *   approval policies deny it everything except labels, progress comments on
@@ -256,10 +259,33 @@ export default githubChannel({
     }
     if (
       issue.action !== "labeled" ||
-      issue.label?.name !== FACTORY_LABEL ||
+      !Array.isArray(issue.raw.labels) ||
+      !issue.raw.labels.some(
+        (label) =>
+          typeof label === "object" &&
+          label !== null &&
+          "name" in label &&
+          label.name === FACTORY_LABEL
+      ) ||
       ctx.sender.type === "Bot" ||
       !(await hasRepositoryRole(ctx, TRUSTED_LABELER_ROLES))
     ) {
+      return null;
+    }
+    // Create is atomic at Blob; never replace this with head-then-put. Keep
+    // claims even if dispatch fails: deleting one can race another delivery.
+    try {
+      await writeDocument(
+        `${ISSUE_INTAKE_PREFIX}${FACTORY_REPO.toLowerCase()}/${issue.issueNumber}.md`,
+        "Automatic issue intake claimed. Retry with a trusted explicit @mention.",
+        { allowOverwrite: false }
+      );
+    } catch {
+      // Blob does not expose a distinct already-exists error. Both a lost
+      // claim and a storage failure must fail closed, including ambiguous puts.
+      console.warn(
+        "Factory issue intake claim not acquired; skipping automatic intake. Use a trusted explicit @mention to retry."
+      );
       return null;
     }
     return {

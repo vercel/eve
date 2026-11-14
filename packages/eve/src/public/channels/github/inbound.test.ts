@@ -52,22 +52,6 @@ function parseWithoutGitHubHeaders(payload: Record<string, unknown>) {
 }
 
 describe("GitHub inbound parsing", () => {
-  it.each(["factory", "bug", undefined])(
-    "preserves the changed issue label %s independently of the current labels",
-    (name) => {
-      const event = parse(
-        "issues",
-        basePayload({
-          action: "labeled",
-          issue: { number: 5, labels: [{ name: "factory" }, { name: "bug" }] },
-          label: name === undefined ? undefined : { name },
-        }),
-      );
-      expect(event?.kind).toBe("issues");
-      if (event?.kind !== "issues") throw new Error("Expected an issue event");
-      expect(event.issue.label).toEqual(name === undefined ? undefined : { name });
-    },
-  );
   it("detects issue comments versus PR timeline comments", () => {
     const issue = parse(
       "issue_comment",
