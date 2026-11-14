@@ -125,8 +125,16 @@ jobs:
       - name: Run typecheck and type-check the published declarations
         run: pnpm exec turbo run typecheck test:public-types
 
-  test-unit:
+  # The unit tier in two halves. eve's vitest files split by vitest's own
+  # --shard; the second half also runs the other packages' unit tests and the
+  # script tests. The `test-unit` check below requires both halves.
+  test-unit-shard:
+    name: test-unit (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/2, 2/2]
 
     steps:
       - name: Checkout code
@@ -168,11 +176,17 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/*/node_modules/.vite/vitest
-          key: vitest-results-${{ runner.os }}-unit-${{ github.sha }}
-          restore-keys: vitest-results-${{ runner.os }}-unit-
+          key: vitest-results-${{ runner.os }}-unit-${{ strategy.job-index }}-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-unit-${{ strategy.job-index }}-
 
       - name: Run unit tests
-        run: pnpm test:unit
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm exec turbo run test:unit --filter=eve -- --shard="$SHARD"
+          if [ "$SHARD" = "2/2" ]; then
+            pnpm exec turbo run test:unit --filter='!eve'
+          fi
 
       - name: Save test file timings
         if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
@@ -182,10 +196,26 @@ jobs:
           key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
       - name: Test workflow and guard helpers
+        if: matrix.shard == '2/2'
         run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs scripts/public-exports.test.mjs
 
       - name: Test eval benchmark scripts
+        if: matrix.shard == '2/2'
         run: pnpm test:eval-benchmark
+
+  test-unit:
+    runs-on: ubuntu-latest
+    needs: [test-unit-shard]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.test-unit-shard.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Unit shards: $RESULT"
+            exit 1
+          fi
 
   # Windows runs only the integration files whose behavior can differ there
   # (see `// @linux-only`); Linux runs the whole tier in two shards below.
