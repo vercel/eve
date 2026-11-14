@@ -1,7 +1,8 @@
-import { posix, relative, win32 } from "node:path";
-import { fileURLToPath } from "node:url";
+import { posix, relative, sep, win32 } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  resolvePackageCompiledFilePath,
   resolvePackageRoot,
   resolveWorkflowModulePath,
   WORKFLOW_MODULE_SPECIFIERS,
@@ -21,6 +22,8 @@ import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-build
 
 export interface HostPluginsInput {
   readonly appRoot: string;
+  /** Development hosts load eve's vendored dependencies natively instead of bundling them. */
+  readonly development?: boolean;
   /** Package root authored assets may not escape. */
   readonly authoredPackageRoot: string;
   readonly externals: ExternalsPolicy;
@@ -43,6 +46,7 @@ export interface HostPluginsInput {
 export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
   const plugins: (NitroBuildPlugin | null)[] = [
+    input.development === true ? createDevelopmentCompiledExternalsPlugin() : null,
     stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,
@@ -74,6 +78,36 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   return plugins
     .filter((plugin) => plugin !== null)
     .map((plugin) => ({ ...plugin, enforce: "pre" as const }));
+}
+
+/**
+ * eve's `#compiled/*` modules are prebuilt, self-contained vendored
+ * dependencies, about two thirds of a development host's input. Loading them
+ * from eve's install saves re-bundling and re-emitting them on every start.
+ * Production hosts still bundle them.
+ */
+function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
+  const packageRoot = resolvePackageRoot();
+  return {
+    name: "eve:development-compiled-externals",
+    resolveId: {
+      filter: { id: /^#compiled\// },
+      handler(source, importer) {
+        // Only eve's own modules: a dependency nested under eve has its own `#` imports.
+        if (
+          importer === undefined ||
+          !importer.startsWith(`${packageRoot}${sep}`) ||
+          importer.includes(`${sep}node_modules${sep}`, packageRoot.length)
+        ) {
+          return null;
+        }
+        return {
+          external: true,
+          id: pathToFileURL(resolvePackageCompiledFilePath(`src/${source.slice(1)}`)).href,
+        };
+      },
+    },
+  };
 }
 
 function normalizePath(path: string): string {
