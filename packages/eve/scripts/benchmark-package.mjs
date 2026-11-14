@@ -51,6 +51,7 @@ await mkdir(unpacked);
 await execFile("tar", ["-xzf", tarball, "-C", unpacked]);
 const eve = await treeSize(join(unpacked, "package"));
 
+const installTimes = [];
 for (let run = 1; run <= runs; run++) {
   const project = join(root, `install-${run}`);
   await mkdir(project);
@@ -74,6 +75,7 @@ for (let run = 1; run <= runs; run++) {
     { cwd: project, env, timeout: INSTALL_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
   );
   const installMs = Math.round(performance.now() - start);
+  installTimes.push(installMs);
   const modules = join(project, "node_modules");
   const installed = await treeSize(modules);
   const packages = await installedPackages(modules);
@@ -102,6 +104,17 @@ for (let run = 1; run <= runs; run++) {
   await rm(project, { recursive: true, force: true });
   await rm(join(root, `npm-cache-${run}`), { recursive: true, force: true });
 }
+
+// A summary for reading locally; records read only the per-run lines.
+installTimes.sort((a, b) => a - b);
+console.log(
+  JSON.stringify({
+    mode: "package",
+    packedBytes,
+    unpackedBytes: eve.bytes,
+    installMedianMs: installTimes[Math.floor(installTimes.length / 2)],
+  }),
+);
 
 /**
  * Apparent size of every regular file under `dir`. Symlinks (`.bin` entries)
