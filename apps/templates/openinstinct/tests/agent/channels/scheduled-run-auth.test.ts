@@ -4,8 +4,17 @@ import type {
   RouteHandlerArgs,
 } from "eve/channels";
 import type { Delivery } from "eve/sessions";
+import type { AuthFn } from "eve/channels/auth";
 import { describe, expect, it, vi } from "vitest";
 import scheduledRunChannel from "@agent/channels/scheduled-run";
+
+const { verify } = vi.hoisted(() => ({ verify: vi.fn<AuthFn>() }));
+
+vi.mock(import("eve/channels/auth"), async (importOriginal) => {
+  const original = await importOriginal();
+  verify.mockImplementation(original.vercelOidc());
+  return { ...original, vercelOidc: () => verify };
+});
 
 const scheduledRunPaths = [
   "/internal/scheduled-run/report",
@@ -14,28 +23,39 @@ const scheduledRunPaths = [
 
 describe("scheduled run channel authentication", () => {
   for (const path of scheduledRunPaths) {
-    it(`rejects an unauthenticated request to ${path}`, async () => {
-      const route = scheduledRunChannel.routes.find(
-        (candidate) =>
-          candidate.transport !== "websocket" &&
-          candidate.method === "POST" &&
-          candidate.path === path
-      );
-      if (!route || route.transport === "websocket") {
-        throw new Error(`The scheduled run route ${path} is unavailable.`);
+    it.each([undefined, "service", "user"] as const)(
+      `rejects an unauthenticated or non-runtime %s request to ${path}`,
+      async (principalType) => {
+        if (principalType) {
+          verify.mockResolvedValueOnce({
+            attributes: {},
+            authenticator: "vercel-oidc",
+            principalId: "same-project",
+            principalType,
+          });
+        }
+        const route = scheduledRunChannel.routes.find(
+          (candidate) =>
+            candidate.transport !== "websocket" &&
+            candidate.method === "POST" &&
+            candidate.path === path
+        );
+        if (!route || route.transport === "websocket") {
+          throw new Error(`The scheduled run route ${path} is unavailable.`);
+        }
+
+        const response = await route.handler(
+          new Request(`https://assistant.example${path}`, {
+            body: "not valid JSON",
+            method: "POST",
+          }),
+          unexpectedRouteContext()
+        );
+
+        expect(response.status).toBe(401);
+        expect(response.headers.get("www-authenticate")).toBe("Bearer");
       }
-
-      const response = await route.handler(
-        new Request(`https://assistant.example${path}`, {
-          body: "not valid JSON",
-          method: "POST",
-        }),
-        unexpectedRouteContext()
-      );
-
-      expect(response.status).toBe(401);
-      expect(response.headers.get("www-authenticate")).toBe("Bearer");
-    });
+    );
   }
 });
 

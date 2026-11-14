@@ -41,7 +41,9 @@ still requires the service configuration described below.
 Operational turn and session telemetry enables evlog redaction and records only
 metadata, such as opaque IDs, outcomes, counts, tool names, and aggregate usage.
 It omits conversation text and raw failure details, even when the logger's
-redaction rules would not recognize that content as sensitive.
+redaction rules would not recognize that content as sensitive. OpenTelemetry
+traces in preview and production also omit model and tool inputs and outputs,
+including saved personal profiles. Local development traces can include content.
 
 ## Requirements and costs
 
@@ -134,7 +136,9 @@ browser image capture use the same store.
 ### Linq iMessage setup
 
 The deploy button creates a managed line, sets `LINQ_CONNECTOR`, and attaches
-the inbound webhook automatically.
+the inbound webhook automatically. Inbound forwarding and internal scheduled-run
+routes require a runtime token from the current project and deployment environment;
+preview and development credentials cannot authenticate to production.
 
 Before your first sign-in, open the connector's **Vercel Connect** settings and
 follow its one-time **Phone Numbers** verification instruction. Additional users

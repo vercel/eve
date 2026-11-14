@@ -1,4 +1,5 @@
 import type { LinqChannelConfig } from "eve/channels/linq";
+import type { AuthFn } from "eve/channels/auth";
 import { Message } from "chat";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as EnvModule from "@shared/environment";
@@ -14,7 +15,14 @@ const capture = vi.hoisted(() => ({
   // SAFETY: The mocked channel factory replaces this value during module loading.
   config: undefined as LinqChannelConfig | undefined,
   findOne: vi.fn<() => Promise<AuthUserRow | null>>(),
+  verify: vi.fn<AuthFn>(),
 }));
+
+vi.mock(import("eve/channels/auth"), async (importOriginal) => {
+  const original = await importOriginal();
+  capture.verify.mockImplementation(original.vercelOidc());
+  return { ...original, vercelOidc: () => capture.verify };
+});
 
 vi.mock("@shared/environment", async (importOriginal) => {
   const original = await importOriginal<typeof EnvModule>();
@@ -68,6 +76,40 @@ describe("Linq inbound authentication", () => {
       method: "POST",
     });
     await expect(verifier(request, new Uint8Array())).resolves.toBe(false);
+  });
+
+  it.each(["service", "user"] as const)(
+    "rejects a verified %s principal before accepting a forwarded message",
+    async (principalType) => {
+      capture.verify.mockResolvedValueOnce({
+        attributes: {},
+        authenticator: "vercel-oidc",
+        principalId: "same-project",
+        principalType,
+      });
+      await expect(
+        verifier(
+          new Request("https://assistant.example/eve/v1/linq"),
+          new Uint8Array()
+        )
+      ).resolves.toBe(false);
+    }
+  );
+
+  it("accepts a forwarder bound to the current project and environment", async () => {
+    const principal = {
+      attributes: {},
+      authenticator: "vercel-oidc",
+      principalId: "same-project",
+      principalType: "runtime" as const,
+    };
+    capture.verify.mockResolvedValueOnce(principal);
+    await expect(
+      verifier(
+        new Request("https://assistant.example/eve/v1/linq"),
+        new Uint8Array()
+      )
+    ).resolves.toEqual(principal);
   });
 
   it("drops messages from handles that are not linked to a verified user", async () => {

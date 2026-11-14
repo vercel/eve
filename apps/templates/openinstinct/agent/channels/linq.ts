@@ -6,7 +6,7 @@ import {
   linqChannel,
   type LinqChannelCredentials,
 } from "eve/channels/linq";
-import { vercelOidc } from "eve/channels/auth";
+import { runtimeAuth } from "@agent/lib/runtime-auth";
 import { z } from "zod";
 import { resolveLinqReplyTarget } from "@agent/lib/reply-targets";
 import { scopeFromPrincipal } from "@agent/lib/principal-scope";
@@ -44,14 +44,12 @@ type LinqMessageContent = Parameters<
   LinqAPIV3["chats"]["messages"]["send"]
 >[1]["message"];
 
-const trustedForwarder = vercelOidc();
-
 // The Linq adapter only rejects a webhook when the verifier returns `false`,
 // while eve's OIDC verifier reports failure as `null`. Translate explicitly so
 // an unverified forwarder can never reach message dispatch.
 export const linqWebhookVerifier: NonNullable<
   LinqChannelCredentials["webhookVerifier"]
-> = async (request) => (await trustedForwarder(request)) ?? false;
+> = async (request) => (await runtimeAuth(request)) ?? false;
 
 const credentials = {
   ...linqCredentials,

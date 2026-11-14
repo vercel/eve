@@ -1,5 +1,6 @@
 import { defineChannel, POST } from "eve/channels";
-import { localDev, routeAuth, vercelOidc } from "eve/channels/auth";
+import { localDev, routeAuth } from "eve/channels/auth";
+import { runtimeAuth } from "@agent/lib/runtime-auth";
 import { parseAnswers, SessionNotActiveError } from "eve/client";
 import {
   APPROVE_OPTION_ID,
@@ -25,7 +26,7 @@ const respondSchema = z.strictObject({
   leaseToken: z.uuid(),
   runId: z.uuid(),
 });
-const internalRouteAuth = [vercelOidc(), localDev()];
+const internalRouteAuth = [runtimeAuth, localDev()];
 
 export default defineChannel({
   audience({ caller }) {
