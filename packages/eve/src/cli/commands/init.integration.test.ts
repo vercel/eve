@@ -896,7 +896,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
   });
 
@@ -1045,7 +1045,7 @@ describe("runInitCommand", () => {
     },
   );
 
-  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration", async () => {
+  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration or peer resolution", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-web-npm-"));
     const output = logger();
     const deps = dependencies();
@@ -1059,7 +1059,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "npm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: true }),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("npm", projectPath, [
       "exec",
@@ -1179,7 +1179,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectRoot,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
     // An existing project's history is its own; only fresh scaffolds get git init.
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
