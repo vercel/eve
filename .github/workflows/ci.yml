@@ -80,8 +80,16 @@ jobs:
       - name: Validate /docs/public frontmatter and nav
         run: pnpm docs:check
 
-  typecheck:
+  # Typecheck in two halves: the packages (with the published-declaration
+  # check, which packs eve from its build), and everything else (apps,
+  # templates, fixtures, examples). The `typecheck` check below requires both.
+  typecheck-part:
+    name: typecheck (${{ matrix.part }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [packages, apps]
     # The CLI spawns git and a detached flush process for every command when
     # telemetry is on. CI runs collect none of it.
     env:
@@ -119,11 +127,31 @@ jobs:
           path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
           key: ${{ steps.verdict-cache.outputs.cache-primary-key }}
 
-      # One turbo run, so the published-declaration check (which packs eve
-      # from its build) runs alongside the other packages' typechecks instead
-      # of after all of them.
-      - name: Run typecheck and type-check the published declarations
-        run: pnpm exec turbo run typecheck test:public-types
+      # One turbo run per half, so the published-declaration check runs
+      # alongside the packages' typechecks instead of after them.
+      - name: Run typecheck
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          if [ "$PART" = "packages" ]; then
+            pnpm exec turbo run typecheck test:public-types --filter='./packages/*'
+          else
+            pnpm exec turbo run typecheck --filter='!./packages/*'
+          fi
+
+  typecheck:
+    runs-on: ubuntu-latest
+    needs: [typecheck-part]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.typecheck-part.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Typecheck halves: $RESULT"
+            exit 1
+          fi
 
   # The unit tier in two halves. eve's vitest files split by vitest's own
   # --shard; the second half also runs the other packages' unit tests and the
