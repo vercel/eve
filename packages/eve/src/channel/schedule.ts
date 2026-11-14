@@ -75,7 +75,6 @@ export interface ScheduleDispatchResult {
 export interface ScheduleCollectionDispatchInput {
   readonly collectionId: string;
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
-  /** The provider namespace of the schedule that fired the occurrence. */
   readonly namespace: string;
   readonly payload: ScheduleCollectionPayload<unknown>;
   readonly occurrence: ScheduleOccurrenceIdentity;

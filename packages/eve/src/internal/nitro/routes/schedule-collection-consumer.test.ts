@@ -26,11 +26,14 @@ vi.mock("#runtime/loaders/manifest.js", () => ({
 vi.mock("#runtime/schedules/load-collection.js", () => ({
   ScheduleCollectionNotDeployedError: class extends Error {},
   loadScheduleCollectionDefinition: async () => ({
-    provider: { disable: mocks.disable },
-    preparePayload: (value: unknown) => value,
-    auth: mocks.auth,
-    run: mocks.run,
-    events: { "occurrence.failed": mocks.failed },
+    application: "fixture",
+    definition: {
+      provider: { disable: mocks.disable },
+      preparePayload: (value: unknown) => value,
+      auth: mocks.auth,
+      run: mocks.run,
+      events: { "occurrence.failed": mocks.failed },
+    },
   }),
 }));
 vi.mock("#compiled/@vercel/schedules/index.js", () => ({

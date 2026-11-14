@@ -274,6 +274,8 @@ async function runSessionStepBody(
       ctx.set(ScheduleIdKey, delivery.schedule.definition);
       if (delivery.schedule.instance !== undefined)
         ctx.set(ScheduleInstanceKey, delivery.schedule.instance);
+      if (delivery.schedule.namespace !== undefined)
+        ctx.set(ScheduleNamespaceKey, delivery.schedule.namespace);
       if (delivery.schedule.occurrenceId !== undefined)
         ctx.set(OccurrenceIdKey, delivery.schedule.occurrenceId);
     }

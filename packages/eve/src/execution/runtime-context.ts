@@ -104,7 +104,8 @@ export function buildRunContext(input: {
   if (scheduleId !== undefined) {
     ctx.set(ScheduleIdKey, scheduleId);
   }
-  const scheduleNamespace = contextStorage.getStore()?.get(ScheduleNamespaceKey);
+  const scheduleNamespace =
+    run.schedule?.namespace ?? contextStorage.getStore()?.get(ScheduleNamespaceKey);
   if (scheduleNamespace !== undefined) ctx.set(ScheduleNamespaceKey, scheduleNamespace);
 
   if (run.delivery !== undefined) {

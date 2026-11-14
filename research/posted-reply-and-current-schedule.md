@@ -47,7 +47,8 @@ occurrence started the session. It returns `undefined` when no dynamic schedule 
 session. Like the handle in `run`, it calls no `scope`: the session reaches only its own schedule.
 
 The dispatcher records the schedule's provider namespace in the session's context, beside the
-schedule's collection and name. `currentSchedule()` reloads the collection's
+schedule's collection and name. A send from `run` passes the namespace on with the rest of the
+schedule's provenance, so the new session keeps it. `currentSchedule()` reloads the collection's
 definition from the compiled agent and calls its provider with that namespace.
 
 ```text
@@ -57,7 +58,8 @@ session ─▶ currentSchedule() ─▶ provider.disable(namespace, name)
 
 ## Boundaries
 
-- A new message in the session clears the schedule's provenance, the namespace included, so
-  `currentSchedule()` returns `undefined` after a person writes in.
+- A later message from a person clears the schedule's provenance, the namespace included, so
+  `currentSchedule()` returns `undefined` after a person writes in. The occurrence's own message
+  keeps it.
 - The protocol and `SessionSchedule` stay the same. The namespace lives in eve's internal
   context only.

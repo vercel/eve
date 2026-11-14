@@ -17,7 +17,10 @@ export async function loadScheduleCollectionDefinition(
   bundle: Pick<CompiledRuntimeAgentBundle, "compiledArtifactsSource" | "moduleMap" | "nodeId">,
   collection: string,
   options: { readonly manifest?: CompiledAgentManifest; readonly providerKind?: string } = {},
-): Promise<DynamicSchedulesDefinition<unknown>> {
+): Promise<{
+  readonly application: string;
+  readonly definition: DynamicSchedulesDefinition<unknown>;
+}> {
   const manifest =
     options.manifest ??
     (await loadCompiledManifest({ compiledArtifactsSource: bundle.compiledArtifactsSource }));
@@ -40,7 +43,11 @@ export async function loadScheduleCollectionDefinition(
     exported,
     `Invalid schedule collection ${collection}.`,
   ) as DynamicSchedulesDefinition<unknown>;
-  return compiled.namedScope === undefined
-    ? authored
-    : namedScopeDefinition(authored, compiled.namedScope.name);
+  return {
+    application: compiled.application,
+    definition:
+      compiled.namedScope === undefined
+        ? authored
+        : namedScopeDefinition(authored, compiled.namedScope.name),
+  };
 }

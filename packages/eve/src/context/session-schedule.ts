@@ -1,5 +1,10 @@
 import type { ContextReader } from "#context/key.js";
-import { ScheduleIdKey, ScheduleInstanceKey, OccurrenceIdKey } from "#context/keys.js";
+import {
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  ScheduleNamespaceKey,
+  OccurrenceIdKey,
+} from "#context/keys.js";
 
 /** Framework-owned provenance for the scheduled work that started the current turn. */
 export interface SessionSchedule {
@@ -32,4 +37,32 @@ export function readSessionSchedule(
     instance: context.get(ScheduleInstanceKey),
     occurrenceId: context.get(OccurrenceIdKey),
   };
+}
+
+/**
+ * Schedule provenance on a scheduled send: the public {@link SessionSchedule} plus the provider
+ * namespace. `currentSchedule()` addresses the schedule with that namespace. eve keeps
+ * `namespace` internal; sessions and remote agents see only the public fields.
+ */
+export interface ScheduleProvenance extends SessionSchedule {
+  readonly namespace?: string;
+}
+
+export function readScheduleProvenance(
+  context: Pick<ContextReader, "get">,
+): ScheduleProvenance | undefined {
+  const schedule = readSessionSchedule(context);
+  return schedule === undefined
+    ? undefined
+    : { ...schedule, namespace: context.get(ScheduleNamespaceKey) };
+}
+
+export function readSerializedScheduleProvenance(
+  values: Readonly<Record<string, unknown>>,
+): ScheduleProvenance | undefined {
+  const schedule = readSerializedSessionSchedule(values);
+  const namespace = values[ScheduleNamespaceKey.name];
+  return schedule === undefined
+    ? undefined
+    : { ...schedule, namespace: typeof namespace === "string" ? namespace : undefined };
 }

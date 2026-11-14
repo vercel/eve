@@ -1103,7 +1103,7 @@ export default slackChannel({ renderers: [sourcedReplies] });
 
 Pass a string, as in `postCompletedSlackReply(ctx.channel, reply)`, to post Markdown alone, as eve's default does.
 
-`postCompletedSlackReply` returns the posted message when eve posts your blocks or your Markdown, so you can edit the reply later with `chat.update` and the message's `id`. It returns `undefined` when eve uploads the snippet or drops a reply to a deleted thread.
+`postCompletedSlackReply` returns the posted message when eve posts your blocks or your Markdown, so you can edit the reply later with `chat.update` and the message's `id` when Slack returned a `ts`. It returns `undefined` when eve uploads the snippet or drops a reply to a deleted thread.
 
 `taskCard` runs for every turn that calls a tool, including a turn without tasks. It receives:
 

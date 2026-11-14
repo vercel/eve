@@ -13,13 +13,11 @@ import {
   type ApprovalPolicy,
 } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
-import {
-  AuthKey,
-  ScheduleIdKey,
-  ScheduleInstanceKey,
-  ScheduleNamespaceKey,
-} from "#context/keys.js";
+import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { getWorld } from "#internal/workflow/runtime.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
+import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { currentSchedule, schedules } from "#public/experimental/schedules/client.js";
 import { byPrincipal } from "#public/schedules/scope.js";
@@ -447,9 +445,9 @@ describe("schedule creation and invocation", () => {
       ]);
 
       // A queue delivery names the stored collection and gets that scope's definition.
-      await expect(loadScheduleCollectionDefinition(bundle, "team-workflows")).resolves.toBe(
-        resolved[1]!.definition,
-      );
+      await expect(
+        loadScheduleCollectionDefinition(bundle, "team-workflows"),
+      ).resolves.toMatchObject({ definition: resolved[1]!.definition });
 
       // Code reaches a scope through the client by naming it.
       await expect(
@@ -558,26 +556,48 @@ describe("schedule creation and invocation", () => {
     });
   });
 
-  it("lets a session from an occurrence disable the schedule that started it", async () => {
-    const started: { key: { name: string }; value: string | undefined }[] = [];
+  it("lets an occurrence's session disable its schedule from a turn", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    const seen: boolean[] = [];
+    const outbox = defineChannel<undefined, void, { inbox: string }>({
+      routes: [POST("/outbox", async () => new Response("ok"))],
+      async receive({ message, target, ...send }, { from }) {
+        return await from(target.inbox).send(message, send);
+      },
+    });
     const subscription = defineDynamicSchedules({
       inputSchema: z.object({ task: z.string() }).strict(),
       provider: inMemoryScheduleProvider(),
       tool: false,
       scope: () => "shared",
       auth: () => alice,
-      // The occurrence's sessions inherit these keys from the dispatch scope.
-      run: () => {
-        const context = loadContext();
-        for (const key of [ScheduleIdKey, ScheduleInstanceKey, ScheduleNamespaceKey])
-          started.push({ key, value: context.get(key) });
+      async run({ payload, occurrence, to }) {
+        await to(outbox, { inbox: "team" }).send(payload.task, {
+          idempotencyKey: `${occurrence.executionId}:reminder`,
+        });
       },
     });
     const app = await createTestRuntime({
+      agent: { name: "current-schedule", limits: { sessionTimeoutMs: false } },
       modules: [
+        { logicalPath: "channels/outbox.ts", loadNamespace: async () => ({ default: outbox }) },
         {
           logicalPath: "schedules/reminders.ts",
           loadNamespace: async () => ({ default: subscription }),
+        },
+        {
+          logicalPath: "hooks/stop-reminder.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "turn.started"() {
+                  const schedule = await currentSchedule();
+                  seen.push(schedule !== undefined);
+                  await schedule?.disable();
+                },
+              },
+            }),
+          }),
         },
       ],
     });
@@ -591,9 +611,8 @@ describe("schedule creation and invocation", () => {
         payload: { task: "Stand up" },
       });
       await client.invoke(created.name);
-      for (const { key, value } of started) loadContext().set(key as never, value as never);
-      await (await currentSchedule())!.disable();
+      await vi.waitFor(() => expect(seen).toEqual([true]), { timeout: 20_000 });
       expect(await client.get(created.name)).toMatchObject({ state: "inactive" });
     });
-  });
+  }, 60_000);
 });

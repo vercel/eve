@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { loadContext } from "#context/container.js";
@@ -26,9 +25,8 @@ import {
   scheduledRunsRuntime,
   type ScheduleCollectionClient,
 } from "#runtime/schedules/collection-client.js";
-import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
+import { scheduleHandle } from "#runtime/schedules/dispatch-occurrence.js";
 import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
-import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 /**
@@ -108,27 +106,14 @@ export async function currentSchedule(): Promise<ScheduleHandle | undefined> {
   const namespace = context.get(ScheduleNamespaceKey);
   if (collection === undefined || name === undefined || namespace === undefined) return undefined;
   const bundle = requireCompiledBundle(context);
-  const manifest = await loadCompiledManifest({
-    compiledArtifactsSource: bundle.compiledArtifactsSource,
+  const { application, definition } = await loadScheduleCollectionDefinition(bundle, collection);
+  return scheduleHandle({
+    application,
+    bundle,
+    collection,
+    definition,
+    name,
+    namespace,
+    runtime: scheduledRunsRuntime(bundle),
   });
-  const definition = await loadScheduleCollectionDefinition(bundle, collection, { manifest });
-  const providerContext = () =>
-    createScheduleProviderContext({
-      abortSignal: new AbortController().signal,
-      application: manifest.config.name,
-      bundle: () => bundle,
-      collection,
-      definition,
-      namespace,
-      operationId: randomUUID(),
-      runtime: () => scheduledRunsRuntime(bundle),
-    });
-  return {
-    async disable() {
-      await definition.provider.disable(providerContext(), name);
-    },
-    async delete() {
-      await definition.provider.delete(providerContext(), name);
-    },
-  };
 }

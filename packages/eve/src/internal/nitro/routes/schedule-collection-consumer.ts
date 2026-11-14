@@ -66,10 +66,10 @@ export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): 
         throw new PermanentScheduleMessageError("Schedule delivery does not match this agent.");
       let definition: DynamicSchedulesDefinition<unknown>;
       try {
-        definition = await loadScheduleCollectionDefinition(bundle, collection, {
+        ({ definition } = await loadScheduleCollectionDefinition(bundle, collection, {
           manifest,
           providerKind: "vercel",
-        });
+        }));
       } catch (error) {
         if (error instanceof ScheduleCollectionNotDeployedError)
           throw new PermanentScheduleMessageError(error.message);

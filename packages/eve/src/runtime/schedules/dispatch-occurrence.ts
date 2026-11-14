@@ -4,6 +4,7 @@ import { ScheduleDispatcher } from "#channel/schedule.js";
 import type { Runtime } from "#channel/types.js";
 import type {
   DynamicSchedulesDefinition,
+  ScheduleHandle,
   ScheduleOccurrenceIdentity,
   ScheduleScopeValue,
 } from "#public/schedules/subscription.js";
@@ -30,24 +31,12 @@ export async function dispatchScheduledOccurrence(input: {
     ...input.occurrence,
     displayName: scheduleDisplayName(input.occurrence.name),
   };
-  const { provider } = input.definition;
   const { application } = input.payload.eve;
   // The delivered namespace, or else the stored scope, identifies where this schedule lives. No
   // caller is present to authorize, and the callback only reaches the schedule that fired it.
   const namespace =
     input.namespace ??
     deriveScheduleNamespace(application, input.collection, input.payload.envelope.scope);
-  const providerContext = () =>
-    createScheduleProviderContext({
-      abortSignal: new AbortController().signal,
-      application,
-      bundle: () => input.bundle,
-      collection: input.collection,
-      runtime: () => input.runtime,
-      definition: input.definition,
-      namespace,
-      operationId: randomUUID(),
-    });
   const result = await new ScheduleDispatcher({
     runtime: input.runtime,
     channels: input.bundle.graph.root.channels,
@@ -57,14 +46,15 @@ export async function dispatchScheduledOccurrence(input: {
     namespace,
     occurrence,
     payload: input.payload,
-    schedule: {
-      async disable() {
-        await provider.disable(providerContext(), occurrence.name);
-      },
-      async delete() {
-        await provider.delete(providerContext(), occurrence.name);
-      },
-    },
+    schedule: scheduleHandle({
+      application,
+      bundle: input.bundle,
+      collection: input.collection,
+      definition: input.definition,
+      name: occurrence.name,
+      namespace,
+      runtime: input.runtime,
+    }),
     verifyDelivery: input.verifyDelivery,
   });
   await input.definition.events?.["occurrence.dispatched"]?.({
@@ -78,6 +68,37 @@ export async function dispatchScheduledOccurrence(input: {
     schedule: input.payload.envelope,
     type: "occurrence.dispatched",
   });
+}
+
+/** Disables or deletes one schedule at its provider namespace, without calling `scope`. */
+export function scheduleHandle(input: {
+  readonly application: string;
+  readonly bundle: ScheduleDispatchBundle;
+  readonly collection: string;
+  readonly definition: DynamicSchedulesDefinition<any, any, any>;
+  readonly name: string;
+  readonly namespace: string;
+  readonly runtime: Runtime;
+}): ScheduleHandle {
+  const providerContext = () =>
+    createScheduleProviderContext({
+      abortSignal: new AbortController().signal,
+      application: input.application,
+      bundle: () => input.bundle,
+      collection: input.collection,
+      definition: input.definition,
+      namespace: input.namespace,
+      operationId: randomUUID(),
+      runtime: () => input.runtime,
+    });
+  return {
+    async disable() {
+      await input.definition.provider.disable(providerContext(), input.name);
+    },
+    async delete() {
+      await input.definition.provider.delete(providerContext(), input.name);
+    },
+  };
 }
 
 /** Addresses one provider operation to a scope's namespace; its target dispatches occurrences the provider delivers in process. */
