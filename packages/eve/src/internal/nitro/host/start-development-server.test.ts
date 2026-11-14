@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
   };
   const devServer = {
     close: vi.fn(async () => undefined),
+    holdTraffic: vi.fn((): (() => void) => () => {}),
     listen: vi.fn(() => listenerServer),
     prepareSpare: vi.fn(),
     setClientAddressSecret: vi.fn(),
@@ -520,9 +521,21 @@ describe("createDevelopmentServer", () => {
       });
     });
 
+    const releaseTraffic = vi.fn(() => {
+      expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledOnce();
+      expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
+    });
+    mocks.devServer.holdTraffic.mockImplementationOnce(() => releaseTraffic);
+
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
+    // Worker traffic, held from before the first worker starts, waits for the
+    // generation and for the host this run serves.
+    expect(releaseTraffic).toHaveBeenCalledOnce();
+    expect(mocks.devServer.holdTraffic.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.devServer.swapTo.mock.invocationCallOrder[0]!,
+    );
     // The worker starts loading the published generation before a client asks.
     expect(mocks.fetch).toHaveBeenCalledWith(new URL("/eve/v1/health", "http://localhost:2000/"));
     await server.close();
