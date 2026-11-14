@@ -451,12 +451,21 @@ async function runSessionLoop(
             });
           continue;
         case "turn":
+          // The idle timer's step starts beside the turn's, so the turn doesn't wait on it.
+          void startTimer().catch(() => {});
           return await runDeliveredTurn(next);
         case "cancel-turn":
           continue;
       }
     }
   };
+  // A session created without a message starts its idle timer with its first turn, or once its
+  // prewarm settles while it still waits, not beside the prewarm at boot: a timer step in flight
+  // when the message arrives would hold the first turn's step until it finished.
+  const defersTimer = boot.start.kind === "first-message";
+  let timerStart: Promise<void> | undefined;
+  const startTimer = (): Promise<void> =>
+    (timerStart ??= sessionTimeout?.start() ?? Promise.resolve());
   const runInitialAction = async (): Promise<SessionActionResult> => {
     if (boot.compactFirst === true) {
       // A failed compaction keeps the history; the session continues either way. This run already
@@ -483,6 +492,8 @@ async function runSessionLoop(
           )
           .finally(() => {
             prewarmSettled = true;
+            // No message came while the prewarm ran: the waiting session's idle timer starts now.
+            if (awaitingFirstInput) void startTimer().catch(() => {});
           });
         return await awaitPrewarmedAction();
       case "parked":
@@ -498,12 +509,14 @@ async function runSessionLoop(
   try {
     const [actionResult, timerResult] = await Promise.allSettled([
       runInitialAction(),
-      sessionTimeout?.start(),
+      defersTimer ? undefined : startTimer(),
     ]);
     if (timerResult.status === "rejected") throw timerResult.reason;
     if (actionResult.status === "rejected") throw actionResult.reason;
     const initial = actionResult.value;
     if (initial.kind !== "action") return initial;
+    // The session goes on, so its timer runs from here if its first turn didn't start it.
+    if (defersTimer) await startTimer();
     let action = initial.action;
 
     while (true) {

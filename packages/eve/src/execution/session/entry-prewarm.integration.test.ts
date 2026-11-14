@@ -177,6 +177,72 @@ describe("session prewarmers", () => {
   });
 });
 
+describe("idle timer of a session created without a message", () => {
+  async function stepNames(runId: string): Promise<string[]> {
+    const world = await getWorld();
+    const steps = await world.steps.list({ runId });
+    return steps.data.map((step) => step.stepName.split("//").at(-1)!);
+  }
+
+  it("starts beside the first turn when the message arrives during the prewarm", async () => {
+    const started = Promise.withResolvers<void>();
+    const runtime = await createTestRuntime({
+      agent: { name: "prewarm-timer-first-turn" },
+      beforeSandboxStart: () => started.promise,
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          sessionTimeoutMs: 60_000,
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const token = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+      try {
+        await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]), {
+          timeout: 10_000,
+        });
+        // The prewarm holds; the waiting session has no timer step beside it.
+        expect(await stepNames(run.runId)).not.toContain("startSessionTimeoutStep");
+
+        await resumeHook(token, handoffFollowUp("dpl_inline", "Say hello.", "timer-first-turn"));
+        await stream.nextTurn();
+        expect(await stepNames(run.runId)).toContain("startSessionTimeoutStep");
+        expect((await deadline(run.runId)).getTime()).toBeGreaterThan(Date.now());
+      } finally {
+        started.resolve();
+        stream.dispose();
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+  });
+
+  it("starts once the prewarm settles when no message comes", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "prewarm-timer-idle" } });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          sessionTimeoutMs: 60_000,
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      try {
+        await waitForPrewarmStep(run.runId);
+        expect((await deadline(run.runId)).getTime()).toBeGreaterThan(Date.now());
+      } finally {
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+  });
+});
+
 describe("prewarm handoff while the prewarm step runs", () => {
   it("keeps the session on its owner until the prewarm step has started the sandbox", async () => {
     const started = Promise.withResolvers<void>();
