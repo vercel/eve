@@ -35,10 +35,11 @@ const ALLOWED_TOOLS = [
 ];
 
 /**
- * Tools that always pause for approval: the irreversible deletes, and replacing the queue
- * schedule, which moves every queued post at once.
+ * Tools that always pause for approval: deletes, draft edits, and replacing the queue schedule.
+ * Draft edits are partial updates, so omitting a publish time can retain an existing schedule.
  */
 const ALWAYS_GATED_TOOLS = [
+  "edit_draft",
   "delete_draft",
   "delete_comment",
   "delete_thread",
@@ -46,12 +47,7 @@ const ALWAYS_GATED_TOOLS = [
 ];
 
 /**
- * Tools that can publish or schedule a post. They pause unless the call is a plain draft.
- */
-const PUBLISH_TOOLS = ["create_draft", "edit_draft"];
-
-/**
- * Whether a create or edit call saves a plain draft with no publish time.
+ * Whether a create call saves a plain draft with no publish time.
  *
  * @remarks
  * Fails closed: anything other than an input whose `requestBody` leaves `publish_at` and
@@ -92,7 +88,7 @@ export default defineMcpClientConnection({
     if (ALWAYS_GATED_TOOLS.includes(tool)) {
       return "user-approval";
     }
-    if (PUBLISH_TOOLS.includes(tool) && !isPlainDraft(toolInput)) {
+    if (tool === "create_draft" && !isPlainDraft(toolInput)) {
       return "user-approval";
     }
     return "not-applicable";
