@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rename, rm, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 import { resolveInstalledPackageInfo, resolvePackageRoot } from "#internal/application/package.js";
 import type { DevelopmentHostBuild } from "#internal/nitro/host/dev-build-host.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
+import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 import { mapConcurrent } from "#shared/map-concurrent.js";
 
@@ -22,14 +24,33 @@ interface ReusableDevelopmentHost {
   readonly workspace: PreparedDevelopmentApplicationHost["workspace"];
 }
 
+function hostsDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "dev-hosts");
+}
+
 function recordPath(appRoot: string): string {
-  return join(appRoot, ".eve", "dev-hosts", RECORD_FILE);
+  return join(hostsDirectory(appRoot), RECORD_FILE);
+}
+
+/** Whether the record's workspace and entry live in this app's own hosts directory. */
+function ownsWorkspace(appRoot: string, record: Partial<ReusableDevelopmentHost>): boolean {
+  const rootDir = record.workspace?.rootDir;
+  const entry = record.payload?.entry;
+  if (rootDir === undefined || entry === undefined) return false;
+  // The entry is recorded beside its workspace, so it may be gone but never elsewhere.
+  if (!entry.startsWith(`${rootDir}${sep}`)) return false;
+  try {
+    return realpathSync.native(dirname(rootDir)) === realpathSync.native(hostsDirectory(appRoot));
+  } catch {
+    return false;
+  }
 }
 
 /**
  * The host fingerprint covers what eve's host build reads from the app. A host
- * also bundles eve's runtime and the app's installed packages, so the key adds
- * eve's identity, the Node runtime, and the nearest lockfiles.
+ * also bundles eve's runtime and the app's installed packages with the app's
+ * tsconfig transform options, so the key adds eve's identity, the Node
+ * runtime, the nearest lockfiles, and the tsconfig chain's contents.
  */
 export async function computeDevelopmentHostReuseKey(
   host: PreparedDevelopmentApplicationHost,
@@ -47,10 +68,24 @@ export async function computeDevelopmentHostReuseKey(
     }
     if (dirname(directory) === directory || lockfiles.length > 0) break;
   }
+  const packageRoot = findAuthoredPackageRoot(host.appRoot) ?? host.appRoot;
+  const tsconfigs = await Promise.all(
+    [...new Set([host.appRoot, packageRoot])].map(async (root) =>
+      Promise.all(
+        (await resolveTsConfigDependencyPaths(root)).map(async (path) => [
+          path,
+          createHash("sha256")
+            .update(await readFile(path).catch(() => ""))
+            .digest("hex"),
+        ]),
+      ),
+    ),
+  );
   return createHash("sha256")
     .update(
       JSON.stringify([
         await computeDevelopmentHostFingerprint(host),
+        tsconfigs,
         resolveInstalledPackageInfo().version,
         evePackageRoot,
         process.version,
@@ -80,6 +115,8 @@ export async function claimReusableDevelopmentHost(
     const record = JSON.parse(
       await readFile(claimPath, "utf8"),
     ) as Partial<ReusableDevelopmentHost>;
+    // A record copied along with the app names another app's workspace.
+    if (!ownsWorkspace(appRoot, record)) return undefined;
     if (
       key !== undefined &&
       record.key === key &&
