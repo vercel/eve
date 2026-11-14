@@ -3,7 +3,7 @@ import { createDeclarationCopier } from "../_shared.mjs";
 export default {
   packageName: "@vercel/queue",
   compiledPath: "@vercel/queue",
-  bundling: "standalone",
+  chunkGroup: "workflow",
   entry: "dist/index.mjs",
   copyDeclarations: createDeclarationCopier({
     files: ({ distEntries }) =>
