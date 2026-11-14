@@ -92,9 +92,9 @@ export default git({});
 
 `git({})` adds no tool and assumes the agent's shell already has GitHub credentials. The agent uses the `gh` and `git` CLIs in `bash`, and `git__pr` commits, pushes, and opens a draft with `gh pr create --draft`.
 
-Configure `github` to get GitHub tokens through Vercel Connect instead. The extension then adds the authenticated `git__gh` tool and tells the agent to use it for every authenticated GitHub operation. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures.
+Configure `github` to get GitHub tokens through Vercel Connect instead. The extension then adds the authenticated `git__gh` tool and tells the agent to use it for every authenticated GitHub operation. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures. `gh-signed-commit` publishes local commits and staged changes as one signed commit, and refuses when the remote branch has commits the checkout lacks, so it never reverts them.
 
-`gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
+`gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before writing to GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
 
 | Option                 | Required      | Effect                                                                                     |
 | ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |

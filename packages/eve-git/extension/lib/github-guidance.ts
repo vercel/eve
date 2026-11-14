@@ -49,10 +49,10 @@ export function githubInstructions(github: boolean, callerScoped = false): strin
 const SIGNED_COMMIT = `Stage only the intended changes. Repositories that require verified commits must use:
 
 \`\`\`sh
-gh-signed-commit --repo owner/name --branch <branch> --base <base> -m "<headline>" [-b "<body>"]
+gh-signed-commit --repo owner/name --branch <branch> -m "<headline>" [-b "<body>"]
 \`\`\`
 
-The command commits only staged changes and synchronizes the checkout to the signed remote commit. Then write the PR body to a file and create one draft:`;
+The command publishes your local commits and staged changes as one signed commit on the branch, then synchronizes the checkout to it. It refuses when the branch has commits the checkout lacks and prints how to rebase onto them. Then write the PR body to a file and create one draft:`;
 
 const PLAIN_COMMIT = `Stage only the intended changes, commit them, and push the branch. Then write the PR body to a file and create one draft:`;
 

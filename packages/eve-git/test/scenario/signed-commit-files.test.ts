@@ -29,8 +29,9 @@ const path = require("node:path");
 const remote = process.env.FAKE_REMOTE;
 const git = (args, options = {}) => execFileSync("git", ["--git-dir", remote, ...args], { encoding: "utf8", ...options }).trim();
 globalThis.fetch = async (url, init = {}) => {
-  fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ url, method: init.method ?? "GET" }) + "\n");
   const pathname = new URL(url).pathname;
+  const write = init.method === "POST" && (pathname !== "/graphql" || JSON.parse(init.body).query.startsWith("mutation"));
+  fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ url, write }) + "\n");
   if (pathname === "/repos/owner/repo") return Response.json({ default_branch: "main" });
   if (pathname.includes("/git/ref/")) {
     const ref = decodeURIComponent(pathname.split("/git/ref/")[1]);
@@ -43,7 +44,18 @@ globalThis.fetch = async (url, init = {}) => {
     return Response.json({ object: { sha } }, { status: 201 });
   }
   if (pathname === "/graphql") {
-    const { input } = JSON.parse(init.body).variables;
+    const { query, variables } = JSON.parse(init.body);
+    if (query.startsWith("query")) {
+      const repository = {};
+      for (const [, alias, oid] of query.matchAll(/(c\d+): object\(oid: "([0-9a-f]+)"\)/g)) {
+        try {
+          git(["cat-file", "-e", oid + "^{commit}"], { stdio: ["ignore", "pipe", "ignore"] });
+          repository[alias] = { oid };
+        } catch { repository[alias] = null; }
+      }
+      return Response.json({ data: { repository } });
+    }
+    const { input } = variables;
     const env = { ...process.env, GIT_INDEX_FILE: path.join(path.dirname(remote), "api-index") };
     git(["read-tree", input.expectedHeadOid], { env });
     for (const { path: file } of input.fileChanges.deletions) git(["update-index", "-z", "--index-info"], { env, input: "0 " + "0".repeat(40) + "\t" + file + "\0" });
@@ -127,7 +139,8 @@ for (const kind of [
   "type change",
   "submodule",
 ] as const) {
-  test(`rejects a ${kind} before contacting GitHub and preserves the checkout`, async () => {
+  const localCommit = kind === "new executable";
+  test(`rejects a ${kind}${localCommit ? " in a local commit" : ""} before writing to GitHub and preserves the checkout`, async () => {
     let path = "changed";
     if (kind === "new executable") {
       await writeFile(join(work, path), "#!/bin/sh\nexit 1\n");
@@ -156,6 +169,7 @@ for (const kind of [
         `160000,${await git(work, "rev-parse", "HEAD")},${path}`,
       );
     }
+    if (localCommit) await git(work, "commit", "--quiet", "-m", "local executable");
     await writeFile(join(work, "untracked.txt"), "preserve me\n");
     const before = {
       tree: await git(work, "write-tree"),
@@ -172,7 +186,7 @@ for (const kind of [
       return true;
     });
 
-    assert.equal(await readFile(log, "utf8"), "");
+    assert.doesNotMatch(await readFile(log, "utf8"), /"write":true/u);
     assert.equal(await git(work, "write-tree"), before.tree);
     assert.equal(await git(work, "rev-parse", "HEAD"), before.head);
     assert.equal(await git(work, "status", "--porcelain"), before.status);
