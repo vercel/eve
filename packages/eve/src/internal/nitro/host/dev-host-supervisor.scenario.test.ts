@@ -197,6 +197,25 @@ describe("dev host supervisor", () => {
     await expect((await early).json()).resolves.toMatchObject({ label: "first" });
   });
 
+  it("holds worker traffic, but not control requests, until the hold is released", async () => {
+    const { host, supervisor, url } = await startSupervisor();
+    supervisor.setControlHandler(async (request) =>
+      new URL(request.url).pathname === "/control" ? new Response("control") : undefined,
+    );
+    const release = supervisor.holdTraffic();
+    await supervisor.swapTo(host({ label: "early" }));
+
+    let settled = false;
+    const held = fetch(url("/")).finally(() => {
+      settled = true;
+    });
+    await expect((await fetch(url("/control"))).text()).resolves.toBe("control");
+    expect(settled).toBe(false);
+
+    release();
+    await expect((await held).json()).resolves.toMatchObject({ label: "early" });
+  });
+
   it("drains a retired worker and retires it within a second of its last exchange", async () => {
     const { host, path, supervisor, url, whoami } = await startSupervisor();
     const disposeFirst = vi.fn(async () => undefined);
