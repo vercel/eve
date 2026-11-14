@@ -187,14 +187,15 @@ function assertUniqueScheduleNames(tasks: readonly HostScheduleTask[]): void {
 
 /**
  * Dev queues dispatch in the worker unless the parent owns the World. Hosted
- * Vercel builds deliver through queue functions, so only a self-hosted build
- * with a configured World dispatches in process.
+ * Vercel builds deliver through queue functions; every self-hosted build,
+ * including one on the default local World, dispatches in process instead of
+ * over an HTTP loopback to itself.
  */
 function hasDirectWorkflowQueue(input: HostRouteTableInput): boolean {
-  const configuredWorld = input.manifest.config.experimental?.workflow?.world;
-  return input.mode === "development"
-    ? !usesParentDevelopmentWorkflowWorld(configuredWorld)
-    : !input.vercel && configuredWorld !== undefined;
+  if (input.mode === "development") {
+    return !usesParentDevelopmentWorkflowWorld(input.manifest.config.experimental?.workflow?.world);
+  }
+  return !input.vercel;
 }
 
 function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRoute {
