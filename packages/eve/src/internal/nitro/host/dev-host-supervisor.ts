@@ -92,6 +92,7 @@ export class DevHostSupervisor implements DevHostSwitch {
   #clientAddressSecret: string | undefined;
   #closePromise: Promise<void> | undefined;
   #closed = false;
+  #trafficHeld = false;
   #controlHandler: ((request: Request) => Promise<Response | undefined>) | undefined;
   /** Host of the active worker; its workspace stays until another host replaces it. */
   #current: HostRecord | undefined;
@@ -102,6 +103,27 @@ export class DevHostSupervisor implements DevHostSwitch {
     this.#logger = logger;
     // Fires only for the attached worker closing on its own.
     this.#manager.onClose(() => this.#restartAfterCrash());
+  }
+
+  /**
+   * Holds requests and upgrades bound for workers, but not control requests,
+   * until the returned release runs. A worker can then boot before its
+   * generation is published without serving the previous one.
+   */
+  holdTraffic(): () => void {
+    this.#trafficHeld = true;
+    return () => {
+      this.#trafficHeld = false;
+      this.#wakeActiveWaiters();
+    };
+  }
+
+  /**
+   * Stops the worker a swap is still waiting on, so that swap rejects instead
+   * of waiting out readiness for a host the caller no longer wants.
+   */
+  abandonCandidate(): void {
+    void this.#candidate?.runner.close(new Error("Development worker candidate was abandoned."));
   }
 
   setControlHandler(handler: (request: Request) => Promise<Response | undefined>): void {
@@ -398,7 +420,7 @@ export class DevHostSupervisor implements DevHostSwitch {
     });
     try {
       // A worker can become active and crash before this waiter resumes, so re-check.
-      while (this.#active === undefined && !this.#closed) {
+      while ((this.#active === undefined || this.#trafficHeld) && !this.#closed) {
         this.#activeChange ??= Promise.withResolvers<void>();
         await Promise.race([this.#activeChange.promise, timedOut]);
       }
