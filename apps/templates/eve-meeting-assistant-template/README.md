@@ -89,6 +89,46 @@ pnpm dev
 
 Expose the dev server with an HTTPS tunnel and set `RECALL_WEBHOOK_URL` to `https://<your-tunnel>/eve/v1/recall`.
 
+## Notes, docs, and screen sharing
+
+Beyond Linear, eve keeps the meeting's notes in Notion, starts and edits docs on request, looks things up in Notion, and shares its screen, much like [Claude Meetings](https://claude.com/resources/articles/claude-meetings).
+
+- **Notes.** About every 25 lines nobody addressed to eve, `shouldRespond` gives it a quiet turn to add what's new to the meeting's notes page: a summary, action items, decisions, and notes. eve only inserts after its own blocks, so people can edit the page while it grows. With a Recall status webhook, `call_ended` triggers one last pass.
+- **Transcript.** "eve, transcribe this meeting to Notion" starts a live transcript, a subpage of the notes that gets every line said or typed from then on, a few lines at a time. The channel's `shouldRespond` hook writes it, since it sees every line in order without a model call. eve's own spoken replies aren't in it.
+- **Docs.** "eve, start a doc for this plan" creates a subpage of the notes. Later requests read the doc first, then edit only the blocks they're about, so teammates' edits survive.
+- **Lookups.** `search_notion` searches page titles. The first search in a meeting waits for someone's approval in the chat or out loud.
+- **Screen.** "eve, put the plan on screen" opens the page in eve's browser, [agent-browser](https://agent-browser.dev)'s headless Chromium in the session's [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox), and screen-shares it through Output Media. The camera page keeps showing when eve listens, thinks, and talks. While a doc is up, the view scrolls to each block eve edits. "eve, show us the venue's site" drives the same browser with the `browser__` tools from `@agent-browser/eve`.
+- **Signed-in browser.** An admin signs eve's browser in to service accounts, such as a Notion account that can see the meeting pages, at `/meeting/browser-sign-in`. The sign-ins are saved to a [Vercel Drive](https://vercel.com/docs/sandbox/concepts/drives), and every later meeting's browser starts with them, so private pages show on screen.
+- **Outside guests.** Set `MEETING_INTERNAL_DOMAINS=acme.com` to have eve leave when someone from another domain joins, matched against the emails Recall reports.
+
+The pieces are `agent/lib/notion.ts` and `agent/lib/notes.ts` for Notion, the `take_notes`, `transcribe_to_notion`, `create_doc`, `read_doc`, `edit_doc`, `search_notion`, and `present` tools, `agent/lib/stage.ts`, `agent/lib/bridge.ts`, and `agent/sandbox.ts` for the shared browser, `agent/channels/browser-sign-in.ts` for the sign-in page, and `agent/instructions/notes-docs-screen.md`.
+
+To set it up, create a Notion page for meeting notes, such as "Meetings" and connect it to a Notion integration (**…** > **Connections**). Store the integration's token in Vercel Connect:
+
+```bash
+read -rs NOTION_TOKEN   # paste your ntn_... token
+printf '[{"value":"%s"}]' "$NOTION_TOKEN" |
+  vercel connect create notion --connection-method api-key --name meetings --data @-
+```
+
+Then set:
+
+```bash
+NOTION_CONNECTOR=<connector-uid>   # from `vercel connect list`; or set NOTION_TOKEN instead
+NOTION_PARENT_PAGE_ID=...          # the Meetings page's id or link
+MEETING_ADMIN_TOKEN=...            # a long random secret for the sign-in page
+MEETING_INTERNAL_DOMAINS=acme.com  # optional
+MEETING_BROWSER_ENCRYPTION_KEY=... # optional; 64 hex characters, from `openssl rand -hex 32`, to encrypt saved sign-ins
+MEETING_BROWSER_REGION=iad1        # optional; the region of the sandboxes and the Drive of sign-ins
+MEETING_DECISION_MODEL=...         # optional; a decision model your AI Gateway team allows, such as openai/gpt-6-luna-decisions
+```
+
+For the end-of-meeting notes, add a workspace webhook in the Recall dashboard for bot status changes, pointed at `/eve/v1/recall`. `agent/channels/eve.ts` lets `eve remote connect` reach a production deployment with the project's Vercel OIDC token: pass `-H "authorization: Bearer $VERCEL_OIDC_TOKEN"` after `vercel env pull`.
+
+Then sign eve's browser in. Open `https://<your-project>.vercel.app/meeting/browser-sign-in?token=<MEETING_ADMIN_TOKEN>`. The first visit installs the browser in a sandbox for sign-ins, which takes a few minutes. Then click **Notion**, sign in with an account that can see the Meetings page, add any other services, and click **Save sign-ins**. Meetings that start afterward use them. Come back the same way when a sign-in expires. When eve hits a page it can't open in a meeting, it posts a sign-in link that works for 15 minutes, signed with `MEETING_ADMIN_TOKEN` so the token itself never reaches the chat, and loads the new sign-ins once someone saves them.
+
+The first build prepares a sandbox template with agent-browser and Chromium, which takes a few minutes.
+
 ## Limits
 
 - Each participant is their own principal, `recall:<botId>:<participantId>`, but display names prove nothing. Anyone in the meeting can use the Linear connector's access, so scope its Linear user accordingly.
@@ -97,3 +137,7 @@ Expose the dev server with an HTTPS tunnel and set `RECALL_WEBHOOK_URL` to `http
 - Talking over eve is detected by loudness, so background noise can cut it off. An interrupted reply stays whole in the session's history.
 - Approvals, questions, and sign-ins go to the meeting chat as text.
 - The bot runs Recall's `web_4_core` variant so the page animates and plays audio smoothly, which Recall bills at a higher rate.
+- Anyone in the meeting can read the Notion pages the integration can see, through search or the shared screen, and anyone with a notes page's link can read it.
+- Anyone in a meeting can ask eve to open what its signed-in accounts can see, and the browser tools can read those pages. Give the service accounts only the access meetings need.
+- The shared browser updates several times a second, which suits documents and browsing, not video. Its public URL, and the sign-in page's, is protected only by an unguessable key in the path. The sign-in page's key changes on every visit.
+- The sandbox stops two hours after it starts, which ends a screen share in longer meetings.
