@@ -358,7 +358,13 @@ async function startNitroDevelopmentServer(
     const environmentKey = computeDevelopmentHostEnvironmentKey(project.appRoot).catch(
       () => undefined,
     );
-    const peeked = await peekReusableDevelopmentHost(project.appRoot, environmentKey);
+    // Under `vc dev`, a host can run the local Schedules consumer, which polls
+    // and dispatches from the published generation as soon as its worker
+    // starts, outside held traffic. Its worker waits for this run's generation.
+    const peeked =
+      process.env.VERCEL_SCHEDULE_DEV_API_VERSION === undefined
+        ? await peekReusableDevelopmentHost(project.appRoot, environmentKey)
+        : undefined;
     const devServer = new DevHostSupervisor();
     cleanup.defer(async () => {
       try {

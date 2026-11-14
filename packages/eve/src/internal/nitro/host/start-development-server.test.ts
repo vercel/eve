@@ -1098,6 +1098,28 @@ describe("reusing the previous run's dev host", () => {
     }
   });
 
+  it("starts a reused host only after publishing the generation under vc dev's local Schedules", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({ kind: "reused", host: kept });
+    process.env.VERCEL_SCHEDULE_DEV_API_VERSION = "1";
+
+    try {
+      const server = await startDevelopmentServer("/tmp/eve-test");
+
+      expect(mocks.reuse.peekReusableDevelopmentHost).not.toHaveBeenCalled();
+      expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
+      expect(mocks.devServer.swapTo).toHaveBeenCalledWith(
+        expect.objectContaining({ entry: kept.payload.entry }),
+      );
+      expect(mocks.activateDevelopmentGeneration.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.devServer.swapTo.mock.invocationCallOrder[0]!,
+      );
+      await server.close();
+    } finally {
+      delete process.env.VERCEL_SCHEDULE_DEV_API_VERSION;
+    }
+  });
+
   it("abandons the early worker and swaps in a fresh host when the kept one is stale", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     mocks.reuse.claimReusableDevelopmentHost.mockResolvedValue({
