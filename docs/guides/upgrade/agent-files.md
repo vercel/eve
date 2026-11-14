@@ -51,6 +51,27 @@ To turn off the token-usage limit, including one inherited from a parent agent, 
 - Export the built-in tool definitions `askQuestion`, `noReply`, and `sleep` directly instead of calling `askQuestion()`, `noReply()`, or `sleep()`.
 - `grep` lists matching files by default. Set `outputMode: "content"` when the caller needs the matching lines. See [Built-in tools](/docs/concepts/built-in-tools#grep).
 
+## Replace `agentWithModel`
+
+`eve/tools/agent` exports no `agentWithModel`. Replace `export { agentWithModel as default } from "eve/tools/agent"` with `agent({ models })`, and list the models the built-in `agent` tool may run a root-copy task on. The model can choose only those keys.
+
+```ts title="agent/tools/agent.ts"
+import { agent } from "eve/tools/agent";
+
+export default agent({
+  models: {
+    "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
+    "openai/gpt-6-luna": "Routine tasks where fast completion matters",
+  },
+});
+```
+
+A string entry is the description, and its key is the AI Gateway model ID. See [`agent`](/docs/concepts/built-in-tools#agent) for object entries and the tool's input.
+
+## Keep tool names unique across static and dynamic tools
+
+A static tool keeps its name when a dynamic tool returns the same name, and eve logs an error for the dynamic tool. To change a tool for some sessions only, define it only in the dynamic file, and return the usual version to the other sessions. See [Dynamic tool conflicts](/docs/guides/dynamic-capabilities#conflicts).
+
 ## Choose one sandbox layout and install your tools
 
 If both `agent/sandbox.ts` and `agent/sandbox/` exist, move the definition to `agent/sandbox/sandbox.ts`. A standalone `agent/sandbox.ts` still works. See [Sandbox layout](/docs/sandbox#define-an-environment).
@@ -165,6 +186,12 @@ import { disableTool } from "eve/tools";
 
 export default disableTool();
 ```
+
+## Add a `grep` tool to code extension agents
+
+The code extension adds no `code__grep` tool, and the `eve/extensions/code/tools` entry point is removed. To give the agent a structured search tool, run `eve add tool/grep`. It writes `agent/tools/grep.ts`, which re-exports the default tool from `eve/tools/grep`. Import `grep` from `eve/tools/grep` wherever your code imported it from `eve/extensions/code/tools`.
+
+An `agent/tools/code__grep.ts` file that only disables the old tool fails `eve build` with `disables a slot with no lower-precedence source`. Delete that file.
 
 ## Workflow imports
 
