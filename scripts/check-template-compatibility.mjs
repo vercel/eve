@@ -156,7 +156,7 @@ const checkVercelServices = async (template, destination) => {
       );
     }
     const serviceRoot = join(destination, service.root ?? ".");
-    if (existsSync(join(serviceRoot, "package.json"))) continue;
+    if (existsSync(join(serviceRoot, "package.json")) && !service.buildCommand) continue;
     if (!service.buildCommand) {
       throw new Error(
         `${label} has no package.json in ${service.root}, so Vercel cannot find the framework binary. Set buildCommand to run it from the root node_modules.`,
