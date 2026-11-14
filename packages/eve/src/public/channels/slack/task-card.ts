@@ -345,13 +345,13 @@ export function withTaskCards(
       try {
         await committed?.(line, ctx);
       } finally {
-        const { channel, view } = ctx;
+        const { channel, session, view } = ctx;
         const turnIds = new Set([
           ...line.facts.flatMap((fact) => fact.scope?.turnId ?? []),
           ...Object.keys(channel.state.taskCards ?? {}),
         ]);
         for (const turnId of turnIds)
-          await writeTaskCards(channel, sessionTables(view), turnId, taskCard);
+          await writeTaskCards(channel, sessionTables(view), session.id, turnId, taskCard);
       }
     },
   };
@@ -367,12 +367,13 @@ export function withTaskCards(
 async function writeTaskCards(
   channel: SlackEventContext,
   view: SessionView,
+  sessionId: string,
   turnId: string,
   taskCard: (card: TaskCard) => SlackCardMessage | null,
 ): Promise<void> {
   if (view.turns[turnId] === undefined) return;
   const audience = normalizeChannelAudience(channel.state.audience);
-  const cards = taskCards(view, turnId, audience);
+  const cards = taskCards(view, sessionId, turnId, audience);
   const since = channel.state.taskCards?.[turnId]?.since ?? 0;
   for (const card of cards) {
     if (card.since < since) continue;

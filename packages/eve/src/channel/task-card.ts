@@ -20,6 +20,8 @@ const MAX_CALLS_PER_CARD = 100;
  * ended, as a turn its caller keeps talking to does: that card is finished, and the next begins.
  */
 export interface TaskCard {
+  /** The session the turn belongs to, such as for a link to it in your own tooling. */
+  readonly sessionId: string;
   readonly turnId: string;
   /** Where the card begins on the stream: `0` for a turn's first card. */
   readonly since: number;
@@ -42,6 +44,7 @@ export interface TaskCard {
 /** A turn's cards, oldest first; every card but the latest is finished. */
 export function taskCards(
   view: SessionTables,
+  sessionId: string,
   turnId: string,
   audience: ChannelAudience,
 ): readonly TaskCard[] {
@@ -79,6 +82,7 @@ export function taskCards(
     return {
       audience,
       calls: shown.flatMap((row) => call(snapshot, row.callId) ?? []),
+      sessionId,
       since,
       state,
       turnId,
