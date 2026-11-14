@@ -16,10 +16,10 @@ npm install @portabletext/vue
 
 ```vue
 <script setup lang="ts">
-import { PortableText } from "@portabletext/vue";
-import type { PortableTextBlock } from "@portabletext/types";
+import {PortableText} from '@portabletext/vue'
+import type {PortableTextBlock} from '@portabletext/types'
 
-const props = defineProps<{ value: PortableTextBlock[] }>();
+const props = defineProps<{value: PortableTextBlock[]}>()
 </script>
 
 <template>
@@ -34,44 +34,34 @@ Vue components can be defined as render functions, SFCs, or JSX.
 ### Render Function Style (Concise)
 
 ```ts
-import { h } from "vue";
-import type { PortableTextVueComponents } from "@portabletext/vue";
+import {h} from 'vue'
+import type {PortableTextVueComponents} from '@portabletext/vue'
 
 const components: PortableTextVueComponents = {
   types: {
-    image: ({ value }) =>
-      h("img", { src: urlFor(value).width(800).url(), alt: value.alt || "" }),
-    code: ({ value }) =>
-      h("pre", { "data-language": value.language }, h("code", value.code)),
+    image: ({value}) => h('img', {src: urlFor(value).width(800).url(), alt: value.alt || ''}),
+    code: ({value}) => h('pre', {'data-language': value.language}, h('code', value.code)),
   },
 
   marks: {
-    link: ({ value }, { slots }) => {
-      const rel = !value?.href?.startsWith("/")
-        ? "noreferrer noopener"
-        : undefined;
-      return h("a", { href: value?.href, rel }, slots.default?.());
+    link: ({value}, {slots}) => {
+      const rel = !value?.href?.startsWith('/') ? 'noreferrer noopener' : undefined
+      return h('a', {href: value?.href, rel}, slots.default?.())
     },
-    highlight: (_, { slots }) =>
-      h("span", { class: "bg-yellow-200" }, slots.default?.()),
+    highlight: (_, {slots}) => h('span', {class: 'bg-yellow-200'}, slots.default?.()),
   },
 
   block: {
-    h1: (_, { slots }) =>
-      h("h1", { class: "text-4xl font-bold" }, slots.default?.()),
-    h2: (_, { slots }) =>
-      h("h2", { class: "text-3xl font-semibold" }, slots.default?.()),
-    blockquote: (_, { slots }) =>
-      h("blockquote", { class: "border-l-4 pl-4 italic" }, slots.default?.()),
+    h1: (_, {slots}) => h('h1', {class: 'text-4xl font-bold'}, slots.default?.()),
+    h2: (_, {slots}) => h('h2', {class: 'text-3xl font-semibold'}, slots.default?.()),
+    blockquote: (_, {slots}) => h('blockquote', {class: 'border-l-4 pl-4 italic'}, slots.default?.()),
   },
 
   list: {
-    bullet: (_, { slots }) =>
-      h("ul", { class: "list-disc ml-6" }, slots.default?.()),
-    number: (_, { slots }) =>
-      h("ol", { class: "list-decimal ml-6" }, slots.default?.()),
+    bullet: (_, {slots}) => h('ul', {class: 'list-disc ml-6'}, slots.default?.()),
+    number: (_, {slots}) => h('ol', {class: 'list-decimal ml-6'}, slots.default?.()),
   },
-};
+}
 ```
 
 ### SFC Style (For Complex Components)
@@ -79,15 +69,13 @@ const components: PortableTextVueComponents = {
 ```vue
 <!-- ImageBlock.vue -->
 <script setup lang="ts">
-import type { PortableTextComponentProps } from "@portabletext/vue";
+import type {PortableTextComponentProps} from '@portabletext/vue'
 
-const props = defineProps<
-  PortableTextComponentProps<{
-    asset: { _ref: string };
-    alt?: string;
-    caption?: string;
-  }>
->();
+const props = defineProps<PortableTextComponentProps<{
+  asset: {_ref: string}
+  alt?: string
+  caption?: string
+}>>()
 </script>
 
 <template>
@@ -101,24 +89,24 @@ const props = defineProps<
 Then register:
 
 ```ts
-import ImageBlock from "./ImageBlock.vue";
+import ImageBlock from './ImageBlock.vue'
 
 const components = {
   types: {
     image: ImageBlock,
   },
-};
+}
 ```
 
 ## Props Pattern
 
 Custom components receive:
 
-| Prop         | Description                       |
-| ------------ | --------------------------------- |
-| `value`      | The block/mark data               |
-| `index`      | Position in parent array          |
-| `isInline`   | Whether this is an inline element |
+| Prop | Description |
+|------|-------------|
+| `value` | The block/mark data |
+| `index` | Position in parent array |
+| `isInline` | Whether this is an inline element |
 | `renderNode` | Internal renderer (rarely needed) |
 
 Children are passed via **slots** (`slots.default?.()`), not props.
@@ -126,9 +114,9 @@ Children are passed via **slots** (`slots.default?.()`), not props.
 ## Plain Text Extraction
 
 ```ts
-import { toPlainText } from "@portabletext/vue";
+import {toPlainText} from '@portabletext/vue'
 
-const text = toPlainText(blocks);
+const text = toPlainText(blocks)
 ```
 
 ## Reference

@@ -1,7 +1,6 @@
 ---
 description: "The review rubric: writing-quality rules and reference lists for judging a content draft, covering AI-sounding phrasing, bloated wording, structure, and web-content specs. Load at the start of every review."
 ---
-
 # Writing Quality
 
 House-neutral rules for judging whether drafted content reads like a person wrote it. They apply to any prose surface. Voice or audience context from the caller layers on top of them.

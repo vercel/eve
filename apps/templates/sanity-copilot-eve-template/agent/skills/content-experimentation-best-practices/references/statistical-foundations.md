@@ -20,14 +20,13 @@ A measure of whether observed differences are likely real or due to chance.
 - **p-value < 0.05:** "Statistically significant" at 95% confidence
 - Means: If there were no real difference, there's less than a 5% chance of seeing results this extreme
 - Does NOT mean: The change is important or meaningful
-- **Common misconception:** The p-value is NOT "the probability the result is due to chance." It's the probability of observing data this extreme _assuming_ the null hypothesis is true.
+- **Common misconception:** The p-value is NOT "the probability the result is due to chance." It's the probability of observing data this extreme *assuming* the null hypothesis is true.
 
 ### Confidence Interval
 
 A range of plausible values for the true effect.
 
 Example: "Conversion rate increased by 5% (95% CI: 2% to 8%)"
-
 - Best estimate: 5% improvement
 - Could be as low as 2% or as high as 8%
 - Narrower intervals = more certainty
@@ -60,7 +59,6 @@ Where:
 ```
 
 For a 5% baseline conversion rate, detecting a 1% absolute lift (5% → 6%):
-
 - σ² = 0.05 × 0.95 = 0.0475
 - MDE² = 0.01² = 0.0001
 - n = 16 × 0.0475 / 0.0001 = **7,600 per variant**
@@ -87,7 +85,6 @@ Checking results daily and stopping when significant.
 Overall results hide segmented truths.
 
 Example:
-
 - Overall: Variant B wins
 - Mobile users: Variant A wins
 - Desktop users: Variant A wins
@@ -104,19 +101,15 @@ Only analyzing users who completed the funnel.
 ## Interpreting Results
 
 ### Significant + Meaningful
-
 Clear win. Implement the change.
 
 ### Significant + Trivial
-
 Statistically different but tiny effect. Consider if worth the complexity.
 
 ### Not Significant + Large Effect
-
 Might be real but underpowered. Extend the test or accept uncertainty.
 
 ### Not Significant + Small Effect
-
 No detectable difference. Either no real effect or test was underpowered.
 
 ## Alternative Approaches
@@ -124,7 +117,6 @@ No detectable difference. Either no real effect or test was underpowered.
 ### Bayesian A/B Testing
 
 An alternative to traditional (frequentist) hypothesis testing. Bayesian methods provide:
-
 - **Direct probability statements:** "There's a 95% probability Variant B is better" (more intuitive than p-values)
 - **No peeking problem:** Continuous monitoring is built in — you can check results at any time
 - **Credible intervals:** Directly interpretable as "the true value falls in this range with X% probability"
@@ -134,7 +126,6 @@ Bayesian methods are offered by platforms like VWO and are useful when you need 
 ### Multi-Armed Bandits
 
 Dynamically allocate more traffic to winning variants while still learning:
-
 - **Thompson Sampling:** Balances exploration (learning) with exploitation (serving the best variant)
 - **Best for:** Ongoing optimization where you want to minimize regret during the test
 - **Trade-off:** Faster convergence to the winner, but less statistical rigor than fixed-allocation A/B tests
@@ -144,7 +135,6 @@ Consider bandits for content recommendations, personalization, or situations whe
 ### Sequential Testing
 
 For teams that need to monitor experiments continuously:
-
 - **Group sequential designs** (O'Brien-Fleming, Lan-DeMets) allow pre-planned interim analyses
 - **Always-valid p-values** let you check results at any time without inflating false positive rates
 - Use when you must balance the peeking problem with business pressure to act on results quickly
@@ -152,7 +142,6 @@ For teams that need to monitor experiments continuously:
 ## When to Trust Results
 
 Checklist before declaring a winner:
-
 - [ ] Reached pre-calculated sample size
 - [ ] Ran for full business cycle (1-2 weeks minimum)
 - [ ] p-value < 0.05 (or your chosen threshold)

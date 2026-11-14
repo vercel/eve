@@ -15,26 +15,21 @@ AI systems evaluate content based on:
 ## Content Structure for AI
 
 ### Direct Answers First
-
 Lead with the answer, then explain.
 
 **Bad:**
-
 > The history of JavaScript dates back to 1995 when Brendan Eich... [500 words later] ...JavaScript runs in the browser.
 
 **Good:**
-
 > JavaScript is a programming language that runs in web browsers. It was created in 1995 by Brendan Eich...
 
 ### Clear Headings
-
 Use descriptive H2/H3 headings that match user questions.
 
 **Bad:** "Overview" → "Details" → "More Information"
 **Good:** "What is X?" → "How does X work?" → "When should you use X?"
 
 ### Lists and Tables
-
 AI extracts structured information more easily than prose.
 
 ```markdown
@@ -46,30 +41,24 @@ AI extracts structured information more easily than prose.
 ```
 
 ### FAQ Format
-
 Question-answer pairs are ideal for AI extraction.
 
 ```typescript
 // Schema for AI-friendly FAQs
 defineType({
-  name: "faq",
-  type: "document",
+  name: 'faq',
+  type: 'document',
   fields: [
-    defineField({ name: "question", type: "string" }),
-    defineField({ name: "answer", type: "text" }),
-    defineField({
-      name: "category",
-      type: "reference",
-      to: [{ type: "faqCategory" }],
-    }),
-  ],
-});
+    defineField({ name: 'question', type: 'string' }),
+    defineField({ name: 'answer', type: 'text' }),
+    defineField({ name: 'category', type: 'reference', to: [{ type: 'faqCategory' }] }),
+  ]
+})
 ```
 
 ## Technical Implementation
 
 ### Structured Data (Critical)
-
 JSON-LD helps AI understand content type and relationships.
 
 ```typescript
@@ -77,19 +66,18 @@ JSON-LD helps AI understand content type and relationships.
 const faqSchema = {
   "@context": "https://schema.org",
   "@type": "FAQPage",
-  mainEntity: faqs.map((faq) => ({
+  mainEntity: faqs.map(faq => ({
     "@type": "Question",
     name: faq.question,
     acceptedAnswer: {
       "@type": "Answer",
-      text: faq.answer,
-    },
-  })),
-};
+      text: faq.answer
+    }
+  }))
+}
 ```
 
 ### Canonical Content
-
 Ensure AI finds your authoritative version, not copies.
 
 - Set canonical URLs
@@ -97,7 +85,6 @@ Ensure AI finds your authoritative version, not copies.
 - Use `rel="canonical"` for syndicated content
 
 ### Freshness Signals
-
 AI systems prefer current information.
 
 - Display publish and update dates prominently
@@ -107,7 +94,6 @@ AI systems prefer current information.
 ## Content Quality Signals
 
 ### Author Credentials
-
 AI systems increasingly check author authority.
 
 - Display author name and credentials
@@ -115,7 +101,6 @@ AI systems increasingly check author authority.
 - Include author structured data
 
 ### Citations and Sources
-
 Linking to authoritative sources increases trust.
 
 - Cite primary sources
@@ -123,7 +108,6 @@ Linking to authoritative sources increases trust.
 - Avoid circular citations (sites citing each other)
 
 ### Comprehensive Coverage
-
 AI prefers content that fully answers questions.
 
 - Cover related questions users might have
@@ -151,29 +135,25 @@ Make conscious decisions about which AI systems can crawl your content:
 ## Measuring AEO Success
 
 ### Monitor AI Mentions
-
 Track when AI assistants cite your content:
-
 - Use Google Search Console's AI Overview data for impression and click tracking
 - Monitor referral traffic from AI platforms (Perplexity, ChatGPT, Bing Copilot)
 - Search for your brand + "according to" in AI assistants
 - Consider third-party AEO tracking tools for comprehensive monitoring
 
 ### Track Zero-Click Queries
-
 If AI answers questions directly, traditional rankings matter less.
 
 ### Featured Snippet Capture
-
 Featured snippets often become AI answers. Track which you own.
 
 ## AEO vs SEO Balance
 
 AEO and SEO largely align—quality content serves both. Key differences:
 
-| Aspect | SEO Focus      | AEO Focus               |
-| ------ | -------------- | ----------------------- |
-| Goal   | Rank on page 1 | Be THE answer           |
-| Format | Varies         | Direct, structured      |
-| Length | Often longer   | Concise + comprehensive |
-| Links  | Link building  | Source citations        |
+| Aspect | SEO Focus | AEO Focus |
+|--------|-----------|-----------|
+| Goal | Rank on page 1 | Be THE answer |
+| Format | Varies | Direct, structured |
+| Length | Often longer | Concise + comprehensive |
+| Links | Link building | Source citations |

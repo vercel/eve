@@ -1,6 +1,6 @@
 # Release notes format specs
 
-Quick-lookup conventions for release notes and changelogs. These are mostly _conventions_, not
+Quick-lookup conventions for release notes and changelogs. These are mostly *conventions*, not
 hard numeric limits — the sourced standard is below; the rules-of-thumb are marked as such. Only
 assert the conventions you can cite.
 
@@ -9,14 +9,14 @@ assert the conventions you can cite.
 The standard category set, with the exact one-line definitions. Use only the categories that
 apply to a release, and keep the same names every time.
 
-| Category       | Use for                            |
-| -------------- | ---------------------------------- |
-| **Added**      | New features.                      |
-| **Changed**    | Changes in existing functionality. |
-| **Deprecated** | Soon-to-be removed features.       |
-| **Removed**    | Now-removed features.              |
-| **Fixed**      | Bug fixes.                         |
-| **Security**   | Vulnerabilities.                   |
+| Category | Use for |
+| --- | --- |
+| **Added** | New features. |
+| **Changed** | Changes in existing functionality. |
+| **Deprecated** | Soon-to-be removed features. |
+| **Removed** | Now-removed features. |
+| **Fixed** | Bug fixes. |
+| **Security** | Vulnerabilities. |
 
 Resist inventing categories ("Tweaks", "Misc", "Improvements" as a catch-all) — the six above are
 specific enough to be useful and broad enough to cover everything. Always pass a feature through
@@ -26,11 +26,11 @@ specific enough to be useful and broad enough to cover everything. Always pass a
 
 Given `MAJOR.MINOR.PATCH`, increment the:
 
-| Part      | When                                                                                      | Backward compatible? |
-| --------- | ----------------------------------------------------------------------------------------- | -------------------- |
-| **MAJOR** | Incompatible API changes.                                                                 | No                   |
-| **MINOR** | New functionality added in a backward-compatible way (or a public API marked deprecated). | Yes                  |
-| **PATCH** | Backward-compatible bug fixes.                                                            | Yes                  |
+| Part | When | Backward compatible? |
+| --- | --- | --- |
+| **MAJOR** | Incompatible API changes. | No |
+| **MINOR** | New functionality added in a backward-compatible way (or a public API marked deprecated). | Yes |
+| **PATCH** | Backward-compatible bug fixes. | Yes |
 
 - A breaking change is "any backward incompatible change to the public API" — that forces a MAJOR
   bump, and resets MINOR and PATCH to 0.
@@ -54,13 +54,13 @@ A repeatable skeleton for one entry. Keep it to one or two sentences; link out f
 
 ## Ordering & dating
 
-| Convention        | Value                                                                                          |
-| ----------------- | ---------------------------------------------------------------------------------------------- |
-| Order             | Newest version first (reverse chronological).                                                  |
-| Date format       | ISO 8601, `YYYY-MM-DD` (orders largest-to-smallest: year, month, day — no regional ambiguity). |
-| Version + section | Linkable, so a reader can jump to a specific release.                                          |
-| Unreleased        | An optional `Unreleased` section at the top tracks upcoming changes.                           |
-| Yanked            | Mark a pulled release visibly, e.g. `## [0.0.5] - 2014-12-13 [YANKED]`.                        |
+| Convention | Value |
+| --- | --- |
+| Order | Newest version first (reverse chronological). |
+| Date format | ISO 8601, `YYYY-MM-DD` (orders largest-to-smallest: year, month, day — no regional ambiguity). |
+| Version + section | Linkable, so a reader can jump to a specific release. |
+| Unreleased | An optional `Unreleased` section at the top tracks upcoming changes. |
+| Yanked | Mark a pulled release visibly, e.g. `## [0.0.5] - 2014-12-13 [YANKED]`. |
 
 Every shipped version gets an entry, even a minor one — gaps erode trust.
 

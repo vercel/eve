@@ -48,40 +48,34 @@ import {
   PUBLIC_SANITY_PROJECT_ID,
   PUBLIC_SANITY_API_VERSION,
   PUBLIC_SANITY_STUDIO_URL,
-} from "$env/static/public";
+} from '$env/static/public'
 
 function assertEnvVar<T>(value: T | undefined, name: string): T {
-  if (value === undefined || value === "") {
-    throw new Error(`Missing environment variable: ${name}`);
+  if (value === undefined || value === '') {
+    throw new Error(`Missing environment variable: ${name}`)
   }
-  return value;
+  return value
 }
 
-export const dataset = assertEnvVar(
-  PUBLIC_SANITY_DATASET,
-  "PUBLIC_SANITY_DATASET"
-);
-export const projectId = assertEnvVar(
-  PUBLIC_SANITY_PROJECT_ID,
-  "PUBLIC_SANITY_PROJECT_ID"
-);
-export const apiVersion = PUBLIC_SANITY_API_VERSION || "2026-05-15";
-export const studioUrl = PUBLIC_SANITY_STUDIO_URL || "http://localhost:3333";
+export const dataset = assertEnvVar(PUBLIC_SANITY_DATASET, 'PUBLIC_SANITY_DATASET')
+export const projectId = assertEnvVar(PUBLIC_SANITY_PROJECT_ID, 'PUBLIC_SANITY_PROJECT_ID')
+export const apiVersion = PUBLIC_SANITY_API_VERSION || '2026-05-15'
+export const studioUrl = PUBLIC_SANITY_STUDIO_URL || 'http://localhost:3333'
 ```
 
 ### `src/lib/sanity/client.ts` — public client
 
 ```ts
-import { createClient } from "@sanity/sveltekit";
-import { apiVersion, projectId, dataset, studioUrl } from "$lib/sanity/api";
+import {createClient} from '@sanity/sveltekit'
+import {apiVersion, projectId, dataset, studioUrl} from '$lib/sanity/api'
 
 export const client = createClient({
   projectId,
   dataset,
   apiVersion,
   useCdn: true,
-  stega: { studioUrl },
-});
+  stega: {studioUrl},
+})
 ```
 
 Import `createClient` from `@sanity/sveltekit`, not `@sanity/client`. `useCdn: true` is for production reads; the server (preview) client below overrides to `false`.
@@ -89,37 +83,37 @@ Import `createClient` from `@sanity/sveltekit`, not `@sanity/client`. `useCdn: t
 ### `src/lib/sanity/client.server.ts` — server (preview) client
 
 ```ts
-import { SANITY_API_READ_TOKEN } from "$env/static/private";
-import { client } from "$lib/sanity/client";
+import {SANITY_API_READ_TOKEN} from '$env/static/private'
+import {client} from '$lib/sanity/client'
 
 export const serverClient = client.withConfig({
   token: SANITY_API_READ_TOKEN,
   useCdn: false,
   stega: true,
-});
+})
 ```
 
 ### `src/lib/sanity/queries.ts` — queries + types
 
 ```ts
-import { groq } from "@sanity/sveltekit";
+import {groq} from '@sanity/sveltekit'
 
 export const postsQuery = groq`*[_type == "post" && defined(slug.current)] | order(_createdAt desc){
   _id, _createdAt, title, slug, excerpt, mainImage, body
-}`;
+}`
 
 export const postQuery = groq`*[_type == "post" && slug.current == $slug][0]{
   _id, _createdAt, title, slug, excerpt, mainImage, body
-}`;
+}`
 
 export interface Post {
-  _id: string;
-  _createdAt: string;
-  title?: string;
-  slug: { current: string };
-  excerpt?: string;
-  mainImage?: unknown;
-  body?: unknown[];
+  _id: string
+  _createdAt: string
+  title?: string
+  slug: {current: string}
+  excerpt?: string
+  mainImage?: unknown
+  body?: unknown[]
 }
 ```
 
@@ -128,13 +122,13 @@ Use `defineQuery` instead of `groq` if you want TypeGen-friendly query definitio
 ### `src/lib/sanity/image.ts` — image URL builder
 
 ```ts
-import { createImageUrlBuilder } from "@sanity/image-url";
-import { client } from "./client";
+import {createImageUrlBuilder} from '@sanity/image-url'
+import {client} from './client'
 
-const builder = createImageUrlBuilder(client);
+const builder = createImageUrlBuilder(client)
 
 export function urlFor(source: unknown) {
-  return builder.image(source as never);
+  return builder.image(source as never)
 }
 ```
 
@@ -145,24 +139,20 @@ Use the named `createImageUrlBuilder` export; the default export logs a deprecat
 ### `src/hooks.server.ts` — wire preview + query loader
 
 ```ts
-import {
-  handlePreviewMode,
-  handleQueryLoader,
-  setServerClient,
-} from "@sanity/sveltekit";
-import { redirect } from "@sveltejs/kit";
-import { sequence } from "@sveltejs/kit/hooks";
-import { serverClient } from "$lib/sanity/client.server";
+import {handlePreviewMode, handleQueryLoader, setServerClient} from '@sanity/sveltekit'
+import {redirect} from '@sveltejs/kit'
+import {sequence} from '@sveltejs/kit/hooks'
+import {serverClient} from '$lib/sanity/client.server'
 
-setServerClient(serverClient);
+setServerClient(serverClient)
 
 export const handle = sequence(
   handlePreviewMode({
     client: serverClient,
-    preview: { redirect },
+    preview: {redirect},
   }),
-  handleQueryLoader()
-);
+  handleQueryLoader(),
+)
 ```
 
 `handlePreviewMode` installs `/preview/enable` and `/preview/disable` endpoints, reads the preview cookie, and populates `locals.sanity` with `{client, fetch, loadQuery, previewEnabled, previewPerspective, browserToken}`. `handleQueryLoader` attaches `loadQuery` to `locals.sanity` for use in `+page.server.ts` / `+layout.server.ts`.
@@ -170,7 +160,7 @@ export const handle = sequence(
 ### `src/app.d.ts` — typed locals
 
 ```ts
-import type { SanityLocals } from "@sanity/sveltekit";
+import type {SanityLocals} from '@sanity/sveltekit'
 
 declare global {
   namespace App {
@@ -178,7 +168,7 @@ declare global {
   }
 }
 
-export {};
+export {}
 ```
 
 ## 4. Layout: Preview + Visual Editing Providers
@@ -186,12 +176,12 @@ export {};
 ### `src/routes/+layout.server.ts` — propagate previewEnabled
 
 ```ts
-import type { LayoutServerLoad } from "./$types";
+import type {LayoutServerLoad} from './$types'
 
 export const load: LayoutServerLoad = (event) => {
-  const { previewEnabled } = event.locals.sanity;
-  return { previewEnabled };
-};
+  const {previewEnabled} = event.locals.sanity
+  return {previewEnabled}
+}
 ```
 
 ### `src/routes/+layout.svelte` — wrap children in providers (Svelte 5)
@@ -216,7 +206,6 @@ export const load: LayoutServerLoad = (event) => {
 ```
 
 Svelte 5 idioms here are mandatory:
-
 - `const {children, data} = $props()` — not `export let data`.
 - `{@render children()}` — not `<slot />`.
 - The `svelte-ignore state_referenced_locally` comment silences a warning about destructuring reactive props at module scope.
@@ -230,14 +219,14 @@ Svelte 5 idioms here are mandatory:
 `src/routes/+page.server.ts`:
 
 ```ts
-import { postsQuery as query, type Post } from "$lib/sanity/queries";
-import type { PageServerLoad } from "./$types";
+import {postsQuery as query, type Post} from '$lib/sanity/queries'
+import type {PageServerLoad} from './$types'
 
-export const load: PageServerLoad = async ({ locals }) => {
-  const { loadQuery } = locals.sanity;
-  const initial = await loadQuery<Post[]>(query);
-  return { query, options: { initial } };
-};
+export const load: PageServerLoad = async ({locals}) => {
+  const {loadQuery} = locals.sanity
+  const initial = await loadQuery<Post[]>(query)
+  return {query, options: {initial}}
+}
 ```
 
 The return shape `{query, params?, options: {initial}}` is what `useQuery(data)` on the client expects — don't change the field names.
@@ -268,7 +257,6 @@ The return shape `{query, params?, options: {initial}}` is what `useQuery(data)`
 ```
 
 Critical Svelte 5 pattern:
-
 - `useQuery` returns a Svelte Readable store. Wrap in `$derived(useQuery(data))` so the store reference stays current across reactive updates.
 - Subscribe via `$query` (Svelte's auto-subscription) and read `.data`.
 - Works on both SSR and client.
@@ -278,15 +266,15 @@ Critical Svelte 5 pattern:
 `src/routes/post/[slug]/+page.server.ts`:
 
 ```ts
-import { postQuery as query, type Post } from "$lib/sanity/queries";
-import type { PageServerLoad } from "./$types";
+import {postQuery as query, type Post} from '$lib/sanity/queries'
+import type {PageServerLoad} from './$types'
 
-export const load: PageServerLoad = async ({ locals, params }) => {
-  const { loadQuery } = locals.sanity;
-  const { slug } = params;
-  const initial = await loadQuery<Post>(query, { slug });
-  return { query, params: { slug }, options: { initial } };
-};
+export const load: PageServerLoad = async ({locals, params}) => {
+  const {loadQuery} = locals.sanity
+  const {slug} = params
+  const initial = await loadQuery<Post>(query, {slug})
+  return {query, params: {slug}, options: {initial}}
+}
 ```
 
 `src/routes/post/[slug]/+page.svelte`:
@@ -324,11 +312,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 When using fetched strings for logic (routing, classNames), strip the stega markers first.
 
 ```ts
-import { stegaClean } from "@sanity/sveltekit";
+import {stegaClean} from '@sanity/sveltekit'
 // …
-if (stegaClean(slug) === "home") {
-  /* … */
-}
+if (stegaClean(slug) === 'home') { /* … */ }
 ```
 
 ## 7. Caveats

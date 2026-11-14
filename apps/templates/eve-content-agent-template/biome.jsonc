@@ -7,8 +7,8 @@
     "includes": [
       "!agent/lib/banned-words.generated.ts",
       "!agent/lib/surfaces.generated.ts",
-      "!agent/subagents/reviewer/lib/rubric.generated.ts",
-    ],
+      "!agent/subagents/reviewer/lib/rubric.generated.ts"
+    ]
   },
   "linter": {
     "rules": {
@@ -16,8 +16,8 @@
         // eve derives tool/connection/skill names from filenames, and this project
         // uses snake_case (e.g. agent/tools/upload_asset.ts). Disable the kebab-case
         // filename rule so those names aren't flagged.
-        "useFilenamingConvention": "off",
-      },
-    },
-  },
+        "useFilenamingConvention": "off"
+      }
+    }
+  }
 }

@@ -27,13 +27,13 @@ Serverless event handlers hosted on Sanity's infrastructure, configured via **Bl
 
 ## Requirements
 
-| Dependency           | Version                                  |
-| :------------------- | :--------------------------------------- |
-| Node.js              | v24.x (matches deployed runtime)         |
-| Sanity CLI           | v4.12.0+                                 |
-| `@sanity/blueprints` | Latest                                   |
-| `@sanity/functions`  | Latest                                   |
-| `@sanity/client`     | v7.12.0+ (includes recursion protection) |
+| Dependency | Version |
+|:---|:---|
+| Node.js | v24.x (matches deployed runtime) |
+| Sanity CLI | v4.12.0+ |
+| `@sanity/blueprints` | Latest |
+| `@sanity/functions` | Latest |
+| `@sanity/client` | v7.12.0+ (includes recursion protection) |
 
 ## Project Structure
 
@@ -86,53 +86,51 @@ npx sanity@latest functions add \
 
 ```typescript
 // sanity.blueprint.ts
-import { defineBlueprint, defineDocumentFunction } from "@sanity/blueprints";
+import { defineBlueprint, defineDocumentFunction } from '@sanity/blueprints'
 
 export default defineBlueprint({
   resources: [
     defineDocumentFunction({
-      name: "my-function",
+      name: 'my-function',
       event: {
-        on: ["create", "update"],
+        on: ['create', 'update'],
         filter: '_type == "post"',
       },
     }),
   ],
-});
+})
 ```
 
 ### 4. Write the Handler
 
 ```typescript
 // functions/my-function/index.ts
-import { documentEventHandler } from "@sanity/functions";
-import { createClient } from "@sanity/client";
+import { documentEventHandler } from '@sanity/functions'
+import { createClient } from '@sanity/client'
 
 interface PostData {
-  _id: string;
-  _type: string;
-  title: string;
+  _id: string
+  _type: string
+  title: string
 }
 
-export const handler = documentEventHandler<PostData>(
-  async ({ context, event }) => {
-    const { data } = event;
+export const handler = documentEventHandler<PostData>(async ({ context, event }) => {
+  const { data } = event
 
-    const client = createClient({
-      ...context.clientOptions,
-      apiVersion: "2025-05-08",
-    });
+  const client = createClient({
+    ...context.clientOptions,
+    apiVersion: '2025-05-08',
+  })
 
-    try {
-      await client.patch(data._id, {
-        setIfMissing: { firstPublished: new Date().toISOString() },
-      });
-      console.log(`Set firstPublished on ${data._id}`);
-    } catch (error) {
-      console.error("Failed to patch document:", error);
-    }
+  try {
+    await client.patch(data._id, {
+      setIfMissing: { firstPublished: new Date().toISOString() },
+    })
+    console.log(`Set firstPublished on ${data._id}`)
+  } catch (error) {
+    console.error('Failed to patch document:', error)
   }
-);
+})
 ```
 
 ### 5. Test Locally
@@ -174,23 +172,23 @@ Every handler receives `{ context, event }`:
 
 ### `context`
 
-| Property                  | Type                   | Description                      |
-| :------------------------ | :--------------------- | :------------------------------- |
-| `clientOptions.apiHost`   | `string`               | API host URL                     |
-| `clientOptions.projectId` | `string`               | Sanity project ID                |
-| `clientOptions.dataset`   | `string`               | Dataset name                     |
-| `clientOptions.token`     | `string`               | Robot token (deployed only)      |
-| `local`                   | `boolean \| undefined` | `true` during local testing      |
-| `eventResourceType`       | `string`               | `'dataset'` or `'media-library'` |
-| `eventResourceId`         | `string`               | e.g., `'projectId.datasetName'`  |
+| Property | Type | Description |
+|:---|:---|:---|
+| `clientOptions.apiHost` | `string` | API host URL |
+| `clientOptions.projectId` | `string` | Sanity project ID |
+| `clientOptions.dataset` | `string` | Dataset name |
+| `clientOptions.token` | `string` | Robot token (deployed only) |
+| `local` | `boolean \| undefined` | `true` during local testing |
+| `eventResourceType` | `string` | `'dataset'` or `'media-library'` |
+| `eventResourceId` | `string` | e.g., `'projectId.datasetName'` |
 
 ### `event`
 
 ```typescript
 {
   data: {
-    _id: string;
-    _type: string;
+    _id: string
+    _type: string
     // ... rest of document (shaped by projection if set)
   }
 }
@@ -204,67 +202,64 @@ When testing locally, `context.clientOptions` only has `projectId` and `apiHost`
 
 ### `defineDocumentFunction` Options
 
-| Option        | Type                     | Default            | Description                                      |
-| :------------ | :----------------------- | :----------------- | :----------------------------------------------- |
-| `name`        | `string`                 | required           | Must match the directory name under `functions/` |
-| `displayName` | `string`                 | —                  | Human-readable display name                      |
-| `src`         | `string`                 | `functions/<name>` | Path to function source directory                |
-| `memory`      | `number`                 | `1`                | Memory in GB (max 10)                            |
-| `timeout`     | `number`                 | `10`               | Timeout in seconds (max 900)                     |
-| `runtime`     | `string`                 | `'nodejs24.x'`     | `'node'`, `'nodejs22.x'`, or `'nodejs24.x'`      |
-| `project`     | `string`                 | —                  | Project ID. Required if blueprint is org-scoped. |
-| `robotToken`  | `string`                 | —                  | Custom robot token name for the function         |
-| `event`       | `object`                 | required           | Event configuration (see below)                  |
-| `env`         | `Record<string, string>` | —                  | Environment variables via `process.env`          |
+| Option | Type | Default | Description |
+|:---|:---|:---|:---|
+| `name` | `string` | required | Must match the directory name under `functions/` |
+| `displayName` | `string` | — | Human-readable display name |
+| `src` | `string` | `functions/<name>` | Path to function source directory |
+| `memory` | `number` | `1` | Memory in GB (max 10) |
+| `timeout` | `number` | `10` | Timeout in seconds (max 900) |
+| `runtime` | `string` | `'nodejs24.x'` | `'node'`, `'nodejs22.x'`, or `'nodejs24.x'` |
+| `project` | `string` | — | Project ID. Required if blueprint is org-scoped. |
+| `robotToken` | `string` | — | Custom robot token name for the function |
+| `event` | `object` | required | Event configuration (see below) |
+| `env` | `Record<string, string>` | — | Environment variables via `process.env` |
 
 ### `event` Options
 
-| Option               | Type       | Default  | Description                                                          |
-| :------------------- | :--------- | :------- | :------------------------------------------------------------------- |
-| `on`                 | `string[]` | required | `'create'`, `'update'`, `'delete'`                                   |
-| `filter`             | `string`   | —        | GROQ filter body (no `*[...]` wrapper)                               |
-| `projection`         | `string`   | —        | GROQ projection to shape `event.data`. Wrap in `{}`.                 |
-| `includeDrafts`      | `boolean`  | `false`  | Trigger on draft changes                                             |
-| `includeAllVersions` | `boolean`  | `false`  | Trigger on all document versions                                     |
-| `resource`           | `object`   | —        | Scope to dataset: `{ type: 'dataset', id: 'projectId.datasetName' }` |
+| Option | Type | Default | Description |
+|:---|:---|:---|:---|
+| `on` | `string[]` | required | `'create'`, `'update'`, `'delete'` |
+| `filter` | `string` | — | GROQ filter body (no `*[...]` wrapper) |
+| `projection` | `string` | — | GROQ projection to shape `event.data`. Wrap in `{}`. |
+| `includeDrafts` | `boolean` | `false` | Trigger on draft changes |
+| `includeAllVersions` | `boolean` | `false` | Trigger on all document versions |
+| `resource` | `object` | — | Scope to dataset: `{ type: 'dataset', id: 'projectId.datasetName' }` |
 
 ### `defineMediaLibraryAssetFunction`
 
 For Media Library asset events. Requires `@sanity/blueprints` v0.4.0+ and `@sanity/functions` v1.1.0+.
 
 ```typescript
-import {
-  defineBlueprint,
-  defineMediaLibraryAssetFunction,
-} from "@sanity/blueprints";
+import { defineBlueprint, defineMediaLibraryAssetFunction } from '@sanity/blueprints'
 
 export default defineBlueprint({
   resources: [
     defineMediaLibraryAssetFunction({
-      name: "asset-handler",
+      name: 'asset-handler',
       event: {
-        on: ["delete"],
-        filter: "documents::incomingGlobalDocumentReferenceCount() > 0",
-        projection: "{_id, versions, title}",
+        on: ['delete'],
+        filter: 'documents::incomingGlobalDocumentReferenceCount() > 0',
+        projection: '{_id, versions, title}',
         resource: {
-          type: "media-library",
-          id: "mlYourLibraryId",
+          type: 'media-library',
+          id: 'mlYourLibraryId',
         },
       },
     }),
   ],
-});
+})
 ```
 
 ---
 
 ## Event Types
 
-| Event    | Description                                                                              |
-| :------- | :--------------------------------------------------------------------------------------- |
-| `create` | New document created                                                                     |
+| Event | Description |
+|:---|:---|
+| `create` | New document created |
 | `update` | Existing document modified (for published docs, fires when a draft/version is published) |
-| `delete` | Document deleted                                                                         |
+| `delete` | Document deleted |
 
 Often best to use `['create', 'update']` together for published document triggers.
 
@@ -308,40 +303,37 @@ Access in handler code via `process.env.MY_VAR`.
 If your function mutates the same document type it listens to, you **will** create an infinite loop.
 
 **✅ Correct — use GROQ filters to exclude processed documents:**
-
 ```typescript
 defineDocumentFunction({
-  name: "first-published",
+  name: 'first-published',
   event: {
-    on: ["create", "update"],
+    on: ['create', 'update'],
     filter: "_type == 'post' && !defined(firstPublished)",
   },
-});
+})
 ```
 
 **✅ Correct — use `@sanity/client` v7.12.0+ for automatic lineage headers:**
-
 ```typescript
-import { createClient } from "@sanity/client";
+import { createClient } from '@sanity/client'
 
 // Client automatically sets X-Sanity-Lineage header
 // Recursive chains are limited to 16 invocations
 const client = createClient({
   ...context.clientOptions,
-  apiVersion: "2025-05-08",
-});
+  apiVersion: '2025-05-08',
+})
 ```
 
 **❌ Incorrect — no recursion guard:**
-
 ```typescript
 defineDocumentFunction({
-  name: "update-post",
+  name: 'update-post',
   event: {
-    on: ["create", "update"],
-    filter: "_type == 'post'", // Will re-trigger on its own writes!
+    on: ['create', 'update'],
+    filter: "_type == 'post'",  // Will re-trigger on its own writes!
   },
-});
+})
 ```
 
 ### Local Testing Safety
@@ -351,24 +343,22 @@ Use `context.local` to prevent accidental mutations during testing:
 ```typescript
 // Skip mutations entirely in test
 if (!context.local) {
-  await client.createOrReplace(someDoc);
+  await client.createOrReplace(someDoc)
 }
 
 // Or use dryRun
-await client
-  .patch(event.data._id, {
-    set: { processed: true },
-  })
-  .commit({ dryRun: context.local });
+await client.patch(event.data._id, {
+  set: { processed: true },
+}).commit({ dryRun: context.local })
 
 // Or use noWrite for Agent Actions
 await client.agent.action.generate({
-  schemaId: "your-schema-id",
+  schemaId: 'your-schema-id',
   documentId: event.data._id,
-  instruction: "Summarize this document",
-  target: { path: ["summary"] },
+  instruction: 'Summarize this document',
+  target: { path: ['summary'] },
   noWrite: context.local,
-});
+})
 ```
 
 ### Limits
@@ -388,27 +378,25 @@ Cost = invocations × (memory GB × duration seconds). Default is 1GB memory. A 
 ### Deploy hook / CDN invalidation
 
 **Blueprint:**
-
 ```typescript
 defineDocumentFunction({
-  name: "deploy-hook",
+  name: 'deploy-hook',
   event: {
-    on: ["create", "update"],
+    on: ['create', 'update'],
     filter: '_type == "page"',
   },
-});
+})
 ```
 
 **Handler:**
-
 ```typescript
 export const handler = documentEventHandler(async ({ context, event }) => {
-  const URL = process.env.DEPLOY_HOOK_URL;
-  if (!URL) throw new Error("DEPLOY_HOOK_URL is not set");
+  const URL = process.env.DEPLOY_HOOK_URL
+  if (!URL) throw new Error('DEPLOY_HOOK_URL is not set')
 
-  await fetch(URL);
-  console.log("Deploy hook triggered");
-});
+  await fetch(URL)
+  console.log('Deploy hook triggered')
+})
 ```
 
 Set the env var: `npx sanity@latest functions env add deploy-hook DEPLOY_HOOK_URL https://...`
@@ -419,47 +407,45 @@ Uses the same pattern as the step-by-step example above. The key insight: the `!
 
 ```typescript
 defineDocumentFunction({
-  name: "first-published",
+  name: 'first-published',
   event: {
-    on: ["create", "update"],
+    on: ['create', 'update'],
     filter: '_type == "post" && !defined(firstPublished)',
   },
-});
+})
 ```
 
 ### Auto-translate with Agent Actions
 
 **Blueprint:**
-
 ```typescript
 defineDocumentFunction({
-  name: "translate",
+  name: 'translate',
   event: {
-    on: ["create", "update"],
+    on: ['create', 'update'],
     filter: "_type == 'post' && language == 'en-US'",
-    projection: "{_id}",
+    projection: '{_id}',
   },
-});
+})
 ```
 
 **Handler:**
-
 ```typescript
 export const handler = documentEventHandler(async ({ context, event }) => {
-  const client = createClient({ ...context.clientOptions, apiVersion: "vX" });
+  const client = createClient({ ...context.clientOptions, apiVersion: 'vX' })
 
   await client.agent.action.translate({
-    schemaId: "your-schema-id",
+    schemaId: 'your-schema-id',
     async: true,
     documentId: event.data._id,
-    languageFieldPath: "language",
+    languageFieldPath: 'language',
     targetDocument: {
-      operation: "create",
+      operation: 'create',
     },
-    fromLanguage: { id: "en-US", title: "English" },
-    toLanguage: { id: "el-GR", title: "Greek" },
-  });
-});
+    fromLanguage: { id: 'en-US', title: 'English' },
+    toLanguage: { id: 'el-GR', title: 'Greek' },
+  })
+})
 ```
 
 The GROQ filter ensures only English documents trigger the function. The translated document gets a different `language` value, preventing recursive triggers.
@@ -469,77 +455,72 @@ Let Sanity assign the translated document's `_id` for ordinary localized content
 ### Auto-tag with Agent Actions
 
 **Blueprint:**
-
 ```typescript
 defineDocumentFunction({
-  name: "auto-tag",
+  name: 'auto-tag',
   event: {
-    on: ["create", "update"],
+    on: ['create', 'update'],
     filter: "_type == 'post'",
-    projection: "{_id, title, body}",
+    projection: '{_id, title, body}',
   },
-});
+})
 ```
 
 **Handler:**
-
 ```typescript
 export const handler = documentEventHandler(async ({ context, event }) => {
-  const client = createClient({ ...context.clientOptions, apiVersion: "vX" });
+  const client = createClient({ ...context.clientOptions, apiVersion: 'vX' })
 
   await client.agent.action.generate({
-    schemaId: "your-schema-id",
+    schemaId: 'your-schema-id',
     documentId: event.data._id,
-    instruction:
-      "Analyze the content and generate 3 relevant tags. Reuse existing tags when possible.",
-    target: { path: ["tags"] },
+    instruction: 'Analyze the content and generate 3 relevant tags. Reuse existing tags when possible.',
+    target: { path: ['tags'] },
     async: true,
-  });
-});
+  })
+})
 ```
 
 ### Slack notification on publish
 
 ```typescript
 export const handler = documentEventHandler(async ({ context, event }) => {
-  const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
-  if (!WEBHOOK_URL) throw new Error("SLACK_WEBHOOK_URL not set");
+  const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL
+  if (!WEBHOOK_URL) throw new Error('SLACK_WEBHOOK_URL not set')
 
   await fetch(WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       text: `📝 New content published: *${event.data.title || event.data._id}* (${event.data._type})`,
     }),
-  });
-});
+  })
+})
 ```
 
 ### Scope to a specific dataset
 
 **Option A — `resource` config:**
-
 ```typescript
 defineDocumentFunction({
-  name: "production-only",
+  name: 'production-only',
   event: {
-    on: ["update"],
+    on: ['update'],
     filter: "_type == 'post'",
-    resource: { type: "dataset", id: "myProjectId.production" },
+    resource: { type: 'dataset', id: 'myProjectId.production' },
   },
-});
+})
 ```
 
 **Option B — GROQ filter:**
-
 ```typescript
 defineDocumentFunction({
-  name: "production-only",
+  name: 'production-only',
   event: {
-    on: ["update"],
+    on: ['update'],
     filter: "_type == 'post' && sanity::dataset() == 'production'",
   },
-});
+})
 ```
 
 ### React to Media Library asset changes
@@ -547,46 +528,41 @@ defineDocumentFunction({
 Requires `@sanity/blueprints` v0.4.0+ and `@sanity/functions` v1.1.0+.
 
 **Blueprint:**
-
 ```typescript
-import {
-  defineBlueprint,
-  defineMediaLibraryAssetFunction,
-} from "@sanity/blueprints";
+import { defineBlueprint, defineMediaLibraryAssetFunction } from '@sanity/blueprints'
 
 export default defineBlueprint({
   resources: [
     defineMediaLibraryAssetFunction({
-      name: "asset-deleted",
+      name: 'asset-deleted',
       event: {
-        on: ["delete"],
-        filter: "documents::incomingGlobalDocumentReferenceCount() > 0",
-        projection: "{_id, versions, title}",
-        resource: { type: "media-library", id: "mlYourLibraryId" },
+        on: ['delete'],
+        filter: 'documents::incomingGlobalDocumentReferenceCount() > 0',
+        projection: '{_id, versions, title}',
+        resource: { type: 'media-library', id: 'mlYourLibraryId' },
       },
     }),
   ],
-});
+})
 ```
 
 **Handler:**
-
 ```typescript
 export const handler = documentEventHandler(async ({ context, event }) => {
-  const { eventResourceId } = context; // Media Library ID
+  const { eventResourceId } = context  // Media Library ID
   const client = createClient({
     ...context.clientOptions,
-    apiVersion: "2025-05-08",
-  });
+    apiVersion: '2025-05-08',
+  })
 
   const response = await client.request({
     uri: `/media-libraries/${eventResourceId}/query`,
-    method: "POST",
+    method: 'POST',
     body: { query: `*[_type == 'sanity.imageAsset']` },
-  });
+  })
 
-  console.log("Assets:", response);
-});
+  console.log('Assets:', response)
+})
 ```
 
 ### Recursion control with custom HTTP clients
@@ -595,25 +571,20 @@ If not using `@sanity/client`, implement lineage tracking manually:
 
 ```typescript
 export const handler = documentEventHandler(async ({ context, event }) => {
-  const lineage = process.env.X_SANITY_LINEAGE;
+  const lineage = process.env.X_SANITY_LINEAGE
 
-  await fetch(
-    `https://${context.clientOptions.projectId}.api.sanity.io/v2025-05-08/data/mutate/production`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${context.clientOptions.token}`,
-        ...(lineage ? { "X-Sanity-Lineage": lineage } : {}),
-      },
-      body: JSON.stringify({
-        mutations: [
-          { patch: { id: event.data._id, set: { processed: true } } },
-        ],
-      }),
-    }
-  );
-});
+  await fetch(`https://${context.clientOptions.projectId}.api.sanity.io/v2025-05-08/data/mutate/production`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${context.clientOptions.token}`,
+      ...(lineage ? { 'X-Sanity-Lineage': lineage } : {}),
+    },
+    body: JSON.stringify({
+      mutations: [{ patch: { id: event.data._id, set: { processed: true } } }],
+    }),
+  })
+})
 ```
 
 ### Multiple functions in one blueprint
@@ -622,30 +593,30 @@ export const handler = documentEventHandler(async ({ context, event }) => {
 export default defineBlueprint({
   resources: [
     defineDocumentFunction({
-      name: "first-published",
+      name: 'first-published',
       event: {
-        on: ["create", "update"],
+        on: ['create', 'update'],
         filter: "_type == 'post' && !defined(firstPublished)",
       },
     }),
     defineDocumentFunction({
-      name: "notify-slack",
+      name: 'notify-slack',
       event: {
-        on: ["create", "update"],
+        on: ['create', 'update'],
         filter: "_type == 'post'",
-        projection: "{title, _id}",
+        projection: '{title, _id}',
       },
     }),
     defineDocumentFunction({
-      name: "sync-algolia",
+      name: 'sync-algolia',
       timeout: 30,
       event: {
-        on: ["create", "update", "delete"],
+        on: ['create', 'update', 'delete'],
         filter: "_type == 'product'",
       },
     }),
   ],
-});
+})
 ```
 
 ---

@@ -13,15 +13,15 @@ Build PT blocks directly when converting from non-HTML sources (APIs, databases,
 Every block, span, and markDef needs a unique `_key`:
 
 ```ts
-import { randomKey } from "@sanity/util/content";
+import {randomKey} from '@sanity/util/content'
 
-const key = randomKey(12); // e.g., "a1b2c3d4e5f6"
+const key = randomKey(12) // e.g., "a1b2c3d4e5f6"
 ```
 
 Or use a simple helper:
 
 ```ts
-const randomKey = () => Math.random().toString(36).slice(2, 14);
+const randomKey = () => Math.random().toString(36).slice(2, 14)
 ```
 
 ## Building Blocks
@@ -113,39 +113,24 @@ Lists are regular blocks with `listItem` and `level`:
 // Bullet list
 [
   {
-    _type: "block",
-    _key: randomKey(),
-    style: "normal",
-    listItem: "bullet",
-    level: 1,
-    children: [
-      { _type: "span", _key: randomKey(), text: "First item", marks: [] },
-    ],
-    markDefs: [],
+    _type: 'block', _key: randomKey(), style: 'normal',
+    listItem: 'bullet', level: 1,
+    children: [{_type: 'span', _key: randomKey(), text: 'First item', marks: []}],
+    markDefs: []
   },
   {
-    _type: "block",
-    _key: randomKey(),
-    style: "normal",
-    listItem: "bullet",
-    level: 1,
-    children: [
-      { _type: "span", _key: randomKey(), text: "Second item", marks: [] },
-    ],
-    markDefs: [],
+    _type: 'block', _key: randomKey(), style: 'normal',
+    listItem: 'bullet', level: 1,
+    children: [{_type: 'span', _key: randomKey(), text: 'Second item', marks: []}],
+    markDefs: []
   },
   {
-    _type: "block",
-    _key: randomKey(),
-    style: "normal",
-    listItem: "bullet",
-    level: 2, // nested
-    children: [
-      { _type: "span", _key: randomKey(), text: "Nested item", marks: [] },
-    ],
-    markDefs: [],
+    _type: 'block', _key: randomKey(), style: 'normal',
+    listItem: 'bullet', level: 2, // nested
+    children: [{_type: 'span', _key: randomKey(), text: 'Nested item', marks: []}],
+    markDefs: []
   },
-];
+]
 ```
 
 ### Custom Block Types
@@ -184,28 +169,26 @@ A utility for building common blocks:
 ```ts
 function createBlock(
   text: string,
-  style: string = "normal",
-  options?: { listItem?: string; level?: number }
+  style: string = 'normal',
+  options?: {listItem?: string; level?: number}
 ) {
   return {
-    _type: "block",
+    _type: 'block',
     _key: randomKey(),
     style,
-    ...(options?.listItem
-      ? { listItem: options.listItem, level: options.level || 1 }
-      : {}),
-    children: [{ _type: "span", _key: randomKey(), text, marks: [] }],
+    ...(options?.listItem ? {listItem: options.listItem, level: options.level || 1} : {}),
+    children: [{_type: 'span', _key: randomKey(), text, marks: []}],
     markDefs: [],
-  };
+  }
 }
 
 // Usage
 const blocks = [
-  createBlock("Introduction", "h2"),
-  createBlock("This is a paragraph."),
-  createBlock("First point", "normal", { listItem: "bullet", level: 1 }),
-  createBlock("Second point", "normal", { listItem: "bullet", level: 1 }),
-];
+  createBlock('Introduction', 'h2'),
+  createBlock('This is a paragraph.'),
+  createBlock('First point', 'normal', {listItem: 'bullet', level: 1}),
+  createBlock('Second point', 'normal', {listItem: 'bullet', level: 1}),
+]
 ```
 
 ## Validation Checklist

@@ -4,7 +4,7 @@
 import type { Surface } from "./surfaces.generated.js";
 
 export const BANNED_WORDS: Readonly<Record<Surface, readonly string[]>> = {
-  blog: [
+  "blog": [
     "leverage",
     "synergy",
     "revolutionary",
@@ -14,9 +14,9 @@ export const BANNED_WORDS: Readonly<Record<Surface, readonly string[]>> = {
     "robust",
     "delve",
     "unlock",
-    "empower",
+    "empower"
   ],
-  linkedin: [
+  "linkedin": [
     "humbled",
     "thrilled",
     "excited to announce",
@@ -31,9 +31,9 @@ export const BANNED_WORDS: Readonly<Record<Surface, readonly string[]>> = {
     "guru",
     "ninja",
     "rockstar",
-    "agree?",
+    "agree?"
   ],
-  newsletter: [
+  "newsletter": [
     "don't miss",
     "act now",
     "limited time",
@@ -43,7 +43,7 @@ export const BANNED_WORDS: Readonly<Record<Surface, readonly string[]>> = {
     "leverage",
     "circle back",
     "deep dive",
-    "must-read",
+    "must-read"
   ],
   "release-notes": [
     "revolutionary",
@@ -54,9 +54,9 @@ export const BANNED_WORDS: Readonly<Record<Surface, readonly string[]>> = {
     "blazing-fast",
     "supercharged",
     "best-in-class",
-    "robust",
+    "robust"
   ],
-  x: [
+  "x": [
     "leverage",
     "synergy",
     "game-changer",
@@ -74,6 +74,6 @@ export const BANNED_WORDS: Readonly<Record<Surface, readonly string[]>> = {
     "rt if you agree",
     "like and retweet",
     "follow me for more",
-    "a thread",
-  ],
+    "a thread"
+  ]
 };

@@ -22,7 +22,6 @@ Jump to the section that matches the task instead of reading this guide end-to-e
 ## 1. Architecture Patterns
 
 ### Option A: Standalone Studio (Recommended)
-
 **Best for:** All new Next.js projects.
 
 The Studio is its own app, living alongside the Next.js app in the same repo:
@@ -41,13 +40,11 @@ Why standalone instead of embedding the Studio in the Next.js app:
 - **Content model independence:** A separate Studio keeps the content model from becoming website-centric and makes collaboration easier.
 
 **Setup:**
-
 - Run both apps side by side in separate terminals: `next dev` (localhost:3000) and `sanity dev` (localhost:3333).
 - Add your Next.js app URL to **CORS Origins**: `npx sanity cors add http://localhost:3000 --credentials` (repeat for your production URL), or via [Sanity Manage](https://www.sanity.io/manage).
 - See `project-structure.md` rule for detailed structure.
 
 ### Option B: Embedded Studio (Not Recommended)
-
 The Studio can be mounted inside the Next.js app at `/app/studio/[[...tool]]/page.tsx` via `next-sanity/studio`. Avoid this for new projects: it slows builds, ties every Studio update to an app deploy, and rules out auto-updates and TypeGen watch mode. For maintaining or migrating an existing embedded Studio, see section 5.
 
 ## 2. Data Fetching (Live Content API)
@@ -57,16 +54,16 @@ We use `defineLive` (next-sanity v11+) to enable real-time content updates and V
 ### Setup (`src/sanity/lib/live.ts`)
 
 ```typescript
-import { defineLive } from "next-sanity";
-import { client } from "./client";
+import { defineLive } from 'next-sanity'
+import { client } from './client'
 
 export const { sanityFetch, SanityLive } = defineLive({
   client: client.withConfig({
-    apiVersion: "2026-02-01",
+    apiVersion: '2026-02-01'
   }),
   serverToken: process.env.SANITY_API_READ_TOKEN,
   browserToken: process.env.SANITY_API_READ_TOKEN,
-});
+})
 ```
 
 ### Rendering (`src/app/layout.tsx`)
@@ -99,11 +96,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
 ### When to Use Manual Caching
 
-| Scenario                                 | Approach                        |
-| ---------------------------------------- | ------------------------------- |
-| Real-time updates, Visual Editing        | `defineLive` (default)          |
-| Static marketing pages, rarely updated   | Time-based revalidation         |
-| Blog posts, products with frequent edits | Tag-based revalidation          |
+| Scenario | Approach |
+|----------|----------|
+| Real-time updates, Visual Editing | `defineLive` (default) |
+| Static marketing pages, rarely updated | Time-based revalidation |
+| Blog posts, products with frequent edits | Tag-based revalidation |
 | Critical accuracy (stock levels, prices) | Path-based + short revalidation |
 
 ### Debugging: Enable Fetch Logging
@@ -122,7 +119,6 @@ const nextConfig: NextConfig = {
 ```
 
 Console output shows cache status:
-
 ```text
 GET /posts 200 in 39ms
  │ GET https://...apicdn.sanity.io/... 200 in 5ms (cache hit)
@@ -130,17 +126,18 @@ GET /posts 200 in 39ms
 
 ### Sanity CDN vs API
 
-| Setting         | Speed  | Freshness            | Use When                         |
-| --------------- | ------ | -------------------- | -------------------------------- |
-| `useCdn: true`  | Fast   | May have brief delay | Default for all runtime fetches  |
-| `useCdn: false` | Slower | Guaranteed fresh     | `generateStaticParams`, webhooks |
+| Setting | Speed | Freshness | Use When |
+|---------|-------|-----------|----------|
+| `useCdn: true` | Fast | May have brief delay | Default for all runtime fetches |
+| `useCdn: false` | Slower | Guaranteed fresh | `generateStaticParams`, webhooks |
 
 Override per-request:
-
 ```typescript
 // For static generation, use API directly
 export async function generateStaticParams() {
-  const slugs = await client.withConfig({ useCdn: false }).fetch(SLUGS_QUERY);
+  const slugs = await client
+    .withConfig({ useCdn: false })
+    .fetch(SLUGS_QUERY);
   return slugs;
 }
 ```
@@ -189,12 +186,11 @@ const posts = await sanityFetch({
 Surgically revalidate specific routes when documents change.
 
 **1. Create API Route:**
-
 ```typescript
 // src/app/api/revalidate/path/route.ts
-import { revalidatePath } from "next/cache";
-import { type NextRequest, NextResponse } from "next/server";
-import { parseBody } from "next-sanity/webhook";
+import { revalidatePath } from 'next/cache';
+import { type NextRequest, NextResponse } from 'next/server';
+import { parseBody } from 'next-sanity/webhook';
 
 type WebhookPayload = { path?: string };
 
@@ -207,10 +203,10 @@ export async function POST(req: NextRequest) {
     );
 
     if (!isValidSignature) {
-      return new Response("Invalid signature", { status: 401 });
+      return new Response('Invalid signature', { status: 401 });
     }
     if (!body?.path) {
-      return new Response("Missing path", { status: 400 });
+      return new Response('Missing path', { status: 400 });
     }
 
     revalidatePath(body.path);
@@ -222,7 +218,6 @@ export async function POST(req: NextRequest) {
 ```
 
 **2. Create GROQ-Powered Webhook:**
-
 - URL: `https://yoursite.com/api/revalidate/path`
 - Filter: `_type in ["post"]`
 - Projection: `{ "path": "/posts/" + slug.current }`
@@ -233,29 +228,27 @@ export async function POST(req: NextRequest) {
 "Update once, revalidate everywhere" — best for referenced content.
 
 **1. Tag Your Queries:**
-
 ```typescript
 // Posts index - revalidate when ANY post, author, or category changes
 const posts = await sanityFetch({
   query: POSTS_QUERY,
-  tags: ["post", "author", "category"],
+  tags: ['post', 'author', 'category'],
 });
 
 // Individual post - more granular, includes slug-specific tag
 const post = await sanityFetch({
   query: POST_QUERY,
   params,
-  tags: [`post:${params.slug}`, "author", "category"],
+  tags: [`post:${params.slug}`, 'author', 'category'],
 });
 ```
 
 **2. Create API Route:**
-
 ```typescript
 // src/app/api/revalidate/tag/route.ts
-import { revalidateTag } from "next/cache";
-import { type NextRequest, NextResponse } from "next/server";
-import { parseBody } from "next-sanity/webhook";
+import { revalidateTag } from 'next/cache';
+import { type NextRequest, NextResponse } from 'next/server';
+import { parseBody } from 'next-sanity/webhook';
 
 type WebhookPayload = { tags: string[] };
 
@@ -268,10 +261,10 @@ export async function POST(req: NextRequest) {
     );
 
     if (!isValidSignature) {
-      return new Response("Invalid signature", { status: 401 });
+      return new Response('Invalid signature', { status: 401 });
     }
     if (!Array.isArray(body?.tags) || !body.tags.length) {
-      return new Response("Missing tags", { status: 400 });
+      return new Response('Missing tags', { status: 400 });
     }
 
     body.tags.forEach((tag) => revalidateTag(tag));
@@ -283,14 +276,13 @@ export async function POST(req: NextRequest) {
 ```
 
 **3. Create GROQ-Powered Webhook:**
-
 - URL: `https://yoursite.com/api/revalidate/tag`
 - Filter: `_type in ["post", "author", "category"]`
 - Projection: `{ "tags": [_type, _type + ":" + slug.current] }`
 
 ### Stale Data After Webhook?
 
-Webhooks fire _before_ Sanity CDN updates. If you see stale data:
+Webhooks fire *before* Sanity CDN updates. If you see stale data:
 
 1. **Add delay** — Pass `true` as third arg to `parseBody`
 2. **Or bypass CDN** — Set `useCdn: false` in client config (use sparingly)
@@ -325,9 +317,9 @@ export async function generateMetadata({ params }) {
   const { data } = await sanityFetch({
     query: SEO_QUERY,
     params: await params,
-    stega: false, // 👈 Critical for SEO
-  });
-  return { title: data?.title };
+    stega: false // 👈 Critical for SEO
+  })
+  return { title: data?.title }
 }
 ```
 
@@ -339,10 +331,10 @@ When generating static params, fetch only published content and disable stega.
 export async function generateStaticParams() {
   const { data } = await sanityFetch({
     query: SLUGS_QUERY,
-    perspective: "published", // 👈 No drafts
-    stega: false,
-  });
-  return data;
+    perspective: 'published', // 👈 No drafts
+    stega: false
+  })
+  return data
 }
 ```
 
@@ -372,25 +364,25 @@ Enable Presentation Tool and Visual Editing by setting up a draft mode route.
 **`src/app/api/draft-mode/enable/route.ts`:**
 
 ```typescript
-import { client } from "@/sanity/lib/client";
-import { defineEnableDraftMode } from "next-sanity/draft-mode";
-import { token } from "@/sanity/lib/token"; // Helper to get token
+import { client } from '@/sanity/lib/client'
+import { defineEnableDraftMode } from 'next-sanity/draft-mode'
+import { token } from '@/sanity/lib/token' // Helper to get token
 
 export const { GET } = defineEnableDraftMode({
   client: client.withConfig({ token }),
-});
+})
 ```
 
 ## 7. Error Handling
 
 Use `notFound()` for missing documents. Common errors:
 
-| Error              | Cause                 | Solution                           |
-| ------------------ | --------------------- | ---------------------------------- |
-| 401 Unauthorized   | Invalid/missing token | Check `SANITY_API_READ_TOKEN`      |
-| 403 Forbidden      | CORS not configured   | Add URL to CORS origins            |
-| Query syntax error | Invalid GROQ          | Test in Vision plugin first        |
-| Empty result       | Wrong filter/params   | Log params, check `_type` spelling |
+| Error | Cause | Solution |
+|-------|-------|----------|
+| 401 Unauthorized | Invalid/missing token | Check `SANITY_API_READ_TOKEN` |
+| 403 Forbidden | CORS not configured | Add URL to CORS origins |
+| Query syntax error | Invalid GROQ | Test in Vision plugin first |
+| Empty result | Wrong filter/params | Log params, check `_type` spelling |
 
 ```typescript
 import { notFound } from 'next/navigation'
@@ -465,7 +457,7 @@ export const HERO_PRESENTATION_QUERY = defineQuery(`
       // Include all fields the component needs
     }
   }
-`);
+`)
 ```
 
 ### Passing Document Context
@@ -501,7 +493,7 @@ export const PTE_IMAGE_PRESENTATION_QUERY = defineQuery(`
       alt
     }
   }
-`);
+`)
 ```
 
 **See also:** `visual-editing.md` for the conceptual overview and `page-builder.md` for full Page Builder patterns.
@@ -511,7 +503,6 @@ export const PTE_IMAGE_PRESENTATION_QUERY = defineQuery(`
 For listing pages with many entries, use offset-based pagination with a count query.
 
 ### Queries
-
 ```typescript
 // Paginated listing
 export const ARTICLES_QUERY = defineQuery(`
@@ -528,7 +519,6 @@ export const ARTICLES_COUNT_QUERY = defineQuery(`
 ```
 
 ### Listing Page
-
 ```typescript
 const ENTRIES_PER_PAGE = 10;
 

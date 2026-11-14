@@ -11,11 +11,11 @@ The primary examples below use **React Router v7** (the current shape — Remix 
 
 If you are on the older **Remix v2** stack, the integration shape is identical; only the import paths differ:
 
-| React Router v7                                 | Remix v2                                                                                       |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `react-router`                                  | `@remix-run/node` / `@remix-run/react`                                                         |
+| React Router v7 | Remix v2 |
+|-----------------|----------|
+| `react-router` | `@remix-run/node` / `@remix-run/react` |
 | `import type { Route } from "./+types/<route>"` | `import type { LoaderFunctionArgs } from "@remix-run/node"` + `useLoaderData<typeof loader>()` |
-| `react-router.config.ts`                        | `remix.config.js`                                                                              |
+| `react-router.config.ts` | `remix.config.js` |
 
 ## 1. Setup & Client Pattern
 
@@ -53,32 +53,33 @@ SANITY_API_READ_TOKEN=your-read-token
 `app/sanity/env.ts` — browser-safe, publishable values only:
 
 ```typescript
-export const projectId = import.meta.env.VITE_SANITY_PROJECT_ID!;
-export const dataset = import.meta.env.VITE_SANITY_DATASET!;
-export const apiVersion =
-  import.meta.env.VITE_SANITY_API_VERSION ?? "2026-02-01";
-export const studioUrl = import.meta.env.VITE_SANITY_STUDIO_URL;
+export const projectId = import.meta.env.VITE_SANITY_PROJECT_ID!
+export const dataset = import.meta.env.VITE_SANITY_DATASET!
+export const apiVersion = import.meta.env.VITE_SANITY_API_VERSION ?? '2026-02-01'
+export const studioUrl = import.meta.env.VITE_SANITY_STUDIO_URL
 ```
 
 ### B. Shared Loader (`app/sanity/loader.ts`)
-
 Defines the store config (SSR enabled, client deferred).
 
 ```typescript
-import { createQueryStore } from "@sanity/react-loader";
+import { createQueryStore } from '@sanity/react-loader'
 
-export const { loadQuery, setServerClient, useQuery, useLiveMode } =
-  createQueryStore({ client: false, ssr: true });
+export const {
+  loadQuery,
+  setServerClient,
+  useQuery,
+  useLiveMode,
+} = createQueryStore({ client: false, ssr: true })
 ```
 
 ### C. Server Loader (`app/sanity/loader.server.ts`)
-
 Initializes the server client. Read the token directly from `process.env` here — do **not** import it from `env.ts`, or it will leak into the client bundle the moment any client-reachable module touches `env.ts`.
 
 ```typescript
-import { createClient } from "@sanity/client";
-import { loadQuery, setServerClient } from "./loader";
-import { projectId, dataset, apiVersion, studioUrl } from "./env";
+import { createClient } from '@sanity/client'
+import { loadQuery, setServerClient } from './loader'
+import { projectId, dataset, apiVersion, studioUrl } from './env'
 
 const client = createClient({
   projectId,
@@ -94,11 +95,11 @@ const client = createClient({
     enabled: Boolean(studioUrl),
     studioUrl,
   },
-});
+})
 
-setServerClient(client);
+setServerClient(client)
 
-export { loadQuery };
+export { loadQuery }
 ```
 
 ### D. Browser-safe Client + Image URL Builder (`app/sanity/client.ts`, `app/sanity/image.ts`)
@@ -107,25 +108,24 @@ Anything used by a route component runs in the browser too. Build a separate pub
 
 ```typescript
 // app/sanity/client.ts
-import { createClient } from "@sanity/client";
-import { projectId, dataset, apiVersion } from "./env";
+import { createClient } from '@sanity/client'
+import { projectId, dataset, apiVersion } from './env'
 
 export const client = createClient({
   projectId,
   dataset,
   apiVersion,
   useCdn: true,
-});
+})
 ```
 
 ```typescript
 // app/sanity/image.ts
-import imageUrlBuilder from "@sanity/image-url";
-import { client } from "./client";
+import imageUrlBuilder from '@sanity/image-url'
+import { client } from './client'
 
-const builder = imageUrlBuilder(client);
-export const urlFor = (source: Parameters<typeof builder.image>[0]) =>
-  builder.image(source);
+const builder = imageUrlBuilder(client)
+export const urlFor = (source: Parameters<typeof builder.image>[0]) => builder.image(source)
 ```
 
 Install `@sanity/image-url` if you'll render images:
@@ -135,7 +135,6 @@ npm install @sanity/image-url
 ```
 
 ### E. Queries (`app/sanity/queries.ts`)
-
 Keep query definitions in one place so route loaders, components, and TypeGen all read the same source.
 
 ```typescript
@@ -226,7 +225,6 @@ This route is the canonical shape that exposes the env trap: `urlFor` → `clien
 ## 4. Real-time Preview & Visual Editing
 
 ### A. Use `useQuery` in Components
-
 Import `useQuery` from your **shared** loader file.
 
 ```typescript
@@ -246,26 +244,24 @@ export default function Page({ loaderData }: Route.ComponentProps) {
 ```
 
 ### B. Enable Live Mode (`VisualEditing.tsx`)
-
 Create a component to handle the connection.
 
 ```typescript
-import { enableVisualEditing } from "@sanity/visual-editing";
-import { useLiveMode } from "~/sanity/loader";
-import { client } from "~/sanity/client"; // Your browser-safe client
-import { useEffect } from "react";
+import { enableVisualEditing } from '@sanity/visual-editing'
+import { useLiveMode } from '~/sanity/loader'
+import { client } from '~/sanity/client' // Your browser-safe client
+import { useEffect } from 'react'
 
 export default function VisualEditing() {
-  useEffect(() => enableVisualEditing(), []);
-  useLiveMode({ client });
-  return null;
+  useEffect(() => enableVisualEditing(), [])
+  useLiveMode({ client })
+  return null
 }
 ```
 
 Render this component in `root.tsx` only when valid (e.g., check env vars or user session).
 
 ## 5. Stega Cleaning
-
 When using data for logic (routing, classNames), use `stegaClean`.
 
 ```typescript
