@@ -3,12 +3,14 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
 
 // What someone new waits through from the getting-started command,
 // `npx eve@latest init my-agent`, to a running agent. Packs the built package
 // directory the way pkg.eve.dev does (`pnpm pack`), then, per run, runs
 // `npx --package <tarball> -- eve init my-agent` in an empty directory with an
-// empty npm cache, in a pseudo-terminal so init takes the interactive path
+// empty npm cache and an empty home directory, in a pseudo-terminal so init takes the interactive path
 // the docs describe: it scaffolds the project, installs its dependencies,
 // initializes Git, and opens the terminal UI (`eve dev --onboard`). The
 // project's own `eve` dependency points at the same tarball
@@ -19,7 +21,7 @@ import { join, resolve } from "node:path";
 // resolve from the registry on the day the job runs, so a dependency release
 // can move these timings with no eve change (as for the package probe).
 //
-// Per run, each timed from spawning npx:
+// Per run, each timed from spawning npx except installMs, an interval:
 //   downloadMs       eve's first progress line ("Creating agent"): npx
 //                    downloading eve's dependencies, installing them with
 //                    eve, and the CLI starting; eve itself is the local
@@ -35,9 +37,10 @@ import { join, resolve } from "node:path";
 // provider (there are no credentials here), which no run waits on.
 //
 // One JSON object per line: a header, then one result per run. Each run's
-// terminal output is kept as init-<run>.log in the header's `root`.
+// terminal output is kept as init-<run>.log in <log-dir> (default: the
+// header's `root`).
 //
-// Usage: node packages/eve/scripts/benchmark-init.mjs <package-dir> [runs]
+// Usage: node packages/eve/scripts/benchmark-init.mjs <package-dir> [runs] [log-dir]
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 3);
 if (!Number.isInteger(runs) || runs < 1) throw new Error("Expected a positive run count.");
@@ -54,8 +57,13 @@ const MARKERS = {
 };
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_INTERVAL_MS = 20;
-// Coding-agent markers @vercel/detect-agent reads: init takes a
-// non-interactive path when it thinks an agent launched it.
+// The prompt normally draws before the server is ready; this long after ready,
+// it isn't coming, and waiting on would only run into RUN_TIMEOUT_MS.
+const PROMPT_GRACE_MS = 30_000;
+const LOG_TAIL_CHARS = 2000;
+// Coding-agent markers @vercel/detect-agent (1.2.7) reads: init takes a
+// non-interactive path when it thinks an agent launched it. It also checks for
+// /opt/.devin, which no environment variable can hide.
 const AGENT_ENV = [
   "AI_AGENT",
   "ANTIGRAVITY_AGENT",
@@ -66,16 +74,22 @@ const AGENT_ENV = [
   "CODEX_CI",
   "CODEX_SANDBOX",
   "CODEX_THREAD_ID",
+  "COPILOT_ALLOW_ALL",
+  "COPILOT_GITHUB_TOKEN",
+  "COPILOT_MODEL",
   "CURSOR_AGENT",
   "CURSOR_EXTENSION_HOST_ROLE",
   "CURSOR_TRACE_ID",
   "GEMINI_CLI",
+  "OPENCODE",
   "OPENCODE_CLIENT",
   "REPL_ID",
 ];
 
 const root = await mkdtemp(join(tmpdir(), "eve-init-benchmark-"));
 const tarball = join(root, "eve.tgz");
+const logDir = resolve(process.argv[4] ?? root);
+await mkdir(logDir, { recursive: true });
 const baseEnv = {
   ...process.env,
   EVE_TELEMETRY_DISABLED: "1",
@@ -91,16 +105,29 @@ const baseEnv = {
   TERM: "xterm-256color",
 };
 // A first-time user has no credentials; dropping them keeps runs comparable.
+// Saved ones (eve's and the Vercel CLI's) live under the home directory, which
+// each run replaces. CI turns off init's animated progress, which a person sees.
 for (const name of [
   ...AGENT_ENV,
+  "CI",
   "VERCEL",
   "EVE_DEV",
   "PORT",
   "AI_GATEWAY_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "VERCEL_TOKEN",
+  "VERCEL_OIDC_TOKEN",
 ])
   delete baseEnv[name];
+// Applied per run only, so packing (a workspace build) keeps the real home.
+const HOME_ENV = [
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_STATE_HOME",
+  "GIT_CONFIG_GLOBAL",
+];
 
 const npmVersion = await output("npm", ["--version"], { env: baseEnv });
 console.log(
@@ -119,9 +146,12 @@ const results = [];
 for (let run = 1; run <= runs; run++) {
   const dir = join(root, `run-${run}`);
   const cache = join(root, `npm-cache-${run}`);
+  const home = join(root, `home-${run}`);
   await mkdir(dir);
+  await mkdir(home);
   const port = await availablePort();
-  const env = { ...baseEnv, npm_config_cache: cache, PORT: String(port) };
+  const env = { ...baseEnv, HOME: home, npm_config_cache: cache, PORT: String(port) };
+  for (const name of HOME_ENV) delete env[name];
   const seen = {};
   let log = "";
   const start = performance.now();
@@ -132,6 +162,10 @@ for (let run = 1; run <= runs; run++) {
       env,
     },
   );
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  // Writing Ctrl-C at teardown can race `script` exiting (EPIPE).
+  child.stdin.on("error", () => {});
   let promptSeen;
   const promptVisible = new Promise((resolvePrompt) => {
     promptSeen = resolvePrompt;
@@ -170,13 +204,22 @@ for (let run = 1; run <= runs; run++) {
   try {
     await Promise.race([created, exited]);
     if (seen.created === undefined)
-      throw new Error(`eve init exited before creating the project; see init-${run}.log.`);
-    const [ready] = await Promise.allSettled([
-      waitReady(child, port, "/eve/v1/info", start, () => log).then(() =>
-        Math.round(performance.now() - start),
-      ),
-      Promise.race([promptVisible, exited]),
-    ]);
+      throw new Error(`eve init exited before creating the project:\n${tail(log)}`);
+    let readyError;
+    const readyMs = await waitReady(child, port, "/eve/v1/info", start).then(
+      () => Math.round(performance.now() - start),
+      (error) => {
+        readyError = error;
+        return undefined;
+      },
+    );
+    // A clean exit before ready is init's coding-agent path, which never runs
+    // `eve dev`: not the path this measures.
+    if (readyMs === undefined && child.exitCode === 0)
+      throw new Error(
+        `eve init exited after creating the project instead of starting eve dev, as it does when it detects a coding agent; unset that agent's environment variable:\n${tail(log)}`,
+      );
+    await Promise.race([promptVisible, exited, delay(PROMPT_GRACE_MS, undefined, { ref: false })]);
     const result = {
       run,
       mode: "init",
@@ -187,15 +230,15 @@ for (let run = 1; run <= runs; run++) {
           : undefined,
       createdMs: seen.created,
       promptVisibleMs: seen.prompt,
-      readyMs: ready.status === "fulfilled" ? ready.value : undefined,
+      readyMs,
     };
-    if (ready.status === "rejected")
+    if (readyError !== undefined)
       console.error(
-        `init run ${run}: the dev server never became ready: ${ready.reason?.message ?? ready.reason}`,
+        `init run ${run}: the dev server never became ready (${readyError.message}):\n${tail(log)}`,
       );
     if (result.promptVisibleMs === undefined)
       console.error(
-        `init run ${run}: the terminal UI never showed its prompt; see init-${run}.log.`,
+        `init run ${run}: the terminal UI never showed its prompt; see ${join(logDir, `init-${run}.log`)}.`,
       );
     results.push(result);
     console.log(JSON.stringify(result));
@@ -208,10 +251,11 @@ for (let run = 1; run <= runs; run++) {
     const killer = setTimeout(() => child.kill("SIGKILL"), 10_000);
     await exited;
     clearTimeout(killer);
-    await writeFile(join(root, `init-${run}.log`), log);
+    await writeFile(join(logDir, `init-${run}.log`), log);
     // The next run starts from nothing; only the tarball and logs are kept.
     await rm(dir, { recursive: true, force: true });
     await rm(cache, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   }
 }
 
@@ -244,8 +288,13 @@ function output(command, args, options) {
   });
 }
 
+/** The end of a run's terminal output, readable in a CI log. */
+function tail(log) {
+  return stripVTControlCharacters(log).slice(-LOG_TAIL_CHARS);
+}
+
 /** Resolves when a probe of `path` first answers 200 with JSON; overlapping probes, as in benchmark-startup.mjs. */
-function waitReady(child, port, path, start, readLog) {
+function waitReady(child, port, path, start) {
   const outstanding = new AbortController();
   return new Promise((resolveReady, reject) => {
     let timer;
@@ -259,7 +308,7 @@ function waitReady(child, port, path, start, readLog) {
     };
     const probe = async () => {
       if (child.exitCode !== null || child.signalCode !== null)
-        return finish(() => reject(new Error(readLog().slice(-2000))));
+        return finish(() => reject(new Error("eve exited")));
       if (performance.now() - start >= RUN_TIMEOUT_MS)
         return finish(() => reject(new Error("Readiness timeout")));
       try {

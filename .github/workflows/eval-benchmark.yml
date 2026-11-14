@@ -647,7 +647,8 @@ jobs:
           fi
 
       # Last: each run installs from the registry and starts `eve dev`, so it
-      # never shares the runner with another probe.
+      # never shares the runner with another probe. Each run's terminal output
+      # (init-<run>.log) is uploaded with the results.
       - name: Run init benchmark
         if: needs.plan.outputs.init != 'null'
         env:
@@ -655,7 +656,7 @@ jobs:
         run: |
           out="$RUNNER_TEMP/dev-startup"
           runs="$(jq -r '.runs' <<<"$INIT_PROBE")"
-          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-init.mjs" packages/eve "$runs" >"$out/init.jsonl"; then
+          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-init.mjs" packages/eve "$runs" "$out" >"$out/init.jsonl"; then
             echo "::warning::Init benchmark failed; its runs are recorded as missing."
           fi
 
