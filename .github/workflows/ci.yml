@@ -188,13 +188,15 @@ jobs:
       - name: Test eval benchmark scripts
         run: pnpm test:eval-benchmark
 
+  # Windows runs only the integration files whose behavior can differ there
+  # (see `// @linux-only`); Linux runs the whole tier in two shards below.
   test-integration:
     name: test-integration (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
 
     steps:
       - name: Checkout code
@@ -250,6 +252,94 @@ jobs:
         with:
           path: packages/*/node_modules/.vite/vitest
           key: ${{ steps.vitest-results.outputs.cache-primary-key }}
+
+  # The Linux integration tier in two halves. eve's vitest files split by
+  # vitest's own --shard; the first half also runs the other packages'
+  # integration tests. The `test-integration (ubuntu-latest)` check below
+  # requires both halves.
+  test-integration-linux:
+    name: test-integration (ubuntu-latest, ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/2, 2/2]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # The integration tier of every package with one, plus the fixtures and
+      # registry sources their tests read. `apps/docs/registry` installs the
+      # adapter packages the registry templates import.
+      - name: Install dependencies
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: integration
+          filters: |
+            eve...
+            @eve/code...
+            @eve/git...
+            @eve/custom-skills...
+            @eve/agent-browser...
+            @eve/agent-desktop...
+            @vercel/agent-runs...
+            @eve-e2e/config...
+            ./apps/fixtures/*
+            ./e2e/fixtures/*
+            ./apps/docs/registry
+
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-integration-${{ strategy.job-index }}-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-integration-${{ strategy.job-index }}-
+
+      - name: Run integration tests
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [ "$SHARD" = "1/2" ]; then
+            pnpm exec turbo run test:integration --filter='!eve'
+          fi
+          pnpm exec turbo run test:integration --filter=eve -- --shard="$SHARD"
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
+
+  test-integration-linux-required:
+    name: test-integration (ubuntu-latest)
+    runs-on: ubuntu-latest
+    needs: [test-integration-linux]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.test-integration-linux.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Linux integration shards: $RESULT"
+            exit 1
+          fi
 
   test-scenario:
     runs-on: ubuntu-latest
