@@ -24,6 +24,7 @@ import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
 import { createDevDiagnostics } from "../diagnostics.js";
 import { inlineArgumentSuggestions, type DevelopmentTuiStartup } from "./startup.js";
+import type { StartupOnboardingResult } from "./startup-onboarding.js";
 import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
 
@@ -48,6 +49,8 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly lifecycle?: CommandLifecycle;
   /** Prepared editing-only startup UI reused by the initialized local runner. */
   startup?: DevelopmentTuiStartup;
+  /** Onboarding that already ran on the startup screen while the server booted. */
+  startupOnboarding?: StartupOnboardingResult;
 }
 
 function prepareRemoteTarget(target: RemoteDevelopmentTarget) {
@@ -110,6 +113,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     onBootProgress,
     lifecycle,
     startup,
+    startupOnboarding,
     withExclusiveTerminal,
     ...display
   } = input;
@@ -158,6 +162,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.startup = startup;
   }
   if (onboard !== undefined) options.onboard = onboard;
+  if (startupOnboarding !== undefined) options.startupOnboarding = startupOnboarding;
   if (onOnboardingStep !== undefined) options.onOnboardingStep = onOnboardingStep;
   if (onOnboardingTerminal !== undefined) options.onOnboardingTerminal = onOnboardingTerminal;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
