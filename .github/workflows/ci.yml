@@ -398,8 +398,16 @@ jobs:
             exit 1
           fi
 
-  test-scenario:
+  # The scenario tier in two halves. eve's vitest files split by vitest's own
+  # --shard; the second half also runs the other packages' scenario tests. The
+  # `test-scenario` check below requires both halves.
+  test-scenario-shard:
+    name: test-scenario (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/2, 2/2]
 
     steps:
       - name: Checkout code
@@ -453,11 +461,17 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/*/node_modules/.vite/vitest
-          key: vitest-results-${{ runner.os }}-scenario-${{ github.sha }}
-          restore-keys: vitest-results-${{ runner.os }}-scenario-
+          key: vitest-results-${{ runner.os }}-scenario-${{ strategy.job-index }}-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-scenario-${{ strategy.job-index }}-
 
       - name: Run scenario tests
-        run: pnpm test:scenario
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm exec turbo run test:scenario --filter=eve -- --shard="$SHARD"
+          if [ "$SHARD" = "2/2" ]; then
+            pnpm exec turbo run test:scenario --filter='!eve'
+          fi
 
       - name: Save test file timings
         if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
@@ -465,6 +479,20 @@ jobs:
         with:
           path: packages/*/node_modules/.vite/vitest
           key: ${{ steps.vitest-results.outputs.cache-primary-key }}
+
+  test-scenario:
+    runs-on: ubuntu-latest
+    needs: [test-scenario-shard]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.test-scenario-shard.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Scenario shards: $RESULT"
+            exit 1
+          fi
 
   # The desktop job installs apt packages and pulls agent-desktop from npm, so it
   # runs only when its package changes. It skips at the job level instead of
