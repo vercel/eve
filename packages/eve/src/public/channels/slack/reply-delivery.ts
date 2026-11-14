@@ -5,6 +5,7 @@ import {
   truncateMessageText,
 } from "#public/channels/slack/limits.js";
 import { reportUndeliveredReply } from "#public/channels/undelivered-reply.js";
+import type { SlackPostedMessage } from "#public/channels/slack/api.js";
 import type {
   SlackChannelInternalEvents,
   SlackChannelContext,
@@ -73,6 +74,10 @@ export type SlackCompletedReply =
  * Any other error, and a failed upload, is thrown so your renderer sees it.
  * eve logs each fallback it takes with Slack's error code, never the reply.
  *
+ * Returns the posted message for the blocks or the Markdown, so your
+ * renderer can edit it later. Returns `undefined` when eve uploads a snippet
+ * or drops the reply.
+ *
  * @example
  * ```ts
  * import { postCompletedSlackReply } from "eve/channels/slack";
@@ -86,8 +91,8 @@ export type SlackCompletedReply =
 export async function postCompletedSlackReply(
   channel: SlackContext,
   reply: SlackCompletedReply,
-): Promise<void> {
-  await deliverCompletedSlackReply(channel, reply, {});
+): Promise<SlackPostedMessage | undefined> {
+  return await deliverCompletedSlackReply(channel, reply, {});
 }
 
 /**
@@ -98,17 +103,16 @@ export async function deliverCompletedSlackReply(
   channel: SlackContext,
   reply: SlackCompletedReply,
   logFields: { readonly turnId?: string },
-): Promise<void> {
+): Promise<SlackPostedMessage | undefined> {
   const { blocks, markdown, text } = typeof reply === "string" ? { markdown: reply } : reply;
   if (await threadRootIsGone(channel)) {
     log.warn(ROOT_GONE_LOG, logFields);
-    return;
+    return undefined;
   }
   let slackError: string | undefined;
   if (blocks !== undefined) {
     try {
-      await channel.thread.post({ blocks, text: text ?? truncateMessageText(markdown) });
-      return;
+      return await channel.thread.post({ blocks, text: text ?? truncateMessageText(markdown) });
     } catch (error) {
       slackError = refusedPayloadError(error);
       if (slackError === undefined) throw error;
@@ -119,8 +123,7 @@ export async function deliverCompletedSlackReply(
       log.warn(FALLBACK_LOG, { fallback: "inline", slackError, ...logFields });
     }
     try {
-      await channel.thread.post(markdown);
-      return;
+      return await channel.thread.post(markdown);
     } catch (error) {
       slackError = refusedPayloadError(error);
       if (slackError === undefined) throw error;
@@ -130,6 +133,7 @@ export async function deliverCompletedSlackReply(
     log.warn(FALLBACK_LOG, { fallback: "snippet", slackError, ...logFields });
   }
   await uploadReplySnippet(channel, markdown);
+  return undefined;
 }
 
 /**
