@@ -593,7 +593,10 @@ describe("eve dev --input", () => {
       };
       const startDevelopmentTuiStartup = vi.fn(async () => startup);
       const runDevelopmentTui = vi.fn(async () => {});
+      const onboardingResult = { outcome: { message: "", summary: "Connected" } };
+      const runStartupOnboarding = vi.fn(async () => onboardingResult);
       vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+      vi.doMock("#cli/dev/tui/startup-onboarding.js", () => ({ runStartupOnboarding }));
       vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui }));
       const startHost = vi.fn(() => ({
         start: async () => {
@@ -615,6 +618,9 @@ describe("eve dev --input", () => {
           );
           try {
             await vi.waitFor(() => expect(startDevelopmentTuiStartup).toHaveBeenCalledOnce());
+            // Onboarding opens on the startup screen while the host is still starting.
+            if (onboard)
+              await vi.waitFor(() => expect(runStartupOnboarding).toHaveBeenCalledOnce());
             expect(runDevelopmentTui).not.toHaveBeenCalled();
           } finally {
             release();
@@ -622,8 +628,16 @@ describe("eve dev --input", () => {
           }
         });
         expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ startup }));
+        if (onboard) {
+          expect(runDevelopmentTui).toHaveBeenCalledWith(
+            expect.objectContaining({ startupOnboarding: onboardingResult }),
+          );
+        } else {
+          expect(runStartupOnboarding).not.toHaveBeenCalled();
+        }
       } finally {
         vi.doUnmock("#cli/dev/tui/startup.js");
+        vi.doUnmock("#cli/dev/tui/startup-onboarding.js");
         vi.doUnmock("#cli/dev/tui/tui.js");
       }
     },
