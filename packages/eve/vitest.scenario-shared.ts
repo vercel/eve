@@ -63,6 +63,7 @@ export const PACKAGING_SCENARIO_FILES = [
   "src/self-modification/package-consumption.scenario.test.ts",
   "test/scenarios/bundle-module-evaluation.scenario.test.ts",
   "test/scenarios/cli.scenario.test.ts",
+  "test/scenarios/dev-host-reuse.scenario.test.ts",
   "test/scenarios/eve-init.scenario.test.ts",
   "test/scenarios/file-memory-provider.scenario.test.ts",
   "test/scenarios/mounted-extension-installed.scenario.test.ts",
