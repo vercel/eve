@@ -13,7 +13,11 @@ import {
 } from "#execution/session/input-queue.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
-import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
+import {
+  createTurnControl,
+  turnSteeredReason,
+  type TurnControl,
+} from "#execution/session/turn-control.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import {
@@ -60,7 +64,20 @@ export class ActiveTurn {
   private readonly routedToChildren = new Set<number>();
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
-  private readonly controller: AbortController;
+  /**
+   * The turn's one Workflow controller (see `TurnControl`): a cancel aborts it with
+   * `TurnCancelledError`, a steer with a `TurnSteeredReason` naming its replacement.
+   */
+  readonly #turnControl: TurnControl;
+  #cancelled = false;
+  /** A steer since the last boundary: later steering deliveries wait for the next generation. */
+  #steered = false;
+  /**
+   * The signal of the controller current when this generation began. A steer or cancel since
+   * reaches it through the steers' replacements, so a step that starts after either still reads
+   * it.
+   */
+  #generation: AbortSignal;
   /** The cancel control that stopped this turn, when it named its delivery. */
   #cancelledBy: ControlOrigin | undefined;
   readonly #control: boolean;
@@ -70,7 +87,6 @@ export class ActiveTurn {
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
-  private steeringController: AbortController;
   /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
   /** A step of this turn compacted the history. */
@@ -86,8 +102,8 @@ export class ActiveTurn {
     },
     control: TurnControl = createTurnControl(),
   ) {
-    this.controller = control.cancellation;
-    this.steeringController = control.steering;
+    this.#turnControl = control;
+    this.#generation = control.controller.signal;
     this.input = input;
     this.caller = owner.caller;
     this.#control = owner.control === true;
@@ -112,13 +128,28 @@ export class ActiveTurn {
       delivery.kind === "deliver" &&
       !this.input.queue.isDuplicate(delivery) &&
       isSteeringMessage(delivery, this.identity) &&
-      !this.input.cursor.sessionState.hasProxyInputRequests
+      !this.input.cursor.sessionState.hasProxyInputRequests &&
+      !this.#cancelled &&
+      !this.#steered
     )
-      this.steeringController.abort();
+      this.steer();
   };
 
+  private steer(): void {
+    this.#steered = true;
+    const next = new AbortController();
+    this.#turnControl.controller.abort(turnSteeredReason(next.signal));
+    this.#turnControl.controller = next;
+  }
+
+  /** The signal the turn's steps run under: a cancel and a steer both abort it. */
   get signal(): AbortSignal {
-    return this.controller.signal;
+    return this.#generation;
+  }
+
+  /** The turn was cancelled. */
+  get cancelled(): boolean {
+    return this.#cancelled;
   }
 
   dispose(): void {
@@ -126,14 +157,11 @@ export class ActiveTurn {
     this.unsubscribeDelivery();
   }
 
-  get steeringSignal(): AbortSignal {
-    return this.steeringController.signal;
-  }
-
   private resetSteering(): void {
-    if (!this.steeringController.signal.aborted) return;
+    if (!this.#steered) return;
+    this.#steered = false;
+    this.#generation = this.#turnControl.controller.signal;
     this.unsubscribeDelivery();
-    this.steeringController = new AbortController();
     // Admission can yield while new deliveries are pumped. Replaying the
     // unread inbox keeps those arrivals attached to the next generation.
     this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
@@ -220,7 +248,7 @@ export class ActiveTurn {
   async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
     while (true) {
       const steered = await this.routeAdmittedToChildren();
-      if (this.signal.aborted) return "cancelled";
+      if (this.#cancelled) return "cancelled";
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
@@ -372,8 +400,10 @@ export class ActiveTurn {
 
   /** Also used by hooks on workflow reports while the turn waits. */
   abort(): void {
-    if (this.controller.signal.aborted) return;
-    this.controller.abort(new TurnCancelledError());
+    if (this.#cancelled) return;
+    this.#cancelled = true;
+    // A steer replaced the controller it aborted, and the running step follows the replacement.
+    this.#turnControl.controller.abort(new TurnCancelledError());
   }
 }
 

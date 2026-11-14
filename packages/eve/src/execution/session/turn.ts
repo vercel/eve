@@ -245,7 +245,6 @@ export class SessionExecution {
             caller,
             input: nextStepInput,
             recover,
-            steeringSignal: turn.steeringSignal,
           });
         return run().catch((error: unknown) => {
           // What the step threw can carry request content, and the recovery step's input is
@@ -254,7 +253,7 @@ export class SessionExecution {
           const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
           return run({
             error: name === undefined ? {} : { name },
-            ...(turn.signal.aborted && { stopped: true as const }),
+            ...(turn.cancelled && { stopped: true as const }),
           });
         });
       });
@@ -277,7 +276,7 @@ export class SessionExecution {
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
       // A settled turn stands, and calls the turn waits on still report, so neither cancels here.
       const waitsOnCalls = result.action === "paused" && result.on === "calls";
-      if (!settles && !waitsOnCalls && turn.signal.aborted) {
+      if (!settles && !waitsOnCalls && turn.cancelled) {
         return await this.finishCancelledTurn(turn);
       }
 

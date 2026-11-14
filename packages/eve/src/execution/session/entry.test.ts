@@ -101,10 +101,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(createSessionStep).mockResolvedValue({ history: [], state: {} } as never);
   vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timeout-run-1" });
-  vi.mocked(createTurnControl).mockImplementation(() => ({
-    cancellation: new AbortController(),
-    steering: new AbortController(),
-  }));
+  vi.mocked(createTurnControl).mockImplementation(() => ({ controller: new AbortController() }));
   vi.mocked(resolveInitialTurnCallerStep).mockResolvedValue(undefined);
   vi.mocked(hasDelegatedSessionContext).mockReturnValue(false);
   vi.mocked(settleContinuationConflictStep).mockResolvedValue(undefined);
