@@ -20,6 +20,17 @@ export class HookNotFoundError extends Error {
   }
 }
 
+/** No host holds the run `runId`: Workflow's `WorkflowRunNotFoundError`, by its name. */
+export class RunNotFoundError extends Error {
+  override readonly name = "WorkflowRunNotFoundError";
+  readonly runId: string;
+
+  constructor(runId: string) {
+    super(`Run "${runId}" not found`);
+    this.runId = runId;
+  }
+}
+
 /**
  * A step error no durable host retries. Workflow's `FatalError.is(error)` accepts it by its
  * name and its `fatal` marker, so a step that throws it fails without retries on Workflow, as one
@@ -36,6 +47,7 @@ type RunErrorName =
   | "EntityConflictError"
   | "HookConflictError"
   | "HookNotFoundError"
+  | "InBandSupersededError"
   | "RunExpiredError"
   | "StreamExpiredError"
   | "WorkflowRunNotFoundError";
@@ -63,8 +75,34 @@ export function isHookConflict(error: unknown): boolean {
 }
 
 /** The run doesn't exist (yet: one `start()` accepted may not be readable). */
+/** A World refused to create what it already holds, such as a second `run_created` for one run. */
+export function isEntityConflict(error: unknown): boolean {
+  return anyCause(error, ["EntityConflictError"]);
+}
+
 export function isRunNotFound(error: unknown): boolean {
-  return anyCause(error, ["WorkflowRunNotFoundError"]);
+  return anyCause(error, ["WorkflowRunNotFoundError"]) || anyRunNotFoundResponse(error);
+}
+
+/**
+ * Vercel's World answering a read of a run it doesn't hold. `runs.get` throws
+ * `WorkflowRunNotFoundError`, but a run's events and streams answer with the HTTP error, a
+ * `WorkflowWorldError` whose code is `not-found` and whose message names the run. The local
+ * World reads such a run as empty instead.
+ */
+function anyRunNotFoundResponse(error: unknown): boolean {
+  for (const cause of walkCauseChain(error))
+    if (
+      typeof cause === "object" &&
+      cause !== null &&
+      (cause as { readonly name?: unknown }).name === "WorkflowWorldError" &&
+      (cause as { readonly code?: unknown }).code === "not-found" &&
+      /^workflow run \S+ not found/iu.test(
+        String((cause as { readonly message?: unknown }).message),
+      )
+    )
+      return true;
+  return false;
 }
 
 /** The run's data passed the World's retention; retrying can't bring it back. */
@@ -74,7 +112,10 @@ export function isRunExpired(error: unknown): boolean {
 
 /** The run doesn't exist, or its history has expired. */
 export function isRunMissing(error: unknown): boolean {
-  return anyCause(error, ["WorkflowRunNotFoundError", "RunExpiredError"]);
+  return (
+    anyCause(error, ["WorkflowRunNotFoundError", "RunExpiredError"]) ||
+    anyRunNotFoundResponse(error)
+  );
 }
 
 /** The run can't take commands: missing, expired, or held by another writer. */
@@ -90,4 +131,9 @@ export function isRunTargetGone(error: unknown): boolean {
     "RunExpiredError",
     "EntityConflictError",
   ]);
+}
+
+/** Whether a World refused an in-band write because another writer moved the run on. */
+export function isInBandSuperseded(error: unknown): boolean {
+  return anyCause(error, ["InBandSupersededError"]);
 }
