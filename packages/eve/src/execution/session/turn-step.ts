@@ -134,6 +134,8 @@ const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
+  /** Usage tags written behind the turn; the step waits for them before it returns. */
+  usage?: Promise<void>;
 }
 
 /**
@@ -183,6 +185,7 @@ async function runSessionStep(
     return await runSessionStepBody(input, pendingAttributes, host);
   } finally {
     await pendingAttributes.title;
+    await pendingAttributes.usage;
   }
 }
 
@@ -677,10 +680,15 @@ async function runSessionStepBody(
         agent,
         node: effectiveNode,
         sessionUsageLimit,
-        // The title's write finishes first.
+        // Usage tags are observability, not state: they're written behind the turn, in order
+        // and after the title's write, and the step waits for them only before it returns, so
+        // the turn settles without a run-attribute round trip.
         setAttributes: async (attributes) => {
-          await pendingAttributes.title;
-          await host.setAttributes(attributes);
+          const previous = pendingAttributes.usage ?? pendingAttributes.title;
+          pendingAttributes.usage = (async () => {
+            await previous?.catch(() => {});
+            await host.setAttributes(attributes);
+          })().catch(() => {});
         },
       });
       return step(lifecycleSession, stepInput);
