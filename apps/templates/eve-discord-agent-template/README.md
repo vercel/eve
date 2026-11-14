@@ -9,7 +9,21 @@ The agent comes with:
 - `no_reply`, so the agent stays quiet when people in its thread talk to each other; and
 - `web_search`, an eve default tool, for current events and facts.
 
-## Get started
+## Deploy with Vercel
+
+Before you start, create an application in the [Discord Developer Portal](https://discord.com/developers/applications). Under **Bot**, copy the bot token and turn on **Message Content Intent**.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-discord-agent-template&project-name=eve-discord-agent&repository-name=eve-discord-agent&connect=%5B%7B%22type%22%3A%22discord%22%2C%22env%22%3A%22DISCORD_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fdiscord%22%7D%5D)
+
+The deploy screen asks for the bot token and creates a Vercel Connect connector for it, so the token stays out of your environment variables. After the first deployment:
+
+1. Open the Discord connector in the Vercel Connect dashboard and copy its trigger URL, which looks like `https://connect.vercel.com/trigger/<connector-id>`. In the Discord Developer Portal, paste it as the **Interactions Endpoint URL** under **General Information**.
+2. Add the bot to a server with `https://discord.com/oauth2/authorize?client_id=<application-id>&scope=bot%20applications.commands&permissions=309237713920`, replacing `<application-id>` with the ID on the same page.
+3. Mention the bot in a channel with "what did I miss?"
+
+The relay asks for Message Content Intent, and Discord refuses it if the intent is off. If you can't turn it on, set `messageContent: false` in `daemon/main.ts` and redeploy; people must then mention the bot in thread follow-ups.
+
+## Develop with the CLI
 
 Install dependencies, then run the guided Discord setup. Choose **DMs, mentions, and threads** when it asks how people should reach the agent:
 
