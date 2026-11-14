@@ -9,6 +9,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { MessageContent } from "#shared/message-content.js";
+import { startsNewAddress, type StartsNewAddressOption } from "#channel/channel-address.js";
 import { toSessionSendOptions, type SessionSendOptions } from "#channel/session.js";
 import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type {
@@ -1999,6 +2000,13 @@ async function dispatchSlackMessage(input: {
   if (spaceType !== undefined) channelState.spaceType = spaceType;
   if (spaceVisibility !== undefined) channelState.spaceVisibility = spaceVisibility;
   await deliverSlackMessage({
+    // A mention or DM that starts its thread is the thread's first message, so no session holds
+    // its address yet. A code channel's one address outlives any thread.
+    startsThread:
+      !codeChannel &&
+      !isThreadReply &&
+      edit === undefined &&
+      (input.kind === "app_mention" || input.kind === "direct_message"),
     botUserId: input.receivingBotUserId,
     credentials: input.credentials,
     kind: input.kind,
@@ -2168,6 +2176,8 @@ async function deliverSlackMessage(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly isPrivateConversation: boolean;
   readonly isMentioned: boolean;
+  /** The message starts its thread, so its send starts the thread's session directly. */
+  readonly startsThread: boolean;
   readonly kind: string;
   readonly message: SlackMessage;
   /** Set when `message` is an edited message, which only joins a session that already exists. */
@@ -2278,7 +2288,10 @@ async function deliverSlackMessage(input: {
       ...(fileParts.length === 0 && { answerText: typedText }),
     };
 
-    await input.sessionOperations.send(turnMessage, sendOptions);
+    const startsSession: SlackSendOptions & StartsNewAddressOption = input.startsThread
+      ? { ...sendOptions, [startsNewAddress]: true }
+      : sendOptions;
+    await input.sessionOperations.send(turnMessage, startsSession);
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
   }
