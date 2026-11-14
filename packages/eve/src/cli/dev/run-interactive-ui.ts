@@ -11,7 +11,8 @@ import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/teleme
 
 import type { DevelopmentCliOptions } from "./command-options.js";
 import { resolveTuiDisplayOptions } from "./ui-options.js";
-import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "./tui/tui.js";
+import type { DevelopmentTuiStartup } from "./tui/startup.js";
+import type { RunDevelopmentTuiInput } from "./tui/tui.js";
 import { resolveTuiTitle } from "./tui/target.js";
 import type { DevelopmentUrlTarget } from "./url-target.js";
 import type { CommandLifecycle } from "../shutdown.js";
