@@ -8,7 +8,7 @@ import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
-import { createTurnControl } from "#execution/session/turn-control.js";
+import { createTurnControl, splitTurnSignal } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import { turnStep } from "#execution/workflow-host/turn-step.js";
@@ -151,7 +151,23 @@ type TurnStepWorkResult = DurableStepResult extends infer R
     ? Omit<R, "history">
     : never
   : never;
-const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
+/**
+ * A turn step's work, given the interruption signals the real step reads from its turn's one
+ * signal (`splitTurnSignal`); `turnSignal` is that signal.
+ */
+function turnStepWork(
+  work: (
+    input: Entered<TurnStepInput> & { readonly turnSignal?: AbortSignal },
+  ) => Promise<TurnStepWorkResult>,
+) {
+  return stepWork<TurnStepInput, TurnStepWorkResult>(async (input) =>
+    work({
+      ...input,
+      turnSignal: input.abortSignal,
+      ...(input.abortSignal === undefined ? {} : splitTurnSignal(input.abortSignal)),
+    }),
+  );
+}
 /** These dispatches leave nothing to publish, so their work omits `pending`. */
 function dispatchWork(
   work: (
@@ -189,14 +205,13 @@ describe("SessionExecution checkpoints", () => {
     ]);
   });
 
-  it("uses prepared cancellation and steering controls for the first step", async () => {
+  it("uses the prepared turn control for the first step", async () => {
     const control = createTurnControl();
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementationOnce(
         turnStepWork(async (input) => {
-          expect(input.abortSignal).toBe(control.cancellation.signal);
-          expect(input.steeringSignal).toBe(control.steering.signal);
+          expect(input.turnSignal).toBe(control.controller.signal);
           return {
             action: "done",
             serializedContext: input.serializedContext,
@@ -219,7 +234,7 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementationOnce(
         turnStepWork(async (input) => {
-          signal = input.steeringSignal;
+          signal = input.turnSignal;
           return {
             action: "continue",
             serializedContext: input.serializedContext,
@@ -229,7 +244,7 @@ describe("SessionExecution checkpoints", () => {
       )
       .mockImplementationOnce(
         turnStepWork(async (input) => {
-          expect(input.steeringSignal).toBe(signal);
+          expect(input.turnSignal).toBe(signal);
           return {
             action: "done",
             serializedContext: input.serializedContext,

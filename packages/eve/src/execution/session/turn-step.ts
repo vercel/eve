@@ -1,3 +1,4 @@
+import { splitTurnSignal } from "#execution/session/turn-control.js";
 import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
@@ -168,6 +169,10 @@ export function turnStepOn(
       runSessionStep(
         {
           ...state,
+          // The turn carries one signal for both interruptions (see `TurnControl`).
+          ...(state.abortSignal !== undefined && state.steeringSignal === undefined
+            ? splitTurnSignal(state.abortSignal)
+            : {}),
           serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
         },
         host,

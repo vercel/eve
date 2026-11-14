@@ -514,7 +514,7 @@ describe("first turn abort hooks", () => {
     { firstMessage: undefined, start: "a prewarmed session" },
     { firstMessage: "Say hello.", start: "a session started with a message" },
   ])(
-    "registers the abort hooks before the first message and reuses them for $start",
+    "registers the abort hook before the first message and reuses it for $start",
     async ({ firstMessage }) => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
 
@@ -541,7 +541,7 @@ describe("first turn abort hooks", () => {
           for (const message of ["Say hello.", "Say hello again."].slice(turns)) {
             await vi.waitFor(async () => {
               const hooks = (await world.hooks.list({ runId: run.runId })).data;
-              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(2);
+              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(1);
             });
             await resumeHook(
               inboxToken,
@@ -571,10 +571,10 @@ describe("first turn abort hooks", () => {
               abortHooksBeforeEachTurn.push(abortHooks);
             }
           }
-          // The first turn uses the pair registered before its message, and a turn that ends
-          // without aborting them leaves them to the next: no turn registers its own.
-          expect(abortHooksBeforeEachTurn).toEqual([2, 2]);
-          expect(abortHooks).toBe(2);
+          // The first turn uses the controller registered before its message, and a turn that
+          // ends without aborting it leaves it to the next: no turn registers its own.
+          expect(abortHooksBeforeEachTurn).toEqual([1, 1]);
+          expect(abortHooks).toBe(1);
         } finally {
           stream.dispose();
           await run.cancel();

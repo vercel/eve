@@ -1103,6 +1103,34 @@ describe("calls in flight", () => {
     ]);
   });
 
+  // A steer the streaming reply can't take still replaces the turn's abort control, so a cancel
+  // that follows it has to reach the step through the replacement.
+  it("cancels a streaming reply after a message steered it", async () => {
+    const never = gate();
+    const { events } = await withSession(
+      "edge-steer-then-cancel",
+      {
+        host: "workflow",
+        message: "Write a long story.",
+        model: scriptedModel(({ said }) =>
+          said("Make it short")
+            ? "The end."
+            : heldReply(" there was a dragon.", never.wait, "Once"),
+        ),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("streaming", (event) => event.type === "content.delta");
+        await session.send("Make it short.");
+        await session.control("cancel");
+        await session.until("cancelled", (event) => event.type === "turn.settled");
+      },
+    );
+
+    expect(turnOutcomes(events)[0]).toBe("turn_0:cancelled");
+    expect(JSON.stringify(events)).not.toContain("there was a dragon");
+  });
+
   it("finishes a reply already streaming, and answers a message sent meanwhile in its own turn", async () => {
     const release = gate();
     const { events } = await withSession(
