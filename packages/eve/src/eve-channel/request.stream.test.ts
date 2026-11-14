@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InternalSession as Session } from "#channel/session.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
-import { createSessionStreamResponse } from "#eve-channel/request.js";
+import { createSessionStreamResponse, rememberCurrentSession } from "#eve-channel/request.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/session-http.js";
 
 afterEach(() => vi.useRealTimers());
@@ -13,13 +13,22 @@ const line = (deliveryId: string) => ({
   facts: [{ data: { deliveryId }, type: "delivery.admitted" }],
 });
 
-/** A session whose stored lines are `lines`; `open` keeps the source open after them. */
-function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean } = {}) {
+let sessionCount = 0;
+
+/**
+ * A session whose stored lines are `lines`; `open` keeps the source open after them. Each has its
+ * own id, since the route remembers which sessions it found current.
+ */
+function sessionOf(
+  lines: readonly unknown[],
+  options: { readonly id?: string; readonly open?: boolean } = {},
+) {
   const starts: number[] = [];
   const follows: (boolean | undefined)[] = [];
   let tailLookups = 0;
+  sessionCount += 1;
   const session = {
-    id: "session_1",
+    id: options.id ?? `session_${sessionCount}`,
     async getLineStream({
       follow,
       startIndex,
@@ -192,6 +201,35 @@ describe("createSessionStreamResponse", () => {
     expect(reconnected).toEqual([completed, { $eve: "stream.lease-ended" }]);
     // The reconnect reads only the line its reader has not seen.
     expect(starts.at(-1)).toBe(3);
+  });
+
+  it("checks a session's version once, after reading a current first line", async () => {
+    const { session, starts } = sessionOf([line("a"), line("b")]);
+    const read = async (startIndex: number) =>
+      await records(
+        await createSessionStreamResponse(
+          new Request(`https://eve.test/eve/v1/session/s/stream?startIndex=${startIndex}`),
+          session,
+        ),
+      );
+
+    expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
+    // The live read, then the version check's read from the first line.
+    expect(starts).toEqual([1, 0]);
+    expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
+    expect(starts).toEqual([1, 0, 1]);
+  });
+
+  it("checks no version for a session this eve created", async () => {
+    const { session, starts } = sessionOf([line("a")]);
+    rememberCurrentSession(session.id);
+    await records(
+      await createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/s/stream?startIndex=0"),
+        session,
+      ),
+    );
+    expect(starts).toEqual([0]);
   });
 
   it("serves a fresh stream with no lines yet without a version check failing it", async () => {

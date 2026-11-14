@@ -428,18 +428,40 @@ export async function createSessionStreamResponse(
 }
 
 /**
+ * Sessions this process knows record current lines: it created them, or it read a current first
+ * line from their stream. A stream's first line never changes, so a later read of one of these
+ * sessions needs no version check. Bounded; the oldest entries go first.
+ */
+const currentSessions = new Set<string>();
+const CURRENT_SESSIONS_LIMIT = 10_000;
+
+/** Records that `sessionId`'s stream starts with a current line (or will, as this eve created it). */
+export function rememberCurrentSession(sessionId: string): void {
+  if (currentSessions.has(sessionId)) return;
+  if (currentSessions.size >= CURRENT_SESSIONS_LIMIT) {
+    const oldest = currentSessions.values().next();
+    if (oldest.done !== true) currentSessions.delete(oldest.value);
+  }
+  currentSessions.add(sessionId);
+}
+
+/**
  * True when the session's first stored line is a v26 event. v27 readers can't read such a
  * stream, so serving it as version 27 would leave a client waiting on facts that never come.
  * Reads at most one line; an empty, unreadable, or slow stream reads as current.
  */
 async function startedOnEarlierEve(session: Session): Promise<boolean> {
+  if (currentSessions.has(session.id)) return false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<unknown> | undefined;
   const first = (async () => {
     const lines = await internalSession(session).getLineStream({ follow: false, startIndex: 0 });
     reader = lines.getReader();
     const { done, value } = await reader.read();
-    return !done && isV26Line(value);
+    if (done) return false;
+    if (isV26Line(value)) return true;
+    rememberCurrentSession(session.id);
+    return false;
   })();
   const timeout = new Promise<false>((resolve) => {
     timer = setTimeout(() => resolve(false), SESSION_VERSION_CHECK_TIMEOUT_MS);
