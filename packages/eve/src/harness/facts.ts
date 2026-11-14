@@ -44,13 +44,18 @@ export function errorInfoOf(failure: {
   readonly details?: JsonObject;
   readonly message: string;
 }): ErrorInfo {
-  const { errorId, hint, name } = failure.details ?? {};
+  const { errorId, errorName, hint, name } = failure.details ?? {};
+  // A curated failure keeps the class name in `errorName`; its `name` holds the catalog's headline.
+  const className = errorName ?? name;
   return defined({
     code: failure.code,
     hint: typeof hint === "string" && hint.trim().length > 0 ? hint.trim() : undefined,
     id: typeof errorId === "string" ? errorId : undefined,
     message: failure.message,
-    name: typeof name === "string" && name.length > 0 && name !== "Error" ? name : undefined,
+    name:
+      typeof className === "string" && className.length > 0 && className !== "Error"
+        ? className
+        : undefined,
   });
 }
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { summarizeFailure } from "#execution/failure-summary.js";
 import { errorInfoOf } from "#harness/facts.js";
+import { ContentFilteredModelResponseError } from "#harness/model-call/errors.js";
 
 describe("errorInfoOf", () => {
   it("carries the thrown error's class name, its support id and its remedy", () => {
@@ -26,5 +28,20 @@ describe("errorInfoOf", () => {
         message: "It broke.",
       });
     }
+  });
+
+  it("carries the class name of a failure eve recognizes, not the catalog's headline", () => {
+    const failure = summarizeFailure(new ContentFilteredModelResponseError(), "TURN_FAILED");
+    expect(failure.details.name).not.toBe("ContentFilteredModelResponseError");
+    expect(errorInfoOf(failure).name).toBe("ContentFilteredModelResponseError");
+  });
+
+  it("carries the class name of a failure eve doesn't recognize", () => {
+    class TokenRejectedError extends Error {
+      override name = "TokenRejectedError";
+    }
+    expect(errorInfoOf(summarizeFailure(new TokenRejectedError("No."), "TURN_FAILED")).name).toBe(
+      "TokenRejectedError",
+    );
   });
 });
