@@ -19,7 +19,6 @@ import { createDeclarationCopier } from "../_shared.mjs";
 export default {
   packageName: "@ai-sdk/anthropic",
   compiledPath: "@ai-sdk/anthropic",
-  chunkGroup: "workflow",
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       "@ai-sdk/provider": { kind: "vendored", compiledPath: "@ai-sdk/provider" },

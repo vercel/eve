@@ -14,7 +14,6 @@ async function discoverDeclarationFiles({ distDir }) {
 export default {
   packageName: "@vercel/blob",
   compiledPath: "@vercel/blob",
-  chunkGroup: "workflow",
   copyDeclarations: createDeclarationCopier({
     files: discoverDeclarationFiles,
     rewrites: {

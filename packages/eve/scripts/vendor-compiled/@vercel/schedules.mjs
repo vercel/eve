@@ -3,7 +3,6 @@ import { createDeclarationCopier } from "../_shared.mjs";
 export default {
   packageName: "@vercel/schedules",
   compiledPath: "@vercel/schedules",
-  chunkGroup: "workflow",
   copyDeclarations: createDeclarationCopier({
     files: ({ distEntries }) =>
       distEntries
