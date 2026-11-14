@@ -1,3 +1,4 @@
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
 export type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
@@ -299,7 +300,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     config.onAnswers ?? (config.onMessage === undefined ? defaultOnAnswers : rejectInput);
   const mergedEvents: TeamsChannelEvents = { ...defaultEvents, ...config.events };
 
-  return defineChannel<
+  const channel = defineChannel<
     TeamsChannelState,
     TeamsChannelContext,
     TeamsReceiveTarget,
@@ -459,6 +460,8 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
     events: mergedEvents,
   });
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
+  return channel;
 }
 
 function teamsAudience(conversationType: string | null): ChannelAudience {

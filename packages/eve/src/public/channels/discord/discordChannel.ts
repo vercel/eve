@@ -1,3 +1,4 @@
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 export type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
@@ -295,7 +296,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     config.onAnswers ?? (config.onCommand === undefined ? acceptAsPresser : dropUnmappedAnswer);
   const mergedEvents: DiscordChannelEvents = { ...defaultEvents, ...config.events };
 
-  return defineChannel<
+  const channel = defineChannel<
     DiscordChannelState,
     DiscordChannelContext,
     DiscordReceiveTarget,
@@ -413,6 +414,8 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
 
     events: mergedEvents,
   });
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
+  return channel;
 }
 
 function rebuildDiscordContext(

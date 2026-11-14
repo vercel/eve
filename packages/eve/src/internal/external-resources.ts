@@ -47,9 +47,13 @@ function collectExternalResources(
       protocol: { type: connection.protocol, url: connection.url },
     });
   }
+  const channelPaths = new Set<string>();
   for (const channel of manifest.channelRoutes.effective) {
     const credentials = channel.vercelConnect?.requirement;
-    if (credentials === undefined || channel.manifest === undefined) continue;
+    if (credentials === undefined) continue;
+    const key = JSON.stringify([channel.name, channel.urlPath]);
+    if (channelPaths.has(key)) continue;
+    channelPaths.add(key);
     resources.push({
       credentials,
       kind: "channel",
