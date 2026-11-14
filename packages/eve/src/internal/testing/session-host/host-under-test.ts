@@ -28,7 +28,8 @@ export type HostName =
   | "workflow"
   | "in-process"
   | "in-process-world"
-  | "in-process-world-restart";
+  | "in-process-world-restart"
+  | "world";
 
 export interface HostCapabilities {
   /** A step that loses its completion or throws runs again, up to a limit (`HostSetup.faults`). */
@@ -158,6 +159,12 @@ export const inProcessWorldRestartHost: SessionHostKind = {
   make: (setup) => makeInProcessHost(setup, "world-restart"),
 };
 
+/** A World host: sessions run only in the activations its queue delivers (`world-host-runtime.ts`). */
+export const worldHost: SessionHostKind = {
+  capabilities: IN_PROCESS_CAPABILITIES,
+  make: (setup) => makeInProcessHost(setup, "world-host"),
+};
+
 export const workflowHost: SessionHostKind = {
   capabilities: WORKFLOW_CAPABILITIES,
   dispatchStep: "publishDispatchedCallsStep",
@@ -190,7 +197,9 @@ async function makeInProcessHost(
         ? "in-process-world-restart"
         : variant === "world"
           ? "in-process-world"
-          : "in-process",
+          : variant === "world-host"
+            ? "world"
+            : "in-process",
     runtime,
     capabilities: IN_PROCESS_CAPABILITIES,
     settled: () => runtime.idle(),

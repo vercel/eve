@@ -13,7 +13,11 @@ import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
 import type { DeliveryTiming } from "#execution/in-process/inbox-transport.js";
 import type { InProcessRuntime } from "#execution/in-process/runtime.js";
-import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
+import {
+  createTestInProcessRuntime,
+  inProcessVariantFromEnv,
+} from "#internal/testing/in-process-runtime.js";
+import type { TestWorldHostRuntime } from "#internal/testing/world-host-runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -34,6 +38,10 @@ vi.mock("#channel/resolve-text.js", async (importOriginal) => {
     },
   };
 });
+
+// A World host's sessions are the World's, not its own: disposing it stops serving them, and ends
+// none.
+const onWorldHost = inProcessVariantFromEnv() === "world-host";
 
 const address = (runtime: Runtime, continuationToken: string) =>
   createChannelAddress({
@@ -391,7 +399,25 @@ describe("the in-process runtime", () => {
     });
   });
 
-  it("ends its sessions when disposed", async () => {
+  it.runIf(onWorldHost)("leaves its sessions on the World when disposed, ending none", async () => {
+    const test = await createTestRuntime({ agent: { name: "in-process-dispose" } });
+    await test.run(async () => {
+      const runtime = createTestInProcessRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      }) as TestWorldHostRuntime;
+      const sent = await address(runtime, "alice-dispose").send("Alice says hello.", {
+        auth: null,
+      });
+      await sent.result();
+      await runtime.dispose();
+      const info = await runtime.host.actors.info(sent.sessionId);
+      expect(info?.status).not.toBe("completed");
+      const events = await recorded(runtime, sent.sessionId).catch(() => []);
+      expect(events.filter(({ type }) => type === "session.ended")).toEqual([]);
+    });
+  });
+
+  it.skipIf(onWorldHost)("ends its sessions when disposed", async () => {
     const test = await createTestRuntime({ agent: { name: "in-process-dispose" } });
     await test.run(async () => {
       const runtime = createTestInProcessRuntime({
@@ -419,7 +445,7 @@ describe("the in-process runtime", () => {
     });
   });
 
-  it("ends a session whose turn is still running when disposed", async () => {
+  it.skipIf(onWorldHost)("ends a session whose turn is still running when disposed", async () => {
     let started!: () => void;
     const modelCalled = new Promise<void>((resolve) => (started = resolve));
     // Answers only once its call is aborted, as a model call still streaming does.
@@ -589,7 +615,10 @@ async function answerBudgetPromptBackToBack<T>(
   });
 }
 
-describe("deliveries made back to back", () => {
+// A World host hands its mailbox over as its activation reads it: two messages sent back to back
+// reach the session together, as the `batched` timing has them, or apart, by when the activation
+// read; neither delivery timing is the World host's own.
+describe.skipIf(onWorldHost)("deliveries made back to back", () => {
   it("are read one at a time when handed over at once", async () => {
     const outcome = await answerBudgetPromptBackToBack("immediate", async (runtime, sessionId) => {
       const settled = await firstEvent(

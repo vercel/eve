@@ -5,6 +5,7 @@ import {
   type InProcessRuntimeOptions,
 } from "#execution/in-process/runtime.js";
 import { createRestartableInProcessRuntime } from "#internal/testing/restartable-in-process.js";
+import { createTestWorldHostRuntime } from "#internal/testing/world-host-runtime.js";
 import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 
 /**
@@ -30,15 +31,18 @@ export function createTestInProcessRuntime(
       return createRestartableInProcessRuntime(config, strict);
     case "world-restart":
       return createRestartableInProcessRuntime(config, { ...strict, restartAtRest: true });
+    case "world-host":
+      return createTestWorldHostRuntime(config, strict);
   }
 }
 
 /**
  * How a test's in-process runtime keeps its sessions: in memory (`memory`); on a World in this
  * process's memory (`world`); or on one, restarted each time it comes to rest after progress
- * (`world-restart`), so every session goes on from what the World kept.
+ * (`world-restart`), so every session goes on from what the World kept; or on a World host
+ * (`world-host`), whose sessions run only in activations its queue delivers.
  */
-export type InProcessVariant = "memory" | "world" | "world-restart";
+export type InProcessVariant = "memory" | "world" | "world-restart" | "world-host";
 
 /**
  * The variant `EVE_TEST_IN_PROCESS_VARIANT` names, which runs every in-process session test on
@@ -47,8 +51,8 @@ export type InProcessVariant = "memory" | "world" | "world-restart";
 export function inProcessVariantFromEnv(): InProcessVariant {
   const named = process.env.EVE_TEST_IN_PROCESS_VARIANT;
   if (named === undefined || named === "" || named === "memory") return "memory";
-  if (named === "world" || named === "world-restart") return named;
+  if (named === "world" || named === "world-restart" || named === "world-host") return named;
   throw new Error(
-    `EVE_TEST_IN_PROCESS_VARIANT must be memory, world or world-restart, not "${named}".`,
+    `EVE_TEST_IN_PROCESS_VARIANT must be memory, world, world-restart or world-host, not "${named}".`,
   );
 }
