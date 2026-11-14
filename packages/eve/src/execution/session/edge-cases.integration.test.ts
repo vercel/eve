@@ -893,6 +893,54 @@ describe("calls in flight", () => {
     expect(JSON.stringify(events)).not.toContain("The job finished.");
   });
 
+  // A turn that ends without aborting its controls leaves them to the next turn; a cancelled
+  // turn's controls stay aborted, so the turn after it gets fresh ones.
+  it("cancels a turn on controls an earlier turn left, and runs the next one on fresh ones", async () => {
+    const started = gate();
+    const finish = gate();
+    const { events } = await withSession(
+      "edge-cancel-reused-controls",
+      {
+        host: "workflow",
+        message: "Hello.",
+        model: scriptedModel(({ results, said }) => {
+          if (said("Status?")) return "Nothing is running.";
+          if (!said("Run the long job.")) return "Hi.";
+          return results.length === 0
+            ? [{ toolName: "long_job", toolCallId: "call_long" }]
+            : "The job finished.";
+        }),
+        tools: [
+          {
+            name: "long_job",
+            execute: async () => {
+              started.open();
+              await finish.wait;
+              return { finished: true };
+            },
+          },
+        ],
+      },
+      async (session) => {
+        await session.next("first turn");
+        await session.send("Run the long job.");
+        await started.wait;
+        await session.control("cancel");
+        await session.until("cancelled", (event) => event.type === "turn.settled");
+        finish.open();
+        await session.send("Status?");
+        await session.next("next turn");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual([
+      "turn_0:completed",
+      "turn_1:cancelled",
+      "turn_2:completed",
+    ]);
+    expect(JSON.stringify(events)).toContain("Nothing is running.");
+  });
+
   // A workflow tool's question sent just before a cancel stopped its run can reach the session
   // after the turn settled. Nobody can answer it then, so the next message must start a turn.
   it("drops a workflow tool's question that arrives after its turn was cancelled", async () => {

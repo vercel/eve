@@ -1267,3 +1267,53 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("false");
   });
 });
+
+describe("createWorkflowRuntime#getLineStream", () => {
+  const encoder = new TextEncoder();
+  function sessionReadable(onPull: () => void) {
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            onPull();
+            controller.enqueue(encoder.encode(`${JSON.stringify({ line: 1 })}\n`));
+            controller.close();
+          },
+        }),
+    });
+  }
+
+  it("opens a followed stream while it checks the session", async () => {
+    let releaseCheck: (run: unknown) => void = () => {};
+    getRunRecordMock.mockReturnValue(new Promise((resolve) => (releaseCheck = resolve)));
+    let pulled = false;
+    sessionReadable(() => (pulled = true));
+
+    const lines = createWorkflowRuntime({
+      compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+    }).getLineStream("session-1");
+    await vi.waitFor(() => expect(pulled).toBe(true));
+    expect(getRunRecordMock).toHaveBeenCalledWith("session-1", { resolveData: "none" });
+    releaseCheck({ status: "running" });
+
+    const reader = (await lines).getReader();
+    expect(await reader.read()).toEqual({ done: false, value: { line: 1 } });
+    expect(await reader.read()).toEqual({ done: true, value: undefined });
+  });
+
+  it("cancels the opened stream when the session check fails", async () => {
+    getRunRecordMock.mockRejectedValue(new WorkflowRunNotFoundError("session-1"));
+    const cancel = vi.fn();
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}), cancel }),
+    });
+
+    await expect(
+      createWorkflowRuntime({
+        compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+      }).getLineStream("session-1"),
+    ).rejects.toBeInstanceOf(WorkflowRunNotFoundError);
+    expect(cancel).toHaveBeenCalled();
+  });
+});
