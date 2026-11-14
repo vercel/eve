@@ -1,5 +1,11 @@
 {
   "printWidth": 80,
   "trailingComma": "es5",
-  "proseWrap": "preserve"
+  "proseWrap": "preserve",
+  "overrides": [
+    {
+      "files": ["biome.jsonc"],
+      "options": { "trailingComma": "none" }
+    }
+  ]
 }

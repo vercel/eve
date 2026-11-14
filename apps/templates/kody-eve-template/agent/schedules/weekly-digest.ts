@@ -13,11 +13,8 @@ const fromAddress = requireEnv("RESEND_FROM_ADDRESS", "kody@yourdomain.com");
  * - Fires every Monday at 09:00 UTC (`"0 9 * * 1"`); on Vercel each schedule
  *   becomes a Vercel Cron Job and the expression is evaluated in UTC.
  * - A markdown schedule: the agent sends the email itself through the
- *   `resend` connection, which gives it control of the subject line. The
- *   chat-sdk Resend channel cannot set a subject on outbound-initiated
- *   threads (`@resend/chat-sdk-adapter` still hardcodes "New message" as of
- *   0.5.0), so delivery does not go through the channel; replies to the
- *   digest still reach the agent through the channel's inbound webhook.
+ *   `resend` connection, which gives it control of the subject line.
+ *   Inbound email commands are disabled; replies do not dispatch sessions.
  * - A markdown schedule cannot ask anyone for input, so a tool that needs
  *   approval, or crossing the session usage limit in `agent/agent.ts`, fails
  *   the run. The digest only reads issues and sends one email, neither of
@@ -41,7 +38,7 @@ export default defineSchedule({
     `Send from ${fromAddress}. Never send from any other address.`,
     "Fetch the issues fresh in this run; never reuse counts or lists from earlier context. Issue lists come back one page at a time: while a result has `hasMore: true`, call again with its `nextPage` until you have every open issue.",
     `Subject line: "Weekly issues digest: ${digestRepo}" followed by the date. The body is the digest itself, with no preamble or commentary about the task.`,
-    "Load the digest-format skill and follow it for the digest's structure: the grouping, one-line issue summaries, citations, overview, and the closing invitation to reply.",
+    "Load the digest-format skill and follow it for the digest's structure: the grouping, one-line issue summaries, citations, and overview. Close with tracker links or an authorized GitHub @Kody mention for follow-up. State that email replies are not processed; never invite a reply.",
   ].join("\n\n"),
   cron: "0 9 * * 1",
 });

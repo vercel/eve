@@ -1,9 +1,10 @@
 ---
-description: "How to compose or revise the weekly digest email of a repository's open issues: subject line, grouping, one-line issue summaries, needs-attention and stale criteria, citation format, and the closing invitation to reply. Load when composing this week's digest or reworking a draft of it. Not for other emails, replies, or GitHub and Linear comments."
+description: "How to compose or revise the weekly digest email of a repository's open issues: subject line, grouping, one-line issue summaries, needs-attention and stale criteria, citation format, and the closing follow-up guidance. Load when composing this week's digest or reworking a draft of it. Not for other emails, replies, or GitHub and Linear comments."
 ---
+
 # Digest Format
 
-The weekly digest is one email a maintainer skims in their inbox. Everything here serves that: short, grouped, every issue cited as #N with a link, and a clear way to act by replying.
+The weekly digest is one email a maintainer skims in their inbox. Everything here serves that: short, grouped, every issue cited as #N with a link, and links for follow-up in the tracker.
 
 ## Before composing
 
@@ -17,7 +18,7 @@ The weekly digest is one email a maintainer skims in their inbox. Everything her
 
 ## Structure
 
-Open with a one-paragraph overview: total open issues, what changed since last week (new, closed, spikes), and any theme worth a sentence. Then the groups, then the closing invitation.
+Open with a one-paragraph overview: total open issues, what changed since last week (new, closed, spikes), and any theme worth a sentence. Then the groups, then the follow-up guidance.
 
 Default grouping, in this order:
 
@@ -54,7 +55,7 @@ Example line: [#42](https://github.com/acme/widgets/issues/42) Crash on empty co
 
 ## Citations
 
-- Cite every issue by number in #N form, and make the #N a link to the issue on GitHub. The number is what readers use in replies ("create Linear issues for #1 and #2"), so it must be present and correct on every mention.
+- Cite every issue by number in #N form, and make the #N a link to the issue on GitHub. Readers use the number in authorized GitHub follow-ups, so it must be present and correct on every mention.
 - Use only numbers and links from issues fetched this run. Never guess or reconstruct a URL.
 
 ## Scannability
@@ -65,4 +66,4 @@ Example line: [#42](https://github.com/acme/widgets/issues/42) Crash on empty co
 
 ## Closing
 
-End every digest by inviting the reader to reply to act, naming the concrete options: ask for detail on an issue, have you comment on one, or have you create Linear issues from it. Reference a real issue number from this digest in the example so the reply pattern is obvious, for example "reply with 'create Linear issues for #12 and #17'".
+End every digest with links for follow-up in the tracker. Maintainers with write, maintain, or admin permission on the configured repository can also @Kody there to request action. State that email replies are not processed. Never invite the reader to reply by email.

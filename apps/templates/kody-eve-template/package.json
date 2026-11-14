@@ -14,7 +14,7 @@
     "dev": "eve dev",
     "fix": "ultracite fix",
     "start": "eve start",
-    "test": "node --import tsx --test --experimental-test-module-mocks agent/lib/user-preferences.test.ts",
+    "test": "node --import tsx --test --experimental-test-module-mocks agent/lib/user-preferences.test.ts agent/channels/security.test.ts",
     "test:smoke": "pnpm test",
     "typecheck": "tsc",
     "validate": "pnpm run check && pnpm run typecheck && eve info"

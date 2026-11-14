@@ -3,28 +3,26 @@
 [![Agent Stack](https://img.shields.io/badge/Agent%20Stack-000?style=flat-square&logo=vercel&logoColor=FFF&labelColor=000&color=000)](https://vercel.com/kb/agent-stack)
 [![MIT License](https://img.shields.io/badge/License-MIT-000?style=flat-square&logo=opensourceinitiative&logoColor=white&labelColor=000&color=000)](LICENSE)
 
-Kody is a personal GitHub maintainer agent built on [eve](https://eve.dev), made for freelancers, solo maintainers, and anyone who runs a repo alongside everything else. Every Monday it emails you a digest of your repo's open issues, and you reply to act on it ("create Linear issues for #1 and #2 and assign them to me"). Between digests it keeps working the repo: summarizing new pull requests, answering @mentions, and handling the Linear issues you delegate. You stay in your inbox, Kody works the tracker.
+Kody is a personal GitHub maintainer agent built on [eve](https://eve.dev), made for freelancers, solo maintainers, and anyone who runs a repo alongside everything else. Every Monday it emails you a digest of your repo's open issues. Between digests it answers authorized maintainer @mentions on the configured repo and handles the Linear issues you delegate. Inbound email commands and automatic PR-open summaries are intentionally disabled.
 
 - **Digests your issue tracker weekly.** A cron schedule fetches all open issues on your repo, groups them (needs attention, recent activity, stale), cites every issue as #N, and sends the digest by email through the Resend MCP tools.
-- **Acts on email replies.** Inbound replies land on the Resend chat channel; the agent resolves the referenced issue numbers against GitHub, does what was asked (comment, label, close, create Linear issues), and replies on the same thread.
-- **Summarizes new pull requests.** When a PR opens, Kody posts one orienting comment: what the PR does and why, plus a table breaking down the changed files. PRs opened by bots are skipped.
 - **Works in Linear.** Delegate issues to the agent or mention it in Linear Agent Sessions ("email me a summary of this issue"), and it works the issue with the Linear MCP tools.
-- **Answers GitHub mentions.** @Kody on an issue or PR gets an in-thread reply, cross-referencing Linear when it helps.
+- **Answers authorized GitHub mentions.** @Kody on an issue or PR in `DIGEST_REPO` gets an in-thread reply only after GitHub confirms the caller has write, maintain, or admin permission there. Roles on unrelated repositories do not grant access to the shared integrations.
 - **Remembers your preferences.** Standing preferences (a preferred email address, how you like the digest grouped, a default Linear team) live in Vercel Blob, keyed to the resolved principal.
 
 ## Deploy
 
-### Inbound email authorization blocker
+### Disabled inbound surfaces
 
-Do not connect the inbound Resend webhook to an installation with live service credentials yet. The current email handlers dispatch every incoming sender to the agent, which has shared Linear and Resend credentials. A signed Resend webhook proves delivery by Resend, not the sender's permission to use those credentials. The pinned adapter derives the author from `From`; it does not provide a verified caller-to-installation binding. An address allowlist, matching `DIGEST_EMAIL`, or a reply's thread headers alone would not establish that binding.
+Inbound email commands are intentionally disabled by default pending a separately authenticated authorization protocol. `/eve/v1/resend` rejects every POST with HTTP 403 without parsing mail or dispatching a session, including replies to previously subscribed threads. There is no opt-in switch or exported email dispatch helper. Outbound weekly digests still use the Resend MCP connection.
 
-The weekly outbound digest does not require the inbound webhook. Leave inbound delivery disconnected until an authorization design is selected and implemented. Existing installations must remove inbound webhook delivery, including queued retries. This is an operational precaution, not a code-level authorization fix; the handlers remain unrestricted.
+A signed Resend webhook proves delivery, not permission to use shared Linear and Resend credentials. Re-enabling email commands requires separately authenticated authorization bound to this installation. A `From` allowlist, matching `DIGEST_EMAIL`, thread headers, or approval prompts alone are not sufficient. Existing installations should remove inbound webhook delivery and queued retries.
 
-The smallest safe choices are to disable inbound turns in code and keep outbound digests, or require a separately authenticated, installation-authorized confirmation before dispatching email requests. Preserving direct email actions needs a trusted sender-verification contract and an explicit installation membership policy. The current adapter's optional raw email headers do not establish that contract. Approval prompts alone are not caller authentication.
+Automatic PR-open summaries are also disabled pending an isolated read-only agent and a bounded publisher. Authorized maintainers can request summaries through @Kody mentions on `DIGEST_REPO`. Configure that repository only for maintainers you trust with this installation's shared GitHub, Linear, and Resend authority; GitHub permission is not per-user Linear consent.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=kody-eve-template&repository-name=kody-eve-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fkody-eve-template&env=RESEND_API_KEY,RESEND_WEBHOOK_SECRET,RESEND_FROM_ADDRESS,DIGEST_REPO,DIGEST_EMAIL&envDescription=Resend%20API%20key%20%2B%20inbound%20webhook%20secret%2C%20a%20verified%20sender%20address%2C%20and%20the%20digest%20repo%2Frecipient.&connect=%5B%7B%22type%22%3A%22github%22%2C%22env%22%3A%22GITHUB_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fgithub%22%7D%2C%7B%22type%22%3A%22linear%22%2C%22env%22%3A%22LINEAR_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Flinear%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22private%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%7D%5D)
 
-Deploying with the button provisions everything the agent needs and wires it up for you:
+The button deploys the upstream repository, not this secured copy. Its provisioning includes:
 
 - a **GitHub** connector (sets `GITHUB_CONNECTOR`, with the trigger pointed at `/eve/v1/github`),
 - a **Linear** connector (sets `LINEAR_CONNECTOR`, with the trigger pointed at `/eve/v1/linear`),
@@ -32,7 +30,7 @@ Deploying with the button provisions everything the agent needs and wires it up 
 - an **Upstash Redis** store (sets `REDIS_URL`) for the email channel's thread state,
 - prompts for the Resend API key, webhook secret, sender address, and digest repo and recipient.
 
-After deployment, keep Resend's inbound webhook disconnected until the [authorization blocker](#inbound-email-authorization-blocker) is resolved.
+The button still targets the upstream template, not this imported copy. Deploy this copy with `eve deploy` to use these security defaults. Its inbound email route rejects all requests; do not configure an inbound webhook. Redis and the inbound webhook secret provisioned by the upstream button are not needed by this copy.
 
 To set things up by hand instead, deploy with `eve deploy` (it wraps `vercel deploy --prod`; the raw command cannot auto-detect the eve framework) and provision the integrations first:
 
@@ -56,11 +54,11 @@ Set `GITHUB_CONNECTOR` and `LINEAR_CONNECTOR` to the printed UIDs in the project
 
 ### Resend
 
-Set `RESEND_API_KEY` for outbound digests and `RESEND_FROM_ADDRESS` to a verified sender on your Resend domain. Optionally set `RESEND_FROM_NAME` (defaults to "Kody"). The email channel and system prompt use the same sender settings. `RESEND_WEBHOOK_SECRET` verifies inbound webhook transport only; do not connect inbound delivery to `/eve/v1/resend` until the [authorization blocker](#inbound-email-authorization-blocker) is resolved.
+Set `RESEND_API_KEY` for outbound digests and `RESEND_FROM_ADDRESS` to a verified sender on your Resend domain. Optionally set `RESEND_FROM_NAME` (defaults to "Kody"). The system prompt and schedule use these sender settings. No inbound webhook secret or Redis store is needed: email replies are not processed.
 
-### Redis, Blob, and digest config
+### Blob and digest config
 
-- `REDIS_URL`: thread state for the email channel (`@chat-adapter/state-redis`). Any Redis works; the [Upstash for Redis](https://vercel.com/marketplace/upstash/upstash-kv) marketplace integration sets the variable automatically when you connect a store.
+- `DIGEST_REPO` also binds GitHub mention authorization. Permission lookup errors deny dispatch; a historical `author_association` is not sufficient.
 - A private Vercel Blob store connected to the project, for the preference tools: `vercel blob create-store <name> --access private --yes`. Existing public stores must be replaced; delete old public preference objects because changing the app does not revoke their URLs.
 - `DIGEST_REPO` (e.g. `owner/repo`) and `DIGEST_EMAIL`: what the weekly digest covers and who receives it. Both are required at build time; a missing value fails discovery with a clear error instead of deploying a digest that cannot send.
 
@@ -72,14 +70,14 @@ Set `RESEND_API_KEY` for outbound digests and `RESEND_FROM_ADDRESS` to a verifie
 | Language               | TypeScript (strict, ESM)                                                                                                                                                        |
 | GitHub surface & tools | eve GitHub channel + [GitHub Tools eve extension](https://github-tools.com/frameworks/eve-extension) (maintainer preset), via [Vercel Connect](https://vercel.com/docs/connect) |
 | Linear surface & tools | eve Linear channel (Agent Sessions) via [Vercel Connect](https://vercel.com/docs/connect) + Linear MCP                                                                          |
-| Email surface          | Resend, via the [Chat SDK](https://chat-sdk.dev) channel (`@resend/chat-sdk-adapter`) with Redis state                                                                          |
+| Email inbound          | Disabled; the legacy Resend route rejects all POSTs                                                                                                                             |
 | Email sending          | Resend MCP (`mcp.resend.com`)                                                                                                                                                   |
 | Preference storage     | [Vercel Blob](https://vercel.com/docs/vercel-blob)                                                                                                                              |
 | Model access           | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway)                                                                                                                         |
 | Sandbox                | [Vercel Sandbox](https://vercel.com/docs/sandbox)                                                                                                                               |
 | Lint & format          | [Ultracite](https://www.ultracite.ai/) (Biome)                                                                                                                                  |
 
-GitHub and Linear credentials are brokered by [Vercel Connect](https://vercel.com/docs/connect); Blob and the model authenticate with the project's [Vercel OIDC](https://vercel.com/docs/oidc) token. The only static credentials are the Resend API key and inbound webhook secret.
+GitHub and Linear credentials are brokered by [Vercel Connect](https://vercel.com/docs/connect); Blob and the model authenticate with the project's [Vercel OIDC](https://vercel.com/docs/oidc) token. The only required static credential is the outbound Resend API key.
 
 ## Quick start with an AI coding agent
 
@@ -96,9 +94,9 @@ agent/
   agent.ts                  # model configuration, compaction, session usage limit
   instructions.ts           # the agent's behavior; compiled at build time with RESEND_FROM_ADDRESS baked in
   channels/
-    github.ts               # eve GitHub Channel; @mentions in-thread + a summary comment on newly opened PRs
+    github.ts               # repo-bound, API-verified maintainer @mentions; no automatic PR summaries
     linear.ts               # eve Linear Channel
-    resend.ts               # Chat SDK channel: Resend adapter + Redis state
+    resend.ts               # rejects all inbound email with HTTP 403
     eve.ts                  # dev TUI / route auth surface
   connections/
     linear.ts               # Linear MCP, app-scoped Connect auth via linearAuth
@@ -166,7 +164,7 @@ Then run the development server and link a model provider with `/model` in the T
 pnpm dev
 ```
 
-You can chat with the agent directly in the dev TUI to exercise the GitHub tools, the Linear and Resend connections, and the preference tools. The webhook surfaces (GitHub mentions, Linear sessions, email replies) run against a deployment.
+You can chat with the agent directly in the dev TUI to exercise the GitHub tools, the Linear and Resend connections, and the preference tools. The supported webhook surfaces (authorized GitHub mentions and Linear sessions) run against a deployment. Email replies are not processed.
 
 `eve dev` never fires schedules on their cron cadence. Trigger the digest by hand with the dev dispatch route:
 
@@ -194,10 +192,10 @@ pnpm validate   # lint + typecheck + eve discovery diagnostics
 
 ## Customizing
 
-- **Behavior:** edit `agent/instructions.ts`. It describes the whole workflow: ground everything in the real tracker, the weekly digest shape, acting on email replies, Linear sessions, and GitHub mentions. The sending-email rule resolves `RESEND_FROM_ADDRESS` at build time.
+- **Behavior:** edit `agent/instructions.ts`. It describes the whole workflow: ground everything in the real tracker, the outbound weekly digest, Linear sessions, and authorized GitHub mentions. The sending-email rule resolves `RESEND_FROM_ADDRESS` at build time.
 - **The digest:** the cron expression, subject line, and recipient live in `agent/schedules/weekly-digest.ts`; the digest's structure (grouping, needs-attention and stale criteria, one-line summaries) lives in `agent/skills/digest-format/SKILL.md`.
-- **PR summaries:** the `onPullRequest` hook and its task prompt live in `agent/channels/github.ts`. Adjust the dispatch condition there (for example, to include bot PRs or drafts) or the comment's shape.
-- **Approval gates:** `agent/extensions/github.ts` sets `requireApproval: "never"` for the reversible issue-conversation writes because email cannot render an approval prompt; adjust the list to re-gate them. `clear_user_preferences` stays approval-gated.
+- **PR summaries:** automatic dispatch is disabled. Do not re-enable it on the privileged root agent; use an isolated read-only agent and a bounded host-side publisher.
+- **Approval gates:** `agent/extensions/github.ts` sets `requireApproval: "never"` for the reversible issue-conversation writes for authorized maintainer workflows; adjust the list to re-gate them. `clear_user_preferences` stays approval-gated.
 - **Skills:** edit or add skills in `agent/skills/`. Each folder holds a `SKILL.md` plus its reference files.
 - **Model:** edit `agent/agent.ts` (or run `/model` in the dev TUI).
 - **Tools:** add or change tools in `agent/tools/`. The filename is the tool name.
@@ -208,7 +206,6 @@ The agent auto-updates as you edit these files.
 
 - [eve documentation](https://eve.dev/docs/introduction): the framework powering this agent.
 - [Vercel Connect](https://vercel.com/docs/connect): manages the GitHub and Linear credentials.
-- [Chat SDK](https://chat-sdk.dev): the adapter layer behind the email channel.
 - [Resend](https://resend.com/docs): email sending and inbound webhooks.
 - [Vercel Blob](https://vercel.com/docs/vercel-blob): object storage for the preference tools.
 

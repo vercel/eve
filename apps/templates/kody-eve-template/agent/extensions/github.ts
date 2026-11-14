@@ -16,10 +16,10 @@ import githubExtension from "@github-tools/eve-extension";
  * `@github-tools/sdk/connect/eve`, whose tool callbacks have no durable descriptor: eve 0.83
  * skips that whole tool set at runtime.
  *
- * Issue-conversation writes (comments, issue create/close, labels) run without approval: they are
- * reversible actions on the configured repo, and the email surface cannot render an approval
- * prompt, so a gate there would strand the session. Higher-impact writes (merging PRs, pushing
- * files, repo creation) keep the extension's approval-by-default.
+ * Issue-conversation writes (comments, issue create/close, labels) run without approval
+ * for authorized maintainer workflows. Inbound authorization is enforced by the channels,
+ * not by the model's task prompt. Higher-impact writes (merging PRs, pushing files, repo
+ * creation) keep the extension's approval-by-default.
  */
 export default githubExtension({
   connector: process.env.GITHUB_CONNECTOR ?? "github/kody-agent",

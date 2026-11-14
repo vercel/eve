@@ -1,6 +1,7 @@
 ---
 description: "Playbook for triaging GitHub issues: checking for duplicates, applying the repo's existing labels, deciding whether to ask for a reproduction or close, and choosing when to act directly versus report back first. Load whenever asked to triage, label, dedupe, or close issues, whether the request came from a GitHub mention, an email reply, or a Linear delegation. Not needed for composing the weekly digest, answering general questions on a thread, or creating Linear issues."
 ---
+
 # Triaging Issues
 
 How to work through a GitHub issue (or a batch of them) when someone asks you to triage. The order matters: read, dedupe, label, then decide what the issue needs. Never comment on or change an issue you haven't read in full, including its existing comments and labels.
