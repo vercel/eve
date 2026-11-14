@@ -197,14 +197,6 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     steps:
-      # Real-time scanning inspects every file the checkout, the pnpm store
-      # restore, and the install write, which slows all three on the hosted
-      # Windows image. The runner is discarded after the job.
-      - name: Turn off Defender real-time scanning
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
-
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
