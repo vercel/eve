@@ -2,6 +2,10 @@
 
 A coding agent template for [eve](https://eve.dev). Mention it in Slack, or on a GitHub issue or pull request, and it investigates, reviews, or fixes code in an isolated [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox), then answers in the thread or opens a pull request. In Slack, it moves coding and triage work into a [code channel](https://docs.slack.dev/ai/slack-code) that shows the repository, branch, diff, pull request, and tests as it works.
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-coding-agent-template&project-name=eve-coding-agent&repository-name=eve-coding-agent&env=GITHUB_ORG&envDescription=The%20GitHub%20organization%20or%20user%20whose%20repositories%20the%20agent%20may%20access.&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-coding-agent-template%23connect-slack-and-github&connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%2C%7B%22type%22%3A%22github%22%2C%22env%22%3A%22GITHUB_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fgithub%22%7D%5D)
+
+The button provisions the Slack and GitHub connectors through Vercel Connect and asks for `GITHUB_ORG`. After it deploys, finish the steps in [Connect Slack and GitHub](#connect-slack-and-github) that it can't do for you: add the code channel scopes and events to the Slack app, install the GitHub App on your repositories, and set `GITHUB_BOT_NAME` to the app's slug.
+
 ## How it works
 
 The coding capabilities come from eve's built-in [code extension](https://eve.dev/docs/code-extension), and GitHub access comes from its companion git extension. This template wires them to Slack and GitHub and keeps everything else default.

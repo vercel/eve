@@ -57,10 +57,16 @@ const codeChannelSurfaces = defineSlackRenderer({
   },
 });
 
-// `eve add channel/slack` creates or picks a Slack app and writes its connector
-// UID here, so keep it a string literal.
+// The "Deploy with Vercel" button provisions a Slack connector and stores its
+// UID in SLACK_CONNECTOR. Otherwise, `eve add channel/slack` creates or picks a
+// Slack app and writes its connector UID into the literal below, so keep that
+// argument a string literal.
+const slackConnector = process.env.SLACK_CONNECTOR?.trim();
+
 export default slackChannel({
-  credentials: connectSlackCredentials("slack/coding-agent"),
+  credentials: slackConnector
+    ? connectSlackCredentials(slackConnector)
+    : connectSlackCredentials("slack/coding-agent"),
   codeChannels: CODE_CHANNELS,
   renderers: [codeChannelSurfaces],
 });

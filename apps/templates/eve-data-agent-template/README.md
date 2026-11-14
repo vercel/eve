@@ -145,6 +145,12 @@ policy.
    pnpm exec eve deploy
    ```
 
+   Or deploy with the button below once the MotherDuck data from step 2 exists.
+   It provisions the Slack connector through Vercel Connect and asks for the
+   MotherDuck and Slack allowlist values above:
+
+   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-data-agent-template&project-name=eve-data-agent&repository-name=eve-data-agent&env=DUCKDB_CONNECTION%2Cmotherduck_token%2CSLACK_TEAM_ID%2CSLACK_ALLOWED_USER_IDS%2CSLACK_ALLOWED_CHANNEL_IDS&envDefaults=%7B%22DUCKDB_CONNECTION%22%3A%22md%3Ajaffle_shop%22%7D&envDescription=The%20MotherDuck%20database%20and%20Read%20Scaling%20token%2C%20plus%20the%20Slack%20workspace%20ID%20and%20the%20user%20and%20conversation%20IDs%20allowed%20to%20use%20the%20agent.&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-data-agent-template%23use-motherduck-and-deploy&connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%5D)
+
 Run the build on the deployment platform so the native DuckDB binding matches
 its OS and architecture. `agent.ts` externalizes `@duckdb/node-api` so eve traces
 its native dependency instead of bundling the binary as JavaScript. The Python
