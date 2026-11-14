@@ -142,6 +142,14 @@ export function formatError(error: unknown, errorId?: string): JsonObject {
 }
 
 /**
+ * The thrown error's class name, or `"Error"` when it carries none. A curated failure keeps it
+ * as `errorName`, because its `name` holds the catalog's headline.
+ */
+export function errorClassName(error: unknown): string {
+  return extractErrorName(error) ?? "Error";
+}
+
+/**
  * Pulls a displayable `name` off a throwable. Real {@link Error}
  * instances contribute their `.name` (except the default `"Error"`
  * which adds no information beyond what `message` already carries);

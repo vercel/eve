@@ -35,18 +35,27 @@ export function usageOf(counts: Partial<Usage>): Usage {
   });
 }
 
-/** A failure as the stream reports it: its code and message, with its support id and remedy. */
+/**
+ * A failure as the stream reports it: its code and message, with the thrown error's class name,
+ * its support id and remedy.
+ */
 export function errorInfoOf(failure: {
   readonly code: string;
   readonly details?: JsonObject;
   readonly message: string;
 }): ErrorInfo {
-  const { errorId, hint } = failure.details ?? {};
+  const { errorId, errorName, hint, name } = failure.details ?? {};
+  // A curated failure keeps the class name in `errorName`; its `name` holds the catalog's headline.
+  const className = errorName ?? name;
   return defined({
     code: failure.code,
     hint: typeof hint === "string" && hint.trim().length > 0 ? hint.trim() : undefined,
     id: typeof errorId === "string" ? errorId : undefined,
     message: failure.message,
+    name:
+      typeof className === "string" && className.length > 0 && className !== "Error"
+        ? className
+        : undefined,
   });
 }
 
