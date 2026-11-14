@@ -58,6 +58,8 @@ export interface WorkflowArtifacts {
   readonly stepTargets: readonly string[];
   readonly stepsPath: string;
   readonly workflowsPath: string;
+  /** Files the workflow driver was built from. */
+  readonly inputs?: readonly string[];
 }
 
 export class WorkflowBundleBuilder {
@@ -118,7 +120,7 @@ export class WorkflowBundleBuilder {
       sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
       workingDir: this.config.workingDir,
     });
-    const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
+    const { inputs, manifest: workflowsManifest } = await this.createWorkflowsBundle({
       appWorkflowFiles: appEntries.workflowModules,
       frameworkSerdeFiles: frameworkEntries.discoveredSerdeFiles,
       frameworkWorkflowFiles: frameworkEntries.discoveredWorkflows,
@@ -145,7 +147,7 @@ export class WorkflowBundleBuilder {
       },
     });
 
-    return { stepTargets, stepsPath, workflowsPath };
+    return { inputs, stepTargets, stepsPath, workflowsPath };
   }
 
   protected get transformProjectRoot(): string {
@@ -222,6 +224,7 @@ export class WorkflowBundleBuilder {
           : await this.#buildDriverChunk({ ...layer, authoredTsConfig: true }),
     );
     for (const chunk of chunks) mergeWorkflowManifest(manifest, chunk.manifest);
+    const inputs = [...new Set(chunks.flatMap((chunk) => chunk.inputs ?? []))];
     const workflowCode = composeWorkflowDriverCode(chunks.map((chunk) => chunk.code));
 
     await bundleFinalWorkflowOutput({
@@ -231,7 +234,7 @@ export class WorkflowBundleBuilder {
       stepRegistrationsPath,
     });
 
-    return { manifest };
+    return { inputs, manifest };
   }
 
   /**
@@ -255,6 +258,7 @@ export class WorkflowBundleBuilder {
       .sort()
       .filter((filePath) => !workflowFileSet.has(filePath));
     if (workflowFiles.length === 0 && serdeOnlyFiles.length === 0) return { code: "", manifest };
+    let inputs: readonly string[] = [];
 
     const virtualEntrySource = [
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
@@ -290,6 +294,12 @@ export class WorkflowBundleBuilder {
         // After the transform, so stubbed step bodies' node:* imports are already gone.
         createWorkflowNodeBuiltinGuardPlugin(),
         options.graphPlugin,
+        {
+          name: "eve-workflow-driver-inputs",
+          buildEnd() {
+            inputs = [...this.getModuleIds()];
+          },
+        },
       ],
       resolve: {
         conditionNames: ["eve-source", "workflow"],
@@ -305,7 +315,7 @@ export class WorkflowBundleBuilder {
         sourcemap: this.#inlineSourcemap ? "inline" : false,
       },
     });
-    return { code: interimBundle.code, manifest };
+    return { code: interimBundle.code, inputs, manifest };
   }
 
   protected async createManifest({
