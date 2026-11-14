@@ -1,8 +1,13 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
+import {
+  resolvePackageCompiledFilePath,
+  resolvePackageRoot,
+  resolveWorkflowModulePath,
+} from "#internal/application/package.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins, type HostPluginsInput } from "#internal/nitro/host/host-plugins.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
@@ -163,5 +168,27 @@ describe("createHostPlugins", () => {
       expect(code).toContain(`${name} kept`);
     }
     expect(code).not.toContain("other kept");
+  });
+
+  it("loads eve's vendored dependencies natively in development hosts", async () => {
+    const eveModule = join(resolvePackageRoot(), "src", "internal", "fixture.ts");
+    const appModule = `${APP_ROOT}/agent/tools/fixture.ts`;
+    const nestedDependency = join(resolvePackageRoot(), "node_modules", "dep", "index.js");
+    const files = {
+      [eveModule]: 'export { z } from "#compiled/zod/index.js";\n',
+      [appModule]: 'export { z } from "#compiled/zod/index.js";\n',
+      [nestedDependency]: 'export { z } from "#compiled/zod/index.js";\n',
+    };
+    const bundle = async (development: boolean, id: string) =>
+      await bundleThroughPlugins({ files, plugins: plugins({ development }), reexports: [id] });
+    const nativeUrl = pathToFileURL(
+      resolvePackageCompiledFilePath("src/compiled/zod/index.js"),
+    ).href;
+
+    expect(await bundle(true, eveModule)).toContain(JSON.stringify(nativeUrl));
+    // Other packages' `#compiled` imports and production hosts keep normal resolution.
+    expect(await bundle(true, appModule)).toContain("unresolved:#compiled/zod/index.js");
+    expect(await bundle(true, nestedDependency)).toContain("unresolved:#compiled/zod/index.js");
+    expect(await bundle(false, eveModule)).toContain("unresolved:#compiled/zod/index.js");
   });
 });

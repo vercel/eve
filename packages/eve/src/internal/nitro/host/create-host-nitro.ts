@@ -168,6 +168,7 @@ function toNitroConfig(
     buildPlugins: createHostPlugins({
       appRoot: locations.appRoot,
       authoredPackageRoot: spec.authored.packageRoot,
+      development: spec.development,
       externals: spec.externals,
       extensionMounts: spec.extensionMounts,
       extensionOverridePaths: spec.extensionOverridePaths,
