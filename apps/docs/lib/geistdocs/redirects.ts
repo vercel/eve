@@ -160,7 +160,7 @@ export const compatibilityRedirects: DocsRedirect[] = [
         permanent: true as const,
       })),
     ),
-    // The data agent has no gallery listing yet.
+    // The data agent has no gallery listing yet, so it goes to its source.
     ...extensions.map((extension) => ({
       source: `${prefix}/templates/eve-data-agent-template${extension}`,
       destination: dataAgentTemplateUrl,
