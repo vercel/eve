@@ -362,6 +362,7 @@ describe("bare eve command", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 
@@ -439,6 +440,7 @@ describe("eve init compatibility flags", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 
@@ -473,6 +475,7 @@ describe("eve init compatibility flags", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 
@@ -496,6 +499,7 @@ describe("eve init compatibility flags", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 

@@ -265,7 +265,8 @@ export function registerDevelopmentCommand(input: {
       .option("--no-default-extensions", "Do not mount default development extensions")
       .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
       .option("--input <text>", "Pre-fill the prompt input")
-      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp()),
+      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
+      .addOption(new Option("--onboarded", "Continue onboarding that eve init ran").hideHelp()),
   ).action(async (options: DevelopmentCliOptions) => {
     const interactive = hasInteractiveTerminal();
     const mode = resolveDevUiMode({ options, interactive });
@@ -329,16 +330,18 @@ export function registerDevelopmentCommand(input: {
       // Fresh-agent onboarding needs only the project files until it saves, so the person
       // picks a provider and signs in while the server boots.
       const startupOnboardingPromise =
-        options.onboard === true
-          ? tuiStartupPromise?.then((startup) =>
-              runOnboardingWhileServerStarts({
-                applicationRoot: applicationContext.root,
-                started,
-                startup,
-                telemetry,
-              }),
-            )
-          : undefined;
+        options.onboarded === true
+          ? Promise.resolve({ outcome: undefined })
+          : options.onboard === true
+            ? tuiStartupPromise?.then((startup) =>
+                runOnboardingWhileServerStarts({
+                  applicationRoot: applicationContext.root,
+                  started,
+                  startup,
+                  telemetry,
+                }),
+              )
+            : undefined;
       const [outcome, startup, startupOnboarding] = await Promise.all([
         started,
         tuiStartupPromise,

@@ -16,6 +16,8 @@ export interface DevelopmentCliOptions {
   input?: string;
   /** Internal fresh-agent handoff from `eve init`. */
   onboard?: boolean;
+  /** Internal handoff from `eve init` after it already ran onboarding during the install. */
+  onboarded?: boolean;
   logs?: LogDisplayMode;
   name?: string;
   port?: number;
