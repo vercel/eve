@@ -10,6 +10,7 @@ export const npmPackageManager = {
     "install",
     ...(options.autoApprove === true ? ["--yes"] : []),
     ...(options.bypassMinimumReleaseAge === true ? ["--min-release-age=0"] : []),
+    ...(options.skipPeerDependencyResolution === true ? ["--legacy-peer-deps"] : []),
     ...(options.progressDetails === true ? ["--loglevel=silly"] : []),
   ],
   prepareArguments: (_projectRoot, args) => args,
