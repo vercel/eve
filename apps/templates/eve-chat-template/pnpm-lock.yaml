@@ -228,7 +228,7 @@ importers:
         specifier: 0.45.2
         version: 0.45.2(@neondatabase/serverless@1.1.0)(@types/pg@8.20.0)(@upstash/redis@1.38.2)(kysely@0.29.5)
       eve:
-        specifier: ^1.0.0
+        specifier: 1.0.0
         version: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(next@16.4.1(@types/node@26.6.6)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
       lucide-react:
         specifier: 1.33.0

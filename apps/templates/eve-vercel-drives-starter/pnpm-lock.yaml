@@ -18,7 +18,7 @@ importers:
         specifier: ^7.0.173
         version: 7.0.173(zod@4.5.4)
       eve:
-        specifier: ^1.0.0
+        specifier: 1.0.0
         version: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.5.4))(just-bash@3.6.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: 4.5.4

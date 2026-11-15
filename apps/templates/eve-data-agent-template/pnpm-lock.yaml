@@ -176,7 +176,7 @@ importers:
         specifier: ^2.9.3
         version: 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
       eve:
-        specifier: ^1.0.0
+        specifier: 1.0.0
         version: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)
       just-bash:
         specifier: 3.6.0

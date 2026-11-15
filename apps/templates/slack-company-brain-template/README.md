@@ -128,10 +128,8 @@ messages, or one thread, with the bot token. It needs no action token, so it
 also works in scheduled tasks, but Slack only lets the bot read channels it has
 been invited to. It refuses private channels and DMs.
 
-The Slack channel copies the token into each turn's auth as the `action_token`
-attribute. That copy is a temporary workaround in `agent/channels/slack.ts`,
-marked `WORKAROUND(vercel/eve#6088)`; a later eve release does it in
-`defaultSlackAuth`.
+The Slack channel's `defaultSlackAuth` copies the token into each turn's auth
+as the `action_token` attribute.
 
 ## Memory
 
@@ -220,7 +218,9 @@ How it works:
   run, `auth` checks with Slack that the account is still an active full
   member, not a guest, and, with `SLACK_TEAM_ID` set, still in your workspace.
   For a private channel or group DM, it also checks that the creator is still
-  in it. That check needs the `groups:read` and `mpim:read` bot scopes.
+  in it. That check needs the `groups:read` and `mpim:read` bot scopes. When a
+  check fails, that run is skipped without a retry; when Slack can't be
+  reached, the run is retried.
 - **Who can manage it.** Each person sees and changes only their own schedules.
   Creating or changing one asks for approval in Slack first. Set `approval` in
   the definition to change that.

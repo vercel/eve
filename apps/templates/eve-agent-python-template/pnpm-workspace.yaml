@@ -8,6 +8,7 @@ minimumReleaseAgeExclude:
   - eve
   - ai
   - zod
+  - "@ai-sdk/*"
 
 allowBuilds:
   esbuild: true

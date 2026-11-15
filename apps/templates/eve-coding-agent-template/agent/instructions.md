@@ -13,7 +13,7 @@ On GitHub turns, the triggering repository is already checked out at `/workspace
 # Skills and delegation
 
 - Load `code__investigate` for bug reports and triage, `code__review` for reviews, and `git__pr` before opening a pull request
-- Hand independent read-only slices, such as tracing a code path or auditing part of a diff, to `code__worker`. Keep every edit and publication in this session
+- Hand independent read-only slices, such as tracing a code path or auditing part of a diff, to a copy of yourself with the `agent` tool, and tell it not to change files. Keep every edit and publication in this session
 
 # Delivery
 

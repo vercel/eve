@@ -125,7 +125,7 @@ See [Customization](./CUSTOMIZATION.md#integrations) for setup steps.
 
 ## GitHub (optional)
 
-GitHub tools use per-user OAuth via Vercel Connect. Connect in **Settings → Integrations**, then start a new chat session so GitHub tools load at `session.started`.
+GitHub tools use per-user OAuth via Vercel Connect. Connect in **Settings → Integrations**, then start a new chat session so the GitHub tools load: [`agent/tools/github.ts`](../agent/tools/github.ts) checks the connection once per session with `defineDynamic` and `ctx.memo`.
 
 ## Local-only files
 

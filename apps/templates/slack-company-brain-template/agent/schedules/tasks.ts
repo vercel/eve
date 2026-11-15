@@ -106,8 +106,8 @@ export default defineDynamicSchedules({
     if (principal.type !== "user" || principal.authenticator !== "slack-webhook") return null;
     if (principal.principalId !== `slack:${payload.teamId}:${payload.userId}`) return null;
     // A member who is deactivated, leaves, becomes a guest, or loses access to
-    // the conversation stops their schedules. A failed lookup throws so the
-    // provider retries.
+    // the conversation stops their schedules: returning null fails each
+    // occurrence without a retry. A failed lookup throws so the provider retries.
     if (!(await isFullMember(payload.teamId, payload.userId))) return null;
     if (!(await canReachChannel(payload))) return null;
     const { type: _type, ...identity } = principal;
