@@ -27,7 +27,7 @@
     "@vercel/blob": "2.8.0",
     "@vercel/connect": "^2.7.0",
     "@vercel/oidc": "3.8.5",
-    "ai": "^7.0.159",
+    "ai": "^7.0.173",
     "better-auth": "1.7.22",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

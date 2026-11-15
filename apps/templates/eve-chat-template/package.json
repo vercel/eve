@@ -36,7 +36,7 @@
     "@vercel/analytics": "2.0.1",
     "@vercel/connect": "^2.9.3",
     "@vercel/speed-insights": "2.0.0",
-    "ai": "7.0.137",
+    "ai": "7.0.173",
     "better-auth": "1.7.10",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

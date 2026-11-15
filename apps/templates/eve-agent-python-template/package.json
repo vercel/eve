@@ -31,7 +31,7 @@
     "@streamdown/mermaid": "1.0.3",
     "@tailwindcss/postcss": "4.3.3",
     "@tanstack/react-table": "9.2.8",
-    "ai": "7.0.137",
+    "ai": "7.0.173",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",

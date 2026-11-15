@@ -39,7 +39,7 @@
     "@tanstack/react-start": "^1.168.60",
     "@tanstack/react-table": "^9.2.8",
     "@vitejs/plugin-react": "^6.1.1",
-    "ai": "^7.0.128",
+    "ai": "^7.0.173",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

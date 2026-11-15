@@ -26,7 +26,7 @@
     "@resend/chat-sdk-adapter": "^0.5.0",
     "@vercel/blob": "^2.8.2",
     "@vercel/connect": "2.9.2",
-    "ai": "^7.0.150",
+    "ai": "^7.0.173",
     "chat": "^4.43.0",
     "eve": "^1.0.0",
     "zod": "4.6.7"
