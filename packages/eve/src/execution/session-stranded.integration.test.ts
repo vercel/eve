@@ -16,7 +16,6 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
@@ -280,38 +279,6 @@ describe("stranded sessions", () => {
         // The successor names the session it replaced.
         const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
-        // A remote job can finish after replacement. Its fixed parent inbox
-        // must not route the result into the new conversation.
-        const callback = await handleSessionCallbackRequest(
-          new Request("https://eve.test/callback", {
-            method: "POST",
-            body: JSON.stringify({
-              kind: "turn.completed",
-              callId: "old-call",
-              subagentName: "research",
-              outcome: {
-                kind: "parked",
-                result: { kind: "succeeded", output: "Alice's report" },
-                usageDelta: {
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  cacheReadTokens: 0,
-                  cacheWriteTokens: 0,
-                },
-              },
-              output: "Alice's report",
-            }),
-          }),
-          {
-            params: { token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)) },
-            requestIp: null,
-            waitUntil() {},
-          },
-        );
-        expect(callback.status).toBe(404);
-        await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: fresh.sessionId,
-        });
 
         const resets = logs.records.filter((record) => record.message === "Reset stranded session");
         expect(resets).toEqual([

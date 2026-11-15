@@ -2,7 +2,7 @@
 "eve": patch
 ---
 
-The `/eve/v1/callback/:token` route now resumes only a call that waits for a remote agent's reply, so a request that guesses a token can't resume a hook your code created with `createHook()` or any other eve hook.
+The `/eve/v1/callback/:token` route now resumes only a call that waits for a remote agent's reply, so a request to it that guesses a token can't resume a hook your code created with `createHook()` or any other eve hook.
 
 eve now names each reply hook with a token under the reserved `eve:reply:v1:` prefix, and the route answers `404` with `code: "CALLBACK_NOT_PENDING"` for any other token. Don't start a `createHook()` token with `eve:`.
 
