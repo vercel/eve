@@ -76,8 +76,8 @@ importers:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       eve:
-        specifier: 1.0.0-rc.17
-        version: 1.0.0-rc.17(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(react@19.3.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: 1.0.0
+        version: 1.0.0(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(react@19.3.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
       lucide-react:
         specifier: ^1.16.0
         version: 1.55.0(@types/react@19.3.0)(react@19.3.0)
@@ -3159,8 +3159,8 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
-  eve@1.0.0-rc.17:
-    resolution: {integrity: sha512-B06xjUcbDZ3c09GHorde8Ww1P7IijKXzwVaKv1ntk2PxTr804glczF6uQ6MLgHVyO/cNU6nN8lv5J6MHDCfcIg==}
+  eve@1.0.0:
+    resolution: {integrity: sha512-N4v0GYcJ/ClAtffQo8viUjBVR+F/FhaAQ/tfke4rC2mSyJueUczrT5GvQF3tiX+6Uq612O2n0IJUGpAwHr7OvQ==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -7879,7 +7879,7 @@ snapshots:
 
   esutils@2.0.3: {}
 
-  eve@1.0.0-rc.17(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(react@19.3.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)):
+  eve@1.0.0(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(react@19.3.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       ai: 7.0.137(zod@4.6.7)
       nitro: 3.0.261103-rc

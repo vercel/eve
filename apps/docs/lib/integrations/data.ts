@@ -2215,7 +2215,7 @@ The extension also supports inline screenshots, session naming, proxies, and pro
 eve add extension/link
 \`\`\`
 
-The extension requires Node.js 24 or later and eve 1.0.0-rc.5 or later. Configure a static Link access token or an application-owned authorization provider. With a static token, every caller uses the same wallet, so restrict access to the agent.`,
+The extension requires Node.js 24 or later and eve 1.0.0 or later. Configure a static Link access token or an application-owned authorization provider. With a static token, every caller uses the same wallet, so restrict access to the agent.`,
     quickStart: `Add a Link access token to the agent's server environment:
 
 \`\`\`bash title=".env.local"

@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@vercel/connect':
-        specifier: 2.2.0
-        version: 2.2.0(ai@7.0.137(zod@4.5.4))(eve@1.0.0-rc.17)
+        specifier: 2.9.3
+        version: 2.9.3(ai@7.0.137(zod@4.5.4))(eve@1.0.0)
       ai:
         specifier: ^7.0.128
         version: 7.0.137(zod@4.5.4)
       eve:
-        specifier: 1.0.0-rc.17
-        version: 1.0.0-rc.17(@vercel/connect@2.2.0)(ai@7.0.137(zod@4.5.4))(just-bash@3.1.0)(vite@8.3.4(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: 1.0.0
+        version: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.137(zod@4.5.4))(just-bash@3.1.0)(vite@8.3.4(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
       just-bash:
         specifier: 3.1.0
         version: 3.1.0
@@ -1169,28 +1169,31 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@vercel/cli-config@0.2.7':
-    resolution: {integrity: sha512-KeSN2HBp8puZrj7kVjSEneDi9yBqW4nAD9AnhGhdYjGNpHl7IkXZVb3HnNe0WWc5+20RlUtmAGWNPQ8qP5QBhQ==}
+  '@vercel/cli-config@0.4.0':
+    resolution: {integrity: sha512-7+DnWjfcHA/u2FjiPMknhlqZFmJZZq1qS5ziIxNH+3zNBo2U4NQjkJABKDGMZlLBlBLK94RXuA2dceC4SCFumA==}
 
   '@vercel/cli-exec@1.0.1':
     resolution: {integrity: sha512-g9XerViJ/paZujufXYcu5XYI2vU2rtB4sgdpjUHde5RnOkdmpu0ngH46LCFGHoPXO/C+qDPSczIHIRN+8Q2YKQ==}
     engines: {node: '>= 18'}
 
-  '@vercel/connect@2.2.0':
-    resolution: {integrity: sha512-5tcJoU/X3ejZY9luCuBMFpEvNkMnmYfrtbrqfG8N3/l4JKiNnGuI2Kzj6LBnazcbflNKneY6qaEpR9i6NqYkLw==}
+  '@vercel/connect@2.9.3':
+    resolution: {integrity: sha512-YtYx964S3ZfEv+0Yu6yIQNh5VfOeq6JqJKRMnnuat01/vqf3Hp5/l9KTVkBDkOM4smzBAEgQgbtYiq4b48HTwQ==}
     peerDependencies:
       '@ai-sdk/mcp': ^1 || ^2
-      '@auth/core': '>=0.37.0'
+      '@auth/core': '>=0.41.3'
       '@chat-adapter/slack': ^4.0.0
+      '@modelcontextprotocol/sdk': ^1.29.0
       ai: ^6 || ^7.0.0-beta.0
       better-auth: '>=1.5.0'
-      eve: '>=0.13.7'
+      eve: '>=0.39.1 || >=1.0.0-0'
     peerDependenciesMeta:
       '@ai-sdk/mcp':
         optional: true
       '@auth/core':
         optional: true
       '@chat-adapter/slack':
+        optional: true
+      '@modelcontextprotocol/sdk':
         optional: true
       ai:
         optional: true
@@ -1203,8 +1206,8 @@ packages:
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
     engines: {node: '>= 20'}
 
-  '@vercel/oidc@3.8.8':
-    resolution: {integrity: sha512-aeq4/sgVh80zO6j2H+7FRfsG6NOXBrvzV1EEO8IdXPEJgwHIPakP+BFq3QmprsEQ18bIimds07kvaYhm2lehtg==}
+  '@vercel/oidc@4.0.9':
+    resolution: {integrity: sha512-LBNEPlKHv3ZAhOX2Dcj1hrxdmqYrdzxukGltouKbyjU8IeJvAFSuOHn5X0ZWg0qG2huANcgrHAb03giWeUyubQ==}
     engines: {node: '>= 20'}
 
   '@vitest/mocker@5.0.3':
@@ -1440,8 +1443,8 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
-  eve@1.0.0-rc.17:
-    resolution: {integrity: sha512-B06xjUcbDZ3c09GHorde8Ww1P7IijKXzwVaKv1ntk2PxTr804glczF6uQ6MLgHVyO/cNU6nN8lv5J6MHDCfcIg==}
+  eve@1.0.0:
+    resolution: {integrity: sha512-N4v0GYcJ/ClAtffQo8viUjBVR+F/FhaAQ/tfke4rC2mSyJueUczrT5GvQF3tiX+6Uq612O2n0IJUGpAwHr7OvQ==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -2465,9 +2468,9 @@ packages:
     resolution: {integrity: sha512-6OLRNZqRntVGBm26ghZ5eZhCuWWyOkRCSn8XsOIuq5stpCE/tjLbdozd93naILZig0lmD8ANfRwnhn0DLeXGlg==}
     engines: {node: '>=20'}
 
-  xdg-app-paths@5.5.1:
-    resolution: {integrity: sha512-hI3flOB4PLZIy5prbtTpirobtPE2ZtZ52szO+2mM9Efp6ErM398La+C1lIpNWDfNoQk+6Lsi6nMcCwVB7pxeMQ==}
-    engines: {node: '>= 6.0'}
+  xdg-app-paths@5.1.0:
+    resolution: {integrity: sha512-RAQ3WkPf4KTU1A8RtFx3gWywzVKe00tfOPFfl2NDGqbIFENQO4kqAJp7mhQjNj/33W5x5hiWWUdyfPq/5SU3QA==}
+    engines: {node: '>=6'}
 
   xdg-portable@7.3.0:
     resolution: {integrity: sha512-sqMMuL1rc0FmMBOzCpd0yuy9trqF2yTTVe+E9ogwCSWQCdDEtQUwrZPT6AxqtsFGRNxycgncbP/xmOOSPw5ZUw==}
@@ -2490,14 +2493,14 @@ packages:
     resolution: {integrity: sha512-xYqdZFUK/VYazNl/oCDYN+3WloWQwMfZxBoiNt6qNyk+xfOdi598muWE42rNZFp1kNOiqW936q5RhUdnpqElSg==}
     engines: {node: '>=18'}
 
-  zod@4.1.11:
-    resolution: {integrity: sha512-WPsqwxITS2tzx1bzhIKsEs19ABD5vmCVa4xBo2tq/SrV4RNZtfws1EnCWQXM6yh8bD08a1idvkB5MZSBiZsjwg==}
-
   zod@4.5.4:
     resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
   zod@4.6.5:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 ignoredOptionalDependencies:
   - '@mongodb-js/zstd'
@@ -3266,27 +3269,27 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vercel/cli-config@0.2.7':
+  '@vercel/cli-config@0.4.0':
     dependencies:
-      xdg-app-paths: 5.5.1
-      zod: 4.1.11
+      xdg-app-paths: 5.1.0
+      zod: 4.6.7
 
   '@vercel/cli-exec@1.0.1':
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@2.2.0(ai@7.0.137(zod@4.5.4))(eve@1.0.0-rc.17)':
+  '@vercel/connect@2.9.3(ai@7.0.137(zod@4.5.4))(eve@1.0.0)':
     dependencies:
-      '@vercel/oidc': 3.8.8
+      '@vercel/oidc': 4.0.9
     optionalDependencies:
       ai: 7.0.137(zod@4.5.4)
-      eve: 1.0.0-rc.17(@vercel/connect@2.2.0)(ai@7.0.137(zod@4.5.4))(just-bash@3.1.0)(vite@8.3.4(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
+      eve: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.137(zod@4.5.4))(just-bash@3.1.0)(vite@8.3.4(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
 
   '@vercel/oidc@3.2.0': {}
 
-  '@vercel/oidc@3.8.8':
+  '@vercel/oidc@4.0.9':
     dependencies:
-      '@vercel/cli-config': 0.2.7
+      '@vercel/cli-config': 0.4.0
       '@vercel/cli-exec': 1.0.1
       jose: 5.10.0
 
@@ -3526,14 +3529,14 @@ snapshots:
 
   esutils@2.0.3: {}
 
-  eve@1.0.0-rc.17(@vercel/connect@2.2.0)(ai@7.0.137(zod@4.5.4))(just-bash@3.1.0)(vite@8.3.4(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)):
+  eve@1.0.0(@vercel/connect@2.9.3)(ai@7.0.137(zod@4.5.4))(just-bash@3.1.0)(vite@8.3.4(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       ai: 7.0.137(zod@4.5.4)
       nitro: 3.0.261103-rc
       rolldown: 1.3.2
       undici: 8.12.4
     optionalDependencies:
-      '@vercel/connect': 2.2.0(ai@7.0.137(zod@4.5.4))(eve@1.0.0-rc.17)
+      '@vercel/connect': 2.9.3(ai@7.0.137(zod@4.5.4))(eve@1.0.0)
       just-bash: 3.1.0
       vite: 8.3.4(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)
 
@@ -4485,9 +4488,8 @@ snapshots:
       ansi-styles: 6.2.3
       string-width: 8.3.0
 
-  xdg-app-paths@5.5.1:
+  xdg-app-paths@5.1.0:
     dependencies:
-      os-paths: 4.4.0
       xdg-portable: 7.3.0
 
   xdg-portable@7.3.0:
@@ -4502,8 +4504,8 @@ snapshots:
 
   yoctocolors@2.2.0: {}
 
-  zod@4.1.11: {}
-
   zod@4.5.4: {}
 
   zod@4.6.5: {}
+
+  zod@4.6.7: {}

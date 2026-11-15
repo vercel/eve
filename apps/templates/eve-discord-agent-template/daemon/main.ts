@@ -1,7 +1,7 @@
 import { connectDiscordCredentials } from "@vercel/connect/eve";
-import { experimental_runDiscordGatewayRelay } from "eve/channels/discord/gateway";
+import { runDiscordGatewayRelay } from "eve/experimental/channels/discord/gateway";
 
-await experimental_runDiscordGatewayRelay({
+await runDiscordGatewayRelay({
   credentials: connectDiscordCredentials(
     process.env.DISCORD_CONNECTOR ?? "discord/eve-discord-agent-template",
   ),
