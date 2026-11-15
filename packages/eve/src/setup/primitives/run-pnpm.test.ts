@@ -361,4 +361,37 @@ describe("spawnPnpm", () => {
     await expect(result).resolves.toMatchObject({ termination: { kind: "aborted" } });
     child.emit("close", null);
   });
+
+  test("settles an aborted running child only once it closes", async () => {
+    const child = createMockChildProcess();
+    Object.defineProperty(child, "pid", { value: 4242 });
+    mockedSpawn.mockReturnValueOnce(child);
+    const controller = new AbortController();
+    let settled = false;
+
+    const result = spawnPnpm("/tmp/eve-agent", ["install"], { signal: controller.signal });
+    void result.then(() => {
+      settled = true;
+    });
+    controller.abort();
+    const error: NodeJS.ErrnoException = new Error("The operation was aborted");
+    error.name = "AbortError";
+    child.emit("error", error);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Cleanup after an abort must not race a package manager that is still writing files.
+    expect(settled).toBe(false);
+
+    child.emit("close", null, "SIGTERM");
+    await expect(result).resolves.toMatchObject({ termination: { kind: "aborted" } });
+  });
+
+  test("settles immediately when aborted before spawning", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      spawnPnpm("/tmp/eve-agent", ["install"], { signal: controller.signal }),
+    ).resolves.toMatchObject({ termination: { kind: "aborted" } });
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
 });

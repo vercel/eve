@@ -156,6 +156,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  process.exitCode = undefined;
 });
 
 describe("runInitCommand", () => {
@@ -346,6 +347,8 @@ describe("runInitCommand", () => {
         expect(screen.rawOutput()).not.toContain("\u001B[3J");
         expect(transcript.match(/☰eve v/gu) ?? []).toHaveLength(startsDevelopment ? 0 : 1);
         expect(deps.spawnPackageManager).toHaveBeenCalledTimes(startsDevelopment ? 1 : 0);
+        // Onboarding during the install opens only where eve dev would start.
+        expect(deps.startInitOnboarding).toHaveBeenCalledTimes(startsDevelopment ? 1 : 0);
       } finally {
         for (const [index, key] of properties.entries()) {
           const descriptor = original[index];
@@ -686,6 +689,8 @@ describe("runInitCommand", () => {
         projectRoot,
         expect.anything(),
       );
+      // An existing project already has its own setup; eve dev onboards it if needed.
+      expect(deps.startInitOnboarding).not.toHaveBeenCalled();
     },
   );
 
@@ -1700,25 +1705,68 @@ describe("runInitCommand", () => {
 
     expect(onboarding.close).toHaveBeenCalled();
     expect(await pathExists(projectPath)).toBe(false);
+    expect(output.messages).toContain(
+      `Cancelled. eve removed the incomplete project at "${projectPath}".`,
+    );
     expect(output.errors).toEqual([]);
+    // Like an interrupted CLI, so `eve init my-agent && cd my-agent` stops here.
+    expect(process.exitCode).toBe(130);
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
-  it("does not start eve dev when Ctrl-C interrupts onboarding after the install", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-interrupt-late-"));
+  it.each([
+    ["while Git sets up", "git"],
+    ["just as the install finishes", "install"],
+  ] as const)(
+    "keeps the project and stops before eve dev when Ctrl-C lands %s",
+    async (_name, when) => {
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-interrupt-late-"));
+      const projectPath = join(parentDirectory, "my-agent");
+      const output = logger();
+      const deps = dependencies();
+      const interrupt = new AbortController();
+      deps.startInitOnboarding.mockResolvedValue(
+        fakeOnboarding({ cancelled: true, interrupted: interrupt.signal }),
+      );
+      deps.runPackageManagerInstall.mockImplementation(async () => {
+        if (when === "install") interrupt.abort();
+        return packageInstallResult();
+      });
+      deps.tryInitializeGit.mockImplementation(async () => {
+        if (when === "git") interrupt.abort();
+        return { kind: "initialized" };
+      });
+
+      await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+      expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+      await expect(pathExists(join(projectPath, "agent", "agent.ts"))).resolves.toBe(true);
+      expect(output.messages.map(stripAnsi).join("\n")).toContain(
+        `Cancelled before starting eve dev. To start it: cd ${JSON.stringify(projectPath)} && pnpm exec eve dev`,
+      );
+      expect(process.exitCode).toBe(130);
+      expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    },
+  );
+
+  it("makes the initial commit once onboarding finishes", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-commit-"));
     const deps = dependencies();
-    const interrupt = new AbortController();
-    deps.startInitOnboarding.mockResolvedValue(
-      fakeOnboarding({ cancelled: true, interrupted: interrupt.signal }),
-    );
-    deps.tryInitializeGit.mockImplementation(async () => {
-      interrupt.abort();
-      return { kind: "initialized" };
+    const finished = Promise.withResolvers<{ cancelled: boolean }>();
+    deps.startInitOnboarding.mockResolvedValue({
+      ...fakeOnboarding(),
+      finished: finished.promise,
     });
 
-    await runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+    const run = runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+    await vi.waitFor(() => expect(deps.runPackageManagerInstall).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // A provider choice can still rewrite agent.ts, so the commit waits for it.
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    finished.resolve({ cancelled: false });
+    await run;
 
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).toHaveBeenCalledOnce();
   });
 
   it("falls back to onboarding in eve dev when init can't open it", async () => {

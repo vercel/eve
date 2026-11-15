@@ -439,17 +439,28 @@ async function runInitSteps(input: {
       installOptions,
     );
     const installElapsedMs = dependencies.now() - installStartedAt;
-    if (onboarding?.interrupted.aborted === true) {
+    // A Ctrl-C that lands after a finished install keeps the project; init stops before eve dev.
+    if (
+      onboarding?.interrupted.aborted === true &&
+      !packageManagerInstallSucceeded(installResult)
+    ) {
       progress.stop();
       await onboarding.close();
-      if (
-        project.failurePolicy !== "preserve" &&
-        !(await cleanupFreshInitTarget(
+      if (project.failurePolicy === "preserve") {
+        logger.log(`Cancelled. The incomplete project is still at "${project.projectPath}".`);
+      } else if (
+        await cleanupFreshInitTarget(
           project.projectPath,
           project.failurePolicy,
           project.preservedTargetEntries,
-        ))
+        )
       ) {
+        logger.log(
+          project.failurePolicy === "remove"
+            ? `Cancelled. eve removed the incomplete project at "${project.projectPath}".`
+            : `Cancelled. eve restored "${project.projectPath}" to its original state.`,
+        );
+      } else {
         logger.error(
           `eve could not completely clean "${project.projectPath}". Clean it manually before rerunning eve init.`,
         );
@@ -501,12 +512,14 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
+      onboarding?.setInstalling(false);
+      // Onboarding can still rewrite agent.ts; waiting keeps the initial commit deterministic.
+      await onboarding?.finished;
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
       progress.update("Initializing Git");
       initLog.debug("initializing git repository");
       const gitResult = await dependencies.tryInitializeGit(project.projectPath);
-      onboarding?.setInstalling(false);
       return {
         ...project,
         elapsedMs: dependencies.now() - startedAt,
@@ -597,8 +610,9 @@ export async function runInitCommand(
   } catch (error) {
     await onboarding?.close();
     if (error instanceof WizardCancelledError) {
-      // An interrupt during onboarding is tracked at the step it stopped.
-      if (onboarding?.interrupted.aborted !== true) trackTerminal?.("resolve_target", "cancelled");
+      // An interrupt during onboarding is tracked at the step it stopped, and exits like SIGINT.
+      if (onboarding?.interrupted.aborted === true) process.exitCode = 130;
+      else trackTerminal?.("resolve_target", "cancelled");
       return;
     }
     if (error instanceof InitTargetError) {
@@ -613,11 +627,8 @@ export async function runInitCommand(
   if (onboarding !== undefined) {
     onboardingCancelled = (await onboarding.finished).cancelled;
     carriedInput = await onboarding.close();
-    if (onboarding.interrupted.aborted) {
-      trackTerminal?.("handoff", "cancelled");
-      return;
-    }
   }
+  const interrupted = onboarding?.interrupted.aborted === true;
   if (result.kind === "created") {
     logger.log(
       `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
@@ -665,6 +676,15 @@ export async function runInitCommand(
 
   if (!startDevelopment) {
     logger.log(agentHandoff);
+    return;
+  }
+
+  if (interrupted) {
+    const location =
+      result.projectPath === parentDirectory ? "" : `cd ${JSON.stringify(result.projectPath)} && `;
+    logger.log(`Cancelled before starting eve dev. To start it: ${location}${agentDevCommand}`);
+    trackTerminal?.("handoff", "cancelled");
+    process.exitCode = 130;
     return;
   }
 
