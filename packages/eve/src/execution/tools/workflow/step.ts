@@ -8,6 +8,7 @@ import {
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
 import { ownerFieldsOf } from "#execution/agent-sessions/owner.js";
+import { signInHookToken } from "#execution/callback-hook-tokens.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import { signInInteractionId, signInRequest } from "#harness/interaction-facts.js";
 import { relayEvent } from "#channel/relay-event.js";
@@ -67,7 +68,9 @@ async function executeAuthorizedStep(
   const pending = new Map<string, IdentifiedAuthorizationChallenge>();
 
   for (;;) {
-    const callback = createHook<unknown>();
+    // Named so the callback route can tell it takes sign-ins. A body's `crypto` is seeded, which
+    // is enough here: a replay names the same hook, and the name is an address, not a credential.
+    const callback = createHook<unknown>({ token: signInHookToken(crypto.randomUUID()) });
     try {
       let result: WorkflowStepResult;
       try {

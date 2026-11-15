@@ -4,6 +4,7 @@ import {
   agentSessionsOver,
   type LocalAgentSessions,
 } from "#execution/agent-sessions/sessions-over.js";
+import { remoteReplyHookToken } from "#execution/callback-hook-tokens.js";
 import type {
   AgentSessionMessage,
   AgentSessionOpenInput,
@@ -95,6 +96,18 @@ export async function sendAgentSessionMessageStep(
   "use step";
 
   return await workflowAgentSessions.send(input);
+}
+
+/**
+ * Names the hook one message's reply arrives on from a remote agent. The name is all the agent
+ * presents with its reply. A workflow body's own `crypto` is seeded from its run's ids, so a
+ * name drawn there could be computed from them; a step draws from the real one, and its result
+ * replays as recorded.
+ */
+export async function createRemoteReplyTokenStep(): Promise<string> {
+  "use step";
+
+  return remoteReplyHookToken(crypto.randomUUID());
 }
 
 /** Cancels a session's running turn; the turn still reports, as cancelled. */

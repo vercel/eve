@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import type { Runtime } from "#channel/types.js";
@@ -16,7 +17,6 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
@@ -280,30 +280,16 @@ describe("stranded sessions", () => {
         // The successor names the session it replaced.
         const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
-        // A remote job can finish after replacement. Its fixed parent inbox
-        // must not route the result into the new conversation.
-        const callback = await handleSessionCallbackRequest(
-          new Request("https://eve.test/callback", {
-            method: "POST",
-            body: JSON.stringify({
-              kind: "turn.completed",
-              callId: "old-call",
-              subagentName: "research",
-              outcome: {
-                kind: "parked",
-                result: { kind: "succeeded", output: "Alice's report" },
-                usageDelta: {
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  cacheReadTokens: 0,
-                  cacheWriteTokens: 0,
-                },
-              },
-              output: "Alice's report",
-            }),
-          }),
+        // A sign-in can finish after replacement. The replaced session's fixed inbox must not
+        // route its callback into the new conversation.
+        const callback = await handleConnectionCallbackRequest(
+          new Request("https://eve.test/callback?code=late"),
           {
-            params: { token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)) },
+            params: {
+              attemptId: "old-attempt",
+              name: "linear",
+              token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+            },
             requestIp: null,
             waitUntil() {},
           },
