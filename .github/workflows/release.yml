@@ -228,8 +228,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Prereleases publish to npm's `latest` tag but stay GitHub prereleases,
-      # which GitHub cannot mark as the latest release.
+      # Prereleases publish under their npm dist-tag and stay GitHub prereleases.
       - name: Mark eve as the latest GitHub release
         if: steps.changesets.outputs.published == 'true'
         env:
@@ -243,8 +242,9 @@ jobs:
 
       # `latest` serves authors who reference an image directly; eve pins its
       # own tags. The tags come from the published eve package, not this
-      # commit, so `latest` never points at an unreleased image. Every main run
-      # converges, so a failed move heals on the next push.
+      # commit, so `latest` never points at an unreleased image. A prerelease
+      # leaves it on npm's `latest` release. Every main run converges, so a
+      # failed move heals on the next push.
       - name: Point latest sandbox image tags at the released eve images
         if: github.ref == 'refs/heads/main'
         timeout-minutes: 20
@@ -253,7 +253,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          version="$(jq -r '.[]? | select(.name == "eve") | .version' <<<"${PUBLISHED_PACKAGES:-[]}")"
+          version="$(jq -r '.[]? | select(.name == "eve" and (.version | contains("-") | not)) | .version' <<<"${PUBLISHED_PACKAGES:-[]}")"
           if [[ -z "$version" ]]; then
             version="$(npm view --prefer-online eve version)"
           fi

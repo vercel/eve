@@ -2,7 +2,7 @@
 
 An [eve](https://eve.dev) extension that gives your agent 42 browser automation tools backed by [agent-browser](https://agent-browser.dev), running inside the agent's sandbox. Tools cover navigation, accessibility snapshots with element refs, form interaction, screenshots, JavaScript evaluation, tabs, and network and console inspection.
 
-This package ports [`@agent-browser/eve`](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) into the eve workspace. It targets agent-browser 0.41.2 and requires eve 1.0.0-rc.1 or later.
+This package ports [`@agent-browser/eve`](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) into the eve workspace. It targets agent-browser 0.41.2 and requires eve 1.0 or later.
 
 ## Install and mount
 

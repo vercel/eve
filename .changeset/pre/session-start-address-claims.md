@@ -8,6 +8,6 @@ Previously, two unkeyed first messages to the same new address could each get a 
 
 eve now requires a Workflow world with atomic start hooks: the local world, Vercel Workflow, or `@workflow/world-postgres` 5.1.1 or later. On another world, starting a session fails with an error that names the requirement. Upgrade `@workflow/world-postgres` and run its `bootstrap` command before deploying this release.
 
-A session can no longer move to this release from an owner on eve before 0.83, which released its addresses before handing off. Finish or end those sessions before upgrading.
+A session can no longer move to this release from a deployment on eve 0.81.0 or earlier, which released its addresses before handing off. Finish or end those sessions before upgrading.
 
 `useEveAgent` and the other framework bindings now send `end()`, `clear()`, and `compact()` called while the store is still creating its session to that session, instead of throwing `SessionNotActiveError`.
