@@ -14,6 +14,8 @@ import { promisify } from "node:util";
 //
 // The repository's templates also import a few internals straight from `node_modules/eve/dist`,
 // mostly in tests. Those files are extra roots, so a template still typechecks after upgrading.
+// Turbo doesn't hash the templates for this build, but `prepack` reruns the prune, so a cached
+// build can't change what gets published.
 //
 // Usage: node scripts/prune-declarations.mjs <staged-package-dir>
 const RESOLUTIONS = [
