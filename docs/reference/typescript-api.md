@@ -32,7 +32,7 @@ export default defineTool({
 
 ## Integration dependencies
 
-Install the packages for each integration entry you import. Most are optional peers of eve, so other entries don't need them. `@vercel/connect` isn't a peer of eve, so your package manager won't warn about an older version; projects created by `eve init` already pin a supported one.
+Install the packages for each integration entry you import. Most are optional peers of eve, so other entries don't need them. eve declares those without version ranges, and `@vercel/connect` isn't a peer at all, so your package manager won't check the versions below; install a supported one. Projects created by `eve init` already pin a supported `@vercel/connect`.
 
 | Entry                                                         | Required integration packages                         |
 | ------------------------------------------------------------- | ----------------------------------------------------- |
@@ -40,12 +40,15 @@ Install the packages for each integration entry you import. Most are optional pe
 | `eve/vue`                                                     | `vue` 3.5 or later in v3                              |
 | `eve/svelte`                                                  | `svelte` 5                                            |
 | `eve/next`                                                    | `next` 16 and `react` 19                              |
-| `eve/sveltekit`, `eve/tanstack`                               | `vite` 8.3.1 or later in v8                           |
+| `eve/sveltekit`, `eve/tanstack`                               | `vite` 8.3.3 or later in v8                           |
 | `eve/nuxt`                                                    | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
 | Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
 | `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
 | `eve/sandbox/just-bash`, `eve/experimental/sandbox/just-bash` | `just-bash` 3.6 or later in v3                        |
 | `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.7.0 or later in v2                |
+| `braintrustReporter` from `eve/evals/reporters`               | `braintrust` 3                                        |
+| `datadogReporter` from `eve/evals/reporters`                  | `dd-trace` 6.20.1 or later in v6                      |
+| Your own OpenTelemetry instrumentation alongside eve tracing  | `@opentelemetry/api` 1                                |
 
 Connections with `experimental.events` require a static Connect auth provider with its events bridge.
 SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
