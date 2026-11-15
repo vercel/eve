@@ -123,13 +123,14 @@ function dependencies(
 }
 
 function fakeOnboarding(
-  overrides: Partial<{ cancelled: boolean; carriedInput: string }> = {},
+  overrides: Partial<{ cancelled: boolean; carriedInput: string; interrupted: AbortSignal }> = {},
 ): InitOnboarding & {
   close: ReturnType<typeof vi.fn<InitOnboarding["close"]>>;
   setInstalling: ReturnType<typeof vi.fn<InitOnboarding["setInstalling"]>>;
 } {
   return {
     finished: Promise.resolve({ cancelled: overrides.cancelled === true }),
+    interrupted: overrides.interrupted ?? new AbortController().signal,
     setInstalling: vi.fn<InitOnboarding["setInstalling"]>(),
     close: vi.fn<InitOnboarding["close"]>(async () => overrides.carriedInput),
   };
@@ -1664,6 +1665,48 @@ describe("runInitCommand", () => {
 
     expect(errorsWhenClosed).toBe(0);
     expect(output.errors).toContain("npm error registry unavailable");
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("stops the install and removes the project when Ctrl-C interrupts onboarding", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-interrupt-"));
+    const projectPath = join(parentDirectory, "my-agent");
+    const output = logger();
+    const deps = dependencies();
+    const interrupt = new AbortController();
+    const onboarding = fakeOnboarding({ cancelled: true, interrupted: interrupt.signal });
+    deps.startInitOnboarding.mockResolvedValue(onboarding);
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _path, options) => {
+      expect(options?.signal).toBe(interrupt.signal);
+      interrupt.abort();
+      return {
+        kind: "installed",
+        result: { ...packageProcessResult(), termination: { kind: "aborted" } },
+      };
+    });
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(onboarding.close).toHaveBeenCalled();
+    expect(await pathExists(projectPath)).toBe(false);
+    expect(output.errors).toEqual([]);
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("does not start eve dev when Ctrl-C interrupts onboarding after the install", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-interrupt-late-"));
+    const deps = dependencies();
+    const interrupt = new AbortController();
+    deps.startInitOnboarding.mockResolvedValue(
+      fakeOnboarding({ cancelled: true, interrupted: interrupt.signal }),
+    );
+    deps.tryInitializeGit.mockImplementation(async () => {
+      interrupt.abort();
+      return { kind: "initialized" };
+    });
+
+    await runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 

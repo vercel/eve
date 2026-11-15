@@ -4,6 +4,12 @@ import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/teleme
 export interface InitOnboarding {
   /** Resolves when the person finishes or cancels onboarding. */
   readonly finished: Promise<{ readonly cancelled: boolean }>;
+  /**
+   * Aborts when the person presses Ctrl-C on the onboarding screen. The
+   * renderer holds the terminal in raw mode, so no SIGINT reaches init or its
+   * install; init stops both through this signal instead.
+   */
+  readonly interrupted: AbortSignal;
   /** Shows whether init is still installing once onboarding no longer owns the status line. */
   setInstalling(installing: boolean): void;
   /**
@@ -34,11 +40,15 @@ export async function startInitOnboarding(input: {
       import("#cli/dev/tui/startup-onboarding.js"),
       import("#cli/dev/ui-options.js"),
     ]);
+  const interrupt = new AbortController();
+  let closing = false;
   const startup = await startDevelopmentTuiStartup({
     ...resolveTuiDisplayOptions({}),
     appRoot: input.projectPath,
-    // The renderer owns raw input, so Ctrl-C arrives as a key; keep init's usual interrupt.
-    onExitRequest: () => process.kill(process.pid, "SIGINT"),
+    // `close()` cancels onboarding with a synthetic Ctrl-C; only a real one interrupts init.
+    onExitRequest: () => {
+      if (!closing) interrupt.abort();
+    },
   });
   const { renderer } = startup;
   let installing = true;
@@ -48,12 +58,30 @@ export async function startInitOnboarding(input: {
     startup,
     workspaceRoot: input.projectPath,
     agentRoot: undefined,
+    signal: interrupt.signal,
     withExclusiveTerminal: (task) => task(),
     onOnboardingStep: telemetry && ((event) => telemetry.trackSetupStep(event)),
-    onOnboardingTerminal: telemetry && ((event) => telemetry.trackSetupTerminal(event)),
   }).then(
-    ({ outcome }) => ({ cancelled: outcome?.cancelled === true || outcome?.failed === true }),
-    () => ({ cancelled: true }),
+    ({ outcome }) => {
+      // Nothing settles after init: `eve dev` starts later and reads the saved connection.
+      const result = outcome?.cancelled
+        ? "cancelled"
+        : outcome?.failed === true
+          ? "error"
+          : "completed";
+      if (result === "completed")
+        telemetry?.trackSetupStep({ flow: "onboarding", step: "connection_ready" });
+      telemetry?.trackSetupTerminal({ flow: "onboarding", step: "model_provider", result });
+      return { cancelled: result !== "completed" };
+    },
+    () => {
+      telemetry?.trackSetupTerminal({
+        flow: "onboarding",
+        step: "model_provider",
+        result: "error",
+      });
+      return { cancelled: true };
+    },
   );
   // Onboarding opens on "Reading saved connection…"; the install is what's actually running.
   renderer.setStartupPhase("installing");
@@ -65,12 +93,14 @@ export async function startInitOnboarding(input: {
   let closed: Promise<string | undefined> | undefined;
   return {
     finished,
+    interrupted: interrupt.signal,
     setInstalling(next) {
       installing = next;
       renderer.setStartupPhase(next ? "installing" : "starting");
     },
     close() {
       closed ??= (async () => {
+        closing = true;
         if (onboarding) {
           renderer.requestInterrupt();
           await finished;

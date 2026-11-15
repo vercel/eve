@@ -29,6 +29,7 @@ import {
   resultSucceeded,
   runPackageManagerInstall,
   spawnPackageManager,
+  type RunInstallOptions,
 } from "#setup/primitives/index.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
@@ -417,20 +418,34 @@ async function runInitSteps(input: {
     initLog.debug(`installing dependencies with ${project.packageManager}`);
     const installStartedAt = dependencies.now();
     const diagnostics = createInstallDiagnostics();
+    const installOptions: RunInstallOptions = {
+      autoApprove: true,
+      bypassMinimumReleaseAge: true,
+      progressDetails: false,
+      onOutput: (line) => {
+        diagnostics.append(line.text);
+        if (debug) initLog.debug(line.text);
+      },
+    };
+    if (onboarding !== undefined) installOptions.signal = onboarding.interrupted;
     const installResult = await dependencies.runPackageManagerInstall(
       project.packageManager,
       project.projectPath,
-      {
-        autoApprove: true,
-        bypassMinimumReleaseAge: true,
-        progressDetails: false,
-        onOutput: (line) => {
-          diagnostics.append(line.text);
-          if (debug) initLog.debug(line.text);
-        },
-      },
+      installOptions,
     );
     const installElapsedMs = dependencies.now() - installStartedAt;
+    if (onboarding?.interrupted.aborted === true) {
+      progress.stop();
+      await onboarding.close();
+      if (project.failurePolicy !== "preserve") {
+        await cleanupFreshInitTarget(
+          project.projectPath,
+          project.failurePolicy,
+          project.preservedTargetEntries,
+        );
+      }
+      throw new WizardCancelledError();
+    }
     if (!packageManagerInstallSucceeded(installResult)) {
       installFailureCode = packageManagerInstallFailureCode(installResult);
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
@@ -496,6 +511,10 @@ async function runInitSteps(input: {
       agentLaunched,
     };
   } catch (error) {
+    if (onboarding?.interrupted.aborted === true) {
+      trackTerminal?.(activeInitStep, "cancelled");
+      throw error;
+    }
     trackTerminal?.(
       activeInitStep,
       "error",
@@ -565,7 +584,8 @@ export async function runInitCommand(
   } catch (error) {
     await onboarding?.close();
     if (error instanceof WizardCancelledError) {
-      trackTerminal?.("resolve_target", "cancelled");
+      // An interrupt during onboarding is tracked at the step it stopped.
+      if (onboarding?.interrupted.aborted !== true) trackTerminal?.("resolve_target", "cancelled");
       return;
     }
     if (error instanceof InitTargetError) {
@@ -580,6 +600,10 @@ export async function runInitCommand(
   if (onboarding !== undefined) {
     onboardingCancelled = (await onboarding.finished).cancelled;
     carriedInput = await onboarding.close();
+    if (onboarding.interrupted.aborted) {
+      trackTerminal?.("handoff", "cancelled");
+      return;
+    }
   }
   if (result.kind === "created") {
     logger.log(
