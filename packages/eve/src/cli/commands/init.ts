@@ -404,6 +404,10 @@ async function runInitSteps(input: {
         autoApprove: true,
         bypassMinimumReleaseAge: true,
         progressDetails: false,
+        skipPeerDependencyResolution:
+          project.kind === "created" &&
+          !project.workspaceMember &&
+          project.workspaceRootMutations.length === 0,
         onOutput: (line) => {
           diagnostics.append(line.text);
           if (debug) initLog.debug(line.text);

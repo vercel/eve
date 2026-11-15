@@ -32,6 +32,14 @@ export interface PackageManagerInstallOptions {
   readonly ignoreWorkspace?: boolean;
   /** Requests verbose package-manager output for a live progress display. */
   readonly progressDetails?: boolean;
+  /**
+   * Skips npm's peer dependency resolution, which downloads the metadata of
+   * every optional peer in the tree even though none are installed. Only safe
+   * for a fresh standalone scaffold that lists each required peer directly.
+   * npm 11.20 stops fetching optional peers it won't install (npm/cli#9903), so
+   * this can go once every supported Node.js LTS ships npm 11.20 or later.
+   */
+  readonly skipPeerDependencyResolution?: boolean;
 }
 
 /**
