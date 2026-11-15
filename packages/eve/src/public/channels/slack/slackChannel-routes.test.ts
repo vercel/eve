@@ -2,11 +2,16 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createChannelOperations,
+  type ChannelReceiveContext,
+} from "#channel/channel-operations.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { Card, CardText } from "#public/channels/slack/cards.js";
 import type { SlackPostInput } from "#public/channels/slack/api.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import type { Runtime } from "#channel/types.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,
@@ -119,16 +124,27 @@ async function firePost(
   send: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ id: "s1" }),
   resolveSession: () => Promise<unknown> = () => Promise.resolve({ id: "s1" }),
 ): Promise<void> {
+  await postWith(channel, request, {
+    from: mockChannelContext<SlackChannelState>(
+      send as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
+    ).from,
+    resolveSession: resolveSession as never,
+  });
+}
+
+/** Like {@link firePost}, with the channel operations the webhook delivers through. */
+async function postWith(
+  channel: unknown,
+  request: Request,
+  operations: ChannelReceiveContext<SlackChannelState>,
+): Promise<void> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
   const post = channel.routes.find((route) => route.method === "POST");
   if (!post || !isHttpRouteDefinition(post)) throw new Error("Expected a POST route.");
   const waitUntil = vi.fn();
   await post.handler(request, {
     ...mockAgentRouteArgs(),
-    from: mockChannelContext<SlackChannelState>(
-      send as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
-    ).from,
-    resolveSession: resolveSession as never,
+    ...operations,
     waitUntil,
     attachSession: vi.fn() as never,
     to: vi.fn() as never,
@@ -442,6 +458,39 @@ describe("slackChannel messageContext.users", () => {
     expect(turn).toContain("id: U01\\ndisplay_name: alice\\nreal_name: Alice Doe\\n</sender>");
     expect(turn).not.toContain("alice@example.com");
     expect(input.auth?.attributes).toMatchObject({ full_name: "Alice Doe" });
+  });
+
+  it("starts the session of a mention that starts its thread without looking for one", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const runtime: Runtime = {
+      createSession: vi.fn().mockResolvedValue({ events: new ReadableStream(), sessionId: "s1" }),
+      dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" }),
+      dispatchSession: vi.fn(),
+      getEventStream: vi.fn(),
+      getLineStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
+      resolveContinuation: vi.fn(),
+    };
+    // The real operations, so a layer that drops the mark between the webhook and the runtime fails.
+    const operations = createChannelOperations<SlackChannelState>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+    const thread = { continuationToken: "slack:C01:1700000000.000001" };
+
+    await postWith(channel, mention({ ts: "1700000000.000001" }), operations);
+    expect(runtime.createSession).toHaveBeenCalledWith(expect.objectContaining(thread));
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+
+    // A reply's thread may have a session already, so the send looks for it first.
+    await postWith(
+      channel,
+      mention({ ts: "1700000000.000002", threadTs: "1700000000.000001" }),
+      operations,
+    );
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(expect.objectContaining(thread));
+    expect(runtime.createSession).toHaveBeenCalledOnce();
   });
 
   it("uses an authored resolve instead of the built-in users.info cache", async () => {
