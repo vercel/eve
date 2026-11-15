@@ -413,15 +413,12 @@ async function runInitSteps(input: {
           if (debug) initLog.debug(line.text);
         },
       })
-      .catch(async (error: unknown) => {
-        // Don't leave Git running in the background behind an unexpected install error.
-        await git?.settled();
-        throw error;
-      });
+      // A failed project is removed next, so Git must not still be running in it. On success
+      // this costs nothing: the commit waits for the same setup.
+      .finally(() => git?.settled());
     const installElapsedMs = dependencies.now() - installStartedAt;
     if (!packageManagerInstallSucceeded(installResult)) {
       installFailureCode = packageManagerInstallFailureCode(installResult);
-      await git?.settled();
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
       progress.stop();
       const { lines: failureOutput, truncated } = diagnostics.result();

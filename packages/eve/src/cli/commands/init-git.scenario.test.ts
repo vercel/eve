@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -70,6 +70,20 @@ describe("startGitInitialization", () => {
         "pnpm-lock.yaml",
       ]);
     });
+  });
+
+  it("lets a failed project be removed once setup settles", async () => {
+    const projectPath = await createScratchDirectory("eve-init-git-settled-");
+    await writeFile(join(projectPath, "package.json"), "{}\n");
+
+    await withGitIdentity(async () => {
+      const git = startGitInitialization(projectPath);
+      await git.settled();
+      // Windows can't remove a directory that a running Git process uses as its working directory.
+      await rm(projectPath, { recursive: true });
+    });
+
+    await expect(pathExists(projectPath)).resolves.toBe(false);
   });
 });
 

@@ -1,9 +1,8 @@
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MockScreen, MockUserInput } from "#cli/dev/tui/test/mock-terminal.js";
 import { TerminalRenderer } from "#cli/dev/tui/terminal-renderer.js";
@@ -30,7 +29,7 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { startGitInitialization, type GitInitialization, type GitInitResult } from "./init-git.js";
+import type { GitInitialization, GitInitResult } from "./init-git.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -1577,40 +1576,29 @@ describe("runInitCommand", () => {
     const projectPath = join(parentDirectory, "my-agent");
     const output = logger();
     const deps = dependencies();
-    // Real Git, still running when the install fails. Windows can't remove a directory that a
+    // Git is still setting up when the install fails. Windows can't remove a directory that a
     // running process uses as its working directory, so cleanup has to wait for Git.
-    let git:
-      | { commit: Mock<GitInitialization["commit"]>; settled: Mock<GitInitialization["settled"]> }
-      | undefined;
-    let projectExistedWhenGitSettled: boolean | undefined;
-    deps.startGitInitialization.mockImplementation((path) => {
-      const real = startGitInitialization(path);
-      git = {
-        commit: vi.fn(real.commit),
-        settled: vi.fn(async () => {
-          await real.settled();
-          projectExistedWhenGitSettled = await pathExists(path);
-        }),
-      };
-      return git;
-    });
-    deps.runPackageManagerInstall.mockImplementation(async (_kind, installPath, options) => {
-      await vi.waitFor(() => expect(existsSync(join(installPath, ".git"))).toBe(true), {
-        timeout: 10_000,
-      });
+    const gitSetup = Promise.withResolvers<void>();
+    const commit = vi.fn<GitInitialization["commit"]>(async () => ({ kind: "initialized" }));
+    const settled = vi.fn<GitInitialization["settled"]>(() => gitSetup.promise);
+    deps.startGitInitialization.mockImplementation(() => ({ commit, settled }));
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
       options?.onOutput?.({ stream: "stdout", text: "Packages: +12" });
       options?.onOutput?.({ stream: "stderr", text: "ERR_PNPM_FETCH_404 not found" });
       return packageInstallResult(1);
     });
 
-    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
-      "Failed to install dependencies",
-    );
+    const run = runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+    const failed = expect(run).rejects.toThrow("Failed to install dependencies");
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(pathExists(projectPath)).resolves.toBe(true);
+    gitSetup.resolve();
+    await failed;
 
     await expect(pathExists(projectPath)).resolves.toBe(false);
-    expect(git?.commit).not.toHaveBeenCalled();
-    expect(git?.settled).toHaveBeenCalledTimes(1);
-    expect(projectExistedWhenGitSettled).toBe(true);
+    expect(commit).not.toHaveBeenCalled();
+    expect(settled).toHaveBeenCalledOnce();
     expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
