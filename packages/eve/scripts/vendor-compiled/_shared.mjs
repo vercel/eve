@@ -952,21 +952,12 @@ function collectSharedSpecifiers(preparedModules) {
  * an ESM bundle cannot leave external.
  */
 function createRuntimeDependencyPlugin(packageRoot) {
-  const manifestPath = join(packageRoot, "package.json");
-  const dependencies = existsSync(manifestPath)
-    ? Object.keys(JSON.parse(readFileSync(manifestPath, "utf8")).dependencies ?? {})
-    : [];
-  const requireFromEve = createRequire(manifestPath);
-  const installs = new Map(
-    dependencies.map((name) => [
-      name,
-      realpathSync(dirname(requireFromEve.resolve(`${name}/package.json`))),
-    ]),
-  );
+  const installs = resolveInstalls(runtimeDependencyNames(packageRoot), packageRoot);
   return {
     name: "eve:vendored-runtime-dependencies",
     async resolveId(source, importer, options) {
-      const install = installs.get(packageNameOf(source));
+      // Only bare package names: rolldown accepts deep paths Node's ESM loader rejects.
+      const install = installs.get(source);
       if (install === undefined || options.kind === "require-call") return null;
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (resolved === null || resolved.external || !isInsideDirectory(resolved.id, install)) {
@@ -975,6 +966,39 @@ function createRuntimeDependencyPlugin(packageRoot) {
       return { id: source, external: true };
     },
   };
+}
+
+function runtimeDependencyNames(packageRoot) {
+  const manifestPath = join(packageRoot, "package.json");
+  return existsSync(manifestPath)
+    ? Object.keys(JSON.parse(readFileSync(manifestPath, "utf8")).dependencies ?? {})
+    : [];
+}
+
+/** Maps each package name to the install directory it resolves to from `fromDir`. */
+function resolveInstalls(names, fromDir) {
+  const resolveFrom = createRequire(join(fromDir, "package.json"));
+  const installs = new Map();
+  for (const name of names) {
+    let dir;
+    try {
+      dir = dirname(resolveFrom.resolve(name));
+    } catch {
+      continue; // Not resolvable with `require` conditions: leave it bundled.
+    }
+    // Walk up rather than resolving `<name>/package.json`, which `exports` may hide.
+    for (; dir !== parse(dir).root; dir = dirname(dir)) {
+      const manifestPath = join(dir, "package.json");
+      if (
+        existsSync(manifestPath) &&
+        JSON.parse(readFileSync(manifestPath, "utf8")).name === name
+      ) {
+        installs.set(name, realpathSync(dir));
+        break;
+      }
+    }
+  }
+  return installs;
 }
 
 const SHARED_FACADE_PREFIX = "\0eve-shared-facade:";
@@ -1092,6 +1116,12 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     scriptHash.update("\0");
   }
 
+  // Which runtime dependencies a bundle imports instead of bundling depends on whether the
+  // vendored package resolves them to eve's install, which a lockfile change alone can alter.
+  const runtimeDependencies = runtimeDependencyNames(packageRoot);
+  const eveInstalls = resolveInstalls(runtimeDependencies, packageRoot);
+  const sharedRuntimeDependencies = [];
+
   const moduleFingerprints = {};
   const moduleVersions = {};
   for (const module of modules) {
@@ -1101,6 +1131,11 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
       module.packageJsonName,
     );
     moduleVersions[module.packageName] = packageInfo.packageJson.version ?? "0.0.0";
+    for (const [name, install] of resolveInstalls(runtimeDependencies, packageInfo.packageRoot)) {
+      if (eveInstalls.get(name) === install) {
+        sharedRuntimeDependencies.push(`${module.packageName}>${name}`);
+      }
+    }
 
     if (module.fingerprintFiles !== undefined) {
       const moduleHash = createHash("sha256");
@@ -1115,16 +1150,10 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     }
   }
 
-  // Which runtime dependencies a bundle imports instead of bundling depends on their versions.
-  const manifestPath = join(packageRoot, "package.json");
-  const runtimeDependencies = existsSync(manifestPath)
-    ? (JSON.parse(await readFile(manifestPath, "utf8")).dependencies ?? {})
-    : {};
-
   return {
     moduleFingerprints,
     moduleVersions,
-    runtimeDependencies,
+    sharedRuntimeDependencies,
     scriptHash: scriptHash.digest("hex"),
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
