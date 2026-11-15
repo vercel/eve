@@ -143,7 +143,6 @@ const boundedSessionTermination = patchMcpSourcePlugin("bounded-session-terminat
 export default {
   packageName: "@ai-sdk/mcp",
   compiledPath: "@ai-sdk/mcp",
-  chunkGroup: "workflow",
   plugins: [supportedProtocolVersionFallback, singleInboundSseStream, boundedSessionTermination],
   copyDeclarations: createDeclarationCopier({
     rewrites: {
