@@ -162,7 +162,7 @@ describe("a dynamic remote agent's child", () => {
   it("sends a remote agent no reply token that names a local agent's reply hook", async () => {
     await expect(
       send(contextSelecting("acme"), addressOpenedFor("acme"), "reply-1"),
-    ).rejects.toThrow("Refused to call remote agent");
+    ).rejects.toThrow("can't take a remote agent's reply");
     expect(continueRemoteAgentSession).not.toHaveBeenCalled();
   });
 

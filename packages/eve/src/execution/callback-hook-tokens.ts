@@ -1,14 +1,15 @@
-import { logicalSessionInboxToken } from "#execution/session-inbox/address.js";
+import {
+  isSessionCommandHookToken,
+  logicalSessionInboxToken,
+} from "#execution/session-inbox/address.js";
 
 // The hooks eve's two unauthenticated callback routes resume. Each route takes a hook token from
-// its URL, so the token's shape is all that says the hook was opened for that route. No hook eve
-// opens for anything else has these shapes. Authored code is told to keep `createHook()` tokens
-// out of the `eve:` prefix (docs/tools/workflows.mdx); nothing enforces that.
+// its URL, so the token's shape is all that says the route may deliver to the hook. Authored code
+// is told to keep `createHook()` tokens out of the `eve:` prefix (docs/tools/workflows.mdx);
+// nothing enforces that.
 
 const REMOTE_REPLY_PREFIX = "eve:reply:v1:";
 const SIGN_IN_PREFIX = "eve:sign-in:v1:";
-/** The logical token of a session's stable inbox, as `sessionCommandHookToken` names it. */
-const SESSION_INBOX = /^eve:session:[^:]+:inbox$/;
 
 /**
  * Names the hook a remote agent's reply arrives on. The agent holds nothing else that says a
@@ -32,10 +33,11 @@ export function signInHookToken(id: string): string {
 }
 
 /**
- * Whether `token` names a hook that takes sign-in callbacks: a session's stable inbox, which
- * `authHookToken` names, or a run's own sign-in hook.
+ * Whether `token` names a hook that takes sign-in callbacks: a run's own sign-in hook, or a
+ * session's stable inbox, which `authHookToken` names. That inbox takes every command for its
+ * session; the callback route sends it nothing but a sign-in callback.
  */
 export function isSignInCallbackToken(token: string): boolean {
   const inbox = logicalSessionInboxToken(token);
-  return inbox === undefined ? token.startsWith(SIGN_IN_PREFIX) : SESSION_INBOX.test(inbox);
+  return inbox === undefined ? token.startsWith(SIGN_IN_PREFIX) : isSessionCommandHookToken(inbox);
 }

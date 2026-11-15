@@ -114,12 +114,14 @@ export async function sendRemoteSessionMessage(
 /**
  * The token `name`, a remote agent, replies with. Its reply reaches eve's callback route with
  * nothing else to vouch for it, so the agent is never handed a token that route refuses: one a
- * run named for a local agent's reply, which anyone who knew the run's ids could compute.
+ * run named for a local agent's reply, which anyone who knew the run's ids could compute. A call
+ * holds such a token when its context didn't list the agent as remote, as when `eve dev` reloads
+ * the agent as a remote one after the call started.
  */
 function remoteReplyToken(replyTo: string, name: string): string {
   if (isRemoteReplyHookToken(replyTo)) return replyTo;
   throw new NonRetryableError(
-    `Refused to call remote agent "${name}": eve opened this message's reply hook as a local agent's, without a callback token. This is a bug in eve.`,
+    `Agent "${name}" is remote, but this call's context doesn't list it as remote, so its reply hook can't take a remote agent's reply. Start the call again.`,
   );
 }
 

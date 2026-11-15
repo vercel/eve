@@ -1,5 +1,4 @@
 import { createHook, FatalError, RetryableError } from "#compiled/@workflow/core/index.js";
-import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 
 export async function hookRegistrationWorkflow(token: string, hold = false) {
   "use workflow";
@@ -20,18 +19,6 @@ export async function hookRegistrationWorkflow(token: string, hold = false) {
     }
   }
   return { owner: null, payload: hold ? await hook : undefined };
-}
-
-/** Opens a remote reply hook as a workflow tool run does: its first payload, and its token. */
-export async function remoteReplyWorkflow() {
-  "use workflow";
-
-  const reply = await workflowRunHost.createRemoteReplyHook<unknown>();
-  try {
-    for await (const payload of reply) return { payload, token: reply.token };
-  } finally {
-    await reply.dispose();
-  }
 }
 
 async function failStep(kind: "fatal" | "retryable") {

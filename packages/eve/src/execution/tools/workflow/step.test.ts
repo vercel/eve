@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, it, vi } from "vitest";
+import { isSignInCallbackToken } from "#execution/callback-hook-tokens.js";
 import { attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { WorkflowStepInvocation } from "#execution/tools/workflow/step-context.js";
 import { workflowToolStep } from "#execution/tools/workflow/step.js";
@@ -65,5 +66,5 @@ it("gives a step a sign-in hook under a token the connection callback route deli
   await expect(step("api", ctx)).resolves.toBe("deployed");
 
   // The step puts this token in each sign-in's callback URL.
-  expect(execute.mock.calls[0]?.[0].context.token).toMatch(/^eve:sign-in:v1:[0-9a-f-]{36}$/);
+  expect(isSignInCallbackToken(execute.mock.calls[0]?.[0].context.token ?? "")).toBe(true);
 });

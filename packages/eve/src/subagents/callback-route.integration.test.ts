@@ -1,7 +1,7 @@
 // @linux-only: a remote reply hook on Workflow, behind the callback route
 import { expect, it } from "vitest";
 
-import { remoteReplyWorkflow } from "#internal/testing/workflow-api-workflows.js";
+import { remoteReplyWorkflow } from "#internal/testing/remote-reply-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";

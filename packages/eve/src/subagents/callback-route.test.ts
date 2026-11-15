@@ -197,10 +197,16 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     ["a hook authored code named", "order:1042"],
     // A remote agent's result never lands in a session's inbox.
     ["a session's inbox", "eve:inbox:v1:eve:session:wrun_1:inbox"],
-  ])("answers not pending for %s, without resuming it", async (_, token) => {
-    const response = await post(approvalRequest, AGREED, token);
+  ])("answers not pending for %s, without reading the request or resuming it", async (_, token) => {
+    const request = new Request(AGREED, { body: JSON.stringify(approvalRequest), method: "POST" });
+    const response = await handleSessionCallbackRequest(request, {
+      params: { token },
+      requestIp: null,
+      waitUntil: () => {},
+    });
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({ code: "CALLBACK_NOT_PENDING" });
+    expect(request.bodyUsed).toBe(false);
     expect(resumeRunnableHook).not.toHaveBeenCalled();
   });
 

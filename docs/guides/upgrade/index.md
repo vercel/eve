@@ -56,12 +56,12 @@ Two kinds of session stay on the old deployment:
 - A session with a background task that is still working, or whose results the model hasn't read yet, stays until that clears.
 - A session on a deployment that runs eve 0.81.0 or earlier never moves. Finish or end those sessions before you upgrade.
 
-A session that stays on the old deployment can still wait on a callback that arrives at the new one. On Vercel, a production callback reaches the newest deployment, which refuses two kinds of callback for work that an earlier eve release started:
+On Vercel, a production callback reaches the newest deployment, but a task keeps running on the deployment that started it. The new deployment refuses two kinds of callback for a task that an earlier eve release started:
 
 - A reply from a remote agent. The remote agent stops retrying after a few seconds, and the call keeps waiting.
 - A sign-in that a `"use step"` function in a workflow tool asked for. The sign-in page answers `404`, and the step keeps waiting.
 
-Let that work finish before you upgrade, or cancel it and start it again afterward. A sign-in that an ordinary tool or connection asked for isn't affected.
+This applies while the task's session stays on the old deployment, and to a task the session still has after it moves. Let those tasks finish before you upgrade, or end their sessions afterward. A sign-in that an ordinary tool or connection asked for isn't affected.
 
 An idle resumable task, such as a subagent that already answered, doesn't keep a session on the old deployment. When the session moves, eve ends the task's run on the old deployment, and the model starts a new task on the new deployment the next time it needs one. The new task doesn't continue the old task's conversation.
 

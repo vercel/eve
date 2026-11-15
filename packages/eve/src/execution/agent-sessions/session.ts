@@ -135,7 +135,8 @@ class RunAgentSession implements AgentSession {
     // those of the call it was sent for, so they are read before a remote reply hook is awaited.
     const sender: AgentSessionSender = { context: this.#run.agentContext, from: this.#run.from };
     const auth = this.#run.auth;
-    this.#remote ||= sender.context.remoteAgents.includes(this.#name);
+    // A call without the list could be to a remote agent, so it is treated as one.
+    this.#remote ||= sender.context.remoteAgents?.includes(this.#name) ?? true;
     // Unlike hooks the session can answer at once, this one isn't registered
     // before its token goes out: the child resumes it only after booting and
     // finishing a turn, long after this suspension writes the hook.

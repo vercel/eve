@@ -113,8 +113,8 @@ function auth(principalId: string): SessionAuth {
   };
 }
 
-/** Whether the reviewer is a remote agent to the calls a test's run serves. */
-let reviewerIsRemote = false;
+/** The remote agents the calls a test's run serves list, or `undefined` for calls without a list. */
+let remoteAgents: readonly string[] | undefined = [];
 
 function agentContext(callId: string): AgentSessionContext {
   return {
@@ -122,7 +122,7 @@ function agentContext(callId: string): AgentSessionContext {
     capabilities: { requestInput: true },
     bundle: { source: { kind: "development" } },
     dynamicSelections: {},
-    remoteAgents: reviewerIsRemote ? ["reviewer"] : [],
+    ...(remoteAgents !== undefined && { remoteAgents }),
     sandbox: { sessionId: "session" },
     trace: { originAudience: "unknown" },
     parent: {
@@ -216,7 +216,7 @@ beforeEach(() => {
   mocks.pending.length = 0;
   mocks.createRemoteReplyToken.mockClear();
   mocks.reset();
-  reviewerIsRemote = false;
+  remoteAgents = [];
 });
 
 describe.each([
@@ -224,7 +224,7 @@ describe.each([
   { agent: "a remote agent", remote: true },
 ])("messages to $agent", ({ remote }) => {
   beforeEach(() => {
-    reviewerIsRemote = remote;
+    remoteAgents = remote ? ["reviewer"] : [];
   });
 
   it("settles every message a turn read when concurrent deliveries could land out of order", async () => {
@@ -285,13 +285,13 @@ describe.each([
 });
 
 it("keeps naming reply hooks by the step once a call found the agent remote", async () => {
-  reviewerIsRemote = true;
+  remoteAgents = ["reviewer"];
   const { sessions, serve } = serveRun();
   const reviewer = sessions.open("reviewer");
   await reviewer.send("Alice opens the review.");
   // A dynamic remote agent is the calling turn's selection. Bob's turn didn't make it, but the
   // session Alice's call opened is still the remote one.
-  reviewerIsRemote = false;
+  remoteAgents = [];
   serve("call-2", "bob");
   const bobs = reviewer.send("Bob adds a rollout note.");
   await landNewestFirst();
@@ -300,8 +300,18 @@ it("keeps naming reply hooks by the step once a call found the agent remote", as
   expect(mocks.createRemoteReplyToken).toHaveBeenCalledTimes(2);
 });
 
+it("names the reply hook by the step for a call that doesn't say which agents are remote", async () => {
+  // A session on an eve from before the list dispatched this call to a task this build runs.
+  remoteAgents = undefined;
+  const { sessions } = serveRun();
+
+  await sessions.open("reviewer").send("Alice opens the review.");
+
+  expect(mocks.createRemoteReplyToken).toHaveBeenCalledTimes(1);
+});
+
 it("fails only the message whose remote reply hook could not be named", async () => {
-  reviewerIsRemote = true;
+  remoteAgents = ["reviewer"];
   const { sessions } = serveRun();
   const reviewer = sessions.open("reviewer");
   const seed = await reviewer.send("seed");
