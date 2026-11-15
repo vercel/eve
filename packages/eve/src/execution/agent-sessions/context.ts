@@ -47,10 +47,9 @@ export interface AgentSessionLineage {
   readonly dynamicSelections: DynamicSubagentSelections;
   /**
    * The agents the call can open that are remote, by name. A message to one names its reply hook
-   * in a step of its own, before the step that opens the session resolves the name. Absent from
-   * a context an earlier eve captured, which names every reply hook that way.
+   * in a step of its own, before the step that opens the session resolves the name.
    */
-  readonly remoteAgents?: readonly string[];
+  readonly remoteAgents: readonly string[];
   /** Whether a parent, local or remote, delegated the calling session. */
   readonly delegated?: boolean;
   readonly localDevRequest?: LocalDevRequestProvenance;

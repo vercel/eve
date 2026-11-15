@@ -168,7 +168,7 @@ describe("openAgentSessionStep", () => {
 
     const opening = open();
     await expect(opening).rejects.toBeInstanceOf(NonRetryableError);
-    await expect(opening).rejects.toThrow("reply hook was opened for a local agent");
+    await expect(opening).rejects.toThrow("Refused to call remote agent");
   });
 
   it("rejects an invalid model selection without retrying", async () => {

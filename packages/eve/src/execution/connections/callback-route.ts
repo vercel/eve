@@ -1,5 +1,7 @@
 import { isSignInCallbackToken } from "#execution/callback-hook-tokens.js";
-import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
+import { deliverToHostedHook } from "#execution/hosts.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 /**
  * Framework-shipped callback route used by in-turn interactive
  * connection authorization.
@@ -56,12 +58,13 @@ export async function handleConnectionCallbackRequest(
 
   const callback = await projectAuthorizationCallback(request);
 
+  const payload: AuthorizationCallbackPayload = {
+    kind: "authorization-callback",
+    payloads: [{ authorizationCallback: { attemptId, callback, connectionName: name } }],
+  };
   try {
-    const authorizationCallback = { attemptId, callback, connectionName: name };
-    await resumeAuthorizationCallback(token, {
-      kind: "authorization-callback" as const,
-      payloads: [{ authorizationCallback }],
-    });
+    // A session a host runs in this process holds its hook there, not in Workflow.
+    if (!(await deliverToHostedHook(token, payload))) await resumeRunnableHook(token, payload);
   } catch {
     return callbackNotPending();
   }

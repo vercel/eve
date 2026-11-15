@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
+import { registerHost } from "#execution/hosts.js";
 
 const resumeHookMock = vi.fn();
 
@@ -158,6 +159,65 @@ describe("handleConnectionCallbackRequest", () => {
     expect(response.status).toBe(404);
     const body = await response.json();
     expect(body).toEqual(expect.objectContaining({ ok: false }));
+  });
+
+  it("delivers to a session a host runs in this process, without asking Workflow", async () => {
+    const delivered: unknown[] = [];
+    const release = registerHost({
+      deliver: async (token, sent) => {
+        if (token !== INBOX) return undefined;
+        delivered.push(sent);
+        return "delivered";
+      },
+      runEnded: () => undefined,
+      cancelRun: () => undefined,
+    });
+    try {
+      const response = await handleConnectionCallbackRequest(
+        new Request(
+          `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", INBOX)}?code=abc`,
+        ),
+        buildRouteContext({ attemptId: "attempt-1", name: "linear", token: INBOX }),
+      );
+      expect(response.status).toBe(200);
+    } finally {
+      release();
+    }
+    expect(delivered).toEqual([
+      {
+        kind: "authorization-callback",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId: "attempt-1",
+              callback: { method: "GET", params: { code: "abc" } },
+              connectionName: "linear",
+            },
+          },
+        ],
+      },
+    ]);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("answers not pending for a hosted session that ended, without asking Workflow", async () => {
+    const release = registerHost({
+      deliver: async (token) => (token === INBOX ? "gone" : undefined),
+      runEnded: () => undefined,
+      cancelRun: () => undefined,
+    });
+    try {
+      const response = await handleConnectionCallbackRequest(
+        new Request(
+          `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", INBOX)}?code=abc`,
+        ),
+        buildRouteContext({ attemptId: "attempt-1", name: "linear", token: INBOX }),
+      );
+      expect(response.status).toBe(404);
+    } finally {
+      release();
+    }
+    expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
   it("delivers a callback to a workflow tool run's own sign-in hook", async () => {

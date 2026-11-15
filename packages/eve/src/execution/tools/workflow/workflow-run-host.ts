@@ -24,6 +24,7 @@ export const workflowRunHost: RunHost = {
   runId: () => getWorkflowMetadata().workflowRunId,
   createHook: <T>(token?: string) =>
     runHookOf(createHook<T>(token === undefined ? undefined : { token })),
+  // A body's own `crypto` is seeded from its run's ids, so a step draws the token.
   createRemoteReplyHook: async <T>() =>
     runHookOf(createHook<T>({ token: await createRemoteReplyTokenStep() })),
   sleep: (ms) => sleep(ms),

@@ -119,7 +119,7 @@ export async function sendRemoteSessionMessage(
 function remoteReplyToken(replyTo: string, name: string): string {
   if (isRemoteReplyHookToken(replyTo)) return replyTo;
   throw new NonRetryableError(
-    `Agent "${name}" is remote, but this message's reply hook was opened for a local agent.`,
+    `Refused to call remote agent "${name}": eve opened this message's reply hook as a local agent's, without a callback token. This is a bug in eve.`,
   );
 }
 

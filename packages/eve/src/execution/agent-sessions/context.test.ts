@@ -1,16 +1,30 @@
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 
 import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
+import { compiledAgentRoster } from "#execution/agent-sessions/roster.js";
 
-it("records the remote agents the owner's roster names for the call's dynamic selections", () => {
-  const selections = { "subagents/tenant": null };
-  const roster = vi.fn(() => ({ remoteAgentNames: () => ["billing"] }));
+it("lists the remote agents a call can open: the compiled ones, and those its turn selected", () => {
+  const bundle = {
+    subagentRegistry: {
+      subagentsByName: new Map([
+        ["reviewer", { definition: { kind: "subagent", name: "reviewer" } }],
+        ["billing", { definition: { kind: "remote", name: "billing" } }],
+      ]),
+    },
+  };
+  // The calling turn selected the dynamic remote agent "tenant".
+  const selections = {
+    "subagents/tenant": { kind: "remote", prepared: { kind: "remote", name: "tenant" } },
+  };
 
   const context = captureAgentSessionContext(
     {
       batch: { event: { sequence: 1, turnId: "turn-1" } },
       dynamicSubagentSelections: selections,
-      owner: { reference: { kind: "bundle", source: {} }, roster },
+      owner: {
+        reference: { kind: "bundle", source: {} },
+        roster: (selected: never) => compiledAgentRoster(bundle as never, selected),
+      },
       sandboxSessionId: "session",
       serializedContext: {},
       session: { sessionId: "session" },
@@ -19,6 +33,5 @@ it("records the remote agents the owner's roster names for the call's dynamic se
     "call-1",
   );
 
-  expect(context.remoteAgents).toEqual(["billing"]);
-  expect(roster).toHaveBeenCalledExactlyOnceWith(selections);
+  expect(context.remoteAgents).toEqual(["billing", "tenant"]);
 });

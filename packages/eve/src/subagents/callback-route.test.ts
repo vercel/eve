@@ -192,9 +192,13 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     });
   });
 
-  it("answers not pending for a token that names no remote reply, without resuming its hook", async () => {
+  it.each([
     // Alice's order workflow waits on a hook it named for the order.
-    const response = await post(approvalRequest, AGREED, "order:1042");
+    ["a hook authored code named", "order:1042"],
+    // A remote agent's result never lands in a session's inbox.
+    ["a session's inbox", "eve:inbox:v1:eve:session:wrun_1:inbox"],
+  ])("answers not pending for %s, without resuming it", async (_, token) => {
+    const response = await post(approvalRequest, AGREED, token);
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({ code: "CALLBACK_NOT_PENDING" });
     expect(resumeRunnableHook).not.toHaveBeenCalled();

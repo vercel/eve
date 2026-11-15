@@ -1,8 +1,9 @@
 import { logicalSessionInboxToken } from "#execution/session-inbox/address.js";
 
 // The hooks eve's two unauthenticated callback routes resume. Each route takes a hook token from
-// its URL, so the token's shape is all that says the hook was opened for that route: a hook that
-// authored code named with `createHook()`, or that eve opened for anything else, never has it.
+// its URL, so the token's shape is all that says the hook was opened for that route. No hook eve
+// opens for anything else has these shapes. Authored code is told to keep `createHook()` tokens
+// out of the `eve:` prefix (docs/tools/workflows.mdx); nothing enforces that.
 
 const REMOTE_REPLY_PREFIX = "eve:reply:v1:";
 const SIGN_IN_PREFIX = "eve:sign-in:v1:";

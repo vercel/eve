@@ -190,7 +190,7 @@ The parent stream shows the same `task.started`, `child.opened`, and `call.settl
 
 The callback URL must use `http` or `https` and reach the parent at a public address. The remote refuses a callback host that is, or resolves to, a private, link-local, or reserved IP address, and a refused callback fails without retries. Loopback hosts such as `localhost` and `127.0.0.1` work only when the remote runs `eve dev` or `vercel dev`. A parent and remote on a private network can't exchange callbacks.
 
-The parent's callback route takes requests without authentication, so the callback URL is the only credential. eve draws a random token for each message to a remote agent, and the route delivers only to a call that waits on one of those tokens. A request for any other token gets `404` with `code: "CALLBACK_NOT_PENDING"`, including the token of a hook you create with `createHook`.
+The parent's callback route takes requests without authentication, so the callback URL is the only credential. For each message to a remote agent, eve generates a random token in a workflow step of its own, and the route delivers only to a call that waits on one of those tokens. A request for any other token gets `404` with `code: "CALLBACK_NOT_PENDING"`, including the token of a hook you create with `createHook`.
 
 A callback URL carries only the message's callback capability, never the parent's deployment protection bypass secret. To let callbacks reach a parent behind Vercel Deployment Protection, configure Trusted Sources on the parent to admit the remote's project and environment.
 
@@ -238,7 +238,7 @@ Each follow-up message and set of answers sent to a protocol-3 child carries an 
 
 A failed start fails the call immediately. After a remote starts, a final failure callback fails the call with the remote's error. eve retries a failed final callback request (see [Execution model & durability](../concepts/execution-model-and-durability)).
 
-A parent's callback route answers `404` with `code: "CALLBACK_NOT_PENDING"` when nothing waits on the callback. Either the parent already took the result, for example after a lost acknowledgement, or it stopped waiting. The child retries for a few seconds in case the parent hasn't registered the reply yet, then logs it and keeps its session.
+A parent's callback route answers `404` with `code: "CALLBACK_NOT_PENDING"` when nothing waits on the callback. This happens when the parent already took the result, for example after a lost acknowledgement, when it stopped waiting, or when the token isn't one the parent issued for a reply. The child retries for a few seconds in case the parent hasn't registered the reply yet, then logs it and keeps its session.
 
 If a remote accepts the create request but its response has an incompatible protocol or an unreadable body, the work may have finished. eve stops workflow retries and reports that the outcome is unknown. A protocol mismatch includes the accepted remote session ID, so you can check the outcome before you send another request. Upgrading the remote doesn't undo work it already did. An unsupported version, or a rejection of the one retried request, is a compatibility error.
 

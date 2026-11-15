@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import type { Runtime } from "#channel/types.js";
@@ -279,6 +280,24 @@ describe("stranded sessions", () => {
         // The successor names the session it replaced.
         const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
+        // A sign-in can finish after replacement. The replaced session's fixed inbox must not
+        // route its callback into the new conversation.
+        const callback = await handleConnectionCallbackRequest(
+          new Request("https://eve.test/callback?code=late"),
+          {
+            params: {
+              attemptId: "old-attempt",
+              name: "linear",
+              token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+            },
+            requestIp: null,
+            waitUntil() {},
+          },
+        );
+        expect(callback.status).toBe(404);
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
+          sessionId: fresh.sessionId,
+        });
 
         const resets = logs.records.filter((record) => record.message === "Reset stranded session");
         expect(resets).toEqual([

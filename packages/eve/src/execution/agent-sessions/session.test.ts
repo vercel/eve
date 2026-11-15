@@ -284,6 +284,41 @@ describe.each([
   });
 });
 
+it("keeps naming reply hooks by the step once a call found the agent remote", async () => {
+  reviewerIsRemote = true;
+  const { sessions, serve } = serveRun();
+  const reviewer = sessions.open("reviewer");
+  await reviewer.send("Alice opens the review.");
+  // A dynamic remote agent is the calling turn's selection. Bob's turn didn't make it, but the
+  // session Alice's call opened is still the remote one.
+  reviewerIsRemote = false;
+  serve("call-2", "bob");
+  const bobs = reviewer.send("Bob adds a rollout note.");
+  await landNewestFirst();
+  await bobs;
+
+  expect(mocks.createRemoteReplyToken).toHaveBeenCalledTimes(2);
+});
+
+it("fails only the message whose remote reply hook could not be named", async () => {
+  reviewerIsRemote = true;
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+  const seed = await reviewer.send("seed");
+  mocks.createRemoteReplyToken.mockRejectedValueOnce(new Error("The naming step failed."));
+  const left = reviewer.send("left");
+  const right = reviewer.send("right");
+
+  await expect(left).rejects.toThrow("The naming step failed.");
+  await landNewestFirst();
+  const sent = await right;
+  endChildTurn("reviewed both");
+  await expect(Promise.all([seed.result(), sent.result()])).resolves.toMatchObject([
+    { reply: "reviewed both", status: "completed" },
+    { reply: "reviewed both", status: "completed" },
+  ]);
+});
+
 it("leaves a message the child admitted after the turn ended pending for the next turn", async () => {
   const { sessions } = serveRun();
   const reviewer = sessions.open("reviewer");
