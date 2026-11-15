@@ -187,6 +187,29 @@ async function runInitCommand(input) {
   return true;
 }
 
+// `eve init` installs a fresh npm scaffold with `--legacy-peer-deps`, which
+// skips required peers too. That's only safe while the scaffold lists every
+// required peer in the tree directly, so fail when npm reports one missing.
+async function assertCompleteNpmTree(projectRoot) {
+  try {
+    await execFile("npm", ["ls", "--all"], {
+      cwd: projectRoot,
+      maxBuffer: 32 * 1024 * 1024,
+      shell: process.platform === "win32",
+    });
+  } catch (error) {
+    const problems = String(error?.stderr ?? "")
+      .split("\n")
+      .filter((line) => /\b(missing|invalid):/.test(line));
+    throw new Error(
+      [
+        "`npm ls --all` found problems in the `eve init` install. Add each missing required peer to the scaffold's dependencies.",
+        ...(problems.length > 0 ? problems : [String(error?.message ?? error)]),
+      ].join("\n"),
+    );
+  }
+}
+
 export async function collectInitInstallReportFromTarball(options) {
   const packageRoot = resolve(options.packageRoot);
   const initDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-"));
@@ -202,6 +225,7 @@ export async function collectInitInstallReportFromTarball(options) {
     }
 
     const projectRoot = join(initDirectory, INIT_PROJECT_NAME);
+    await assertCompleteNpmTree(projectRoot);
     const packageJson = await readJson(join(projectRoot, "package.json"));
     const nodeModulesRoot = join(projectRoot, "node_modules");
     const installedFiles = (await pathExists(nodeModulesRoot))
