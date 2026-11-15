@@ -32,6 +32,8 @@ export async function runStartupOnboarding(input: {
   renderer.setStartupPhase("connecting");
   input.onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
   const { runTuiSetupCommand } = await import("./setup-commands.js");
+  // `AbortSignal` doesn't replay, so a stop during the import is caught here.
+  if (input.signal.aborted) return { outcome: { cancelled: true } };
   const flow = renderer.setupFlow;
   const onStop = () => renderer.requestInterrupt();
   input.signal.addEventListener("abort", onStop, { once: true });
@@ -44,12 +46,13 @@ export async function runStartupOnboarding(input: {
       renderer: flow,
       initialModelStep: "provider",
       withExclusiveTerminal: input.withExclusiveTerminal,
+      signal: input.signal,
     };
     if (input.agentRoot !== undefined) commandInput.agentRoot = input.agentRoot;
     const result = await runTuiSetupCommand(commandInput);
     const { preserveFlowDiagnostics, partial: _partial, ...outcome } = result;
     preserveDiagnostics = preserveFlowDiagnostics;
-    return { outcome };
+    return { outcome: input.signal.aborted ? { cancelled: true } : outcome };
   } catch (error) {
     if (input.signal.aborted && isInterruptedError(error)) return { outcome: { cancelled: true } };
     throw error;

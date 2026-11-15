@@ -643,6 +643,50 @@ describe("eve dev --input", () => {
     },
   );
 
+  it("stops onboarding before shutting down when the host fails to start", async () => {
+    const order: string[] = [];
+    const startup = {
+      renderer: {},
+      finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+      shutdown: vi.fn(async () => {
+        order.push("shutdown");
+      }),
+    };
+    let fail!: (error: Error) => void;
+    const runStartupOnboarding = vi.fn(
+      async (input: { signal: AbortSignal }) =>
+        await new Promise((resolve) => {
+          input.signal.addEventListener("abort", () => {
+            order.push("onboarding stopped");
+            resolve({ outcome: { cancelled: true } });
+          });
+        }),
+    );
+    vi.doMock("#cli/dev/tui/startup.js", () => ({
+      startDevelopmentTuiStartup: vi.fn(async () => startup),
+    }));
+    vi.doMock("#cli/dev/tui/startup-onboarding.js", () => ({ runStartupOnboarding }));
+    const startHost = vi.fn(() => ({
+      start: async () =>
+        await new Promise<never>((_, reject) => {
+          fail = reject;
+        }),
+      close: async () => {},
+    }));
+    try {
+      await withInteractiveTerminal(async () => {
+        const run = runCli(["dev", "--onboard"], { error: () => {}, log: () => {} }, { startHost });
+        await vi.waitFor(() => expect(runStartupOnboarding).toHaveBeenCalledOnce());
+        fail(new Error("port in use"));
+        await expect(run).rejects.toThrow("port in use");
+      });
+      expect(order).toEqual(["onboarding stopped", "shutdown"]);
+    } finally {
+      vi.doUnmock("#cli/dev/tui/startup.js");
+      vi.doUnmock("#cli/dev/tui/startup-onboarding.js");
+    }
+  });
+
   it.each([["dev"], ["remote", "connect", "--url", "https://example.com"]])(
     "passes --show-* display flags through %s",
     async (...command) => {

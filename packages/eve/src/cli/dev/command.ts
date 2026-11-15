@@ -328,13 +328,22 @@ export function registerDevelopmentCommand(input: {
         lifecycle.stopped.then(() => ({ handle: undefined })),
       ]);
       // Fresh-agent onboarding needs only the project files until it saves, so the person
-      // picks a provider and signs in while the server boots.
+      // picks a provider and signs in while the server boots. A server that fails to start
+      // or exits while onboarding is open ends it, like a stop does.
+      const stopOnboarding = new AbortController();
+      const startedServer: DevelopmentServer & { wait?: () => Promise<void> } = server;
+      void started
+        .then(({ handle }) => (handle?.kind === "existing" ? undefined : startedServer.wait?.()))
+        .then(
+          () => stopOnboarding.abort(),
+          () => stopOnboarding.abort(),
+        );
       const startupOnboardingPromise =
         options.onboard === true
           ? tuiStartupPromise?.then((startup) =>
               runOnboardingWhileServerStarts({
                 applicationRoot: applicationContext.root,
-                signal: lifecycle.signal,
+                signal: AbortSignal.any([lifecycle.signal, stopOnboarding.signal]),
                 started,
                 startup,
                 telemetry,
@@ -345,9 +354,17 @@ export function registerDevelopmentCommand(input: {
         started,
         tuiStartupPromise,
         startupOnboardingPromise,
-      ]);
+      ]).catch(async (error: unknown) => {
+        // Let onboarding unwind off the terminal before the startup screen shuts down.
+        stopOnboarding.abort();
+        await Promise.race([
+          startupOnboardingPromise?.catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 1_000).unref()),
+        ]);
+        throw error;
+      });
       const handle = outcome.handle;
-      if (handle === undefined) {
+      if (handle === undefined || lifecycle.signal.aborted) {
         tuiStartup = startup;
         await tuiStartup?.shutdown();
         return;
