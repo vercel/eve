@@ -119,7 +119,7 @@ test("only verified writers on the canonical factory repository can authorize sh
 });
 
 test("published issue hooks claim automatic intake once per repository and issue", async () => {
-  // rc.17 supplies current labels in raw, not the webhook's changed label.
+  // eve supplies current labels in raw, not the webhook's changed label.
   const issue = {
     action: "labeled",
     issueNumber: 7,

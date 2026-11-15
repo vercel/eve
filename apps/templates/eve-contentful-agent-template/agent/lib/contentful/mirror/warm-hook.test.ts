@@ -1,8 +1,5 @@
-import type {
-  Experimental_SandboxProcess,
-  Experimental_SandboxSession,
-} from "ai";
 import type { HookEvent } from "eve/hooks";
+import type { SandboxProcess, SandboxSession } from "eve/sandbox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installTestState, testState } from "../../testing/state";
@@ -13,7 +10,7 @@ import hook, {
   warmOnTurnStart,
 } from "./warm-hook";
 
-const started: Experimental_SandboxProcess = {
+const started: SandboxProcess = {
   kill: () => Promise.resolve(),
   stderr: new ReadableStream(),
   stdout: new ReadableStream(),
@@ -22,9 +19,7 @@ const started: Experimental_SandboxProcess = {
 
 /* Context whose sandbox records spawned commands. */
 const warmContext = () => {
-  const spawn = vi.fn<Experimental_SandboxSession["spawn"]>(() =>
-    Promise.resolve(started)
-  );
+  const spawn = vi.fn<SandboxSession["spawn"]>(() => Promise.resolve(started));
   const getSandbox = vi.fn(() => Promise.resolve({ spawn }));
   return { ctx: { getSandbox }, getSandbox, spawn };
 };

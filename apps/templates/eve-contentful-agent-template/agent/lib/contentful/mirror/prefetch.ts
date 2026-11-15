@@ -4,14 +4,14 @@
  * @packageDocumentation
  */
 
-import type { Experimental_SandboxSession } from "ai";
+import type { SandboxSession } from "eve/sandbox";
 
 /* Runs the search_content script's warm mode; its output is discarded so nothing buffers. */
 export const MIRROR_PREFETCH_COMMAND =
   "sh -c 'sh \"$HOME/.agents/skills/search_content/scripts/sql\" --warm >/dev/null 2>&1'";
 
 /** The sandbox operation the prefetch uses. */
-type PrefetchSandbox = Pick<Experimental_SandboxSession, "spawn">;
+type PrefetchSandbox = Pick<SandboxSession, "spawn">;
 
 /**
  * Starts reading DuckDB and the compacted database into the sandbox's file cache.
