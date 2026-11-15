@@ -32,7 +32,7 @@ export default defineTool({
 
 ## Integration dependencies
 
-Install the packages for each integration entry you import. Most are optional peers of eve, so other entries don't need them. `@vercel/connect` isn't a peer of eve, so your package manager won't warn about an older version; projects created by `eve init` already pin a supported one.
+Install the packages for each integration entry you import. Most are optional peers of eve, so other entries don't need them. `@vercel/connect` isn't a peer of eve, so your package manager won't flag an unsupported version. Install the version in the table below; `eve init` and eve's connection and channel setup add a supported one for you.
 
 | Entry                                                         | Required integration packages                         |
 | ------------------------------------------------------------- | ----------------------------------------------------- |
