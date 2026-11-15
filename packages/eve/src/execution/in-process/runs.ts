@@ -6,7 +6,7 @@ import {
 } from "#execution/agent-sessions/sessions-over.js";
 import { FRAMEWORK_WORKFLOW_BODIES } from "#execution/framework-workflow-bodies.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
-import type { RunHost } from "#execution/run-host.js";
+import type { RunHook, RunHost } from "#execution/run-host.js";
 import type { ToolStubHost } from "#execution/tool-stub-host.js";
 import { resumeHookWherever } from "#execution/tools/workflow/resume-hook.js";
 import { runWorkflowToolRun } from "#execution/tools/workflow/run.js";
@@ -103,11 +103,13 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
   const runHost = (runId: string): RunHost => {
     let hooks = 0;
     let deliveries = 0;
+    const createHook = <T>(token = `${runHookPrefix(runId)}${String(hooks++)}`): RunHook<T> =>
+      host.inboxes.openHook<T>(runId, token, { keep: KEEP_NOTHING });
     return {
       runId: () => runId,
-      createHook<T>(token = `${runHookPrefix(runId)}${String(hooks++)}`) {
-        return host.inboxes.openHook<T>(runId, token, { keep: KEEP_NOTHING });
-      },
+      createHook,
+      // This host reaches no remote agent, so no callback names a reply hook: it needs no mark.
+      createReplyHook: <T>() => createHook<T>(),
       sleep: (ms) => host.timers.until(Date.now() + ms),
       resumeHook: async (token, payload, options) =>
         await resumeHookWherever(token, payload, options),

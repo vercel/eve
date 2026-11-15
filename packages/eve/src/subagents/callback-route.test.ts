@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const resumeRunnableHook = vi.hoisted(() => vi.fn());
-vi.mock("#execution/session-inbox/owner.js", () => ({ resumeRunnableHook }));
+const resumeAgentReplyHook = vi.hoisted(() => vi.fn());
+vi.mock("#execution/session-inbox/owner.js", () => ({ resumeAgentReplyHook }));
 
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 
@@ -41,14 +41,14 @@ const approvalRequest = {
 
 describe("handleSessionCallbackRequest from a protocol 2 child", () => {
   beforeEach(() => {
-    resumeRunnableHook.mockReset();
-    resumeRunnableHook.mockResolvedValue(undefined);
+    resumeAgentReplyHook.mockReset();
+    resumeAgentReplyHook.mockResolvedValue(undefined);
   });
 
   it("resumes the pending call with the request read as a v27 relay", async () => {
     const response = await post(approvalRequest);
     expect(response.status).toBe(202);
-    expect(resumeRunnableHook).toHaveBeenCalledWith(
+    expect(resumeAgentReplyHook).toHaveBeenCalledWith(
       "parent-hook",
       expect.objectContaining({
         callId: "delegate",
@@ -79,7 +79,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       subagentName: "deployer",
     });
     expect(response.status).toBe(202);
-    expect(resumeRunnableHook).toHaveBeenCalledWith("parent-hook", {
+    expect(resumeAgentReplyHook).toHaveBeenCalledWith("parent-hook", {
       callId: "delegate",
       childSessionId: "child-session",
       events: [
@@ -110,7 +110,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       subagentName: "deployer",
     });
     expect(response.status).toBe(202);
-    expect(resumeRunnableHook).not.toHaveBeenCalled();
+    expect(resumeAgentReplyHook).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed protocol 2 callback", async () => {
@@ -120,7 +120,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       error: "Invalid session input callback.",
       ok: false,
     });
-    expect(resumeRunnableHook).not.toHaveBeenCalled();
+    expect(resumeAgentReplyHook).not.toHaveBeenCalled();
   });
 
   it("passes a protocol 2 callback as is to a parent run from before v27", async () => {
@@ -136,9 +136,9 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     };
     const response = await post(nested, "https://parent.example.com/eve/v1/callback/parent-hook");
     expect(response.status).toBe(202);
-    expect(resumeRunnableHook).toHaveBeenCalledWith("parent-hook", nested);
+    expect(resumeAgentReplyHook).toHaveBeenCalledWith("parent-hook", nested);
 
-    resumeRunnableHook.mockClear();
+    resumeAgentReplyHook.mockClear();
     const approved = {
       callId: "delegate",
       childSessionId: "child-session",
@@ -156,7 +156,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     };
     await post(approved, "https://parent.example.com/eve/v1/callback/parent-hook");
     // Such a run reads an approval's own settlement too.
-    expect(resumeRunnableHook).toHaveBeenCalledWith("parent-hook", approved);
+    expect(resumeAgentReplyHook).toHaveBeenCalledWith("parent-hook", approved);
   });
 
   it("refuses protocol 2 input on a URL that agreed to another protocol", async () => {
@@ -169,7 +169,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       error: "Unsupported callback kind.",
       ok: false,
     });
-    expect(resumeRunnableHook).not.toHaveBeenCalled();
+    expect(resumeAgentReplyHook).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed protocol 2 callback to a parent run from before v27", async () => {
@@ -178,7 +178,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       "https://parent.example.com/eve/v1/callback/parent-hook",
     );
     expect(response.status).toBe(400);
-    expect(resumeRunnableHook).not.toHaveBeenCalled();
+    expect(resumeAgentReplyHook).not.toHaveBeenCalled();
   });
 
   it("still refuses protocol 1 task callbacks, which it doesn't translate", async () => {
@@ -191,7 +191,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
   });
 
   it("answers 404 when the call is no longer pending", async () => {
-    resumeRunnableHook.mockRejectedValue(new Error("hook not found"));
+    resumeAgentReplyHook.mockRejectedValue(new Error("hook not found"));
     const response = await post(approvalRequest);
     expect(response.status).toBe(404);
     // The same message as every protocol's route, now with a code a child can read.

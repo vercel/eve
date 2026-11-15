@@ -39,6 +39,11 @@ export interface RunHost {
   runId(): string;
   /** Opens a hook, under `token` or one the host names. */
   createHook<T>(token?: string): RunHook<T>;
+  /**
+   * Opens the hook an agent's reply arrives on, under a token the host names. A remote agent
+   * replies through eve's callback route, which resumes only these hooks.
+   */
+  createReplyHook<T>(): RunHook<T>;
   /** Resolves once `ms` pass. */
   sleep(ms: number): Promise<void>;
   /**

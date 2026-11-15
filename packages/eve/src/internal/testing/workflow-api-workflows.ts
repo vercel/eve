@@ -1,4 +1,5 @@
 import { createHook, FatalError, RetryableError } from "#compiled/@workflow/core/index.js";
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 
 export async function hookRegistrationWorkflow(token: string, hold = false) {
   "use workflow";
@@ -19,6 +20,18 @@ export async function hookRegistrationWorkflow(token: string, hold = false) {
     }
   }
   return { owner: null, payload: hold ? await hook : undefined };
+}
+
+/** Returns the first payload on a hook opened as a workflow tool run opens an agent's reply hook. */
+export async function agentReplyWorkflow() {
+  "use workflow";
+
+  const reply = workflowRunHost.createReplyHook<unknown>();
+  try {
+    for await (const payload of reply) return payload;
+  } finally {
+    await reply.dispose();
+  }
 }
 
 async function failStep(kind: "fatal" | "retryable") {

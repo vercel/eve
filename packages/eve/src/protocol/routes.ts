@@ -133,7 +133,8 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  * Stable framework-owned route pattern for terminal session callbacks.
  *
  * The `:token` segment is an unguessable workflow hook capability. The route
- * is unauthenticated by design and resumes the matching parked runtime action.
+ * is unauthenticated by design and resumes the matching parked runtime action:
+ * only a hook that awaits an agent's reply, never another hook with that token.
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 

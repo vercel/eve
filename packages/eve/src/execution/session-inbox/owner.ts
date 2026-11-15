@@ -1,4 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { isAgentReplyHookMetadata } from "#execution/agent-sessions/reply-hook.js";
 import { readInboxHandle } from "#execution/session-inbox/handle.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
@@ -76,6 +77,17 @@ export async function resumeRunnableHook(
   }
   if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   return await resumeHook(token, payload);
+}
+
+/**
+ * Delivers a remote agent's callback to the hook its caller awaits the reply on. The callback
+ * route is unauthenticated, so the token is its only authority, and only over a reply hook: any
+ * other hook is reported as not found, as `resumeWebhook` reports one that isn't a webhook.
+ */
+export async function resumeAgentReplyHook(token: string, payload: unknown): Promise<void> {
+  const hook = await getHookByToken(token);
+  if (!isAgentReplyHookMetadata(await hook.metadata)) throw new HookNotFoundError(token);
+  await resumeRunnableHook(token, payload);
 }
 
 /**

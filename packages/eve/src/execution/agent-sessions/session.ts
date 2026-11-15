@@ -148,7 +148,7 @@ class RunAgentSession implements AgentSession {
   }
 
   #awaitReply(expectsData: boolean): AwaitedReply {
-    const hook = this.#run.host.createHook<AgentTurnReply>();
+    const hook = this.#run.host.createReplyHook<AgentTurnReply>();
     let settle: (end: AgentTurnEnd) => void = () => {};
     const ended = new Promise<AgentTurnEnd>((resolve) => {
       settle = resolve;
