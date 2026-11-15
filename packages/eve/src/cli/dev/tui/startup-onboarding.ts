@@ -24,7 +24,7 @@ export async function runStartupOnboarding(input: {
   readonly agentRoot: string | undefined;
   readonly withExclusiveTerminal: <T>(task: () => Promise<T>) => Promise<T>;
   readonly onOnboardingStep?: ((input: EveCliSetupStepEvent) => void) | undefined;
-  /** Stops the open setup flow when `eve dev` is asked to stop from outside the keyboard. */
+  /** Stops the open setup flow when `eve dev` stops or its server fails to start or exits. */
   readonly signal: AbortSignal;
 }): Promise<StartupOnboardingResult> {
   if (input.signal.aborted) return { outcome: { cancelled: true } };
