@@ -177,13 +177,13 @@ describe("read_file images", () => {
   it("rejects images wider than providers accept", async () => {
     const sandbox = mockSandbox();
     await sandbox.session.writeBinaryFile({
-      content: pngBytes(8001, 10),
+      content: pngBytes(3001, 10),
       path: "/workspace/wide.png",
     });
 
     await expect(
       executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/wide.png" }),
-    ).rejects.toThrow("8001x10 pixels");
+    ).rejects.toThrow("3001x10 pixels");
   });
 
   it.each(["photo.png", "photo"])("rejects oversized images named %s", async (filename) => {

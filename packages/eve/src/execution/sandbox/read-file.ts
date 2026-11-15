@@ -222,7 +222,7 @@ function buildFileReadResult(bytes: Uint8Array, path: string, mediaType: string)
         ? `PDF "${path}" is ${bytes.byteLength} bytes; read_file shows PDFs up to 20 MiB. ` +
             "Split it or extract its text in the sandbox first."
         : `Image "${path}" is ${describeImage(file)}; read_file shows images up to 3 MiB and ` +
-            "8000 pixels per side. Resize or crop it in the sandbox first.",
+            "3000 pixels per side. Resize or crop it in the sandbox first.",
     );
   }
   const pages =

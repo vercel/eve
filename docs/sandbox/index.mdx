@@ -175,7 +175,7 @@ Files returned by URL with `toolOutputPart.fileUrl` aren't copied, because the m
 
 Every copied file reaches the model on every call with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow the label only for formats every major provider reads natively:
 
-- A PNG, JPEG, GIF, or WebP image up to 3 MiB and at most 8000 pixels per side.
+- A PNG, JPEG, GIF, or WebP image up to 3 MiB and at most 3000 pixels per side.
 - A PDF up to 20 MiB.
 
 Other files, such as CSV, HEIC, audio, and video, reach the model as the label alone. An image or PDF whose bytes don't match its declared type is stored as `application/octet-stream`, so a provider never receives bytes it would reject.

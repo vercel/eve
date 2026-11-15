@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeSandboxRef,
   encodeSandboxRef,
+  inlinesSandboxRefAsBytes,
   isSandboxRefUrl,
   SANDBOX_URL_SCHEME,
   type SandboxRef,
@@ -154,5 +155,28 @@ describe("isSandboxRefUrl", () => {
     expect(isSandboxRefUrl(undefined)).toBe(false);
     expect(isSandboxRefUrl({})).toBe(false);
     expect(isSandboxRefUrl(Buffer.from("x"))).toBe(false);
+  });
+});
+
+describe("inlinesSandboxRefAsBytes", () => {
+  const image = (width: number, height: number): SandboxRef => ({
+    height,
+    mediaType: "image/png",
+    path: "/workspace/frame.png",
+    size: 1024,
+    width,
+  });
+
+  it("inlines images up to 3000 px per side", () => {
+    expect(inlinesSandboxRefAsBytes(image(3000, 3000))).toBe(true);
+  });
+
+  // Refs staged before the cap dropped still carry their dimensions, so a
+  // replayed history degrades them to labels instead of failing the request.
+  it.each([
+    [3456, 2234],
+    [1080, 3001],
+  ])("keeps a %ix%i image as a label", (width, height) => {
+    expect(inlinesSandboxRefAsBytes(image(width, height))).toBe(false);
   });
 });
