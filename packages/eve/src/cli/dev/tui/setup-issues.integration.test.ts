@@ -125,7 +125,11 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     );
     const handle = vi.fn(async () => ({ message: "" }));
     const readInput = vi.fn(async () => undefined);
+    const onOnboardingStep = vi.fn();
+    const onOnboardingTerminal = vi.fn();
     const runner = new EveTUIRunner({
+      onOnboardingStep,
+      onOnboardingTerminal,
       appRoot,
       client,
       detectProjectIdentity: vi.fn(async () => undefined),
@@ -141,5 +145,13 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
     expect(handle).not.toHaveBeenCalled();
     expect(readInput).toHaveBeenCalledOnce();
+    expect(onOnboardingStep.mock.calls).toEqual([
+      [{ flow: "onboarding", step: "connection_ready" }],
+    ]);
+    expect(onOnboardingTerminal).toHaveBeenCalledExactlyOnceWith({
+      flow: "onboarding",
+      step: "model_provider",
+      result: "completed",
+    });
   });
 });

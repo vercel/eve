@@ -708,11 +708,7 @@ export class EveTUIRunner {
     }
     if (initialAgentOnboarding) {
       this.#renderer.setStartupPhase?.("connecting");
-      startupOutcome =
-        this.#startupOnboarding === undefined
-          ? await this.#runInitialAgentOnboarding(title)
-          : this.#startupOnboarding.outcome &&
-            (await this.#settleCommandOutcome(this.#startupOnboarding.outcome));
+      startupOutcome = await this.#runInitialAgentOnboarding(title);
     }
 
     let initialDraft = this.#finishStartup();
@@ -1435,12 +1431,19 @@ export class EveTUIRunner {
   }
 
   async #runInitialAgentOnboarding(title: string): Promise<PromptCommandOutcome | undefined> {
-    this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
-    const outcome = await this.#executeExtensionCommand(
-      { type: "extension", name: "login", argument: "" },
-      title,
-      { trigger: "startup", initialModelStep: "provider" },
-    );
+    let outcome: PromptCommandOutcome | undefined;
+    if (this.#startupOnboarding === undefined) {
+      this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
+      outcome = await this.#executeExtensionCommand(
+        { type: "extension", name: "login", argument: "" },
+        title,
+        { trigger: "startup", initialModelStep: "provider" },
+      );
+    } else {
+      // The startup screen already reported `model_provider`; report the rest once settled.
+      const pending = this.#startupOnboarding.outcome;
+      outcome = pending && (await this.#settleCommandOutcome(pending));
+    }
     if (!outcome?.cancelled && outcome?.failed !== true)
       this.#onOnboardingStep?.({ flow: "onboarding", step: "connection_ready" });
     this.#onOnboardingTerminal?.({

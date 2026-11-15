@@ -58,6 +58,7 @@ async function loadStartHost(): Promise<NonNullable<DevelopmentCommandRuntime["s
 async function runOnboardingWhileServerStarts(input: {
   readonly applicationRoot: string;
   readonly started: Promise<{ readonly handle: { readonly url: string } | undefined }>;
+  readonly signal: AbortSignal;
   readonly startup: DevelopmentTuiStartup;
   readonly telemetry: DevelopmentCommandTelemetry;
 }): Promise<StartupOnboardingResult> {
@@ -74,7 +75,7 @@ async function runOnboardingWhileServerStarts(input: {
     agentRoot:
       projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined,
     onOnboardingStep: input.telemetry.trackSetupStep,
-    onOnboardingTerminal: input.telemetry.trackSetupTerminal,
+    signal: input.signal,
     withExclusiveTerminal: async (task) => {
       const { handle } = await input.started;
       if (handle === undefined) throw new Error("eve dev stopped before setup finished.");
@@ -333,6 +334,7 @@ export function registerDevelopmentCommand(input: {
           ? tuiStartupPromise?.then((startup) =>
               runOnboardingWhileServerStarts({
                 applicationRoot: applicationContext.root,
+                signal: lifecycle.signal,
                 started,
                 startup,
                 telemetry,
