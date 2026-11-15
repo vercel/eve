@@ -42,8 +42,20 @@ const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "u
 // Conditions can nest, so walk every string target under `exports` and `types`.
 const targets = (value) =>
   typeof value === "string" ? [value] : Object.values(value ?? {}).flatMap(targets);
+const DECLARATION = /\.d\.[cm]?ts$/u;
+// An export without its own declaration would have TypeScript fall back to one this prune
+// doesn't treat as a root, so it would be deleted.
+for (const [subpath, value] of Object.entries(manifest.exports ?? {})) {
+  const subpathTargets = targets(value);
+  if (
+    subpathTargets.some((target) => /\.[cm]?js$/u.test(target)) &&
+    !subpathTargets.some((target) => DECLARATION.test(target))
+  ) {
+    throw new Error(`The "${subpath}" export has no declaration target.`);
+  }
+}
 const exported = targets([manifest.exports, manifest.types])
-  .filter((target) => target.endsWith(".d.ts"))
+  .filter((target) => DECLARATION.test(target))
   .map((target) => resolve(packageRoot, target));
 
 const templatesDirectory = resolve(import.meta.dirname, "..", "..", "..", "apps", "templates");
