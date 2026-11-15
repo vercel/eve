@@ -544,7 +544,6 @@ describe("createWorkflowRuntime#createSession", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_current",
           input: { message: "hello" },
-          retention: 0,
           startClaim: "inbox",
           serializedContext: expect.objectContaining({
             "eve.bundle": { source: compiledArtifactsSource },
@@ -566,7 +565,6 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.version": resolveInstalledPackageInfo().version,
         },
         deploymentId: "dpl_current",
-        experimental_retention: 0,
         experimental_hook: {
           metadata: { sessionId: OWNER_RUN_ID },
           token: sessionInboxHookToken(sessionCommandHookToken(OWNER_RUN_ID)),
@@ -769,7 +767,6 @@ describe("createWorkflowRuntime#createSession", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_current",
           input: { message: "hello" },
-          retention: 0,
           startClaim: "inbox",
           serializedContext: expect.objectContaining({
             [ChannelRequestIdKey.name]: "req_run",
@@ -789,7 +786,6 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.version": resolveInstalledPackageInfo().version,
         },
         deploymentId: "dpl_current",
-        experimental_retention: 0,
         experimental_hook: {
           metadata: { sessionId: OWNER_RUN_ID },
           token: sessionInboxHookToken(sessionCommandHookToken(OWNER_RUN_ID)),
@@ -842,7 +838,6 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.version": resolveInstalledPackageInfo().version,
       },
       deploymentId: "dpl_current",
-      experimental_retention: 0,
       experimental_hook: {
         metadata: { sessionId: OWNER_RUN_ID },
         token: sessionInboxHookToken("subagent:parent-session:call-1"),
@@ -875,7 +870,6 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.version": resolveInstalledPackageInfo().version,
       },
       deploymentId: "dpl_current",
-      experimental_retention: 0,
       experimental_hook: {
         metadata: { sessionId: OWNER_RUN_ID },
         token: sessionInboxHookToken(sessionCommandHookToken(OWNER_RUN_ID)),
@@ -1001,35 +995,30 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
   it.each<{
     name: string;
     policy: TraceCapturePolicy;
-    retention: AgentWorkflowRetentionDefinition | undefined;
   }>([
-    { name: "full capture", policy: () => true, retention: undefined },
-    { name: "dropped trace", policy: () => false, retention: 0 },
+    { name: "full capture", policy: () => true },
+    { name: "dropped trace", policy: () => false },
     {
       name: "metadata-only capture",
       policy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
-      retention: 0,
     },
     {
       name: "input-only capture",
       policy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
-      retention: 0,
     },
     {
       name: "output-only capture",
       policy: () => ({ emit: true, recordInputs: false, recordOutputs: true }),
-      retention: 0,
     },
     {
       name: "throwing policy",
       policy: () => {
         throw new Error("Policy unavailable");
       },
-      retention: 0,
     },
   ])(
-    "derives Workflow retention from $name without reevaluating the policy",
-    async ({ policy, retention }) => {
+    "uses default Workflow retention with $name without reevaluating the policy",
+    async ({ policy }) => {
       const tracePolicy = vi.fn(policy);
       installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
       mockBundleAndRun();
@@ -1038,8 +1027,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       await buildRuntime().createSession({ adapter, auth: null, input: { message: "hello" } });
 
       const [, [workflowInput], options] = startMock.mock.calls[0]!;
-      expect(options.experimental_retention).toBe(retention);
-      expect(workflowInput.retention).toBe(retention);
+      expect(options).not.toHaveProperty("experimental_retention");
+      expect(workflowInput).not.toHaveProperty("retention");
       expect(tracePolicy).toHaveBeenCalledOnce();
     },
   );
@@ -1063,13 +1052,13 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
   );
 
   it.each([
-    { audience: "public", development: false, retention: undefined },
-    { audience: "private", development: false, retention: 0 },
-    { audience: "unknown", development: false, retention: 0 },
-    { audience: "private", development: true, retention: undefined },
+    { audience: "public", development: false },
+    { audience: "private", development: false },
+    { audience: "unknown", development: false },
+    { audience: "private", development: true },
   ] as const)(
     "uses audience=$audience development=$development without OTel",
-    async ({ audience, development, retention }) => {
+    async ({ audience, development }) => {
       vi.stubEnv("EVE_DEV", development ? "1" : "");
       vi.stubEnv("VERCEL_ENV", "production");
       mockBundleAndRun();
@@ -1082,8 +1071,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       });
 
       const [, [workflowInput], options] = startMock.mock.calls[0]!;
-      expect(options.experimental_retention).toBe(retention);
-      expect(workflowInput.retention).toBe(retention);
+      expect(options).not.toHaveProperty("experimental_retention");
+      expect(workflowInput).not.toHaveProperty("retention");
       expect(workflowInput.serializedContext["eve.sessionTraceSeed"]).toBeUndefined();
     },
   );
@@ -1213,8 +1202,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceId).toBe(parentTrace.traceId);
     expect(seed!.spanId).not.toBe(parentTrace.spanId);
     expect(serialized["eve.parentTraceContext"]).toEqual(parentTrace);
-    expect(workflowInput[0].retention).toBe(0);
-    expect(startMock.mock.calls[0]?.[2].experimental_retention).toBe(0);
+    expect(workflowInput[0]).not.toHaveProperty("retention");
+    expect(startMock.mock.calls[0]?.[2]).not.toHaveProperty("experimental_retention");
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
     expect(tracePolicy).not.toHaveBeenCalled();

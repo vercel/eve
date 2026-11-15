@@ -25,12 +25,7 @@ export default otel({
 
 `otel({ tracePolicy })` sets the most content any OTel destination can receive. No destination can add back content it excludes. It doesn't affect instrumentation files created with `defineInstrumentation()`. See [Audience](/docs/channels#audience) for how channels classify the conversation passed to this policy.
 
-The same capture decision sets the session's default [Workflow run-data retention](/docs/agent-config#run-data-retention):
-
-- Allowing both inputs and outputs keeps the World's default retention.
-- Dropping the trace or excluding either direction deletes stored payloads and streams when the run ends.
-
-So under the default policy, completed private and unknown-audience transcripts are unreadable outside development. Set `experimental.workflow.retention: "default"` on the agent to keep completed sessions regardless of tracing. Destination `exportPolicy` filters don't change Workflow retention, and Workflow deletion doesn't delete exported traces.
+[Workflow run-data retention](/docs/agent-config#run-data-retention) is configured separately from tracing. Sessions use the World's default retention period unless the agent sets `experimental.workflow.retention: 0` to delete stored payloads and streams when the run ends. Trace capture policies and destination `exportPolicy` filters don't change Workflow retention, and Workflow deletion doesn't delete exported traces.
 
 ## Add an OpenTelemetry destination
 

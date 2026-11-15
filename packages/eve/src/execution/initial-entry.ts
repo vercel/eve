@@ -83,17 +83,12 @@ export async function prepareInitialEntry(
     run: input,
   });
   if (predecessor !== undefined) ctx.set(SessionPredecessorKey, predecessor);
-  const traceDecision = initializeSessionInstrumentation({
+  initializeSessionInstrumentation({
     agentName: agent.id,
     ctx,
   });
   const sessionTimeoutMs = agentLimits(agent, ctx)?.sessionTimeoutMs;
-  // Workflow cannot purge inputs and outputs independently.
-  const retention =
-    agent.settings.retention ??
-    (traceDecision.action === "record" && traceDecision.recordInputs && traceDecision.recordOutputs
-      ? undefined
-      : 0);
+  const retention = agent.settings.retention;
   const serializedContext = serializeContext(ctx);
   const entry: {
     -readonly [K in keyof PreparedInitialEntry["entry"]]: PreparedInitialEntry["entry"][K];

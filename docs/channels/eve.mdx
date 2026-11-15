@@ -272,7 +272,7 @@ export default eveChannel({
 
 `audience` also accepts a function that receives `caller`, channel, and deployment environment. The audience is fixed when the session is created, so a later turn from a different caller doesn't change it. For an audience that depends on channel state or verified application data, use a [custom channel audience](./custom#conversation-audience).
 
-Audience also selects the default [run-data retention](../agent-config#run-data-retention). Outside development, private and unknown-audience sessions request deletion when they end, if the Workflow world supports deletion.
+Audience does not affect [run-data retention](../agent-config#run-data-retention). Sessions use the Workflow World's default retention period unless the agent explicitly sets `experimental.workflow.retention: 0`.
 
 For a remote agent, a trusted caller can forward the original audience and its trace-content ceiling. See [Preserving trace content](../guides/remote-agents#preserving-trace-content).
 

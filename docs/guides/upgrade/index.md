@@ -80,7 +80,7 @@ On worlds without deployment routing, follow the [stranded-session recovery guid
 7. Call `client.info()` with an operator credential if your tooling uses it.
 8. Test proactive Slack messages and durable workflow waits your project defines.
 
-Review [run-data retention](/docs/agent-config#run-data-retention) before you rely on a finished transcript staying readable. Outside development, the default trace policy for private and unknown-audience sessions requests deletion when the session ends; whether data is deleted depends on the backend.
+Review [run-data retention](/docs/agent-config#run-data-retention) before you rely on a finished transcript staying readable. Sessions use the Workflow World's default retention period unless the agent explicitly sets `experimental.workflow.retention: 0`.
 
 ## Troubleshooting
 

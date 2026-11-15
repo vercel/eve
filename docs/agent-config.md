@@ -446,24 +446,14 @@ for the retry behavior.
 ## Run data retention
 
 Run-data retention is how long the Workflow World keeps a session's run data.
-Omit `experimental.workflow.retention` to derive it from the session's resolved
-[OpenTelemetry trace policy](./observability/otel#configure-opentelemetry) when
-the session starts:
+Omit `experimental.workflow.retention` or set it to `"default"` to use the
+World's default retention period. On Vercel, this follows your team's plan.
+Trace capture policies, conversation audience, and destination export filters
+do not change run-data retention.
 
-- When the policy allows both inputs and outputs, eve uses the World's default
-  retention period.
-- When the policy drops the trace or excludes either content direction, eve
-  requests deletion when the run ends (Workflow's `experimental_retention: 0`).
-  Workflow can't delete inputs and outputs separately.
-
-Without a custom policy, public conversations and development sessions use the
-World's default. Private and unknown-audience sessions outside development
-request `0`, even with no OpenTelemetry destination installed. Destination
-export filters and lifecycle-provider policies don't change the decision.
-
-Set `experimental.workflow.retention` to `0` to always request deletion, or to
-`"default"` to always keep run data for the World's default period. This
-override is experimental and has no compatibility promise:
+Set `experimental.workflow.retention` to `0` to request deletion when the run
+ends (Workflow's `experimental_retention: 0`). This option is experimental and
+has no compatibility promise:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -483,8 +473,7 @@ redeploy. Session timeout and [workflow tool](./tools/workflows) runs keep the
 World's default.
 
 Retention applies per agent. A [subagent](./subagents) with its own session uses
-its own explicit value or derives retention from its resolved trace decision,
-including any inherited content ceiling. `experimental.workflow.world` is root-only.
+its own explicit value or the World's default retention period. `experimental.workflow.world` is root-only.
 
 At `0`, supporting Worlds delete run and step inputs, outputs, and errors;
 event payloads; and stream contents when the run reaches a terminal state. The
@@ -499,7 +488,7 @@ The Workflow World enforces deletion. A World older than spec version 4 rejects
 Confirm support with your World provider. See
 [Workflow data retention](https://workflow-sdk.dev/docs/observability/retention).
 
-> ⚠️ **At `0`, completed session transcripts become unreadable.** Deletion races reads of finished runs. Depending on the World, reading deleted session history returns either an empty stream or `410` with `code: "session_expired"`. Persist anything you need to keep from inside a tool, or set `retention: "default"` to preserve completed-session reads independently of tracing.
+> ⚠️ **At `0`, completed session transcripts become unreadable.** Deletion races reads of finished runs. Depending on the World, reading deleted session history returns either an empty stream or `410` with `code: "session_expired"`. Persist anything you need to keep from inside a tool, or use the default retention to keep completed-session history for the World's default period.
 
 ## Other defineAgent fields
 
