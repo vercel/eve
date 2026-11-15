@@ -1118,7 +1118,10 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
 
   // Which runtime dependencies a bundle imports instead of bundling depends on whether the
   // vendored package resolves them to eve's install, which a lockfile change alone can alter.
-  // Record the exceptions (usually none) to keep the stamp small.
+  // Recording only the packages that don't keeps the stamp small. This checks resolution from
+  // each vendored package's own root; the plugin decides per importer, so a transitive
+  // dependency that changes where it resolves eve's runtime dependencies doesn't re-vendor,
+  // just as other transitive version changes don't.
   const runtimeDependencies = runtimeDependencyNames(packageRoot);
   const eveInstalls = resolveInstalls(runtimeDependencies, packageRoot);
   const unsharedRuntimeDependencies = [];
