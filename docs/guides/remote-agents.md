@@ -190,7 +190,7 @@ The parent stream shows the same `task.started`, `child.opened`, and `call.settl
 
 The callback URL must use `http` or `https` and reach the parent at a public address. The remote refuses a callback host that is, or resolves to, a private, link-local, or reserved IP address, and a refused callback fails without retries. Loopback hosts such as `localhost` and `127.0.0.1` work only when the remote runs `eve dev` or `vercel dev`. A parent and remote on a private network can't exchange callbacks.
 
-The parent's callback route takes requests without authentication, so the callback URL is the only credential. The route delivers only to a call that waits for a remote agent's reply. A request for any other token gets `404` with `code: "CALLBACK_NOT_PENDING"`, including the token of a hook you create with `createHook`.
+The parent's callback route takes requests without authentication, so the callback URL is the only credential. The route delivers only to a call that waits for an agent's reply. A request for any other token gets `404` with `code: "CALLBACK_NOT_PENDING"`, including the token of a hook you create with `createHook`.
 
 A callback URL carries only the message's callback capability, never the parent's deployment protection bypass secret. To let callbacks reach a parent behind Vercel Deployment Protection, configure Trusted Sources on the parent to admit the remote's project and environment.
 
