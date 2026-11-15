@@ -10,7 +10,7 @@ import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
 import { createDevBootProgressReporter } from "./boot-progress.js";
-import type { DevelopmentCliOptions } from "./command-options.js";
+import { EVE_INIT_INPUT_ENV, type DevelopmentCliOptions } from "./command-options.js";
 import { runInteractiveDevelopmentUi } from "./run-interactive-ui.js";
 import type { DevelopmentTuiStartup } from "./tui/startup.js";
 import type { StartupOnboardingResult } from "./tui/startup-onboarding.js";
@@ -271,6 +271,11 @@ export function registerDevelopmentCommand(input: {
   ).action(async (options: DevelopmentCliOptions) => {
     const interactive = hasInteractiveTerminal();
     const mode = resolveDevUiMode({ options, interactive });
+    const initInput = process.env[EVE_INIT_INPUT_ENV];
+    delete process.env[EVE_INIT_INPUT_ENV];
+    if (options.onboarded === true && initInput !== undefined && mode !== "headless") {
+      options.input ??= initInput;
+    }
     telemetry.trackDevContext({ target: "local", ui: mode });
     if (mode === "headless") logger.log(eveCliBanner());
     if (options.input !== undefined && mode === "headless") {

@@ -878,6 +878,27 @@ describe("eve dev --input", () => {
     },
   );
 
+  it("pre-fills the prompt eve init carried over, without passing it to child processes", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    process.env.EVE_INIT_INPUT = "Help Alice plan her week";
+    try {
+      const runDevelopmentTui = await runInteractiveDev(["dev", "--onboarded"], { startHost });
+      expect(runDevelopmentTui).toHaveBeenCalledWith(
+        expect.objectContaining({ initialInput: "Help Alice plan her week" }),
+      );
+      expect(process.env.EVE_INIT_INPUT).toBeUndefined();
+    } finally {
+      delete process.env.EVE_INIT_INPUT;
+    }
+  });
+
   it("passes the default extension opt-out to the local server", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({

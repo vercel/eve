@@ -1609,24 +1609,35 @@ describe("runInitCommand", () => {
       events.push(`onboarding:${input.projectPath}`);
       return onboarding;
     });
-    deps.runPackageManagerInstall.mockImplementation(async () => {
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _root, options) => {
       events.push("install");
+      // The onboarding screen owns stdin, so the install must not read it.
+      expect(options?.nonInteractive).toBe(true);
       return packageInstallResult();
     });
+    let handedInput: string | undefined;
+    deps.spawnPackageManager.mockImplementation(async () => {
+      handedInput = process.env.EVE_INIT_INPUT;
+      return packageProcessResult();
+    });
 
-    await runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+    try {
+      await runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+    } finally {
+      delete process.env.EVE_INIT_INPUT;
+    }
 
     expect(events).toEqual([`onboarding:${projectPath}`, "install", "installed"]);
     expect(onboarding.close).toHaveBeenCalled();
+    // The prompt travels in the environment: Windows shells split argv, and argv shows in `ps`.
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
       "--reporter=silent",
       "exec",
       "eve",
       "dev",
       "--onboarded",
-      "--input",
-      "Help Alice plan her week",
     ]);
+    expect(handedInput).toBe("Help Alice plan her week");
   });
 
   it("points to /login when onboarding during the install was cancelled", async () => {

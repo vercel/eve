@@ -108,7 +108,8 @@ export async function startInitOnboarding(input: {
         const { draft, queuedPrompt } = startup.finish();
         await startup.shutdown();
         const carried = [queuedPrompt, draft].filter((text) => text !== undefined && text !== "");
-        return carried.length === 0 ? undefined : carried.join("\n\n");
+        // The prompt is single-line: eve dev strips newlines from pre-filled input.
+        return carried.length === 0 ? undefined : carried.join(" ");
       })();
       return closed;
     },

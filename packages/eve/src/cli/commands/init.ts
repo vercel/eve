@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import pc from "#compiled/picocolors/index.js";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
+import { EVE_INIT_INPUT_ENV } from "#cli/dev/command-options.js";
 import type {
   EveCliSetupFailureCode,
   EveCliSetupStep,
@@ -427,7 +428,11 @@ async function runInitSteps(input: {
         if (debug) initLog.debug(line.text);
       },
     };
-    if (onboarding !== undefined) installOptions.signal = onboarding.interrupted;
+    if (onboarding !== undefined) {
+      installOptions.signal = onboarding.interrupted;
+      // The onboarding screen owns the keyboard; a prompt from the install would be invisible.
+      installOptions.nonInteractive = true;
+    }
     const installResult = await dependencies.runPackageManagerInstall(
       project.packageManager,
       project.projectPath,
@@ -437,11 +442,16 @@ async function runInitSteps(input: {
     if (onboarding?.interrupted.aborted === true) {
       progress.stop();
       await onboarding.close();
-      if (project.failurePolicy !== "preserve") {
-        await cleanupFreshInitTarget(
+      if (
+        project.failurePolicy !== "preserve" &&
+        !(await cleanupFreshInitTarget(
           project.projectPath,
           project.failurePolicy,
           project.preservedTargetEntries,
+        ))
+      ) {
+        logger.error(
+          `eve could not completely clean "${project.projectPath}". Clean it manually before rerunning eve init.`,
         );
       }
       throw new WizardCancelledError();
@@ -549,7 +559,10 @@ export async function runInitCommand(
     ? async (projectPath: string) => {
         onboarding = await dependencies
           .startInitOnboarding({ projectPath, telemetry: onboardingTelemetry })
-          .catch(() => undefined);
+          .catch((error: unknown) => {
+            initLog.debug("onboarding could not open; eve dev will run it", { error });
+            return undefined;
+          });
         return onboarding;
       }
     : undefined;
@@ -662,8 +675,8 @@ export async function runInitCommand(
     ...(result.packageManager === "pnpm" ? ["--reporter=silent"] : []),
     ...baseDevArguments,
     ...(onboarding !== undefined ? ["--onboarded"] : freshScaffold ? ["--onboard"] : []),
-    ...(carriedInput === undefined ? [] : ["--input", carriedInput]),
   ];
+  if (carriedInput !== undefined) process.env[EVE_INIT_INPUT_ENV] = carriedInput;
   if (onboardingCancelled) logger.log(pc.dim("Connect a model with /login when you’re ready."));
   logger.log("");
   if (

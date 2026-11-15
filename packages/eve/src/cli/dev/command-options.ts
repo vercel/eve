@@ -34,3 +34,9 @@ export interface ProductionCliOptions {
   port?: number;
   schedules?: boolean;
 }
+
+/**
+ * Carries the prompt typed during `eve init`'s onboarding to `eve dev --onboarded`. Unlike
+ * `--input`, it isn't split by the Windows shell or shown in process lists and npm logs.
+ */
+export const EVE_INIT_INPUT_ENV = "EVE_INIT_INPUT";
