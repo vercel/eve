@@ -1895,6 +1895,15 @@ importers:
 
   packages/eve:
     dependencies:
+      '@linqapp/sdk':
+        specifier: ^0.47.1
+        version: 0.47.1
+      '@opentelemetry/api':
+        specifier: ^1.0.0
+        version: 1.9.1
+      braintrust:
+        specifier: ^3.0.0
+        version: 3.44.0(@aws-sdk/credential-provider-web-identity@3.972.88)(@types/react@19.3.0)(supports-color@10.2.2)(zod@4.6.7)
       nitro:
         specifier: 3.0.261103-rc
         version: 3.0.261103-rc
@@ -1950,9 +1959,6 @@ importers:
       '@linqapp/chat-sdk-adapter':
         specifier: ^0.5.1
         version: 0.5.1(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))
-      '@linqapp/sdk':
-        specifier: 0.47.1
-        version: 0.47.1
       '@modelcontextprotocol/server':
         specifier: 2.4.0
         version: 2.4.0
@@ -1962,9 +1968,6 @@ importers:
       '@nuxt/schema':
         specifier: ^4.6.4
         version: 4.6.4
-      '@opentelemetry/api':
-        specifier: 1.9.1
-        version: 1.9.1
       '@opentelemetry/context-async-hooks':
         specifier: 'catalog:'
         version: 2.12.1(@opentelemetry/api@1.9.1)
@@ -2052,9 +2055,6 @@ importers:
       ai:
         specifier: 'catalog:'
         version: 7.0.172(zod@4.6.7)
-      braintrust:
-        specifier: 3.44.0
-        version: 3.44.0(@aws-sdk/credential-provider-web-identity@3.972.88)(@types/react@19.3.0)(supports-color@10.2.2)(zod@4.6.7)
       chat:
         specifier: 4.44.0
         version: 4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
