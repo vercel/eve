@@ -7,7 +7,7 @@ import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 
 const position = { sequence: 1, stepIndex: 0, turnId: "child-turn" };
 
-/** The token of a hook a run awaits an agent's reply on. */
+/** The token of a hook a run awaits a remote agent's reply on. */
 const REPLY = "eve:reply:v1:parent-hook";
 
 /** The parent's callback URL for that hook, naming no protocol. */
@@ -192,7 +192,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     });
   });
 
-  it("answers not pending for a token that names no reply, without resuming its hook", async () => {
+  it("answers not pending for a token that names no remote reply, without resuming its hook", async () => {
     // Alice's order workflow waits on a hook it named for the order.
     const response = await post(approvalRequest, AGREED, "order:1042");
     expect(response.status).toBe(404);

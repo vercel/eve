@@ -1,3 +1,4 @@
+import { isSignInCallbackToken } from "#execution/callback-hook-tokens.js";
 import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
 /**
  * Framework-shipped callback route used by in-turn interactive
@@ -49,6 +50,10 @@ export async function handleConnectionCallbackRequest(
     );
   }
 
+  // The route is unauthenticated, so it delivers only to a hook that takes sign-in callbacks:
+  // never to one authored code named, or one eve opened for anything else.
+  if (!isSignInCallbackToken(token)) return callbackNotPending();
+
   const callback = await projectAuthorizationCallback(request);
 
   try {
@@ -58,13 +63,17 @@ export async function handleConnectionCallbackRequest(
       payloads: [{ authorizationCallback }],
     });
   } catch {
-    return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
+    return callbackNotPending();
   }
 
   // RFC 6749 section 4.1.2.1: the IdP reports denied consent and other failures with `error`.
   return buildAuthorizationCompletePage(
     callback.params.error === undefined ? "authorized" : "failed",
   );
+}
+
+function callbackNotPending(): Response {
+  return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
 }
 
 /**

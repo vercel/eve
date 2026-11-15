@@ -6,7 +6,7 @@ import {
 } from "#compiled/@workflow/core/index.js";
 import {
   cancelAgentSessionTurnStep,
-  createAgentReplyTokenStep,
+  createRemoteReplyTokenStep,
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
@@ -24,8 +24,8 @@ export const workflowRunHost: RunHost = {
   runId: () => getWorkflowMetadata().workflowRunId,
   createHook: <T>(token?: string) =>
     runHookOf(createHook<T>(token === undefined ? undefined : { token })),
-  createReplyHook: async <T>() =>
-    runHookOf(createHook<T>({ token: await createAgentReplyTokenStep() })),
+  createRemoteReplyHook: async <T>() =>
+    runHookOf(createHook<T>({ token: await createRemoteReplyTokenStep() })),
   sleep: (ms) => sleep(ms),
   resumeHook: (token, payload, options) => resumeHookStep(token, payload, options),
   agentSessions: {

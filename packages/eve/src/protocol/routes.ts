@@ -118,14 +118,14 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  * during in-turn interactive connection authorization.
  *
  * `:name` is the connection name, `:attemptId` identifies the exact challenge,
- * and `:token` is the workflow hook token minted by the workflow body so the
- * route handler can resume the suspended turn via `resumeHook(token, payload)`.
+ * and `:token` names the hook that takes the callback: the session's stable
+ * inbox, or a workflow tool run's own sign-in hook. The route resumes no
+ * other hook.
  *
  * The route is unauthenticated by design: an OAuth IdP follows this URL
  * via a 3xx redirect from the user's browser with no eve credentials
- * attached. The token is the unguessable capability that authorizes the
- * resume; anyone who has it can deliver the callback payload, which is
- * exactly what the IdP needs to do.
+ * attached. The token only addresses the hook. A callback is read when its
+ * `:attemptId`, drawn at random for each challenge, matches a pending one.
  */
 export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:attemptId/:token`;
 
@@ -134,7 +134,7 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  *
  * The `:token` segment is an unguessable workflow hook capability. The route
  * is unauthenticated by design and resumes the matching parked runtime action:
- * only a hook that awaits an agent's reply, which its token's prefix names.
+ * only the hook a remote agent's reply arrives on, which the token's prefix names.
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 

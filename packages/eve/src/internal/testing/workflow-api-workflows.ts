@@ -22,11 +22,11 @@ export async function hookRegistrationWorkflow(token: string, hold = false) {
   return { owner: null, payload: hold ? await hook : undefined };
 }
 
-/** Opens a reply hook as a workflow tool run does, and returns its first payload and its token. */
-export async function agentReplyWorkflow() {
+/** Opens a remote reply hook as a workflow tool run does: its first payload, and its token. */
+export async function remoteReplyWorkflow() {
   "use workflow";
 
-  const reply = await workflowRunHost.createReplyHook<unknown>();
+  const reply = await workflowRunHost.createRemoteReplyHook<unknown>();
   try {
     for await (const payload of reply) return { payload, token: reply.token };
   } finally {

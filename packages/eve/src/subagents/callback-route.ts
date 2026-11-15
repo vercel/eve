@@ -1,4 +1,4 @@
-import { isAgentReplyHookToken } from "#execution/agent-sessions/reply-hook.js";
+import { isRemoteReplyHookToken } from "#execution/callback-hook-tokens.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -96,8 +96,8 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
   }
   // The route is unauthenticated, so a token is authority over the reply it names and nothing
-  // else: not a session inbox, nor a hook authored code created, whose tokens can be guessed.
-  if (!isAgentReplyHookToken(token)) return callbackNotPending();
+  // else: not a session inbox, nor a hook authored code named, whose tokens can be guessed.
+  if (!isRemoteReplyHookToken(token)) return callbackNotPending();
 
   let body: unknown;
   try {

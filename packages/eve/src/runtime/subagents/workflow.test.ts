@@ -27,7 +27,6 @@ vi.mock("#execution/workflow-registry.js", async () => {
   };
 });
 vi.mock("#execution/agent-sessions/steps.js", () => ({
-  createAgentReplyTokenStep: async () => "agent-turn",
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
   stopLateAgentSessionStep: async () => {},
@@ -76,6 +75,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 const agentContext = {
   agents: {},
   capabilities: { requestInput: false },
+  remoteAgents: [] as readonly string[],
   parent: {
     callId: "call-1",
     rootSessionId: "session",

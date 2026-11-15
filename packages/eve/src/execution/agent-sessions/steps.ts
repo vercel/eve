@@ -1,10 +1,10 @@
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { agentReplyHookToken } from "#execution/agent-sessions/reply-hook.js";
 import {
   agentSessionsOver,
   type LocalAgentSessions,
 } from "#execution/agent-sessions/sessions-over.js";
+import { remoteReplyHookToken } from "#execution/callback-hook-tokens.js";
 import type {
   AgentSessionMessage,
   AgentSessionOpenInput,
@@ -99,14 +99,15 @@ export async function sendAgentSessionMessageStep(
 }
 
 /**
- * Names the hook one message's reply arrives on. The name is the reply's only credential, and a
- * workflow body's own `crypto` is seeded from its run's ids, so anyone who knew them could
- * compute a name drawn there. A step draws from the real one, and its result replays as recorded.
+ * Names the hook one message's reply arrives on from a remote agent. The name is all the agent
+ * presents with its reply. A workflow body's own `crypto` is seeded from its run's ids, so a
+ * name drawn there could be computed from them; a step draws from the real one, and its result
+ * replays as recorded.
  */
-export async function createAgentReplyTokenStep(): Promise<string> {
+export async function createRemoteReplyTokenStep(): Promise<string> {
   "use step";
 
-  return agentReplyHookToken(crypto.randomUUID());
+  return remoteReplyHookToken(crypto.randomUUID());
 }
 
 /** Cancels a session's running turn; the turn still reports, as cancelled. */

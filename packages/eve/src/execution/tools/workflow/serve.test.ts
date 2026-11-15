@@ -45,7 +45,6 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.deliver,
 }));
 vi.mock("#execution/agent-sessions/steps.js", () => ({
-  createAgentReplyTokenStep: async () => "agent-turn",
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
   stopLateAgentSessionStep: async () => {},
@@ -101,6 +100,7 @@ function agentContext(
     agents,
     capabilities: { requestInput: true },
     parent: { callId, rootSessionId: "session", sessionId: "session", turn },
+    remoteAgents: [] as readonly string[],
   } as AgentSessionContext;
 }
 

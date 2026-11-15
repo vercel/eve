@@ -1,16 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { registerHost } from "#execution/hosts.js";
 import { resumeAuthorizationCallback, handleExpiredLegacyAuthorization } from "./authorization.js";
-const mocks = vi.hoisted(() => ({ resolve: vi.fn(), resume: vi.fn() }));
-vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: mocks.resume }));
+const mocks = vi.hoisted(() => ({ resume: vi.fn() }));
 // Owner classification has its own tests; every owner here is runnable.
 vi.mock("#execution/session-inbox/owner.js", () => ({
   resumeRunnableHook: (token: string, payload: unknown) => mocks.resume(token, payload),
-}));
-vi.mock("./inbox.js", async (original) => ({
-  ...(await original<typeof import("./inbox.js")>()),
-  resolveLegacyInbox: mocks.resolve,
 }));
 beforeEach(() => vi.resetAllMocks());
 const payload = {
@@ -25,34 +19,11 @@ const payload = {
     },
   ],
 };
-function missingCurrentInbox(token: string) {
-  mocks.resume.mockRejectedValueOnce(new HookNotFoundError(token));
-}
-describe("authorization cutover", () => {
-  it("delivers current callbacks without historical lookup", async () => {
+describe("authorization callbacks", () => {
+  it("delivers a callback to the Workflow hook its token names", async () => {
     mocks.resume.mockResolvedValue({ runId: "current" });
     await resumeAuthorizationCallback("eve:inbox:v1:current", payload);
-    expect(mocks.resolve).not.toHaveBeenCalled();
     expect(mocks.resume).toHaveBeenCalledExactlyOnceWith("eve:inbox:v1:current", payload);
-  });
-  it("rejects historical callbacks after import without queuing them on the new owner", async () => {
-    missingCurrentInbox("old");
-    mocks.resolve.mockResolvedValue({ current: true });
-    await expect(resumeAuthorizationCallback("old", payload)).rejects.toThrow("interrupted");
-    expect(mocks.resume).toHaveBeenCalledExactlyOnceWith("old", payload);
-  });
-  it("uses the historical wire envelope before import", async () => {
-    missingCurrentInbox("old");
-    mocks.resolve.mockResolvedValue({
-      current: false,
-      hook: { token: "old", metadata: { sessionInboxWireVersion: 3 } },
-    });
-    await resumeAuthorizationCallback("old", payload);
-    expect(mocks.resume).toHaveBeenCalledTimes(2);
-    expect(mocks.resume).toHaveBeenLastCalledWith(
-      "old",
-      expect.objectContaining({ kind: "deliver", version: 3, payloads: payload.payloads }),
-    );
   });
   it("delivers to a session a host runs in this process, without asking Workflow", async () => {
     const delivered: unknown[] = [];
@@ -72,9 +43,8 @@ describe("authorization cutover", () => {
     }
     expect(delivered).toEqual([payload]);
     expect(mocks.resume).not.toHaveBeenCalled();
-    expect(mocks.resolve).not.toHaveBeenCalled();
   });
-  it("refuses a callback for a hosted session that ended, without the legacy lookup", async () => {
+  it("refuses a callback for a hosted session that ended, without asking Workflow", async () => {
     const release = registerHost({
       deliver: async (token) => (token === "eve:inbox:v1:ended" ? "gone" : undefined),
       runEnded: () => undefined,
@@ -92,7 +62,6 @@ describe("authorization cutover", () => {
       release();
     }
     expect(mocks.resume).not.toHaveBeenCalled();
-    expect(mocks.resolve).not.toHaveBeenCalled();
   });
   it("expires historical URLs that do not identify an authorization attempt", async () => {
     expect((await handleExpiredLegacyAuthorization()).status).toBe(410);

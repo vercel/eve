@@ -13,6 +13,9 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
 }));
 
+/** A session's stable inbox, which its sign-in callback URLs name. */
+const INBOX = "eve:inbox:v1:eve:session:wrun_1:inbox";
+
 function buildRouteContext(params: Readonly<Record<string, string>>): RouteContext {
   return {
     waitUntil: () => {},
@@ -55,13 +58,13 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("forwards a GET callback into resumeHook as parsed params with no request headers", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "eve:inbox:v1:tok123")}?code=abc&state=xyz`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", INBOX)}?code=abc&state=xyz`;
     const response = await handleConnectionCallbackRequest(
       new Request(url, {
         headers: { "x-probe": "1" },
         method: "GET",
       }),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok123" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: INBOX }),
     );
 
     expect(response.status).toBe(200);
@@ -74,7 +77,7 @@ describe("handleConnectionCallbackRequest", () => {
 
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     const [token, payload] = resumeHookMock.mock.calls[0] ?? [];
-    expect(token).toBe("eve:inbox:v1:tok123");
+    expect(token).toBe(INBOX);
     // Exact match: only parsed params + method cross into the hook
     // payload. The inbound `x-probe` header (and any `Cookie`) is dropped.
     expect(payload).toEqual({
@@ -96,14 +99,14 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("captures form-encoded POST bodies before resuming the hook", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "eve:inbox:v1:tok123")}`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", INBOX)}`;
     await handleConnectionCallbackRequest(
       new Request(url, {
         body: "code=abc&state=xyz",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         method: "POST",
       }),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok123" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: INBOX }),
     );
 
     const [, payload] = resumeHookMock.mock.calls[0] ?? [];
@@ -127,10 +130,10 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("does not report success when the provider redirects back with an OAuth error", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "eve:inbox:v1:tok123")}?error=access_denied&state=xyz`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", INBOX)}?error=access_denied&state=xyz`;
     const response = await handleConnectionCallbackRequest(
       new Request(url),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok123" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: INBOX }),
     );
 
     // The callback still resumes the workflow so it can fail the attempt.
@@ -148,12 +151,54 @@ describe("handleConnectionCallbackRequest", () => {
     resumeHookMock.mockRejectedValueOnce(new Error("hook not found"));
     const response = await handleConnectionCallbackRequest(
       new Request(
-        `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok")}`,
+        `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", INBOX)}`,
       ),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: INBOX }),
     );
     expect(response.status).toBe(404);
     const body = await response.json();
     expect(body).toEqual(expect.objectContaining({ ok: false }));
   });
+
+  it("delivers a callback to a workflow tool run's own sign-in hook", async () => {
+    resumeHookMock.mockResolvedValueOnce(undefined);
+    const token = "eve:sign-in:v1:0b1c2d3e";
+    const response = await handleConnectionCallbackRequest(
+      new Request(
+        `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", token)}?code=abc`,
+      ),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token }),
+    );
+    expect(response.status).toBe(200);
+    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(
+      token,
+      expect.objectContaining({ kind: "authorization-callback" }),
+    );
+  });
+
+  it.each([
+    // Alice's order workflow waits on a hook it named for the order.
+    ["a hook authored code named", "order:1042"],
+    // A channel's address for a session is an inbox too, but no sign-in URL names it.
+    ["a session inbox other than its stable one", "eve:inbox:v1:slack:C1:1700000000.000100"],
+  ])(
+    "answers not pending for %s, without reading the request or resuming the hook",
+    async (_, token) => {
+      const request = new Request(
+        `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", token)}`,
+        { body: "code=abc", method: "POST" },
+      );
+      const response = await handleConnectionCallbackRequest(
+        request,
+        buildRouteContext({ attemptId: "attempt-1", name: "linear", token }),
+      );
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: "Connection callback not pending.",
+        ok: false,
+      });
+      expect(request.bodyUsed).toBe(false);
+      expect(resumeHookMock).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -1,15 +1,15 @@
-// @linux-only: Workflow replay of a reply hook's token behind the callback route
+// @linux-only: a remote reply hook on Workflow, behind the callback route
 import { expect, it } from "vitest";
 
-import { agentReplyWorkflow } from "#internal/testing/workflow-api-workflows.js";
+import { remoteReplyWorkflow } from "#internal/testing/workflow-api-workflows.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 
 const usageDelta = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
 
-it("resumes a run's reply hook, whose token a step drew and a replay keeps", async () => {
-  const run = await start(agentReplyWorkflow, []);
+it("resumes a run's remote reply hook, whose token a step drew and a replay keeps", async () => {
+  const run = await start(remoteReplyWorkflow, []);
   try {
     const { token } = await waitForHook(run);
     const response = await handleSessionCallbackRequest(
