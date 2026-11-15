@@ -61,9 +61,9 @@ On Vercel, callbacks go to the current production deployment, but a workflow too
 - A reply from a remote agent. The remote agent stops retrying after a few seconds, and the call keeps waiting.
 - A sign-in that a `"use step"` function in a workflow tool asked for. The sign-in page answers `404`, and the step keeps waiting.
 
-That covers a call in flight when you deploy, anything a session starts while it stays on the old deployment, and a task that a session from eve 0.84 or later keeps when it moves. A task stays affected for as long as it lives, so finishing its current call doesn't help. If your agent calls remote agents or signs in from workflow steps, end its sessions when you upgrade and start new ones. A sign-in that an ordinary tool or connection asked for isn't affected.
+That covers a call in flight when you deploy, anything a session starts while it stays on the old deployment, and an idle task that a session from eve 0.84 or later keeps when it moves. A task stays affected for as long as it lives, so finishing its current call doesn't help. If your agent calls remote agents or signs in from workflow steps, end its sessions after production runs 1.0, and start new ones. A session that moves to the new deployment with no task from before the upgrade isn't affected. A sign-in that an ordinary tool or connection asked for isn't affected.
 
-For a session from eve 0.83 or earlier, an idle resumable task, such as a subagent that already answered, doesn't keep the session on the old deployment. When the session moves, eve ends the task's run on the old deployment, and the model starts a new task on the new deployment the next time it needs one. The new task doesn't continue the old task's conversation.
+For a session from eve 0.81.1 through 0.83, an idle resumable task, such as a subagent that already answered, doesn't keep the session on the old deployment. When the session moves, eve ends the task's run on the old deployment, and the model starts a new task on the new deployment the next time it needs one. The new task doesn't continue the old task's conversation.
 
 When a session moves, eve compacts its earlier conversation. The model continues from a summary, and the stored transcript stays intact. Remembered tool approvals and usage limits start over, so people may be asked to approve a tool again.
 
