@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { MockScreen, MockUserInput } from "#cli/dev/tui/test/mock-terminal.js";
 import { TerminalRenderer } from "#cli/dev/tui/terminal-renderer.js";
@@ -30,7 +30,7 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { startGitInitialization, type GitInitResult } from "./init-git.js";
+import { startGitInitialization, type GitInitialization, type GitInitResult } from "./init-git.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -1547,15 +1547,57 @@ describe("runInitCommand", () => {
     expect(output.messages.join("\n")).toContain("npm exec -- eve dev");
   });
 
+  it("commits the Git repository only after dependencies install", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-git-order-"));
+    const output = logger();
+    const deps = dependencies();
+    const events: string[] = [];
+    deps.startGitInitialization.mockImplementation(() => {
+      events.push("git:start");
+      return {
+        commit: async () => {
+          events.push("git:commit");
+          return { kind: "initialized" };
+        },
+        settled: async () => undefined,
+      };
+    });
+    deps.runPackageManagerInstall.mockImplementation(async () => {
+      events.push("install");
+      return packageInstallResult();
+    });
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(events).toEqual(["git:start", "install", "git:commit"]);
+  });
+
   it("stops before the Git commit and dev when dependency installation fails, replaying its output", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-fail-"));
+    const projectPath = join(parentDirectory, "my-agent");
     const output = logger();
     const deps = dependencies();
     // Real Git, still running when the install fails. Windows can't remove a directory that a
     // running process uses as its working directory, so cleanup has to wait for Git.
-    deps.startGitInitialization.mockImplementation(startGitInitialization);
-    deps.runPackageManagerInstall.mockImplementation(async (_kind, projectPath, options) => {
-      await vi.waitFor(() => expect(existsSync(join(projectPath, ".git"))).toBe(true));
+    let git:
+      | { commit: Mock<GitInitialization["commit"]>; settled: Mock<GitInitialization["settled"]> }
+      | undefined;
+    let projectExistedWhenGitSettled: boolean | undefined;
+    deps.startGitInitialization.mockImplementation((path) => {
+      const real = startGitInitialization(path);
+      git = {
+        commit: vi.fn(real.commit),
+        settled: vi.fn(async () => {
+          await real.settled();
+          projectExistedWhenGitSettled = await pathExists(path);
+        }),
+      };
+      return git;
+    });
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, installPath, options) => {
+      await vi.waitFor(() => expect(existsSync(join(installPath, ".git"))).toBe(true), {
+        timeout: 10_000,
+      });
       options?.onOutput?.({ stream: "stdout", text: "Packages: +12" });
       options?.onOutput?.({ stream: "stderr", text: "ERR_PNPM_FETCH_404 not found" });
       return packageInstallResult(1);
@@ -1565,9 +1607,35 @@ describe("runInitCommand", () => {
       "Failed to install dependencies",
     );
 
-    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
+    await expect(pathExists(projectPath)).resolves.toBe(false);
+    expect(git?.commit).not.toHaveBeenCalled();
+    expect(git?.settled).toHaveBeenCalledTimes(1);
+    expect(projectExistedWhenGitSettled).toBe(true);
     expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("waits for Git setup before rethrowing an unexpected install error", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-throw-"));
+    const output = logger();
+    const deps = dependencies();
+    const events: string[] = [];
+    deps.startGitInitialization.mockImplementation(() => ({
+      commit: async () => ({ kind: "initialized" }),
+      settled: async () => {
+        events.push("git:settled");
+      },
+    }));
+    deps.runPackageManagerInstall.mockImplementation(async () => {
+      events.push("install");
+      throw new Error("install crashed");
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "install crashed",
+    );
+
+    expect(events).toEqual(["install", "git:settled"]);
   });
 
   it("hands off to pnpm dev without extra configuration", async () => {
@@ -1719,7 +1787,8 @@ describe("runInitCommand", () => {
         debugLines.some((line) => line.startsWith("[eve:init] installing dependencies with")),
       ).toBe(true);
       expect(debugLines).toContain("[eve:init] Progress: resolved 62, reused 62, done");
-      expect(debugLines).toContain("[eve:init] initializing git repository");
+      expect(debugLines).toContain("[eve:init] starting git repository setup");
+      expect(debugLines).toContain("[eve:init] committing git repository");
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
