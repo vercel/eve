@@ -1118,9 +1118,10 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
 
   // Which runtime dependencies a bundle imports instead of bundling depends on whether the
   // vendored package resolves them to eve's install, which a lockfile change alone can alter.
+  // Record the exceptions (usually none) to keep the stamp small.
   const runtimeDependencies = runtimeDependencyNames(packageRoot);
   const eveInstalls = resolveInstalls(runtimeDependencies, packageRoot);
-  const sharedRuntimeDependencies = [];
+  const unsharedRuntimeDependencies = [];
 
   const moduleFingerprints = {};
   const moduleVersions = {};
@@ -1131,9 +1132,10 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
       module.packageJsonName,
     );
     moduleVersions[module.packageName] = packageInfo.packageJson.version ?? "0.0.0";
-    for (const [name, install] of resolveInstalls(runtimeDependencies, packageInfo.packageRoot)) {
-      if (eveInstalls.get(name) === install) {
-        sharedRuntimeDependencies.push(`${module.packageName}>${name}`);
+    const moduleInstalls = resolveInstalls(runtimeDependencies, packageInfo.packageRoot);
+    for (const [name, install] of eveInstalls) {
+      if (moduleInstalls.get(name) !== install) {
+        unsharedRuntimeDependencies.push(`${module.packageName}>${name}`);
       }
     }
 
@@ -1153,11 +1155,11 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
   return {
     moduleFingerprints,
     moduleVersions,
-    sharedRuntimeDependencies,
     scriptHash: scriptHash.digest("hex"),
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
     ),
+    unsharedRuntimeDependencies,
   };
 }
 
