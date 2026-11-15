@@ -26,7 +26,7 @@ export async function hookRegistrationWorkflow(token: string, hold = false) {
 export async function agentReplyWorkflow() {
   "use workflow";
 
-  const reply = workflowRunHost.createReplyHook<unknown>();
+  const reply = await workflowRunHost.createReplyHook<unknown>();
   try {
     for await (const payload of reply) return { payload, token: reply.token };
   } finally {

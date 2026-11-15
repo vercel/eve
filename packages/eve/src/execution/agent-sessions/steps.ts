@@ -1,5 +1,6 @@
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { agentReplyHookToken } from "#execution/agent-sessions/reply-hook.js";
 import {
   agentSessionsOver,
   type LocalAgentSessions,
@@ -95,6 +96,17 @@ export async function sendAgentSessionMessageStep(
   "use step";
 
   return await workflowAgentSessions.send(input);
+}
+
+/**
+ * Names the hook one message's reply arrives on. The name is the reply's only credential, and a
+ * workflow body's own `crypto` is seeded from its run's ids, so anyone who knew them could
+ * compute a name drawn there. A step draws from the real one, and its result replays as recorded.
+ */
+export async function createAgentReplyTokenStep(): Promise<string> {
+  "use step";
+
+  return agentReplyHookToken(crypto.randomUUID());
 }
 
 /** Cancels a session's running turn; the turn still reports, as cancelled. */

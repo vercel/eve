@@ -45,6 +45,7 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.deliver,
 }));
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  createAgentReplyTokenStep: async () => "agent-turn",
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
   stopLateAgentSessionStep: async () => {},

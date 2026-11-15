@@ -28,8 +28,16 @@ const mocks = vi.hoisted(() => {
     admitted: [] as string[],
     /** Delivery steps that have not landed yet, oldest first. */
     pending: [] as PendingDelivery[],
-    createHook: () => {
+    /**
+     * Names reply hooks in the order asked. Every second name takes longer, as a step started
+     * later may end first: replies must still follow the order their messages were sent.
+     */
+    createReplyToken: async () => {
       const token = `reply-${String(tokens++)}`;
+      if (tokens % 2 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+      return token;
+    },
+    createHook: ({ token }: { readonly token: string }) => {
       const queue: unknown[] = [];
       let wake: (() => void) | undefined;
       let disposed = false;
@@ -69,6 +77,7 @@ vi.mock("#execution/agent-sessions/requests.js", () => ({
   forwardAgentSessionRequest: vi.fn(async () => {}),
 }));
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  createAgentReplyTokenStep: mocks.createReplyToken,
   cancelAgentSessionTurnStep: vi.fn(async () => {}),
   endAgentSessionsStep: vi.fn(async () => {}),
   stopLateAgentSessionStep: vi.fn(async () => {}),

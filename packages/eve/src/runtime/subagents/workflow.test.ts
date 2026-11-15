@@ -27,6 +27,7 @@ vi.mock("#execution/workflow-registry.js", async () => {
   };
 });
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  createAgentReplyTokenStep: async () => "agent-turn",
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
   stopLateAgentSessionStep: async () => {},
