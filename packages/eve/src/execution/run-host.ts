@@ -41,7 +41,7 @@ export interface RunHost {
   createHook<T>(token?: string): RunHook<T>;
   /**
    * Opens the hook an agent's reply arrives on, under a token the host names. A remote agent
-   * replies through eve's callback route, which resumes only these hooks.
+   * replies through eve's callback route, which resumes only a hook opened here.
    */
   createReplyHook<T>(): RunHook<T>;
   /** Resolves once `ms` pass. */

@@ -108,7 +108,7 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
     return {
       runId: () => runId,
       createHook,
-      // This host reaches no remote agent, so no callback names a reply hook: it needs no mark.
+      // This host reaches no remote agent, so no callback names a reply hook: any token serves.
       createReplyHook: <T>() => createHook<T>(),
       sleep: (ms) => host.timers.until(Date.now() + ms),
       resumeHook: async (token, payload, options) =>

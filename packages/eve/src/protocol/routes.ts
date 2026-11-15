@@ -134,7 +134,7 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  *
  * The `:token` segment is an unguessable workflow hook capability. The route
  * is unauthenticated by design and resumes the matching parked runtime action:
- * only a hook that awaits an agent's reply, never another hook with that token.
+ * only a hook that awaits an agent's reply, which its token's prefix names.
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 

@@ -4,4 +4,6 @@
 
 The `/eve/v1/callback/:token` route now resumes only a call that waits for a remote agent's reply, so a request that guesses a token can't resume a hook your code created with `createHook()` or any other eve hook.
 
-A remote agent call started on an earlier eve release doesn't receive its reply after the parent's production deployment moves to this release. Let those calls finish before you upgrade, or run them again afterward.
+eve now names each reply hook with a token under the reserved `eve:reply:v1:` prefix, and the route answers `404` with `code: "CALLBACK_NOT_PENDING"` for any other token. Don't start a `createHook()` token with `eve:`.
+
+A remote agent call that an earlier eve release started doesn't receive its reply once this release serves the parent's callback route: the remote stops retrying after a few seconds, and the call never gets that reply. Let those calls finish before you upgrade, or run them again afterward.

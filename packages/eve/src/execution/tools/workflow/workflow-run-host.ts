@@ -4,7 +4,7 @@ import {
   sleep,
   type Hook,
 } from "#compiled/@workflow/core/index.js";
-import { AGENT_REPLY_HOOK_METADATA } from "#execution/agent-sessions/reply-hook.js";
+import { agentReplyHookToken } from "#execution/agent-sessions/reply-hook.js";
 import {
   cancelAgentSessionTurnStep,
   endAgentSessionsStep,
@@ -24,7 +24,9 @@ export const workflowRunHost: RunHost = {
   runId: () => getWorkflowMetadata().workflowRunId,
   createHook: <T>(token?: string) =>
     runHookOf(createHook<T>(token === undefined ? undefined : { token })),
-  createReplyHook: <T>() => runHookOf(createHook<T>({ metadata: AGENT_REPLY_HOOK_METADATA })),
+  // Workflow seeds `crypto` inside a run's body, so each replay names the same token.
+  createReplyHook: <T>() =>
+    runHookOf(createHook<T>({ token: agentReplyHookToken(crypto.randomUUID()) })),
   sleep: (ms) => sleep(ms),
   resumeHook: (token, payload, options) => resumeHookStep(token, payload, options),
   agentSessions: {

@@ -138,7 +138,7 @@ import { resumeHook } from "eve/workflow/api";
 | `getRun(runId)`                        | `eve/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                                                         |
 | `resumeHook(token, payload)`           | `eve/workflow/api` | Sends a payload to the hook with that token.                                                                                                                                             |
 
-A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to `{ runId }` for the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
+A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. Don't start a token with `eve:`, because eve uses that prefix for its own hooks. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to `{ runId }` for the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
 
 Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` for explicit types.
 

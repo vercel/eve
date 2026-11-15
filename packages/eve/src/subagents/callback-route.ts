@@ -1,4 +1,5 @@
-import { resumeAgentReplyHook } from "#execution/session-inbox/owner.js";
+import { isAgentReplyHookToken } from "#execution/agent-sessions/reply-hook.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -20,9 +21,8 @@ import {
   V26_INPUT_REMOTE_AGENT_PROTOCOL,
 } from "#protocol/remote-agent-protocol.js";
 
-// The callback token grants access to the pending turn, and to nothing else: the route resumes
-// only a hook that awaits an agent's reply. Validate remote input before handing it to the
-// parent; the child session ID is not authority.
+// The callback token grants access to the pending turn. Validate remote input
+// before handing it to the parent; the child session ID is not authority.
 const sessionInteractionCallbackSchema = z.object({
   callId: z.string().min(1),
   childSessionId: z.string().min(1),
@@ -95,6 +95,9 @@ export async function handleSessionCallbackRequest(
   if (typeof token !== "string" || token.length === 0) {
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
   }
+  // The route is unauthenticated, so a token is authority over the reply it names and nothing
+  // else: not a session inbox, nor a hook authored code created, whose tokens can be guessed.
+  if (!isAgentReplyHookToken(token)) return callbackNotPending();
 
   let body: unknown;
   try {
@@ -113,18 +116,22 @@ export async function handleSessionCallbackRequest(
   if (result instanceof Response) return result;
 
   try {
-    await resumeAgentReplyHook(
+    await resumeRunnableHook(
       token,
       forwarded ?? { kind: "runtime-action-result", results: [result] },
     );
   } catch {
-    return Response.json(
-      { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
-      { status: 404 },
-    );
+    return callbackNotPending();
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+function callbackNotPending(): Response {
+  return Response.json(
+    { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
+    { status: 404 },
+  );
 }
 
 /**
