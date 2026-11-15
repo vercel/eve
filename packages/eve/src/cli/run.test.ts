@@ -687,6 +687,148 @@ describe("eve dev --input", () => {
     }
   });
 
+  describe("onboarding on the startup screen", () => {
+    function startupScreen() {
+      let requestExit!: () => void;
+      const startup = {
+        renderer: {},
+        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        shutdown: vi.fn(async () => {}),
+      };
+      const startDevelopmentTuiStartup = vi.fn(async (input: { onExitRequest: () => void }) => {
+        requestExit = input.onExitRequest;
+        return startup;
+      });
+      const signals: AbortSignal[] = [];
+      const settle = Promise.withResolvers<{ outcome: { message?: string; cancelled?: true } }>();
+      const runStartupOnboarding = vi.fn(
+        async (input: {
+          signal: AbortSignal;
+          onOnboardingStep?: (event: { flow: "onboarding"; step: "model_provider" }) => void;
+        }) => {
+          signals.push(input.signal);
+          input.onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
+          input.signal.addEventListener("abort", () =>
+            settle.resolve({ outcome: { cancelled: true } }),
+          );
+          return await settle.promise;
+        },
+      );
+      const runDevelopmentTui = vi.fn(async () => {});
+      vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+      vi.doMock("#cli/dev/tui/startup-onboarding.js", () => ({ runStartupOnboarding }));
+      vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui }));
+      return {
+        startup,
+        runDevelopmentTui,
+        onboardingSignal: () => signals[0],
+        finishOnboarding: () => settle.resolve({ outcome: { message: "" } }),
+        requestExit: () => requestExit(),
+        opened: () => vi.waitFor(() => expect(runStartupOnboarding).toHaveBeenCalledOnce()),
+      };
+    }
+
+    afterEach(() => {
+      vi.doUnmock("#cli/dev/tui/startup.js");
+      vi.doUnmock("#cli/dev/tui/startup-onboarding.js");
+      vi.doUnmock("#cli/dev/tui/tui.js");
+    });
+
+    it.each([
+      ["attaches to an existing server", "existing" as const],
+      ["starts a server that keeps running", "started" as const],
+    ])("keeps onboarding open when eve dev %s", async (_name, kind) => {
+      const screen = startupScreen();
+      const startHost = vi.fn(() => ({
+        start: async () => ({ kind, appRoot: "/canonical/app", url: "http://127.0.0.1:4321/" }),
+        wait: () => new Promise<void>(() => {}),
+        close: async () => {},
+      }));
+
+      await withInteractiveTerminal(async () => {
+        const run = runCli(["dev", "--onboard"], { error: () => {}, log: () => {} }, { startHost });
+        await screen.opened();
+        // Let the started handle reach the code that would stop onboarding.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(screen.onboardingSignal()?.aborted).toBe(false);
+        screen.finishOnboarding();
+        await run;
+      });
+
+      expect(screen.runDevelopmentTui).toHaveBeenCalledOnce();
+    });
+
+    it("stops onboarding and reports the server's exit when it exits after starting", async () => {
+      const screen = startupScreen();
+      const exited = Promise.withResolvers<void>();
+      const startHost = vi.fn(() => ({
+        start: async () => ({
+          kind: "started" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:4321/",
+        }),
+        wait: () => exited.promise,
+        close: async () => {},
+      }));
+
+      await withInteractiveTerminal(async () => {
+        const run = runCli(["dev", "--onboard"], { error: () => {}, log: () => {} }, { startHost });
+        await screen.opened();
+        exited.reject(new Error("server crashed"));
+        await expect(run).rejects.toThrow("server crashed");
+      });
+
+      expect(screen.onboardingSignal()?.aborted).toBe(true);
+      expect(screen.startup.shutdown).toHaveBeenCalled();
+      expect(screen.runDevelopmentTui).not.toHaveBeenCalled();
+    });
+
+    it("stops onboarding without loading the full UI when eve dev is stopped", async () => {
+      const screen = startupScreen();
+      const startHost = vi.fn(() => ({
+        start: () => new Promise<never>(() => {}),
+        close: async () => {},
+      }));
+
+      const telemetry = {
+        trackDevContext: vi.fn(),
+        trackSetupStep: vi.fn(),
+        trackSetupTerminal: vi.fn(),
+      };
+      const program = createCliProgram(
+        { error: () => {}, log: () => {} },
+        { startHost },
+        {
+          resolve: async () => {},
+          resolveAgent: async () => ({
+            appRoot: "/app",
+            environmentRoot: "/app",
+            kind: "standalone" as const,
+          }),
+          root: "/app",
+        },
+        telemetry,
+      );
+
+      await withInteractiveTerminal(async () => {
+        const run = program.parseAsync(["dev", "--onboard"], { from: "user" });
+        await screen.opened();
+        screen.requestExit();
+        await run;
+      });
+
+      expect(screen.onboardingSignal()?.aborted).toBe(true);
+      // The full UI never ran to report how onboarding ended, so eve dev does.
+      expect(telemetry.trackSetupTerminal).toHaveBeenCalledExactlyOnceWith({
+        flow: "onboarding",
+        step: "model_provider",
+        result: "cancelled",
+      });
+      expect(screen.startup.shutdown).toHaveBeenCalled();
+      expect(screen.runDevelopmentTui).not.toHaveBeenCalled();
+    });
+  });
+
   it.each([["dev"], ["remote", "connect", "--url", "https://example.com"]])(
     "passes --show-* display flags through %s",
     async (...command) => {

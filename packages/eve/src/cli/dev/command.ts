@@ -5,7 +5,7 @@ import { eveCliBanner } from "#cli/banner.js";
 import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
-import type { EveCliTelemetry } from "#cli/telemetry/index.js";
+import type { EveCliSetupStepEvent, EveCliTelemetry } from "#cli/telemetry/index.js";
 import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
@@ -57,10 +57,10 @@ async function loadStartHost(): Promise<NonNullable<DevelopmentCommandRuntime["s
 
 async function runOnboardingWhileServerStarts(input: {
   readonly applicationRoot: string;
+  readonly onOnboardingStep: (event: EveCliSetupStepEvent) => void;
   readonly started: Promise<{ readonly handle: { readonly url: string } | undefined }>;
   readonly signal: AbortSignal;
   readonly startup: DevelopmentTuiStartup;
-  readonly telemetry: DevelopmentCommandTelemetry;
 }): Promise<StartupOnboardingResult> {
   const [{ runStartupOnboarding }, { withDevelopmentServerPaused }, { findEveProjectContext }] =
     await Promise.all([
@@ -74,7 +74,7 @@ async function runOnboardingWhileServerStarts(input: {
     workspaceRoot: projectContext?.environmentRoot ?? input.applicationRoot,
     agentRoot:
       projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined,
-    onOnboardingStep: input.telemetry.trackSetupStep,
+    onOnboardingStep: input.onOnboardingStep,
     signal: input.signal,
     withExclusiveTerminal: async (task) => {
       const { handle } = await input.started;
@@ -332,21 +332,44 @@ export function registerDevelopmentCommand(input: {
       // or exits while onboarding is open ends it, like a stop does.
       const stopOnboarding = new AbortController();
       const startedServer: DevelopmentServer & { wait?: () => Promise<void> } = server;
-      void started
-        .then(({ handle }) => (handle?.kind === "existing" ? undefined : startedServer.wait?.()))
-        .then(
-          () => stopOnboarding.abort(),
-          () => stopOnboarding.abort(),
-        );
+      // Only a server this command owns can exit under onboarding; an attached one outlives it.
+      const ownedServerExited = started.then(({ handle }) =>
+        handle?.kind === "started" && startedServer.wait !== undefined
+          ? startedServer.wait()
+          : new Promise<never>(() => {}),
+      );
+      void ownedServerExited.then(
+        () => stopOnboarding.abort(),
+        () => stopOnboarding.abort(),
+      );
+      // The runner reports how onboarding ended; when eve dev ends first, it's reported here.
+      let onboardingOpened = false;
+      const reportOnboardingEnded = (result: StartupOnboardingResult | undefined) => {
+        if (!onboardingOpened) return;
+        const outcome = result?.outcome;
+        telemetry.trackSetupTerminal({
+          flow: "onboarding",
+          step: "model_provider",
+          result:
+            result === undefined || outcome?.cancelled
+              ? "cancelled"
+              : outcome?.failed === true
+                ? "error"
+                : "completed",
+        });
+      };
       const startupOnboardingPromise =
         options.onboard === true
           ? tuiStartupPromise?.then((startup) =>
               runOnboardingWhileServerStarts({
                 applicationRoot: applicationContext.root,
+                onOnboardingStep: (event) => {
+                  onboardingOpened = true;
+                  telemetry.trackSetupStep(event);
+                },
                 signal: AbortSignal.any([lifecycle.signal, stopOnboarding.signal]),
                 started,
                 startup,
-                telemetry,
               }),
             )
           : undefined;
@@ -357,19 +380,30 @@ export function registerDevelopmentCommand(input: {
       ]).catch(async (error: unknown) => {
         // Let onboarding unwind off the terminal before the startup screen shuts down.
         stopOnboarding.abort();
-        await Promise.race([
-          startupOnboardingPromise?.catch(() => undefined),
-          new Promise((resolve) => setTimeout(resolve, 1_000).unref()),
-        ]);
+        reportOnboardingEnded(
+          await Promise.race([
+            startupOnboardingPromise?.catch(() => undefined),
+            new Promise<undefined>((resolve) =>
+              setTimeout(() => resolve(undefined), 1_000).unref(),
+            ),
+          ]),
+        );
         throw error;
       });
       const handle = outcome.handle;
+      tuiStartup = startup;
       if (handle === undefined || lifecycle.signal.aborted) {
-        tuiStartup = startup;
+        reportOnboardingEnded(startupOnboarding);
         await tuiStartup?.shutdown();
         return;
       }
-      tuiStartup = startup;
+      if (startupOnboardingPromise !== undefined && stopOnboarding.signal.aborted) {
+        // The server exited while onboarding was open, which stopped the startup screen.
+        reportOnboardingEnded(startupOnboarding);
+        await tuiStartup?.shutdown();
+        await ownedServerExited;
+        return;
+      }
 
       if (mode !== "tui") {
         logger.log(

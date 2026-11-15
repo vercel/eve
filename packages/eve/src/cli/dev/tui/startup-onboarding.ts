@@ -2,6 +2,7 @@ import type { EveCliSetupStepEvent } from "#cli/telemetry/index.js";
 
 import { isInterruptedError } from "./errors.js";
 import type { PromptCommandOutcome } from "./runner.js";
+import { runSetupFlowCommand } from "./run-setup-flow-command.js";
 import type { TuiSetupCommandInput } from "./setup-commands.js";
 import type { DevelopmentTuiStartup } from "./startup.js";
 
@@ -31,33 +32,23 @@ export async function runStartupOnboarding(input: {
   const { renderer } = input.startup;
   renderer.setStartupPhase("connecting");
   input.onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
-  const { runTuiSetupCommand } = await import("./setup-commands.js");
-  // `AbortSignal` doesn't replay, so a stop during the import is caught here.
-  if (input.signal.aborted) return { outcome: { cancelled: true } };
-  const flow = renderer.setupFlow;
   const onStop = () => renderer.requestInterrupt();
   input.signal.addEventListener("abort", onStop, { once: true });
-  flow.begin("");
-  let preserveDiagnostics = true;
   try {
-    const commandInput: TuiSetupCommandInput = {
+    const commandInput: Omit<TuiSetupCommandInput, "renderer"> = {
       command: "login",
       appRoot: input.workspaceRoot,
-      renderer: flow,
       initialModelStep: "provider",
       withExclusiveTerminal: input.withExclusiveTerminal,
       signal: input.signal,
     };
     if (input.agentRoot !== undefined) commandInput.agentRoot = input.agentRoot;
-    const result = await runTuiSetupCommand(commandInput);
-    const { preserveFlowDiagnostics, partial: _partial, ...outcome } = result;
-    preserveDiagnostics = preserveFlowDiagnostics;
+    const outcome = await runSetupFlowCommand(renderer.setupFlow, commandInput);
     return { outcome: input.signal.aborted ? { cancelled: true } : outcome };
   } catch (error) {
     if (input.signal.aborted && isInterruptedError(error)) return { outcome: { cancelled: true } };
     throw error;
   } finally {
     input.signal.removeEventListener("abort", onStop);
-    flow.end({ preserveDiagnostics });
   }
 }
