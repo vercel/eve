@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, readdir, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
@@ -11,6 +12,9 @@ import { promisify } from "node:util";
 //
 // Reachability is TypeScript's own, under both module resolutions that read `exports`.
 //
+// The repository's templates also import a few internals straight from `node_modules/eve/dist`,
+// mostly in tests. Those files are extra roots, so a template still typechecks after upgrading.
+//
 // Usage: node scripts/prune-declarations.mjs <staged-package-dir>
 const RESOLUTIONS = [
   ["--module", "nodenext", "--moduleResolution", "nodenext"],
@@ -21,14 +25,48 @@ const require = createRequire(import.meta.url);
 const tsc = join(dirname(require.resolve("typescript/package.json")), "bin", "tsc");
 const packageRoot = await realpath(resolve(process.argv[2] ?? ".package"));
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-const roots = [
-  ...new Set(
-    Object.values(manifest.exports)
-      .flatMap((target) => (typeof target === "object" ? Object.values(target) : [target]))
-      .filter((target) => typeof target === "string" && target.endsWith(".d.ts"))
-      .map((target) => resolve(packageRoot, target)),
-  ),
-];
+const exported = Object.values(manifest.exports)
+  .flatMap((target) => (typeof target === "object" ? Object.values(target) : [target]))
+  .filter((target) => typeof target === "string" && target.endsWith(".d.ts"))
+  .map((target) => resolve(packageRoot, target));
+
+const templatesDirectory = resolve(import.meta.dirname, "..", "..", "..", "apps", "templates");
+const SKIPPED_DIRECTORIES = new Set([
+  "node_modules",
+  ".next",
+  ".nuxt",
+  ".output",
+  ".eve",
+  ".vercel",
+]);
+const SOURCE_FILE = /\.(?:[cm]?ts|tsx)$/u;
+const DIST_IMPORT = /node_modules\/eve\/(dist\/[^"'`\s]+?)\.js["'`]/gu;
+const sourceFiles = async (directory) => {
+  const entries = await readdir(directory, { withFileTypes: true }).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  const nested = await Promise.all(
+    entries.map((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return SKIPPED_DIRECTORIES.has(entry.name) ? [] : sourceFiles(path);
+      return entry.isFile() && SOURCE_FILE.test(entry.name) ? [path] : [];
+    }),
+  );
+  return nested.flat();
+};
+const templateImported = [];
+for (const file of await sourceFiles(templatesDirectory)) {
+  for (const [, target] of (await readFile(file, "utf8")).matchAll(DIST_IMPORT)) {
+    const declaration = resolve(packageRoot, `${target}.d.ts`);
+    if (!existsSync(declaration)) {
+      throw new Error(`${file} imports eve/${target}.js, which has no declaration to keep.`);
+    }
+    templateImported.push(declaration);
+  }
+}
+
+const roots = [...new Set([...exported, ...templateImported])];
 
 const reachable = new Set();
 for (const resolution of RESOLUTIONS) {
@@ -40,7 +78,7 @@ for (const resolution of RESOLUTIONS) {
   for (const file of stdout.split(/\r?\n/u)) if (file !== "") reachable.add(resolve(file));
 }
 const missing = roots.filter((root) => !reachable.has(root));
-if (missing.length > 0) throw new Error(`tsc did not list the exported ${missing.join(", ")}.`);
+if (missing.length > 0) throw new Error(`tsc did not list the root ${missing.join(", ")}.`);
 
 const dist = join(packageRoot, "dist");
 const unreachable = (await readdir(dist, { recursive: true }))
@@ -48,4 +86,6 @@ const unreachable = (await readdir(dist, { recursive: true }))
   .map((file) => join(dist, file))
   .filter((file) => !reachable.has(file));
 await Promise.all(unreachable.map((file) => rm(file)));
-console.log(`Removed ${unreachable.length} declarations that no export reaches.`);
+console.log(
+  `Removed ${unreachable.length} declarations that no export or template import reaches.`,
+);
