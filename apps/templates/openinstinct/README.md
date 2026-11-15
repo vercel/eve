@@ -316,7 +316,7 @@ require additional financial-data scopes and connected-source permissions.
 <details>
 <summary>Eve version and active-session compatibility</summary>
 
-This repository pins Eve `1.0.0`. Eve 1.0 refuses to load extensions
+This repository uses Eve `^1.0.0`. Eve 1.0 refuses to load extensions
 built with Eve 0.83 or earlier, so the Link extension is disabled until Stripe
 ships a compatible release (see [Link wallet](#link-wallet)). Browser work uses
 the resumable `run_browser` task: the coordinator continues a worker by its

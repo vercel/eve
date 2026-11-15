@@ -1,6 +1,6 @@
 # Dependency compatibility patches
 
-eve is pinned to the published `1.0.0` release.
+This repository uses the published eve `^1.0.0` release line.
 
 `@linqapp__chat-sdk-adapter@0.5.1.patch` adds the native reply option to
 the separately installed adapter while preserving attachments and idempotency.
