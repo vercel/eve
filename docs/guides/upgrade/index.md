@@ -56,14 +56,14 @@ Two kinds of session stay on the old deployment:
 - A session with a background task that is still working, or whose results the model hasn't read yet, stays until that clears.
 - A session on a deployment that runs eve 0.81.0 or earlier never moves. Finish or end those sessions before you upgrade.
 
-On Vercel, a production callback reaches the newest deployment, but a task keeps running on the deployment that started it. The new deployment refuses two kinds of callback for a task that an earlier eve release started:
+On Vercel, callbacks go to the current production deployment, but a workflow tool run or a task keeps running on the deployment that started it. Once production runs 1.0, it refuses two kinds of callback for a run on a deployment with an earlier eve release:
 
 - A reply from a remote agent. The remote agent stops retrying after a few seconds, and the call keeps waiting.
 - A sign-in that a `"use step"` function in a workflow tool asked for. The sign-in page answers `404`, and the step keeps waiting.
 
-This applies while the task's session stays on the old deployment, and to a task the session still has after it moves. Let those tasks finish before you upgrade, or end their sessions afterward. A sign-in that an ordinary tool or connection asked for isn't affected.
+That covers a call in flight when you deploy, anything a session starts while it stays on the old deployment, and a task that a session from eve 0.84 or later keeps when it moves. A task stays affected for as long as it lives, so finishing its current call doesn't help. If your agent calls remote agents or signs in from workflow steps, end its sessions when you upgrade and start new ones. A sign-in that an ordinary tool or connection asked for isn't affected.
 
-An idle resumable task, such as a subagent that already answered, doesn't keep a session on the old deployment. When the session moves, eve ends the task's run on the old deployment, and the model starts a new task on the new deployment the next time it needs one. The new task doesn't continue the old task's conversation.
+For a session from eve 0.83 or earlier, an idle resumable task, such as a subagent that already answered, doesn't keep the session on the old deployment. When the session moves, eve ends the task's run on the old deployment, and the model starts a new task on the new deployment the next time it needs one. The new task doesn't continue the old task's conversation.
 
 When a session moves, eve compacts its earlier conversation. The model continues from a summary, and the stored transcript stays intact. Remembered tool approvals and usage limits start over, so people may be asked to approve a tool again.
 
