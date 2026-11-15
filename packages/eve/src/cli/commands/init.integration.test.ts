@@ -987,10 +987,11 @@ describe("runInitCommand", () => {
   });
 
   it.each([
+    ["npm", "package-lock.json", ["exec", "--", "eve", "dev", "--onboard"]],
     ["yarn", "yarn.lock", ["eve", "dev", "--onboard"]],
     ["bun", "bun.lock", ["x", "eve", "dev", "--onboard"]],
   ] as const)(
-    "scaffolds a fresh %s workspace member without nested root-only package fields",
+    "scaffolds a fresh %s workspace member without nested root-only package fields or skipping peer resolution",
     async (kind, lockfile, devArguments) => {
       const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
       const appsDirectory = join(workspaceRoot, "apps");
@@ -1036,10 +1037,11 @@ describe("runInitCommand", () => {
       expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
+      // A workspace's tree isn't eve's alone, so npm still resolves its peers.
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
-        expect.anything(),
+        expect.objectContaining({ skipPeerDependencyResolution: false }),
       );
       expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
     },
