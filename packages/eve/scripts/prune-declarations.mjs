@@ -23,13 +23,27 @@ const RESOLUTIONS = [
   ["--module", "preserve", "--moduleResolution", "bundler"],
 ];
 
+// `--listFilesOnly` leaves an import it can't resolve off the list without failing, which would
+// delete everything behind it. A full check with `skipLibCheck` off fails on that instead.
+const CHECK = [
+  "--ignoreConfig",
+  "--noEmit",
+  "--skipLibCheck",
+  "false",
+  "--listFiles",
+  "--types",
+  "",
+];
+
 const require = createRequire(import.meta.url);
 const tsc = join(dirname(require.resolve("typescript/package.json")), "bin", "tsc");
 const packageRoot = await realpath(resolve(process.argv[2] ?? ".package"));
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-const exported = Object.values(manifest.exports)
-  .flatMap((target) => (typeof target === "object" ? Object.values(target) : [target]))
-  .filter((target) => typeof target === "string" && target.endsWith(".d.ts"))
+// Conditions can nest, so walk every string target under `exports` and `types`.
+const targets = (value) =>
+  typeof value === "string" ? [value] : Object.values(value ?? {}).flatMap(targets);
+const exported = targets([manifest.exports, manifest.types])
+  .filter((target) => target.endsWith(".d.ts"))
   .map((target) => resolve(packageRoot, target));
 
 const templatesDirectory = resolve(import.meta.dirname, "..", "..", "..", "apps", "templates");
@@ -74,9 +88,14 @@ const reachable = new Set();
 for (const resolution of RESOLUTIONS) {
   const { stdout } = await promisify(execFile)(
     process.execPath,
-    [tsc, "--ignoreConfig", "--listFilesOnly", "--types", "", ...resolution, ...roots],
+    [tsc, ...CHECK, ...resolution, ...roots],
     { cwd: packageRoot, maxBuffer: 64 * 1024 * 1024 },
-  );
+  ).catch((error) => {
+    const errors = String(error.stdout)
+      .split(/\r?\n/u)
+      .filter((line) => line.includes(" TS"));
+    throw new Error(`eve's declarations do not typecheck:\n${errors.join("\n") || error.message}`);
+  });
   for (const file of stdout.split(/\r?\n/u)) if (file !== "") reachable.add(resolve(file));
 }
 const missing = roots.filter((root) => !reachable.has(root));
