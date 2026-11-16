@@ -326,7 +326,7 @@ describe("remembering a continuation's owner", () => {
     });
     const receipt = await resumeSessionInbox("slack:deleted", send);
     await expect(receipt.sessionId).rejects.toBeInstanceOf(StrandedSessionOwnerError);
-    expect(resumeHookMock.mock.calls[1]?.[0]).not.toBe(token);
+    expect(resumeHookMock.mock.calls[1]?.[0]).toMatchObject({ runId: "owner-1", token });
   });
 
   it("resolves the owner again after the remembered one refuses", async () => {
