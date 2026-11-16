@@ -146,7 +146,7 @@ describe("extension-scope plugin (bundled)", () => {
   });
 
   // https://github.com/vercel/eve/issues/6503
-  it.fails("resolves a package helper outside the source root when the package is mounted twice", async () => {
+  it("resolves a package helper outside the source root when the package is mounted twice", async () => {
     const { sourceRoot } = scratchModule("export const value = 1;");
     const packageRoot = join(sourceRoot, "..");
     writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "@acme/test" }));
