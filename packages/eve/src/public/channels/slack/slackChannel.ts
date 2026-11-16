@@ -71,6 +71,7 @@ import {
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
 import { withFinalReplyDelivery } from "#public/channels/slack/reply-delivery.js";
+import { withReplyStreaming } from "#public/channels/slack/reply-stream.js";
 import {
   composeInteractionCards,
   composeSlackRenderers,
@@ -1062,6 +1063,31 @@ export interface SlackChannelConfig {
   ): SlackAnswerResult | Promise<SlackAnswerResult>;
 
   /**
+   * Options with no compatibility promise. They can change or go away in any release.
+   */
+  readonly experimental?: {
+    /**
+     * Streams each reply into the thread as the model writes it, with Slack's
+     * `chat.startStream`, `chat.appendStream`, and `chat.stopStream`. A reply
+     * starts streaming once it passes 280 characters, so narration before a
+     * tool call rarely shows; a streamed part that turns out to be narration
+     * is removed. Shorter replies post whole, as without this option.
+     *
+     * The completed reply still runs through `renderers`. Delivering it with
+     * the default renderer or `postCompletedSlackReply` finalizes the streamed
+     * message, and rewrites it with `chat.update` when a renderer changed the
+     * text or added blocks. A renderer that posts with `channel.thread.post`
+     * instead leaves its own message, and eve removes the streamed one.
+     *
+     * Streaming needs a thread (or a code channel) and, outside a DM, the
+     * Slack user who triggered the turn. Without them, or when Slack refuses
+     * to start a stream, the reply posts whole. Uses only `chat:write`.
+     * Defaults to `false`.
+     */
+    readonly streaming?: boolean;
+  };
+
+  /**
    * Renderers that wrap eve's default Slack rendering, outermost first. Omit
    * it and eve renders with its default alone. Each renderer can acknowledge
    * messages (`received`), render session events (`events`), and shape the
@@ -1143,7 +1169,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const renderTurnStarted = rendering.events["turn.started"];
   const renderCallSettled = rendering.events["call.settled"];
   const renderTurnSettled = rendering.events["turn.settled"];
-  const events = withTaskCards(
+  const composed = withTaskCards(
     {
       ...rendering.events,
       "content.completed": withFinalReplyDelivery(rendering.events["content.completed"]),
@@ -1176,6 +1202,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     },
     rendering.taskCard,
   );
+  const events = config.experimental?.streaming === true ? withReplyStreaming(composed) : composed;
 
   const handledEvents = new Set<string>();
 

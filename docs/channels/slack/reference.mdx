@@ -626,6 +626,26 @@ The final reply can still fail: the upload fails, Slack returns another error, o
 - The next message tells the model its reply wasn't delivered.
 - Other failed posts, such as status updates, are logged and skipped.
 
+### Stream replies
+
+With `experimental: { streaming: true }`, a reply streams into the thread as the model writes it, through Slack's `chat.startStream`, `chat.appendStream`, and `chat.stopStream`. The option has no compatibility promise.
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  experimental: { streaming: true },
+});
+```
+
+- A reply starts streaming once it passes 280 characters, and appends at most once a second. Shorter replies post whole.
+- Whether text is the reply or narration before a tool call is known only when it ends. Narration that passed 280 characters streams, and eve removes it once the model calls the tool.
+- The completed reply still runs through your [renderers](#customize-rendering). Delivering it with `next()` or `postCompletedSlackReply` closes the streamed message, and rewrites it with `chat.update` when a renderer changed the text or added blocks. A renderer that posts with `ctx.channel.thread.post` instead keeps its own message, and eve removes the streamed one.
+- Streaming needs a thread, or a code channel, where it streams top-level. Outside a DM, it also needs the Slack user who triggered the turn. Without them, or when Slack refuses to start a stream, the reply posts whole.
+- When an append fails, the stream passes 12,000 characters, or Slack's 10-minute stream limit ends it, eve rewrites the message with the full reply when it finishes, or removes it and posts the reply with the usual fallbacks.
+- When someone presses stop on a streaming reply, Slack keeps what streamed and eve doesn't post the rest.
+- Streaming uses only the `chat:write` scope.
+
 Text the model writes while its tasks keep working posts as its own message, and the reply after the results posts as another. A schedule's session posts only the final reply.
 
 Outbound `@name` text stays literal. To mention a user, write `<@USER_ID>`, or call `ctx.channel.thread.mentionUser(userId)` in a renderer.
@@ -710,6 +730,7 @@ Public channels are `public`; DMs, group DMs, and private channels are `private`
 | `messageContext`  | Off                                                         | `{ users }` adds sender names, and emails with `email: true`, to model context. See [Add sender names and emails](#add-sender-names-and-emails). |
 | `threadContext`   | Off                                                         | Load earlier thread replies. `{}` means `since: "thread-root"`. See [Load prior thread messages](#load-prior-thread-messages).                   |
 | `codeChannels`    | `false`                                                     | Serve Slack code channels as one session each. See [Serve Slack code channels](#serve-slack-code-channels).                                      |
+| `experimental`    | Off                                                         | `{ streaming }` streams replies as the model writes them. See [Stream replies](#stream-replies).                                                 |
 | `uploadPolicy`    | Any media type, up to 25 MB                                 | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound files.                                                                             |
 | `approvalChannel` | `"thread"`                                                  | `(request, ctx) => "thread" \| "ephemeral" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                               |
 | `renderers`       | eve's default renderer                                      | Renderers that wrap eve's default. See [Customize rendering](#customize-rendering).                                                              |
