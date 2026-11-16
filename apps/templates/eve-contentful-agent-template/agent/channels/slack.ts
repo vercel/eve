@@ -1,4 +1,4 @@
-import { contentfulPublicationInput } from "../lib/contentful/publication-input";
+import { contentfulPublicationInteractions } from "../lib/contentful/publication-input";
 import { createSlackChannel } from "../lib/integrations/slack/channel";
 
 /**
@@ -11,5 +11,5 @@ export default createSlackChannel({
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean),
-  inputRequests: contentfulPublicationInput,
+  interactions: contentfulPublicationInteractions,
 });

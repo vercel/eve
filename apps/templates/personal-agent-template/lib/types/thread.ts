@@ -16,6 +16,8 @@ export interface EveSessionCursor {
 export interface ThreadState {
   session: EveSessionCursor;
   events: unknown[];
+  /** Retired sessions stay separate: each event stream has its own cursor and inbox. */
+  history?: Array<{ session: EveSessionCursor; events: unknown[] }>;
 }
 
 export interface ThreadRecord extends ThreadSummary {

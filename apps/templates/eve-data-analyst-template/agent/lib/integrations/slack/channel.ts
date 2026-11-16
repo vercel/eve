@@ -232,7 +232,7 @@ export const createSlackInboundHandlers = ({
  * @param config - Native channel overrides and optional reply or approval presentation settings.
  * @returns A channel definition with authenticated inbound routing and shared event renderers.
  * @remarks Without SLACK_CONNECTOR, compilation uses slack/placeholder; Slack delivery still requires a configured connector.
- * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name.
+ * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name. Message edits are ignored unless the caller supplies `onMessageEdited`, which runs without identity enrichment.
  */
 export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
   const {
@@ -242,6 +242,7 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
     onMessage,
     onAppMention,
     onDirectMessage,
+    onMessageEdited = () => null,
     threadContext = { since: "thread-root" },
     ...channelConfig
   } = config;
@@ -259,6 +260,7 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
     credentials: connectSlackCredentials(
       process.env.SLACK_CONNECTOR ?? "slack/placeholder"
     ),
+    onMessageEdited,
     // Caller renderers stay outermost so they can wrap the shared rendering.
     renderers: [
       ...(channelConfig.renderers ?? []),

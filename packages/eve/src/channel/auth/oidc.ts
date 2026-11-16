@@ -1,5 +1,5 @@
 import type { JWTPayload } from "#compiled/jose/index.js";
-import { createRemoteJWKSet, jwtVerify } from "#compiled/jose/index.js";
+import { createRemoteJWKSet, decodeJwt, jwtVerify } from "#compiled/jose/index.js";
 import { z } from "#compiled/zod/index.js";
 
 import {
@@ -31,6 +31,9 @@ export async function authenticateOidcStrategy(input: {
   readonly token: string;
   readonly strategy: ResolvedOidcAuthStrategy;
 }): Promise<RouteStrategyAuthenticationResult> {
+  // Verification requires this issuer, so a token naming another one is refused before the
+  // issuer's discovery document and keys are fetched for it.
+  if (unverifiedIssuer(input.token) !== input.strategy.issuer) return { kind: "not-authenticated" };
   let remoteJwks: ReturnType<typeof createRemoteJWKSet>;
 
   try {
@@ -152,6 +155,14 @@ export async function authenticateOidcStrategy(input: {
     return {
       kind: "not-authenticated",
     };
+  }
+}
+
+function unverifiedIssuer(token: string): unknown {
+  try {
+    return decodeJwt(token).iss;
+  } catch {
+    return undefined;
   }
 }
 

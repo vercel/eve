@@ -11,5 +11,5 @@ export default createSlackChannel({
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean),
-  inputRequests: runSqlApprovalCard,
+  renderers: [runSqlApprovalCard],
 });

@@ -1,5 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { readInboxHandle } from "#execution/session-inbox/handle.js";
+import { readInboxHandle, type InboxHook } from "#execution/session-inbox/handle.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
@@ -45,26 +45,28 @@ export class StrandedSessionOwnerError extends Error {
 /**
  * The single ingress path into a hook: refuses a session inbox whose owner
  * cannot execute before anything is committed. Vercel can reuse a validated
- * inbox handle: Workflow requires its guarded, deduplicated write endpoint.
- * Only a definite refusal falls back to resolving the current token owner.
+ * inbox handle, or the owner this process `remembered` resolving for the
+ * token: Workflow requires its guarded, deduplicated write endpoint. Only a
+ * definite refusal falls back to resolving the current token owner.
  */
 export async function resumeRunnableHook(
   token: string,
   payload: unknown,
   inbox?: string,
+  remembered?: InboxHook,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
-  const world = inbox !== undefined ? await getWorld() : undefined;
+  const world = inbox !== undefined || remembered !== undefined ? await getWorld() : undefined;
   if (
-    inbox !== undefined &&
-    inbox.length <= 8_192 &&
     world !== undefined &&
     routesToOwnerDeployment(world) &&
     world.capabilities !== undefined &&
     "resolvedHookResume" in world.capabilities &&
     world.capabilities.resolvedHookResume === true
   ) {
-    const parsed = readInboxHandle(inbox);
-    const cached = parsed?.token === token ? parsed : undefined;
+    const parsed =
+      inbox !== undefined && inbox.length <= 8_192 ? readInboxHandle(inbox) : undefined;
+    const cached =
+      parsed?.token === token ? parsed : remembered?.token === token ? remembered : undefined;
     if (cached !== undefined) {
       try {
         return await resumeHook(cached, payload);

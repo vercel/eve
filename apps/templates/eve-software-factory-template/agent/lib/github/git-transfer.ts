@@ -1,8 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { Sandbox } from "@vercel/sandbox";
+import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import { FACTORY_BRANCH_PREFIX, FACTORY_REPO } from "../constants.js";
+import {
+  assertPushAuthority,
+  ciScope,
+  isCiIntake,
+  isCiPull,
+  isTicketIntake,
+} from "../trust.js";
 import { githubCredentials } from "./credentials.js";
 import {
   brokerPolicy,
@@ -13,6 +21,8 @@ import {
 } from "./git-remote.js";
 
 const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
+const MAX_PR_LOOKUP_BYTES = 1024;
+const MAX_METADATA_BYTES = 1024 * 1024;
 const BUNDLE = "/tmp/transfer.bundle";
 const GIT_DIR = "/tmp/factory.git";
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
@@ -130,7 +140,109 @@ export async function fetchRepository(
   return String(head.stdout).trim();
 }
 
-async function assertPushTarget(branch: string): Promise<void> {
+async function readLookup(
+  response: Response,
+  signal: AbortSignal,
+  limit = MAX_METADATA_BYTES
+): Promise<unknown> {
+  if (!response.ok || response.headers.has("link") || !response.body) {
+    await response.body?.cancel();
+    throw new Error("Unverifiable GitHub metadata.");
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  await response.body.pipeTo(
+    new WritableStream<Uint8Array>({
+      write(chunk) {
+        size += chunk.byteLength;
+        if (size > limit) {
+          throw new Error("GitHub metadata exceeds the byte limit.");
+        }
+        chunks.push(chunk);
+      },
+    }),
+    { signal }
+  );
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function assertCiHeadAvailable(
+  auth: SessionAuthContext | null
+): Promise<void> {
+  if (!isCiIntake(auth)) {
+    return;
+  }
+  const scope = ciScope(auth);
+  try {
+    const token = await mintInstallationToken(githubCredentials);
+    const signal = AbortSignal.timeout(15_000);
+    const response = await fetch(
+      `https://api.github.com/repos/${FACTORY_REPO}/pulls/${scope.pullNumber}`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+        },
+        redirect: "error",
+        signal,
+      }
+    );
+    if (!isCiPull(await readLookup(response, signal), scope)) {
+      throw new Error("Changed pull request authority.");
+    }
+  } catch {
+    // biome-ignore lint/style/useErrorCause: transport errors may expose credentials or repository data
+    throw new Error(
+      "Could not verify CI pull request authority: an open draft on the same repository branch is required."
+    );
+  }
+}
+
+async function assertTicketHeadAvailable(
+  branch: string,
+  auth: SessionAuthContext | null
+): Promise<void> {
+  if (!isTicketIntake(auth)) {
+    return;
+  }
+  let data: unknown[];
+  try {
+    const token = await mintInstallationToken(githubCredentials);
+    const [owner] = FACTORY_REPO.split("/");
+    const signal = AbortSignal.timeout(15_000);
+    const pulls = await fetch(
+      `https://api.github.com/repos/${FACTORY_REPO}/pulls?state=all&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=1`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+        },
+        redirect: "error",
+        signal,
+      }
+    );
+    // Only an empty array permits delivery; full PR metadata is unnecessary.
+    const parsed = await readLookup(pulls, signal, MAX_PR_LOOKUP_BYTES);
+    if (!Array.isArray(parsed)) {
+      throw new Error("Invalid pull requests.");
+    }
+    data = parsed;
+  } catch {
+    // biome-ignore lint/style/useErrorCause: transport errors may expose credentials or repository data
+    throw new Error("Could not verify ticket branch pull requests.");
+  }
+  if (data.length !== 0) {
+    throw new Error(
+      "HTTP ticket branches cannot be pushed once a pull request exists."
+    );
+  }
+}
+
+async function assertPushTarget(
+  branch: string,
+  auth: SessionAuthContext | null
+): Promise<void> {
+  assertPushAuthority(branch, auth);
   const refusal = validateBranch(branch);
   if (refusal) {
     throw new Error(refusal);
@@ -138,7 +250,10 @@ async function assertPushTarget(branch: string): Promise<void> {
   if (!branch.startsWith(FACTORY_BRANCH_PREFIX)) {
     throw new Error("Pushes must target a factory feature branch.");
   }
+  await assertTicketHeadAvailable(branch, auth);
+  await assertCiHeadAvailable(auth);
   const token = await mintInstallationToken(githubCredentials);
+  const signal = AbortSignal.timeout(15_000);
   const request = (path: string) =>
     fetch(`https://api.github.com/repos/${FACTORY_REPO}${path}`, {
       headers: {
@@ -146,7 +261,7 @@ async function assertPushTarget(branch: string): Promise<void> {
         Authorization: `Bearer ${token}`,
       },
       redirect: "error",
-      signal: AbortSignal.timeout(15_000),
+      signal,
     });
   const repository = await request("");
   if (!repository.ok) {
@@ -154,7 +269,13 @@ async function assertPushTarget(branch: string): Promise<void> {
       "Could not verify the factory repository's default branch."
     );
   }
-  const metadata = (await repository.json()) as { default_branch?: string };
+  const metadata = (await readLookup(repository, signal)) as {
+    default_branch?: string;
+    id?: unknown;
+  };
+  if (isCiIntake(auth) && metadata.id !== ciScope(auth).repositoryId) {
+    throw new Error("Could not verify CI factory repository identity.");
+  }
   if (!metadata.default_branch || branch === metadata.default_branch) {
     throw new Error("Direct pushes to the default branch are not allowed.");
   }
@@ -162,7 +283,8 @@ async function assertPushTarget(branch: string): Promise<void> {
   if (
     target.status !== 404 &&
     (!target.ok ||
-      ((await target.json()) as { protected?: boolean }).protected !== false)
+      ((await readLookup(target, signal)) as { protected?: boolean })
+        .protected !== false)
   ) {
     throw new Error("Protected branches cannot be pushed by the factory.");
   }
@@ -171,9 +293,10 @@ async function assertPushTarget(branch: string): Promise<void> {
 /** Push exactly one validated ref from a fresh bare repository, without checkout. */
 export async function pushBranch(
   station: SandboxSession,
-  branch: string
+  branch: string,
+  auth: SessionAuthContext | null
 ): Promise<string> {
-  await assertPushTarget(branch);
+  await assertPushTarget(branch, auth);
   const path = `/tmp/factory-${randomUUID()}.bundle`;
   const result = await station.run({
     command: `git -C ${REPO_DIR} bundle create '${path}' 'refs/heads/${branch}'`,
@@ -204,6 +327,9 @@ export async function pushBranch(
     if (!COMMIT_SHA.test(sha)) {
       throw new Error("Invalid commit in Git transfer.");
     }
+    // Keep the last authorization lookup after all station-controlled work.
+    await assertTicketHeadAvailable(branch, auth);
+    await assertCiHeadAvailable(auth);
     await git(remote, [
       "-C",
       GIT_DIR,

@@ -6,8 +6,9 @@ export default defineEval({
   tags: ["slow"],
   async test(t) {
     const turn = await t.send(
-      "Something is wrong with the emails, you know the one I mean. Fix it properly this time."
+      "Alice has asked Bob to investigate an email problem, but the ticket only says that an email is wrong. Help them identify which message, what happened, and what should happen before planning a change."
     );
+    t.calledTool("triage_work_item");
     t.calledAgent("classifier");
     t.calledAgent("implementer", { count: 0 });
     t.calledAgent("reviewer", { count: 0 });

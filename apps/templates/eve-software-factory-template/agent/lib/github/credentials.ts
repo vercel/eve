@@ -1,4 +1,5 @@
 import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { FACTORY_REPO } from "../constants.js";
 
 /**
  * Vercel Connect connector UID for the factory's GitHub App installation.
@@ -21,4 +22,22 @@ export const GITHUB_CONNECTOR =
  * helpers inject them only at a fresh transfer sandbox's firewall (see
  * `agent/lib/github/git-transfer.ts`), never in a repository-code station.
  */
-export const githubCredentials = connectGitHubCredentials(GITHUB_CONNECTOR);
+export const githubCredentials = connectGitHubCredentials(GITHUB_CONNECTOR, {
+  authorizationDetails: [
+    { repositories: [FACTORY_REPO], type: "github_app_installation" },
+  ],
+});
+
+/** Webhook replies and verification need no repository-content write token. */
+export const githubChannelCredentials = connectGitHubCredentials(
+  GITHUB_CONNECTOR,
+  {
+    authorizationDetails: [
+      {
+        permissions: ["metadata:read", "issues:write", "pull_requests:write"],
+        repositories: [FACTORY_REPO],
+        type: "github_app_installation",
+      },
+    ],
+  }
+);

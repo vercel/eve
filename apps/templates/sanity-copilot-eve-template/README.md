@@ -160,6 +160,7 @@ agent/
     subagent.ts             # runs one subagent turn and returns its structured result
     review-schema.ts        # reviewer verdict schema
     reserved-paths.ts       # Blob prefixes the asset tools refuse (user memory)
+    blob-url.ts             # shared HTTPS Blob URL validation
   skills/
     sanity-best-practices/              # schemas, GROQ, releases, framework integrations
     content-modeling-best-practices/    # designing and refactoring content types
@@ -203,7 +204,7 @@ eve deploy
 
 ### Evals
 
-Asset tools check decoded paths without leading slashes before accessing storage. Reserved memory paths and malformed or ambiguous encodings are refused, including nested escapes and traversal segments.
+`delete_asset`, `get_asset_info`, and `download_asset` accept only HTTPS URLs on `*.blob.vercel-storage.com`, without credentials or a custom port. They pass the checked, serialized URL to storage. Asset tools refuse reserved memory paths, including the prefix roots, and fail closed on malformed or ambiguous paths: nested escapes, traversal, backslashes, and repeated separators.
 
 ```bash
 pnpm test:smoke     # asset security and pagination regressions, no network or credentials

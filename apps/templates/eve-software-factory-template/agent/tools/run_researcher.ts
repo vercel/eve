@@ -1,5 +1,6 @@
 import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
+import { stationOutput } from "../lib/stations/result.js";
 import { RESEARCHER_OUTPUT_SCHEMA } from "../lib/stations/schemas.js";
 
 /**
@@ -20,8 +21,9 @@ export default defineWorkflowTool({
     "use workflow";
     const response = await ctx.agent("researcher").send(message, {
       outputSchema: RESEARCHER_OUTPUT_SCHEMA,
+      signal: ctx.abortSignal,
     });
-    return (await response.result()).data;
+    return stationOutput("researcher", await response.result());
   },
   inputSchema: z.object({
     message: z

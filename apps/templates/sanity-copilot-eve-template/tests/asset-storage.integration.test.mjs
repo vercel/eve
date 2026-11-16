@@ -4,9 +4,18 @@ import { mock, test } from "node:test";
 
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier === "#lib/reserved-paths.js") {
-      const guard = new URL("../agent/lib/reserved-paths.ts", import.meta.url);
+    if (specifier.startsWith("#lib/")) {
+      const guard = new URL(
+        `../agent/lib/${specifier.slice(5, -3)}.ts`,
+        import.meta.url
+      );
       return nextResolve(guard.href, context);
+    }
+    if (specifier === "./reserved-paths.js") {
+      return nextResolve(
+        new URL("../agent/lib/reserved-paths.ts", import.meta.url).href,
+        context
+      );
     }
     return nextResolve(specifier, context);
   },
@@ -22,10 +31,20 @@ const get = mock.fn(async () => ({
   stream: new Response("draft").body,
 }));
 const list = mock.fn();
-mock.module("@vercel/blob", { namedExports: { get, list, put } });
+const del = mock.fn(async () => undefined);
+const head = mock.fn(async (url) => ({
+  contentType: "text/plain",
+  pathname: "drafts/post.md",
+  size: 5,
+  uploadedAt: new Date("2026-01-01T00:00:00Z"),
+  url,
+}));
+mock.module("@vercel/blob", { namedExports: { del, get, head, list, put } });
 const { default: upload } = await import("../agent/tools/upload_asset.ts");
 const { default: download } = await import("../agent/tools/download_asset.ts");
 const { default: listAssets } = await import("../agent/tools/list_assets.ts");
+const { default: deleteAsset } = await import("../agent/tools/delete_asset.ts");
+const { default: info } = await import("../agent/tools/get_asset_info.ts");
 hooks.deregister();
 
 test("upload denies normalized memory paths before storage, but dispatches ordinary assets", async () => {
@@ -59,6 +78,65 @@ test("download denies encoded memory URLs before storage, but returns ordinary a
   assert.equal(allowed.content, "draft");
   assert.equal(get.mock.callCount(), 1);
 });
+
+for (const [name, tool, sdk, flag] of [
+  ["delete", deleteAsset, del, "success"],
+  ["info", info, head, "exists"],
+  ["download", download, get, "success"],
+]) {
+  test(`${name} refuses unsafe URL destinations and paths before contacting storage`, async () => {
+    const host = "assets.private.blob.vercel-storage.com";
+    const before = sdk.mock.callCount();
+    const urls = [
+      "not a URL",
+      `http://${host}/draft.md`,
+      `ftp://${host}/draft.md`,
+      "https://localhost/draft.md",
+      "https://blob.vercel-storage.com/draft.md",
+      `https://${host}.example.com/draft.md`,
+      `https://${host}:8443/draft.md`,
+      `https://alice@${host}/draft.md`,
+      `https://:secret@${host}/draft.md`,
+      ...[
+        "eve/memory",
+        "user-preferences",
+        "eve//memory/alice.md",
+        "ev%65/memory/alice.md",
+        "ev%2565/memory/alice.md",
+        "drafts/%",
+        "drafts/../post.md",
+        "drafts/%2e%2e/post.md",
+        "drafts%2f%2e%2e%2fpost.md",
+        "drafts\\post.md",
+        "drafts/\npost.md",
+      ].map((path) => `https://${host}/${path}`),
+    ];
+    await Promise.all(
+      urls.map(async (url) => {
+        const result = await tool.execute({ url });
+        assert.equal(result[flag], false, url);
+        assert.ok(result.error, url);
+      })
+    );
+    assert.equal(sdk.mock.callCount(), before);
+  });
+
+  test(`${name} passes the checked serialized URL to storage`, async () => {
+    const url =
+      "HTTPS://ASSETS.PRIVATE.BLOB.VERCEL-STORAGE.COM:443/drafts/café.md";
+    const result = await tool.execute({ url });
+    assert.equal(result[flag], true);
+    assert.equal(
+      sdk.mock.calls.at(-1).arguments[0],
+      "https://assets.private.blob.vercel-storage.com/drafts/caf%C3%A9.md"
+    );
+    if (name === "download") {
+      assert.deepEqual(sdk.mock.calls.at(-1).arguments[1], {
+        access: "private",
+      });
+    }
+  });
+}
 
 const assetUrl =
   "https://assets.private.blob.vercel-storage.com/drafts/post.md";

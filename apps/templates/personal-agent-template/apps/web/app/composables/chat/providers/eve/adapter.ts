@@ -49,9 +49,12 @@ function uiPart(part: EveMessagePart): UIMessage["parts"][number] | undefined {
     case "reasoning":
       return part;
     case "file":
-      return part.url === undefined
-        ? undefined
-        : { type: "file", mediaType: part.mediaType, url: part.url, filename: part.filename };
+      return {
+        type: "file",
+        mediaType: part.mediaType,
+        url: part.url ?? "",
+        filename: part.filename,
+      };
   }
 }
 

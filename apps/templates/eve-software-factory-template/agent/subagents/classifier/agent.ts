@@ -2,7 +2,7 @@ import { defineAgent } from "eve";
 import { MODELS } from "../../lib/models.js";
 
 /**
- * Station 1: triage.
+ * Clarification station and fallback when decision-model triage is unavailable.
  *
  * @remarks
  * Runs on a fast, cheap model because classification is a shaping step, not
@@ -19,7 +19,8 @@ import { MODELS } from "../../lib/models.js";
  */
 export default defineAgent({
   description:
-    "Classify an incoming work item: type (bug/feature/refactor/question/chore/security), " +
+    "Write clarification questions for a work item that typed triage could not route, " +
+    "or classify it when the decision model is unavailable: type (bug/feature/refactor/question/chore/security), " +
     "priority, complexity, affected area, and whether it is actionable or needs " +
     "clarification. Fast triage only; no analysis or implementation. The caller passes " +
     "the work item verbatim in the message.",

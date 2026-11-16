@@ -14,7 +14,7 @@
     "dev": "eve dev",
     "fix": "ultracite fix",
     "start": "eve start",
-    "test": "node --import tsx --test --experimental-test-module-mocks agent/lib/user-preferences.test.ts agent/channels/security.test.ts",
+    "test": "node --import tsx --test --experimental-test-module-mocks agent/lib/user-preferences.test.ts agent/channels/security.test.ts agent/channels/eve.test.ts",
     "test:smoke": "pnpm test",
     "typecheck": "tsc",
     "validate": "pnpm run check && pnpm run typecheck && eve info"
@@ -25,7 +25,7 @@
     "@github-tools/eve-extension": "^0.13.0",
     "@resend/chat-sdk-adapter": "^0.5.0",
     "@vercel/blob": "^2.8.2",
-    "@vercel/connect": "2.9.2",
+    "@vercel/connect": "2.9.3",
     "ai": "^7.0.173",
     "chat": "^4.43.0",
     "eve": "^1.0.0",
