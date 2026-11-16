@@ -19,9 +19,9 @@ eve add memory/file
 
 If an item isn't found, `eve add` prints close matches from the available catalogs without installing anything.
 
-Web Chat installs a Next.js or TanStack Start application at `apps/web` for a standalone agent or a selected workspace member. The installer asks for the framework (`web-framework`), then the deployment. Non-interactive runs use Next.js unless you answer `web-framework="tanstack"`.
+Web Chat installs a Next.js or TanStack Start application at `apps/web` for a standalone agent or a selected workspace member. The installer asks for the framework (`web-framework`). Non-interactive runs use Next.js unless you answer `web-framework="tanstack"`.
 
-For the deployment, choose **Vercel services** (recommended) to deploy Web Chat and agents as separate services. Choose the framework (**Next.js** or **TanStack Start**) to serve Web Chat and route agent requests through one app. Vercel services run locally without a linked Vercel project. If you already have Next.js or Vercel configuration, eve stops with manual composition guidance instead of overwriting it. See [Project Structure](./concepts/project-structure) for browser-app placement, and [Next.js](./guides/frontend/nextjs) or [TanStack Start](./guides/frontend/tanstack) for framework-owned integration.
+The installer deploys Web Chat and agents as separate Vercel services, which run locally without a linked Vercel project. If you already have Next.js or Vercel configuration, eve stops with manual composition guidance instead of overwriting it. See [Project Structure](./concepts/project-structure) for browser-app placement. To run the generated app outside Vercel, see [Next.js](./guides/frontend/nextjs#run-the-generated-app-outside-vercel) or [TanStack Start](./guides/frontend/tanstack#run-the-generated-app-outside-vercel).
 
 Run `eve add` without an argument to see how to search the registry with `eve registry search <query>`.
 

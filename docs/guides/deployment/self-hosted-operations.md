@@ -76,7 +76,7 @@ A frontend under `apps/web/` is a separate service that runs with its framework 
 
 For path-based mounts, strip the public prefix before forwarding to the agent. Set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Forward its workflow callback routes as well as its eve routes. Keep the browser client, callback URLs, and peer transports consistent with the public mounts.
 
-To have Next.js start the built agent processes and provide the browser-facing proxy routes, use [`eve/next`](../frontend/nextjs#self-host). A self-hosted process manager ignores `eve/vercel` configuration.
+To have Next.js start the built agent processes and provide the browser-facing proxy routes, embed them with [`eve/next`](../frontend/nextjs#run-a-production-build). A self-hosted process manager ignores `eve/vercel` configuration.
 
 ## Manage run data
 

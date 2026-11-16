@@ -117,7 +117,7 @@ npx eve link
 npx eve add channel/web
 ```
 
-Choose a hosting layout, then **Sign in with Vercel** to provision authentication for members of the project's team.
+Choose **Next.js**, then **Sign in with Vercel** to provision authentication for members of the project's team.
 You can also select **Web Chat** from the terminal UI's `/add` channel picker.
 Run `npx eve deploy` when ready to publish. Local development works without browser sign-in.
 See the [Web Chat setup guide](https://eve.dev/docs/channels/eve#web-chat-with-sign-in-with-vercel) for permissions and recovery.

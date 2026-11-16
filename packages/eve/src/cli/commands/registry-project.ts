@@ -16,6 +16,7 @@ import {
   WEB_FRAMEWORK_QUESTION,
   type WebChatFramework,
 } from "#setup/integrations/web/framework.js";
+import { FRAMEWORK_HOSTED_CONFIGS } from "#setup/integrations/web/hosted-config.js";
 import {
   WEB_APP_TANSTACK_TEMPLATE_FILES,
   WEB_APP_TEMPLATE_FILES,
@@ -281,6 +282,32 @@ export async function prepareWebRegistryProject(
   }
   const updated = addWebRegistryTsconfig(source, path, framework);
   if (updated !== source) await writeFile(path, updated, "utf8");
+}
+
+/**
+ * Reads an `apps/web` config that an earlier install wrote to host the agent in
+ * the app, and returns a function that writes it back. Installing the registry
+ * item can overwrite that config, and Web Chat setup reads it to keep the app
+ * hosting the agent instead of switching it to Vercel services.
+ */
+export async function preserveHostedWebConfig(
+  appRoot: string,
+  framework: WebChatFramework,
+): Promise<() => Promise<void>> {
+  const { file, source } = FRAMEWORK_HOSTED_CONFIGS[framework];
+  const path = join(appRoot, "apps", "web", file);
+  let current: string | undefined;
+  try {
+    current = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (current !== source) return async () => {};
+  return async () => {
+    if ((await readFile(path, "utf8").catch(() => undefined)) !== source) {
+      await writeFile(path, source, "utf8");
+    }
+  };
 }
 
 /** Adds explicit registry namespace mappings to package.json. */

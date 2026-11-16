@@ -19,26 +19,32 @@ Run the Web Chat installer and choose **TanStack Start** when it asks which fram
 eve add channel/web
 ```
 
-In automation, answer the framework and hosting questions up front. Omit `web-framework` to install Next.js:
+In automation, answer the framework question up front. Omit `web-framework` to install Next.js:
 
 ```bash
 eve add channel/web --non-interactive \
-  --answer 'web-framework="tanstack"' \
-  --answer 'web-hosting="vercel"'
+  --answer 'web-framework="tanstack"'
 ```
 
-The installer creates a TanStack Start app under `apps/web/`, adds the `dev:web` and `build:web` scripts, and asks how to deploy it:
+The installer creates a TanStack Start app under `apps/web/`, adds the `dev:web` and `build:web` scripts, and writes a root `vercel.ts` that deploys Web Chat and the agent as separate Vercel services. Run both locally with `pnpm dev:all`, without linking a Vercel project.
 
-- **Vercel services** (recommended) deploys Web Chat and the agent as separate services. Run both locally with `pnpm dev:all`, without linking a Vercel project.
-- **TanStack Start** hosts the agent in the TanStack Start app through `eveTanStack()`. Run it with `pnpm dev:web`. A Vercel deploy from the project root doesn't build the app, because the app's dependencies are in the root `package.json`. Choose **Vercel services** to deploy Web Chat on Vercel.
+An existing Web Chat app in `apps/web/` keeps its framework, and the installer stops if you answer a different one. To switch between Next.js and TanStack Start, remove `apps/web/` first.
 
-To switch hosting modes, rerun `eve add channel/web --skip-install` with the other choice. The installer removes the `vercel.ts` and scripts it wrote for the previous mode. An existing Web Chat app in `apps/web/` keeps its framework, and the installer stops if you answer a different one. To switch between Next.js and TanStack Start, remove `apps/web/` first.
+### Run the generated app outside Vercel
+
+The generated app reaches its agent through the Vercel services in `vercel.ts`, which only Vercel reads. Unlike `eve/next`, `eveTanStack()` doesn't embed the agent in a self-hosted production build: it proxies to an eve dev server during `vite dev` and adds Vercel services only on Vercel builds (see [Dev vs deploy topology](#dev-vs-deploy-topology)). To run the app anywhere else, run the agent as its own service:
+
+1. Build and start the agent from the project root with `npx eve build` and `npx eve start`. See [Self-host eve](../deployment/self-hosting) for authentication, the Workflow world, and sandboxes.
+2. Point Web Chat at the agent. Either pass the agent's origin as `baseUrl` to `useEveAgent` in `apps/web/app/_components/agent-chat.tsx` and configure [CORS](../../channels/eve#cors), or mount the agent's routes on the app's origin through your reverse proxy. See [Add a peer frontend](../deployment/self-hosted-operations#add-a-peer-frontend).
+3. Build the app with `pnpm build:web` and serve its Nitro output.
+
+Projects that an earlier installer set up with `eveTanStack({ eveRoot })` in `apps/web/vite.config.ts` keep that setup when you rerun `eve add channel/web`. That setup runs the agent only under `pnpm dev:web`. For a workspace agent, see [Run workspace members](../deployment/self-hosted-operations#run-workspace-members).
 
 Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
 
 The chat uses the same routes as the [Next.js Web Chat](./nextjs#give-each-conversation-a-url): `/`, `/s`, and `/s/$sessionId`, one URL per session. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](/docs/guides/frontend#authenticate-browser-requests).
 
-A workspace agent always deploys as a separate Vercel service, because the installer doesn't support single-app hosting for it. If you already have a TanStack Start app, skip the installer and follow the steps below.
+If you already have a TanStack Start app, skip the installer and follow the steps below.
 
 ## Register the Vite plugin
 

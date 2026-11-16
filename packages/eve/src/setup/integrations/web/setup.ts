@@ -1,6 +1,5 @@
 import { join } from "node:path";
 
-import { select } from "#setup/ask.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import type { PackageManagerKind } from "#setup/package-manager.js";
@@ -8,11 +7,12 @@ import { WEB_APP_TANSTACK_TEMPLATE_FILES } from "#setup/scaffold/create/web-temp
 import { installScaffoldDependencies } from "../shared/scaffold.js";
 import { prepareWebAuthScaffold } from "./auth-scaffold.js";
 import { WEB_AUTHENTICATION_QUESTION } from "./auth-options.js";
+import { detectWebChatFramework, type WebChatFramework } from "./framework.js";
 import {
-  detectWebChatFramework,
-  WEB_CHAT_FRAMEWORK_LABELS,
-  type WebChatFramework,
-} from "./framework.js";
+  FRAMEWORK_HOSTED_CONFIGS,
+  NEXT_HOSTED_CONFIG,
+  TANSTACK_HOSTED_VITE_CONFIG,
+} from "./hosted-config.js";
 import {
   defaultWebChatHostingDeps,
   peerServiceVercelConfig,
@@ -28,15 +28,6 @@ import {
   type SetupPrepareContext,
 } from "../types.js";
 
-const NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
-import { withEve } from "eve/next";
-import { fileURLToPath } from "node:url";
-
-const nextConfig: NextConfig = {};
-const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
-
-export default withEve(nextConfig, { eveRoot });
-`;
 const PEER_SERVICE_NEXT_CONFIG = `import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {};
@@ -60,27 +51,6 @@ const LEGACY_NEXT_PEER_SERVICE_VERCEL_CONFIG = NEXT_PEER_SERVICE_VERCEL_CONFIG.r
 );
 
 const TANSTACK_REGISTRY_VITE_CONFIG = WEB_APP_TANSTACK_TEMPLATE_FILES["vite.config.ts"];
-const TANSTACK_HOSTED_VITE_CONFIG = `import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-import tailwindcss from "@tailwindcss/vite";
-import viteReact from "@vitejs/plugin-react";
-import { eveTanStack } from "eve/tanstack";
-import { nitro } from "nitro/vite";
-import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
-
-const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
-
-export default defineConfig({
-  resolve: { tsconfigPaths: true },
-  plugins: [
-    eveTanStack({ eveRoot }),
-    tailwindcss(),
-    tanstackStart({ srcDirectory: "app" }),
-    viteReact(),
-    nitro(),
-  ],
-});
-`;
 const TANSTACK_PEER_SERVICE_VERCEL_CONFIG = peerServiceVercelConfig(
   "tanstack-start",
   "node ../../node_modules/vite/bin/vite.js build",
@@ -114,28 +84,15 @@ interface WebSetupPlan {
   rootWebChat?: boolean;
 }
 
-function hostingQuestion(framework: WebChatFramework) {
-  const label = WEB_CHAT_FRAMEWORK_LABELS[framework];
-  return select<WebChatFramework | "vercel">({
-    key: "web-hosting",
-    message: "How should Web Chat and your agents be deployed?",
-    options: [
-      {
-        id: "vercel",
-        label: "Vercel services",
-        hint: "(Recommended) Web Chat and agents deploy as separate services.",
-        value: "vercel",
-      },
-      {
-        id: framework,
-        label,
-        hint: `One ${label} app serves Web Chat and routes agent requests.`,
-        value: framework,
-      },
-    ],
-    recommended: "vercel",
-    required: true,
-  });
+/** Whether an earlier install set up `webRoot` to host the agent in the app. */
+async function hostsAgentInApp(
+  framework: WebChatFramework,
+  webRoot: string,
+  deps: WebSetupDeps,
+): Promise<boolean> {
+  const { file, source } = FRAMEWORK_HOSTED_CONFIGS[framework];
+  const path = join(webRoot, file);
+  return (await deps.pathExists(path)) && (await deps.readTextFile(path)) === source;
 }
 
 export async function prepareWebSetup(
@@ -143,20 +100,21 @@ export async function prepareWebSetup(
   deps: WebSetupDeps = defaultWebSetupDeps,
 ): Promise<WebSetupPlan> {
   const project = await resolveWebChatProject(context.appRoot, deps);
+  const webAppRoot = join(project.environmentRoot, "apps", "web");
   // `eve add channel/web` installed the framework's files, so they decide it.
-  const framework =
-    (await detectWebChatFramework(join(project.environmentRoot, "apps", "web"), deps.pathExists)) ??
-    "next";
+  const framework = (await detectWebChatFramework(webAppRoot, deps.pathExists)) ?? "next";
   const rootWebChat =
     framework === "next" &&
     (await deps.pathExists(join(project.environmentRoot, "app", "eve-agent.ts"))) &&
-    !(await deps.pathExists(join(project.environmentRoot, "apps", "web", "app", "eve-agent.ts")));
-  // `eveTanStack()` mounts one agent, so a TanStack workspace member deploys as a peer service.
-  const hosting = rootWebChat
-    ? "next"
-    : framework === "tanstack" && project.agentName !== undefined
-      ? "vercel"
-      : await context.asker.ask(hostingQuestion(framework));
+    !(await deps.pathExists(join(webAppRoot, "app", "eve-agent.ts")));
+  // Web Chat deploys as Vercel services. A root Next.js app already hosts the
+  // agent, and a rerun keeps an app that was set up to host it, except a
+  // TanStack workspace member: `eveTanStack()` mounts one agent.
+  const canHostInApp = framework === "next" || project.agentName === undefined;
+  const hosting =
+    rootWebChat || (canHostInApp && (await hostsAgentInApp(framework, webAppRoot, deps)))
+      ? framework
+      : "vercel";
   // Sign in with Vercel ships as Next.js files.
   const authentication =
     framework === "next" ? await context.asker.ask(WEB_AUTHENTICATION_QUESTION) : "custom";

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EveProjectContext } from "#internal/project-context.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { FRAMEWORK_HOSTED_CONFIGS } from "#setup/integrations/web/hosted-config.js";
 import { WizardCancelledError } from "#setup/step.js";
 import {
   browseRegistryCatalog,
@@ -14,6 +15,7 @@ import {
   runRegistryViewCommand,
   type RegistryCommandLogger,
 } from "./registry.js";
+import { preserveHostedWebConfig } from "./registry-project.js";
 import type {
   RegistrySetupCommand,
   RegistrySetupCommandOptions,
@@ -625,6 +627,65 @@ describe("registry commands", () => {
     );
     expect(process.exitCode).toBeUndefined();
   });
+
+  it("restores a framework-hosted Web Chat config after the install overwrites it", async () => {
+    const logger = createLogger();
+    const restore = vi.fn(async () => {});
+    const preserve = vi.fn(async () => restore);
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: { setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }] },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { overwrite: true, yes: true },
+      {
+        loadSetupCommandRunner: async () => runSetupCommand,
+        prepareWebRegistryProject: vi.fn(async () => {}),
+        preserveHostedWebConfig: preserve,
+      },
+    );
+
+    expect(preserve).toHaveBeenCalledWith("/project", "next");
+    expect(preserve.mock.invocationCallOrder[0]).toBeLessThan(
+      addRegistryItems.mock.invocationCallOrder[0]!,
+    );
+    expect(restore).toHaveBeenCalledOnce();
+    expect(addRegistryItems.mock.invocationCallOrder[0]).toBeLessThan(
+      restore.mock.invocationCallOrder[0]!,
+    );
+    expect(restore.mock.invocationCallOrder[0]).toBeLessThan(
+      runSetupCommand.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it.each(["next", "tanstack"] as const)(
+    "writes back the %s framework-hosted config only when it was there before the install",
+    async (framework) => {
+      const { file, source } = FRAMEWORK_HOSTED_CONFIGS[framework];
+      const path = `/project/apps/web/${file}`;
+
+      readFile.mockResolvedValueOnce(source).mockResolvedValueOnce("overwritten\n");
+      const restoreHosted = await preserveHostedWebConfig("/project", framework);
+      await restoreHosted();
+      expect(writeFile).toHaveBeenCalledWith(path, source, "utf8");
+
+      writeFile.mockClear();
+      readFile.mockResolvedValueOnce("// edited\n");
+      const restoreEdited = await preserveHostedWebConfig("/project", framework);
+      await restoreEdited();
+      expect(writeFile).not.toHaveBeenCalled();
+    },
+  );
 
   it("reports an invalid headless framework answer before writing anything", async () => {
     const logger = createLogger();

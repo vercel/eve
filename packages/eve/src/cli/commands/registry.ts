@@ -50,6 +50,7 @@ import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-
 import {
   prepareWebChatProjectRoot,
   prepareWebRegistryProject,
+  preserveHostedWebConfig,
   readRegistryConfig,
   resolveWebChatFramework,
 } from "./registry-project.js";
@@ -95,6 +96,7 @@ export interface AddCommandDependencies extends RegistrySetupDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal?: () => boolean;
   prepareWebRegistryProject?: typeof prepareWebRegistryProject;
+  preserveHostedWebConfig?: typeof preserveHostedWebConfig;
 }
 
 type RunAddCommandOptions = AddCommandOptions & {
@@ -128,6 +130,7 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
   loadSetupCommandRunner: async () =>
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
   prepareWebRegistryProject,
+  preserveHostedWebConfig,
 };
 
 const DEFAULT_OFFICIAL_REGISTRY_URL = "https://eve.dev/r";
@@ -629,11 +632,15 @@ export async function runAddCommand(
     });
     if (!installReady) return false;
 
+    let restoreHostedWebConfig = async () => {};
     if (webChatFramework !== undefined) {
       await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(
         projectRoot,
         webChatFramework,
       );
+      restoreHostedWebConfig = await (
+        dependencies.preserveHostedWebConfig ?? preserveHostedWebConfig
+      )(projectRoot, webChatFramework);
     }
     await installRegistryItemTransaction({
       appRoot: projectRoot,
@@ -648,6 +655,8 @@ export async function runAddCommand(
           overwrite: options.overwrite,
           silent: options.silent,
         });
+        // An overwrite must not switch an app that hosts the agent to services.
+        await restoreHostedWebConfig();
       },
     });
     if (eveMetadata?.setup === undefined)

@@ -192,7 +192,7 @@ For the full auth model and helper list, see [Auth & route protection](../guides
 
 ## Web Chat with Sign in with Vercel
 
-To let your team sign in to a browser chat, run `eve add channel/web` or select **Web Chat** from the terminal UI's channel picker. Then choose **Next.js**, a hosting layout, and **Sign in with Vercel**. Sign in with Vercel is available only for the Next.js Web Chat app. Setup creates a Vercel App on the linked project that only members of the project's team can sign in to.
+To let your team sign in to a browser chat, run `eve add channel/web` or select **Web Chat** from the terminal UI's channel picker. Then choose **Next.js** and **Sign in with Vercel**. Sign in with Vercel is available only for the Next.js Web Chat app. Setup creates a Vercel App on the linked project that only members of the project's team can sign in to.
 
 For a new agent, initialize it first, then link a project and add Web Chat:
 
@@ -213,7 +213,6 @@ For automation, supply the setup answers explicitly:
 
 ```bash
 eve add channel/web --non-interactive \
-  --answer 'web-hosting="vercel"' \
   --answer 'web-authentication="vercel"'
 ```
 
