@@ -169,8 +169,9 @@ export function withClientContext(
 }
 
 /**
- * A message `announce()` added ahead of a turn's input. Other unanchored framework messages, such as
- * a compaction checkpoint or its "Continue.", keep the context ahead of them.
+ * A message `announce()` added ahead of a turn's input: only it puts unanchored `context.state` and
+ * `context.instruction` messages at a turn's start. Other framework messages there, such as a
+ * compaction checkpoint or its "Continue.", keep the context ahead of them.
  */
 function isAnnouncement(message: HarnessModelMessage): boolean {
   return (

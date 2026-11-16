@@ -26,7 +26,10 @@ const announcements: Record<string, Announcement> = {
   policy: { kind: "context.instruction", render: () => "Answer in one sentence.", value: "v1" },
 };
 
-/** One model call: announcements join the record, and the model reads its projection. */
+/**
+ * One model call, in `ModelCaller.buildRequest`'s order: announcements join the record, then the
+ * model reads its projection.
+ */
 function call(
   draft: CallRecord,
   turn: readonly UserModelMessage[],
@@ -86,7 +89,7 @@ describe("client context", () => {
     expect(next.view.slice(0, 3)).toEqual(first.view.slice(0, 3));
   });
 
-  it("never splits a compaction checkpoint from its summary", () => {
+  it("stays ahead of a compaction checkpoint", () => {
     const compacted: HarnessModelMessage[] = [
       createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
       said("Alice asked about settings."),
