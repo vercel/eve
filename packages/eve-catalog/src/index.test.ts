@@ -138,8 +138,6 @@ describe("integration catalog", () => {
   });
 
   it("uses Natural's streamable HTTP MCP endpoint", () => {
-    expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
-      "https://mcp.natural.com/mcp",
-    );
+    expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe("https://mcp.natural.com");
   });
 });

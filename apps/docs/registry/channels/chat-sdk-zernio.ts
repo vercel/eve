@@ -11,6 +11,8 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
   // Hand every message to eve, even mid-reply, so eve can steer the running turn.
   concurrency: "concurrent",
+  // Most Zernio platforms cannot edit sent messages.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {

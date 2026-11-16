@@ -6,7 +6,10 @@ import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: {
-    sendblue: createSendblueAdapter(),
+    sendblue: createSendblueAdapter({
+      allowedServices: ["iMessage", "SMS", "RCS"],
+      webhookSecret: process.env.SENDBLUE_WEBHOOK_SECRET!,
+    }),
   },
   state: createMemoryState(),
   // Hand every message to eve, even mid-reply, so eve can steer the running turn.

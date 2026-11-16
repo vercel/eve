@@ -81,7 +81,12 @@ for (const item of items) {
       );
     }
   } else if (slug === "arcana") {
-    if (!item.dependencies?.includes("@kybernesis/arcana")) {
+    if (
+      !item.dependencies?.some(
+        (dependency) =>
+          dependency === "@kybernesis/arcana" || dependency.startsWith("@kybernesis/arcana@"),
+      )
+    ) {
       throw new Error('Registry item "memory/arcana" must depend on @kybernesis/arcana.');
     }
     if (
@@ -93,7 +98,12 @@ for (const item of items) {
       );
     }
   } else if (slug === "supermemory") {
-    if (!item.dependencies?.includes("@supermemory/eve")) {
+    if (
+      !item.dependencies?.some(
+        (dependency) =>
+          dependency === "@supermemory/eve" || dependency.startsWith("@supermemory/eve@"),
+      )
+    ) {
       throw new Error('Registry item "memory/supermemory" must depend on @supermemory/eve.');
     }
     if (!("SUPERMEMORY_API_KEY" in (item.envVars ?? {}))) {

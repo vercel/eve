@@ -44,7 +44,7 @@ describe("createMcpConnectionStatusTracker", () => {
       intervalMs: 60_000,
       onChange: (snapshot) => snapshots.push(snapshot),
       probe: async ({ url }) =>
-        url === "https://mcp.datadoghq.com/api/mcp" && !datadogAvailable
+        url === "https://mcp.datadoghq.com/v1/mcp" && !datadogAvailable
           ? `${url} is not reachable (HTTP 404).`
           : undefined,
     });
@@ -52,7 +52,7 @@ describe("createMcpConnectionStatusTracker", () => {
     tracker.refresh();
     await vi.advanceTimersByTimeAsync(0);
     expect(tracker.current()).toEqual({
-      datadog: "https://mcp.datadoghq.com/api/mcp is not reachable (HTTP 404).",
+      datadog: "https://mcp.datadoghq.com/v1/mcp is not reachable (HTTP 404).",
     });
 
     datadogAvailable = true;

@@ -128,6 +128,11 @@
       "dependencies": [
         "@eve/agent-browser"
       ],
+      "meta": {
+        "eve": {
+          "requires": ">=1.0.0"
+        }
+      },
       "files": [
         {
           "path": "registry/extensions/agent-browser.ts",
@@ -140,7 +145,7 @@
       "name": "extension/browserbase",
       "type": "registry:item",
       "title": "Browserbase",
-      "description": "Search, fetch, and automate the web with Browserbase and Stagehand.",
+      "description": "Automate and inspect browser pages with Browserbase and Stagehand.",
       "dependencies": [
         "@browserbasehq/eve"
       ],
@@ -245,7 +250,7 @@
       "description": "Search the web, extract readable page content, and run multi-source research with Nimble.",
       "meta": {
         "eve": {
-          "requires": ">=0.82.0"
+          "requires": ">=1.0.0"
         }
       },
       "dependencies": [
@@ -320,14 +325,14 @@
       "title": "Supermemory",
       "description": "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
       "dependencies": [
-        "@supermemory/eve"
+        "@supermemory/eve@0.2.0-rc.1"
       ],
       "envVars": {
         "SUPERMEMORY_API_KEY": ""
       },
       "meta": {
         "eve": {
-          "requires": ">=0.47.3"
+          "requires": ">=1.0.0 <2.0.0"
         }
       },
       "files": [
@@ -353,7 +358,7 @@
       },
       "meta": {
         "eve": {
-          "requires": ">=0.45.2"
+          "requires": ">=0.87.0"
         }
       },
       "files": [
@@ -370,7 +375,7 @@
       "title": "Kybernesis Arcana",
       "description": "Give your agents workspace-scoped long-term memory with automatic recall and deliberate storage.",
       "dependencies": [
-        "@kybernesis/arcana"
+        "@kybernesis/arcana@0.8.0"
       ],
       "envVars": {
         "ARCANA_API_KEY": "",
@@ -378,7 +383,7 @@
       },
       "meta": {
         "eve": {
-          "requires": ">=0.49.0"
+          "requires": ">=1.0.0 <2.0.0"
         }
       },
       "files": [
@@ -3050,7 +3055,7 @@
       ],
       "envVars": {
         "GOOGLE_CHAT_CREDENTIALS": "",
-        "GOOGLE_CHAT_PROJECT_NUMBER": "",
+        "GOOGLE_CHAT_ENDPOINT_URL": "",
         "GOOGLE_CHAT_BOT_USER_ID": ""
       },
       "meta": {
@@ -3216,7 +3221,8 @@
       "envVars": {
         "SENDBLUE_API_KEY": "",
         "SENDBLUE_API_SECRET": "",
-        "SENDBLUE_FROM_NUMBER": ""
+        "SENDBLUE_FROM_NUMBER": "",
+        "SENDBLUE_WEBHOOK_SECRET": ""
       },
       "files": [
         {
@@ -3434,7 +3440,7 @@
       "name": "channel/chat-sdk-lark",
       "type": "registry:item",
       "title": "Lark / Feishu",
-      "description": "Lark and Feishu chats with native card streaming via the Chat SDK.",
+      "description": "Lark and Feishu chats via the Chat SDK.",
       "dependencies": [
         "chat",
         "@larksuite/vercel-chat-adapter",
@@ -3442,7 +3448,8 @@
       ],
       "envVars": {
         "LARK_APP_ID": "",
-        "LARK_APP_SECRET": ""
+        "LARK_APP_SECRET": "",
+        "LARK_DOMAIN": ""
       },
       "files": [
         {
@@ -3562,7 +3569,7 @@
       "title": "Braintrust",
       "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
       "dependencies": [
-        "braintrust@^3.29.0"
+        "braintrust@^3.44.0"
       ],
       "envVars": {
         "BRAINTRUST_API_KEY": ""
