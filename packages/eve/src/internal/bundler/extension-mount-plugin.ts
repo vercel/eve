@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 
 import type { Plugin } from "rolldown";
@@ -52,6 +52,20 @@ export function createExtensionMountPlugin(
       canonicalPaths.set(path, canonicalPath);
     }
     return canonicalPath;
+  };
+  const packageDirectories = new Map<string, string | null>();
+  const packageDirectory = (directory: string): string | null => {
+    let found = packageDirectories.get(directory);
+    if (found === undefined) {
+      const parent = dirname(directory);
+      found = existsSync(join(directory, "package.json"))
+        ? directory
+        : parent === directory
+          ? null
+          : packageDirectory(parent);
+      packageDirectories.set(directory, found);
+    }
+    return found;
   };
   const roots = mounts.map((mount) => ({ ...mount, root: canonical(mount.sourceRoot) }));
   // A mount file inside an extension subagent declares one mount per enclosing mount. Extension
@@ -167,6 +181,16 @@ export function createExtensionMountPlugin(
           : { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(owner.mountId)}` };
       }
       if (owners.length > 1) {
+        // A helper the extension's package ships beside its source root, such as
+        // `eve/extensions/code/sandbox`, has no mount to bind. It shares the source it imports,
+        // just as it does when the extension is not mounted at all.
+        const importerPackage = packageDirectory(dirname(importerPath!));
+        if (
+          importerPackage !== null &&
+          owners.every((owner) => packageDirectory(owner.root) === importerPackage)
+        ) {
+          return resolved;
+        }
         throw new Error(
           `Import "${source}" from "${importer}" refers to multiple extension mounts (${owners.map((owner) => owner.mountId).join(", ")}). Import it from an owned mount or contribution instead.`,
         );
