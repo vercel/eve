@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 
 import { describe, expect, it } from "vitest";
 
-import { waitForCondition, withinDeadline } from "../../test/scenarios/dev-server-harness.js";
+import { waitForCondition, withinDeadline } from "#internal/testing/dev-server-harness.js";
 import { startEveProductionServer } from "./framework-eve-server.js";
 
 async function fixture(source: string) {

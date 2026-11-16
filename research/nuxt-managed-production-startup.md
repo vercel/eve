@@ -9,18 +9,24 @@ last_updated: "2026-10-30"
 ## Authoring and deployment contract
 
 Keep the existing `eve/nuxt` options. For non-Vercel server builds, start an
-already-built eve service from a separate `eveRoot` when no production origin
-is configured. Building eve remains the deployment's responsibility.
+already-built eve service per agent when no production origin is configured.
+Use the shared framework discovery for standalone `agent/` projects and
+`agents/` workspaces. Standalone builds need a separate output from Nuxt;
+workspace members already build into their own directories. Building eve remains
+the deployment's responsibility.
 
 Resolve `EVE_NUXT_PRODUCTION_ORIGIN` and `EVE_NUXT_PRODUCTION_PORT` at build time.
 An explicit origin disables managed startup. Otherwise, the generated Nitro
-plugin and proxy share one fixed loopback destination. Runtime routing variables
-cannot change only one side of that relationship.
+plugin and proxy share fixed loopback destinations. Workspace members use
+consecutive ports in discovery order, with public `/eve/<name>/v1` routes proxied
+to each backend's `/eve/v1`. Runtime routing variables cannot change only one
+side of that relationship.
 
 Record `eveRoot` relative to the Nuxt project root so deployments can move.
 At startup, resolve that path against the working directory. The runtime-only
 `EVE_NUXT_PRODUCTION_ROOT` override accepts absolute paths or paths relative to
-that working directory. Reject shared Nuxt/eve output and the running Nuxt entry
+that working directory. Record each member's root relative to the eve project
+root so the override relocates the entire workspace. Reject shared Nuxt/eve output and the running Nuxt entry
 before spawning a child. Neither prerendering nor static generation starts eve.
 
 Managed startup supports a single Node.js process using Nitro's `node-server`
@@ -35,8 +41,9 @@ The generated Nitro plugin only imports and configures the plugin factory from
 `eve/nuxt/production-server`, with Nitro's prerender guard. All startup,
 readiness, and failure handling lives in that eve-owned runtime entry, not in
 generated code. This entry exists for production code, not as an authoring API
-or test seam. Its configuration carries the fixed `origin` and portable
-`relativeRoot`; startup is deduplicated per process through the shared process
+or test seam. Its configuration carries each fixed `origin`, public route
+prefix, portable project `relativeRoot`, and project-relative `agentRoot`.
+Startup is deduplicated per origin in the process through the shared process
 manager.
 
 Keep the import literal. Ship this runtime entry as a self-contained bundle
@@ -45,8 +52,9 @@ tracer skips workspace symlinks, and its alias resolver cannot preserve eve's
 private imports. Installed and workspace-linked packages use the same boundary;
 no new runtime dependency or hidden import is needed.
 
-The synchronous plugin registers an awaited request hook for `/eve/v1/**`.
-Requests wait for a bounded startup promise, resolved by loopback TCP listener
+The synchronous plugin registers an awaited request hook for each public prefix.
+Each agent's requests wait only for that agent's bounded startup promise,
+resolved by loopback TCP listener
 readiness rather than optional authored routes or startup logs. The shared
 helper also serves Next.js, whose custom-channel deployments may omit health.
 An existing listener, child exit, and bind failures remain startup errors.
@@ -57,8 +65,8 @@ Own the child immediately after spawn. Listen for Nitro's configured shutdown
 signals to abort pending startup before Nitro drains HTTP requests; otherwise,
 a request awaiting readiness can delay cleanup past the termination bound.
 Require Nitro graceful shutdown to remain enabled. The close hook removes the
-signal listeners, aborts pending startup
-or closes the running child and awaits termination. Send SIGTERM, allow 20
+signal listeners, aborts pending startups
+and closes all running children, awaiting termination concurrently. Send SIGTERM, allow 20
 seconds for graceful shutdown, then escalate to SIGKILL with a one-second reap
 bound. Clear readiness sockets, timers, and process listeners on completion.
 
@@ -76,3 +84,7 @@ with a mock child for normalized port 80 and SIGTERM escalation. A narrow real
 socket/child scenario owns route-independent readiness and pending-startup
 cancellation. Verify configured and environment cluster presets fail at build,
 external origins work with cluster, and runtime workers cannot spawn eve.
+A real Nuxt workspace build checks consecutive ports, public-to-backend path
+translation, whole-workspace root relocation, and termination of both children.
+Unit coverage checks that a pending or failed agent does not gate another agent
+or unrelated paths.

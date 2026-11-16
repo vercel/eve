@@ -55,10 +55,9 @@ export interface EveNuxtModule {
 }
 
 /**
- * Minimal view of the Nitro Vercel build-output config the module merges the
- * eve service into. The full `nitro` typing lives behind the nitropack/Nuxt
- * augmentation, which is not loaded in this package's build, so model only the
- * surface we touch.
+ * Minimal view of the Nitro config this module writes. The full `nitro`
+ * typing lives behind the nitropack/Nuxt augmentation, which is not loaded
+ * in this package's build, so model only the surface we touch.
  */
 interface NitroConfigHost {
   preset?: string;
@@ -74,8 +73,8 @@ interface NitroConfigHost {
  * (configured via the `eve` config key). It auto-imports the `useEveAgent()`
  * composable and routes eve transport requests to the eve service: a shared
  * dev server spawned on demand in dev, a generated Vercel service on Vercel
- * deployments, and managed eve servers or a configured origin in non-Vercel production. Requires
- * Nuxt >= 4.0.0. Configure via {@link EveNuxtModuleOptions}.
+ * deployments, and managed eve servers or a configured origin in non-Vercel
+ * production. Requires Nuxt >= 4.0.0. Configure via {@link EveNuxtModuleOptions}.
  */
 const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   meta: {

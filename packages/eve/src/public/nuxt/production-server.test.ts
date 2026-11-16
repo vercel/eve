@@ -22,7 +22,12 @@ vi.mock("#shared/framework-eve-server.js", () => ({
 
 const { startEveProductionServer } = await import("#shared/framework-eve-server.js");
 const { ensureEveProductionServer, default: createPlugin } = await import("./production-server.js");
-const config = { origin: "http://127.0.0.1:5000", relativeRoot: "agent" };
+const config = {
+  origin: "http://127.0.0.1:5000",
+  relativeRoot: "agent",
+  agentRoot: "",
+  publicPrefix: "/eve/v1",
+};
 
 beforeEach(() => {
   vi.stubEnv("EVE_NUXT_PRODUCTION_ROOT", undefined);
@@ -122,7 +127,7 @@ describe("ensureEveProductionServer", () => {
     const hook = vi.fn();
     vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      createPlugin(config)({ hooks: { hook } });
+      createPlugin([config])({ hooks: { hook } });
       close = hook.mock.calls.find(([name]) => name === "close")![1] as () => Promise<void>;
       const beginShutdown = once.mock.calls.find(([name]) => name === "SIGUSR2")?.[1];
       expect(beginShutdown).toBeTypeOf("function");
@@ -141,6 +146,57 @@ describe("ensureEveProductionServer", () => {
     } finally {
       finish();
       await close?.();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("isolates workspace readiness and closes every agent after relocating the project root", async () => {
+    vi.stubEnv("EVE_NUXT_PRODUCTION_ROOT", "relocated");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const alphaClose = vi.fn(async () => {});
+    let failBeta!: (error: Error) => void;
+    vi.mocked(startEveProductionServer)
+      .mockResolvedValueOnce({ origin: config.origin, close: alphaClose })
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failBeta = reject;
+          }),
+      );
+    const hook = vi.fn();
+    try {
+      createPlugin([
+        { ...config, agentRoot: "agents/alpha", publicPrefix: "/eve/alpha/v1" },
+        {
+          ...config,
+          origin: "http://127.0.0.1:5001",
+          agentRoot: "agents/beta",
+          publicPrefix: "/eve/beta/v1",
+        },
+      ])({ hooks: { hook } });
+      const request = hook.mock.calls.find(([name]) => name === "request")![1] as (
+        event: unknown,
+      ) => Promise<void>;
+      const close = hook.mock.calls.find(([name]) => name === "close")![1] as () => Promise<void>;
+      const res = { statusCode: 200, end: vi.fn() };
+      let betaDone = false;
+      const beta = request({ path: "/eve/beta/v1/health?probe=1", node: { res } }).then(() => {
+        betaDone = true;
+      });
+      await request({ path: "/eve/alpha/v1/health", node: { res } });
+      await request({ path: "/eve/beta/v10", node: { res } });
+      expect(betaDone).toBe(false);
+      expect(res.end).not.toHaveBeenCalled();
+      expect(
+        vi.mocked(startEveProductionServer).mock.calls.map(([input]) => input.appRoot),
+      ).toEqual([resolve("relocated/agents/alpha"), resolve("relocated/agents/beta")]);
+      failBeta(new Error("beta failed"));
+      await beta;
+      expect(res.statusCode).toBe(503);
+      expect(res.end).toHaveBeenCalledWith("eve production server is unavailable.");
+      await close();
+      expect(alphaClose).toHaveBeenCalledOnce();
+    } finally {
       vi.restoreAllMocks();
     }
   });

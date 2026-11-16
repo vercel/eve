@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,7 +10,10 @@ import { describe, expect, it } from "vitest";
 import { createNuxtEveServiceDescriptor } from "../../src/internal/testing/scenario-apps/nuxt-eve-service.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
-import { stopChildProcess, waitForCondition } from "./dev-server-harness.js";
+import {
+  stopChildProcess,
+  waitForCondition,
+} from "../../src/internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
@@ -74,6 +77,7 @@ async function assertNuxtHealth(
   env: NodeJS.ProcessEnv,
   expectedStatus = 200,
   pendingStartupPidPath?: string,
+  routePrefixes = ["/eve/v1"],
 ): Promise<void> {
   const port = await findFreePort();
   let output = "";
@@ -153,20 +157,24 @@ async function assertNuxtHealth(
       await response.body?.cancel();
       return;
     }
-    // Do not poll eve: the first transport request must wait for startup.
-    const health = await fetch(`http://127.0.0.1:${port}/eve/v1/health`, {
-      signal: AbortSignal.timeout(15_000),
-    });
-    expect(health.status, output).toBe(expectedStatus);
-    if (expectedStatus === 200) {
-      expect(await health.json()).toEqual(expect.objectContaining({ ok: true, status: "ready" }));
-      expect(output).not.toContain("failed to start the eve production server");
-    } else {
-      expect(await health.text()).toBe("eve production server is unavailable.");
-      expect(output).toContain("failed to start the eve production server");
-      const retry = await fetch(`http://127.0.0.1:${port}/eve/v1/health`);
-      expect(retry.status).toBe(503);
-      await retry.body?.cancel();
+    for (const prefix of routePrefixes) {
+      // Do not poll eve: the first transport request must wait for startup.
+      const health = await fetch(`http://127.0.0.1:${port}${prefix}/health`, {
+        signal: AbortSignal.timeout(15_000),
+      });
+      expect(health.status, output).toBe(expectedStatus);
+      if (expectedStatus === 200) {
+        const body = await health.json();
+        expect(body).toEqual(expect.objectContaining({ ok: true, status: "ready" }));
+        if (routePrefixes.length > 1) expect(body).toEqual(expect.objectContaining({ prefix }));
+        expect(output).not.toContain("failed to start the eve production server");
+      } else {
+        expect(await health.text()).toBe("eve production server is unavailable.");
+        expect(output).toContain("failed to start the eve production server");
+        const retry = await fetch(`http://127.0.0.1:${port}/eve/v1/health`);
+        expect(retry.status).toBe(503);
+        await retry.body?.cancel();
+      }
     }
   } catch (error) {
     throw new Error(`Nuxt health check failed (expected ${expectedStatus}).\n${output}`, {
@@ -390,6 +398,74 @@ ${await readFile(entry, "utf8")}`,
         await new Promise<void>((resolve, reject) =>
           occupant.close((error) => (error ? reject(error) : resolve())),
         );
+      }
+    } finally {
+      await rm(deployment, { recursive: true, force: true });
+    }
+  }, 300_000);
+
+  it("starts workspace agents on consecutive ports with portable roots and public prefixes", async () => {
+    const descriptor = NUXT_EVE_SERVICE_DESCRIPTOR;
+    const files: Record<string, string> = {
+      ...descriptor.files,
+      "nuxt.config.ts": descriptor.files["nuxt.config.ts"]!.replace(
+        'eveRoot: "agent"',
+        'eveRoot: "."',
+      ),
+    };
+    delete files["agent/agent.mjs"];
+    delete files["agent/instructions.md"];
+    for (const name of ["alpha", "beta"]) {
+      files[`agents/${name}/agent.mjs`] = descriptor.files["agent/agent.mjs"]!;
+      files[`agents/${name}/instructions.md`] = "You are a test agent.\n";
+    }
+    const app = await scenarioApp({ ...descriptor, files });
+    const evePort = await findFreePort();
+    const env = {
+      ...process.env,
+      VERCEL: "",
+      NITRO_PRESET: "node-server",
+      EVE_NUXT_PRODUCTION_ORIGIN: "",
+      EVE_NUXT_PRODUCTION_PORT: String(evePort),
+      // A development-only override must not hide production workspace members.
+      EVE_BASE_URL: "https://unused.example.com",
+    };
+    await runPnpmCommand({ args: ["exec", "nuxt", "build"], cwd: app.appRoot, env });
+    const deployment = await mkdtemp(join(tmpdir(), "eve-nuxt-workspace-"));
+    try {
+      await rename(join(app.appRoot, ".output"), join(deployment, ".output"));
+      for (const [index, name] of ["alpha", "beta"].entries()) {
+        const directory = join(deployment, "backend/agents", name, ".output/server");
+        await mkdir(directory, { recursive: true });
+        // Minimal built servers isolate Nitro's real routing and child-process ownership.
+        await writeFile(
+          join(directory, "index.mjs"),
+          `import { createServer } from "node:http";
+import { writeFileSync } from "node:fs";
+writeFileSync("pid", String(process.pid));
+if (Number(process.env.PORT) !== ${evePort + index}) throw new Error("wrong port");
+await new Promise(resolve => setTimeout(resolve, 500));
+createServer((req, res) => {
+  res.setHeader("content-type", "application/json");
+  res.statusCode = req.url === "/eve/v1/health" ? 200 : 404;
+  res.end(JSON.stringify({ ok: true, status: "ready", prefix: "/eve/${name}/v1" }));
+}).listen(Number(process.env.PORT), "127.0.0.1");`,
+        );
+      }
+      await assertNuxtHealth(
+        deployment,
+        {
+          ...env,
+          EVE_NUXT_PRODUCTION_ROOT: "backend",
+          EVE_NUXT_PRODUCTION_PORT: undefined,
+        },
+        200,
+        undefined,
+        ["/eve/alpha/v1", "/eve/beta/v1"],
+      );
+      for (const name of ["alpha", "beta"]) {
+        const pid = Number(await readFile(join(deployment, "backend/agents", name, "pid"), "utf8"));
+        expect(() => process.kill(pid, 0)).toThrow();
       }
     } finally {
       await rm(deployment, { recursive: true, force: true });

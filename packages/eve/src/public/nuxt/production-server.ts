@@ -4,8 +4,6 @@ import { isMainThread } from "node:worker_threads";
 import type { ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-
 import {
   startEveProductionServer,
   type EveFrameworkHost,
@@ -16,13 +14,15 @@ const EVE_NUXT_HOST: EveFrameworkHost = { label: "Nuxt", slug: "nuxt" };
 const globalStateSymbol = Symbol.for("eve.nuxt.production-server");
 
 interface EveNuxtProductionServerState {
-  server?: Promise<EveProcessHandle>;
+  readonly servers: Map<string, Promise<EveProcessHandle>>;
   readonly controller: AbortController;
 }
 
 interface EveNuxtProductionServerConfig {
   readonly origin: string;
   readonly relativeRoot: string;
+  readonly agentRoot: string;
+  readonly publicPrefix: string;
 }
 
 interface EveNitroRequest {
@@ -42,7 +42,7 @@ function getGlobalState(): EveNuxtProductionServerState {
     [globalStateSymbol]?: EveNuxtProductionServerState;
   };
 
-  globalWithState[globalStateSymbol] ??= { controller: new AbortController() };
+  globalWithState[globalStateSymbol] ??= { controller: new AbortController(), servers: new Map() };
   return globalWithState[globalStateSymbol];
 }
 
@@ -78,34 +78,43 @@ export async function ensureEveProductionServer(
     );
   }
   const configuredRoot = process.env.EVE_NUXT_PRODUCTION_ROOT?.trim();
-  const appRoot = resolve(process.cwd(), configuredRoot || config.relativeRoot);
+  const appRoot = resolve(process.cwd(), configuredRoot || config.relativeRoot, config.agentRoot);
   assertDistinctServerOutput(appRoot);
 
   const state = getGlobalState();
-  state.server ??= startEveProductionServer({
-    appRoot,
-    host: EVE_NUXT_HOST,
-    origin: config.origin,
-    portRetryHint: "set EVE_NUXT_PRODUCTION_PORT to another port and rebuild Nuxt",
-    signal: state.controller.signal,
-  }).catch((error: unknown) => {
-    state.server = undefined;
-    throw error;
-  });
+  let server = state.servers.get(config.origin);
+  if (server === undefined) {
+    server = startEveProductionServer({
+      appRoot,
+      host: EVE_NUXT_HOST,
+      origin: config.origin,
+      portRetryHint: "set EVE_NUXT_PRODUCTION_PORT to another port and rebuild Nuxt",
+      signal: state.controller.signal,
+    }).catch((error: unknown) => {
+      state.servers.delete(config.origin);
+      throw error;
+    });
+    state.servers.set(config.origin, server);
+  }
 
-  await state.server;
+  await server;
 }
 
 /** Install managed startup and its readiness gate in the built Nuxt server. */
-export default function createEveProductionServerPlugin(config: EveNuxtProductionServerConfig) {
+export default function createEveProductionServerPlugin(
+  configs: readonly EveNuxtProductionServerConfig[],
+) {
   return (nitroApp: EveNitroApp): void => {
-    const ready = ensureEveProductionServer(config).then(
-      () => true,
-      (error: unknown) => {
-        console.error("[eve] failed to start the eve production server.", error);
-        return false;
-      },
-    );
+    const agents = configs.map((config) => ({
+      publicPrefix: config.publicPrefix,
+      ready: ensureEveProductionServer(config).then(
+        () => true,
+        (error: unknown) => {
+          console.error("[eve] failed to start the eve production server.", error);
+          return false;
+        },
+      ),
+    }));
     const state = getGlobalState();
     const signals = process.env.NITRO_SHUTDOWN_DISABLED
       ? []
@@ -118,15 +127,20 @@ export default function createEveProductionServerPlugin(config: EveNuxtProductio
     for (const signal of signals) process.once(signal, beginShutdown);
     nitroApp.hooks.hook("close", async () => {
       for (const signal of signals) process.off(signal, beginShutdown);
-      const server = state.server;
       beginShutdown();
-      const handle = await server?.catch(() => undefined);
-      await handle?.close?.();
+      await Promise.all(
+        [...state.servers.values()].map(async (server) => {
+          const handle = await server.catch(() => undefined);
+          await handle?.close?.();
+        }),
+      );
     });
     nitroApp.hooks.hook("request", async (event) => {
       const path = event.path.split("?")[0] ?? "";
-      if (path !== EVE_ROUTE_PREFIX && !path.startsWith(`${EVE_ROUTE_PREFIX}/`)) return;
-      if (await ready) return;
+      const agent = agents.find(
+        ({ publicPrefix }) => path === publicPrefix || path.startsWith(`${publicPrefix}/`),
+      );
+      if (agent === undefined || (await agent.ready)) return;
       event.node.res.statusCode = 503;
       event.node.res.end("eve production server is unavailable.");
     });

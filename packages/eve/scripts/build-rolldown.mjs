@@ -390,7 +390,7 @@ await buildWithRolldown({
 
 // Nitro cannot externalize workspace symlinks or resolve eve's private aliases
 // in Nuxt's alias namespace. Ship the production entry as a standalone module.
-await buildWithNitroRolldown({
+await buildWithRolldown({
   input: join(SRC_ROOT, "public/nuxt/production-server.ts"),
   external: (source) => isBuiltin(source),
   platform: "node",
