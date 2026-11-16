@@ -1,5 +1,5 @@
-import { type AuthFn, localDev, vercelOidc } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+import { type EveAuthFn, eveChannel } from "eve/channels/eve";
 
 const localDevAuth = localDev();
 
@@ -13,10 +13,14 @@ const localDevAuth = localDev();
  * `principal_required`. This shim defers the trust decision to `localDev()` — returning `null`
  * for anything it would reject, so it never affects production — and only upgrades the resolved
  * principal to a user. Drop it if you don't exercise user-scoped tools from the dev TUI.
+ * The request-local `allowAgentInfo` grant preserves access to `GET /eve/v1/info`, which
+ * otherwise rejects user principals.
  */
-const localDevUser: AuthFn<Request> = async (request) => {
+const localDevUser: EveAuthFn = async (request) => {
   const local = await localDevAuth(request);
-  return local ? { ...local, principalType: "user" } : null;
+  return local
+    ? { ...local, allowAgentInfo: true, principalType: "user" }
+    : null;
 };
 
 export default eveChannel({ auth: [localDevUser, vercelOidc()] });

@@ -114,12 +114,35 @@ Event handlers receive `(event, ctx)`. The event has `type`, `data`, and `scope`
 - `ctx.session.id` identifies the session.
 - `ctx.position` locates the event on the stream, and `ctx.view` is a read-only snapshot of the session at that point.
 - `ctx.channel` is the channel's own context. `ctx.channel.continuation.token` is the address that `from()`, `resolveSession()`, and `alias()` accept, without eve's prefixes. `alias()` adds another address.
+- `ctx.waitUntil(promise)` lets the turn continue while `promise` settles. See [Run platform calls in the background](#run-platform-calls-in-the-background).
 
 For session state in channel event handlers, query `ctx.view` with selectors from `eve/events` instead of reconstructing it yourself. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
 
 One stream line can hold several events. Use `committed(line, ctx)` to update a status or card once per line instead of once per event. It runs after the line's event handlers, with `line.facts`, `line.position`, and the line's snapshot at `ctx.view`.
 
 Handle `interaction.settled` to remove a question or approval you posted once it ends, whether it was answered, withdrawn, or interrupted. Match by `interactionId` and check its `outcome`.
+
+#### Run platform calls in the background
+
+The turn waits for each event handler to return before it goes on. A handler that calls your platform, such as a typing indicator before a model call, delays the turn by that round trip. When the turn doesn't depend on the call, pass its promise to `ctx.waitUntil()` and return:
+
+```ts title="agent/channels/chat.ts"
+events: {
+  "model.started"(_event, ctx) {
+    ctx.waitUntil(showTyping(ctx.session.id));
+  },
+},
+```
+
+`showTyping` stands in for your platform call.
+
+- eve waits for the promise before the step that ran the handler ends, or, inside a model call, before that call ends, including when the turn is cancelled. The work never outlives the sandbox or session it uses, and changes it makes to `ctx.channel.state` are saved with the step. `session.ended` is the exception: the session is over, so nothing is saved after it.
+- If the promise rejects, eve logs the error and the turn continues.
+- eve stops waiting after 30 seconds and logs a warning naming the event. Changes the promise makes after that aren't saved.
+- Later handlers, hooks, and the model don't wait for the promise. Work that must happen in order with later events, such as posting a reply after the typing indicator, belongs in the handler itself, or the handler for the later event must wait for it.
+- Call `ctx.waitUntil()` while the handler runs. A call after the step ended logs a warning, and eve doesn't wait for that promise.
+
+The Slack channel shows its status this way at the start of a turn and of each model call.
 
 ### Describe the agent and run tools directly
 

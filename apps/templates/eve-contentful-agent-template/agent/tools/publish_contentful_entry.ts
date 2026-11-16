@@ -15,7 +15,7 @@ import { withLocale } from "../lib/contentful/tool-locale";
 /**
  * Publishes a frozen Contentful dependency plan after the applicable human approval.
  *
- * @remarks Any authenticated user can approve. Batches containing pages require a delivered Slack plan; explicit component-only batches may proceed immediately.
+ * @remarks Any authenticated user can approve. Batches containing pages require a delivered Slack plan from the main conversation, not a delegated session; explicit component-only batches may proceed immediately.
  */
 export default defineTool({
   approval: {
@@ -29,6 +29,11 @@ export default defineTool({
         );
         if (!plan.requiresApproval) {
           return "not-applicable";
+        }
+        if (session.parent) {
+          throw new Error(
+            "Request page publication from the main conversation, not a delegated task, so its Slack preview can be delivered."
+          );
         }
         if (!slackThreadFromSession({ session })) {
           throw new Error(

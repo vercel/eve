@@ -54,6 +54,7 @@ describe("handleExplicitInvocation", () => {
       principalType: "user",
     });
     expect(result?.auth?.attributes.channel_id).toBe("C123");
+    expect(result?.history).toEqual([]);
   });
 
   it.each([

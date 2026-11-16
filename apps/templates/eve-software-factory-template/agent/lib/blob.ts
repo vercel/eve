@@ -34,6 +34,9 @@ export const ARTIFACTS_PREFIX = "artifacts/";
 /** Write-once claims owned by GitHub issue intake, not agent tools. */
 export const ISSUE_INTAKE_PREFIX = "issue-intake/";
 
+/** Write-once HTTP ticket claims, isolated from issue intake history. */
+export const TICKET_INTAKE_PREFIX = "ticket-intake/";
+
 /**
  * A Blob path prefix that a general-purpose Blob tool must not touch.
  *
@@ -58,6 +61,11 @@ interface ReservedNamespace {
  * call sites.
  */
 const RESERVED_NAMESPACES: Readonly<Record<string, ReservedNamespace>> = {
+  [TICKET_INTAKE_PREFIX]: {
+    label: "HTTP ticket intake claims",
+    readTool: "the intake channel (no model tool)",
+    writeTool: "the intake channel (no model tool)",
+  },
   [ISSUE_INTAKE_PREFIX]: {
     label: "automatic issue intake claims",
     readTool: "the GitHub intake channel (no model tool)",

@@ -63,7 +63,7 @@ Keep the existing sections on reading and saving files alongside your own guidan
 
 ### Model and token limits
 
-Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `openai/gpt-6.1-sol-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
+Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `anthropic/claude-fable-5.2` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
 The same file limits each session to `300_000` input tokens through the `limits.sessionUsage` callback. Each model call counts the input it sends, including earlier messages and the file contents the agent has read, so reading many large files reaches the limit sooner. When a session crosses the limit, eve pauses it and asks whether to continue. Increase the limit if sessions pause too often. See [eve's agent configuration](https://eve.dev/docs/agent-config) for other usage limits.
 
@@ -270,6 +270,8 @@ export default defineSandbox(async () => {
 Both Drives must be in `DRIVE_REGION`, and a Drive's region can't change after it's created. If either Drive is missing or has never been written to, the agent logs `drive.unavailable` and opens a sandbox with neither mount, so check the logs if `/drive` goes missing after this change. Tell the agent about `/reference` in [agent/instructions.md](agent/instructions.md), including that it can't save there.
 
 ## Control Slack identity lookups
+
+Message edits don't start another reply or save a file again. Send a new message to correct a request. To handle edits, pass `onMessageEdited` to `createSlackChannel` in [agent/channels/slack.ts](agent/channels/slack.ts).
 
 Before responding to a Slack mention or direct message, the agent looks up the Slack profiles of the sender, anyone mentioned, and the people who posted in the thread since its last reply, then adds their names and profile images to the conversation as context. This uses the `users:read` permission. The agent never adds email addresses, so it can't reveal them to other people in a channel.
 

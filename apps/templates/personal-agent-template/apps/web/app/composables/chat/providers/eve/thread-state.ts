@@ -19,12 +19,14 @@ export function resumeOptionsFromThread(thread: ThreadRecord): ChatSessionOption
   return {
     initialSession,
     initialEvents: events as readonly EveStreamEvent[],
+    history: thread.state?.history,
   };
 }
 
 export async function persistThreadState(
   threadId: string,
   snapshot: Pick<UseEveAgentSnapshot, "events" | "session">,
+  history?: ThreadState["history"],
 ) {
   if (!snapshot.events.length || !snapshot.session) {
     return;
@@ -37,7 +39,7 @@ export async function persistThreadState(
     streamIndex: snapshot.session.streamIndex,
   };
   if (snapshot.session.inbox) session.inbox = snapshot.session.inbox;
-  const state: ThreadState = { session, events: [...snapshot.events] };
+  const state: ThreadState = { session, events: [...snapshot.events], history };
 
   await $fetch(`/api/threads/${threadId}`, {
     method: "PATCH",

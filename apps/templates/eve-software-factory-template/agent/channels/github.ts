@@ -11,8 +11,13 @@ import {
   FACTORY_REPO,
 } from "../lib/constants.js";
 import { mentionPattern, resolveBotName } from "../lib/github/bot-name.js";
-import { githubCredentials } from "../lib/github/credentials.js";
-import { stampAutonomous, stampTrusted } from "../lib/trust.js";
+import { githubChannelCredentials } from "../lib/github/credentials.js";
+import {
+  isCiPull,
+  stampAutonomous,
+  stampCi,
+  stampTrusted,
+} from "../lib/trust.js";
 
 // Resolve the configured resource, not an association on an arbitrary event.
 async function isFactoryRepository(
@@ -100,7 +105,7 @@ const hasRepositoryRole = async (
  */
 const FACTORY_INTAKE_TASK = [
   `This issue was handed to the factory with the "${FACTORY_LABEL}" label, and this run is unattended: nobody is watching to answer a question or approve an action, so never attempt an action that needs approval.`,
-  "Run the work item through the full pipeline. If the classifier needs clarification, post its questions as a comment on the issue and stop; a repository writer can explicitly @mention you to continue after answering. Re-labeling does not requeue an issue.",
+  "Run the work item through the full pipeline. If triage needs clarification, have the classifier write questions, post them as a comment on the issue and stop; a repository writer can explicitly @mention you to continue after answering. Re-labeling does not requeue an issue.",
   "Keep the requester in the loop as you go: post a short comment on this issue when a station completes, except the last one. Comments on this issue are the one conversational write this run has; you cannot comment anywhere else.",
   "Deliver the finished work as a draft pull request. The message you end the run with appears on this issue for you: link the pull request there, and let it stand in for the progress comment for this final step.",
 ].join("\n\n");
@@ -127,7 +132,7 @@ const CI_FIX_TASK = [
   "A CI check suite failed on one of the factory's own pull requests. This run is unattended: nobody is watching to answer a question or approve an action, so never attempt an action that needs approval.",
   "Before anything else, read the pull request and its check runs fresh. If the checks are green by now, or the failure belongs to a commit that is no longer the branch head, stop without posting anything.",
   `Count your own earlier fix-attempt comments on this pull request. If there are already ${MAX_CI_FIX_ATTEMPTS}, do not attempt another fix. Post one comment saying the factory is pausing its automated CI fixes on this pull request to avoid looping, ${MAX_CI_FIX_ATTEMPTS} attempts have not turned the checks green, and further troubleshooting needs a person. Then stop.`,
-  "Otherwise, first post a short comment that a CI fix attempt is starting and what looks broken (future runs count these comments to know when to stop). Diagnose with github__getCiFailureContext, then run the fix as a revision: send the implementer the pull request's context, its branch name, and your diagnosis, and have the reviewer judge the updated branch. Pushing the fix re-runs the checks; do not open a new pull request.",
+  "Otherwise, read github__getCiFailureContext and call diagnose_ci_failure with the failed log. If fix_with_code is false, report the cause and stop without changing code or rerunning CI. If the log is unavailable or the cause is uncertain, report the gap and stop for a person. Only for a code failure, first post a short comment that a CI fix attempt is starting and what looks broken (future runs count these comments to know when to stop), then run the fix as a revision: send the implementer the pull request's context, its branch name, and your diagnosis, and have the reviewer judge the updated branch. Pushing the fix re-runs the checks; do not open a new pull request.",
 ].join("\n\n");
 
 /**
@@ -173,9 +178,10 @@ const CI_FIX_TASK = [
  *   capability-limited agent; untrusted content must not start factory sessions.
  * - `onCheckSuite` is the red-CI fix loop, scoped to the factory's own work:
  *   it dispatches only when a suite completes with a failure conclusion on a
- *   pull request whose head branch carries the factory prefix, so a person's
- *   red PR never triggers an uninvited fix. The session runs unattended under
- *   the autonomous principal, anchored to the pull request, and the injected
+ *   API-verified open draft PR whose same-repository head matches the report
+ *   and carries the factory prefix, excluding the reserved ticket namespace.
+ *   The unattended CI authenticator binds pushes and comments to that PR;
+ *   revisions of ticket heads require explicit trusted intake. The injected
  *   task bounds the loop by counting earlier fix-attempt comments on the
  *   thread. Requires the connector to subscribe to the `check_suite` webhook
  *   event.
@@ -189,7 +195,7 @@ const CI_FIX_TASK = [
  */
 export default githubChannel({
   botName: resolveBotName,
-  credentials: githubCredentials,
+  credentials: githubChannelCredentials,
   // The built-in handler checks out with channel credentials in the station.
   // factoryInit already imports objects without exposing those credentials.
   events: {
@@ -204,33 +210,38 @@ export default githubChannel({
     const raw = suite.raw as {
       head_branch?: unknown;
       check_suite?: { head_branch?: unknown };
-    };
-    const headBranch = raw.head_branch ?? raw.check_suite?.head_branch;
+    } | null;
+    const headBranch = raw?.head_branch ?? raw?.check_suite?.head_branch;
     const [pullNumber] = suite.pullRequests;
     if (
       suite.action !== "completed" ||
       suite.conclusion !== "failure" ||
+      !Number.isSafeInteger(pullNumber) ||
       pullNumber === undefined ||
+      pullNumber <= 0 ||
+      !Number.isSafeInteger(ctx.repository.id) ||
+      ctx.repository.id <= 0 ||
       typeof headBranch !== "string" ||
       !headBranch.startsWith(FACTORY_BRANCH_PREFIX)
     ) {
       return null;
     }
     const pull = await ctx.github
-      .request<{ head: { repo: { id: number } | null; ref: string } }>({
+      .request<unknown>({
         method: "GET",
         path: `/repos/${FACTORY_REPO}/pulls/${pullNumber}`,
       })
       .catch(() => null);
-    if (
-      !pull?.ok ||
-      pull.body.head.repo?.id !== ctx.repository.id ||
-      !pull.body.head.ref.startsWith(FACTORY_BRANCH_PREFIX)
-    ) {
+    const scope = {
+      branch: headBranch,
+      pullNumber,
+      repositoryId: ctx.repository.id,
+    };
+    if (!(pull?.ok && isCiPull(pull.body, scope))) {
       return null;
     }
     return {
-      auth: stampAutonomous(defaultGitHubAuth(ctx), pullNumber),
+      auth: stampCi(defaultGitHubAuth(ctx), scope),
       context: [CI_FIX_TASK],
     };
   },

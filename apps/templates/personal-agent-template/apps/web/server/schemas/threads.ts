@@ -18,6 +18,9 @@ const eveSessionSchema = z.object({
 export const threadStateSchema = z.object({
   session: eveSessionSchema,
   events: z.array(z.unknown()),
+  history: z
+    .array(z.object({ session: eveSessionSchema, events: z.array(z.unknown()) }))
+    .optional(),
 });
 
 export const patchThreadBodySchema = z.object({

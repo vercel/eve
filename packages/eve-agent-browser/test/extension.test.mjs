@@ -130,6 +130,20 @@ test("takes descriptions and schemas from the catalog, minus app-owned arguments
   }
 });
 
+test("hides launch-only shared arguments the catalog lists on open and tab_new", () => {
+  for (const name of ["open", "tab_new"]) {
+    const source = catalog.tools.find((tool) => tool.name === `agent_browser_${name}`);
+    for (const hidden of ["capture", "restore", "allowedDomains", "extraArgs"]) {
+      assert.ok(hidden in source.inputSchema.properties, `${name} catalog lists ${hidden}`);
+    }
+    const properties = Object.keys(tools[name].inputSchema.properties);
+    assert.ok(properties.includes("relaunch"), `${name} keeps relaunch`);
+    for (const hidden of ["capture", "restore", "allowedDomains", "extraArgs", "session"]) {
+      assert.ok(!properties.includes(hidden), `${name}: ${hidden} reached the model`);
+    }
+  }
+});
+
 test("runs one mcp call per tool call with the default session", async () => {
   resetConfig();
   const sandbox = fakeSandbox({

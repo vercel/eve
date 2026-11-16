@@ -2,7 +2,7 @@ import { connectSlackCredentials } from "@vercel/connect/eve";
 import { slackChannel } from "eve/channels/slack";
 
 /**
- * Slack channel: answers @mentions and DMs, replies in threads, and renders approvals as buttons.
+ * Slack channel: answers new @mentions and DMs, ignores message edits, replies in threads, and renders approvals as buttons.
  *
  * @remarks
  * Credentials are brokered by Vercel Connect through {@link connectSlackCredentials}, which
@@ -18,4 +18,5 @@ export default slackChannel({
   credentials: connectSlackCredentials(
     process.env.SLACK_CONNECTOR ?? "slack/eve-content-agent"
   ),
+  onMessageEdited: () => null,
 });

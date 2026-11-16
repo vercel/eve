@@ -6,7 +6,7 @@ import { disableTool } from "eve/tools";
  * @remarks
  * The built-in tool runs a fresh copy of the root agent, which would let the
  * orchestrator delegate work to an undifferentiated clone of itself and
- * bypass the four stations. All delegation goes through the declared
+ * bypass the declared station pipeline. All delegation goes through the declared
  * subagents instead.
  */
 export default disableTool();

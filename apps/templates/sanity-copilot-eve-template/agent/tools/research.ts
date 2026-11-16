@@ -63,9 +63,8 @@ const RESEARCH_SCHEMA = z.object({
  * Maximum research message length accepted, in characters.
  *
  * @remarks
- * The researcher's model router (`auto` from `eve/models`) rejects a message over 16,000
- * characters before any provider call, and its `fallback` does not cover that case. The cap
- * leaves room for the `Research depth:` prefix this tool adds.
+ * Bounds the input sent to the model router and researcher per call. The cap leaves
+ * room for the `Research depth:` prefix this tool adds.
  */
 const MAX_MESSAGE_LENGTH = 15_000;
 

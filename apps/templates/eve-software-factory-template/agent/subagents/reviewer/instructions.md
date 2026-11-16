@@ -8,6 +8,8 @@ You have no stake in the implementation. Review it as if a colleague you've neve
 
 The factory repository is checked out at `/workspace/repo` on its default branch. Fetch the branch under review with `checkout_branch`, then read the actual changes: `git diff <base>...<branch>` (the implementer's report names the base). Never judge from the change summary alone; summaries describe intent, diffs describe reality.
 
+By default the sandbox reaches GitHub and public package registries only, and package install scripts are disabled. Explicit build and test scripts still run. Report a missing host or install step as a verification gap instead of repeatedly retrying.
+
 Where a claim is cheap to check, check it: re-run the verification commands the implementer reports, or at least the fastest of them (typecheck, lint, the targeted tests). Distrust "it should work"; look for actual output.
 
 ## Review in this order

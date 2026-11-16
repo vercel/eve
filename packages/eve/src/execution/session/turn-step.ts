@@ -553,6 +553,8 @@ async function runSessionStepBody(
       try {
         await contextStorage.run(ctx, () => publish(facts));
       } finally {
+        // Work its handlers handed `waitUntil` may still use the sandbox this captures.
+        await publisher.drain();
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
           if (
@@ -637,19 +639,24 @@ async function runSessionStepBody(
         ctx,
         failed: input.recover,
         publish: async (events, session) => {
-          const scoped = await withContextScope(ctx, session, async (current) => {
-            await prepareDefinitions(current);
-            const emit = createTurnEventHandler({
-              abortSignal,
-              canCancelTurn: false,
-              conversation: current.history,
-              hookCancellation: new AbortController(),
-              publisher,
-            });
-            const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
-            await publish(events);
-            return { result: undefined, session: current };
-          });
+          const scoped = await withContextScope(
+            ctx,
+            session,
+            async (current) => {
+              await prepareDefinitions(current);
+              const emit = createTurnEventHandler({
+                abortSignal,
+                canCancelTurn: false,
+                conversation: current.history,
+                hookCancellation: new AbortController(),
+                publisher,
+              });
+              const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
+              await publish(events);
+              return { result: undefined, session: current };
+            },
+            { drain: publisher.drain },
+          );
           return scoped.session;
         },
         session: initialSession,
@@ -735,41 +742,46 @@ async function runSessionStepBody(
         initialSession,
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
-          const result = await runStep(ctx, session, async (enrichedSession) => {
-            // Races session resources against the model call; their users wait for what remains.
-            if (firstCall && input.input?.control === undefined) {
-              startSessionPrewarmers(ctx, "turn");
-            }
-            ctx.setVirtualContext(HandleEventKey, handleEvent);
-            if (host.deliver !== undefined)
-              ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
-            const stubs = ctx.get(ToolStubsKey);
-            if (stubs !== undefined)
-              ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(host.toolStubs, stubs));
-            ctx.setVirtualContext(ToolChannelKey, {
-              channel: channelOf(ctx),
-              to: createToolChannelTo({
-                createRuntime: host.createRuntime,
-                delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadAgent: () => agent,
-              }),
-            });
-            const schemaSession =
-              firstCall && resolved?.outputSchema !== undefined
-                ? { ...enrichedSession, outputSchema: resolved.outputSchema }
-                : enrichedSession;
-            // The scope's providers start empty; the slots fill what they own.
-            await installDefinitions(ctx);
-            // A sign-in completes before the turn it resumes, in the first call only.
-            const completions =
-              firstCall && completedAuths !== undefined
-                ? completedAuths.map(({ challenge }) => challenge)
-                : undefined;
-            const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
-            // Only the step knows whether it stopped for an interaction; the tables say which.
-            await publisher.finish({ announce: stoppedForPerson(harnessResult) });
-            return harnessResult;
-          });
+          const result = await runStep(
+            ctx,
+            session,
+            async (enrichedSession) => {
+              // Races session resources against the model call; their users wait for what remains.
+              if (firstCall && input.input?.control === undefined) {
+                startSessionPrewarmers(ctx, "turn");
+              }
+              ctx.setVirtualContext(HandleEventKey, handleEvent);
+              if (host.deliver !== undefined)
+                ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
+              const stubs = ctx.get(ToolStubsKey);
+              if (stubs !== undefined)
+                ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(host.toolStubs, stubs));
+              ctx.setVirtualContext(ToolChannelKey, {
+                channel: channelOf(ctx),
+                to: createToolChannelTo({
+                  createRuntime: host.createRuntime,
+                  delegated: hasDelegatedSessionContext(input.serializedContext),
+                  loadAgent: () => agent,
+                }),
+              });
+              const schemaSession =
+                firstCall && resolved?.outputSchema !== undefined
+                  ? { ...enrichedSession, outputSchema: resolved.outputSchema }
+                  : enrichedSession;
+              // The scope's providers start empty; the slots fill what they own.
+              await installDefinitions(ctx);
+              // A sign-in completes before the turn it resumes, in the first call only.
+              const completions =
+                firstCall && completedAuths !== undefined
+                  ? completedAuths.map(({ challenge }) => challenge)
+                  : undefined;
+              const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
+              // Only the step knows whether it stopped for an interaction; the tables say which.
+              await publisher.finish({ announce: stoppedForPerson(harnessResult) });
+              return harnessResult;
+            },
+            { drain: publisher.drain },
+          );
           // The waiting boundary may reach the client before this step returns.
           // Its settled result wins over a cancellation of that completed turn.
           if (result.settledTurn === undefined) throwIfTurnAborted(abortSignal);
@@ -787,6 +799,8 @@ async function runSessionStepBody(
         throw error;
       }
       if (completedModelCall === undefined) await consumeCancelledInput();
+      // The checkpoint serializes the channel state that background work leaves.
+      await publisher.drain();
       return createCancelledModelCallBatchResult({
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
@@ -796,6 +810,8 @@ async function runSessionStepBody(
       });
     }
 
+    // The step saves the channel state its handlers' background work left.
+    await publisher.drain();
     // Re-stamp the current address after handlers add a continuation alias.
     const aliased = saveSessionProjection(
       dropClosedRecords(
@@ -817,7 +833,7 @@ async function runSessionStepBody(
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
-    publisher.writer.release();
+    await publisher.release();
   }
 }
 

@@ -2,7 +2,7 @@
 description: "Grounding a GitHub work item before running the factory pipeline: checking for duplicates, working with the repo's existing labels, deciding whether to ask for clarification or proceed, and asking for reproduction details well. Load whenever a work item arrives from a GitHub issue or mention, and whenever asked to triage, label, dedupe, or close issues. Not needed for work items that arrive as plain requests with no GitHub issue behind them."
 ---
 
-# Triaging Issues
+# Triaging issues
 
 How to ground a GitHub issue before the factory pipeline runs on it, or when someone asks for a triage pass outright. The order matters: read, dedupe, label, then decide what the issue needs. Never comment on or change an issue you haven't read in full, including its existing comments and labels.
 
@@ -29,7 +29,7 @@ Every repo has its own label taxonomy, and an invented label is worse than none.
 
 ## 3. Ask or proceed?
 
-This decision feeds the classifier's `needs_clarification` judgment, and yours before it. Default to proceeding when the intent is clear; ask when building the wrong thing is a real risk.
+Pass the original item, the label vocabulary, and likely duplicate candidates to `triage_work_item`. Its `lane` chooses pipeline, clarify, answer, or duplicate; it does not write to GitHub. Confirm duplicates before closing anything, and apply selected labels through the existing GitHub tools. Default to proceeding when the intent is clear; ask when building the wrong thing is a real risk.
 
 - Proceed with stated assumptions when the report is plausible and the gap is small: a missing version when the bug reproduces on the current one, a vague title over a clear body.
 - Ask when the report is plausible but not actionable: no steps, no expected-versus-actual behavior, contradictory details, or several incompatible readings of what's wanted. Apply the repo's needs-repro or needs-more-info style label if it has one.
@@ -42,7 +42,7 @@ The comment asking for more info decides whether the reporter comes back. Keep i
 - Open by engaging with what they reported, not with a form letter. One sentence showing you read the issue.
 - Ask for the smallest set of things that would make the issue actionable, as a short list: exact version, steps or a minimal repro, expected versus actual behavior, and environment only if it plausibly matters.
 - Ask specific questions over generic ones. "Does this happen with X disabled?" gets an answer; "please provide more details" gets silence.
-- Close with what happens next: that the factory will pick the issue up once the details land.
+- Close with what happens next: a repository writer explicitly @mentions the bot after answering. Re-labeling does not retry automatic intake.
 - See `references/repro-request-structure.md` for the comment shape and worked examples.
 
 ## 5. Report what you did
