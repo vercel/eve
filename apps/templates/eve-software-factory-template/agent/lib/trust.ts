@@ -82,6 +82,16 @@ export function stampAutonomous(
   };
 }
 
+/** HTTP intake has no GitHub thread and never inherits caller trust. */
+export function autonomousForTicket(): SessionAuthContext {
+  return {
+    attributes: { factoryRepository: FACTORY_REPO.toLowerCase() },
+    authenticator: "intake-token",
+    principalId: AUTONOMOUS_PRINCIPAL,
+    principalType: "service",
+  };
+}
+
 /**
  * The issue number an unattended run was dispatched from, or null when the
  * session is not an unattended run (or predates the stamp).

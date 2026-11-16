@@ -187,7 +187,7 @@ test("push entry point transfers only the validated feature ref despite hostile 
   assert.equal(stopped, 2);
 });
 
-test("push refuses the configured default branch even when it has the factory prefix", async () => {
+test("push refuses configured default and protected branches even when they have the factory prefix", async () => {
   mock.method(globalThis, "fetch", async () =>
     Response.json({ default_branch: "factory/default" })
   );
@@ -197,6 +197,20 @@ test("push refuses the configured default branch even when it has the factory pr
       { getSandbox: async () => station }
     ),
     DEFAULT_BRANCH_ERROR
+  );
+  mock.method(globalThis, "fetch", async (url: string) =>
+    Response.json(
+      url.includes("/branches/")
+        ? { protected: true }
+        : { default_branch: "main" }
+    )
+  );
+  await assert.rejects(
+    pushTool.execute(
+      { branch: "factory/protected" },
+      { getSandbox: async () => station }
+    ),
+    { message: "Protected branches cannot be pushed by the factory." }
   );
   assert.equal(stopped, 2);
 });

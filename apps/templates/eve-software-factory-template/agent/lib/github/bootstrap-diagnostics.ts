@@ -14,12 +14,13 @@ const MAX_DETAIL_LENGTH = 2000;
  * tokens embedded in remote URLs, and authorization header values.
  */
 const CREDENTIAL_PATTERNS = [
-  /\bgh[a-z]_[A-Za-z0-9_]{8,}\b/g,
-  /\bgithub_pat_[A-Za-z0-9_]{8,}\b/g,
+  /gh[pousr]_[A-Za-z0-9_]{8,}/g,
+  /github_pat_[A-Za-z0-9_]{8,}/g,
   /x-access-token:[^@\s"']+/gi,
+  /(?<=https?:\/\/)[^\s/@:"']+:[^\s/@"']+(?=@)/gi,
   /\b(?:authorization|proxy-authorization)\b\s*[:=][^\r\n]*/gi,
-  /\bbasic\s+[A-Za-z0-9+/=]{8,}/gi,
-  /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\bbasic\s+[A-Za-z0-9+/]{20,}={0,2}/gi,
+  /\bbearer\s+[A-Za-z0-9._~+/=-]{20,}/gi,
 ];
 
 /**
@@ -64,7 +65,7 @@ const NOT_FOUND_EVIDENCE =
   /repository[^\n]{0,200}not found|not found[^\n]{0,200}repository|could not read from remote repository/i;
 
 const AUTHORIZATION_EVIDENCE =
-  /authentication failed|authorization|permission denied|forbidden|error:? 403|access denied|invalid[^\n]{0,40}credential/i;
+  /authentication failed|authorization|permission denied|permission to [^\n]{0,200} denied|forbidden|error:? 403|access denied|invalid[^\n]{0,40}credential/i;
 
 /**
  * Classifies a failed clone from its sanitized output.
@@ -86,7 +87,7 @@ export function describeCloneFailure(repo: string, detail: string): string {
   if (AUTHORIZATION_EVIDENCE.test(safe)) {
     return appAccessMessage(repo);
   }
-  return `Failed to clone ${repo} while building the factory sandbox template. ${safe.trim()}`;
+  return `Failed to clone ${repo} while preparing the factory session. ${safe.trim()}`;
 }
 
 /**

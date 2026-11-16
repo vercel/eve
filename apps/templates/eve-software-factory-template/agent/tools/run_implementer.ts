@@ -1,5 +1,6 @@
 import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
+import { stationOutput } from "../lib/stations/result.js";
 import { IMPLEMENTER_OUTPUT_SCHEMA } from "../lib/stations/schemas.js";
 
 /**
@@ -22,8 +23,9 @@ export default defineWorkflowTool({
     "use workflow";
     const response = await ctx.agent("implementer").send(message, {
       outputSchema: IMPLEMENTER_OUTPUT_SCHEMA,
+      signal: ctx.abortSignal,
     });
-    return (await response.result()).data;
+    return stationOutput("implementer", await response.result());
   },
   inputSchema: z.object({
     message: z

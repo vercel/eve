@@ -38,9 +38,9 @@ export default defineEval({
   tags: ["fast", "needs-connect"],
   async test(t) {
     const turn = await t.send(
-      "Run issue #1 on the repository through the classifier and mirror the classification onto the issue, then stop; do not run the analyst or any later station."
+      "Read issue #1 on the repository, triage it with triage_work_item, and mirror the selected labels onto the issue, then stop; do not run the analyst or any later station."
     );
-    t.calledAgent("classifier");
+    t.calledTool("triage_work_item");
     t.calledAgent("analyst", { count: 0 });
     t.calledAgent("implementer", { count: 0 });
     t.awaitingInput();

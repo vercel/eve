@@ -13,18 +13,19 @@
     "build": "eve build",
     "check": "ultracite check",
     "dev": "eve dev",
+    "discovery": "node scripts/check-discovery.ts",
     "eval": "eve eval",
     "fix": "ultracite fix",
     "start": "eve start",
     "test": "node --import tsx --test --experimental-test-module-mocks agent/lib/*.test.ts",
     "test:smoke": "pnpm test",
     "typecheck": "tsc",
-    "validate": "pnpm run check && pnpm run typecheck && eve info"
+    "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run discovery"
   },
   "dependencies": {
     "@github-tools/eve-extension": "^0.13.0",
-    "@vercel/blob": "^2.8.0",
-    "@vercel/connect": "2.9.2",
+    "@vercel/blob": "^2.9.0",
+    "@vercel/connect": "2.9.3",
     "@vercel/sandbox": "3.9.0",
     "ai": "^7.0.173",
     "eve": "^1.0.0",
