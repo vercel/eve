@@ -18,9 +18,9 @@ import type {
   SlackThread,
 } from "eve/channels/slack";
 import { emptySessionView } from "eve/events";
+import type { Interaction } from "eve/events";
 import { vi } from "vitest";
 
-import type { SlackInputRequest } from "../integrations/slack/input-requests";
 import { eventView } from "./events";
 import { sessionContext } from "./session";
 
@@ -202,11 +202,13 @@ export const channelEventContext = (
  * Drives a renderer against folded facts and an observable native renderer.
  * @param request - Interaction and associated call to render.
  * @param channel - Slack delivery capabilities.
+ * @param batch - Requests visible in the same session snapshot.
  * @returns A renderer driver and delivery observers.
  */
 export const interactionOpenedHarness = (
-  request: SlackInputRequest,
-  channel = slackEventContext()
+  request: Interaction,
+  channel = slackEventContext(),
+  batch: readonly Interaction[] = [request]
 ) => {
   const event = {
     data: {
@@ -217,24 +219,36 @@ export const interactionOpenedHarness = (
     type: "interaction.opened" as const,
   };
   const view = eventView([
-    {
+    ...[...new Set(batch.map((item) => item.turnId))].map((turnId) => ({
       data: {
-        cause: { deliveryId: "delivery-1" },
+        cause: { deliveryId: `delivery-${turnId}` },
         follows: null,
-        turnId: request.turnId,
+        turnId,
       },
-      type: "turn.started",
-    },
-    {
-      data: {
-        callId: request.call?.callId ?? "call-1",
-        capability: { kind: "tool", name: request.call?.name ?? "test" },
-        input: request.call?.input,
-        owner: { turnId: request.turnId },
+      type: "turn.started" as const,
+    })),
+    ...batch.flatMap((item) => [
+      {
+        data: {
+          callId: item.call?.callId ?? "call-1",
+          capability: {
+            kind: "tool" as const,
+            name: item.call?.name ?? "test",
+          },
+          input: item.call?.input,
+          owner: { turnId: item.turnId },
+        },
+        type: "call.requested" as const,
       },
-      type: "call.requested",
-    },
-    event,
+      {
+        data: {
+          interactionId: item.interactionId,
+          request: item.request,
+          subject: { callId: item.call?.callId ?? "call-1" },
+        },
+        type: "interaction.opened" as const,
+      },
+    ]),
   ]);
   const next = vi.fn<SlackRenderNext<"interaction.opened">>(() =>
     Promise.resolve()

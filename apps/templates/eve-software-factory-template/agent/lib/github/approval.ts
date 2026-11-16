@@ -1,9 +1,14 @@
 import type { ApprovalContext, ApprovalStatus } from "eve/tools/approval";
+import { factoryRepo } from "../constants.js";
 import {
+  ciScope,
   intakeIssueNumber,
   isAutonomous,
+  isCiIntake,
   isScheduleAppAuth,
+  isTicketIntake,
   isTrusted,
+  ticketBranch,
 } from "../trust.js";
 
 /**
@@ -23,8 +28,7 @@ export function writePolicy(ctx: ApprovalContext): ApprovalStatus {
   const auth = ctx.session.auth.current;
   if (isAutonomous(auth)) {
     return {
-      reason:
-        "Unattended factory runs may only apply labels, comment on their intake issue, and open draft pull requests.",
+      reason: "This write is outside the unattended run's intake authority.",
       type: "denied",
     };
   }
@@ -53,7 +57,14 @@ export function commentPolicy(ctx: ApprovalContext): ApprovalStatus {
   if (!isAutonomous(auth)) {
     return writePolicy(ctx);
   }
-  const intakeIssue = intakeIssueNumber(auth);
+  let intakeIssue: number | null;
+  try {
+    intakeIssue = isCiIntake(auth)
+      ? ciScope(auth).pullNumber
+      : intakeIssueNumber(auth);
+  } catch {
+    intakeIssue = null;
+  }
   const input = ctx.toolInput as { issueNumber?: unknown } | undefined;
   if (intakeIssue !== null && input?.issueNumber === intakeIssue) {
     return "not-applicable";
@@ -94,11 +105,12 @@ export function factoryBrainPolicy(ctx: ApprovalContext): ApprovalStatus {
 }
 
 /**
- * Label writes: the one reversible write an unattended run also needs, so it
- * can mark the work item as picked up.
+ * Label writes let vetted unattended GitHub runs mark work as picked up.
+ * Tickets and CI fixes cannot mutate repository labels.
  */
 export function labelPolicy(ctx: ApprovalContext): ApprovalStatus {
-  return isAutonomous(ctx.session.auth.current)
+  const auth = ctx.session.auth.current;
+  return isAutonomous(auth) && !isTicketIntake(auth) && !isCiIntake(auth)
     ? "not-applicable"
     : writePolicy(ctx);
 }
@@ -131,26 +143,57 @@ export function shipPolicy(ctx: ApprovalContext): ApprovalStatus {
  * The only sessions that reach the issue-lifecycle tools are trusted mentions,
  * autonomous label runs, and the local dev TUI; an untrusted public commenter
  * never gets a session (see the channel's `onComment`), so allowing this can't
- * hand issue control to an arbitrary account. Unlike {@link commentPolicy}
- * this is deliberately not scoped to one issue, because deduplication closes
- * the duplicates, not the intake issue.
+ * hand issue control to an arbitrary account. HTTP tickets and automatic CI
+ * sessions are denied; neither grants issue-lifecycle authority. Unlike
+ * {@link commentPolicy}, vetted GitHub runs are deliberately not scoped to one
+ * issue, because deduplication closes the duplicates, not the intake issue.
  */
 export function closeIssuePolicy(ctx: ApprovalContext): ApprovalStatus {
-  return isAutonomous(ctx.session.auth.current)
+  const auth = ctx.session.auth.current;
+  return isAutonomous(auth) && !isTicketIntake(auth) && !isCiIntake(auth)
     ? "not-applicable"
     : writePolicy(ctx);
 }
 
 /**
- * `createPullRequest`: a draft runs for every caller, anything that can be
- * merged follows {@link shipPolicy}.
+ * `createPullRequest`: CI sessions cannot create new PRs. Tickets may create
+ * drafts only on their assigned head in the configured repository. Other
+ * callers can create drafts; anything mergeable follows {@link shipPolicy}.
  *
  * @remarks
  * A draft cannot merge, so an unattended run can deliver its finished work
  * without a card while marking the PR ready stays a human act.
  */
 export function createPullRequestPolicy(ctx: ApprovalContext): ApprovalStatus {
-  const input = ctx.toolInput as { draft?: unknown } | undefined;
+  const auth = ctx.session.auth.current;
+  if (isCiIntake(auth)) {
+    return { reason: "CI fixes cannot create pull requests.", type: "denied" };
+  }
+  const input = ctx.toolInput as
+    | { draft?: unknown; head?: unknown; owner?: unknown; repo?: unknown }
+    | undefined;
+  if (isTicketIntake(auth)) {
+    try {
+      // The extension schema resolves configured owner/repo defaults before approval.
+      if (
+        input?.draft === true &&
+        input.head === ticketBranch(auth) &&
+        typeof input.owner === "string" &&
+        input.owner.toLowerCase() === factoryRepo.owner.toLowerCase() &&
+        typeof input.repo === "string" &&
+        input.repo.toLowerCase() === factoryRepo.repo.toLowerCase()
+      ) {
+        return "not-applicable";
+      }
+    } catch {
+      // Missing or malformed server authority cannot be replaced by tool input.
+    }
+    return {
+      reason:
+        "HTTP tickets may create only a draft pull request on their server-assigned head in the configured repository.",
+      type: "denied",
+    };
+  }
   if (input?.draft === true) {
     return "not-applicable";
   }

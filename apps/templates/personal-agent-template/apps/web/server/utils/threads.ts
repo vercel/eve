@@ -27,7 +27,7 @@ function mergeThreadState(incoming: ThreadState): ThreadState {
   const session: EveSessionCursor = { sessionId, streamIndex };
   if (inbox) session.inbox = inbox;
 
-  return { session, events: incoming.events };
+  return { session, events: incoming.events, history: incoming.history };
 }
 
 function rowToSummary(row: typeof schema.threads.$inferSelect): ThreadSummary {

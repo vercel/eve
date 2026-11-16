@@ -1,7 +1,10 @@
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
-import { fetchRepository } from "./lib/github/git-transfer.js";
-import { FACTORY_SANDBOX_CREATE_OPTIONS } from "./lib/github/repo-sandbox.js";
+import {
+  FACTORY_SANDBOX_CREATE_OPTIONS,
+  factoryInit,
+  factoryOpenOptions,
+} from "./lib/github/repo-sandbox.js";
 
 /**
  * Root agent sandbox configuration.
@@ -22,18 +25,7 @@ export const environment = VercelSandbox.environment(
 );
 
 export default defineSandbox(async () => {
-  const sandbox = await environment.open();
-  const result = await sandbox.run({
-    command:
-      "git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/repo",
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `Failed to mark /workspace as a safe git directory (exit ${result.exitCode}): ${String(
-        result.stderr || result.stdout
-      ).trim()}`
-    );
-  }
-  await fetchRepository(sandbox);
+  const sandbox = await environment.open(factoryOpenOptions());
+  await factoryInit(sandbox);
   return sandbox;
 });

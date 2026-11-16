@@ -10,8 +10,8 @@ export function ChatConversation({ className, ...props }: ComponentProps<typeof 
   return (
     <StickToBottom
       className={cn("relative min-h-0 flex-1 overflow-y-hidden", className)}
-      initial="smooth"
-      resize="smooth"
+      initial="instant"
+      resize="instant"
       role="log"
       {...props}
     />
