@@ -18,12 +18,13 @@ const PAGE_SIZE = 100;
 /** An installation larger than this many pages (3,000 repositories) is refused, not sampled. */
 const MAX_PAGES = 30;
 const REQUEST_TIMEOUT_MS = 10_000;
-/** How long a passed installation check is reused for the same caller and access value. */
-const INSTALLATION_CHECK_TTL_MS = 60_000;
+/** Most lookups in flight at once; GitHub limits a token to 100 concurrent requests. */
+const MAX_CONCURRENT_REQUESTS = 32;
 
 const visibilitySchema = z.enum(["public", "private", "internal"]);
 const repositorySchema = z.object({ visibility: visibilitySchema });
 const installationsSchema = z.object({
+  total_count: z.number(),
   installations: z.array(
     z.object({
       account: z.object({ login: z.string() }).nullish(),
@@ -33,6 +34,7 @@ const installationsSchema = z.object({
   ),
 });
 const installationRepositoriesSchema = z.object({
+  total_count: z.number(),
   repositories: z.array(z.object({ full_name: z.string(), visibility: visibilitySchema })),
 });
 
@@ -123,8 +125,8 @@ function privateWritePermissions(configured: readonly string[] | undefined): rea
   return configured;
 }
 
-/** Installation checks that passed, by caller and access value, with when each stops being reused. */
-export type InstallationChecksPassed = Readonly<Record<string, number>>;
+/** Installation checks that passed, by caller and access value, with the turn that ran each. */
+export type InstallationChecksPassed = Readonly<Record<string, string>>;
 
 /** Where passed checks are kept; the session's `defineState` handle in the shell. */
 export interface InstallationCheckState {
@@ -133,76 +135,88 @@ export interface InstallationCheckState {
 }
 
 export interface InstallationCheckCache {
-  readonly now: () => number;
+  readonly turnId: string;
   readonly state: InstallationCheckState;
 }
 
 /**
  * Refuses the command when the caller's App installation reaches a repository
  * the access setting rules out. A user token can't be narrowed when it is
- * minted, so the installation is the boundary. The check stops at the first
- * refused repository. A passed check is kept in the session's state and reused
- * for 60 seconds; a refusal or a failed lookup is never reused.
+ * minted, so the installation is the boundary. The check reads page 1 of each
+ * list, then every remaining page at once, and stops at the first refused
+ * repository. A passed check is kept in the session's state for the rest of
+ * the turn that ran it; the next turn checks again. A refusal or a failed
+ * lookup is never kept.
  */
 export async function assertUserInstallation(options: {
   readonly access: GitHubAccess;
-  readonly cache: InstallationCheckCache;
+  readonly cache?: InstallationCheckCache;
   readonly fetch: GitHubFetch;
   readonly token: string;
 }): Promise<void> {
   const { access, cache, token } = options;
   const key = `${access}:${createHash("sha256").update(token).digest("hex")}`;
-  const now = cache.now();
-  const reusableUntil = cache.state.get()[key];
-  if (reusableUntil !== undefined && now < reusableUntil) return;
-  const installations: z.infer<typeof installationsSchema>["installations"] = [];
-  for await (const batch of githubPages(
-    options.fetch,
+  if (cache && cache.state.get()[key] === cache.turnId) return;
+  const abort = new AbortController();
+  const lookup: Lookup = {
+    fetch: options.fetch,
+    limit: createLimiter(MAX_CONCURRENT_REQUESTS),
+    signal: abort.signal,
     token,
-    "/user/installations",
-    (body) => installationsSchema.parse(body).installations,
-  )) {
-    installations.push(...batch);
-  }
-  if (access === "private-write") {
-    for (const installation of installations) {
-      const outside = installation.permissions
-        ? writesOutsideAllowlist(Object.entries(installation.permissions))
-        : undefined;
-      if (outside === undefined || outside.length > 0) {
-        const label = installation.account?.login ?? String(installation.id);
-        throw new Error(
-          outside === undefined
-            ? `access "private-write" refused: GitHub did not list the permissions of the App installation on ${label}.`
-            : `access "private-write" refused: the App installation on ${label} grants ${outside.join(", ")}, which can make a repository public or create one. Remove those permissions from the App.`,
-        );
-      }
-    }
-  }
-  for (const { id } of installations) {
-    for await (const batch of githubPages(
-      options.fetch,
-      token,
-      `/user/installations/${id}/repositories`,
-      (body) => installationRepositoriesSchema.parse(body).repositories,
-    )) {
-      for (const repository of batch) {
-        if (access === "private-write" && repository.visibility === "public") {
+  };
+  try {
+    const installations = await readList(lookup, "/user/installations", (body) => {
+      const { total_count, installations } = installationsSchema.parse(body);
+      return { items: installations, total: total_count };
+    });
+    if (access === "private-write") {
+      for (const installation of installations) {
+        const outside = installation.permissions
+          ? writesOutsideAllowlist(Object.entries(installation.permissions))
+          : undefined;
+        if (outside === undefined || outside.length > 0) {
+          const label = installation.account?.login ?? String(installation.id);
           throw new Error(
-            `access "private-write" refused: the GitHub App installation includes a public repository (${repository.full_name}). Any user with read access can comment on a public repository, so narrow the App installation to private repositories.`,
-          );
-        }
-        if (access === "public-write" && repository.visibility !== "public") {
-          throw new Error(
-            `access "public-write" refused: the GitHub App installation includes a private or internal repository (${repository.full_name}). Narrow the App installation to public repositories.`,
+            outside === undefined
+              ? `access "private-write" refused: GitHub did not list the permissions of the App installation on ${label}.`
+              : `access "private-write" refused: the App installation on ${label} grants ${outside.join(", ")}, which can make a repository public or create one. Remove those permissions from the App.`,
           );
         }
       }
     }
+    await Promise.all(
+      installations.map(({ id }) =>
+        readList(
+          lookup,
+          `/user/installations/${id}/repositories`,
+          (body) => {
+            const { total_count, repositories } = installationRepositoriesSchema.parse(body);
+            return { items: repositories, total: total_count };
+          },
+          (repositories) => {
+            for (const repository of repositories) {
+              if (access === "private-write" && repository.visibility === "public") {
+                throw new Error(
+                  `access "private-write" refused: the GitHub App installation includes a public repository (${repository.full_name}). Any user with read access can comment on a public repository, so narrow the App installation to private repositories.`,
+                );
+              }
+              if (access === "public-write" && repository.visibility !== "public") {
+                throw new Error(
+                  `access "public-write" refused: the GitHub App installation includes a private or internal repository (${repository.full_name}). Narrow the App installation to public repositories.`,
+                );
+              }
+            }
+          },
+        ),
+      ),
+    );
+  } catch (error) {
+    abort.abort();
+    throw error;
   }
-  cache.state.update((current) => ({
-    ...Object.fromEntries(Object.entries(current).filter(([, until]) => until > now)),
-    [key]: now + INSTALLATION_CHECK_TTL_MS,
+  cache?.state.update((current) => ({
+    ...Object.fromEntries(Object.entries(current).filter(([, turnId]) => turnId === cache.turnId)),
+    [key]: cache.turnId,
   }));
 }
 
@@ -212,25 +226,76 @@ function readOnly(configured: readonly string[]): readonly string[] {
   ];
 }
 
-async function* githubPages<T>(
+interface Lookup {
+  readonly fetch: GitHubFetch;
+  readonly limit: <R>(run: () => Promise<R>) => Promise<R>;
+  readonly signal: AbortSignal;
+  readonly token: string;
+}
+
+/**
+ * Reads every page of a list: page 1 first, which carries `total_count`, then
+ * all remaining pages at once. `inspect` sees each page as it arrives, so a
+ * refusal on page 1 wins over the size limit.
+ */
+async function readList<T>(
+  lookup: Lookup,
+  path: string,
+  parse: (body: unknown) => { readonly items: T[]; readonly total: number },
+  inspect: (items: T[]) => void = () => {},
+): Promise<T[]> {
+  const readPage = async (page: number) => {
+    const result = parse(
+      await lookup.limit(() => {
+        lookup.signal.throwIfAborted();
+        return githubGet(
+          lookup.fetch,
+          lookup.token,
+          `${path}?per_page=${PAGE_SIZE}&page=${page}`,
+          lookup.signal,
+        );
+      }),
+    );
+    inspect(result.items);
+    return result;
+  };
+  const first = await readPage(1);
+  const pages = Math.ceil(first.total / PAGE_SIZE);
+  if (pages > MAX_PAGES) {
+    throw new Error(
+      `The access policy can't check ${path}: it lists more than ${MAX_PAGES * PAGE_SIZE} entries. Narrow the GitHub App installation.`,
+    );
+  }
+  const rest = await Promise.all(
+    Array.from({ length: Math.max(pages - 1, 0) }, (_, index) => readPage(index + 2)),
+  );
+  return [first, ...rest].flatMap((page) => page.items);
+}
+
+/** Runs at most `max` calls at once; a finished call hands its slot to the next waiting one. */
+function createLimiter(max: number): Lookup["limit"] {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async (run) => {
+    if (active < max) active++;
+    else await new Promise<void>((resolve) => waiting.push(resolve));
+    try {
+      return await run();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+}
+
+async function githubGet(
   fetch: GitHubFetch,
   token: string,
   path: string,
-  items: (body: unknown) => T[],
-): AsyncGenerator<T[]> {
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const batch = items(
-      await githubGet(fetch, token, `${path}?per_page=${PAGE_SIZE}&page=${page}`),
-    );
-    yield batch;
-    if (batch.length < PAGE_SIZE) return;
-  }
-  throw new Error(
-    `The access policy can't check ${path}: it lists more than ${MAX_PAGES * PAGE_SIZE} entries. Narrow the GitHub App installation.`,
-  );
-}
-
-async function githubGet(fetch: GitHubFetch, token: string, path: string): Promise<unknown> {
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const response = await fetch(`${API}${path}`, {
     headers: {
       accept: "application/vnd.github+json",
@@ -238,7 +303,7 @@ async function githubGet(fetch: GitHubFetch, token: string, path: string): Promi
       "user-agent": "eve-git",
       "x-github-api-version": "2022-11-28",
     },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   if (!response.ok) throw new GitHubPolicyLookupError(path.split("?")[0]!, response.status);
   return response.json();

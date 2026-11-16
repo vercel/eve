@@ -6,6 +6,7 @@ import type {
   GitHubAccess,
   InstallationCheckCache,
   InstallationChecksPassed,
+  InstallationCheckState,
 } from "../../extension/lib/github-policy.ts";
 import {
   executeGitHubShell,
@@ -61,6 +62,7 @@ function fakeGitHub(options: {
       const permissions =
         options.installPermissions === undefined ? SAFE_INSTALLATION : options.installPermissions;
       return Response.json({
+        total_count: installs.length,
         installations: slice(
           installs.map((_, id) => ({
             account: { login: `org-${id}` },
@@ -71,7 +73,10 @@ function fakeGitHub(options: {
       });
     }
     const listed = /^\/user\/installations\/(\d+)\/repositories$/u.exec(url.pathname);
-    if (listed) return Response.json({ repositories: slice(installs[Number(listed[1])] ?? []) });
+    if (listed) {
+      const repositories = installs[Number(listed[1])] ?? [];
+      return Response.json({ total_count: repositories.length, repositories: slice(repositories) });
+    }
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
   return { fetch: fetchImpl, requests };
@@ -395,17 +400,21 @@ test("concurrent App commands each read their own repository with their own toke
   assert.deepEqual(refused.authorized, []);
 });
 
-function createInstallationCheckCache(now: () => number = Date.now): InstallationCheckCache {
+function memoryState(): InstallationCheckState {
   let passed: InstallationChecksPassed = {};
   return {
-    now,
-    state: {
-      get: () => passed,
-      update: (fn) => {
-        passed = fn(passed);
-      },
+    get: () => passed,
+    update: (fn) => {
+      passed = fn(passed);
     },
   };
+}
+
+function createInstallationCheckCache(
+  turnId = "turn-1",
+  state = memoryState(),
+): InstallationCheckCache {
+  return { turnId, state };
 }
 
 function runUser(
@@ -417,7 +426,7 @@ function runUser(
   authorized: string[] = [],
   requireAuth: () => never = () => assert.fail("must not request re-authorization"),
   repository: string | null = "acme/vault",
-  installationChecks = createInstallationCheckCache(),
+  installationChecks: InstallationCheckCache | null = createInstallationCheckCache(),
 ) {
   return executeGitHubShell(
     input(repository ?? undefined, repository ? WRITE_COMMAND : "gh search repos --owner acme"),
@@ -436,7 +445,7 @@ function runUser(
       fetch: github.fetch,
       getToken: async () => ({ token }),
       requireAuth,
-      installationChecks,
+      installationChecks: installationChecks ?? undefined,
       getSandbox: async () => fakeSandbox(runs, leases),
     },
   );
@@ -600,47 +609,100 @@ test("the installation check stops at the first refused repository", async () =>
   const github = fakeGitHub({
     installs: {
       "user-b": [
-        [{ ...PUBLIC }, ...Array.from({ length: 100 }, () => ({ ...PRIVATE }))],
+        [{ ...PUBLIC }, ...Array.from({ length: 300 }, () => ({ ...PRIVATE }))],
         [PRIVATE],
       ],
     },
   });
   await assert.rejects(runUser("private-write", "user-b", github), /acme\/site/u);
-  assert.deepEqual(
-    github.requests.map((request) => request.url),
-    [
-      "/user/installations?per_page=100&page=1",
-      "/user/installations/0/repositories?per_page=100&page=1",
-    ],
+  assert.ok(
+    github.requests.every((request) => request.url.endsWith("page=1")),
+    "no page after page 1 is read once page 1 names an offender",
   );
 });
 
-test("a passed installation check is reused for 60 seconds, per caller and access value", async () => {
-  let clock = 1_000;
-  const checks = createInstallationCheckCache(() => clock);
+test("the installation check reads the pages after page 1 at once, within a bound on requests in flight", async () => {
+  const many = Array.from({ length: 450 }, (_, index) => ({
+    full_name: `acme/private-${index}`,
+    visibility: "private" as const,
+  }));
+  const wide = Array.from({ length: 80 }, () => [{ ...PRIVATE }]);
+  const github = fakeGitHub({ installs: { "user-a": [many], "user-w": wide } });
+  let inFlight = 0;
+  let peak = 0;
+  const slow: ReturnType<typeof fakeGitHub> = {
+    requests: github.requests,
+    fetch: (async (input, init) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      try {
+        return await github.fetch(input, init);
+      } finally {
+        inFlight--;
+      }
+    }) as typeof fetch,
+  };
+  await runUser("private-write", "user-a", slow);
+  assert.equal(github.requests.length, 1 + 5, "one installations page plus five repository pages");
+  assert.equal(peak, 4, "pages 2 to 5 of the repositories are in flight together");
+  github.requests.length = 0;
+  peak = 0;
+  await runUser("private-write", "user-w", slow);
+  assert.equal(github.requests.length, 1 + 80);
+  assert.equal(peak, 32);
+});
+
+test("an installation that lists more than 3,000 repositories is refused after page 1", async () => {
+  const github = fakeGitHub({
+    installs: {
+      "user-a": [
+        Array.from({ length: 3_001 }, (_, index) => ({ ...PRIVATE, full_name: `a/${index}` })),
+      ],
+    },
+  });
+  await assert.rejects(runUser("private-write", "user-a", github), /more than 3000 entries/u);
+  assert.equal(github.requests.length, 2);
+});
+
+test("a passed installation check is reused for the rest of the turn, per caller and access value", async () => {
+  const state = memoryState();
   const github = fakeGitHub({
     installs: { "user-a": [[{ ...PRIVATE }]], "user-c": [[{ ...PRIVATE }]] },
   });
-  const run = (access: "private-write" | "public-write", token: string) =>
-    runUser(access, token, github, [], [], [], undefined, "acme/vault", checks);
+  const run = (access: "private-write" | "public-write", token: string, turn = "turn-1") =>
+    runUser(access, token, github, [], [], [], undefined, "acme/vault", {
+      turnId: turn,
+      state,
+    });
   await run("private-write", "user-a");
   const afterFirst = github.requests.length;
-  clock += 59_999;
   await run("private-write", "user-a");
-  assert.equal(github.requests.length, afterFirst, "reused inside the window");
+  assert.equal(github.requests.length, afterFirst, "reused in the same turn");
   await run("private-write", "user-c");
   assert.ok(github.requests.length > afterFirst, "another caller is checked");
   const afterOther = github.requests.length;
   await assert.rejects(run("public-write", "user-a"), /acme\/vault/u);
   assert.ok(github.requests.length > afterOther, "another access value is checked");
-  clock += 1;
-  const beforeExpiry = github.requests.length;
-  await run("private-write", "user-a");
-  assert.ok(github.requests.length > beforeExpiry, "checked again once the window ends");
+  const beforeNextTurn = github.requests.length;
+  await run("private-write", "user-a", "turn-2");
+  assert.ok(github.requests.length > beforeNextTurn, "checked again in the next turn");
+  const afterNextTurn = github.requests.length;
+  await run("private-write", "user-a", "turn-2");
+  assert.equal(github.requests.length, afterNextTurn);
+  assert.deepEqual(Object.values(state.get()), ["turn-2"], "only the current turn is kept");
+});
+
+test("without a turn to key on, every command checks the installation", async () => {
+  const github = fakeGitHub({ installs: { "user-a": [[{ ...PRIVATE }]] } });
+  await runUser("private-write", "user-a", github, [], [], [], undefined, "acme/vault", null);
+  const afterFirst = github.requests.length;
+  await runUser("private-write", "user-a", github, [], [], [], undefined, "acme/vault", null);
+  assert.equal(github.requests.length, afterFirst * 2);
 });
 
 test("a refused installation check is not reused once the installation is narrowed", async () => {
-  const checks = createInstallationCheckCache(() => 1_000);
+  const checks = createInstallationCheckCache();
   const installs: Record<string, Repo[][]> = { "user-a": [[{ ...PUBLIC }]] };
   const github = fakeGitHub({ installs });
   const run = () =>

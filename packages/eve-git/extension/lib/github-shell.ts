@@ -157,7 +157,7 @@ interface GitHubShellDependencies {
   /** Resolves and re-authorizes user-scoped providers; the tool's `ctx.getToken` and `ctx.requireAuth`. */
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
-  /** Passed user installation checks; defaults to the session's state, shared by every command of the session. */
+  /** Passed user installation checks; defaults to the session's state, keyed by the turn of `context`. Without `context`, every command checks. */
   readonly installationChecks?: InstallationCheckCache;
   readonly getSandbox: () => Promise<SandboxSession>;
   /**
@@ -210,6 +210,14 @@ export function githubShellApproval(input: GitHubShellInput | undefined) {
   }
 }
 
+function installationCheckCache(
+  dependencies: GitHubShellDependencies,
+): InstallationCheckCache | undefined {
+  if (dependencies.installationChecks) return dependencies.installationChecks;
+  const turnId = dependencies.context?.session.turn.id;
+  return turnId ? { turnId, state: installationChecks } : undefined;
+}
+
 export async function executeGitHubShell(
   input: GitHubShellInput,
   config: GitHubConfig | undefined,
@@ -255,7 +263,7 @@ export async function executeGitHubShell(
       try {
         await assertUserInstallation({
           access,
-          cache: dependencies.installationChecks ?? { now: Date.now, state: installationChecks },
+          cache: installationCheckCache(dependencies),
           fetch: fetchGitHub,
           token,
         });
