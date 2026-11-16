@@ -156,7 +156,7 @@ export function withClientContext(
   let insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
   // What eve announced for the turn joined history at the same position, ahead of the turn's
   // input. The context goes after it, so the durable prefix the next turn reads stays cached.
-  while (insertionIndex < messages.length && isAnnouncedAhead(messages[insertionIndex]!)) {
+  while (insertionIndex < messages.length && isAnnouncement(messages[insertionIndex]!)) {
     insertionIndex += 1;
   }
   return [
@@ -168,9 +168,16 @@ export function withClientContext(
   ];
 }
 
-/** A framework message eve added to history that is not part of a turn's input. */
-function isAnnouncedAhead(message: HarnessModelMessage): boolean {
-  return message.role === "user" && message.kind !== "user" && turnAnchorOf(message) === undefined;
+/**
+ * A message `announce()` added ahead of a turn's input. Other unanchored framework messages, such as
+ * a compaction checkpoint or its "Continue.", keep the context ahead of them.
+ */
+function isAnnouncement(message: HarnessModelMessage): boolean {
+  return (
+    message.role === "user" &&
+    (message.kind === "context.state" || message.kind === "context.instruction") &&
+    turnAnchorOf(message) === undefined
+  );
 }
 
 /** The prompt as the model reads it: with the client's context. */
