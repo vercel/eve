@@ -30,6 +30,7 @@ mock.module("eve/tools", {
 
 const tokenRequests: any[] = [];
 const searches: URL[] = [];
+const createdPulls: any[] = [];
 mock.method(
   globalThis,
   "fetch",
@@ -43,6 +44,21 @@ mock.method(
       );
     }
     assert.equal(url.origin, "https://api.github.com");
+    if (url.pathname === "/repos/acme/widgets/pulls") {
+      const pull = JSON.parse(String(init?.body));
+      createdPulls.push(pull);
+      return Promise.resolve(
+        Response.json({
+          base: { ref: pull.base },
+          draft: pull.draft,
+          head: { ref: pull.head },
+          html_url: "https://github.com/acme/widgets/pull/23",
+          number: 23,
+          state: "open",
+          title: pull.title,
+        })
+      );
+    }
     assert.ok(["/search/code", "/search/issues"].includes(url.pathname));
     searches.push(url);
     return Promise.resolve(Response.json({ items: [], total_count: 0 }));
@@ -82,6 +98,49 @@ test("channel credentials and isolated Git transfers request only the configured
     }
     assert.deepEqual(tokenRequests.at(-1).authorizationDetails, [expected]);
   }
+});
+
+test("ticket draft approval uses the actual extension's resolved repository and exact API head", async () => {
+  const { autonomousForTicket } = await import("./intake/ticket.js");
+  const auth = autonomousForTicket("ticket:alice:extension-draft");
+  const ticketSession = { auth: { current: auth }, id: "ticket-draft" };
+  const ticketTools = await discover({
+    messages: () => Promise.resolve([]),
+    session: ticketSession,
+  });
+  const tool = ticketTools.createPullRequest;
+  const draft = {
+    base: "main",
+    draft: true,
+    head: auth.attributes.ticketBranch,
+    title: "Alice's email delivery fix",
+  };
+  const input = tool.inputSchema.parse(draft);
+  assert.equal(input.owner, "acme");
+  assert.equal(input.repo, "widgets");
+  assert.equal(
+    tool.inputSchema.safeParse({ ...draft, head: undefined }).success,
+    false
+  );
+  await Promise.all(
+    ["factory/existing-unrelated", `acme:${draft.head}`].map(async (head) => {
+      const denied = await tool.approval.request({
+        session: ticketSession,
+        toolInput: tool.inputSchema.parse({ ...draft, head }),
+      });
+      assert.equal(denied.type, "denied");
+    })
+  );
+  assert.equal(createdPulls.length, 0);
+  assert.equal(
+    await tool.approval.request({ session: ticketSession, toolInput: input }),
+    "not-applicable"
+  );
+  const result = await tool.execute(input, { session: ticketSession });
+  assert.equal(result.branch, draft.head);
+  assert.equal(createdPulls.length, 1);
+  assert.equal(createdPulls[0].head, draft.head);
+  assert.equal(createdPulls[0].draft, true);
 });
 
 for (const name of ["searchCode", "searchIssues"]) {

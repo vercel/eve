@@ -170,10 +170,81 @@ test("HTTP intake authenticates before work, rejects oversized/unknown input, an
   assert.equal(
     policies.createPullRequestPolicy({
       ...approvalCtx,
-      toolInput: { draft: true },
+      toolInput: {
+        draft: true,
+        head: expectedBranch,
+        owner: "acme",
+        repo: "widgets",
+      },
     }),
     "not-applicable"
   );
+  const draft = {
+    draft: true,
+    head: expectedBranch,
+    owner: "acme",
+    repo: "widgets",
+  };
+  for (const input of [
+    { ...draft, head: "factory/existing-unrelated" },
+    { ...draft, head: "factory/ticket-forged-prefix" },
+    { ...draft, head: `acme:${expectedBranch}` },
+    { ...draft, head: `mallory:${expectedBranch}` },
+    { ...draft, head: undefined },
+    { ...draft, head: 7 },
+    { ...draft, owner: "other" },
+    { ...draft, repo: "other" },
+    { ...draft, owner: undefined },
+    { ...draft, repo: undefined },
+    { ...draft, owner: null },
+    { ...draft, repo: 7 },
+    { ...draft, draft: false },
+    { ...draft, draft: undefined },
+    { ...draft, auth, head: "factory/existing-unrelated" },
+  ]) {
+    assert.equal(
+      (
+        policies.createPullRequestPolicy({
+          ...approvalCtx,
+          toolInput: input,
+        }) as any
+      ).type,
+      "denied",
+      JSON.stringify(input)
+    );
+  }
+  for (const current of [
+    { ...auth, attributes: {} },
+    {
+      ...auth,
+      attributes: { ...auth.attributes, ticketBranch: "factory/fix" },
+    },
+    {
+      ...auth,
+      attributes: { ...auth.attributes, factoryRepository: "other/repo" },
+    },
+    { ...auth, principalType: "user" },
+    { ...auth, principalId: "github:42" },
+  ]) {
+    assert.equal(
+      (
+        policies.createPullRequestPolicy({
+          session: { auth: { current } },
+          toolInput: draft,
+        } as any) as any
+      ).type,
+      "denied"
+    );
+  }
+  for (const current of [null, issueCtx.session.auth.current]) {
+    assert.equal(
+      policies.createPullRequestPolicy({
+        session: { auth: { current } },
+        toolInput: { draft: true, head: "factory/existing-unrelated" },
+      } as any),
+      "not-applicable"
+    );
+  }
   assert.equal((await post(request(ticket), ctx)).status, 200);
   assert.equal(sent.length, 1);
 });

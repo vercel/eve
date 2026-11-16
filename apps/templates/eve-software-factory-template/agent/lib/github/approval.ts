@@ -1,4 +1,5 @@
 import type { ApprovalContext, ApprovalStatus } from "eve/tools/approval";
+import { factoryRepo } from "../constants.js";
 import {
   ciScope,
   intakeIssueNumber,
@@ -7,6 +8,7 @@ import {
   isScheduleAppAuth,
   isTicketIntake,
   isTrusted,
+  ticketBranch,
 } from "../trust.js";
 
 /**
@@ -154,18 +156,44 @@ export function closeIssuePolicy(ctx: ApprovalContext): ApprovalStatus {
 }
 
 /**
- * `createPullRequest`: CI sessions cannot create new PRs. Other callers can
- * create drafts; anything that can be merged follows {@link shipPolicy}.
+ * `createPullRequest`: CI sessions cannot create new PRs. Tickets may create
+ * drafts only on their assigned head in the configured repository. Other
+ * callers can create drafts; anything mergeable follows {@link shipPolicy}.
  *
  * @remarks
  * A draft cannot merge, so an unattended run can deliver its finished work
  * without a card while marking the PR ready stays a human act.
  */
 export function createPullRequestPolicy(ctx: ApprovalContext): ApprovalStatus {
-  if (isCiIntake(ctx.session.auth.current)) {
+  const auth = ctx.session.auth.current;
+  if (isCiIntake(auth)) {
     return { reason: "CI fixes cannot create pull requests.", type: "denied" };
   }
-  const input = ctx.toolInput as { draft?: unknown } | undefined;
+  const input = ctx.toolInput as
+    | { draft?: unknown; head?: unknown; owner?: unknown; repo?: unknown }
+    | undefined;
+  if (isTicketIntake(auth)) {
+    try {
+      // The extension schema resolves configured owner/repo defaults before approval.
+      if (
+        input?.draft === true &&
+        input.head === ticketBranch(auth) &&
+        typeof input.owner === "string" &&
+        input.owner.toLowerCase() === factoryRepo.owner.toLowerCase() &&
+        typeof input.repo === "string" &&
+        input.repo.toLowerCase() === factoryRepo.repo.toLowerCase()
+      ) {
+        return "not-applicable";
+      }
+    } catch {
+      // Missing or malformed server authority cannot be replaced by tool input.
+    }
+    return {
+      reason:
+        "HTTP tickets may create only a draft pull request on their server-assigned head in the configured repository.",
+      type: "denied",
+    };
+  }
   if (input?.draft === true) {
     return "not-applicable";
   }

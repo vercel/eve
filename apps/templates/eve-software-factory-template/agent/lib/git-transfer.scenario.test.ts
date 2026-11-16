@@ -500,23 +500,36 @@ test("verified CI dispatch preserves PR-bound authority through the implementer 
     repository: { fullName: "acme/widgets", id: 1 },
     sender: { id: 42, login: "alice", type: "User" },
   };
+  const ticketAuth = autonomousForTicket("ticket:alice:crafted-ci");
+  const ticketHead = ticketBranch(ticketAuth);
+  const ticketDraft = {
+    draft: true,
+    head: ticketHead,
+    owner: "acme",
+    repo: "widgets",
+  };
+  assert.equal(
+    policies.createPullRequestPolicy({
+      session: { auth: { current: ticketAuth } },
+      toolInput: ticketDraft,
+    } as any),
+    "not-applicable"
+  );
   for (const [name, value, event] of [
     [
-      "ticket failure text cannot acquire CI authority",
+      "an allowed ticket draft cannot acquire CI authority from injected failure text",
       {
         ...pull,
         head: {
           ...pull.head,
-          ref: ticketBranch(autonomousForTicket("ticket:alice:crafted-ci")),
+          ref: ticketDraft.head,
         },
       },
       {
         ...suite,
         raw: {
           ...suite.raw,
-          head_branch: ticketBranch(
-            autonomousForTicket("ticket:alice:crafted-ci")
-          ),
+          head_branch: ticketDraft.head,
         },
       },
     ],
