@@ -180,6 +180,7 @@ export class ClientSession {
     let early: EarlyStream = NO_EARLY_STREAM;
     let response: Response;
     let timing: Omit<ClientSendReceipt, "deliveryId">;
+    let deliveryId: string | undefined;
     try {
       ({ response, timing } = await postSessionSend(
         this.#context,
@@ -189,28 +190,26 @@ export class ClientSession {
         this.#state.inbox,
         opensStream
           ? () => {
+              // A retried send reopens it; the attempt before's connection closes unread.
+              early.release();
               early = this.#openEarlyStream(initialStreamIndex, input);
             }
           : undefined,
       ));
+      const accepted = await readAcceptedMessage(response, this.#state.sessionId);
+      if (accepted.sessionId !== this.#state.sessionId) {
+        throw new Error("Message route returned a different session id.");
+      }
+      this.#state = { ...this.#state, inbox: accepted.inbox };
+      deliveryId = accepted.deliveryId;
+      if (deliveryId === undefined) {
+        throw new Error(
+          "Message route did not return a delivery id. Update the server before sending with this client.",
+        );
+      }
     } catch (error) {
       early.release();
       throw error;
-    }
-    const {
-      sessionId: responseSessionId,
-      deliveryId,
-      inbox,
-    } = await readAcceptedMessage(response, this.#state.sessionId);
-    if (responseSessionId !== this.#state.sessionId) {
-      throw new Error("Message route returned a different session id.");
-    }
-    this.#state = { ...this.#state, inbox };
-    if (deliveryId === undefined) {
-      early.release();
-      throw new Error(
-        "Message route did not return a delivery id. Update the server before sending with this client.",
-      );
     }
     early.releaseAfter(SEND_STREAM_HOLD_MS);
     return this.#messageResponse<TOutput>(

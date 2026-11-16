@@ -268,26 +268,23 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
-    const { answers, message, ...options } = attachSignal(input, this.#signal);
+    const payload = attachSignal(input, this.#signal);
     const startIndex = this.#session.state.streamIndex;
     // The eval follows the session from its own cursor below, so the send opens no stream.
-    const response =
-      answers === undefined
-        ? await sendFollowedClientSession(this.#session, { ...options, message: message! })
-        : await sendFollowedClientSession(this.#session, {
-            ...withoutTurnPolicy(options),
-            answers,
-          });
-    this.recordSend(answers === undefined ? "message" : "respond", getDeliveryReceipt(response));
+    const response = await sendFollowedClientSession(this.#session, payload);
+    this.recordSend(
+      payload.answers === undefined ? "message" : "respond",
+      getDeliveryReceipt(response),
+    );
     const deliveryId = response.deliveryId;
     return this.consume(
       followClientSession(this.#session, {
         startIndex,
-        signal: options.signal,
-        headers: options.headers,
-        reconnect: options.reconnect,
+        signal: payload.signal,
+        headers: payload.headers,
+        reconnect: payload.reconnect,
       }),
-      message,
+      payload.message,
       { deliveryId },
     );
   }
@@ -785,12 +782,4 @@ function assertRequestHasOption(request: Interaction, optionId: string): void {
       `Input request "${request.interactionId}" does not offer option "${optionId}".`,
     );
   }
-}
-
-/** Answers take no turn policy. */
-function withoutTurnPolicy<T extends { readonly turnPolicy?: unknown }>(
-  options: T,
-): Omit<T, "turnPolicy"> {
-  const { turnPolicy: _turnPolicy, ...rest } = options;
-  return rest;
 }

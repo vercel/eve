@@ -14,6 +14,7 @@ import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
 import type { ClientRedirectPolicy, ReconnectOptions } from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
+import { waitWithSignal } from "#shared/wait-with-signal.js";
 
 interface ResolvedStreamReconnectPolicy {
   readonly reconnect: boolean;
@@ -128,9 +129,12 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
       const adopted =
         early === undefined
           ? undefined
-          : requestTailIndex || input.follow === false
+          : requestTailIndex
             ? void early.then((unused) => unused?.close())
-            : await early;
+            : await waitWithSignal(early, input.signal).catch((error: unknown) => {
+                void early.then((unused) => unused?.close());
+                throw error;
+              });
       connection =
         adopted ?? (await openStreamBody({ ...input, retryPolicy, startIndex, requestTailIndex }));
     } catch (error) {

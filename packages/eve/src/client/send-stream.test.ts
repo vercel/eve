@@ -101,4 +101,43 @@ describe("a send's stream", () => {
     expect((await delivery.result()).reply).toBe("REPORT");
     expect(calls.filter((call) => call.startsWith("GET"))).toHaveLength(2);
   });
+
+  it("closes the connection of each retried attempt", async () => {
+    const cancelled = vi.fn();
+    let posts = 0;
+    routes(
+      () => stream([], cancelled),
+      () =>
+        (posts += 1) <= 2
+          ? Response.json(
+              { code: "session_not_ready", error: "Not ready.", ok: false },
+              { status: 409 },
+            )
+          : accepted(),
+    );
+    vi.useFakeTimers();
+
+    const sent = session().send("report");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await sent;
+    expect(cancelled).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(cancelled).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops a read whose signal aborts while the connection opens", async () => {
+    const opening = Promise.withResolvers<Response>();
+    const cancelled = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
+      init?.method === "POST" ? accepted() : await opening.promise,
+    );
+
+    const delivery = await session().send("report");
+    const controller = new AbortController();
+    const reading = delivery.result({ signal: controller.signal });
+    controller.abort();
+    await expect(reading).rejects.toThrow();
+    opening.resolve(stream([], cancelled));
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalled());
+  });
 });

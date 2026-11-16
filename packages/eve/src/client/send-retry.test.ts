@@ -79,7 +79,7 @@ describe("session send readiness retries", () => {
     });
     expect(new Set(observedHeaders).size).toBe(5);
     expect(observedHeaders.map(Number)).toEqual(
-      [...observedHeaders.map(Number)].sort((a, b) => a - b),
+      observedHeaders.map(Number).sort((a, b) => a - b),
     );
     expect(new Set(observedPaths)).toEqual(new Set(["/eve/v1/session/session_1"]));
   });
