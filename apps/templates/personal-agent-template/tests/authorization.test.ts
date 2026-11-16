@@ -4,6 +4,7 @@ import {
   clearAuthorizationChallenges,
   getPendingChallenge,
   recordAuthorizationEvent,
+  resolveAuthorizationChallenge,
   useAuthorizationChallenges,
 } from "../apps/web/app/composables/chat/useAuthorizationChallenges";
 
@@ -54,6 +55,47 @@ it("finds and resumes a tool-scoped sign-in when its connector is connected", as
     credentials: "include",
   });
   expect(useAuthorizationChallenges().pendingChallenges.value).toEqual([]);
+});
+
+it("does not let a completed callback from chat A remove chat B's same-provider card", async () => {
+  open("chat-a");
+  const callback = Promise.withResolvers<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => callback.promise),
+  );
+  const resolving = resolveAuthorizationChallenge(connector);
+  clearAuthorizationChallenges();
+  open("chat-b");
+  const replacement = getPendingChallenge(connector);
+  callback.resolve(new Response());
+  expect(await resolving).toBe(false);
+  expect(getPendingChallenge(connector)).toBe(replacement);
+});
+
+it("does not settle a newer same-provider interaction with an older interaction's outcome", () => {
+  open("older");
+  open("newer");
+  const replacement = getPendingChallenge(connector);
+  settle("older", "accepted");
+  expect(getPendingChallenge(connector)).toBe(replacement);
+  settle("newer", "accepted");
+  expect(getPendingChallenge(connector)).toBeUndefined();
+});
+
+it("does not resume a different chat after the connector lookup completes", async () => {
+  open("chat-a");
+  const lookup = Promise.withResolvers<unknown>();
+  const callback = vi.fn().mockResolvedValue(new Response());
+  vi.stubGlobal("fetch", callback);
+  vi.stubGlobal("$fetch", () => lookup.promise);
+  const resuming = useAuthorizationChallenges().tryResumeConnectedChallenges();
+  clearAuthorizationChallenges();
+  open("chat-b");
+  lookup.resolve([{ ...connector, status: { state: "connected" } }]);
+  await resuming;
+  expect(callback).not.toHaveBeenCalled();
+  expect(getPendingChallenge(connector)).toBeDefined();
 });
 
 it("shares the primary card with sign-ins that wait on it", () => {

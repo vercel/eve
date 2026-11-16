@@ -81,7 +81,9 @@ The web chat saves the session's events and opaque `inbox` handle with the threa
 
 When a session has expired, is stranded, or is not active, sending or retrying starts a replacement session in the same thread. The old messages remain visible and saved, but are not sent as context to the replacement session. Old approval and question cards are read-only. If saving the old events fails, recovery stops without clearing them.
 
-Retry reconnects a dropped stream when its turn is still busy; it does not resend an already accepted message. Other transport errors do not automatically start replacement sessions.
+Recovery stays busy through saving the old stream and accepting the replacement message, so repeated retry clicks cannot retire or send twice. Archived messages come only from recorded events, never rejected optimistic submissions.
+
+Retry reconnects a dropped stream when its turn is still busy. After an ambiguous send failure, retry only catches up the stream, even if the last observed state is idle: neither an empty catch-up nor a missing receipt proves the message was rejected. It never automatically resends that indeterminate delivery. If session creation lost its receipt, there is no session identity to reconnect; start a new chat deliberately rather than assuming the work was not accepted. Other transport errors do not automatically start replacement sessions.
 
 Sign-in cards show the provider's name and match both connection and tool-scoped connector names. Shared sign-in attempts use one card. Withdrawn or interrupted sign-ins disappear; failed sign-ins disappear when the next turn starts.
 

@@ -41,11 +41,13 @@ export function createEveChatSession(
   ]);
 
   const status = computed(() =>
-    agent.value.error.value !== undefined
-      ? "error"
-      : agent.value.status.value === "idle"
-        ? "ready"
-        : "streaming",
+    binding.value.busy.value
+      ? "streaming"
+      : agent.value.error.value !== undefined
+        ? "error"
+        : agent.value.status.value === "idle"
+          ? "ready"
+          : "streaming",
   );
   const error = computed(() => agent.value.error.value);
 
@@ -59,13 +61,31 @@ export function createEveChatSession(
 
   async function deliver(text: string) {
     const current = binding.value;
+    if (current.busy.value) return;
+    current.busy.value = true;
+    let generation = current.generation;
     try {
-      await current.agent.send(text);
-    } catch (error) {
-      // Only definitive rejection is safe to resend; a network failure may have been accepted.
-      if (!isSessionGone(error)) throw error;
-      await current.restart();
-      await current.agent.send(text);
+      try {
+        await current.agent.send(text);
+      } catch (error) {
+        if (generation !== current.generation) return;
+        // Only definitive rejection is safe to resend; a network failure may have been accepted.
+        if (!isSessionGone(error)) {
+          current.indeterminate = true;
+          throw error;
+        }
+        if (!(await current.restart())) return;
+        generation = current.generation;
+        try {
+          await current.agent.send(text);
+        } catch (replacementError) {
+          if (generation === current.generation && !isSessionGone(replacementError))
+            current.indeterminate = true;
+          throw replacementError;
+        }
+      }
+    } finally {
+      current.busy.value = false;
     }
   }
 
@@ -78,15 +98,25 @@ export function createEveChatSession(
   }
 
   function reset() {
-    agent.value.newSession();
+    binding.value.reset();
   }
 
   async function retry() {
     if (isBusy.value) return;
 
-    // A lost stream is not a failed turn; reconnect rather than submit a duplicate.
-    if (agent.value.status.value === "busy" && !isSessionGone(agent.value.error.value)) {
-      await agent.value.resume();
+    const current = binding.value;
+    // Idle only describes the observed stream. A failed POST can still have been accepted.
+    // Catch-up cannot prove non-delivery, so repeated retries remain reconnect-only.
+    if (
+      current.indeterminate ||
+      (current.agent.status.value === "busy" && !isSessionGone(current.agent.error.value))
+    ) {
+      current.busy.value = true;
+      try {
+        await current.agent.resume();
+      } finally {
+        current.busy.value = false;
+      }
       return;
     }
 

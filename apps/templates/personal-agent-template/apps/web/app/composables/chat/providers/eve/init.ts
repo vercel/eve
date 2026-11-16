@@ -1,7 +1,8 @@
 import { shallowRef, watch } from "vue";
 import type { ShallowRef } from "vue";
 import type { ThreadState } from "#eve/types/thread";
-import { type EveMessage, type UseEveAgentReturn, useEveAgent } from "eve/vue";
+import { type UseEveAgentReturn, useEveAgent } from "eve/vue";
+import { conversationOf } from "eve/client";
 import type { UIMessage } from "ai";
 import type { ChatSessionOptions, EveStreamEvent } from "~/composables/chat/types";
 import { toUIMessages } from "./adapter";
@@ -15,13 +16,17 @@ import { recordStreamEvent, resetTurnEventCounts } from "./stream-log";
 type ChatBinding = {
   agent: UseEveAgentReturn;
   historyMessages: ShallowRef<UIMessage[]>;
-  restart: () => Promise<void>;
+  busy: ShallowRef<boolean>;
+  indeterminate: boolean;
+  generation: number;
+  reset: () => void;
+  restart: () => Promise<boolean>;
 };
 const agentsByChatId = new Map<string, ChatBinding>();
 let activeChatId: string | undefined;
 
-function retiredMessages(sessionId: string, messages: readonly EveMessage[]) {
-  return toUIMessages(messages).map((message) => ({
+function retiredMessages(sessionId: string, events: readonly EveStreamEvent[]) {
+  return toUIMessages(conversationOf(events).messages).map((message) => ({
     ...message,
     id: `${sessionId}:${message.id}`,
     metadata: { retired: true },
@@ -39,14 +44,9 @@ export function getOrCreateEveAgent(chatId: string, options?: ChatSessionOptions
   if (!binding) {
     const history = shallowRef<NonNullable<ThreadState["history"]>>(options?.history ?? []);
     const historyMessages = shallowRef(
-      history.value.flatMap((snapshot) => {
-        // Project each retired stream independently, without binding or following its session.
-        const archived = useEveAgent({
-          initialEvents: snapshot.events as EveStreamEvent[],
-          followWhile: () => false,
-        });
-        return retiredMessages(snapshot.session.sessionId, archived.messages.value);
-      }),
+      history.value.flatMap((snapshot) =>
+        retiredMessages(snapshot.session.sessionId, snapshot.events as EveStreamEvent[]),
+      ),
     );
     const agent = useEveAgent({
       initialSession: options?.initialSession,
@@ -97,7 +97,17 @@ export function getOrCreateEveAgent(chatId: string, options?: ChatSessionOptions
     binding = {
       agent,
       historyMessages,
+      busy: shallowRef(false),
+      indeterminate: false,
+      generation: 0,
+      reset() {
+        this.generation += 1;
+        this.indeterminate = false;
+        agent.newSession();
+        if (activeChatId === chatId) clearAuthorizationChallenges();
+      },
       async restart() {
+        const generation = this.generation;
         const session = agent.session.value;
         const events = [...agent.events.value];
         if (session && events.length) {
@@ -106,14 +116,15 @@ export function getOrCreateEveAgent(chatId: string, options?: ChatSessionOptions
             .catch(() => {})
             .then(() => persistThreadState(chatId, { session, events }, history.value));
           await persistence;
+          if (generation !== this.generation) return false;
           history.value = [...history.value, { session: { ...session }, events }];
           historyMessages.value = [
             ...historyMessages.value,
-            ...retiredMessages(session.sessionId, agent.messages.value),
+            ...retiredMessages(session.sessionId, events),
           ];
         }
-        agent.newSession();
-        if (activeChatId === chatId) clearAuthorizationChallenges();
+        this.reset();
+        return true;
       },
     };
     agentsByChatId.set(chatId, binding);
@@ -126,8 +137,8 @@ export function removeEveAgent(chatId: string) {
 }
 
 export function resetAllEveAgents() {
-  for (const { agent } of agentsByChatId.values()) {
-    agent.newSession();
+  for (const binding of agentsByChatId.values()) {
+    binding.reset();
   }
   agentsByChatId.clear();
   activeChatId = undefined;
