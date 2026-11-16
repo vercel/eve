@@ -457,11 +457,13 @@ async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Pro
   if (currentSessions.has(session.id)) return false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<unknown> | undefined;
+  let settled = false;
   const first = (async () => {
     const open = (follow: boolean) =>
       internalSession(session).getLineStream({ follow, startIndex: 0 });
     const lines = await (hasFirstLine ? open(true).catch(() => open(false)) : open(false));
     reader = lines.getReader();
+    if (settled) void reader.cancel().catch(() => {});
     const { done, value } = await reader.read();
     if (done) return false;
     if (isV26Line(value)) return true;
@@ -476,8 +478,10 @@ async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Pro
   } catch {
     return false;
   } finally {
+    // Cancelled now, not once its read settles: a followed read of an empty stream never does.
+    settled = true;
     clearTimeout(timer);
-    void first.finally(() => reader?.cancel().catch(() => {})).catch(() => {});
+    void reader?.cancel().catch(() => {});
   }
 }
 
