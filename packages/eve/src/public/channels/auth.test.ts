@@ -39,6 +39,7 @@ import {
   verifyHttpBasic,
   verifyJwtEcdsa,
   verifyJwtHmac,
+  verifyOidc,
   verifyVercelOidc,
   withAuthChallenges,
 } from "#public/channels/auth.js";
@@ -899,6 +900,24 @@ describe("verifyVercelOidc", () => {
       .sign(privateKey);
 
     await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+  });
+
+  it("refuses another issuer's token without fetching this issuer's keys", async () => {
+    // A route that accepts GitHub Actions and Vercel tokens tries both; a Vercel token must not
+    // wait on GitHub's discovery document before the Vercel strategy gets it.
+    const issuer = await installMockedVercelIssuer("another-issuer");
+    try {
+      const token = await issuer.signToken({});
+      await expect(
+        verifyOidc(token, {
+          audiences: ["agent-framework-bench"],
+          issuer: "https://token.actions.githubusercontent.com",
+        }),
+      ).resolves.toEqual({ ok: false });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      issuer.restore();
+    }
   });
 
   it("rejects tokens with no audience claim", async () => {
