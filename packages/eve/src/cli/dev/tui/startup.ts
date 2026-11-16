@@ -74,6 +74,8 @@ export async function startDevelopmentTuiStartup(
   input: TuiDisplayOptions & {
     readonly appRoot: string;
     readonly initialInput?: string;
+    /** A message to show queued, sent once the agent is ready. */
+    readonly queuedInput?: string;
     readonly onExitRequest: () => void;
   },
 ): Promise<DevelopmentTuiStartup> {
@@ -86,6 +88,7 @@ export async function startDevelopmentTuiStartup(
   });
   renderer.beginStartupDraft({
     initialDraft: input.initialInput,
+    queued: input.queuedInput,
     title: input.name ?? "eve",
   });
   return {

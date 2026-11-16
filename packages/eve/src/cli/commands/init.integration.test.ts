@@ -30,7 +30,7 @@ import { pathExists } from "#setup/path-exists.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import type { GitInitialization, GitInitResult } from "./init-git.js";
-import type { InitOnboarding } from "./init-onboarding.js";
+import type { InitCarriedInput, InitOnboarding } from "./init-onboarding.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -128,7 +128,11 @@ function dependencies(
 }
 
 function fakeOnboarding(
-  overrides: Partial<{ cancelled: boolean; carriedInput: string; interrupted: AbortSignal }> = {},
+  overrides: Partial<{
+    cancelled: boolean;
+    carriedInput: InitCarriedInput;
+    interrupted: AbortSignal;
+  }> = {},
 ): InitOnboarding & {
   close: ReturnType<typeof vi.fn<InitOnboarding["close"]>>;
   setInstalling: ReturnType<typeof vi.fn<InitOnboarding["setInstalling"]>>;
@@ -137,7 +141,7 @@ function fakeOnboarding(
     finished: Promise.resolve({ cancelled: overrides.cancelled === true }),
     interrupted: overrides.interrupted ?? new AbortController().signal,
     setInstalling: vi.fn<InitOnboarding["setInstalling"]>(),
-    close: vi.fn<InitOnboarding["close"]>(async () => overrides.carriedInput),
+    close: vi.fn<InitOnboarding["close"]>(async () => overrides.carriedInput ?? {}),
   };
 }
 
@@ -1668,12 +1672,14 @@ describe("runInitCommand", () => {
     );
   });
 
-  it("runs onboarding during the install and hands eve dev the typed prompt", async () => {
+  it("runs onboarding during the install and hands eve dev the typed messages", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-"));
     const projectPath = join(parentDirectory, "my-agent");
     const deps = dependencies();
     const events: string[] = [];
-    const onboarding = fakeOnboarding({ carriedInput: "Help Alice plan her week" });
+    const onboarding = fakeOnboarding({
+      carriedInput: { queued: "Help Alice plan her week", draft: "and Bob's" },
+    });
     onboarding.setInstalling.mockImplementation((installing: boolean) => {
       if (!installing) events.push("installed");
     });
@@ -1687,9 +1693,12 @@ describe("runInitCommand", () => {
       expect(options?.nonInteractive).toBe(true);
       return packageInstallResult();
     });
-    let handedInput: string | undefined;
+    let handedInput: { draft?: string; queued?: string } | undefined;
     deps.spawnPackageManager.mockImplementation(async () => {
-      handedInput = process.env.EVE_INIT_INPUT;
+      handedInput = {
+        draft: process.env.EVE_INIT_INPUT,
+        queued: process.env.EVE_INIT_QUEUED_INPUT,
+      };
       return packageProcessResult();
     });
 
@@ -1697,6 +1706,7 @@ describe("runInitCommand", () => {
       await runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
     } finally {
       delete process.env.EVE_INIT_INPUT;
+      delete process.env.EVE_INIT_QUEUED_INPUT;
     }
 
     expect(events).toEqual([`onboarding:${projectPath}`, "install", "installed"]);
@@ -1709,7 +1719,7 @@ describe("runInitCommand", () => {
       "dev",
       "--onboarded",
     ]);
-    expect(handedInput).toBe("Help Alice plan her week");
+    expect(handedInput).toEqual({ queued: "Help Alice plan her week", draft: "and Bob's" });
   });
 
   it("points to /login when onboarding during the install was cancelled", async () => {
@@ -1734,7 +1744,7 @@ describe("runInitCommand", () => {
     let errorsWhenClosed: number | undefined;
     onboarding.close.mockImplementation(async () => {
       errorsWhenClosed ??= output.errors.length;
-      return undefined;
+      return {};
     });
     deps.startInitOnboarding.mockResolvedValue(onboarding);
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _path, options) => {

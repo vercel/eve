@@ -40,3 +40,6 @@ export interface ProductionCliOptions {
  * `--input`, it isn't split by the Windows shell or shown in process lists and npm logs.
  */
 export const EVE_INIT_INPUT_ENV = "EVE_INIT_INPUT";
+
+/** Carries the messages queued during `eve init`'s onboarding, which `eve dev` sends once ready. */
+export const EVE_INIT_QUEUED_INPUT_ENV = "EVE_INIT_QUEUED_INPUT";

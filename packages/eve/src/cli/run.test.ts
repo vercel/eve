@@ -899,6 +899,39 @@ describe("eve dev --input", () => {
     }
   });
 
+  it("keeps messages queued during eve init queued on the startup screen", async () => {
+    const startup = {
+      renderer: {},
+      finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+      shutdown: vi.fn(async () => {}),
+    };
+    const startDevelopmentTuiStartup = vi.fn(async () => startup);
+    vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+    vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui: vi.fn(async () => {}) }));
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    process.env.EVE_INIT_QUEUED_INPUT = "Help Alice plan her week";
+    try {
+      await withInteractiveTerminal(async () => {
+        await runCli(["dev", "--onboarded"], { error: () => {}, log: () => {} }, { startHost });
+      });
+      expect(startDevelopmentTuiStartup).toHaveBeenCalledWith(
+        expect.objectContaining({ queuedInput: "Help Alice plan her week" }),
+      );
+      expect(process.env.EVE_INIT_QUEUED_INPUT).toBeUndefined();
+    } finally {
+      delete process.env.EVE_INIT_QUEUED_INPUT;
+      vi.doUnmock("#cli/dev/tui/startup.js");
+      vi.doUnmock("#cli/dev/tui/tui.js");
+    }
+  });
+
   it("passes the default extension opt-out to the local server", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({

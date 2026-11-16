@@ -446,6 +446,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #everInteractive = false;
   #partingLinePrinted = false;
+  /** Another process takes over the terminal after teardown; see {@link handOff}. */
+  #handingOff = false;
   #exitRequested = false;
   /** True after the first consecutive Ctrl+C at the idle chat prompt. */
   #exitArmed = false;
@@ -670,7 +672,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
   }
 
-  beginStartupDraft(options: { initialDraft?: string; title: string }): void {
+  beginStartupDraft(options: { initialDraft?: string; queued?: string; title: string }): void {
+    if (options.queued !== undefined) this.#startupQueue.enqueue(options.queued);
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
@@ -2782,6 +2785,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  /**
+   * Makes teardown erase the screen without a parting line or trailing blank
+   * row, for when another process (`eve dev` after `eve init`) takes over the
+   * terminal and paints its own screen in the same place.
+   */
+  handOff(): void {
+    this.#handingOff = true;
+    this.#partingLinePrinted = true;
+  }
+
   requestInterrupt(): void {
     if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });
     this.#stop();
@@ -2948,7 +2961,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Restore the real `process.stdout` before the trailing newline so it is
     // not intercepted by the foreign-output capture.
     this.#removeLogCapture();
-    this.#live.newline();
+    if (!this.#handingOff) this.#live.newline();
 
     if (this.#input.isTTY) {
       // Disable bracketed paste, restoring the terminal to how we found it.
