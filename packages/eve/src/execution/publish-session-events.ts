@@ -299,16 +299,21 @@ async function publishInSessionScope<T>(
     sessionWritable: step.sessionWritable,
   });
   try {
-    return await withContextScope(ctx, session, async (enrichedSession) => {
-      const emit =
-        instrumentation?.createHandleEvent({
-          handleEvent: publisher.publish,
-          relayed: publication.origin === "relayed",
-        }) ?? publisher.publish;
-      const result = await publication.publish(emit, enrichedSession);
-      await publisher.finish();
-      return { result, session: enrichedSession };
-    });
+    return await withContextScope(
+      ctx,
+      session,
+      async (enrichedSession) => {
+        const emit =
+          instrumentation?.createHandleEvent({
+            handleEvent: publisher.publish,
+            relayed: publication.origin === "relayed",
+          }) ?? publisher.publish;
+        const result = await publication.publish(emit, enrichedSession);
+        await publisher.finish();
+        return { result, session: enrichedSession };
+      },
+      { drain: publisher.drain },
+    );
   } finally {
     await instrumentation?.flush();
     await publisher.release();
@@ -359,24 +364,28 @@ interface EventDispatcher extends SessionEventDispatcher {
    * context.
    */
   deliver(written: readonly WrittenEvent[]): Promise<void>;
+  /** Waits for the work handlers handed `waitUntil`, then saves the channel context it left. */
+  settle(): Promise<void>;
 }
 
 /** A session's stream held by one step, with the dispatch of the events that step publishes. */
 export interface SessionEventPublisher {
   readonly dispatcher: SessionEventDispatcher;
-  /** Closes the stream once the handlers of everything emitted have run. */
+  /** Closes the stream; `release` gives it up. */
   readonly writer: Pick<SessionEventWriter, "close">;
   /**
    * Writes one publication (a commit's facts on one line, each progress record on its own),
-   * folds each line into the step's projection, then queues the channel's handlers (see
-   * `drain`). Returns the events as written, for their hooks.
+   * folds each line into the step's projection, then runs the channel's handlers. Returns the
+   * events as written, for their hooks.
    */
   emit(publication: SessionPublication): Promise<readonly WrittenEvent[]>;
   /** `emit`, then the events' stream-event hooks. */
   publish(publication: SessionPublication): Promise<void>;
   /**
-   * Waits for the channel handlers of everything emitted so far, which run behind the
-   * publications, and rethrows the first delivery that failed.
+   * Waits for everything emitted so far, and for the work its channel handlers handed
+   * `ctx.waitUntil`, then saves the channel state that work left. It never throws: that work's
+   * failures are logged. Every scope a handler can run in drains before it ends, so the work
+   * never outlives the sandbox, session, or checkpoint it belongs to.
    */
   drain(): Promise<void>;
   /**
@@ -386,12 +395,7 @@ export interface SessionEventPublisher {
    * tables.
    */
   finish(options?: { readonly announce?: boolean }): Promise<void>;
-  /**
-   * Waits for the handlers still running, then releases the stream for the next step. Every step
-   * ends with it, so no handler outlives its step; a step that saves drains first, so a delivery
-   * that fails only here is one a failing step left behind, and is logged rather than masking
-   * the step's own error.
-   */
+  /** Drains, then releases the stream for the next step. Every step ends with it. */
   release(): Promise<void>;
 }
 
@@ -586,24 +590,12 @@ export function openSessionEventPublisher(input: {
         written.push({ event, position: event.meta.position, progress, view }),
       );
     }
-    // Channel handlers often call a platform (a status update, a posted reply). They run in
-    // order behind the publication instead of holding the turn, and the step drains them before
-    // it saves the channel's state.
-    const delivered = deliveryTail.then(() => dispatcher.deliver(written));
-    deliveryTail = delivered.catch((error: unknown) => {
-      deliveryFailure ??= { error };
-    });
+    await dispatcher.deliver(written);
     return written;
   };
-  let deliveryTail: Promise<void> = Promise.resolve();
-  let deliveryFailure: { readonly error: unknown } | undefined;
   const drain = async (): Promise<void> => {
     await publicationTail;
-    await deliveryTail;
-    if (deliveryFailure === undefined) return;
-    const { error } = deliveryFailure;
-    deliveryFailure = undefined;
-    throw error;
+    await dispatcher.settle();
   };
   // Local calls execute concurrently. Serialize publication through write, fold and channel
   // delivery so two calls cannot reserve the same position or overwrite channel state. A
@@ -626,32 +618,23 @@ export function openSessionEventPublisher(input: {
   };
   return {
     dispatcher,
-    writer: {
-      async close() {
-        try {
-          await drain();
-        } finally {
-          await writer.close();
-        }
-      },
-    },
+    writer,
     emit,
     publish,
     drain,
     async finish(options) {
-      await drain();
       if (before === undefined) return;
       const announced =
         options?.announce === false ? undefined : announceWaiting(before, currentView(ctx));
       before = undefined;
       if (announced !== undefined && announced.length > 0) await publish(announced);
-      await drain();
     },
     async release() {
-      await drain().catch((error: unknown) => {
-        log.error("a channel event handler failed in a step that failed", { error });
-      });
-      writer.release();
+      try {
+        await drain();
+      } finally {
+        writer.release();
+      }
     },
   };
 }
@@ -667,6 +650,26 @@ function createSessionEventDispatcher(input: {
   // Commits react one at a time, in order. Inline tool calls publish concurrently, and a slow
   // effect of an earlier commit must not write its slot over a later commit's.
   let reacting: Promise<void> = Promise.resolve();
+  // Work a handler handed `waitUntil`: it runs behind the turn, and its failures are only logged.
+  const background: Promise<void>[] = [];
+  const waitUntilFor =
+    (eventType: string) =>
+    (promise: PromiseLike<unknown>): void => {
+      background.push(
+        Promise.resolve(promise).then(
+          () => undefined,
+          (error: unknown) => {
+            log.error("a channel event handler's waitUntil work failed", {
+              adapterKind: adapter.kind,
+              eventType,
+              error,
+            });
+          },
+        ),
+      );
+    };
+  const saveChannelState = () =>
+    setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
   return {
     adapterCtx,
@@ -681,18 +684,37 @@ function createSessionEventDispatcher(input: {
         await callAdapterEventHandler(
           adapter,
           { facts, position: position.line },
-          { ...deliveryCtx, position, scope: undefined, view },
+          {
+            ...deliveryCtx,
+            position,
+            scope: undefined,
+            view,
+            waitUntil: waitUntilFor("committed"),
+          },
         );
       };
       for (const { event, position, progress, view } of written) {
         if (line !== undefined && line.position.line !== position.line) await committed();
-        if (await forwardSessionInput(ctx, event, view, inputSource)) continue;
+        if (await forwardSessionInput(ctx, event, inputSource)) continue;
         if (!progress) (line ??= { facts: [], position, view }).facts.push(event);
         const scope = "scope" in event ? event.scope : undefined;
-        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope, view });
+        const waitUntil = waitUntilFor(event.type);
+        await callAdapterEventHandler(adapter, event, {
+          ...deliveryCtx,
+          position,
+          scope,
+          view,
+          waitUntil,
+        });
       }
       await committed();
-      setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
+      saveChannelState();
+    },
+    async settle() {
+      if (background.length === 0) return;
+      // Work can hand more work to `waitUntil` while it runs.
+      while (background.length > 0) await Promise.all(background.splice(0));
+      saveChannelState();
     },
     react(written, options) {
       if (written.length === 0) return Promise.resolve();
