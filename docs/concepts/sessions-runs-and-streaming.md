@@ -423,7 +423,7 @@ The info route belongs to the selected `channels/eve.ts` source and checks its a
 Each new event line goes through these stages in order:
 
 1. **Write**: the line is written to the stream.
-2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`. Work a handler passes to `ctx.waitUntil()` continues in the background, and eve waits for it, for up to 30 seconds, before the step that ran the handler ends. See [Run platform calls in the background](../channels/custom#run-platform-calls-in-the-background).
+2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`.
 3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each event fire.
 4. **Intents**: eve acts on cancellation requests queued by `ctx.cancel()`.
 

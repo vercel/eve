@@ -84,13 +84,13 @@ export function resolveWebSearchOutputSchema(
 
 /**
  * Determines the web search backend for a model. On AI Gateway it is the selected search
- * provider (Exa by default); `native` selects the model vendor's own search, or the fallback
+ * provider (Parallel by default); `native` selects the model vendor's own search, or the fallback
  * when the model has none. Direct models always use their provider's native search. A model
  * left without a backend gets none (`null`).
  */
 export function resolveWebSearchBackend(
   profile: ModelProfile,
-  selection: WebSearchSelection = { provider: "exa" },
+  selection: WebSearchSelection = { provider: "parallel" },
 ): WebSearchBackend | null {
   if (!profile.gateway) return resolveNativeWebSearchBackend(profile);
   if (selection.provider !== "native") return selection.provider;

@@ -31,10 +31,6 @@ export interface SlackRenderingHarness {
 export function slackRenderingHarness(
   definition: unknown,
   state: Partial<SlackChannelState>,
-  options: {
-    /** Receives handlers' background work, as a running session's publisher does. */
-    readonly waitUntil?: (task: Promise<unknown>) => void;
-  } = {},
 ): SlackRenderingHarness {
   if (!isCompiledChannel(definition)) throw new Error("Expected a compiled channel.");
   const adapter = { ...definition.adapter, state: { ...definition.adapter.state, ...state } };
@@ -49,7 +45,6 @@ export function slackRenderingHarness(
   const channel = {
     ...buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as never),
     view: tables,
-    ...(options.waitUntil !== undefined && { waitUntil: options.waitUntil }),
   };
   const event = async (fact: SessionEvent) => {
     const handler = adapter[fact.type as keyof typeof adapter] as
