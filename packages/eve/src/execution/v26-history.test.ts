@@ -397,18 +397,42 @@ describe("createV26HistoryReader", () => {
 
 describe("v26LineStream", () => {
   it("reads every record from the first, and marks the records that read as no line", async () => {
-    const records = new ReadableStream<unknown>({
-      start(controller) {
-        for (const record of KITCHEN_SINK) controller.enqueue(record);
-        controller.close();
-      },
-    });
+    const starts: number[] = [];
     const out: unknown[] = [];
-    for await (const value of v26LineStream(records, 5)) out.push(value);
+    const lines = await v26LineStream("session_marked", 5, async (startIndex) => {
+      starts.push(startIndex);
+      return streamOf(KITCHEN_SINK);
+    });
+    for await (const value of lines) out.push(value);
+    expect(starts).toEqual([0]);
     // One output per stored record from the cursor on, so positions keep counting stored lines.
     expect(out).toHaveLength(KITCHEN_SINK.length - 5);
     // The first session.waiting reads as no line: the turn before it already settled.
     expect(out[8 - 5]).toEqual({ $eve: "position", next: 9 });
+  });
+
+  it("resumes a session's next read where its last one ended, and starts over before that", async () => {
+    const read = async (sessionId: string, from: number, stored: readonly unknown[]) => {
+      const starts: number[] = [];
+      const out: unknown[] = [];
+      const lines = await v26LineStream(sessionId, from, async (startIndex) => {
+        starts.push(startIndex);
+        return streamOf(stored.slice(startIndex));
+      });
+      for await (const value of lines) out.push(value);
+      return { out, starts };
+    };
+    const whole = await read("session_whole", 0, KITCHEN_SINK);
+    const half = Math.floor(KITCHEN_SINK.length / 2);
+
+    await read("session_resumed", 0, KITCHEN_SINK.slice(0, half));
+    const resumed = await read("session_resumed", half, KITCHEN_SINK);
+    expect(resumed.starts).toEqual([half]);
+    expect(resumed.out).toEqual(whole.out.slice(half));
+
+    const again = await read("session_resumed", 0, KITCHEN_SINK);
+    expect(again.starts).toEqual([0]);
+    expect(again.out).toEqual(whole.out);
   });
 });
 
@@ -417,7 +441,8 @@ describe("convertLegacyEvents", () => {
     const reader = createEventReader();
     const served: SessionStreamEvent[] = [];
     let position = 0;
-    for await (const value of v26LineStream(streamOf(KITCHEN_SINK), 0)) {
+    const lines = await v26LineStream("session_saved", 0, async () => streamOf(KITCHEN_SINK));
+    for await (const value of lines) {
       if (isStoredLine(value)) served.push(...reader.read(value, position));
       position += 1;
     }
