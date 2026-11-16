@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -12,6 +12,10 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import { turn } from "#protocol/session-projection/public-view.js";
 import { defineChannel, type ChannelEventContext } from "#public/definitions/channel.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function adapterOf(channel: unknown): ChannelAdapter<any> {
   return (channel as CompiledChannel<any, any, any>).adapter;
@@ -188,5 +192,39 @@ describe("defineChannel events", () => {
     });
 
     expect(adapterCtx.state).toEqual({ count: 2 });
+  });
+
+  it("waits for waitUntil work without a publisher, and logs its rejection instead of throwing", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const channel = defineChannel<{ count: number }, { state: { count: number } }>({
+      context: (state) => ({ state }),
+      events: {
+        "turn.settled"(_event, ctx) {
+          ctx.waitUntil(
+            (async () => {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+              ctx.channel.state.count += 1;
+            })(),
+          );
+          ctx.waitUntil(Promise.reject(new Error("Rate limited.")));
+        },
+      },
+      routes: [],
+      state: { count: 0 },
+    });
+    const adapter = adapterOf(channel);
+    const ctx = sessionContext();
+    const adapterCtx = buildAdapterContext(adapter, ctx);
+    const handler = adapter["turn.settled"] as (
+      event: SessionEvent,
+      ctx: typeof adapterCtx,
+    ) => Promise<void>;
+    await contextStorage.run(ctx, () => handler(SETTLED, adapterCtx));
+
+    expect(adapterCtx.state).toEqual({ count: 1 });
+    expect(errors).toHaveBeenCalledWith(
+      expect.stringContaining("a channel event handler's waitUntil work failed"),
+      expect.objectContaining({ eventType: "turn.settled" }),
+    );
   });
 });

@@ -1,6 +1,7 @@
 import { setSlackCodeChannelStatus } from "#public/channels/slack/code-channel.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
-import type { SlackEventContext } from "#public/channels/slack/slackChannel.js";
+import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
+import type { ChannelEventContext } from "#public/definitions/channel.js";
 
 const STATUS_REFRESH_MS = 30_000;
 
@@ -10,7 +11,38 @@ export interface SlackThreadStatus {
   readonly text: string;
 }
 
+const statusWrites = new WeakMap<SlackChannelState, Promise<void>>();
+
+export async function statusWritesSettled(channel: SlackEventContext): Promise<void> {
+  await statusWrites.get(channel.state);
+}
+
+export function showStatusBehindTurn(
+  ctx: ChannelEventContext<SlackEventContext>,
+  next: () => { readonly text: string; readonly force?: boolean },
+): void {
+  const { channel } = ctx;
+  const written = (statusWrites.get(channel.state) ?? Promise.resolve()).then(() => {
+    const { text, ...options } = next();
+    return writeStatus(channel, text, options);
+  });
+  statusWrites.set(
+    channel.state,
+    written.catch(() => {}),
+  );
+  ctx.waitUntil(written);
+}
+
 export async function showStatus(
+  channel: SlackEventContext,
+  text: string,
+  options?: { readonly force?: boolean },
+): Promise<void> {
+  await statusWritesSettled(channel);
+  await writeStatus(channel, text, options);
+}
+
+async function writeStatus(
   channel: SlackEventContext,
   text: string,
   options?: { readonly force?: boolean },
@@ -36,6 +68,7 @@ export async function restoreStatus(channel: SlackEventContext): Promise<void> {
 }
 
 export async function hideStatus(channel: SlackEventContext): Promise<void> {
+  await statusWritesSettled(channel);
   const current = channel.state.threadStatus;
   if (current) channel.state.threadStatus = { ...current, atMs: 0 };
   if (isCodeChannel(channel)) {
@@ -50,6 +83,7 @@ function isCodeChannel(channel: SlackEventContext): boolean {
 }
 
 export async function clearStatus(channel: SlackEventContext): Promise<void> {
+  await statusWritesSettled(channel);
   channel.state.threadStatus = null;
   await channel.thread.startTyping();
 }
