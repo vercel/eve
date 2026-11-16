@@ -141,6 +141,40 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
         );
       });
 
+      it("takes a command by session id while a session started on an address runs its first turn", async () => {
+        const replying = Promise.withResolvers<void>();
+        await withHost(
+          {
+            name: `${name}-first-turn-command`,
+            respond: async (_prompt, call, signal) => {
+              if (call === 1) {
+                replying.resolve();
+                await new Promise<void>((resolve) => {
+                  if (signal?.aborted) resolve();
+                  signal?.addEventListener("abort", () => resolve(), { once: true });
+                });
+              }
+              return textStreamResult("Noted, Alice.");
+            },
+          },
+          async ({ runtime, settled }) => {
+            const first = await alice(runtime, `${name}:first-turn-command`).send("Alice asks.", {
+              auth: null,
+            });
+            await replying.promise;
+            expect((await runtime.hasRunnableOwner?.(first.sessionId)) ?? true).toBe(true);
+            await expect(
+              runtime.dispatchSession({
+                command: { deliveryId: "cancel-first-turn", kind: "cancel" },
+                sessionId: first.sessionId,
+              }),
+            ).resolves.toMatchObject({ status: "accepted" });
+            expect((await first.result()).status).toBe("cancelled");
+            await settled();
+          },
+        );
+      });
+
       it("answers a command to a session it never ran as inactive", async () => {
         await withHost(
           { name: `${name}-unknown`, respond: () => textStreamResult("") },

@@ -68,6 +68,8 @@ async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
     readonly continuationToken: string;
+    /** Whether the session was started with a message, which its first turn runs. */
+    readonly firstTurn: boolean;
     /** The claims confirm after it, so it runs inline while their hooks commit. */
     readonly sessionCreation: Promise<unknown>;
     readonly sessionId: string;
@@ -90,10 +92,18 @@ async function prepareInitialOwner(
   };
   const claim = { confirmAfter: input.sessionCreation };
   const [stableClaim, aliasClaim] = await Promise.allSettled([
-    inbox.claimSessionHook(
-      sessionCommandHookToken(input.sessionId),
-      input.startClaim === "inbox" ? { ...claim, claimedAtStart: true } : claim,
-    ),
+    // A session started on its continuation address with a message claims its stable inbox
+    // with its first step's state (`SessionStateCursor`), keeping a hook write off that turn.
+    // Until then, anything that addresses the session by id must use its session address
+    // (`{ sessionId }`), which falls back to its start Hook. Without a message the session
+    // idles before any step, and a prewarm finds it, and a handoff moves it, only by the inbox
+    // hooks it claimed, so it claims the inbox here.
+    input.startClaim === "continuation" && input.firstTurn
+      ? Promise.resolve()
+      : inbox.claimSessionHook(
+          sessionCommandHookToken(input.sessionId),
+          input.startClaim === "inbox" ? { ...claim, claimedAtStart: true } : claim,
+        ),
     input.continuationToken === ""
       ? Promise.resolve()
       : inbox.claimSessionHook(
@@ -179,6 +189,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
           });
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
       continuationToken,
+      firstTurn: input.input.message !== undefined,
       sessionCreation: sessionCreationPromise,
       sessionId,
       sessionTimeoutMs,

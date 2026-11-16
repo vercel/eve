@@ -1,7 +1,7 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { deliverToHostedHook } from "#execution/hosts.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
-import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
+import { resumeSignInHook } from "#execution/session-inbox/resume.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 import { encodeLegacyCommand, resolveLegacyInbox } from "./inbox.js";
@@ -20,7 +20,7 @@ export async function resumeAuthorizationCallback(
   // route held once is gone (`HookNotFoundError`): its token was never a legacy one.
   if (await deliverToHostedHook(token, payload)) return;
   try {
-    await resumeRunnableHook(token, payload);
+    await resumeSignInHook(token, payload);
     return;
   } catch (error) {
     if (!HookNotFoundError.is(error)) throw error;

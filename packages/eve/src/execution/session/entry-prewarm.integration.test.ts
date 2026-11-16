@@ -15,12 +15,14 @@ import {
   waitForParkedTurnStep,
 } from "#internal/testing/session-test-helpers.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createChannelAddress } from "#channel/channel-address.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -441,6 +443,54 @@ describe("idle session prewarm handoff", () => {
       expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
     },
   );
+});
+
+describe("prewarm handoff of a session created on an address", () => {
+  it("moves it before its first message, and its successor answers by session id", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "address-prewarm" } });
+    await runtime.run(async () => {
+      const workflowRuntime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const address = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "http",
+        continuationToken: "alice:planning-notes",
+        runtime: workflowRuntime,
+      });
+      const { session } = await address.create({ auth: null });
+      const world = await getWorld();
+      const token = sessionInboxHookToken(sessionCommandHookToken(session.id));
+      try {
+        // `Session.prewarm()` finds the owner here; a session that waits for its first message
+        // before any step must already hold it.
+        expect((await waitForHookOwner(token, 10_000)).runId).toBe(session.id);
+        await waitForPrewarmStep(session.id);
+        await resumeSessionInbox(
+          { sessionId: session.id },
+          { kind: "session-prewarm", expectedOwnerRunId: session.id, targetDeploymentId: "dpl_b" },
+        );
+        // A successor holds only the hooks its source claimed.
+        await vi.waitFor(
+          async () => expect((await waitForHookOwner(token)).runId).not.toBe(session.id),
+          { timeout: 10_000 },
+        );
+        await expect(
+          workflowRuntime.dispatchSession({
+            command: { deliveryId: "end-after-move", kind: "reset" },
+            sessionId: session.id,
+          }),
+        ).resolves.toMatchObject({ status: "reset" });
+        await vi.waitFor(
+          async () => expect((await world.runs.get(session.id)).status).toBe("completed"),
+          { timeout: 10_000 },
+        );
+      } finally {
+        if ((await world.runs.get(session.id)).status === "running")
+          await getRun(session.id).cancel();
+      }
+    });
+  });
 });
 
 describe("first turn abort hooks", () => {

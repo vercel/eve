@@ -76,6 +76,7 @@ import {
 } from "#execution/session-inbox/end-stranded-session.js";
 import { waitForSessionHooksRelease } from "#execution/session-inbox/hook-release.js";
 import {
+  findSessionStartHookHolder,
   AcceptedSessionIdentityError,
   resolveSessionInbox,
   resumeSessionInbox,
@@ -315,7 +316,10 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
 
     async hasRunnableOwner(sessionId: string): Promise<boolean> {
       const token = sessionInboxHookToken(sessionCommandHookToken(sessionId));
-      const holder = await findSessionHookHolder(token);
+      // A session started on a continuation address claims its stable inbox after its first
+      // step; until then its start Hook holds it.
+      const holder =
+        (await findSessionHookHolder(token)) ?? (await findSessionStartHookHolder(sessionId));
       if (holder === undefined) return false;
       try {
         await assertRunnableSessionOwner(holder);
