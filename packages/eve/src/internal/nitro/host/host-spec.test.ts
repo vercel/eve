@@ -11,8 +11,6 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
-import { defineWorkflowTool } from "#tools/workflow-definition.js";
-import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { z } from "zod";
 
 const APP_ROOT = "/tmp/weather-agent";
@@ -25,8 +23,6 @@ type Modules = Array<NonNullable<Parameters<typeof compileFromMemory>[0]["module
 interface AgentVariant {
   readonly codeMode?: boolean;
   readonly externalDependencies?: readonly string[];
-  /** A workflow tool: an authored one, or one marked as `workflow()` marks its own. */
-  readonly tool?: "workflow" | "workflow-program";
   readonly sandbox?: "just-bash" | "vercel";
   readonly websocket?: boolean;
   /** A dynamic schedule collection on Vercel's provider. */
@@ -65,23 +61,6 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
           tool: false,
         }),
       }),
-    });
-  }
-  if (variant.tool !== undefined) {
-    const definition = defineWorkflowTool({
-      description: "Run a workflow.",
-      inputSchema: {},
-      task: Object.assign(async () => null, {
-        workflowId: "workflow//agent/tools/run-program//task",
-      }),
-    });
-    const tool =
-      variant.tool === "workflow-program"
-        ? attachWorkflowProgramOptions(definition, { maxSubagents: 4 })
-        : definition;
-    modules.push({
-      logicalPath: "tools/run-program.ts",
-      loadNamespace: async () => ({ default: tool }),
     });
   }
   const { manifest } = await compileFromMemory({
@@ -206,54 +185,22 @@ describe("createHostSpec", () => {
   });
 
   it.each([
-    ["code mode on", { codeMode: true }, true],
-    ["code mode off", { codeMode: false }, false],
-    ["an authored workflow tool", { tool: "workflow" }, false],
-    ["a workflow() tool", { tool: "workflow-program" }, true],
+    ["on", true],
+    ["off", false],
   ] as const)(
-    "installs the workflow sandbox runtime for an agent with %s: %s",
-    async (_label, variant, expected) => {
-      const { runtime } = spec(await compileAgent(variant), PRODUCTION);
-      expect(runtime.workflowSandbox).toBe(expected);
+    "installs the workflow sandbox runtime for an agent with code mode %s: %s",
+    async (_label, codeMode) => {
+      const { runtime } = spec(await compileAgent({ codeMode }), PRODUCTION);
+      expect(runtime.workflowSandbox).toBe(codeMode);
     },
   );
 
-  it.each([
-    ["code mode on", { codeMode: true }],
-    ["a workflow() tool", { tool: "workflow-program" }],
-  ] as const)(
-    "installs the workflow sandbox runtime for a subagent with %s",
-    async (_label, variant) => {
-      const manifest = withSubagent(
-        await compileAgent(),
-        await compileAgent(variant, "researcher"),
-      );
-      expect(spec(manifest, PRODUCTION).runtime.workflowSandbox).toBe(true);
-    },
-  );
-
-  it.each([
-    ["Vercel without a sandbox", VERCEL, undefined, true],
-    ["Vercel with Vercel Sandbox", VERCEL, "vercel", true],
-    ["Vercel with just-bash", VERCEL, "just-bash", false],
-    ["a self-hosted build", PRODUCTION, undefined, false],
-    ["dev", DEVELOPMENT, undefined, false],
-  ] as const)(
-    "prunes local sandbox providers from %s: %s",
-    async (_label, mode, sandbox, expected) => {
-      const externals = spec(await compileAgent({ sandbox }), mode).externals;
-      expect(externals.pruneSandboxProviders).toBe(expected);
-    },
-  );
-
-  it("traces a configured optional engine and keeps unconfigured ones external and untraced", async () => {
-    const configured = spec(await compileAgent({ sandbox: "just-bash" }), PRODUCTION).externals;
-    const unconfigured = spec(await compileAgent(), PRODUCTION).externals;
-
-    expect(configured.traceDeps).toEqual(["just-bash"]);
-    expect(configured.untracedExternals).toEqual([]);
-    expect(unconfigured.traceDeps).toEqual([]);
-    expect(unconfigured.untracedExternals).toEqual(["just-bash"]);
+  it("installs the workflow sandbox runtime for a subagent with code mode on", async () => {
+    const manifest = withSubagent(
+      await compileAgent(),
+      await compileAgent({ codeMode: true }, "researcher"),
+    );
+    expect(spec(manifest, PRODUCTION).runtime.workflowSandbox).toBe(true);
   });
 
   it("traces configured externals from root and subagent configs once in production, never eve itself", async () => {

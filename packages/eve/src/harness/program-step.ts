@@ -1,13 +1,11 @@
 import { asSchema, type ToolCallPart } from "ai";
 
 import {
-  agentLimitMessage,
   PROGRAM_MAX_AGENT_CALLS,
   PROGRAM_MAX_CALLS,
   PROGRAM_MAX_INLINE_CALLS,
   PROGRAM_MAX_RESULT_TOKENS,
 } from "#execution/code-mode/limits.js";
-import { programFailure, programResult } from "#execution/code-mode/result.js";
 import {
   ProgramCallError,
   runProgramSandbox,
@@ -152,7 +150,9 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
         : checked;
     if (kind === "agent") {
       if (current.agentCalls >= PROGRAM_MAX_AGENT_CALLS) {
-        throw new ProgramCallError(agentLimitMessage(PROGRAM_MAX_AGENT_CALLS, name));
+        throw new ProgramCallError(
+          `EXECUTE_AGENT_LIMIT_REACHED: a program may call agents at most ${String(PROGRAM_MAX_AGENT_CALLS)} times; "${name}" was not called.`,
+        );
       }
       current = { ...current, agentCalls: current.agentCalls + 1 };
     }
@@ -420,13 +420,18 @@ async function finishProgram(
     | { readonly result: JsonValue; readonly logs?: readonly string[] },
 ): Promise<StepResult> {
   const failed = "error" in outcome;
+  const completed = program.counts.completed ?? 0;
   const output: JsonObject = {
-    ...programResult(
-      failed && outcome.error !== PROGRAM_STEERED_MESSAGE
-        ? { ...outcome, error: programFailure(outcome.error, program.counts) }
-        : outcome,
-      program.counts,
-    ),
+    ...(failed
+      ? {
+          error:
+            completed > 0 && outcome.error !== PROGRAM_STEERED_MESSAGE
+              ? `${outcome.error} Calls that completed before this are not undone.`
+              : outcome.error,
+        }
+      : { result: outcome.result }),
+    ...((outcome.logs?.length ?? 0) > 0 && { logs: [...outcome.logs!] }),
+    calls: { ...program.counts },
     ...(program.unfinished.length > 0 && {
       notCompleted: program.unfinished.map((call) => ({ ...call })),
     }),

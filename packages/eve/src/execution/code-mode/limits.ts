@@ -1,5 +1,4 @@
-// The limits of a program, whether `eve__execute` runs it in the turn or a `workflow()` tool runs
-// it in the background. Only the agent-call limit of a `workflow()` tool is a setting.
+// The fixed limits of an `eve__execute` program. None is a setting.
 
 /** Tool calls and searches one program may make. */
 export const PROGRAM_MAX_CALLS = 1024;
@@ -23,8 +22,3 @@ export const PROGRAM_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 export const PROGRAM_MAX_CONTINUATION_BYTES = 8 * 1024 * 1024;
 /** What reaches the model of a program's result, in estimated tokens. */
 export const PROGRAM_MAX_RESULT_TOKENS = 10_000;
-
-/** What a program reads at the agent call that goes over `limit`. */
-export function agentLimitMessage(limit: number, name: string): string {
-  return `EXECUTE_AGENT_LIMIT_REACHED: a program may call agents at most ${String(limit)} times; "${name}" was not called.`;
-}

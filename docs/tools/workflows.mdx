@@ -10,9 +10,8 @@ it under its path-derived name, such as `deploy`.
 
 Use a workflow tool when a call must wait for input, delegate work to subagents, or run retryable
 steps over a long period. Each call starts a Workflow run that survives restarts. For a tool that
-returns in one step, use [`defineTool`](/docs/tools) instead. When the model should write the
-program, turn on [`codeMode`](/docs/concepts/built-in-tools#eve__execute) or add the
-[`workflow()` tool](#add-a-runtime-generated-workflow-tool).
+returns in one step, use [`defineTool`](/docs/tools) instead. To let the model write a program that
+calls tools and agents itself, turn on [`codeMode`](/docs/concepts/built-in-tools#eve__execute).
 
 A workflow tool defines exactly one entry point, which decides how its calls run:
 
@@ -656,29 +655,6 @@ Its input is `{ message: string }`. `agentRouter()` considers only targets with 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
-
-## Add a runtime-generated workflow tool
-
-An authored workflow tool runs a workflow you write. When the model should write the program at
-runtime, export the provided `workflow` factory from `agent/tools/workflow.ts`:
-
-```ts title="agent/tools/workflow.ts"
-import { workflow } from "eve/tools/workflow";
-
-export default workflow({ maxSubagents: 20 });
-```
-
-The model supplies a JavaScript program through the tool's `code` input. The program calls agents
-as `await tools.<name>({ message, outputSchema? })`, including agents hidden with `tool: false`.
-Each `workflow` call runs as a [task](#run-calls-as-tasks-task), so the model keeps working and
-reads the program's result in a `task.result` message.
-
-The `workflow()` tool is the background counterpart of
-[code mode](/docs/concepts/built-in-tools#eve__execute), where the program runs inside the turn and
-also reaches the agent's other tools. See
-[Run a program in the background](/docs/concepts/built-in-tools#run-a-program-in-the-background)
-to choose between them, and [`workflow`](/docs/concepts/built-in-tools#workflow) for the program's
-rules, result, and limits.
 
 ## Start channel sessions: `ctx.to`
 

@@ -422,11 +422,12 @@ In a workflow body, keep values needed after a wait in local variables, because 
 
 ## Troubleshooting
 
-| What you see                                  | What to do                                                                                                |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| The build rejects `deferred` on a tool        | Remove it from provider tools such as `webSearch()`, because the provider has to see their definition.    |
-| eve rejects a file part                       | Pass the file as a base64 string. Raw bytes (`Uint8Array`, `Buffer`) can't be saved as JSON.              |
-| Later model calls fail after a `fileUrl` part | Use a URL that stays readable for the whole session. A presigned URL that expires makes later calls fail. |
+| What you see                                                                                                 | What to do                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The build rejects `deferred` on a tool                                                                       | Remove it from provider tools such as `webSearch()`, because the provider has to see their definition.                                                               |
+| eve rejects a file part                                                                                      | Pass the file as a base64 string. Raw bytes (`Uint8Array`, `Buffer`) can't be saved as JSON.                                                                         |
+| Later model calls fail after a `fileUrl` part                                                                | Use a URL that stays readable for the whole session. A presigned URL that expires makes later calls fail.                                                            |
+| `workflow() was removed. Set codeMode: true in agent.ts; programs call agents as tools.<name>({ message }).` | Delete the tool file the error names and set [`codeMode: true`](/docs/concepts/built-in-tools#eve__execute) in `agent.ts`, so the model calls agents from a program. |
 
 ## When to use a connection or skill instead
 

@@ -29,15 +29,15 @@ export async function programAgentCallWorkflow(
 export async function callProgramAgent(
   input: ProgramAgentCallInput,
   ctx: WorkflowToolContext,
-  /** The name the program called: the run's own tool, unless a `workflow()` program made the call. */
-  name: string = ctx.toolName,
 ): Promise<JsonValue> {
   const { message, model, outputSchema, target } = input;
   const agent = ctx.agent(target, model === undefined ? undefined : { model });
   const response = await agent.send<JsonValue>(message, { outputSchema, signal: ctx.abortSignal });
   const result = await response.result();
   if (result.status === "failed") {
-    throw new Error(`Agent "${name}" failed to handle the message: ${result.error.message}`);
+    throw new Error(
+      `Agent "${ctx.toolName}" failed to handle the message: ${result.error.message}`,
+    );
   }
   return outputSchema !== undefined ? (result.data ?? null) : (result.reply ?? null);
 }

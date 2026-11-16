@@ -16,15 +16,11 @@ import { isObject } from "#shared/guards.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { loadWorkflowSandboxModule } from "#shared/workflow-sandbox.js";
 
-// One step of a program, for `eve__execute` and for a `workflow()` tool: the model's JavaScript runs in QuickJS on the vendored
+// One step of an `eve__execute` program: the model's JavaScript runs in QuickJS on the vendored
 // `run` runtime, with no network, file system, timers, or imports. Its only way out is the host
 // bridge below, which the program step answers. A call that can't finish inside the step
 // interrupts the program; `run` returns a signed continuation holding every result so far, and a
 // later step resumes from it without running a recorded call again.
-
-/** How the model is told to write a program, for every tool that takes one. */
-export const PROGRAM_CODE_INPUT_DESCRIPTION =
-  "The body of an async function: use `await` and `return` at the top level.";
 
 /** An error the program can catch: its message is what the program reads. */
 export class ProgramCallError extends Error {

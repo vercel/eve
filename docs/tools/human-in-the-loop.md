@@ -182,7 +182,7 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 - Local subagent sessions run under the root agent's policy too. A subagent's own `approval` in its `agent.ts` adds to it and can't loosen it.
 - A [remote agent](/docs/guides/remote-agents) runs in its own deployment under that deployment's policy. Your policy gates the call to the remote agent, not the calls it makes.
 - A call through `eve__tool` runs the resolved entry's policy, such as `linear__create_issue`'s.
-- Not gated: `eve__search`, `eve__skill`, `eve__execute`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. `ctx.agent()` in workflow code and agent calls from a [`workflow()` program](/docs/concepts/built-in-tools#workflow) aren't gated either, though a local child's own calls are.
+- Not gated: `eve__search`, `eve__skill`, `eve__execute`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
 - A channel calling `invokeTool` directly gets the same policy: a call it would ask about is rejected with `approval-required`.
 - With a policy set, eve evaluates it on every call, so keep it fast and pass `abortSignal` to asynchronous work.
 

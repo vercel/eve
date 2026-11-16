@@ -236,10 +236,6 @@ export type CompiledToolDefinition = InternalToolDefinition &
     /** The input schema as eve sends it to a model; absent for provider-managed tools. */
     readonly modelInputSchema?: JsonObject;
     readonly requiresApproval: boolean;
-    /** Set for the `workflow()` tool, whose calls run a program in the background. */
-    readonly workflowProgram?: {
-      readonly maxSubagents: number;
-    };
   };
 
 /** The kinds of file eve asks at runtime, each a definition of the agent's. */

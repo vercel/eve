@@ -17,6 +17,10 @@ function formatEntryPointMethods(): string {
 // of surfacing a generic missing-export error.
 const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 
+// Earlier eve releases exported the `workflow()` tool from this subpath; name the replacement
+// instead of failing to resolve it.
+const REMOVED_WORKFLOW_TOOL_SPECIFIER = "eve/tools/workflow";
+
 type AstNode = {
   readonly async?: boolean;
   readonly generator?: boolean;
@@ -101,6 +105,11 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       (node.type === "CallExpression" && node.callee?.name === "require"
         ? node.arguments?.[0]?.value
         : undefined);
+    if (specifier === REMOVED_WORKFLOW_TOOL_SPECIFIER) {
+      throw new Error(
+        `${input.filePath}: workflow() was removed. Set codeMode: true in agent.ts; programs call agents as tools.<name>({ message }).`,
+      );
+    }
     if (specifier === "eve/workflow") {
       const removed = node.specifiers?.find(isRemovedWorkflowHelper);
       if (removed !== undefined) {

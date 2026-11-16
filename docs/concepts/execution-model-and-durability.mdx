@@ -233,8 +233,6 @@ Each call keeps its id, `<callId>/<n>`, when the step runs again, so a tool can 
 
 The rules above still apply. A turn fails with `STEP_INTERRUPTED` after more than three interrupted steps, and a call whose start hadn't reached the stream can run again.
 
-This section covers `eve__execute` programs. A [`workflow()` program](./built-in-tools#workflow) runs outside the session's steps, as a task in a Workflow run of its own.
-
 ## Parked work
 
 Some work has to wait, such as a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks and holds no compute until the input arrives, even much later. The conversation then picks up where it left off.

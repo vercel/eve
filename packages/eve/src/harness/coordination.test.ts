@@ -256,7 +256,6 @@ describe("createCoordinationRequestFromToolCall", () => {
       }),
     ).toEqual({
       callId: "call-1",
-      executeInput: undefined,
       input: { message: "research this" },
       entry: { entryPoint: "execute" },
       kind: "workflow-task",

@@ -1,5 +1,4 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { TASK_WAIT_TOOL } from "@eve-e2e/config/catalog-tools";
 import {
   latestTaskResult,
   playScript,
@@ -7,7 +6,7 @@ import {
   runProgram,
 } from "@eve-e2e/config/mock-script";
 import { defineAgent, defineDynamic, type DefinedAgent } from "eve";
-import { mockModel, type MockModelRequest } from "eve/evals";
+import { mockModel } from "eve/evals";
 
 import {
   TENANT_REMOTE_DIRECTIVE,
@@ -64,45 +63,21 @@ const dynamicSubagentProbe = mockModel({
   },
 });
 
-/** The program an eval's directive carries in its `js` fence, which a scripted parent runs unchanged. */
-function directiveProgram(request: MockModelRequest, probe: string): string {
-  const directive = request.messages.find(
-    (message) => message.role === "user" && message.text.includes(probe),
-  );
-  const code = directive?.text.match(/```js\n([\s\S]*?)\n```/u)?.[1];
-  if (code === undefined) throw new Error(`The ${probe} directive has no js program.`);
-  return code;
-}
-
-// Runs the eval's program unchanged as one `eve__execute` call, so the eval checks how eve runs
-// a program's agent calls on every world, not what a model chooses to write.
+// Runs the program in the eval directive's `js` fence unchanged as one `eve__execute` call, so
+// the eval checks how eve runs a program's agent calls on every world, not what a model chooses
+// to write.
 const PROGRAM_AGENT_CALLS_PROBE = "E2E_PROGRAM_AGENT_CALLS";
 const programParent = mockModel({
   modelId: "program-agent-calls-parent",
   respond(request) {
-    const code = directiveProgram(request, PROGRAM_AGENT_CALLS_PROBE);
+    const directive = request.messages.find(
+      (message) => message.role === "user" && message.text.includes(PROGRAM_AGENT_CALLS_PROBE),
+    );
+    const code = directive?.text.match(/```js\n([\s\S]*?)\n```/u)?.[1];
+    if (code === undefined) throw new Error("The program directive has no js program.");
     // The call holds the turn until the program returns, so its result is the call's own.
     return playScript(request, [runProgram("program-agent-calls", code)], (finished) =>
       JSON.stringify(programResultOf(finished, "program-agent-calls")),
-    );
-  },
-});
-
-// Runs the eval's program unchanged as one `workflow` call, the background counterpart: the
-// call returns a receipt, and the program's result arrives as its task's result. A live model
-// that honors the tool's advertised agent limit may refuse to write a program that exceeds it.
-const WORKFLOW_PROGRAM_PROBE = "E2E_WORKFLOW_PROGRAM";
-const workflowProgramParent = mockModel({
-  modelId: "workflow-program-parent",
-  respond(request) {
-    const code = directiveProgram(request, WORKFLOW_PROGRAM_PROBE);
-    return playScript(
-      request,
-      [
-        { id: "workflow-program", name: "workflow", input: () => ({ code }) },
-        { id: "workflow-program-wait", name: TASK_WAIT_TOOL },
-      ],
-      (finished) => latestTaskResult(finished, "workflow") ?? "No workflow result.",
     );
   },
 });
@@ -297,7 +272,7 @@ function findListedTaskId(
 const agent: DefinedAgent = defineAgent({
   ...agentConfig,
   // `eve__execute` programs call this agent's tools and subagents as `tools.<name>(input)` in
-  // the turn; `agent/tools/workflow.ts` runs programs that call agents only, in the background.
+  // the turn.
   codeMode: true,
   // The remote continuation eval reattaches to a retired keeper, a root session of this
   // deployment reached through remote-loopback, so its run must outlive the session.
@@ -320,11 +295,6 @@ const agent: DefinedAgent = defineAgent({
     });
     if (messages.some((message) => message.includes(DYNAMIC_SUBAGENT_PROBE))) {
       return scripted(dynamicSubagentProbe);
-    }
-    // Checked before the program directive: a workflow program may send a copy of this agent
-    // that directive, and the copy's session holds only the message the program sent it.
-    if (messages.some((message) => message.includes(WORKFLOW_PROGRAM_PROBE))) {
-      return scripted(workflowProgramParent);
     }
     if (messages.some((message) => message.includes(PROGRAM_AGENT_CALLS_PROBE))) {
       return scripted(programParent);

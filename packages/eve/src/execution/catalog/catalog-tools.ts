@@ -8,7 +8,6 @@ import type { OfferedCatalogTools } from "#context/keys.js";
 import type { Route, RouteMiss, ToolEntry } from "#definitions/definition.js";
 import type { Announcement } from "#harness/announcements.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { PROGRAM_CODE_INPUT_DESCRIPTION } from "#execution/code-mode/sandbox.js";
 import { programCallKind } from "#harness/program-calls.js";
 import {
   CALL_TOOL_NAME,
@@ -75,7 +74,8 @@ export function executeTool(): ToolEntry {
         properties: {
           code: {
             type: "string",
-            description: PROGRAM_CODE_INPUT_DESCRIPTION,
+            description:
+              "The body of an async function: use `await` and `return` at the top level.",
           },
         },
         required: ["code"],
@@ -94,9 +94,8 @@ export function isExecuteTool(definition: HarnessToolDefinition | undefined): bo
 
 /**
  * The entry a program's `tools.<name>(input)` runs: whatever `eve__tool` runs, except a tool that
- * ends the turn, which only the model may do, a `serve` tool, whose task only the model can hold
- * open, and a `workflow()` tool, whose program only the model starts. Otherwise, what the program
- * reads instead.
+ * ends the turn, which only the model may do, and a `serve` tool, whose task only the model can
+ * hold open. Otherwise, what the program reads instead.
  */
 export function programEntry(
   callable: Callable,
@@ -115,15 +114,9 @@ export function programEntry(
   if (entry.endsTurn !== undefined && entry.endsTurn !== false) {
     return { issue: `"${name}" ends your turn, so a program can't call it; call it directly.` };
   }
-  const kind = programCallKind(entry);
-  if (kind === "serve") {
+  if (programCallKind(entry) === "serve") {
     return {
       issue: `"${name}" keeps a task open between calls, which a program can't hold; call it directly.`,
-    };
-  }
-  if (kind === "program") {
-    return {
-      issue: `"${name}" runs a program in the background, which a program can't start. Call the agents from this program as tools.<agent>({ message }), or call "${name}" directly.`,
     };
   }
   return { entry };

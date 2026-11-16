@@ -1,14 +1,11 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { TASK_WAIT_TOOL } from "@eve-e2e/config/catalog-tools";
 import { playScript, programResultOf, runProgram } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 /** Starts the evals whose scripted parent asks the sleeper agent from an `eve__execute` program. */
 const PROGRAM_SLEEPER_REQUEST = "ask the sleeper agent from one program";
-/** Starts the evals whose scripted parent asks the sleeper agent from a `workflow` program. */
-const WORKFLOW_SLEEPER_REQUEST = "call the sleeper subagent";
-/** What either program sends the sleeper to make it ask a question; shared with the sleeper. */
+/** What the program sends the sleeper to make it ask a question; shared with the sleeper. */
 const CHILD_QUESTION_REQUEST = "PROGRAM-CHILD-QUESTION";
 const WAIT_FOR_CANCELLATION_REQUEST =
   "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.";
@@ -62,37 +59,16 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
           )
           .join("\n");
   }
-  // Both dialects run the same program; only the tool that runs it differs.
-  const question = message.includes(CHILD_QUESTION_REQUEST);
-  const sleeperProgram = `return await tools.sleeper({ message: ${JSON.stringify(
-    question ? CHILD_QUESTION_REQUEST : WAIT_FOR_CANCELLATION_REQUEST,
-  )} });`;
   if (message.includes(PROGRAM_SLEEPER_REQUEST)) {
+    const question = message.includes(CHILD_QUESTION_REQUEST);
     const id = question ? "question-sleeper" : "cancel-sleeper";
+    const code = `return await tools.sleeper({ message: ${JSON.stringify(
+      question ? CHILD_QUESTION_REQUEST : WAIT_FOR_CANCELLATION_REQUEST,
+    )} });`;
     // The program's call holds the turn until the sleeper replies, so its result is the call's own.
-    return playScript(request, [runProgram(id, sleeperProgram)], (finished) =>
+    return playScript(request, [runProgram(id, code)], (finished) =>
       String(programResultOf(finished, id)),
     );
-  }
-  if (message.includes(WORKFLOW_SLEEPER_REQUEST)) {
-    // The workflow tool runs as a task: its call returns a receipt, and the
-    // program's result arrives in a <task_result> message after eve__task_wait.
-    const taskResult = request.messages.find(
-      (entry) => entry.role === "user" && entry.text.startsWith("<task_result"),
-    );
-    if (taskResult !== undefined) return taskResult.text;
-    if (request.toolResults.some((entry) => entry.name === "workflow")) {
-      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: TASK_WAIT_TOOL }] };
-    }
-    return {
-      toolCalls: [
-        {
-          id: question ? "question-sleeper" : "cancel-sleeper",
-          input: { code: sleeperProgram },
-          name: "workflow",
-        },
-      ],
-    };
   }
   if (message.includes(CANCELLED_TURN_FOLLOW_UP)) return replyAfterCancelledTurn(request);
   if (message.includes(CODE_WORD_QUESTION)) return recallCodeWord(request);
@@ -109,10 +85,8 @@ function recallCodeWord(request: MockModelRequest): string {
 
 /**
  * Answers the follow-up to a cancelled sleeper turn only when history keeps
- * what that turn did: the call that ran the sleeper's program, and the call the
- * cancel stopped answered as cancelled. That is the `eve__execute` call itself,
- * or the `eve__task_wait` after a `workflow` call. Without them the sleeper
- * request would look unanswered.
+ * what that turn did: the `eve__execute` call that ran the sleeper's program,
+ * answered as cancelled. Without it the sleeper request would look unanswered.
  */
 function replyAfterCancelledTurn(request: MockModelRequest): string {
   const calledSleeper = request.toolResults.some((entry) => entry.id === "cancel-sleeper");
@@ -157,7 +131,6 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
-  // `eve__execute` programs ask the sleeper agent as `tools.sleeper({ message })` in the turn;
-  // `agent/tools/workflow.ts` runs the same program in the background.
+  // `eve__execute` programs ask the sleeper agent as `tools.sleeper({ message })` in the turn.
   codeMode: true,
 });

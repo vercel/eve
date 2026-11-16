@@ -187,40 +187,32 @@ agent fan-out. Its `real-model` evals gate prompt-cache reuse after discovery
 and after programs, model-written programs, and that web questions go to
 `web_search`.
 
-`agent-subagents` and `agent-cancellation` cover the two ways a model runs a
-program it writes. Both root agents set `codeMode: true` and define
-`agent/tools/workflow.ts` with `workflow()`:
+`agent-subagents` and `agent-cancellation` cover the agent calls a program
+makes. Both root agents set `codeMode: true`, which adds
+`eve__execute({ code })`. A program asks an agent with
+`await tools.<agent>({ message, outputSchema? })` and gets its reply, or the
+value `outputSchema` describes. The program runs in the turn, which waits for
+it: it starts no task, and each agent call (`<callId>/<n>`) owns the child
+session it opens. A program that returns settles its call with
+`{ result, logs?, calls }`, and one that throws with `{ error, logs?, calls }`,
+so an eval finds the return value in `output.result` of the `eve__execute`
+call.
 
-|             | `eve__execute` (code mode)                        | `workflow` tool                                                |
-| ----------- | ------------------------------------------------- | -------------------------------------------------------------- |
-| Input       | `{ code }`                                        | `{ code }`, in the same language                               |
-| Calls       | `await tools.<name>(input)`, every tool and agent | `await tools.<agent>({ message, outputSchema? })`, agents only |
-| Runs        | In the turn, which waits for the program          | In the background, as a task                                   |
-| Result      | The call's own result                             | The task's result                                              |
-| Agent calls | At most 128                                       | At most `maxSubagents`, which `agent-subagents` sets to 3      |
+| Eval                       | Fixture              | Model | Covers                                                                                              |
+| -------------------------- | -------------------- | ----- | --------------------------------------------------------------------------------------------------- |
+| `program-agent-calls`      | `agent-subagents`    | mock  | Agent calls one at a time and together, the session each call owns, and an agent with `tool: false` |
+| `program-in-child-session` | `agent-subagents`    | mock  | A program that asks a copy of the agent, which runs a program of its own in its turn                |
+| `program-fan-out`          | `agent-subagents`    | real  | A model-written program that asks two sessions at once                                              |
+| `software-factory-program` | `agent-subagents`    | real  | A model-written program whose `outputSchema` replies feed a later agent call                        |
+| `program-child-question`   | `agent-cancellation` | mock  | A question from the called agent reaches the parent session, and its answer resumes the program     |
+| `cancel-subagent`          | `agent-cancellation` | mock  | Cancelling the turn a program holds stops the program and cancels the child session                 |
 
-A program that returns gives the model `{ result, logs?, calls }` either way,
-so an eval finds its return value in `output.result` of the program call's
-`call.settled`. A program that throws settles its `eve__execute` call with
-`{ error, logs?, calls }`, and fails its `workflow` task.
-
-`program-agent-calls`, `program-fan-out`, `software-factory-program`,
-`program-child-question`, and `program-cancel-subagent` cover `eve__execute`:
-the program starts no task, and its nested calls (`<callId>/<n>`) own the
-child sessions they open. `workflow-subagent-limit`, `dynamic-workflow`,
-`software-factory-workflow`, `generated-program-child-hitl`, and
-`cancel-subagent` cover `workflow`: the program starts one task, and its call
-owns the child sessions. `workflow-code-mode-agent` runs one inside the other:
-a `workflow` program asks a copy of the root agent, which runs an
-`eve__execute` program in its own turn.
-
-The mock-model evals carry their program in a `js` fence. In
+A mock model cannot write a program, so the fixture scripts it. In
 `agent-subagents`, the marker `E2E_PROGRAM_AGENT_CALLS` selects a scripted
-model that runs the fence unchanged with `eve__execute`, and
-`E2E_WORKFLOW_PROGRAM` selects one that runs it with `workflow` and waits for
-the task. In `agent-cancellation`, "ask the sleeper agent from one program"
-scripts the `eve__execute` call and "call the sleeper subagent" scripts the
-`workflow` call.
+model that runs the `js` fence in the eval's message unchanged with
+`eve__execute`. In `agent-cancellation`, "ask the sleeper agent from one
+program" selects a scripted `eve__execute` call. No eval reaches a program's
+limit of 128 agent calls.
 
 `agent-tool-discovery` is the real-model gate for how models use the catalog
 tools: a catalog of 70 deferred tools (60 in the `sre`, `d0`, `index`, and

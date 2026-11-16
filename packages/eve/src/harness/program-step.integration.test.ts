@@ -19,7 +19,6 @@ import { isStoredLine } from "#protocol/session-events/envelope.js";
 import { schemaViolation } from "#protocol/session-events/schemas.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import agentTool from "#public/tools/agent.js";
-import { workflow } from "#public/tools/workflow.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
@@ -118,11 +117,9 @@ function tool(name: string, definition: unknown) {
 /** Alice's session with code mode on, over `tools`, where the model runs `code`. */
 async function withProgramSession<T>(
   input: {
+    /** The agent-wide approval policy, when the session has one. */
+    readonly approval?: Parameters<typeof defineAgent>[0]["approval"];
     readonly code: string;
-    /** Off for a session whose model starts a `workflow()` program itself. Defaults to on. */
-    readonly codeMode?: boolean;
-    /** The session's model, in place of one that runs `code` with `eve__execute`. */
-    readonly model?: ReturnType<typeof programModel>;
     readonly tools: readonly ReturnType<typeof tool>[];
     /** The plain bodies of the session's `"use workflow"` tools, which the in-process host runs. */
     readonly workflows?: readonly WorkflowBody[];
@@ -134,11 +131,12 @@ async function withProgramSession<T>(
   }) => Promise<T>,
 ): Promise<T> {
   const results: ProgramResults = [];
-  const model = input.model ?? programModel(input.code, results);
+  const model = programModel(input.code, results);
   const test = await createTestRuntime({
     agent: {
       definition: defineAgent({
-        codeMode: input.codeMode ?? true,
+        ...(input.approval !== undefined && { approval: input.approval }),
+        codeMode: true,
         model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
       }),
       name: "program-session",
@@ -383,6 +381,42 @@ describe("a program step", () => {
     );
   });
 
+  it("counts every agent call toward the agent limit, and refuses the call past it", async () => {
+    await withProgramSession(
+      {
+        // Denied calls count without opening 128 sessions.
+        approval: ({ toolName }) => (toolName === "agent" ? "denied" : undefined),
+        code: `
+          let denied = 0;
+          for (let made = 0; made < 128; made += 1) {
+            try { await tools.agent({ message: "Review refunds" }); } catch { denied += 1; }
+          }
+          try { await tools.agent({ message: "Review refunds" }); } catch (error) {
+            return { denied, refused: error.message };
+          }
+        `,
+        tools: [tool("agent", agentTool)],
+      },
+      async ({ alice, results, runtime }) => {
+        const delivery = await alice.send("Check billing.", { auth: null });
+        await delivery.result();
+
+        // The result also lists each rejected call under `notCompleted`.
+        expect(results).toMatchObject([
+          {
+            calls: { rejected: 128 },
+            result: {
+              denied: 128,
+              refused:
+                'EXECUTE_AGENT_LIMIT_REACHED: a program may call agents at most 128 times; "agent" was not called.',
+            },
+          },
+        ]);
+        expect(calls(await recorded(runtime, delivery.sessionId), "child.opened")).toEqual([]);
+      },
+    );
+  });
+
   it("stops a parked program when a new message arrives", async () => {
     const sent: string[] = [];
     await withProgramSession(
@@ -460,100 +494,6 @@ describe("a program step", () => {
             ),
           },
         ]);
-      },
-    );
-  });
-});
-
-/**
- * A model that starts `code` as one `workflow()` program, waits for its task, and replies. Copies
- * of the agent the program delegates to answer in words.
- */
-function workflowModel(code: string) {
-  return markMockModel(
-    new MockLanguageModelV4({
-      doStream: async ({ prompt }) => {
-        const delegated = /Summarize (\w+)/u.exec(JSON.stringify(prompt.at(-1)))?.[1];
-        if (delegated !== undefined) return textStreamResult(`${delegated} are current.`);
-        const called = (name: string) => JSON.stringify(prompt).includes(`"toolName":"${name}"`);
-        if (!called("workflow")) {
-          return toolCallsStreamResult([
-            { input: JSON.stringify({ code }), toolCallId: "call-workflow", toolName: "workflow" },
-          ]);
-        }
-        if (!called("eve__task_wait")) {
-          return toolCallsStreamResult([
-            { input: "{}", toolCallId: "call-wait", toolName: "eve__task_wait" },
-          ]);
-        }
-        return textStreamResult("Done.");
-      },
-      modelId: "workflow-scripted",
-      provider: "eve-test",
-    }),
-  );
-}
-
-describe("a workflow() program", () => {
-  it("runs in the background as a task, whose agents answer in sessions its call owns", async () => {
-    const code = `
-      const [refunds, invoices] = await Promise.all([
-        tools.agent({ message: "Summarize refunds" }),
-        tools.agent({ message: "Summarize invoices" }),
-      ]);
-      console.log("summarized 2");
-      return { invoices, refunds };
-    `;
-    await withProgramSession(
-      { code, codeMode: false, model: workflowModel(code), tools: [tool("workflow", workflow())] },
-      async ({ alice, runtime }) => {
-        const delivery = await alice.send("Check billing.", { auth: null });
-        const result = await delivery.result();
-        const events = await recorded(runtime, delivery.sessionId);
-
-        expect(result.reply).toBe("Done.");
-        const [task] = calls(events, "task.started");
-        expect(task).toMatchObject({ name: "workflow", startedBy: { callId: "call-workflow" } });
-        // Each child session hangs under the `workflow` call, as a program's calls hang under
-        // `eve__execute`.
-        expect(calls(events, "child.opened").map(({ owner }) => owner)).toEqual([
-          { callId: "call-workflow" },
-          { callId: "call-workflow" },
-        ]);
-        // The task's result is the value a program in the turn gives the model.
-        expect(
-          calls(events, "call.settled").find(({ callId }) => callId === "call-workflow"),
-        ).toMatchObject({
-          outcome: "completed",
-          output: {
-            calls: { completed: 2 },
-            logs: ["summarized 2"],
-            result: { invoices: "invoices are current.", refunds: "refunds are current." },
-          },
-        });
-        expect(await violations(runtime, delivery.sessionId)).toEqual([]);
-      },
-    );
-  });
-
-  it("can't be started from a program, which calls the agents itself", async () => {
-    await withProgramSession(
-      {
-        code: `try { return await tools.workflow({ code: "return 1" }); } catch (error) { return error.message; }`,
-        tools: [tool("workflow", workflow()), tool("agent", agentTool)],
-      },
-      async ({ alice, results, runtime }) => {
-        const delivery = await alice.send("Check billing.", { auth: null });
-        await delivery.result();
-
-        expect(results).toEqual([
-          {
-            calls: {},
-            result:
-              '"workflow" runs a program in the background, which a program can\'t start. Call the agents from this program as tools.<agent>({ message }), or call "workflow" directly.',
-          },
-        ]);
-        expect(calls(await recorded(runtime, delivery.sessionId), "task.started")).toEqual([]);
       },
     );
   });

@@ -5,7 +5,6 @@
 
 import { programAgentCallWorkflowReference } from "#execution/code-mode/agent-call-reference.js";
 import type { ProgramAgentCallInput } from "#execution/code-mode/agent-call.js";
-import { runWorkflowProgramTask } from "#execution/code-mode/workflow-program.js";
 import { TASK_ID_INPUT } from "#execution/tasks/task-id-input.js";
 import { entryPointOf, isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import { requireClearance, type Clearance } from "#harness/clearance.js";
@@ -27,21 +26,12 @@ export type ProgramCallKind =
   /** As a run that sends one message to a new session of the agent and returns its reply. */
   | "agent"
   /** Not from a program: its task stays open between calls, which only the model can hold. */
-  | "serve"
-  /** Not from a program: a `workflow()` tool, which runs a program of its own in the background. */
-  | "program";
+  | "serve";
 
 export function programCallKind(definition: HarnessToolDefinition): ProgramCallKind {
   if (definition.execute !== undefined) return "inline";
   if (isAgentTool(definition) || isAgentModelsTool(definition)) return "agent";
-  if (isWorkflowProgramTool(definition)) return "program";
   return entryPointOf(definition) === "serve" ? "serve" : "workflow";
-}
-
-/** `workflow()`: the tool whose calls run a program as a task. */
-function isWorkflowProgramTool(definition: HarnessToolDefinition): boolean {
-  const workflowId = readWorkflowFunctionId(runWorkflowProgramTask);
-  return workflowId !== undefined && definition.workflowId === workflowId;
 }
 
 /** `agent({ models })`: a copy of the root on the model its call names. */

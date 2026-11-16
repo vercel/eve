@@ -519,7 +519,6 @@ A program calls entries by the same names the model uses, whether they are in th
 | Tools eve doesn't run, such as provider-managed `web_search`                                     | No                                                        |
 | Tools with [`endsTurn`](/docs/tools#end-the-turn-after-a-tool-call)                              | No                                                        |
 | `serve` workflow tools that aren't agents                                                        | No                                                        |
-| A [`workflow()`](#workflow) tool                                                                 | No. The program calls the agents itself.                  |
 | Agents with `tool: false`                                                                        | No                                                        |
 
 A call the program can't make throws one of these errors. An unknown name lists the closest tool names when it has any:
@@ -530,7 +529,6 @@ No tool named "<name>". Find tools with search({ query }).
 "<name>" is in your tool list; call it directly.
 "<name>" ends your turn, so a program can't call it; call it directly.
 "<name>" keeps a task open between calls, which a program can't hold; call it directly.
-"<name>" runs a program in the background, which a program can't start. Call the agents from this program as tools.<agent>({ message }), or call "<name>" directly.
 ```
 
 A call whose input fails the tool's schema throws the issue and the tool's signature.
@@ -554,7 +552,7 @@ const review = await tools.reviewer({
 - Without `outputSchema`, the call resolves to the agent's reply text.
 - Each call starts a new child session. A call with `taskId` throws, so a program can't continue an earlier child.
 - An [`agent({ models })`](#agent) tool also accepts `model`.
-- The child sessions belong to the `eve__execute` call. They aren't tasks, so `eve__task_wait` and `eve__task_cancel` don't see them.
+- The child sessions belong to the `eve__execute` call, which holds the turn until the program returns. They aren't tasks, so `eve__task_wait` and `eve__task_cancel` don't see them.
 - A failed child turn throws at its call.
 - A program can't call an agent with `tool: false`. Set [`tool: "deferred"`](/docs/subagents#declared-subagents) to keep an agent out of the tool list while programs call it.
 
@@ -620,30 +618,9 @@ The limits are fixed. An error over a limit names it, such as `EXECUTE_CALL_LIMI
 | Console output                                           | 64 KiB                  | Later lines are dropped.                                                            |
 | Result the model reads                                   | 10,000 estimated tokens | The model reads the head and tail.                                                  |
 
-#### Run a program in the background
-
-An `eve__execute` program holds the turn until it returns. To let the model keep working while agents run, add the [`workflow()` tool](#workflow). It runs the same kind of program in the background, as a [task](/docs/tools/tasks). The two differ in where the program runs and what follows from that:
-
-|                         | `eve__execute`                                                                                                              | `workflow()` tool                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| How you add it          | `codeMode: true` in `agent.ts`                                                                                              | A tool file that exports `workflow()`              |
-| What `tools` reaches    | The agent's tools, connection tools, and agents. See [What a program can call](#what-a-program-can-call).                   | Agents only, including agents with `tool: false`   |
-| How it runs             | Inside the turn, as one tool call                                                                                           | Outside the session, as a task in a run of its own |
-| A new message           | Stops the program                                                                                                           | Doesn't stop it                                    |
-| Where the result goes   | The `eve__execute` tool result                                                                                              | A receipt at once, then a `task.result` message    |
-| Agent calls per program | 128                                                                                                                         | `maxSubagents`, which is 128 unless you lower it   |
-| Approval of agent calls | Gated by the agent-wide [approval policy](/docs/human-in-the-loop#approve-calls-from-a-program), like the model's own calls | Not gated. A local child's own tool calls are.     |
-
-A `workflow()` program runs outside the session, so its `tools` holds agents only. It has no session sandbox, sign-ins, or remembered approvals to run other tools with.
-
-Use `eve__execute` when the model needs the result in this turn. Use the `workflow()` tool when the model should keep working while agents run. The two combine:
-
-- A `workflow()` program fans out to agents, and an agent with `codeMode` on can use `eve__execute` for its own tool calls.
-- An `eve__execute` program calls agents itself when the model needs their answers in this turn. It can't start a `workflow()` program.
-
 ### `eve__task_wait` and `eve__task_cancel`
 
-eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks). These are the built-in `agent` tool, declared subagents, remote agents, `agentRouter()`, the [`workflow()` tool](#workflow), and authored workflow tools that define `task(input, ctx)` or `serve(receive, ctx)`. There is no add command.
+eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks). These are the built-in `agent` tool, declared subagents, remote agents, `agentRouter()`, and authored workflow tools that define `task(input, ctx)` or `serve(receive, ctx)`. There is no add command.
 
 - `eve__task_wait({ timeoutSeconds? })` waits until any task has a result, a new message arrives, or `timeoutSeconds` pass. It returns at once when a result is already waiting. The turn stays running, not paused, because `turn.paused` only reports approvals, questions, and other requests for input. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `eve__task_cancel({ taskId })` stops a task's current work and says so. When the task already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve), it says the task had no work to stop. An id that names no task fails with `UNKNOWN_TASK`. Cancelling an agent task ends it; other resumable tasks stay available after a cancel.
@@ -765,65 +742,6 @@ export default defineWorkflowTool({
   description: "Pause before checking an external operation again.",
 });
 ```
-
-### `workflow`
-
-The `workflow()` tool runs a JavaScript program the model writes, in the background. The program calls agents and returns one value. It runs as a [task](/docs/tools/tasks): the model gets a receipt, keeps working, and reads the result later in a `task.result` message. It is the background counterpart of code mode. See [Run a program in the background](#run-a-program-in-the-background) for how the two differ.
-
-There is no add command. Create the file:
-
-```ts title="agent/tools/workflow.ts"
-import { workflow } from "eve/tools/workflow";
-
-// maxSubagents: agent calls per program, from 1 through 128. Omit it for 128.
-export default workflow({ maxSubagents: 20 });
-```
-
-- The file name is the tool's name. The tool works with or without `codeMode`.
-- A `workflow()` tool isn't an authored [workflow tool](/docs/tools/workflows). `defineWorkflowTool` runs a workflow you write, and `workflow()` runs a program the model writes.
-
-The model calls `workflow({ code })`. `code` is the body of an async function, as it is for [`eve__execute`](#eve__execute). This program starts three `researcher` sessions side by side, then gives their findings to a second agent:
-
-```js
-const areas = ["billing", "auth", "search"];
-// Start the calls together, so the agents work side by side.
-const findings = await Promise.all(
-  areas.map((area) => tools.researcher({ message: `List the open incidents in ${area}.` })),
-);
-console.log(`researched ${areas.length} areas`);
-return await tools["incident-writer"]({
-  message: `Summarize these findings:\n\n${findings.join("\n\n")}`,
-  // optional JSON Schema: the call then resolves to a matching value
-  outputSchema: {
-    type: "object",
-    properties: { title: { type: "string" }, urgent: { type: "number" } },
-    required: ["title", "urgent"],
-  },
-});
-```
-
-- `tools.<name>({ message, outputSchema? })` sends `message` to a new session with that agent. The call resolves to the agent's reply text, or to the structured value when `outputSchema` is set.
-- `<name>` is a name [`ctx.agent`](/docs/tools/workflows#delegate-work-ctxagent) accepts, such as a subagent's path-derived name. Write `tools["name"]` when the name isn't a JavaScript identifier.
-- A program can call an agent hidden with `tool: false` or a same-named `disableTool()` file. Name those agents in the agent's instructions, because the model's tool list doesn't show them.
-- Each call starts a new child session, which doesn't see the conversation. A call with any property other than `message` and `outputSchema`, such as `taskId`, throws.
-- `tools` holds agents only. `search()` throws, and a program has no other tools, `fetch`, file system, timers, or imports.
-- A failed child turn, an invalid call, or a call over `maxSubagents` throws a `ToolError` at that call, which the program can catch. A call over the limit reads `EXECUTE_AGENT_LIMIT_REACHED: a program may call agents at most 20 times; "researcher" was not called.`
-
-When the program returns, the task's result is `{ result, logs?, calls }`: the return value, the console lines, and how many agent calls ended as `completed` or `failed`. An [`eve__execute` result](#what-the-model-reads-back) has the same three fields.
-
-A program that throws, or that returns while a call is still pending, fails its task. The failure message holds the error, the program line that threw, and the console output. When a call completed first, the message says so:
-
-```text
-Error: no recipients left (line 3) Calls that completed before this are not undone.
-console output:
-sent one
-```
-
-A `workflow()` program has the source, time, size, memory, and console limits of an `eve__execute` program; see [Program limits](#program-limits). Only `maxSubagents` is a setting.
-
-The program's task follows the [task rules](/docs/tools/tasks). The model waits for it with `eve__task_wait` and stops it with `eve__task_cancel`, and the turn can't end while it works.
-
-In the child sessions, agent authorization, questions, approvals, and cancellation work as they do for a session an authored workflow tool opens with [`ctx.agent`](/docs/tools/workflows#delegate-work-ctxagent). The parent stream announces each child session with `child.opened`. Its `owner` is `{ callId }` naming the `workflow` call, so a client can show the children under that call.
 
 ## What to read next
 

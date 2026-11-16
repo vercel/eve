@@ -333,6 +333,13 @@ return inner();
     );
   });
 
+  it("points the removed workflow() tool at code mode", async () => {
+    const source = 'import { workflow } from "eve/tools/workflow";\nexport default workflow();';
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      `${FILE}: workflow() was removed. Set codeMode: true in agent.ts; programs call agents as tools.<name>({ message }).`,
+    );
+  });
+
   it("accepts public primitives without mistaking a bare-import string for an import", async () => {
     const source = `import { sleep } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";

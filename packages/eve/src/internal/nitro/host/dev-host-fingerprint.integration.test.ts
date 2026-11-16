@@ -11,7 +11,6 @@ import { defineChannel, GET } from "#public/definitions/channel.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
-import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -35,7 +34,7 @@ interface HostVariant {
   /** Where the app's package.json lives: its own root, or an enclosing workspace. */
   readonly packageJson?: "own" | "enclosing";
   readonly schedule?: { readonly cron: string; readonly content: string };
-  readonly tool?: "ordinary" | "workflow" | "workflow-program";
+  readonly tool?: "ordinary" | "workflow";
   readonly tsconfig?: boolean;
   readonly workflowSourceFingerprint?: string;
   readonly workflowWorld?: "local" | "vercel";
@@ -101,16 +100,12 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
               const execute = Object.assign(async () => null, {
                 workflowId: "workflow//agent/tools/run//execute",
               });
-              const definition = defineWorkflowTool({
-                description: "Run a workflow.",
-                execute,
-                inputSchema: {},
-              });
               return {
-                default:
-                  variant.tool === "workflow-program"
-                    ? attachWorkflowProgramOptions(definition, { maxSubagents: 4 })
-                    : definition,
+                default: defineWorkflowTool({
+                  description: "Run a workflow.",
+                  execute,
+                  inputSchema: {},
+                }),
               };
             },
           },
@@ -352,7 +347,7 @@ describe("computeDevelopmentHostFingerprint", () => {
     expect(edited).not.toBe(withWorkflows);
   });
 
-  it("treats only what runs model-written programs as structural: code mode and a workflow() tool", async () => {
+  it("treats code mode as structural and tools as runtime-only", async () => {
     const base = await computeDevelopmentHostFingerprint(await createHost());
     const ordinary = await computeDevelopmentHostFingerprint(
       await createHost({ tool: "ordinary" }),
@@ -360,14 +355,10 @@ describe("computeDevelopmentHostFingerprint", () => {
     const workflow = await computeDevelopmentHostFingerprint(
       await createHost({ tool: "workflow" }),
     );
-    const workflowProgram = await computeDevelopmentHostFingerprint(
-      await createHost({ tool: "workflow-program" }),
-    );
     const codeMode = await computeDevelopmentHostFingerprint(await createHost({ codeMode: true }));
 
     expect(ordinary).toBe(base);
     expect(workflow).toBe(base);
-    expect(workflowProgram).not.toBe(base);
     expect(codeMode).not.toBe(base);
   });
 

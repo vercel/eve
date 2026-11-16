@@ -146,7 +146,7 @@ export function createHostSpec(
     routes,
     runtime: {
       localTracing: development && !instrumented,
-      workflowSandbox: runsPrograms(manifest),
+      workflowSandbox: hasCodeMode(manifest),
     },
     runtimePlugins,
     skills: development ? [] : manifest.skills.map((skill) => skill.name),
@@ -162,21 +162,14 @@ export function createHostSpec(
   };
 }
 
-/**
- * Whether any agent runs model-written programs, which need the workflow sandbox runtime: code
- * mode's `eve__execute`, or a `workflow()` tool.
- */
-function runsPrograms(manifest: CompiledAgentManifest): boolean {
-  const subagents = manifest.subagents;
+/** Whether any agent has code mode on, which needs the workflow sandbox runtime. */
+function hasCodeMode(manifest: CompiledAgentManifest): boolean {
   return (
     manifest.config.codeMode === true ||
     // A dynamic subagent has no static config, so it can't turn code mode on.
-    subagents.some(
+    manifest.subagents.some(
       (subagent) =>
         subagent.configResolver === undefined && subagent.agent.config.codeMode === true,
-    ) ||
-    [manifest, ...subagents.map((subagent) => subagent.agent)].some((node) =>
-      node.tools.some((tool) => tool.workflowProgram !== undefined),
     )
   );
 }

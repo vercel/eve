@@ -400,32 +400,17 @@ process.stdout.write(JSON.stringify(globalThis.__fixtureInstrumentationDep ?? nu
   });
 });
 
-// Both ways an agent runs a model-written program need the sandbox it runs in.
-describe.each<{ files: Record<string, string>; label: string; name: string }>([
-  {
-    label: "code-mode",
-    name: "an agent with code mode on",
-    files: {
-      "agent/agent.ts":
-        'import { defineAgent } from "eve";\nexport default defineAgent({ codeMode: true, model: "openai/gpt-5.4-mini" });\n',
-    },
-  },
-  {
-    label: "workflow-tool",
-    name: "an agent with a workflow() tool",
-    files: {
-      "agent/subagents/researcher/agent.ts":
-        'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Research.", model: "openai/gpt-5.4-mini" });\n',
-      "agent/subagents/researcher/instructions.md": "Research the request.\n",
-      "agent/tools/workflow.ts":
-        'import { workflow } from "eve/tools/workflow";\n\nexport default workflow({ maxSubagents: 6 });\n',
-    },
-  },
-])("$name", ({ files, label }) => {
+describe("an agent with code mode on", () => {
   let outputDir: string;
 
   beforeAll(async () => {
-    const appRoot = await writeApp({ label, files });
+    const appRoot = await writeApp({
+      label: "code-mode",
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ codeMode: true, model: "openai/gpt-5.4-mini" });\n',
+      },
+    });
     outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
   }, 60_000);
 

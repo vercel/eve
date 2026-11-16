@@ -24,14 +24,14 @@ defineWorkflowTool({ /* … */ async serve(receive, ctx) {} }); // a task that a
 
 Defining none of the three, or more than one, throws when the tool is defined.
 
-| Call                                                                      | Runs as                   | Result                                            | A new message during the call     |
-| ------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------- | --------------------------------- |
-| `execute` workflow tool, including `sleep` and `ask_question`             | Tool call; the turn waits | The tool result                                   | Aborts the call's `abortSignal`   |
-| `task` workflow tool, including `agentRouter()` and the `workflow()` tool | Task                      | A receipt, then a `task.result` message           | Nothing                           |
-| `serve` workflow tool, including every agent tool                         | Resumable task            | A receipt, then a `task.result` message per reply | Nothing                           |
-| `eve__task_wait`                                                          | Wait inside the turn      | Which tasks finished                              | Ends the wait                     |
-| `eve__execute` program                                                    | Tool call; the turn waits | The program's result                              | Stops the program                 |
-| Plain and MCP tools                                                       | Inside the model step     | The tool result                                   | Applied at the next step boundary |
+| Call                                                          | Runs as                   | Result                                            | A new message during the call     |
+| ------------------------------------------------------------- | ------------------------- | ------------------------------------------------- | --------------------------------- |
+| `execute` workflow tool, including `sleep` and `ask_question` | Tool call; the turn waits | The tool result                                   | Aborts the call's `abortSignal`   |
+| `task` workflow tool, including `agentRouter()`               | Task                      | A receipt, then a `task.result` message           | Nothing                           |
+| `serve` workflow tool, including every agent tool             | Resumable task            | A receipt, then a `task.result` message per reply | Nothing                           |
+| `eve__task_wait`                                              | Wait inside the turn      | Which tasks finished                              | Ends the wait                     |
+| `eve__execute` program                                        | Tool call; the turn waits | The program's result                              | Stops the program                 |
+| Plain and MCP tools                                           | Inside the model step     | The tool result                                   | Applied at the next step boundary |
 
 Waiting alone doesn't need a task. A question, a `sleep`, or an approval inside an `execute` call
 pauses the turn without holding compute, even across restarts. A new message stops the wait.
@@ -102,14 +102,10 @@ With [`codeMode`](/docs/concepts/built-in-tools#eve__execute) on, the model can 
   takes no `taskId`.
 - The work belongs to the `eve__execute` call, which holds the turn until the program ends.
   `task.started`, `eve__task_wait`, `eve__task_cancel`, and the `[Tasks]` note don't cover it.
-- A program can't call a `serve` workflow tool that isn't an agent, or a `workflow()` tool.
+- A program can't call a `serve` workflow tool that isn't an agent.
 
 See [Agents in programs](/docs/concepts/built-in-tools#agents-in-programs) for the input and the
 errors.
-
-To run agent calls as a task instead, add the
-[`workflow()` tool](/docs/concepts/built-in-tools#workflow). It runs a model-written program in the
-background, and the program's result arrives in a `task.result` message.
 
 ## Pass signals to the work
 

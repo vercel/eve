@@ -1,17 +1,21 @@
+import { EXECUTE_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
+/** The id the scripted parent gives its `eve__execute` call; its agent call takes `<id>/1`. */
+const PROGRAM_CALL = "cancel-sleeper";
+
 export default defineEval({
   description:
-    "Cancel a parent turn and cascade cancellation to the local sleeper session its workflow run opened.",
+    "Cancelling a turn held by an eve__execute program stops the program and cancels the sleeper session its agent call opened.",
   timeoutMs: 240_000,
 
   async test(t) {
     const session = await t.session();
-    // Explicit directive phrasing keeps the delegation deterministic so a
-    // scripted mock responder can drive this eval in the world suites.
+    // The directive phrase selects a scripted program, so the mock model drives this eval on
+    // every world.
     const parent = await session.start(
-      "Use the workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
+      "Alice wants the sleeper to hold its turn while she checks that stopping works. Please ask the sleeper agent from one program to wait for cancellation, and return what it replies.",
     );
     const started = await parent.waitForEvent("child.opened", {
       data: { name: "sleeper" },
@@ -41,7 +45,17 @@ export default defineEval({
     parentTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
     parentTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
     parentTurn.notEvent("session.ended", { data: { outcome: "failed" } });
+    // The program held the turn: its agent call opened the sleeper's session and was never a task.
+    parentTurn.event("child.opened", {
+      count: 1,
+      data: { name: "sleeper", owner: { callId: `${PROGRAM_CALL}/1` } },
+    });
+    parentTurn.notEvent("task.started");
+    // The cancel stops both calls before either returns a value.
+    parentTurn.calledTool(EXECUTE_TOOL, { count: 1, status: "interrupted" });
+    parentTurn.calledTool("sleeper", { count: 1, status: "interrupted" });
 
+    // The follow-up answers only when history keeps the cancelled program call.
     const followUp = await session.send("Reply with exactly CANCELLATION-SUBAGENT-FOLLOW-UP-OK.");
     followUp.expectOk();
     followUp.notEvent("turn.settled", { data: { outcome: "cancelled" } });
@@ -49,11 +63,5 @@ export default defineEval({
 
     // The eval watches both the parent and the sleeper session; each one's turn is cancelled once.
     t.event("turn.settled", { count: 2, data: { outcome: "cancelled" } });
-    t.event("child.opened", { count: 1, data: { name: "sleeper" } });
-    t.event("call.settled", {
-      count: 1,
-      data: { outcome: "interrupted" },
-      scope: { taskId: /./u },
-    });
   },
 });

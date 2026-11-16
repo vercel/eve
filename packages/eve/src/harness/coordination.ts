@@ -228,7 +228,6 @@ export function createCoordinationRequestFromToolCall(input: {
   return {
     callId: input.toolCall.toolCallId,
     entry: input.entry,
-    executeInput: definition.executeInput?.(input.input),
     input: input.input,
     kind: "workflow-task",
     toolName: input.toolCall.toolName,

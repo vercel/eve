@@ -79,6 +79,26 @@ async function handler() {
     );
   });
 
+  // The subpath no longer resolves, so the removal must be reported before resolution fails.
+  it("reports the removed workflow() tool for a leftover import during compilation", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/workflow.ts":
+          'import { workflow } from "eve/tools/workflow";\nexport default workflow({ maxSubagents: 20 });',
+      },
+      name: "removed-workflow-tool",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+      "workflow() was removed. Set codeMode: true in agent.ts; programs call agents as tools.<name>({ message }).",
+    );
+  });
+
   it.each([
     ["missing", "async execute() { return 1; }", ""],
     ["generator", "async *execute() { yield 1; }", ""],

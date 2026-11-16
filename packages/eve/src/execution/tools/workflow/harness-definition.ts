@@ -3,12 +3,10 @@ import { entryPointOf } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
-import type { JsonValue } from "#shared/json.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
 
 export interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
-  readonly executeInput?: (input: unknown) => JsonValue;
   readonly workflowId: string;
 }
 
@@ -26,7 +24,6 @@ export function createWorkflowToolHarnessDefinition(
   return {
     ...definition,
     execute: undefined,
-    executeInput: input.executeInput,
     workflowId: input.workflowId,
   };
 }
