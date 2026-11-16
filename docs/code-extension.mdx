@@ -104,8 +104,30 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 | `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
 | `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
 | `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`  |
+| `github.access`        | No            | `"private-write"` or `"public-write"`: limits commands by repository visibility            |
 
 With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
+
+Set `github.access` to limit what the agent can do by repository visibility. GitHub enforces the limit, so the extension does not sort commands into reads and writes. With `"app"`, nothing is cached, so a repository that changes visibility is judged anew on the next command.
+
+| `github.access`   | Public repositories | Private and internal repositories |
+| ----------------- | ------------------- | --------------------------------- |
+| `"private-write"` | Read-only           | Read and write                    |
+| `"public-write"`  | Read and write      | Refused, reads included           |
+
+With `"app"`, every command needs `repository` set to `owner/name`. eve reads the repository's visibility with a `metadata:read` token, then mints the token the command runs with. With `"private-write"` on a public repository, every permission in `github.permissions` is lowered to `read`, and `workflows`, which has no `read` level, is dropped. Each entry must be a lowercase name, optionally followed by `:read`, `:write` or `:admin`; a bare name means `write`. Any other entry is refused.
+
+With `"user"`, a token can't be narrowed when it is minted, so the GitHub App installation is the boundary, and commands don't need `repository`. Each command lists `GET /user/installations`, then each installation's repositories, with the caller's token. It reads page 1 of each list, which reports the total, then every remaining page at once, with at most 32 requests in flight. The check stops at the first repository the setting rules out. A check that passes is kept in the session's state for the rest of the turn that ran it, for the same caller and `access` value, so the turn's other commands make no extra requests, and the next turn checks again. A custom tool built on `executeGitHubShell` gets this reuse only when it passes `context`; without it, every command checks. A refusal is never reused. eve refuses the command, and names the repository, when the installation reaches a public repository (`"private-write"`) or a private or internal one (`"public-write"`). It also refuses an installation that lists more than 3,000 repositories. Narrow the installation to fix it.
+
+`GET /user/installations` lists only the installations the caller has explicit access to. If the App is also installed on an account the caller isn't a member of, and that installation includes a public repository, the check can't see it, and the caller's token may still be able to comment on that repository. With `"user"`, `"private-write"` therefore holds only when every account the App is installed on is one the caller belongs to. Use `"app"` when you can't guarantee that.
+
+`"private-write"` refuses to run when an App permission could write to a public repository without naming one. Any user with read access can comment on a public repository, which is why `"private-write"` refuses an installation that reaches one even when the caller can't push to it. `administration` can make a private repository public, and `repository_creation` can create a public one.
+
+GitHub enforces the read-only limit on the token, not on what the repositories do afterward. `workflows:write` plus `contents:write` on a private repository can still reach public repositories through GitHub Actions workflows that use stored secrets. With `"app"`, `"public-write"` applies the same rules to `github.permissions` as `"private-write"`, because `administration:write` could make a checked public repository private. With `"user"`, an installation that grants it is refused for the same reason, and a check kept for the turn can't be invalidated by the token itself.
+
+- With `"app"`, `github.permissions` must be set, and may not grant `write` or `admin` on anything except `actions`, `checks`, `contents`, `issues`, `pull_requests`, `statuses` and `workflows`.
+- With `"user"`, the same list applies, for both values, to what each installation grants, as GitHub reports it on `GET /user/installations`. An installation that doesn't report its permissions is refused.
+- GitHub doesn't list account-level App permissions, such as `gists`, on an installation, so eve can't check them. A public gist is a public write. Don't grant the App an account permission with write access.
 
 Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
 

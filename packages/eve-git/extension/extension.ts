@@ -30,6 +30,20 @@ const githubBase = {
    * `Co-authored-by` trailer ends signed commits and new pull requests.
    */
   attribution: fn<GitHubAttribution>().optional(),
+  /**
+   * Limits access by repository visibility, enforced by GitHub rather than by
+   * sorting commands. `"private-write"` makes public repositories read-only
+   * and private and internal ones read-write. `"public-write"` makes public
+   * repositories read-write and refuses private and internal ones, reads
+   * included. With `"app"`, both values need `permissions` set to writes
+   * within `actions`, `checks`, `contents`, `issues`, `pull_requests`,
+   * `statuses` and `workflows`, and each command needs `repository` set to `owner/name`
+   * and costs one extra GitHub lookup. With `"user"`, commands don't need
+   * `repository`; the first command of a turn lists the caller's installations
+   * (1 request, plus 1 per 100 repositories of each installation), and the
+   * turn's other commands reuse the result. Omit it for no visibility rule.
+   */
+  access: z.enum(["private-write", "public-write"]).optional(),
 };
 
 export default defineExtension({
