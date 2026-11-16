@@ -17,15 +17,23 @@ export function usesParentDevelopmentWorkflowWorld(
 }
 export const DEVELOPMENT_WORKER_APP_ROOT_ENV = "EVE_DEV_WORKER_APP_ROOT";
 export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery";
+/**
+ * Set to "1" in a worker's environment when the parent's World has a live
+ * event feed (`events.subscribe`). Workers copy the environment when they are
+ * created, so the worker's client can decide synchronously whether to offer
+ * the feed.
+ */
+export const DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV = "EVE_DEV_WORKFLOW_EVENT_FEED";
 
 /**
  * The single source of truth for World operations forwarded over the dev
  * RPC: the worker client generates its method forwards from this list and
  * the parent dispatches by walking the same dot-path on the real world, so
  * adapting to a vendored-world interface change is one entry here. The
- * members NOT listed are the deliberate exceptions — `streams.get` returns
- * a live stream over its own route, `createQueueHandler` runs entirely in
- * the worker, and `start`/`close` belong to the parent's lifecycle.
+ * members NOT listed are the deliberate exceptions — `streams.get` and
+ * `events.subscribe` are live feeds over their own routes, `createQueueHandler`
+ * runs entirely in the worker, and `start`/`close` belong to the parent's
+ * lifecycle.
  */
 export const DEVELOPMENT_WORLD_OPERATIONS = [
   "events.create",

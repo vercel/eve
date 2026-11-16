@@ -10,6 +10,7 @@ import {
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
+  DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV,
   usesParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-protocol.js";
 
@@ -50,12 +51,28 @@ export function createDevelopmentWorkflowWorld(input: {
   });
 }
 
-export function installWorkflowTransportEnvironment(appRoot: string, secret: string): () => void {
+export function installWorkflowTransportEnvironment(input: {
+  readonly appRoot: string;
+  /** Whether the parent's World has a live event feed for workers to follow. */
+  readonly eventFeed: boolean;
+  readonly secret: string;
+}): () => void {
   const previousSecret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   const previousAppRoot = process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
-  process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
-  process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
+  const previousEventFeed = process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV];
+  process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = input.secret;
+  process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = input.appRoot;
+  if (input.eventFeed) {
+    process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV] = "1";
+  } else {
+    delete process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV];
+  }
   return () => {
+    if (previousEventFeed === undefined) {
+      delete process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV];
+    } else {
+      process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV] = previousEventFeed;
+    }
     if (previousSecret === undefined) {
       delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
     } else {

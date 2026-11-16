@@ -25,6 +25,7 @@ import {
 } from "#internal/workflow/development-world-codec.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 import {
+  DEVELOPMENT_WORKFLOW_EVENTS_ROUTE,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#protocol/routes.js";
@@ -53,6 +54,8 @@ import {
  * call arrives back on the listener within milliseconds.
  */
 export interface ParentDevelopmentWorkflowWorld {
+  /** Whether the World has a live event feed (`events.subscribe`) for workers to follow. */
+  readonly eventFeed: boolean;
   close(): Promise<void>;
   handleRequest(request: Request): Promise<Response | undefined>;
   start(): Promise<void>;
@@ -85,6 +88,10 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   #closed = false;
   #started = false;
   #reconciliation: Promise<void> = Promise.resolve();
+
+  get eventFeed(): boolean {
+    return this.#world.events.subscribe !== undefined;
+  }
 
   constructor(input: {
     readonly agentName: string;
@@ -172,6 +179,9 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     if (url.pathname === DEVELOPMENT_WORKFLOW_STREAM_ROUTE) {
       return await this.#handleStream(request, url);
+    }
+    if (url.pathname === DEVELOPMENT_WORKFLOW_EVENTS_ROUTE) {
+      return this.#handleEvents(request, url);
     }
     return undefined;
   }
@@ -264,6 +274,59 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         status: 500,
       });
     }
+  }
+
+  /**
+   * Follows a run's live event feed for a worker: one encoded `{ event }` line
+   * per event, in the World's order. When the World ends the feed, the last
+   * line is `{ error }`. A worker that disconnects (it unsubscribed, or it was
+   * disposed) ends the World subscription with it.
+   */
+  #handleEvents(request: Request, url: URL): Response {
+    if (!this.#isTrusted(request) || request.method !== "GET") {
+      return Response.json({ error: "Workflow World request is not trusted." }, { status: 401 });
+    }
+    const events = this.#world.events;
+    if (events.subscribe === undefined) {
+      return Response.json(
+        { error: "This Workflow World has no live event feed." },
+        { status: 404 },
+      );
+    }
+    const runId = url.searchParams.get("runId");
+    const afterSlot = Number(url.searchParams.get("afterSlot") ?? Number.NaN);
+    if (runId === null || runId === "" || !Number.isSafeInteger(afterSlot)) {
+      return Response.json({ error: "Workflow event feed request is malformed." }, { status: 400 });
+    }
+    const subscribe = events.subscribe.bind(events);
+    const encoder = new TextEncoder();
+    let unsubscribe: (() => void) | undefined;
+    let ended = false;
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      request.signal.removeEventListener("abort", end);
+      unsubscribe?.();
+    };
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const write = (record: unknown) => {
+          if (!ended)
+            controller.enqueue(encoder.encode(`${encodeDevelopmentWorldValue(record)}\n`));
+        };
+        request.signal.addEventListener("abort", end, { once: true });
+        unsubscribe = subscribe(runId, afterSlot, (event) => write({ event }), {
+          onError(error) {
+            write({ error: serializeDevelopmentWorldError(error) });
+            if (!ended) controller.close();
+            end();
+          },
+        });
+        if (ended) unsubscribe();
+      },
+      cancel: end,
+    });
+    return new Response(body, { headers: { "content-type": "application/x-ndjson" } });
   }
 
   async #queue(...args: Parameters<World["queue"]>): ReturnType<World["queue"]> {

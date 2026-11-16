@@ -1,4 +1,4 @@
-import { e2eAgentConfig } from "@eve-e2e/config";
+import { e2eAgentConfig, type E2EModel } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
@@ -135,8 +135,65 @@ function cancelAndRestartSleeper(request: MockModelRequest): MockModelResponse |
   return result?.text ?? { toolCalls: [{ input: {}, name: "eve__task_wait" }] };
 }
 
+/** Shared with `evals/cancellation/interrupt-model-call.eval.ts`. */
+const HELD_MODEL_CALL = "HELD-MODEL-CALL";
+/**
+ * Shorter than the 2 s the Workflow runtime waits between log polls when a World has no live
+ * event feed, so a cancel or steer the runtime only learns of by polling arrives too late.
+ */
+const HELD_MODEL_CALL_MS = 1_500;
+
+/**
+ * Holds a mock model call whose last user message names {@link HELD_MODEL_CALL}, honoring the
+ * call's abort signal, as a provider request still waiting for its first token does.
+ */
+function holdMarkedCalls<TModel>(model: TModel): TModel {
+  if (!isMockModel(model)) return model;
+  const hold = async (options: {
+    prompt: readonly { role: string }[];
+    abortSignal?: AbortSignal;
+  }) => {
+    const lastUser = [...options.prompt].reverse().find((message) => message.role === "user");
+    if (!JSON.stringify(lastUser ?? null).includes(HELD_MODEL_CALL)) return;
+    const signal = options.abortSignal;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, HELD_MODEL_CALL_MS);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        },
+        { once: true },
+      );
+    });
+  };
+  const generate = model.doGenerate.bind(model);
+  const stream = model.doStream.bind(model);
+  model.doGenerate = async (options) => {
+    await hold(options);
+    return await generate(options);
+  };
+  model.doStream = async (options) => {
+    await hold(options);
+    return await stream(options);
+  };
+  return model;
+}
+
+function isMockModel(
+  model: unknown,
+): model is Extract<E2EModel, { readonly specificationVersion: "v4" }> {
+  return (
+    typeof model === "object" &&
+    model !== null &&
+    (model as { specificationVersion?: unknown }).specificationVersion === "v4"
+  );
+}
+
 const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
+  model: holdMarkedCalls(base.model),
 });

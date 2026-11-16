@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
+import type { Event } from "#compiled/@workflow/world/index.js";
 import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
   activateDevelopmentGeneration,
@@ -25,6 +26,7 @@ import {
 } from "#internal/workflow/development-world-server.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
+  DEVELOPMENT_WORKFLOW_EVENTS_ROUTE,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#protocol/routes.js";
@@ -35,6 +37,7 @@ import {
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
+  DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV,
 } from "#internal/workflow/development-world-protocol.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -56,6 +59,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   delete process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
+  delete process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV];
   delete process.env.WORKFLOW_LOCAL_BASE_URL;
   for (const name of LOCAL_DELIVERY_TIMEOUT_ENV_NAMES) {
     const originalValue = originalLocalDeliveryTimeoutEnv.get(name);
@@ -805,6 +809,67 @@ describe("parent development Workflow World", () => {
         new Request(`http://localhost${DEVELOPMENT_WORKFLOW_STREAM_ROUTE}?runId=r&name=n`),
       );
       expect(stream?.status).toBe(401);
+
+      const events = await world.handleRequest(
+        new Request(`http://localhost${DEVELOPMENT_WORKFLOW_EVENTS_ROUTE}?runId=r&afterSlot=0`),
+      );
+      expect(events?.status).toBe(401);
+    } finally {
+      await world.close();
+    }
+  });
+
+  // A worker's inline step learns of a cancel or steer only through this feed; without it the
+  // runtime polls every few seconds (vercel/eve#6496). Broken until eve vendors a world-local
+  // with `events.subscribe` (vercel/workflow#5436): the parent's World has no feed to forward.
+  it.fails("forwards a run's events from the parent World's feed after afterSlot, until unsubscribed", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-event-feed-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      await world.start();
+      const runId = await createFeedRun(world);
+      // Slots are dense and 1-based, so the last slot is the event count.
+      const top = (await listEvents(world, runId)).length;
+      const received: Event[] = [];
+      const errors: unknown[] = [];
+      const unsubscribe = subscribeFromWorker(world, runId, top, received, errors);
+      await createFeedStep(world, runId, "step_1");
+      await createFeedStep(world, runId, "step_2");
+      const written = (await listEvents(world, runId)).slice(top);
+      await vi.waitFor(() => expect(received).toHaveLength(2));
+      unsubscribe();
+      await createFeedStep(world, runId, "step_3");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // The same events `list` returns, Dates and bytes included, in slot order.
+      expect(received).toEqual(written);
+      expect(errors).toEqual([]);
+    } finally {
+      await world.close();
+    }
+  });
+
+  // The runtime polls slowly while a feed is live, so a feed that ends quietly would delay every
+  // wake. Broken until eve vendors a world-local with `events.subscribe` (vercel/workflow#5436).
+  it.fails("reports the end of the parent World's feed to the worker's onError", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-event-feed-end-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      await world.start();
+      const runId = await createFeedRun(world);
+      const received: Event[] = [];
+      const errors: unknown[] = [];
+      subscribeFromWorker(world, runId, (await listEvents(world, runId)).length, received, errors);
+      await createFeedStep(world, runId, "step_1");
+      await vi.waitFor(() => expect(received).toHaveLength(1));
+      await world.close();
+
+      await vi.waitFor(() => expect(errors).toHaveLength(1));
+      expect(errors[0]).toBeInstanceOf(Error);
     } finally {
       await world.close();
     }
@@ -839,6 +904,63 @@ function connectWorkerToWorld(world: ParentDevelopmentWorkflowWorld, appRoot: st
     }
     return response;
   }) as typeof fetch;
+}
+
+/** Subscribes through a worker client, as the dev host enables it when the parent has a feed. */
+function subscribeFromWorker(
+  world: ParentDevelopmentWorkflowWorld,
+  runId: string,
+  afterSlot: number,
+  received: Event[],
+  errors: unknown[],
+): () => void {
+  if (world.eventFeed) process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV] = "1";
+  const { subscribe } = createDevelopmentWorkflowWorld().events;
+  if (subscribe === undefined) throw new Error("The worker client offers no event feed.");
+  return subscribe(runId, afterSlot, (event) => received.push(event), {
+    onError: (error) => errors.push(error),
+  });
+}
+
+async function createFeedRun(world: ParentDevelopmentWorkflowWorld): Promise<string> {
+  return readCreatedRunId(
+    await callWorld(world, "events.create", [
+      null,
+      {
+        eventData: {
+          deploymentId: "generation-a",
+          executionContext: {},
+          input: new Uint8Array([1, 2, 3]),
+          workflowName: workflowEntryReference.workflowId,
+        },
+        eventType: "run_created",
+        specVersion: 9,
+      },
+    ]),
+  );
+}
+
+async function createFeedStep(
+  world: ParentDevelopmentWorkflowWorld,
+  runId: string,
+  stepId: string,
+): Promise<void> {
+  await callWorld(world, "events.create", [
+    runId,
+    {
+      correlationId: stepId,
+      eventData: { input: new Uint8Array([4, 5]), stepName: "save" },
+      eventType: "step_created",
+      specVersion: 9,
+    },
+  ]);
+}
+
+async function listEvents(world: ParentDevelopmentWorkflowWorld, runId: string): Promise<Event[]> {
+  const page = (await callWorld(world, "events.list", [{ resolveData: "all", runId }])) as {
+    readonly data: Event[];
+  };
+  return page.data;
 }
 
 function createWorkerQueueHandler(): (request: Request) => Promise<Response> {
