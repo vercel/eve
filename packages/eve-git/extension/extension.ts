@@ -35,8 +35,11 @@ const githubBase = {
    * sorting commands. `"private-write"` makes public repositories read-only
    * and private and internal ones read-write. `"public-write"` makes public
    * repositories read-write and refuses private and internal ones, reads
-   * included. Each command then needs `repository` set to `owner/name`, and
-   * costs one extra GitHub lookup. Omit it for no visibility rule.
+   * included. With `"app"`, each command needs `repository` set to `owner/name`
+   * and costs one extra GitHub lookup. With `"user"`, commands don't need
+   * `repository`; the first command of a turn lists the caller's installations
+   * (1 request, plus 1 per 100 repositories of each installation), and the
+   * turn's other commands reuse the result. Omit it for no visibility rule.
    */
   access: z.enum(["private-write", "public-write"]).optional(),
 };

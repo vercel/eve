@@ -247,6 +247,51 @@ test("private-write lowers every write to read on a public repository", async ()
   }
 });
 
+test("private-write lowers bare and write entries to read and drops permissions with no read level", async () => {
+  const app = await runApp("private-write", "acme/site", {
+    permissions: ["contents", "pull_requests:write", "workflows:write", "issues:read"],
+  });
+  await app.result;
+  assert.deepEqual(app.mints.at(-1)?.permissions, [
+    "contents:read",
+    "pull_requests:read",
+    "issues:read",
+  ]);
+  const onlyWorkflows = await runApp("private-write", "acme/site", {
+    permissions: ["contents:write", "workflows:write"],
+  });
+  await onlyWorkflows.result;
+  assert.deepEqual(onlyWorkflows.mints.at(-1)?.permissions, ["contents:read"]);
+  const none = await runApp("private-write", "acme/site", { permissions: ["workflows:write"] });
+  await none.result;
+  assert.deepEqual(none.mints.at(-1)?.permissions, ["metadata:read"]);
+});
+
+test("private-write keeps bare and workflows entries as configured on a private repository", async () => {
+  const permissions = ["contents", "workflows:write"];
+  const app = await runApp("private-write", "acme/vault", { permissions });
+  await app.result;
+  assert.deepEqual(app.mints.at(-1)?.permissions, permissions);
+});
+
+test("private-write refuses a permission entry it can't read as lowercase name and level", async () => {
+  for (const entry of [
+    "contents:WRITE",
+    "contents:write ",
+    "pull_requests:Write",
+    "Contents:read",
+    "contents:",
+  ]) {
+    const app = await runApp("private-write", "acme/site", { permissions: [entry] });
+    await assert.rejects(
+      app.result,
+      /access "private-write" refused: github\.permissions entry .* can't be checked/u,
+      entry,
+    );
+    assert.equal(app.runs.length, 0, entry);
+  }
+});
+
 test("private-write refuses App permissions that can make a repository public, before any GitHub call", async () => {
   for (const permissions of [
     undefined,

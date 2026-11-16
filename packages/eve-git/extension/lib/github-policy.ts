@@ -54,6 +54,18 @@ const WRITABLE_PERMISSIONS: ReadonlySet<string> = new Set([
   "workflows",
 ]);
 
+/** Permissions GitHub defines no `read` level for; a read-only token can't carry them. */
+const WITHOUT_READ_LEVEL: ReadonlySet<string> = new Set(["workflows"]);
+
+const PERMISSION_ENTRY = /^([a-z_]+)(?::(read|write|admin))?$/u;
+
+interface ParsedPermission {
+  readonly entry: string;
+  readonly name: string;
+  /** A bare name such as `"contents"` is `write`. */
+  readonly level: string;
+}
+
 function writesOutsideAllowlist(permissions: Iterable<readonly [string, string]>): string[] {
   return [...permissions]
     .filter(([name, level]) => level !== "read" && !WRITABLE_PERMISSIONS.has(name))
@@ -102,27 +114,33 @@ export async function appTokenPermissions(options: {
     }
     return options.configured;
   }
-  return visibility === "public" ? readOnly(writable) : writable;
+  return visibility === "public" ? readOnly(writable) : writable.map(({ entry }) => entry);
 }
 
-function privateWritePermissions(configured: readonly string[] | undefined): readonly string[] {
+function privateWritePermissions(
+  configured: readonly string[] | undefined,
+): readonly ParsedPermission[] {
   if (!configured) {
     throw new Error(
       `access "private-write" refused: github.permissions is not set, so the App token would carry every permission the App holds, including administration. List the permissions the agent needs.`,
     );
   }
-  const outside = writesOutsideAllowlist(
-    configured.map((permission) => {
-      const [name = "", level = "write"] = permission.split(":");
-      return [name, level] as const;
-    }),
-  );
+  const parsed = configured.map((entry): ParsedPermission => {
+    const match = PERMISSION_ENTRY.exec(entry);
+    if (!match) {
+      throw new Error(
+        `access "private-write" refused: github.permissions entry ${JSON.stringify(entry)} is not a lowercase name or name:read, name:write or name:admin, so it can't be checked.`,
+      );
+    }
+    return { entry, name: match[1]!, level: match[2] ?? "write" };
+  });
+  const outside = writesOutsideAllowlist(parsed.map(({ name, level }) => [name, level] as const));
   if (outside.length > 0) {
     throw new Error(
       `access "private-write" refused: github.permissions grants ${outside.join(", ")}, which can make a repository public or create one. Allowed writes are ${[...WRITABLE_PERMISSIONS].join(", ")}.`,
     );
   }
-  return configured;
+  return parsed;
 }
 
 /** Installation checks that passed, by caller and access value, with the turn that ran each. */
@@ -220,10 +238,14 @@ export async function assertUserInstallation(options: {
   }));
 }
 
-function readOnly(configured: readonly string[]): readonly string[] {
-  return [
-    ...new Set(configured.map((permission) => permission.replace(/:(?:write|admin)$/u, ":read"))),
-  ];
+/** The read level of each permission; GitHub always grants `metadata:read`, so it stands in when none is left. */
+function readOnly(permissions: readonly ParsedPermission[]): readonly string[] {
+  const lowered = new Set(
+    permissions
+      .filter(({ name }) => !WITHOUT_READ_LEVEL.has(name))
+      .map(({ name }) => `${name}:read`),
+  );
+  return lowered.size > 0 ? [...lowered] : ["metadata:read"];
 }
 
 interface Lookup {
