@@ -22,28 +22,62 @@ export function permalink(channelId: string, ts: string): string {
   return `https://acme.slack.com/archives/${channelId}/p${ts.replace(".", "")}`;
 }
 
+function readMessage(match: SearchMatch) {
+  return { ts: match.ts, author: match.author, userId: match.authorUserId, text: match.text };
+}
+
 /**
- * Stubs both Slack tools: `search_slack` returns `matches`, and
- * `read_slack_conversation` returns each match as its own one-message thread.
- * Outside a Slack turn the real tools report Slack as unavailable.
+ * Stubs both Slack tools so every read matches what search returned:
+ *
+ * - `search_slack` returns `matches`.
+ * - Reading a match's thread returns that match alone, as a one-message thread.
+ * - Reading any other thread returns no messages.
+ * - Reading a channel returns that channel's matches, newest first.
+ * - Reading any other channel returns no messages.
+ *
+ * Stubs match in order, so thread reads are caught before channel reads.
+ * Outside a Slack turn the real tools report Slack as unavailable, so every
+ * read must hit a stub.
  */
 export function slackStubs(matches: readonly SearchMatch[]): ToolStub[] {
+  const channels = new Map<string, SearchMatch[]>();
+  for (const match of matches) {
+    channels.set(match.channelId, [...(channels.get(match.channelId) ?? []), match]);
+  }
   return [
     { id: "search", tool: "search_slack", outcome: { response: { matches: [...matches] } } },
-    {
-      id: "read",
+    ...matches.map((match, index): ToolStub => ({
+      id: `read-thread-${index}`,
       tool: "read_slack_conversation",
+      match: { channelId: { const: match.channelId }, threadTs: { const: match.ts } },
       outcome: {
         response: {
-          messages: matches.map((match) => ({
-            ts: match.ts,
-            author: match.author,
-            userId: match.authorUserId,
-            text: match.text,
-          })),
+          channel: match.channelName,
+          permalink: match.permalink,
+          messages: [readMessage(match)],
         },
       },
+    })),
+    {
+      id: "read-other-thread",
+      tool: "read_slack_conversation",
+      match: { threadTs: true },
+      outcome: { response: { messages: [] } },
     },
+    ...[...channels].map(([channelId, channelMatches]): ToolStub => ({
+      id: `read-channel-${channelId}`,
+      tool: "read_slack_conversation",
+      match: { channelId: { const: channelId } },
+      outcome: {
+        response: {
+          channel: channelMatches[0]!.channelName,
+          messages: [...channelMatches]
+            .sort((a, b) => Number(b.ts) - Number(a.ts))
+            .map(readMessage),
+        },
+      },
+    })),
+    { id: "read-other", tool: "read_slack_conversation", outcome: { response: { messages: [] } } },
   ];
 }
 
@@ -99,3 +133,17 @@ export function wordCount(text: string | undefined): number {
 
 /** Markdown structure that a plain thread reply shouldn't have. */
 export const REPORT_FORMATTING = /^\s*#{1,6}\s|\*\*[^*]+\*\*|^\s*\|.*\|\s*$|^\s*---\s*$/mu;
+
+/**
+ * The message a scheduled run sends the agent. Matches `run` in
+ * `agent/schedules/tasks.ts`.
+ */
+export function scheduledRun(task: string): string {
+  return [
+    `Run this scheduled task for <@${alice.userId}> now and post the result.`,
+    "No one is present to answer questions or approve actions. If you can't finish, say what's missing.",
+    "Schedule: Morning incident check",
+    "Scheduled for: 2026-01-02T17:00:00.000Z",
+    `Task: ${task}`,
+  ].join("\n");
+}

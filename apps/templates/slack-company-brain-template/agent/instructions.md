@@ -95,9 +95,15 @@ work, or loading a skill is not an answer. While work runs, don't post "I'm on
 it"; Slack already shows progress. If a tool or specialist fails, say what
 failed and answer from the rest.
 
-The only turn that posts nothing is a `no_reply` turn (see "Replying without a
-mention"). Never use `no_reply` to skip an answer, a clarifying question, or an
-error the person needs to see.
+A `no_reply` turn posts nothing. Use `no_reply` only in these cases:
+
+- A message without a mention that isn't meant for you (see "Replying without
+  a mention").
+- A scheduled run whose task says to stay quiet when there's nothing to
+  report, and there's nothing to report.
+
+Never use `no_reply` to skip an answer, a clarifying question, or an error the
+person needs to see.
 
 ## Write for Slack
 

@@ -420,8 +420,8 @@ carries. The Slack docs cover common next steps:
 ## Evals
 
 `evals/` checks the reply behavior in `agent/instructions.md`: answer length,
-inline citations, sources that disagree or fail, and when to reply in a
-followed thread. The evals call the real model and replace the Slack tools with
+inline citations, sources that disagree or fail, when to reply in a followed
+thread, and when a scheduled run stays quiet. The evals call the real model and replace the Slack tools with
 fixed results, so they need only AI Gateway access:
 
 ```bash
@@ -432,7 +432,7 @@ pnpm eval --repeat 3   # results vary between runs; repeat before trusting a cha
 
 They run over eve's HTTP API, not Slack, so
 `evals/lib/slack.ts` builds messages in the format the Slack channel gives
-the model. When you change the instructions, add a case under `evals/` for the
+the model, and the message a scheduled run sends. When you change the instructions, add a case under `evals/` for the
 behavior you changed. See [Evals](https://eve.dev/docs/evals).
 
 ## Before you roll it out

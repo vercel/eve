@@ -52,7 +52,7 @@ export default [
       const turn = await session.send(
         slackMessage({
           from: alice,
-          text: "Thanks! How is that different from the average latency?",
+          text: "Thanks! So is a lower p99 better?",
           ts: "1767268900.000200",
           mentioned: false,
         }),

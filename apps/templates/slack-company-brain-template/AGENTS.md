@@ -23,7 +23,8 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
   the real model with Slack tools stubbed. `evals/lib/slack.ts` builds
   messages in the Slack channel's model format, since evals run over HTTP.
   Keep its guidance text in sync with `FOLLOWED_THREAD_GUIDANCE` in
-  `agent/channels/slack.ts`.
+  `agent/channels/slack.ts`, and its scheduled-run message in sync with `run`
+  in `agent/schedules/tasks.ts`.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack
   (experimental `defineDynamicSchedules`). The destination and creator come
   from the Slack session in `preparePayload`, never from the model.
