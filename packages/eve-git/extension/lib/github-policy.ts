@@ -6,8 +6,9 @@ import { z } from "zod";
  * What an agent may do by repository visibility.
  *
  * - `"private-write"`: public repositories are read-only; private and internal ones are read-write.
- *   Tokens may write only the permissions in `WRITABLE_PERMISSIONS`.
  * - `"public-write"`: public repositories are read-write; private and internal ones are refused.
+ *
+ * With `"app"`, both values need `github.permissions`, and it may write only the permissions in `WRITABLE_PERMISSIONS`.
  */
 export type GitHubAccess = "private-write" | "public-write";
 
@@ -100,36 +101,36 @@ export async function appTokenPermissions(options: {
   readonly repository: string;
 }): Promise<readonly string[] | undefined> {
   const { access, repository } = options;
-  const writable =
-    access === "private-write" ? privateWritePermissions(options.configured) : undefined;
+  const permissions = checkedPermissions(access, options.configured);
   const lookupToken = await options.mint(["metadata:read"]);
   const { visibility } = repositorySchema.parse(
     await githubGet(options.fetch, lookupToken, `/repos/${repository}`),
   );
-  if (!writable) {
+  if (access === "public-write") {
     if (visibility !== "public") {
       throw new Error(
         `access "public-write" refused ${repository}: it is ${visibility}, and this agent may only use public repositories. Use a public repository.`,
       );
     }
-    return options.configured;
+    return permissions.map(({ entry }) => entry);
   }
-  return visibility === "public" ? readOnly(writable) : writable.map(({ entry }) => entry);
+  return visibility === "public" ? readOnly(permissions) : permissions.map(({ entry }) => entry);
 }
 
-function privateWritePermissions(
+function checkedPermissions(
+  access: GitHubAccess,
   configured: readonly string[] | undefined,
 ): readonly ParsedPermission[] {
   if (!configured) {
     throw new Error(
-      `access "private-write" refused: github.permissions is not set, so the App token would carry every permission the App holds, including administration. List the permissions the agent needs.`,
+      `access ${JSON.stringify(access)} refused: github.permissions is not set, so the App token would carry every permission the App holds, including administration. List the permissions the agent needs.`,
     );
   }
   const parsed = configured.map((entry): ParsedPermission => {
     const match = PERMISSION_ENTRY.exec(entry);
     if (!match) {
       throw new Error(
-        `access "private-write" refused: github.permissions entry ${JSON.stringify(entry)} is not a lowercase name or name:read, name:write or name:admin, so it can't be checked.`,
+        `access ${JSON.stringify(access)} refused: github.permissions entry ${JSON.stringify(entry)} is not a lowercase name or name:read, name:write or name:admin, so it can't be checked.`,
       );
     }
     return { entry, name: match[1]!, level: match[2] ?? "write" };
@@ -137,7 +138,7 @@ function privateWritePermissions(
   const outside = writesOutsideAllowlist(parsed.map(({ name, level }) => [name, level] as const));
   if (outside.length > 0) {
     throw new Error(
-      `access "private-write" refused: github.permissions grants ${outside.join(", ")}, which can make a repository public or create one. Allowed writes are ${[...WRITABLE_PERMISSIONS].join(", ")}.`,
+      `access ${JSON.stringify(access)} refused: github.permissions grants ${outside.join(", ")}, which can change a repository's visibility or create one. Allowed writes are ${[...WRITABLE_PERMISSIONS].join(", ")}.`,
     );
   }
   return parsed;

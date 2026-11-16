@@ -198,7 +198,7 @@ test("public-write refuses private and internal repositories after only the meta
     ["acme/wiki", "internal"],
   ]) {
     for (const command of [READ_COMMAND, WRITE_COMMAND]) {
-      const app = await runApp("public-write", repository!, { command });
+      const app = await runApp("public-write", repository!, { command, permissions: WRITES });
       await assert.rejects(
         app.result,
         new RegExp(`access "public-write" refused ${repository}: it is ${visibility}`, "u"),
@@ -324,15 +324,30 @@ test("private-write allows read permissions outside the write allowlist", async 
   assert.equal(app.runs.length, 1);
 });
 
-test("public-write leaves App permissions as configured, including none", async () => {
-  const app = await runApp("public-write", "acme/site", {
-    permissions: ["administration:write"],
-  });
+test("public-write mints the configured permissions unchanged on a public repository", async () => {
+  const permissions = ["contents:write", "issues", "workflows:write"];
+  const app = await runApp("public-write", "acme/site", { permissions });
   await app.result;
-  assert.deepEqual(app.mints.at(-1)?.permissions, ["administration:write"]);
-  const unconfigured = await runApp("public-write", "acme/site");
-  await unconfigured.result;
-  assert.equal(unconfigured.mints.at(-1)?.permissions, undefined);
+  assert.deepEqual(app.mints.at(-1)?.permissions, permissions);
+});
+
+test("public-write refuses unset, unreadable and visibility-changing permissions before any GitHub call", async () => {
+  for (const permissions of [
+    undefined,
+    ["administration:write"],
+    ["contents:write", "repository_creation:write"],
+    ["contents:WRITE"],
+  ]) {
+    const app = await runApp("public-write", "acme/site", permissions ? { permissions } : {});
+    await assert.rejects(
+      app.result,
+      /access "public-write" refused: github\.permissions (is not set|grants|entry)/u,
+      `${permissions}`,
+    );
+    assert.deepEqual(app.mints, []);
+    assert.deepEqual(app.requests, []);
+    assert.deepEqual(app.runs, []);
+  }
 });
 
 test("an App command with no repository or only an owner is refused under each access value", async () => {
@@ -424,17 +439,17 @@ test("a repository that changes visibility between two commands is judged anew",
   assert.deepEqual(second.mints.at(-1)?.permissions, WRITES);
 
   repos["acme/site"] = PUBLIC;
-  const third = await runApp("public-write", "acme/site", { repos });
+  const third = await runApp("public-write", "acme/site", { repos, permissions: WRITES });
   await third.result;
   repos["acme/site"] = { ...PUBLIC, visibility: "private" };
-  const fourth = await runApp("public-write", "acme/site", { repos });
+  const fourth = await runApp("public-write", "acme/site", { repos, permissions: WRITES });
   await assert.rejects(fourth.result, /refused acme\/site: it is private/u);
 });
 
 test("concurrent App commands each read their own repository with their own token", async () => {
   const [allowed, refused] = [
-    await runApp("public-write", "acme/site"),
-    await runApp("public-write", "acme/vault"),
+    await runApp("public-write", "acme/site", { permissions: WRITES }),
+    await runApp("public-write", "acme/vault", { permissions: WRITES }),
   ];
   const results = await Promise.allSettled([allowed.result, refused.result]);
   assert.equal(results[0].status, "fulfilled");

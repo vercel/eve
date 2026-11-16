@@ -123,7 +123,7 @@ With `"user"`, a token can't be narrowed when it is minted, so the GitHub App in
 
 `"private-write"` refuses to run when an App permission could write to a public repository without naming one. Any user with read access can comment on a public repository, which is why `"private-write"` refuses an installation that reaches one even when the caller can't push to it. `administration` can make a private repository public, and `repository_creation` can create a public one.
 
-GitHub enforces the read-only limit on the token, not on what the repositories do afterward. `workflows:write` plus `contents:write` on a private repository can still reach public repositories through GitHub Actions workflows that use stored secrets. `"public-write"` does not narrow `github.permissions`: with `administration:write`, a command can make a checked public repository private.
+GitHub enforces the read-only limit on the token, not on what the repositories do afterward. `workflows:write` plus `contents:write` on a private repository can still reach public repositories through GitHub Actions workflows that use stored secrets. With `"app"`, `"public-write"` applies the same rules to `github.permissions` as `"private-write"`, because `administration:write` could make a checked public repository private.
 
 - With `"app"`, `github.permissions` must be set, and may not grant `write` or `admin` on anything except `actions`, `checks`, `contents`, `issues`, `pull_requests`, `statuses` and `workflows`.
 - With `"user"`, the same list applies to what each installation grants, as GitHub reports it on `GET /user/installations`. An installation that doesn't report its permissions is refused.
