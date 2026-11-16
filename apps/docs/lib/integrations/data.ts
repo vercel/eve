@@ -324,9 +324,9 @@ TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
       "poll",
       "group",
     ],
-    install: `**Compatibility:** The published \`eve-channel-blooio@0.3.0\` package uses an event contract that eve 1.x does not support. An upstream compatibility release is required before this channel can dispatch and deliver replies on eve 1.x.
+    install: `\`eve-channel-blooio@0.3.0\` cannot receive and reply to messages on eve 1.x. It requires an updated package release.
 
-The registry command writes \`agent/channels/blooio.ts\` and installs the package; it does not resolve that incompatibility:
+Registry command:
 
 \`\`\`bash
 eve add channel/blooio
@@ -340,7 +340,7 @@ import { blooioChannel } from "eve-channel-blooio";
 export default blooioChannel();
 \`\`\`
 
-Blooio is a native eve channel built on \`defineChannel\`, not a Chat SDK adapter. The example above is the package's authoring surface, not a working eve 1.x setup. See the [eve-channel-blooio README](https://github.com/Blooio/eve-channel-blooio#readme) for the full \`BlooioHandle\` surface: reactions, typing indicators, read receipts, polls, groups, capability checks, and history.`,
+Blooio is a native eve channel built on \`defineChannel\`, not a Chat SDK adapter. See the [eve-channel-blooio README](https://github.com/Blooio/eve-channel-blooio#readme) for the full \`BlooioHandle\` surface: reactions, typing indicators, read receipts, polls, groups, capability checks, and history.`,
     configure: `Set \`BLOOIO_API_KEY\` (a \`bl_live_...\` key) and \`BLOOIO_WEBHOOK_SECRET\` (\`whsec_...\`), then point a Blooio webhook at \`/eve/v1/blooio\`:
 
 \`\`\`bash
@@ -1107,9 +1107,9 @@ See the [AgentPhone adapter documentation](https://chat-sdk.dev/adapters/vendor-
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "lark", "feishu", "bytedance", "cardkit", "messaging"],
-    install: `**Compatibility:** This adapter receives events over a WebSocket connection. The current eve Chat SDK bridge requires an HTTP webhook context for \`send()\`, so the registry scaffold cannot dispatch those events to eve.
+    install: `eve's Chat SDK bridge does not support Lark's WebSocket transport. This channel cannot receive messages until the bridge supports non-webhook events.
 
-The registry command installs the adapter and writes \`agent/channels/lark.ts\`; additional bridge support is required before using it:
+Registry command:
 
 \`\`\`bash
 eve add channel/chat-sdk-lark
@@ -1148,16 +1148,16 @@ export default channel;
 \`\`\`
 
 See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/lark) for all supported events and credentials.`,
-    configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. For an app created on \`open.larksuite.com\`, set \`LARK_DOMAIN=lark\`; the adapter defaults to Feishu. Its WebSocket connection requires a long-lived process, but calling \`bot.initialize()\` alone does not make inbound dispatch compatible with eve's HTTP webhook bridge. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. For an app created on \`open.larksuite.com\`, set \`LARK_DOMAIN=lark\`; the adapter defaults to Feishu. The adapter requires a long-lived Node.js process for its WebSocket connection. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-beeper": {
     logo: "beeper",
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "matrix", "beeper", "encrypted chat", "e2ee", "signal", "instagram"],
-    install: `**Compatibility:** This adapter receives events through Matrix sync. The current eve Chat SDK bridge requires an HTTP webhook context for \`send()\`, so the registry scaffold cannot dispatch those events to eve.
+    install: `eve's Chat SDK bridge does not support Matrix sync. This channel cannot receive messages until the bridge supports non-webhook events.
 
-The registry command installs the adapter and writes \`agent/channels/beeper.ts\`; additional bridge support is required before using it:
+Registry command:
 
 \`\`\`bash
 eve add channel/chat-sdk-beeper
@@ -1196,7 +1196,7 @@ export default channel;
 \`\`\`
 
 See the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vendor-official/matrix) for all supported events and credentials.`,
-    configure: `Set the Matrix homeserver, access token, and bot identity environment variables documented by Beeper. This adapter consumes Matrix sync rather than webhooks and needs a long-lived process. Calling \`bot.initialize()\` alone does not make inbound dispatch compatible with eve's HTTP webhook bridge. It requires Node.js 22 or newer and a durable state adapter in production. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Set the Matrix homeserver, access token, and bot identity environment variables documented by Beeper. This adapter consumes Matrix sync rather than webhooks and needs a long-lived process. It requires Node.js 22 or newer and a durable state adapter in production. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-resend": {
     logo: "resend",
@@ -1343,9 +1343,9 @@ const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
       "media generation",
       "exports",
     ],
-    install: `**Compatibility:** The published \`@blitzreels/eve@0.2.1\` distribution is incompatible with eve 1.x. A compatible upstream release is required; the registry command below cannot make this version load.
+    install: `\`@blitzreels/eve@0.2.1\` does not load on eve 1.x. It requires a rebuilt package release.
 
-Install a compatible release through the registry when available:
+Registry command:
 
 \`\`\`bash
 eve add extension/blitzreels
@@ -1436,9 +1436,9 @@ The extension supports creating and inspecting assets, exact-range clips, subtit
       "screenshots",
       "web automation",
     ],
-    install: `**Compatibility:** The published \`@browserbasehq/eve@0.2.3\` distribution is incompatible with eve 1.x. A compatible upstream release is required; the registry command below cannot make this version load.
+    install: `\`@browserbasehq/eve@0.2.3\` does not load on eve 1.x. It requires a rebuilt package release.
 
-Install a compatible release through the registry when available:
+Registry command:
 
 \`\`\`bash
 eve add extension/browserbase
@@ -1461,7 +1461,7 @@ export default browserbase({
 });
 \`\`\`
 
-The filename supplies the \`browserbase\` namespace. The published package exposes \`browserbase__run\`, \`browserbase__snapshot\`, and \`browserbase__screenshot\`. Use \`run\` for Playwright-shaped JavaScript or snapshot actions, \`snapshot\` for the active page's accessibility tree, and \`screenshot\` for visual inspection.`,
+The filename supplies the \`browserbase\` namespace. The extension adds \`browserbase__run\`, \`browserbase__snapshot\`, and \`browserbase__screenshot\`. Use \`run\` for Playwright-shaped JavaScript or snapshot actions, \`snapshot\` for the active page's accessibility tree, and \`screenshot\` for visual inspection.`,
     configure: `Use the run tool to navigate and interact with pages, then inspect the result with snapshot or screenshot.
 
 You can configure the Stagehand model, session timeout, and proxies:
@@ -1477,7 +1477,7 @@ export default browserbase({
 });
 \`\`\`
 
-The published package shares its browser session across calls using the same module instance; it does not isolate the browser per eve session or persist it across invocations. Do not use it for mutually untrusted concurrent sessions. Call \`await browser.close()\` through \`browserbase__run\` after collecting the final result to release the owned browser. Keep API keys out of prompts, and add approval gates around sensitive or irreversible browser actions. See the [Browserbase extension package](https://www.npmjs.com/package/@browserbasehq/eve) for the complete tool and configuration reference.`,
+Browserbase reuses a browser across calls, including calls from different eve sessions. Do not share it between users who must not access each other's browser data. Browser sessions do not survive process restarts. Call \`await browser.close()\` through \`browserbase__run\` after collecting the final result to release the browser. Keep API keys out of prompts, and add approval gates around sensitive or irreversible browser actions. See the [Browserbase extension package](https://www.npmjs.com/package/@browserbasehq/eve) for the complete tool and configuration reference.`,
   },
   kernel: {
     logo: "kernel",
@@ -1491,16 +1491,16 @@ The published package shares its browser session across calls using the same mod
       "managed auth",
       "vercel connect",
     ],
-    install: `**Compatibility:** The published \`@onkernel/eve-extension@0.1.4\` distribution is incompatible with eve 1.x. A compatible upstream release is required; the registry command below cannot make this version load.
+    install: `\`@onkernel/eve-extension@0.1.4\` does not load on eve 1.x. It requires a rebuilt package release.
 
-Install a compatible release through the registry when available:
+Registry command:
 
 \`\`\`bash
 eve add extension/kernel
 \`\`\`
 
-The package requires Node.js 24 or later. Its configuration mounts Kernel's hosted MCP browser tools and a \`browse\` skill without requiring you to maintain browser tool code.`,
-    quickStart: `The package's Connect configuration uses Vercel CLI 58.8.0 or later for \`--connection-method\`. Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
+The extension requires Node.js 24 or later. It adds Kernel's hosted MCP browser tools and a \`browse\` skill.`,
+    quickStart: `Vercel Connect setup requires Vercel CLI 58.8.0 or later for \`--connection-method\`. Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
 
 \`\`\`bash
 vercel connect create kernel --name kernel-mcp --connection-method mcp
@@ -1551,15 +1551,15 @@ The default mount can execute JavaScript in the browser VM and reuse authenticat
       "bandit",
       "a/b testing",
     ],
-    install: `**Compatibility:** The published \`@jetty/eve@0.3.1\` distribution is incompatible with eve 1.x. A compatible upstream release is required; the registry command below cannot make this version load.
+    install: `\`@jetty/eve@0.3.1\` does not load on eve 1.x. It requires a rebuilt package release.
 
-Install a compatible release through the registry when available:
+Registry command:
 
 \`\`\`bash
 eve add extension/jetty
 \`\`\`
 
-The package requires Node.js 24 or later. Its configuration can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
+The extension requires Node.js 24 or later. Jetty can record completed turns, grade them, compare experiment arms, and report native \`eve eval\` results.`,
     quickStart: `Add your Jetty credentials and collection to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1741,7 +1741,7 @@ export default defineMemory({
 });
 \`\`\`
 
-Keep the \`recall\` wrapper shown above when configuring the provider; eve 1.x accepts recall at \`turn.started\` only. Before each turn, the provider recalls memories relevant to the user's message. After the turn, it retains the user message and assistant reply. Neither path depends on the model choosing to call a tool. The slot also exposes \`hindsight__reflect\`, so the model can ask long-term memory a question mid-turn.`,
+Set \`provider.recall\` to include only \`turn.started\`, as eve 1.x requires. Before each turn, the provider recalls memories relevant to the user's message. After the turn, it retains the user message and assistant reply. Neither path depends on the model choosing to call a tool. The slot also exposes \`hindsight__reflect\`, so the model can ask long-term memory a question mid-turn.`,
     configure: `Each eve memory scope gets its own Hindsight bank, so \`byPrincipal\` keeps every caller's memory separate. Tune recall in the memory slot when needed:
 
 \`\`\`ts title="agent/memory/hindsight.ts"
@@ -1867,7 +1867,7 @@ AgentKit also ships \`@upstash/agentkit-eve-extension\`, an eve extension that a
 eve add memory/arcana
 \`\`\`
 
-This installs \`@kybernesis/arcana@0.8.0\` from the provider's \`eve-1.0\` release channel and writes a memory slot. The registry configuration requires Node.js 24 or later and eve 1.x.`,
+This installs \`@kybernesis/arcana@0.8.0\` and writes a memory slot. Requires Node.js 24 or later and eve 1.x.`,
     quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1915,7 +1915,7 @@ An Arcana key is scoped to a workspace. Keep the key in a sensitive environment 
 eve add memory/supermemory
 \`\`\`
 
-This installs the published \`@supermemory/eve@0.2.0-rc.1\` prerelease and writes a memory slot. The registry configuration requires Node.js 24 or later and eve 1.x. Review the prerelease before using it in production; the provider's npm \`latest\` release, \`0.1.3\`, does not support eve 1.x.`,
+This installs \`@supermemory/eve@0.2.0-rc.1\`, a prerelease for eve 1.x, and writes a memory slot. Requires Node.js 24 or later and eve 1.x.`,
     quickStart: `Create a Supermemory API key and add it to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1995,14 +1995,14 @@ export default defineMemory({
 });
 \`\`\`
 
-The filename creates the \`memanto\` slot. Keep the \`recall\` wrapper shown above; eve 1.x accepts recall at \`turn.started\` only. Before every turn, the provider recalls relevant context. It also gives the model \`memanto__remember\` and \`memanto__recall\` tools for deliberate saves and searches.`,
+The filename creates the \`memanto\` slot. Set \`provider.recall\` to include only \`turn.started\`, as eve 1.x requires. Before every turn, the provider recalls relevant context. It also gives the model \`memanto__remember\` and \`memanto__recall\` tools for deliberate saves and searches.`,
     configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
 
 All eve scopes share one Memanto agent. The provider tags each memory with a digest of eve's opaque scope key and filters recalls by that tag. Its tools are bound to the current scope, so the model cannot read or write another scope's memories.
 
-Automatic capture is unsupported in this reviewed configuration. The published adapter does not make completed-turn capture idempotent across eve operation replays. The registry explicitly sets \`capture: false\`; leave it disabled until the provider supports replay-safe idempotency. The model can still use \`memanto__remember\` for deliberate, scope-bound memory writes. Those are model-invoked writes, not user-approved writes. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
+Keep \`capture: false\`. Automatic capture can store a turn more than once when eve retries it. The model can still use \`memanto__remember\` for deliberate, scope-bound memory writes. These writes do not require user approval. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
 
-The reviewed configuration expects a running Memanto server at \`MEMANTO_BASE_URL\`. If you omit it during \`eve dev\`, the adapter starts a local server with the unpinned default \`memanto\` package through \`uvx\`. That local-server path is outside the reviewed compatibility boundary. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
+Set \`MEMANTO_BASE_URL\` to a Memanto server you run. If you omit it during \`eve dev\`, the adapter starts a local server through \`uvx\` without pinning its version. Use an explicit server URL to control which version runs. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
   },
   memco: {
     logo: "memco",
