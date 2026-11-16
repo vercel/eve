@@ -924,16 +924,15 @@ export function callSignInsSettled(
 }
 
 /**
- * Sign-in callbacks arrived: each attempt the session still waits on is accepted. A sign-in a
- * call or a model call waits on settles when that call completes it (`callSignInsSettled`).
+ * Sign-in callbacks arrived: a responder's attempt, still open, ends accepted. A call's sign-ins
+ * settle with the call, and a model call's settle when the turn goes ahead with the model call
+ * (`callSignInsSettled`).
  */
 export function completeSignIn(
   view: SessionView,
   input: { readonly completions: readonly AuthorizationChallenge[] },
 ): Transition {
   const tables = view.projection.view;
-  // Only a responder's sign-in settles here. A call reports its own sign-ins when it settles, and
-  // a model call's dynamic value reports its own when it completes it.
   const reportedByCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
   return unchanged(
     view,

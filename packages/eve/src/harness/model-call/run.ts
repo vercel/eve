@@ -6,7 +6,12 @@ import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import { enforceBudget, humanInputContext, stopForSignIn } from "#harness/hitl/index.js";
+import {
+  enforceBudget,
+  humanInputContext,
+  settleModelSignIns,
+  stopForSignIn,
+} from "#harness/hitl/index.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
@@ -82,6 +87,7 @@ export async function runModelStep(
   const prompt = commitTurnInput(step, prepared);
   if (preparation.kind === "sign-in")
     return await pauseForSignIn(step, prompt.messages, preparation.error);
+  await settleModelSignIns(step);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;

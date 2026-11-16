@@ -1,6 +1,7 @@
 import type {
   ConnectionAuthorizationContext,
   AuthorizationDefinition,
+  TokenResult,
 } from "#shared/connection-types.js";
 
 /**
@@ -37,4 +38,23 @@ export interface ToolAuthOptions {
    * `connect({ connector, tokenParams })`.
    */
   readonly authKey?: string;
+}
+
+/**
+ * The caller's sign-in, in a tool and in the agent's dynamic `model`. Both methods take the same
+ * providers as a connection's `auth` field, including `connect("...")` from `@vercel/connect/eve`,
+ * and one call can use several providers. Each context says how its work continues after the
+ * sign-in.
+ */
+export interface SignInMethods {
+  /**
+   * Returns the caller's token for `provider`. When the caller has no token, eve opens the sign-in
+   * and continues the work once the caller signs in.
+   */
+  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
+  /**
+   * Drops the provider's cached token and starts a sign-in. Call it when the provider rejects a
+   * token from {@link getToken}, such as with a `401`.
+   */
+  requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
 }

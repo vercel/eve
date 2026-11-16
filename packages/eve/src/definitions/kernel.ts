@@ -15,6 +15,7 @@ import { sessionFrameOf } from "#definitions/frame.js";
 import { reportEffectFailure } from "#definitions/intents.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
 import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
+import type { SignInMethods } from "#tools/auth.js";
 import { openMemos } from "#definitions/memos.js";
 import {
   clearLive,
@@ -446,11 +447,24 @@ async function withMemos<T>(
 }
 
 /**
- * Dynamic values sign in under this scope: `connect("x/y")` keys as `eve:dynamic__x_y`, and a
- * provider without Connect metadata keys under its definition. A tool name can't contain `:`. An
- * `authKey` replaces the scope, so every tool and connection with the same key shares the token.
+ * The dynamic model signs in under this scope: `connect("x/y")` keys as `eve:model__x_y`, and a
+ * provider without Connect metadata as `eve:model__inline_auth`. A tool name can't contain `:`.
+ * An `authKey` replaces the scope, so every tool and connection with the same key shares the token.
  */
-const DYNAMIC_AUTH_SCOPE = "eve:dynamic";
+const MODEL_AUTH_SCOPE = "eve:model";
+
+/**
+ * The dynamic model's sign-in methods. A restore reads the latest evaluation's results and
+ * completes no sign-in: the evaluation completes a pending one, so when the provider rejects the
+ * fresh token, the turn fails.
+ */
+function modelSignIn(mode: Run["mode"]): SignInMethods {
+  const { getToken, requireAuth } = createAuthorizationContext({
+    scope: MODEL_AUTH_SCOPE,
+    ...(mode === "restore" && { completeAuthorization: async () => false }),
+  });
+  return { getToken, requireAuth };
+}
 
 function internalContext(
   ctx: ContextContainer,
@@ -459,20 +473,12 @@ function internalContext(
 ): InternalContext {
   const frame = sessionFrameOf(ctx);
   const { history } = run;
-  const auth = createAuthorizationContext({
-    owner: definition.id,
-    scope: DYNAMIC_AUTH_SCOPE,
-    // A restore only reads the latest evaluation's results. The evaluation completes a pending
-    // sign-in, so the model call knows its token comes from that sign-in.
-    ...(run.mode === "restore" && { completeAuthorization: async () => false }),
-  });
   return Object.defineProperties(
     {
       ...frame,
       abortSignal: run.signal,
       ctx,
-      getToken: auth.getToken,
-      requireAuth: auth.requireAuth,
+      ...(run.choosesModel && modelSignIn(run.mode)),
       getSandbox: run.choosesModel
         ? () => {
             throw new Error(

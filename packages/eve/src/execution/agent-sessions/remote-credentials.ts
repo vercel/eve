@@ -63,12 +63,6 @@ export async function remoteAgentCredentials(input: {
       );
     },
     model: { id: binding.model ?? "" },
-    getToken: () => {
-      throw unavailableAuth(label, "getToken");
-    },
-    requireAuth: () => {
-      throw unavailableAuth(label, "requireAuth");
-    },
   };
   let value: unknown;
   try {
@@ -100,10 +94,4 @@ async function foldSessionViewTo(sessionId: string, position: number): Promise<S
     if (line !== undefined) foldLine(view, line, at);
   }
   return view;
-}
-
-function unavailableAuth(label: string, method: "getToken" | "requireAuth"): Error {
-  return new Error(
-    `"${label}" called ctx.${method}() while eve rebuilt credentials for a remote agent. No sign-in can run there, so read the remote agent's credentials from the session or the environment.`,
-  );
 }

@@ -22,7 +22,6 @@ import { filterEventsByType } from "#internal/testing/events.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
-import { defineInstructions } from "#public/definitions/instructions.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
 
 const alice = {
@@ -54,6 +53,29 @@ describe("a dynamic model that needs a sign-in", () => {
       expect(billing.tokensSeen).toEqual(["billing-token-1"]);
       expect(userMessages(billing.prompts.at(-1))).toEqual([FIRST]);
     });
+  });
+
+  it("settles the card when the model call goes ahead without reading the token again", async () => {
+    const billing = billingProvider();
+    let readsToken = true;
+    await withAgent(
+      "model-sign-in-once",
+      async (ctx) => {
+        if (readsToken) await ctx.getToken(billing.auth);
+        return plainModel();
+      },
+      async (session) => {
+        const asked = await session.asked();
+        readsToken = false;
+        const answered = await session.callBack();
+        expect(cardOutcome(answered, asked)).toBe("accepted");
+        expect(turnSettled(answered)).toMatchObject({ outcome: "completed" });
+
+        await session.send("And yesterday's?");
+        const next = await session.stream.nextUntil("second answer", isTurnSettled);
+        expect(turnSettled(next)).toMatchObject({ outcome: "completed" });
+      },
+    );
   });
 
   it("ends a model call that calls requireAuth, and runs it again after sign-in", async () => {
@@ -204,43 +226,6 @@ describe("a model sign-in that doesn't complete", () => {
   });
 });
 
-it("gives each dynamic value its own plain provider's token", async () => {
-  const seen: Record<string, string> = {};
-  const read = async (ctx: DynamicModelContext, name: string) => {
-    seen[name] = (await ctx.getToken({ getToken: async () => ({ token: `${name}-key` }) })).token;
-  };
-  const instructions = (logicalPath: string, name: string) => ({
-    logicalPath,
-    loadNamespace: async () => ({
-      default: defineDynamic(async (ctx: DynamicModelContext) => {
-        await read(ctx, name);
-        return defineInstructions({ content: `Answer from ${name}.` });
-      }),
-    }),
-  });
-  await withAgent(
-    "plain-providers",
-    async (ctx) => {
-      await read(ctx, "model");
-      return plainModel();
-    },
-    async (session) => {
-      await session.stream.nextUntil("answer", isTurnSettled);
-      expect(seen).toEqual({
-        docs: "docs-key",
-        "foo/bar": "foo/bar-key",
-        foo_bar: "foo_bar-key",
-        model: "model-key",
-      });
-    },
-    [
-      instructions("instructions/docs.ts", "docs"),
-      instructions("instructions/foo/bar.ts", "foo/bar"),
-      instructions("instructions/foo_bar.ts", "foo_bar"),
-    ],
-  );
-});
-
 interface SessionOptions {
   readonly bigFirstAnswer?: boolean;
   readonly rejectEveryToken?: boolean;
@@ -320,7 +305,7 @@ function openSession(run: Awaited<ReturnType<typeof startTestSession>>, continua
             authorizationCallback: {
               attemptId,
               callback,
-              connectionName: "eve:dynamic__oauth_billing",
+              connectionName: "eve:model__oauth_billing",
             },
           },
         ],

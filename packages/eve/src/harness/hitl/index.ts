@@ -8,11 +8,10 @@ import { AuthKey, SessionKey } from "#context/keys.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { commitOf, committedMessages, saveTransition } from "#harness/session-machine/commit.js";
 import { callSignInsSettled, fail } from "#harness/session-machine/transitions.js";
-import type { SignInCompleted } from "#harness/authorization.js";
 import { signInFailureOf } from "./approved-calls.js";
 import { readTurnState } from "#harness/session-machine/state.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
+import { modelSignIns, park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
@@ -102,18 +101,17 @@ export async function stopForSignIn(
 type SignInInterrupt = NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>;
 
 /**
- * Reports a model call's sign-in when its dynamic value completes it: the card settles accepted,
- * or declined or failed with the reason.
+ * The step resumed with callbacks for the model call's sign-ins: their cards settle, as a call's
+ * sign-ins settle with the call. They settle accepted when the turn goes ahead with the model
+ * call, and declined or failed with the reason when the sign-in failed.
  */
-export function modelSignInReporter(step: Step): SignInCompleted {
-  return async (result, failure) => {
-    const challenge = step.config.signInCompletions?.find(
-      ({ attemptId }) => attemptId === result.attemptId,
-    );
-    if (challenge === undefined) return;
-    const settled = failure === undefined ? undefined : signInFailureOf(failure);
-    await step.apply(commitOf(callSignInsSettled(step.view(), { signIns: [challenge] }, settled)));
-  };
+export async function settleModelSignIns(step: Step, failure?: unknown): Promise<void> {
+  const events = callSignInsSettled(
+    step.view(),
+    { signIns: modelSignIns(step.view(), step.config.signInCompletions ?? []) },
+    failure === undefined ? undefined : signInFailureOf(failure),
+  );
+  if (events.length > 0) await step.apply(commitOf(events));
 }
 
 /**

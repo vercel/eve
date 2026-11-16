@@ -1,3 +1,4 @@
+import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { callSignIns } from "#harness/session-machine/transitions.js";
@@ -37,15 +38,22 @@ export function holdsMessages(view: SessionView): boolean {
   );
 }
 
-/** Whether the turn waits on an open sign-in for its model call: one no stopped call or answer owns. */
+/** Whether the turn waits on an open sign-in for its model call. */
 export function holdsModelCall(view: SessionView): boolean {
-  const byCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
   const { interactions } = view.projection.view;
-  return view.signIns.some(
-    (challenge) =>
-      challenge.candidateId === undefined &&
-      !byCalls.has(signInAttemptKey(challenge)) &&
-      interactions[signInInteractionId(challenge)]?.status === "open",
+  return modelSignIns(view, view.signIns).some(
+    (challenge) => interactions[signInInteractionId(challenge)]?.status === "open",
+  );
+}
+
+/** The sign-ins in `challenges` for the turn's model call: a stopped call or a responder owns the others. */
+export function modelSignIns(
+  view: SessionView,
+  challenges: readonly AuthorizationChallenge[],
+): AuthorizationChallenge[] {
+  const byCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
+  return challenges.filter(
+    (challenge) => challenge.candidateId === undefined && !byCalls.has(signInAttemptKey(challenge)),
   );
 }
 

@@ -15,8 +15,7 @@ import { isDynamicModelSelectionError } from "#definitions/model.js";
 import { DefinitionFailedError } from "#definitions/kernel.js";
 import { evaluateStepValues } from "#definitions/step.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import { SignInCompletedKey } from "#harness/authorization.js";
-import { modelSignInReporter } from "#harness/hitl/index.js";
+import { settleModelSignIns } from "#harness/hitl/index.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
 import { displayProperName } from "#protocol/session-projection/display-name.js";
 import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
@@ -177,15 +176,12 @@ export async function openTurn(
 export async function prepareModelCall(step: Step, preview: Prompt): Promise<ModelCallPreparation> {
   throwIfTurnAborted(step.config.abortSignal);
   const conversation = validateHarnessModelMessages(withClientContext(preview));
-  step.ctx.setVirtualContext(SignInCompletedKey, modelSignInReporter(step));
   try {
     await evaluateStepValues(step, { abortSignal: step.config.abortSignal, conversation });
   } catch (error) {
     if (!(error instanceof DefinitionFailedError)) throw error;
     if (isSignInError(error.cause)) return { kind: "sign-in", error: error.cause };
     return { kind: "failed", result: await failTurn(step, error, "REACTION_FAILED") };
-  } finally {
-    step.ctx.delete(SignInCompletedKey);
   }
   return { kind: "ready" };
 }
@@ -212,14 +208,16 @@ const EVE_SIGN_IN_REASONS: ReadonlySet<string | undefined> = new Set([
 ]);
 
 /**
- * A model call's sign-in didn't finish, so the turn fails with `SIGN_IN_FAILED`. The person reads
- * the provider's name, with the provider's own message when the author's code threw one.
+ * A model call's sign-in didn't finish: its card settles with the failure, and the turn fails
+ * with `SIGN_IN_FAILED`. The person reads the provider's name, with the provider's own message
+ * when the author's code threw one.
  */
 export async function failSignIn(
   step: Step,
   error: unknown,
   signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
 ): Promise<StepResult> {
+  await settleModelSignIns(step, error);
   const name = providerName(step.view(), signIn);
   const message =
     isConnectionAuthorizationFailedError(error) && !EVE_SIGN_IN_REASONS.has(error.reason)

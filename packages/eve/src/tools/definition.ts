@@ -14,7 +14,7 @@ import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
-import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
+import type { SignInMethods, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
@@ -26,7 +26,12 @@ type ApprovalContextInput<TInput> = 0 extends 1 & TInput
     ? Record<string, unknown>
     : TInput;
 
-export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
+export type {
+  SignInMethods,
+  ToolAuthDefinition,
+  ToolAuthOptions,
+  ToolAuthProvider,
+} from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context"> & {
@@ -165,13 +170,13 @@ export interface ToolAskOptions {
  * Authored tool context. Passed as the last argument to
  * {@link ToolDefinition.execute}.
  *
- * Extends {@link SessionContext} with token accessors. Passing a provider
- * resolves that provider inline, which lets one tool use multiple credentials.
+ * Extends {@link SessionContext} with {@link SignInMethods}: a call that needs
+ * a sign-in stops, and runs once the caller signs in.
  *
  * Workflow tools use the separate `WorkflowToolContext` provided by
  * `defineWorkflowTool`.
  */
-export type ToolContext = SessionContext & {
+export interface ToolContext extends SessionContext, SignInMethods {
   /**
    * Aborts when the work this tool is doing is cancelled: the active turn
    * for an ordinary tool, the durable run for a workflow tool. In a workflow
@@ -201,18 +206,6 @@ export type ToolContext = SessionContext & {
    */
   readonly messages: readonly ModelMessage[];
   /**
-   * Resolves the bearer token for an inline provider. This accepts the same
-   * auth shapes as a connection's `auth` field, including `connect("...")`
-   * from `@vercel/connect/eve`.
-   */
-  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
-  /**
-   * Signals that the caller must complete authorization for an inline
-   * provider before proceeding. Use this after a downstream `401` rejects a
-   * token returned by {@link getToken}.
-   */
-  requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
-  /**
    * Starts or continues a session on one of the agent's channels, as a route
    * handler's `ctx.to()` does: `ctx.to(slack, target).send(message, options)`
    * runs the channel's `receive()` hook and returns the delivery. The session
@@ -236,7 +229,7 @@ export type ToolContext = SessionContext & {
    * person approved it; absent for calls that needed no approval.
    */
   readonly approval?: ApprovedCall;
-};
+}
 
 /**
  * The approval behind an approved tool call. The call still runs as the

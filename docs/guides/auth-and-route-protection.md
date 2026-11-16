@@ -494,7 +494,7 @@ Inline providers derive a stable auth key from Vercel Connect metadata when avai
 
 ### Before a model call
 
-When the model call needs the caller's own credential, get it in the agent's dynamic `model`. A dynamic value's `ctx` has the same `getToken` and `requireAuth` as a tool's. In this example, each person's model calls run on their own Anthropic API key:
+When the model call needs the caller's own credential, get it in the agent's dynamic `model`. Its `ctx` has the same `getToken` and `requireAuth` as a tool's; among dynamic values, only the `model` field has them. In this example, each person's model calls run on their own Anthropic API key:
 
 ```ts title="agent/agent.ts"
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -540,7 +540,7 @@ export default defineAgent({
 - When the provider rejects the token during a model call, call `ctx.requireAuth(provider)` from your model code, for example from AI SDK middleware. eve ends that model call and runs it again after sign-in.
 - When eve can't finish the sign-in, as in a scheduled turn or after a decline, the turn fails with `code: "SIGN_IN_FAILED"`. Its `message` shows the provider's display name, plus the message when your provider throws a `ConnectionAuthorizationFailedError`.
 
-Every `ctx.getToken` call with the same `authKey`, in a tool, a connection, or a dynamic value, shares one token and one sign-in. Call `ctx.getToken` outside `ctx.memo`; eve already reuses the token within a step.
+Every `ctx.getToken` call with the same `authKey`, in a tool, a connection, or the `model` field, shares one token and one sign-in. Call `ctx.getToken` before you build the model, outside `ctx.memo`: eve already reuses the token within a step.
 
 ## What to read next
 

@@ -44,7 +44,7 @@ export interface SignInReports {
 }
 
 /** How a failed sign-in settles its card: why it failed, and whether asking again can help. */
-export function signInFailureOf(failure: Error | string): {
+export function signInFailureOf(failure: unknown): {
   readonly reason: string;
   readonly retryable?: boolean;
 } {

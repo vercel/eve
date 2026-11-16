@@ -455,7 +455,7 @@ describe("controls and callbacks as deliveries", () => {
     expect(accepted(session, events)).toEqual([]);
   });
 
-  it("leaves a model call's sign-in to the dynamic value that completes it", () => {
+  it("leaves a model call's sign-in to the turn that goes ahead with the model call", () => {
     expect(
       completeSignIn(viewOf(waitingTurn()), { completions: [GITHUB_CALLBACK] }).events,
     ).toEqual([]);
