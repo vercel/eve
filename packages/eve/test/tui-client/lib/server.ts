@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -11,6 +11,7 @@ const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
 const FORCE_KILL_GRACE_MS = 2_000;
 const TERMINATE_GRACE_MS = 5_000;
+const BUILD_LOCK_POLL_MS = 250;
 const PROC_ROOT = "/proc";
 
 /**
@@ -61,14 +62,18 @@ export async function startAgentServer(input: {
   const baseUrl = `http://localhost:${port}`;
 
   if (plan.build !== undefined) {
-    if (await builtInThisRun(input.appName)) {
-      console.log(theme.muted(`[tui] reusing the "${input.appName}" build from this run ...`));
-    } else {
+    if (await claimBuild(input.appName)) {
       console.log(theme.muted(`[tui] building "${input.appName}" before smoke run ...`));
       // Built without the caller's start env: later tests reuse the build, whatever env they start
       // it with.
-      await runPnpmCommand({ ...plan.build, env: process.env });
-      await recordBuild(input.appName);
+      try {
+        await runPnpmCommand({ ...plan.build, env: process.env });
+        await recordBuild(input.appName);
+      } finally {
+        await releaseBuild(input.appName);
+      }
+    } else {
+      console.log(theme.muted(`[tui] reusing the "${input.appName}" build from this run ...`));
     }
   }
 
@@ -187,14 +192,48 @@ function spawnServerProcess(input: {
 }
 
 /**
- * True when this run already built `appName`. A single smoke test run on its
- * own leaves the variable unset and always builds.
+ * True when this caller should build `appName`, false when this run already
+ * built it. Smoke tests that run together share the build: the first to claim
+ * the app's lock builds it, and the others wait for its record. A single smoke
+ * test run on its own leaves the variable unset and always builds.
  */
-async function builtInThisRun(appName: string): Promise<boolean> {
-  if (BUILD_STATE_DIR === undefined) return false;
+async function claimBuild(appName: string): Promise<boolean> {
+  if (BUILD_STATE_DIR === undefined) return true;
 
+  await mkdir(BUILD_STATE_DIR, { recursive: true });
+  for (;;) {
+    if (await exists(join(BUILD_STATE_DIR, appName))) return false;
+    try {
+      // `mkdir` fails when the directory exists, so exactly one caller claims it.
+      await mkdir(buildLockPath(appName));
+      // A build that finished between the check and the claim already recorded the app.
+      if (await exists(join(BUILD_STATE_DIR, appName))) {
+        await releaseBuild(appName);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    // Another smoke test is building this app; a failed build releases the
+    // lock without a record, and the next waiter builds it.
+    await sleep(BUILD_LOCK_POLL_MS);
+  }
+}
+
+async function releaseBuild(appName: string): Promise<void> {
+  if (BUILD_STATE_DIR === undefined) return;
+
+  await rm(buildLockPath(appName), { force: true, recursive: true });
+}
+
+function buildLockPath(appName: string): string {
+  return join(BUILD_STATE_DIR!, `${appName}.lock`);
+}
+
+async function exists(path: string): Promise<boolean> {
   try {
-    await access(join(BUILD_STATE_DIR, appName));
+    await access(path);
     return true;
   } catch {
     return false;

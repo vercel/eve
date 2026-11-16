@@ -31,7 +31,12 @@
       {
         "name": "repair",
         "evals": [
-          "self-modification/offer-repair",
+          "self-modification/offer-repair"
+        ]
+      },
+      {
+        "name": "edit",
+        "evals": [
           "self-modification/repair-order-total",
           "self-modification/update-identity"
         ]
@@ -44,9 +49,14 @@
         ]
       },
       {
-        "name": "create",
+        "name": "create-shipping",
         "evals": [
-          "self-modification/create-shipping-quote",
+          "self-modification/create-shipping-quote"
+        ]
+      },
+      {
+        "name": "create-triage",
+        "evals": [
           "self-modification/create-incident-triage"
         ]
       }

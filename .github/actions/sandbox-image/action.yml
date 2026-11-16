@@ -6,9 +6,12 @@ description: >-
 inputs:
   pull:
     description: >-
-      Pull the resolved image into the Docker daemon before the tests run.
-      Scenarios that prewarm a sandbox pull the image themselves, and parallel
-      workers would each pull it inside their own test.
+      Pull the resolved image into the Docker daemon. "true" pulls it before
+      this step ends. "background" starts the pull and returns, so it overlaps
+      the install and build steps that follow; a test that needs the image
+      before the pull finishes joins it, because the daemon shares one pull of
+      an image between every client that asks for it. "false" leaves the pull
+      to the first sandbox that needs the image.
     required: false
     default: "false"
 
@@ -40,4 +43,7 @@ runs:
         if [[ "$PULL" == "true" ]]; then
           echo "Pulling $image once for the job"
           docker pull "$image"
+        elif [[ "$PULL" == "background" ]]; then
+          echo "Pulling $image in the background; log at $RUNNER_TEMP/sandbox-image-pull.log"
+          nohup docker pull "$image" >"$RUNNER_TEMP/sandbox-image-pull.log" 2>&1 &
         fi

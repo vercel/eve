@@ -80,8 +80,12 @@ async function expectParallelReviews(t: EveEvalContext, turn: EveEvalTurn) {
     return reviewSchema.parse(child.requireToolCall("review_sheet").output);
   });
   assert.equal(new Set(reviews.map((review) => review.sheet)).size, 5, "all five sheets reviewed");
+  const firstStarted = Math.min(...reviews.map((review) => review.startedAt));
   const lastStarted = Math.max(...reviews.map((review) => review.startedAt));
   const firstFinished = Math.min(...reviews.map((review) => review.completedAt));
+  t.log(
+    `[prompt-cache] review start spread ${lastStarted - firstStarted} ms, overlap margin ${firstFinished - lastStarted} ms`,
+  );
   assert(lastStarted < firstFinished, "all five reviews overlap");
 }
 

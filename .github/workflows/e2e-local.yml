@@ -44,7 +44,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|package\.json$|tsconfig\.json$|turbo\.json$|packages/eve/|packages/eve-catalog/|packages/tracing/|packages/eve-code/extension/|packages/eve-git/extension/|packages/eve-computer-use/extension/|packages/eve-custom-skills/extension/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/sandbox-image-tag\.mjs$|\.github/actions/sandbox-image/|\.github/workflows/e2e-local\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|package\.json$|tsconfig\.json$|turbo\.json$|packages/eve/|packages/eve-catalog/|packages/tracing/|packages/eve-code/extension/|packages/eve-git/extension/|packages/eve-computer-use/extension/|packages/eve-custom-skills/extension/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/sandbox-image-tag\.mjs$|\.github/actions/sandbox-image/|\.github/actions/setup-pnpm/|\.github/actions/pnpm-install/|\.github/workflows/e2e-local\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -91,33 +91,36 @@ jobs:
 
       - name: Setup pnpm
         if: needs.changes.outputs.relevant == 'true'
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         if: needs.changes.outputs.relevant == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
+      # The first sandbox needs the image; pulling it now overlaps install and build.
       - name: Resolve eve sandbox image
         if: needs.changes.outputs.relevant == 'true'
         uses: ./.github/actions/sandbox-image
-
-      # pnpm verifies the lockfile against the supply-chain policies on every
-      # install. Its verdict log is keyed by the lockfile hash, so the entry
-      # ci.yml saves from main is reused here and the check is skipped. This
-      # workflow never runs on main, so it only restores the verdict.
-      - name: Restore the lockfile verification verdict
-        if: needs.changes.outputs.relevant == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+          pull: "background"
 
+      # The workspace packages a fixture's build and evals read: eve, the
+      # shared fixtures, and the workspace packages they depend on (the e2e
+      # config, extensions such as @eve/agent-browser). test-tui installs the
+      # same set, so this restores the pnpm store that test-tui saves from
+      # main (about half the size of the whole workspace's) along with the
+      # lockfile verification verdict.
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: tui
+          filters: |
+            eve...
+            {./apps/fixtures/*}...
+            {./e2e/fixtures/*}...
 
       - name: Build fixture dependencies
         if: needs.changes.outputs.relevant == 'true'

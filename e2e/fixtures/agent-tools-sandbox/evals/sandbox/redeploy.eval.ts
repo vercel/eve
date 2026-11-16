@@ -36,6 +36,8 @@ import type { EveEvalContext } from "eve/evals";
 
 const ALIAS_ENV = "EVE_E2E_REDEPLOY_ALIAS";
 const ALIAS_SETTLE_MATCHES = 5;
+// Five matches 500 ms apart: the alias serves the new deployment for 2 s straight.
+const ALIAS_POLL_MS = 500;
 
 const FILE_PATH = "/workspace/redeploy-note.txt";
 const FILE_TOKEN = "sandbox-redeploy-ok-K4W";
@@ -231,7 +233,7 @@ async function waitForAliasToServe(t: EveEvalContext, marker: string): Promise<v
     } catch {
       consecutiveMatches = 0;
     }
-    await t.sleep(1_000);
+    await t.sleep(ALIAS_POLL_MS);
   }
   throw new Error(
     `Timed out waiting for alias ${new URL(t.target.url).host} to serve marker ${marker}; ` +

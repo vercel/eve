@@ -1,3 +1,5 @@
 import { defineEvalConfig } from "eve/evals";
 
-export default defineEvalConfig({ maxConcurrency: 1, timeoutMs: 240_000 });
+// Each eval holds its own sessions and checks cache reuse only within them, so
+// the three evals run together.
+export default defineEvalConfig({ maxConcurrency: 3, timeoutMs: 240_000 });

@@ -1,0 +1,95 @@
+name: "Setup pnpm"
+description: >-
+  Put package.json's pnpm on the PATH. pnpm/action-setup installs a bootstrap
+  pnpm with npm and then self-updates it to that version on every job (4-10 s
+  on Linux), so on Linux the installed pnpm is cached by version and the
+  action runs only when the cache misses. Every run restores the
+  cache; only runs on main save it, as for the other caches.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Read the pnpm version and home
+      id: pnpm
+      shell: bash
+      run: |
+        node -e '
+          const { join } = require("node:path");
+          const { homedir } = require("node:os");
+          const version = require("./package.json").packageManager;
+          const home = join(homedir(), "setup-pnpm", "node_modules", ".bin");
+          require("node:fs").appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `version=${version}\nhome=${home}\nbin=${join(home, "bin")}\n`,
+          );
+        '
+
+    # Not on Windows: there the restored pnpm fails from PowerShell ("The
+    # directory name is invalid"), and Windows downloads pnpm instead (below).
+    - name: Restore pnpm
+      id: cache
+      if: runner.os != 'Windows'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/setup-pnpm
+        key: setup-pnpm-${{ runner.os }}-${{ steps.pnpm.outputs.version }}
+
+    # On Windows, the bootstrap-and-self-update takes 19-37 s. When
+    # package.json pins the version below, the job downloads pnpm's standalone
+    # Windows build from its GitHub release instead, checked against its
+    # SHA-256. Another version falls back to pnpm/action-setup until the pin is
+    # updated (`sha256sum pnpm-win32-x64.zip` of the release asset).
+    - name: Download standalone pnpm
+      id: standalone
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        PACKAGE_MANAGER: ${{ steps.pnpm.outputs.version }}
+        PINNED_VERSION: "12.17.0"
+        PINNED_SHA256: "f160b053dac663c5931975d244920836ec26e6bc3516a42518db44c9d5c2ffc2"
+        # The directory pnpm/action-setup uses as PNPM_HOME, so pnpm resolves
+        # the same store path and the jobs' store caches still match.
+        PNPM_HOME_DIR: ${{ steps.pnpm.outputs.home }}
+      run: |
+        if ($env:PACKAGE_MANAGER -ne "pnpm@$env:PINNED_VERSION") {
+          Write-Output "package.json wants $env:PACKAGE_MANAGER, not the pinned pnpm@$env:PINNED_VERSION; using pnpm/action-setup."
+          Add-Content $env:GITHUB_OUTPUT "installed=false"
+          exit 0
+        }
+        $ProgressPreference = "SilentlyContinue"
+        $dir = $env:PNPM_HOME_DIR
+        $zip = Join-Path $env:RUNNER_TEMP "pnpm-win32-x64.zip"
+        Invoke-WebRequest -Uri "https://github.com/pnpm/pnpm/releases/download/v$env:PINNED_VERSION/pnpm-win32-x64.zip" -OutFile $zip
+        $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $env:PINNED_SHA256) { throw "pnpm-win32-x64.zip SHA-256 $actual does not match the pinned $env:PINNED_SHA256." }
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        tar -xf $zip -C $dir
+        Add-Content $env:GITHUB_PATH $dir
+        Add-Content $env:GITHUB_ENV "PNPM_HOME=$dir"
+        Add-Content $env:GITHUB_OUTPUT "installed=true"
+
+    - name: Install pnpm
+      if: (runner.os == 'Windows' && steps.standalone.outputs.installed != 'true') || (runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true')
+      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+    # The same PATH and PNPM_HOME pnpm/action-setup sets: the self-updated pnpm
+    # in PNPM_HOME/bin comes first.
+    - name: Use the cached pnpm
+      if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        PNPM_HOME_DIR: ${{ steps.pnpm.outputs.home }}
+        PNPM_BIN_DIR: ${{ steps.pnpm.outputs.bin }}
+      run: |
+        echo "$PNPM_HOME_DIR" >>"$GITHUB_PATH"
+        echo "$PNPM_BIN_DIR" >>"$GITHUB_PATH"
+        echo "PNPM_HOME=$PNPM_HOME_DIR" >>"$GITHUB_ENV"
+
+    # Saved before any install, so the cache holds pnpm and not the packages
+    # pnpm stores under PNPM_HOME on Linux.
+    - name: Save pnpm
+      if: runner.os != 'Windows' && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack') && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/setup-pnpm
+        key: ${{ steps.cache.outputs.cache-primary-key }}

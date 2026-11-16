@@ -39,7 +39,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|package\.json$|tsconfig\.json$|turbo\.json$|packages/eve/|packages/eve-catalog/|packages/tracing/|packages/eve-code/extension/|packages/eve-git/extension/|packages/eve-computer-use/extension/|packages/eve-custom-skills/extension/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|scripts/sandbox-image-tag\.mjs$|scripts/workflow-stress-report\.(mjs|test\.mjs)$|\.github/actions/sandbox-image/|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|package\.json$|tsconfig\.json$|turbo\.json$|packages/eve/|packages/eve-catalog/|packages/tracing/|packages/eve-code/extension/|packages/eve-git/extension/|packages/eve-computer-use/extension/|packages/eve-custom-skills/extension/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|scripts/sandbox-image-tag\.mjs$|scripts/workflow-stress-report\.(mjs|test\.mjs)$|\.github/actions/sandbox-image/|\.github/actions/setup-pnpm/|\.github/actions/pnpm-install/|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -81,6 +81,9 @@ jobs:
         include: ${{ fromJSON(needs.discover-fixtures.outputs.world_matrix) }}
 
     env:
+      # Fixtures capped at four concurrent evals for a server on the runner
+      # read this to run more at once against a deployment.
+      EVE_E2E_EVAL_CONCURRENCY: "8"
       EVE_E2E_MODEL: mock
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
       VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1"
@@ -94,14 +97,13 @@ jobs:
 
       - name: Setup pnpm
         if: needs.changes.outputs.relevant == 'true'
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         if: needs.changes.outputs.relevant == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
       - name: Install Vercel CLI
         if: needs.changes.outputs.relevant == 'true'
@@ -111,18 +113,21 @@ jobs:
         if: needs.changes.outputs.relevant == 'true'
         uses: ./.github/actions/sandbox-image
 
-      # Reuse the verdict ci.yml saves from main so pnpm skips its supply-chain
-      # check of the lockfile. This workflow only restores it.
-      - name: Restore the lockfile verification verdict
-        if: needs.changes.outputs.relevant == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # The workspace packages a fixture's build and evals read: eve, the
+      # shared fixtures, and the workspace packages they depend on (the e2e
+      # config, extensions such as @eve/agent-browser). test-tui installs the
+      # same set, so this restores the pnpm store that test-tui saves from
+      # main (about half the size of the whole workspace's) along with the
+      # lockfile verification verdict.
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: tui
+          filters: |
+            eve...
+            {./apps/fixtures/*}...
+            {./e2e/fixtures/*}...
 
       - name: Build fixture dependencies
         if: needs.changes.outputs.relevant == 'true'
@@ -209,25 +214,42 @@ jobs:
           }
 
           wait_for_target "$DEPLOYMENT_URL"
-          npx eve eval --strict --verbose --exclude-tag real-model \
-            --url "$DEPLOYMENT_URL" \
-            --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
 
           # Redeploy-tagged evals rebuild and redeploy the fixture from inside
           # the eval body, repointing a run-scoped alias at each new
           # deployment. They run against the alias (immutable deployment URLs
           # never change what they serve) and are skipped in the main suite
-          # above because EVE_E2E_REDEPLOY_ALIAS is unset there.
+          # because EVE_E2E_REDEPLOY_ALIAS is unset there. The main suite keeps
+          # the first deployment's immutable URL, so the two run at once; the
+          # main suite's output prints after the redeploy suite ends.
+          main_log="$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-main.log"
+          redeploy_status=0
           if npx eve eval --tag redeploy --list >/dev/null 2>&1; then
             ALIAS="eve-e2e-${{ matrix.name }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ strategy.job-index }}.vercel.app"
             # vercel alias does not infer the team from the project link the way
             # link/deploy do, so pass the scope explicitly.
             vercel alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
             wait_for_target "https://$ALIAS"
+            npx eve eval --strict --verbose --exclude-tag real-model \
+              --url "$DEPLOYMENT_URL" \
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml" >"$main_log" 2>&1 &
+            main_pid=$!
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
               npx eve eval --tag redeploy --strict --verbose --exclude-tag real-model \
               --url "https://$ALIAS" \
-              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml"
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml" || redeploy_status=$?
+            main_status=0
+            wait "$main_pid" || main_status=$?
+            echo "----- main suite output -----"
+            cat "$main_log"
+            if [ "$main_status" -ne 0 ] || [ "$redeploy_status" -ne 0 ]; then
+              echo "Main suite exit $main_status, redeploy suite exit $redeploy_status."
+              exit 1
+            fi
+          else
+            npx eve eval --strict --verbose --exclude-tag real-model \
+              --url "$DEPLOYMENT_URL" \
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
           fi
 
       - name: Log deployable build timing

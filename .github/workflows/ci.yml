@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -80,8 +80,16 @@ jobs:
       - name: Validate /docs/public frontmatter and nav
         run: pnpm docs:check
 
-  typecheck:
+  # Typecheck in two halves: the packages (with the published-declaration
+  # check, which packs eve from its build), and everything else (apps,
+  # templates, fixtures, examples). The `typecheck` check below requires both.
+  typecheck-part:
+    name: typecheck (${{ matrix.part }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [packages, apps]
     # The CLI spawns git and a detached flush process for every command when
     # telemetry is on. CI runs collect none of it.
     env:
@@ -94,7 +102,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -119,15 +127,42 @@ jobs:
           path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
           key: ${{ steps.verdict-cache.outputs.cache-primary-key }}
 
+      # One turbo run per half, so the published-declaration check runs
+      # alongside the packages' typechecks instead of after them.
       - name: Run typecheck
-        run: pnpm typecheck
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          if [ "$PART" = "packages" ]; then
+            pnpm exec turbo run typecheck test:public-types --filter='./packages/*'
+          else
+            pnpm exec turbo run typecheck --filter='!./packages/*'
+          fi
 
-      # Packs eve from the dist the typecheck build left in Turbo's cache.
-      - name: Type-check the published declarations
-        run: pnpm test:public-types
-
-  test-unit:
+  typecheck:
     runs-on: ubuntu-latest
+    needs: [typecheck-part]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.typecheck-part.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Typecheck halves: $RESULT"
+            exit 1
+          fi
+
+  # The unit tier in two halves. eve's vitest files split by vitest's own
+  # --shard; the first half also runs the other packages' unit tests, and the
+  # second half the script tests. The `test-unit` check below requires both halves.
+  test-unit-shard:
+    name: test-unit (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/2, 2/2]
 
     steps:
       - name: Checkout code
@@ -136,7 +171,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -161,22 +196,64 @@ jobs:
           path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
           key: ${{ steps.verdict-cache.outputs.cache-primary-key }}
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-unit-${{ strategy.job-index }}-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-unit-${{ strategy.job-index }}-
+
       - name: Run unit tests
-        run: pnpm test:unit
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm exec turbo run test:unit --filter=eve -- --shard="$SHARD"
+          if [ "$SHARD" = "1/2" ]; then
+            pnpm exec turbo run test:unit --filter='!eve'
+          fi
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
       - name: Test workflow and guard helpers
+        if: matrix.shard == '2/2'
         run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs scripts/public-exports.test.mjs
 
       - name: Test eval benchmark scripts
+        if: matrix.shard == '2/2'
         run: pnpm test:eval-benchmark
 
+  test-unit:
+    runs-on: ubuntu-latest
+    needs: [test-unit-shard]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.test-unit-shard.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Unit shards: $RESULT"
+            exit 1
+          fi
+
+  # Windows runs only the integration files whose behavior can differ there
+  # (see `// @linux-only`); Linux runs the whole tier in two shards below.
   test-integration:
     name: test-integration (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
 
     steps:
       - name: Checkout code
@@ -185,7 +262,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -212,11 +289,38 @@ jobs:
             ./e2e/fixtures/*
             ./apps/docs/registry
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-integration-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-integration-
+
       - name: Run integration tests
         run: pnpm test:integration
 
-  test-scenario:
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
+
+  # The Linux integration tier in two halves. eve's vitest files split by
+  # vitest's own --shard; the second half, which measured lighter, also runs
+  # the other packages' integration tests. The `test-integration (ubuntu-latest)` check below
+  # requires both halves.
+  test-integration-linux:
+    name: test-integration (ubuntu-latest, ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/2, 2/2]
 
     steps:
       - name: Checkout code
@@ -225,7 +329,95 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # The integration tier of every package with one, plus the fixtures and
+      # registry sources their tests read. `apps/docs/registry` installs the
+      # adapter packages the registry templates import.
+      - name: Install dependencies
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: integration
+          filters: |
+            eve...
+            @eve/code...
+            @eve/git...
+            @eve/custom-skills...
+            @eve/agent-browser...
+            @eve/agent-desktop...
+            @vercel/agent-runs...
+            @eve-e2e/config...
+            ./apps/fixtures/*
+            ./e2e/fixtures/*
+            ./apps/docs/registry
+
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-integration-${{ strategy.job-index }}-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-integration-${{ strategy.job-index }}-
+
+      - name: Run integration tests
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm exec turbo run test:integration --filter=eve -- --shard="$SHARD"
+          if [ "$SHARD" = "2/2" ]; then
+            pnpm exec turbo run test:integration --filter='!eve'
+          fi
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
+
+  test-integration-linux-required:
+    name: test-integration (ubuntu-latest)
+    runs-on: ubuntu-latest
+    needs: [test-integration-linux]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.test-integration-linux.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Linux integration shards: $RESULT"
+            exit 1
+          fi
+
+  # The scenario tier in two halves. eve's vitest files split by vitest's own
+  # --shard; the first half, which measured lighter, also runs the other
+  # packages' scenario tests. The
+  # `test-scenario` check below requires both halves.
+  test-scenario-shard:
+    name: test-scenario (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/2, 2/2]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -238,11 +430,12 @@ jobs:
         with:
           bun-version: "1.4.4"
 
-      # This job builds agents whose sandboxes pull eve's default image.
+      # This job builds agents whose sandboxes pull eve's default image. The
+      # pull overlaps the install and the builds the scenarios depend on.
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
         with:
-          pull: "true"
+          pull: "background"
 
       - name: Restore the lockfile verification verdict
         id: verdict-cache
@@ -261,8 +454,46 @@ jobs:
           path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
           key: ${{ steps.verdict-cache.outputs.cache-primary-key }}
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-scenario-${{ strategy.job-index }}-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-scenario-${{ strategy.job-index }}-
+
       - name: Run scenario tests
-        run: pnpm test:scenario
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm exec turbo run test:scenario --filter=eve -- --shard="$SHARD"
+          if [ "$SHARD" = "1/2" ]; then
+            pnpm exec turbo run test:scenario --filter='!eve'
+          fi
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
+
+  test-scenario:
+    runs-on: ubuntu-latest
+    needs: [test-scenario-shard]
+    if: always()
+    steps:
+      - name: Require both halves
+        env:
+          RESULT: ${{ needs.test-scenario-shard.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "Scenario shards: $RESULT"
+            exit 1
+          fi
 
   # The desktop job installs apt packages and pulls agent-desktop from npm, so it
   # runs only when its package changes. It skips at the job level instead of
@@ -311,7 +542,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -354,7 +585,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -373,8 +604,26 @@ jobs:
             eve...
             ./apps/frameworks/*
 
+      # Vitest runs the files it has timings for longest first, and files
+      # without timings by size. Restoring main's timings lets the longest
+      # files start first instead of trailing the run.
+      - name: Restore test file timings
+        id: vitest-results
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: vitest-results-${{ runner.os }}-build-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-build-
+
       - name: Build and package apps with the workspace eve
         run: pnpm test:build
+
+      - name: Save test file timings
+        if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/*/node_modules/.vite/vitest
+          key: ${{ steps.vitest-results.outputs.cache-primary-key }}
 
   test-webchat:
     runs-on: ubuntu-latest
@@ -386,7 +635,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -446,7 +695,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -456,6 +705,8 @@ jobs:
       # This job builds agents whose sandboxes pull eve's default image.
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
+        with:
+          pull: "background"
 
       - name: Setup uv for Python template services
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
@@ -487,7 +738,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: ./.github/actions/setup-pnpm
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -497,18 +748,25 @@ jobs:
       # This job builds agents whose sandboxes pull eve's default image.
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
+        with:
+          pull: "background"
 
-      # The smoke tests start their agent apps from the shared fixtures.
+      # The smoke tests start their agent apps from the shared fixtures. The
+      # e2e workflows install the same package set and restore the store this
+      # job saves from main, so keep their filters in step with these.
       - name: Install dependencies
         uses: ./.github/actions/pnpm-install
         with:
           cache-key: tui
           filters: |
             eve...
-            ./apps/fixtures/*
-            ./e2e/fixtures/*
+            {./apps/fixtures/*}...
+            {./e2e/fixtures/*}...
 
+      # Streamed, so each smoke script's start and result show up as it runs
+      # instead of when the whole task ends.
       - name: Run TUI smoke tests
+        timeout-minutes: 10
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-        run: pnpm test:tui
+        run: pnpm test:tui --log-order=stream
