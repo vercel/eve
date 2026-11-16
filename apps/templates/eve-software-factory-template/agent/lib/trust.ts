@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { SessionAuthContext } from "eve/context";
 import { FACTORY_BRANCH_PREFIX, FACTORY_REPO } from "./constants.js";
 
@@ -81,20 +80,6 @@ export function stampAutonomous(
       ...auth.attributes,
       [INTAKE_ISSUE_ATTRIBUTE]: String(intakeIssue),
     },
-    principalId: AUTONOMOUS_PRINCIPAL,
-    principalType: "service",
-  };
-}
-
-/** HTTP intake has no GitHub thread and never inherits caller trust. */
-export function autonomousForTicket(address: string): SessionAuthContext {
-  const digest = createHash("sha256").update(address).digest("hex");
-  return {
-    attributes: {
-      factoryRepository: FACTORY_REPO.toLowerCase(),
-      ticketBranch: `${FACTORY_BRANCH_PREFIX}ticket-${digest}`,
-    },
-    authenticator: "intake-token",
     principalId: AUTONOMOUS_PRINCIPAL,
     principalType: "service",
   };

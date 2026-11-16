@@ -10,7 +10,7 @@ process.env.FACTORY_REPO = "acme/widgets";
 process.env.LINEAR_CONNECTOR = "linear/test";
 const implementerModule = await import("../tools/run_implementer.js");
 const implementer = implementerModule.default as any;
-const { autonomousForTicket } = await import("./trust.js");
+const { autonomousForTicket } = await import("./intake/ticket.js");
 
 test("factory usage policy caps output and uncached input without charging cached input twice", () => {
   const limit = rootAgent.limits?.sessionUsage as (context: any) => boolean;

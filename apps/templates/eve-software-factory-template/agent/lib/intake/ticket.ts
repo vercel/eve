@@ -1,5 +1,8 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import type { SessionAuthContext } from "eve/context";
 import { z } from "zod";
+import { FACTORY_BRANCH_PREFIX, FACTORY_REPO } from "../constants.js";
+import { AUTONOMOUS_PRINCIPAL } from "../trust.js";
 
 export const MAX_TICKET_BYTES = 64 * 1024;
 export const TICKET_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -52,6 +55,20 @@ export const ticketIdFor = (
 
 export const ticketAddress = (id: string, caller: string): string =>
   `ticket:${sha256(caller).toString("hex").slice(0, 16)}:${id}`;
+
+/** Server-bound ticket authority; HTTP intake never inherits caller trust. */
+export function autonomousForTicket(address: string): SessionAuthContext {
+  const digest = sha256(address).toString("hex");
+  return {
+    attributes: {
+      factoryRepository: FACTORY_REPO.toLowerCase(),
+      ticketBranch: `${FACTORY_BRANCH_PREFIX}ticket-${digest}`,
+    },
+    authenticator: "intake-token",
+    principalId: AUTONOMOUS_PRINCIPAL,
+    principalType: "service",
+  };
+}
 
 export const renderTicket = (ticket: z.infer<typeof ticketSchema>): string => {
   const metadata = [

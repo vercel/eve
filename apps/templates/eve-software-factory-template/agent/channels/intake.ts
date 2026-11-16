@@ -10,6 +10,7 @@ import {
 import { TICKET_INTAKE_PREFIX, writeDocument } from "../lib/blob.js";
 import { FACTORY_REPO } from "../lib/constants.js";
 import {
+  autonomousForTicket,
   intakeCaller,
   MAX_TICKET_BYTES,
   readLimitedText,
@@ -19,7 +20,7 @@ import {
   ticketIdFor,
   ticketSchema,
 } from "../lib/intake/ticket.js";
-import { autonomousForTicket, ticketBranch } from "../lib/trust.js";
+import { ticketBranch } from "../lib/trust.js";
 
 const INTAKE_TASK = [
   "This work item came through the intake API. The run is unattended: never wait for approval or input.",
