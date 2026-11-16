@@ -170,7 +170,7 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
       eve:
-        specifier: 1.0.0
+        specifier: ^1.0.0
         version: 1.0.0(@vercel/connect@2.9.0)(ai@7.0.173(zod@4.6.7))
       zod:
         specifier: 4.6.7

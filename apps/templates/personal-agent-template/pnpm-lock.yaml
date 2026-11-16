@@ -212,7 +212,7 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5)
       eve:
-        specifier: 1.0.0
+        specifier: ^1.0.0
         version: 1.0.0(@nuxt/kit@4.6.4(@nuxt/schema@4.6.4)(confbox@0.3.2)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.5)(unplugin@3.7.0(esbuild@0.28.2)(rolldown@1.2.5)(rollup@4.68.2)(vite@8.3.5(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))))(@nuxt/schema@4.6.4)(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(react@19.2.6)(vite@8.3.5(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(vue@3.5.45(typescript@6.0.3))
       maska:
         specifier: ^3.2.0

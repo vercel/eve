@@ -298,7 +298,7 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0)
       eve:
-        specifier: 1.0.0
+        specifier: ^1.0.0
         version: 1.0.0(@linqapp/sdk@0.47.1)(@opentelemetry/api@1.9.1)(@vercel/connect@2.7.0)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(next@16.4.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(vite@8.3.5(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))
       evlog:
         specifier: 2.28.1
