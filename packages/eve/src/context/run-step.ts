@@ -22,6 +22,16 @@ interface ContextScopeResult<T, S extends HarnessSessionBase> {
   readonly session: S;
 }
 
+interface ContextScopeOptions {
+  /**
+   * Waits for work the scope started in the background, such as what a channel handler handed
+   * `ctx.waitUntil`. It runs after the callback, whether it returned or threw, and before the
+   * providers commit or dispose, so that work never outlives the sandbox or session it uses.
+   * It must not throw.
+   */
+  readonly drain?: () => Promise<void>;
+}
+
 /**
  * Runs `callback` inside a fully-initialized ALS scope with all framework
  * providers (session, connection, sandbox) built and committed.
@@ -34,6 +44,7 @@ export async function withContextScope<T, S extends HarnessSessionBase>(
   ctx: ContextContainer,
   session: S,
   callback: (session: S) => Promise<ContextScopeResult<T, S>>,
+  options: ContextScopeOptions = {},
 ): Promise<ContextScopeResult<T, S>> {
   const createdProviders: FrameworkContextProvider<any>[] = [];
 
@@ -48,7 +59,9 @@ export async function withContextScope<T, S extends HarnessSessionBase>(
       }
     }
 
-    const scopeResult = await contextStorage.run(ctx, () => callback(session));
+    const scopeResult = await contextStorage
+      .run(ctx, () => callback(session))
+      .finally(() => options.drain?.());
 
     let committed = scopeResult.session;
     for (const provider of createdProviders) {
@@ -97,10 +110,16 @@ export async function runStep(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<StepResult>,
+  options?: ContextScopeOptions,
 ): Promise<StepResult> {
-  const scoped = await withContextScope(ctx, harnessSession, async (enriched) => {
-    const result = await callback(enriched);
-    return { result, session: result.session };
-  });
+  const scoped = await withContextScope(
+    ctx,
+    harnessSession,
+    async (enriched) => {
+      const result = await callback(enriched);
+      return { result, session: result.session };
+    },
+    options,
+  );
   return { ...scoped.result, session: scoped.session };
 }
