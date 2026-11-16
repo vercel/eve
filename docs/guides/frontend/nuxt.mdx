@@ -96,13 +96,44 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** The module doesn't start eve in production; run the eve service yourself. `nuxt build` writes proxy rules that send the eve routes to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. With `EVE_NUXT_PRODUCTION_ORIGIN`, each `agents/` workspace member keeps its own path on that host (`/eve/<name>/v1`). Without it, each member runs as its own server serving `/eve/v1`, on consecutive ports from `4274` in alphabetical order of member name (`4274`, `4275`, ...). Override the first port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
+- **Non-Vercel hosts.** The built Nuxt server starts each built eve agent and proxies its transport routes to a loopback server. A standalone `agent/` uses `http://127.0.0.1:4274`. Workspace members use consecutive ports in alphabetical order of member name (`4274`, `4275`, ...). Each backend serves `/eve/v1`; Nuxt mounts it at `/eve/<name>/v1`. Set `EVE_NUXT_PRODUCTION_PORT` during `nuxt build` to select another first port. The build fixes both the proxy destinations and managed server ports.
+
+  `eve build` and `nuxt build` both write `.output/`. For a standalone agent, use a separate eve project directory with its own `package.json` declaring `eve` as a dependency. Set `eveRoot` to that directory; managed startup rejects shared outputs. For example, with `eveRoot: "./backend"`:
 
   ```bash
-  EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
+  (cd backend && npx eve build)
+  npx nuxt build
+  node .output/server/index.mjs
   ```
 
-  `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, the two outputs overwrite each other. Build and serve eve from a separate directory instead, and set `eveRoot` to it. See [Self-host eve](../deployment/self-hosting) for running the eve service.
+  For an `agents/` workspace, build each member from its own directory; a root `eve build` produces a Vercel workspace deployment:
+
+  ```bash
+  (cd agents/support && npx eve build)
+  (cd agents/research && npx eve build)
+  npx nuxt build
+  node .output/server/index.mjs
+  ```
+
+  Deploy every member's output, preserving its path relative to the workspace root. A workspace can share the Nuxt project root because member outputs do not overwrite Nuxt's output. See [Run workspace members](../deployment/self-hosted-operations#run-workspace-members) for each member's authentication, Workflow world, and sandbox configuration.
+
+  Run the Nuxt server from the deployed Nuxt project root. Preserve the relative location of `eveRoot`, or set `EVE_NUXT_PRODUCTION_ROOT` at startup to relocate the eve project root. Workspace member paths remain relative to that root. Relative values resolve from the Nuxt server's working directory:
+
+  ```bash
+  EVE_NUXT_PRODUCTION_ROOT=./relocated-backend node .output/server/index.mjs
+  ```
+
+  Each agent's transport requests wait up to three minutes for that agent to confirm it has bound its configured port. Another process listening on the port does not count as readiness. Startup does not require an authored health route. If an agent fails to start, its routes return `503`; check the Nuxt server logs for the cause. Other agents and frontend pages remain available. With the default eve channel, use `/eve/v1/health` (or `/eve/<name>/v1/health`) for deployment readiness checks.
+
+  Managed startup supports one Node.js process with Nitro's `node-server` preset. For `node-cluster`, worker deployments, or multiple frontend processes, use an externally managed eve service. Set `EVE_NUXT_PRODUCTION_ORIGIN` at build time, as shown below. Keep Nitro's graceful shutdown enabled; do not set `NITRO_SHUTDOWN_DISABLED`. Shutdown cancels eve startup before draining HTTP requests and waits up to 21 seconds for eve to terminate.
+
+  To manage eve separately, set `EVE_NUXT_PRODUCTION_ORIGIN` during `nuxt build`. That build proxies to the configured origin and does not start eve, even when the variable is absent at runtime. Workspace members keep their public paths on that host (`/eve/<name>/v1`):
+
+  ```bash
+  EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npx nuxt build
+  ```
+
+  See [Self-host eve](../deployment/self-hosting) for running the separate service. Managed startup does not run during prerendering or `nuxt generate`. Static output has no server-side eve proxy; use a server deployment for this topology.
 
 ## Managing vercel.json yourself
 

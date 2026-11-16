@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
@@ -31,6 +32,7 @@ export interface EveFrameworkHost {
 export interface EveProcessHandle {
   readonly origin: string;
   readonly process?: ChildProcess;
+  readonly close?: () => Promise<void>;
 }
 
 interface EveDevServerRegistry {
@@ -265,6 +267,21 @@ function findLocalServerOrigin(output: string): string | undefined {
   return undefined;
 }
 
+function findProductionServerOrigin(output: string, expectedOrigin: string): string | undefined {
+  // srvx emits this line only after its own successful bind. A TCP probe can
+  // instead reach a process that claimed the port after our preflight.
+  const lines = output.replace(ANSI_ESCAPE_PATTERN, "").split("\n");
+  lines.pop(); // Wait for the complete line, including a possibly chunked URL.
+  for (const line of lines) {
+    const match = /^(?:➜\s+)?Listening on:?\s+(https?:\/\/\S+)\s*$/.exec(line.trim());
+    const url = match?.[1] === undefined ? null : URL.parse(match[1]);
+    if (url !== null && url.origin === expectedOrigin) {
+      return expectedOrigin;
+    }
+  }
+  return undefined;
+}
+
 function formatEveDevOutputLine(line: string, logLabel: string | undefined): string | undefined {
   const normalizedLine = line.replace(/\r$/, "");
   const trimmedLine = normalizedLine.replace(ANSI_ESCAPE_PATTERN, "").trim();
@@ -324,6 +341,28 @@ function createEveDevOutputWriter(input: {
   };
 }
 
+function isListening(origin: string, signal?: AbortSignal): Promise<boolean> {
+  const url = new URL(origin);
+  return new Promise((resolvePromise) => {
+    const socket = createConnection({
+      host: url.hostname.replace(/^\[|\]$/g, ""),
+      port: Number(url.port || (url.protocol === "https:" ? "443" : "80")),
+      signal,
+    });
+    let finished = false;
+    const finish = (listening: boolean) => {
+      if (finished) return;
+      finished = true;
+      socket.setTimeout(0);
+      socket.destroy();
+      resolvePromise(listening);
+    };
+    socket.setTimeout(DEV_SERVER_READINESS_TIMEOUT_MS, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
 function startServerProcess(input: {
   readonly args: readonly string[];
   readonly command: string;
@@ -331,19 +370,76 @@ function startServerProcess(input: {
   readonly env?: Record<string, string>;
   readonly listen?: { readonly host: string; readonly port: string; readonly retryHint: string };
   readonly logLabel?: string;
+  readonly signal?: AbortSignal;
+  readonly readOrigin?: (output: string) => string | undefined;
   readonly timeoutMs?: number;
 }): Promise<EveProcessHandle> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_EVE_SERVER_TIMEOUT_MS;
 
+  input.signal?.throwIfAborted();
   return new Promise((resolvePromise, reject) => {
+    const env = { ...process.env, ...input.env };
+    if (input.listen !== undefined) {
+      // srvx must report its bind and run bounded graceful shutdown. Nitro's
+      // Unix socket override must not replace the configured loopback port.
+      delete env.TEST;
+      delete env.CI;
+      delete env.SERVER_SHUTDOWN_TIMEOUT;
+      delete env.NITRO_UNIX_SOCKET;
+    }
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
-      env: {
-        ...process.env,
-        ...input.env,
-      },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    let closed = false;
+    let closing: Promise<void> | undefined;
+    const close = (): Promise<void> => {
+      closing ??= new Promise<void>((resolveClose) => {
+        if (closed) {
+          resolveClose();
+          return;
+        }
+        // Allow eve's bounded sandbox shutdown (15s) before escalation.
+        const force = setTimeout(() => child.kill("SIGKILL"), 20_000);
+        const deadline = setTimeout(finish, 21_000);
+        function finish() {
+          clearTimeout(force);
+          clearTimeout(deadline);
+          child.off("exit", finish);
+          releaseOwnership();
+          child.stdout.destroy();
+          child.stderr.destroy();
+          resolveClose();
+        }
+        child.once("exit", finish);
+        child.kill("SIGTERM");
+      });
+      return closing;
+    };
+    const exit = () => {
+      if (!closed) child.kill("SIGTERM");
+    };
+    const abort = () => {
+      if (!settled) {
+        cleanup();
+        void close().then(() => reject(new Error("eve server startup was cancelled.")));
+      } else {
+        void close();
+      }
+    };
+    const releaseOwnership = () => {
+      closed = true;
+      child.off("exit", releaseOwnership);
+      child.off("error", releaseOwnership);
+      process.off("beforeExit", exit);
+      process.off("exit", exit);
+      input.signal?.removeEventListener("abort", abort);
+    };
+    process.once("beforeExit", exit);
+    process.once("exit", exit);
+    child.once("exit", releaseOwnership);
+    child.once("error", releaseOwnership);
     const stderrWriter = createEveDevOutputWriter({
       logLabel: input.logLabel,
       stream: process.stderr,
@@ -353,8 +449,11 @@ function startServerProcess(input: {
       stream: process.stdout,
     });
     const timeout = setTimeout(() => {
-      child.kill();
-      reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to print its server URL.`));
+      cleanup();
+      const condition = input.listen === undefined ? "print its server URL" : "bind its listener";
+      void close().then(() =>
+        reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to ${condition}.`)),
+      );
     }, timeoutMs);
 
     let settled = false;
@@ -381,7 +480,7 @@ function startServerProcess(input: {
       cleanup();
       reject(
         new Error(
-          `eve server process exited before printing its server URL (code ${String(code)}, signal ${String(signal)}).`,
+          `eve server process exited before ${input.listen === undefined ? "printing its server URL" : "binding its listener"} (code ${String(code)}, signal ${String(signal)}).`,
         ),
       );
     };
@@ -400,12 +499,11 @@ function startServerProcess(input: {
       if (startFailure !== undefined) {
         flushOutput();
         cleanup();
-        child.kill();
-        reject(startFailure);
+        void close().then(() => reject(startFailure));
         return;
       }
 
-      const origin = findLocalServerOrigin(text);
+      const origin = input.readOrigin?.(input.listen === undefined ? text : startupOutput);
 
       if (origin === undefined) {
         return;
@@ -415,6 +513,7 @@ function startServerProcess(input: {
       resolvePromise({
         origin,
         process: child,
+        close,
       });
     };
     const handleStdout = (chunk: Buffer) => {
@@ -430,26 +529,10 @@ function startServerProcess(input: {
     child.once("exit", handleEarlyExit);
     child.stdout.on("data", handleStdout);
     child.stderr.on("data", handleStderr);
+
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted) abort();
   });
-}
-
-function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
-  const childProcess = handle.process;
-
-  if (childProcess === undefined) {
-    return handle;
-  }
-
-  const close = () => {
-    if (!childProcess.killed) {
-      childProcess.kill();
-    }
-  };
-
-  process.once("beforeExit", close);
-  process.once("exit", close);
-
-  return handle;
 }
 
 function startEveDevServer(input: {
@@ -470,28 +553,40 @@ function startEveDevServer(input: {
     command: process.execPath,
     cwd: input.appRoot,
     logLabel: input.logLabel,
+    readOrigin: findLocalServerOrigin,
     timeoutMs: input.timeoutMs,
-  }).then(installProcessShutdown);
+  });
 }
 
 /**
  * Serve an existing `eve build` output from `.output/server/index.mjs` on
  * {@link input.origin}'s loopback port.
  */
-export function startEveProductionServer(input: {
+export async function startEveProductionServer(input: {
   readonly appRoot: string;
   readonly host: EveFrameworkHost;
   readonly origin: string;
   /** How to pick another port, completing "stop it or ..." when the port is taken. */
   readonly portRetryHint: string;
+  readonly signal?: AbortSignal;
 }): Promise<EveProcessHandle> {
   const parsedOrigin = new URL(input.origin);
-  const port = parsedOrigin.port;
+  const port = parsedOrigin.port || (parsedOrigin.protocol === "https:" ? "443" : "80");
   const serverEntry = join(input.appRoot, ".output", "server", "index.mjs");
 
   if (!existsSync(serverEntry)) {
     throw new Error(
       `eve production output is missing at ${serverEntry}. Run eve build from ${input.appRoot} before starting ${input.host.label}.`,
+    );
+  }
+
+  input.signal?.throwIfAborted();
+  // Preflight gives an early diagnostic, not proof of the child's bind.
+  const occupied = await isListening(input.origin, input.signal);
+  input.signal?.throwIfAborted();
+  if (occupied) {
+    throw new Error(
+      `Port ${port} on ${parsedOrigin.hostname} is already in use. Another process is listening there; stop it or ${input.portRetryHint}.`,
     );
   }
 
@@ -506,7 +601,9 @@ export function startEveProductionServer(input: {
       PORT: port,
     },
     listen: { host: parsedOrigin.hostname, port, retryHint: input.portRetryHint },
-  }).then(installProcessShutdown);
+    readOrigin: (output) => findProductionServerOrigin(output, parsedOrigin.origin),
+    signal: input.signal,
+  });
 }
 
 /**
