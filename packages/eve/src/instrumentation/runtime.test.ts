@@ -512,13 +512,16 @@ describe("bindInstrumentationRuntime", () => {
 
     await readTelemetry(instrumentation);
 
-    expect(forTrace).toHaveBeenCalledExactlyOnceWith({
-      agentName: "Weather Display Name",
-      audience: "private",
-      channel: { kind: "channel:test", name: "test" },
-      environment: "production",
-      principalType: "anonymous",
-    });
+    expect(forTrace).toHaveBeenCalledExactlyOnceWith(
+      {
+        agentName: "Weather Display Name",
+        audience: "private",
+        channel: { kind: "channel:test", name: "test" },
+        environment: "production",
+        principalType: "anonymous",
+      },
+      { ceiling: undefined },
+    );
   });
 
   it.each([
@@ -728,6 +731,55 @@ describe("bindInstrumentationRuntime", () => {
       expect(telemetry).toMatchObject({ recordInputs: recordsInputs, recordOutputs: false });
     },
   );
+
+  it.each([
+    ["without OpenTelemetry", { otelSettings: undefined }],
+    [
+      "under an authored file's content policy",
+      {
+        hooks: createInstrumentationHooks({
+          parallel: [
+            {
+              name: "sentry",
+              tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+            },
+          ],
+        }),
+        ownsAgentSpans: true,
+      },
+    ],
+  ] as const)("keeps a forwarded no-content ceiling %s", async (_label, overrides) => {
+    const ctx = createContext("public");
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: false, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: false },
+        originAudience: "public",
+      },
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      { ...createRuntime({ capturesContent: true, publish: vi.fn() }), ...overrides },
+      ctx,
+      boundSession,
+    );
+
+    const telemetry = await instrumentation?.prepareExecution().runStep(
+      {
+        environment: "test",
+        eveVersion: "0.0.0",
+        hasInput: true,
+        session: { sessionId: "session-1" },
+      },
+      async (scope) =>
+        scope.prepareAttempt({ runId: "run_0", attempt: 0, stepIndex: 0, turnId: "turn-1" })
+          .telemetry,
+    );
+
+    expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
+  });
 
   it("uses one framework-owned span tree when the runtime owns agent spans", async () => {
     const originalIntegrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS;

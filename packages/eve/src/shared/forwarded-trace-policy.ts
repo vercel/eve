@@ -1,6 +1,7 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import {
   applyAudienceCeiling,
+  shouldCaptureInstrumentationContent,
   type InstrumentationContentContext,
 } from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -55,6 +56,18 @@ export function traceContentCeilingToDecision(
 
 export function formatTraceContentCeiling(ceiling: TraceContentCeiling): string {
   return `i${ceiling.recordInputs ? "1" : "0"}o${ceiling.recordOutputs ? "1" : "0"}`;
+}
+
+/** The audience's default content capture, which a forwarded ceiling can only narrow. */
+export function defaultContentCapture(
+  context: InstrumentationContentContext,
+  ceiling: TraceContentCeiling | undefined,
+): TraceContentCeiling {
+  const content = shouldCaptureInstrumentationContent(context);
+  return {
+    recordInputs: content && ceiling?.recordInputs !== false,
+    recordOutputs: content && ceiling?.recordOutputs !== false,
+  };
 }
 
 /** Applies a distinct live delivery audience without re-capping callback or origin delivery. */
