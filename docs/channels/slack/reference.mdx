@@ -1112,6 +1112,7 @@ Pass a string, as in `postCompletedSlackReply(ctx.channel, reply)`, to post Mark
   - `openInteractions(view, { about: { callId } })` returns the open approvals, questions, and sign-ins holding a call up.
 - `state`: `blocked` while any task waits on an approval, question, or sign-in, `working` while the turn or any task works, then `finished`.
 - `audience`: who reads the card. eve's default shows errors and request prompts only when it's `private`; do the same with what you show from `calls`.
+- `sessionId` and `turnId`: the session and turn the card belongs to. Use them to link the card to your own tooling, such as a trace viewer, while the turn is still running.
 
 `taskCard` must be synchronous and have no side effects; eve posts and updates the card. eve's default returns `null` for a card without tasks. Its block keeps one `block_id` for the whole turn, so keep that `block_id` on a block you build in its place. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
 
