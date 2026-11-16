@@ -32,7 +32,7 @@ export function slackRenderingHarness(
   state: Partial<SlackChannelState>,
   options: {
     /** Receives handlers' background work, as a running session's publisher does. */
-    readonly waitUntil?: (promise: PromiseLike<unknown>) => void;
+    readonly waitUntil?: (task: Promise<unknown>) => void;
   } = {},
 ): SlackRenderingHarness {
   if (!isCompiledChannel(definition)) throw new Error("Expected a compiled channel.");

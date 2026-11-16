@@ -31,13 +31,17 @@ events: {
 
 ```ts
 interface ChannelEventContext<TChannel> {
-  /** Lets the turn go on while `promise` settles, instead of waiting for the handler. */
-  waitUntil(promise: PromiseLike<unknown>): void;
+  /** Lets the turn go on while `task` settles, instead of waiting for the handler. */
+  readonly waitUntil: (task: Promise<unknown>) => void;
 }
 ```
 
-The name and shape follow `waitUntil` in Vercel Functions and service workers: the caller has
-already started the work and only asks the host to keep its scope alive until it settles.
+The name and shape follow `waitUntil` in Vercel Functions and service workers, and match the
+`waitUntil` eve already hands route handlers: the caller has already started the work and only
+asks the host to keep its scope alive until it settles.
+
+The member is required, so code that builds a `ChannelEventContext` by hand, such as a test
+fixture, must add it. That makes this a breaking type change, released as `major`.
 
 ## Semantics
 
@@ -49,16 +53,24 @@ already started the work and only asks the host to keep its scope alive until it
   the stream is released. A promise never outlives the sandbox, session, or checkpoint it
   belongs to.
 - **State lands.** After draining, eve snapshots `ctx.channel.state` again, so changes the work
-  made are saved with the step, including on cancel. A cancelled turn's checkpoint keeps the
+  made are saved with the step, including on cancel. `session.ended` saves nothing, since the
+  session is over. A cancelled turn's checkpoint keeps the
   channel state its handlers left, as it already keeps hook state, because the stream keeps the
   events they handled.
 - **Failures are logged.** A rejected promise is logged with the channel kind and event type and
   never fails the turn, matching how a throwing handler is already treated.
+- **Bounded wait.** Each drain waits at most 30 seconds. Work still running then is logged with
+  its event types and left behind, so a promise that never settles can't hold the step until the
+  host times it out. Changes it makes afterwards aren't saved.
+- **Closed after release.** Once the step releases the stream, a `waitUntil` call (from a
+  handler that kept `ctx`) is logged and not waited for, rather than queued where nothing would
+  drain it.
 - **No ordering across handlers.** Later handlers, hooks, and the model don't wait for the
   promise. A channel whose later handlers must follow the work, such as a reply after a status,
   sequences that itself.
 - **Outside a publisher** (unit harnesses that call a handler directly), the handler waits for
-  its `waitUntil` work before it returns.
+  its `waitUntil` work before it returns, with the same timeout, and logs rather than throws a
+  rejection.
 
 ```
 emit(line) ──▶ handler ──▶ hooks ──▶ … next model call
