@@ -1439,6 +1439,8 @@ export class EveTUIRunner {
         title,
         { trigger: "startup", initialModelStep: "provider" },
       );
+    } else if (this.#startupOnboarding.reported === true) {
+      return undefined;
     } else {
       // The startup screen already reported `model_provider`; report the rest once settled.
       const pending = this.#startupOnboarding.outcome;

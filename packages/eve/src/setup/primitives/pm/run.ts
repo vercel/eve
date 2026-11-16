@@ -107,7 +107,8 @@ export function spawnPackageManager(
 
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (options.signal?.aborted === true || error.name === "AbortError") {
-        settle(abortedTermination(options.signal));
+        // A running child still owes `close`; settling now would disarm its SIGKILL backstop.
+        if (child.pid === undefined) settle(abortedTermination(options.signal));
       } else {
         settle({ kind: "spawn-error", code: error.code, message: error.message });
       }

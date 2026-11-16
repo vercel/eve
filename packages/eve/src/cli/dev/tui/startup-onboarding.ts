@@ -10,6 +10,8 @@ import type { DevelopmentTuiStartup } from "./startup.js";
 export interface StartupOnboardingResult {
   /** Undefined when the setup command produced no outcome. The effect is still unapplied. */
   readonly outcome: PromptCommandOutcome | undefined;
+  /** `eve init` ran onboarding and already reported its result; the runner only skips login. */
+  readonly reported?: true;
 }
 
 /**

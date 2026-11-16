@@ -10,7 +10,7 @@ import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
 import { createDevBootProgressReporter } from "./boot-progress.js";
-import type { DevelopmentCliOptions } from "./command-options.js";
+import { EVE_INIT_INPUT_ENV, type DevelopmentCliOptions } from "./command-options.js";
 import { runInteractiveDevelopmentUi } from "./run-interactive-ui.js";
 import type { DevelopmentTuiStartup } from "./tui/startup.js";
 import type { StartupOnboardingResult } from "./tui/startup-onboarding.js";
@@ -266,10 +266,16 @@ export function registerDevelopmentCommand(input: {
       .option("--no-default-extensions", "Do not mount default development extensions")
       .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
       .option("--input <text>", "Pre-fill the prompt input")
-      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp()),
+      .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
+      .addOption(new Option("--onboarded", "Continue onboarding that eve init ran").hideHelp()),
   ).action(async (options: DevelopmentCliOptions) => {
     const interactive = hasInteractiveTerminal();
     const mode = resolveDevUiMode({ options, interactive });
+    const initInput = process.env[EVE_INIT_INPUT_ENV];
+    delete process.env[EVE_INIT_INPUT_ENV];
+    if (options.onboarded === true && initInput !== undefined && mode !== "headless") {
+      options.input ??= initInput;
+    }
     telemetry.trackDevContext({ target: "local", ui: mode });
     if (mode === "headless") logger.log(eveCliBanner());
     if (options.input !== undefined && mode === "headless") {
@@ -359,20 +365,22 @@ export function registerDevelopmentCommand(input: {
         });
       };
       const startupOnboardingPromise =
-        options.onboard === true
-          ? tuiStartupPromise?.then((startup) =>
-              runOnboardingWhileServerStarts({
-                applicationRoot: applicationContext.root,
-                onOnboardingStep: (event) => {
-                  onboardingOpened = true;
-                  telemetry.trackSetupStep(event);
-                },
-                signal: AbortSignal.any([lifecycle.signal, stopOnboarding.signal]),
-                started,
-                startup,
-              }),
-            )
-          : undefined;
+        options.onboarded === true
+          ? Promise.resolve({ outcome: undefined, reported: true as const })
+          : options.onboard === true
+            ? tuiStartupPromise?.then((startup) =>
+                runOnboardingWhileServerStarts({
+                  applicationRoot: applicationContext.root,
+                  onOnboardingStep: (event) => {
+                    onboardingOpened = true;
+                    telemetry.trackSetupStep(event);
+                  },
+                  signal: AbortSignal.any([lifecycle.signal, stopOnboarding.signal]),
+                  started,
+                  startup,
+                }),
+              )
+            : undefined;
       const [outcome, startup, startupOnboarding] = await Promise.all([
         started,
         tuiStartupPromise,
