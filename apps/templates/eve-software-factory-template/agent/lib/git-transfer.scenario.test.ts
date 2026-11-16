@@ -103,8 +103,8 @@ const pushTool = pusher.default as any;
 const transfer = await import("./github/git-transfer.js");
 const { fetchRepository, pushBranch } = transfer;
 const { autonomousForTicket } = await import("./intake/ticket.js");
-const { ticketBranch, stampTrusted, stampAutonomous } =
-  await import("./trust.js");
+const trust = await import("./trust.js");
+const { ticketBranch, stampTrusted, stampAutonomous } = trust;
 mock.method(globalThis, "fetch", async (url: string) =>
   Response.json(
     url.includes("/branches/")
