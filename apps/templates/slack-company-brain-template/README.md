@@ -33,6 +33,7 @@ agent/
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
   tools/search_slack.ts          # searches public Slack channels
   tools/read_slack_conversation.ts # reads a public channel or thread
+  tools/post_slack_file.ts       # posts a sandbox file, such as a chart or CSV, in the thread
   sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
   lib/connect.ts                 # connector detection and setup notes
@@ -78,7 +79,8 @@ evals/                           # checks for answer length, citations, and thre
   [Scheduled tasks](#scheduled-tasks).
 - **Code and files.** The [code extension](https://eve.dev/docs/code-extension)
   lets the agent run scripts, analyze attached files such as CSVs or logs, and
-  read or write code in a sandbox.
+  read or write code in a sandbox. `post_slack_file` posts what it makes, such
+  as a chart or a cleaned-up CSV, back in the thread.
 - **GitHub.** With a GitHub connector, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
   adds a `git__gh` tool for reading repositories, issues, and pull requests the
   connector's GitHub App is installed on, and a `pr` skill for opening draft
@@ -116,7 +118,8 @@ connector's **Advanced** settings under **Trigger Event Types** and **Bot
 Scopes**. Without them, people mention the agent for each follow-up.
 
 For Slack search and reading channels, also add the `search:read.public` and
-`channels:read` bot scopes the same way.
+`channels:read` bot scopes the same way. To read files people attach and post
+files back, add `files:read` and `files:write`.
 
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
@@ -421,9 +424,9 @@ carries. The Slack docs cover common next steps:
 
 `evals/` checks the reply behavior in `agent/instructions.md`: answer length,
 inline citations, sources that disagree or fail, when to reply in a followed
-thread, and when a scheduled run stays quiet. The evals call the real model
-and replace the Slack tools with fixed results, so they need only AI Gateway
-access:
+thread, when a scheduled run stays quiet, and posting files. The evals call
+the real model and replace the Slack tools with fixed results, so they need
+only AI Gateway access:
 
 ```bash
 pnpm eval              # every eval
