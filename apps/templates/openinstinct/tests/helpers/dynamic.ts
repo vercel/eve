@@ -1,4 +1,4 @@
-import type { DynamicContext, DynamicSentinel } from "eve";
+import type { DynamicContext, DynamicModelContext, DynamicSentinel } from "eve";
 import { emptySessionView } from "eve/events";
 import type { DynamicToolResult, ToolDefinition } from "eve/tools";
 
@@ -11,16 +11,25 @@ interface TestDynamicContextOptions {
   readonly view?: DynamicContext["view"];
 }
 
-/** A dynamic-definition context for focused tests. */
+/**
+ * A dynamic-definition context for focused tests. It fits every dynamic value
+ * and the agent's dynamic model, which alone has `getToken` and `requireAuth`.
+ */
 export function dynamicContextFor({
   auth = { current: null, initiator: null },
   channel = { kind: "channel:eve", metadata: {} },
   sessionId = "test-session",
   view = emptySessionView(),
-}: TestDynamicContextOptions = {}): DynamicContext {
+}: TestDynamicContextOptions = {}): DynamicContext & DynamicModelContext {
   const context = {
     async getSandbox() {
       throw new Error("This test context has no sandbox.");
+    },
+    async getToken(): Promise<never> {
+      throw new Error("This test context has no sign-in.");
+    },
+    requireAuth(): never {
+      throw new Error("This test context has no sign-in.");
     },
     channel,
     memo: (async (_key, fn) =>
