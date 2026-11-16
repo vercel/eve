@@ -14,7 +14,9 @@ Run `pnpm check:templates` from the repository root to copy every template to a 
 
 ## Repository mapping
 
-Maintain the copies in this directory for eve compatibility. The upstream remotes below identify their standalone counterparts; changes here are not automatically synchronized to those repositories. A dash means no separate upstream remote is recorded.
+The upstream repositories below are the source of truth for their templates. Maintain these copies alongside eve, bring in upstream changes, and contribute local fixes back upstream through pull requests to reach parity. Changes are not automatically synchronized. A dash means no separate upstream remote is recorded.
+
+See the [upstream parity review](./UPSTREAM-PARITY.md) for the reviewed revisions and remaining differences.
 
 | Internal template                                                   | Upstream remote                                                                                           |
 | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |

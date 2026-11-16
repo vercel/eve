@@ -3,11 +3,18 @@ import { mock, test } from "node:test";
 import { routeAuth } from "eve/channels/auth";
 import type { EveChannelConfig } from "eve/channels/eve";
 
+let config: EveChannelConfig | undefined;
 mock.module("eve/channels/eve", {
-  namedExports: { eveChannel: (options: EveChannelConfig) => options },
+  namedExports: {
+    eveChannel: (options: EveChannelConfig) => {
+      config = options;
+      return options;
+    },
+  },
 });
-const { default: config } = await import("./eve.js");
-const { auth } = config as unknown as EveChannelConfig;
+await import("./eve.js");
+assert.ok(config);
+const { auth } = config;
 
 const withEnvironment = async (
   values: Record<string, string | undefined>,

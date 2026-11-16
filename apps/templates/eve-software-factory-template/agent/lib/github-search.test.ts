@@ -69,13 +69,18 @@ test("channel credentials and isolated Git transfers request only the configured
     assert.equal(typeof token, "function");
     // biome-ignore lint/performance/noAwaitInLoops: inspect each distinct credential request
     await (token as () => Promise<string>)();
-    assert.deepEqual(tokenRequests.at(-1).authorizationDetails, [
-      {
-        ...(permissions ? { permissions } : {}),
-        repositories: ["acme/widgets"],
-        type: "github_app_installation",
-      },
-    ]);
+    const expected: {
+      permissions?: readonly string[];
+      repositories: string[];
+      type: string;
+    } = {
+      repositories: ["acme/widgets"],
+      type: "github_app_installation",
+    };
+    if (permissions) {
+      expected.permissions = permissions;
+    }
+    assert.deepEqual(tokenRequests.at(-1).authorizationDetails, [expected]);
   }
 });
 
