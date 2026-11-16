@@ -9,6 +9,7 @@ import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { attachClientContext } from "#internal/client-context.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
@@ -810,6 +811,77 @@ describe("reactions", () => {
     expect(JSON.stringify(prompts[1])).toContain("Run pnpm test.");
     expect(JSON.stringify(prompts[2])).toContain("Run pnpm test.");
     expect(log.filter((entry) => entry === "read:AGENTS.md")).toEqual(["read:AGENTS.md"]);
+  }, 60_000);
+
+  // #6495: the instruction joins history, the client context does not, so the context sits after
+  // it, right before the message, and the next turn's prompt keeps the instruction's prefix.
+  it.fails("places a turn's client context after the user-role instruction that turn announces", async () => {
+    const log: string[] = [];
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          prompts.push(prompt);
+          return textStreamResult("Done.");
+        },
+        modelId: "scripted-model",
+        provider: "eve-test",
+      }),
+    );
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "client-context-order",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineInstructions({ content: POLICY, role: "user" }),
+          }),
+          logicalPath: "instructions/policy.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.settled": () => {
+                  log.push("turn:settled");
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/observe.ts",
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: attachClientContext({ message: "Hello." }, ["Client page: /settings"]),
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken: "http:client-context-order",
+        }),
+      });
+      try {
+        await until(log, "turn:settled", 1);
+      } finally {
+        await run.cancel().catch(() => {});
+      }
+    });
+
+    expect(prompts).toHaveLength(1);
+    const users = prompts[0]!.filter((message) => message.role === "user").map(textOf);
+    expect(users.slice(-3)).toEqual([
+      expect.stringContaining(POLICY),
+      expect.stringContaining("Client page: /settings"),
+      "Hello.",
+    ]);
   }, 60_000);
 
   describe("across deployments", () => {
