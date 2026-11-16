@@ -15,6 +15,7 @@ import {
 } from "./git-remote.js";
 
 const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
+const MAX_PR_LOOKUP_BYTES = 1024;
 const BUNDLE = "/tmp/transfer.bundle";
 const GIT_DIR = "/tmp/factory.git";
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
@@ -132,6 +133,64 @@ export async function fetchRepository(
   return String(head.stdout).trim();
 }
 
+async function assertTicketHeadAvailable(
+  branch: string,
+  auth: SessionAuthContext | null
+): Promise<void> {
+  if (!isTicketIntake(auth)) {
+    return;
+  }
+  let data: unknown[];
+  try {
+    const token = await mintInstallationToken(githubCredentials);
+    const [owner] = FACTORY_REPO.split("/");
+    const signal = AbortSignal.timeout(15_000);
+    const pulls = await fetch(
+      `https://api.github.com/repos/${FACTORY_REPO}/pulls?state=all&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=1`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+        },
+        redirect: "error",
+        signal,
+      }
+    );
+    if (!pulls.ok || pulls.headers.has("link") || !pulls.body) {
+      await pulls.body?.cancel();
+      throw new Error("Unverifiable pull requests.");
+    }
+    // Only an empty array permits delivery; full PR metadata is unnecessary.
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    await pulls.body.pipeTo(
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          size += chunk.byteLength;
+          if (size > MAX_PR_LOOKUP_BYTES) {
+            throw new Error("Pull request lookup exceeds the byte limit.");
+          }
+          chunks.push(chunk);
+        },
+      }),
+      { signal }
+    );
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!Array.isArray(parsed)) {
+      throw new Error("Invalid pull requests.");
+    }
+    data = parsed;
+  } catch {
+    // biome-ignore lint/style/useErrorCause: transport errors may expose credentials or repository data
+    throw new Error("Could not verify ticket branch pull requests.");
+  }
+  if (data.length !== 0) {
+    throw new Error(
+      "HTTP ticket branches cannot be pushed once a pull request exists."
+    );
+  }
+}
+
 async function assertPushTarget(
   branch: string,
   auth: SessionAuthContext | null
@@ -144,6 +203,7 @@ async function assertPushTarget(
   if (!branch.startsWith(FACTORY_BRANCH_PREFIX)) {
     throw new Error("Pushes must target a factory feature branch.");
   }
+  await assertTicketHeadAvailable(branch, auth);
   const token = await mintInstallationToken(githubCredentials);
   const request = (path: string) =>
     fetch(`https://api.github.com/repos/${FACTORY_REPO}${path}`, {
@@ -154,23 +214,6 @@ async function assertPushTarget(
       redirect: "error",
       signal: AbortSignal.timeout(15_000),
     });
-  if (isTicketIntake(auth)) {
-    // Any historical PR freezes delivery. Refuse ambiguous or paginated
-    // responses rather than treating a failed lookup as permission to push.
-    const [owner] = FACTORY_REPO.split("/");
-    const pulls = await request(
-      `/pulls?state=all&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`
-    );
-    if (!pulls.ok || pulls.headers.has("link")) {
-      throw new Error("Could not verify ticket branch pull requests.");
-    }
-    const data: unknown = await pulls.json();
-    if (!Array.isArray(data) || data.length !== 0) {
-      throw new Error(
-        "HTTP ticket branches cannot be pushed once a pull request exists."
-      );
-    }
-  }
   const repository = await request("");
   if (!repository.ok) {
     throw new Error(
@@ -228,6 +271,8 @@ export async function pushBranch(
     if (!COMMIT_SHA.test(sha)) {
       throw new Error("Invalid commit in Git transfer.");
     }
+    // Keep the last authorization lookup after all station-controlled work.
+    await assertTicketHeadAvailable(branch, auth);
     await git(remote, [
       "-C",
       GIT_DIR,

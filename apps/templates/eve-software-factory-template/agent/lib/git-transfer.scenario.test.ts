@@ -15,6 +15,7 @@ const remotePath = join(root, "remote.git");
 const stationPath = join(root, "station");
 const marker = join(root, "hook-ran");
 const DEFAULT_BRANCH_ERROR = /default branch/;
+const PR_LOOKUP_ERROR = /pull request/;
 process.env.FACTORY_REPO = "acme/widgets";
 process.env.LINEAR_CONNECTOR = "linear/test";
 mock.module("@vercel/connect/eve", {
@@ -34,6 +35,7 @@ mock.module("../subagents/implementer/sandbox.js", {
   namedExports: { environment: {} },
 });
 let stopped = 0;
+let afterImport: (() => void) | undefined;
 // Provision a fresh local workspace instead of a Vercel VM. All Git commands
 // still execute, and only the object bundle is copied from the hostile station.
 mock.module("@vercel/sandbox", {
@@ -56,6 +58,9 @@ mock.module("@vercel/sandbox", {
               const { stdout } = await exec(command, args.map(map), {
                 cwd: directory,
               });
+              if (args.includes("fetch")) {
+                afterImport?.();
+              }
               return { exitCode: 0, stdout: async () => stdout };
             } catch {
               return { exitCode: 1, stdout: async () => "" };
@@ -339,6 +344,78 @@ test("HTTP ticket pushes are confined to their stamped branch and freeze at PR d
       );
       assert.equal(await remoteHead(owned), revision);
       assert.equal(stopped, transfers);
+    });
+  }
+  for (const [name, boundary, response] of [
+    [
+      "PR appears during export",
+      "export",
+      () => Response.json([{ draft: false, state: "open" }]),
+    ],
+    [
+      "PR appears during import",
+      "import",
+      () => Response.json([{ draft: false, state: "open" }]),
+    ],
+    [
+      "lookup fails after import",
+      "import",
+      () => new Response("unavailable", { status: 503 }),
+    ],
+    ["invalid JSON after import", "import", () => new Response("not JSON")],
+    [
+      "oversized response after import",
+      "import",
+      () => new Response(`${" ".repeat(2048)}[]`),
+    ],
+    [
+      "pagination after import",
+      "import",
+      () =>
+        Response.json([], {
+          headers: { link: '<https://api.github.com/next>; rel="next"' },
+        }),
+    ],
+  ] as const) {
+    await t.test(name, async () => {
+      let headLookups = 0;
+      pulls = () => {
+        headLookups += 1;
+        return Response.json([]);
+      };
+      const freeze = () => {
+        assert.equal(headLookups, 1, "early lookup must see no PR");
+        pulls = () => {
+          headLookups += 1;
+          return response();
+        };
+      };
+      afterImport = boundary === "import" ? freeze : undefined;
+      const delayedStation = {
+        ...station,
+        readFile: async (options: { path: string }) => {
+          const body = await station.readFile(options);
+          if (boundary === "export") {
+            freeze();
+          }
+          return body;
+        },
+      };
+      const transfers = stopped;
+      try {
+        await assert.rejects(
+          pushTool.execute(
+            { branch: owned },
+            { ...context(auth), getSandbox: async () => delayedStation }
+          ),
+          PR_LOOKUP_ERROR
+        );
+        assert.equal(headLookups, 2);
+        assert.equal(await remoteHead(owned), revision);
+        assert.equal(stopped, transfers + 1, "fresh transfer must be disposed");
+      } finally {
+        afterImport = undefined;
+      }
     });
   }
   // Trusted human/Linear and vetted GitHub label sessions retain revision
