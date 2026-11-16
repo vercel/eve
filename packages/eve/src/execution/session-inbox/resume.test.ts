@@ -357,6 +357,27 @@ describe("remembering a continuation's owner", () => {
       successor,
     ]);
   });
+
+  it("forgets a refused owner even when no caller reads the session", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:handed-off");
+    const { metadata: _metadata, ...first } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockRejectedValueOnce(new HookNotFoundError(token))
+      .mockResolvedValue(routableHook("owner-2", token, "session-2"));
+    await (
+      await resumeSessionInbox("slack:handed-off", send)
+    ).sessionId;
+    await resumeSessionInbox("slack:handed-off", send);
+    await resumeSessionInbox("slack:handed-off", send);
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([
+      token,
+      first,
+      token,
+      token,
+    ]);
+  });
 });
 
 function sessionHook(runId: string, token: string, metadata: Record<string, unknown>) {

@@ -92,6 +92,10 @@ export async function resumeSessionInbox(
     if (command.kind === "session-failure" || command.kind === "session-prewarm") throw error;
     return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
   }
+  // The remembered owner refused, so forget it now: callers that never read `sessionId` would
+  // otherwise try it first on every command.
+  if (remembered !== undefined && remembered.hook.hookId !== hook.hookId)
+    forgetInboxOwner(physicalToken);
   let identity: Promise<string> | undefined;
   return {
     ownerRunId: hook.runId,
