@@ -108,3 +108,7 @@ See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the Workflow SDK abst
 eve creates new runs with Workflow spec version 9, which drives each run from one orchestrator. eve sets `WORKFLOW_SPEC_VERSION=9` before it creates a world, unless `WORKFLOW_SPEC_VERSION` or `WORKFLOW_SEALED_LOG` is already set. To create spec 8 runs, set `WORKFLOW_SPEC_VERSION=8` in the runtime environment.
 
 The setting applies only to new runs. Existing runs keep the version they started with. The local world, Vercel Workflow, and `@workflow/world-postgres` 5.1.0 or later create spec 9 runs. A world without spec 9 support, such as an earlier Postgres world, logs a warning and creates spec 8 runs. `eve dev` always creates spec 9 runs on the local world.
+
+## Keep a session warm between messages
+
+After a turn, a session's run keeps waiting for its next message on a live orchestrator for up to 30 seconds. A message that arrives in that window starts its turn without a queue delivery that reloads and replays the session. eve sets `WORKFLOW_ORCHESTRATOR_HOOK_LINGER_MS=30000` unless it is already set; Workflow's own default is 5 seconds, and it never lingers longer than `WORKFLOW_ORCHESTRATOR_LINGER_MS` (30 seconds by default). Set `WORKFLOW_ORCHESTRATOR_HOOK_LINGER_MS=0` to release the orchestrator after every turn. Only worlds with a live event feed, such as Vercel Workflow and `@workflow/world-postgres`, linger.

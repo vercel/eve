@@ -16,6 +16,23 @@ export function applyWorkflowSpecVersionDefault(
   env.WORKFLOW_SPEC_VERSION = String(EVE_WORKFLOW_SPEC_VERSION);
 }
 
+/**
+ * How long a session's orchestrator stays live after a turn, waiting for its next message.
+ * Workflow's 5s default suits a hook that is rarely resumed; a person usually replies to a
+ * session later than that, and a message that arrives after the orchestrator left waits for a
+ * queue delivery that reloads and replays the session. Workflow caps it at
+ * `WORKFLOW_ORCHESTRATOR_LINGER_MS`, 30s by default.
+ */
+export const EVE_WORKFLOW_HOOK_LINGER_MS = 30_000;
+
+/** Keeps a session's orchestrator live between turns unless the operator chose a linger. */
+export function applyWorkflowHookLingerDefault(
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+): void {
+  if (isSet(env.WORKFLOW_ORCHESTRATOR_HOOK_LINGER_MS)) return;
+  env.WORKFLOW_ORCHESTRATOR_HOOK_LINGER_MS = String(EVE_WORKFLOW_HOOK_LINGER_MS);
+}
+
 function isSet(value: string | undefined): boolean {
   return value !== undefined && value !== "";
 }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { applyWorkflowSpecVersionDefault } from "#internal/workflow/spec-version-default.js";
+import {
+  applyWorkflowHookLingerDefault,
+  applyWorkflowSpecVersionDefault,
+} from "#internal/workflow/spec-version-default.js";
 
 describe("applyWorkflowSpecVersionDefault", () => {
   it.each([
@@ -16,5 +19,20 @@ describe("applyWorkflowSpecVersionDefault", () => {
     const target: Record<string, string | undefined> = { ...env };
     applyWorkflowSpecVersionDefault(target);
     expect(target.WORKFLOW_SPEC_VERSION).toBe(expected);
+  });
+});
+
+describe("applyWorkflowHookLingerDefault", () => {
+  it.each([
+    { name: "defaults an unset linger to 30s", env: {}, expected: "30000" },
+    {
+      name: "keeps an operator linger",
+      env: { WORKFLOW_ORCHESTRATOR_HOOK_LINGER_MS: "0" },
+      expected: "0",
+    },
+  ])("$name", ({ env, expected }) => {
+    const target: Record<string, string | undefined> = { ...env };
+    applyWorkflowHookLingerDefault(target);
+    expect(target.WORKFLOW_ORCHESTRATOR_HOOK_LINGER_MS).toBe(expected);
   });
 });

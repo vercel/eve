@@ -32,6 +32,7 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeLessThan(
       source.indexOf("await createWorldFromModule("),
     );
+    expect(source).toContain("applyWorkflowHookLingerDefault();");
   });
 
   it("configures the vendored local World with eve's app-local data resolver", () => {
