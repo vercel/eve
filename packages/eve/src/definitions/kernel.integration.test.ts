@@ -815,7 +815,7 @@ describe("reactions", () => {
 
   // #6495: the instruction joins history, the client context does not, so the context sits after
   // it, right before the message, and the next turn's prompt keeps the instruction's prefix.
-  it.fails("places a turn's client context after the user-role instruction that turn announces", async () => {
+  it("places a turn's client context after the user-role instruction that turn announces", async () => {
     const log: string[] = [];
     const prompts: LanguageModelV4Prompt[] = [];
     const model = markMockModel(

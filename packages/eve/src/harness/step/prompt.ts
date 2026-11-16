@@ -7,6 +7,7 @@ import {
   followsToolResults,
   type HarnessModelMessage,
   normalizeModelMessages,
+  turnAnchorOf,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { hasUnansweredToolCall } from "#harness/model-call/response.js";
@@ -152,7 +153,12 @@ export function withClientContext(
 ): HarnessModelMessage[] {
   const { clientContext } = prompt;
   if (clientContext === undefined || clientContext.messages.length === 0) return [...messages];
-  const insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  let insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  // What eve announced for the turn joined history at the same position, ahead of the turn's
+  // input. The context goes after it, so the durable prefix the next turn reads stays cached.
+  while (insertionIndex < messages.length && isAnnouncement(messages[insertionIndex]!)) {
+    insertionIndex += 1;
+  }
   return [
     ...messages.slice(0, insertionIndex),
     ...clientContext.messages.map((content) =>
@@ -160,6 +166,19 @@ export function withClientContext(
     ),
     ...messages.slice(insertionIndex),
   ];
+}
+
+/**
+ * A message `announce()` added ahead of a turn's input: only it puts unanchored `context.state` and
+ * `context.instruction` messages at a turn's start. Other framework messages there, such as a
+ * compaction checkpoint or its "Continue.", keep the context ahead of them.
+ */
+function isAnnouncement(message: HarnessModelMessage): boolean {
+  return (
+    message.role === "user" &&
+    (message.kind === "context.state" || message.kind === "context.instruction") &&
+    turnAnchorOf(message) === undefined
+  );
 }
 
 /** The prompt as the model reads it: with the client's context. */
