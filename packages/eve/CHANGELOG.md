@@ -1,5 +1,44 @@
 # eve
 
+## 1.0.1
+
+Released 2026-11-16 · [Compare with 1.0.0](https://github.com/vercel/eve/compare/eve%401.0.0...eve%401.0.1)
+
+### Features
+
+- Show the model provider picker about a second sooner when `eve init` hands off to `eve dev`, by running onboarding while the development server starts. ([#6472](https://github.com/vercel/eve/pull/6472))
+- Make `npx eve@latest` start much faster with npm by no longer declaring `@vercel/connect` as an optional peer dependency, which made npm download about 450 MB of package metadata it never installs.
+  eve uses its own bundled copy of `@vercel/connect`. Projects that import `@vercel/connect/eve` still need `@vercel/connect` 2.7.0 or later installed, and `eve init` already adds it. ([#6453](https://github.com/vercel/eve/pull/6453))
+- `oidc()` refuses a token from a different issuer without fetching its own issuer's discovery document and keys, so a route that also accepts another kind of token, such as `vercelOidc()`, no longer waits on that fetch on a new server instance. ([#6508](https://github.com/vercel/eve/pull/6508))
+- Follow-up messages to a session, including Slack replies in an existing thread, skip a Workflow hook lookup when they reach a server instance that recently resolved that session, without needing `EVE_INBOX_HANDLE_SECRET`. ([#6506](https://github.com/vercel/eve/pull/6506))
+- A Slack mention or DM that starts its thread now starts its session directly instead of first looking up the thread's session, which takes two lookups off a new conversation's first reply. ([#6473](https://github.com/vercel/eve/pull/6473))
+- A Slack mention or DM reaches its session sooner: the session starts while Slack is still confirming the "Thinking..." status, and a mention that starts its thread no longer fetches the thread to look for earlier files.
+  A custom `received` renderer for a mention or DM now runs alongside the session start, so it can finish after the turn's output. ([#6474](https://github.com/vercel/eve/pull/6474))
+- A followed session stream resumed past its first line opens sooner on a server instance that hasn't served that session yet, because the stream version check no longer looks up the stream's tail first. ([#6507](https://github.com/vercel/eve/pull/6507))
+- Make `eve init` finish a little sooner by setting up the Git repository while dependencies install. ([#6470](https://github.com/vercel/eve/pull/6470))
+- Make `eve init` install a fresh npm project faster by skipping npm's optional peer dependency lookups, which downloaded hundreds of megabytes of package metadata without installing anything. ([#6452](https://github.com/vercel/eve/pull/6452))
+- Let people connect a model while `eve init` installs dependencies, instead of waiting for the install and the development server to finish first. ([#6478](https://github.com/vercel/eve/pull/6478))
+- Make the eve package smaller and faster to install by publishing only the type declarations its entry points reach.
+  The package drops about 1,800 internal declaration files, 38% of its files and 1.3 MB of its download. ([#6464](https://github.com/vercel/eve/pull/6464))
+- Make the eve package about 700 KB smaller to download by bundling fewer duplicate copies of the same dependencies.
+  eve's bundled Node.js dependencies now share one copy of each dependency version they have in common, and the bundled Vercel Sandbox SDK uses eve's own `undici` dependency instead of a second copy of the same version. ([#6465](https://github.com/vercel/eve/pull/6465))
+
+### Bug Fixes
+
+- Place a turn's client context after the user-role instructions and skill or tool catalog updates eve announces in that turn, so the next turn keeps the prompt cache.
+  User-role instructions and catalog updates join the conversation history, but client context does not. Since #5638, the client context sat ahead of them, so the next turn's prompt diverged at that point. ([#6498](https://github.com/vercel/eve/pull/6498))
+- Use current provider MCP endpoints for Datadog, Cloudinary, Make, Natural, and Netlify, and align Notion's API version header with its OpenAPI schema. ([#6520](https://github.com/vercel/eve/pull/6520))
+- Apply a forwarded trace content ceiling to instrumentation files and to AI SDK telemetry in a remote agent, so a downstream hop records no more prompt or response content than the upstream hop allowed.
+  Before this change, each instrumentation file's `tracePolicy` was evaluated on its own, and an agent without OpenTelemetry used its audience default. Both paths ignored a forwarded `recordInputs: false` or `recordOutputs: false` ceiling. ([#6515](https://github.com/vercel/eve/pull/6515))
+- Keep messages queued during `eve init` queued when `eve dev` starts, and stop leaving a stray version line above the `eve dev` screen. ([#6531](https://github.com/vercel/eve/pull/6531))
+- Include Better Auth's optional OpenTelemetry dependency in new authenticated web chat projects to avoid unresolved-import warnings during deployment builds. ([#5695](https://github.com/vercel/eve/pull/5695))
+- Keep the changelog URL in the package README from overflowing into the npm sidebar. ([#6517](https://github.com/vercel/eve/pull/6517))
+- Typing in the "Project to link" picker during an integration setup, such as `/add` in `eve dev`, no longer crashes with `TypeError: n.label is not a function`.
+  Integration setup runs in a child process, and the IPC channel dropped the picker's search action. The child now sends the search label as text and resolves a picked search itself, so the "Search for '…'" row works there as well. ([#6014](https://github.com/vercel/eve/pull/6014))
+- Remove the line saying the agent has paused until you connect your account or cancel from the Slack sign-in card that holds a turn, so the card shows only the "Connect <service>" heading above the Connect and Cancel buttons. ([#6016](https://github.com/vercel/eve/pull/6016))
+- Use Parallel instead of Exa as the default `web_search` provider for AI Gateway models.
+  Agents without an `agent/tools/web_search.ts` file now search with Parallel. To keep Exa, export `webSearch({ provider: "exa" })` from that file. ([#6530](https://github.com/vercel/eve/pull/6530))
+
 ## 1.0.0
 
 Released 2026-11-15 · [Compare with 0.91.0](https://github.com/vercel/eve/compare/eve%400.91.0...eve%401.0.0)
