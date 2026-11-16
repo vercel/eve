@@ -13,7 +13,7 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 
 - Read `AGENTS.md` first. It requires reading the relevant guide under `node_modules/eve/docs/` before writing code.
 - Read `docs/how-the-chatbot-works.md` for architecture changes and `docs/setup-and-deploy.md` for setup, auth, storage, or deployment changes.
-- Search with `rg "useEveAgent|ClientSession|SessionState|content.delta|interaction.opened|eveSession|chat_event|streamIndex|continuationToken|defineMcpClientConnection|defineTool"`.
+- Search with `rg "useEveAgent|ClientSession|SessionState|content.delta|interaction.opened|eveSession|chat_event|streamIndex|defineMcpClientConnection|defineTool"`.
 - Keep Eve runtime code separate from product shell code: `agent/` defines agent behavior; `app/_components/agent-chat.tsx` bridges Eve to the web UI; `lib/db/*` persists app state.
 
 ## Core Model
@@ -25,7 +25,7 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 
 ## Persistence And Resume
 
-- Persist `SessionState` immediately after Eve returns `sessionId` and `continuationToken`; do not wait for the stream to finish.
+- Persist the whole `ClientSessionState` (`sessionId`, `streamIndex`, and the opaque `inbox`) as soon as `onSessionChange` reports it, and pass it back unchanged; do not wait for the stream to finish or keep only some of its fields.
 - Persist each stream event as it arrives, then use the final snapshot as the canonical cleanup pass.
 - Upsert events by local `eventIndex`; on final snapshot, delete rows beyond the final event length.
 - Keep `pendingUserMessage` for interruption recovery. Mark it before sending, consume it once in the session page, hide it after a settled event, and clear it after snapshot or authorization skip.
@@ -38,7 +38,7 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 - Treat `content.delta.data.delta` as the new text for its `partId`. Treat reduced message text and rendered parts as cumulative; `content.completed` carries a part's whole value.
 - Read the stream as NDJSON. Buffering until newline is normal parsing, not app-level response buffering.
 - Consider a turn settled on an event `endsTurn` from `eve/client` accepts: `turn.settled`, `session.ended`, or a `turn.paused` awaiting a person. Treat a sign-in `interaction.opened` (`request.kind: "sign-in"`) as a blocked state for normal text input.
-- Treat a `turn.paused` awaiting only calls as progress, not a settled turn: the turn waits on its tasks and resumes with `turn.resumed` for the same `turnId`. Keep following the stream until one of the settling events above.
+- Only a person pauses a turn. A turn waiting on its own tasks keeps running, and no event announces a paused turn resuming: the next event under the same `turnId`, such as `model.requested`, shows it is running again. Only `turn.settled` ends it.
 - On disconnect, reconnect from the next unread remote stream index. On refresh mid-turn, resume from saved `activeChat.session` and layer resumed events until the final snapshot catches up.
 
 ## Connections And Tools
@@ -47,7 +47,7 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 - Define Vercel Connect-backed MCP connections in `agent/connections/<name>.ts` with `defineMcpClientConnection(...)` and `connect(process.env.ENV_NAME ?? "local-name")`.
 - Treat composer connection toggles as per-turn intent, not connector provisioning or OAuth state.
 - Do not parse assistant text for auth requirements. Use sign-in `interaction.opened` and `interaction.settled` events.
-- Implement Skip as a structured outcome: stop the stream, synthesize a declined `interaction.settled` plus a cancelled `turn.settled`, apply those local events to the chat, persist them, and clear pending input. The chat's next message starts a new session.
+- Implement Skip as a turn cancellation: call `agent.cancel()` and keep the stream attached so the server's `interaction.settled` and `turn.settled` arrive and persist through the normal callbacks. Never synthesize settlement events locally. The chat's next message continues the same session.
 
 ## Upstream Signals
 

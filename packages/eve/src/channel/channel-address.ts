@@ -40,6 +40,19 @@ type ChannelAddressCreateOptions<TState = undefined> = [TState] extends [undefin
   ? BaseChannelAddressCreateOptions
   : BaseChannelAddressCreateOptions & { readonly state?: Partial<TState> };
 
+/**
+ * Marks a send to an address that no session can hold yet, such as a Slack mention that starts
+ * its thread. The send starts a session at once instead of first looking for one. A start that
+ * finds the address taken still delivers to its owner, as concurrent cold starts do. Answers
+ * ignore it, so `respond()` does not accept it.
+ */
+export const startsNewAddress: unique symbol = Symbol("eve.channel.startsNewAddress");
+
+/** Message-send options that may carry {@link startsNewAddress}. */
+export interface StartsNewAddressOption {
+  readonly [startsNewAddress]?: true;
+}
+
 interface BaseChannelAddressDeliveryOptions {
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
@@ -73,8 +86,14 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   create(options: ChannelAddressCreateOptions<TState>): Promise<ChannelCreateResult>;
-  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
-  send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
+  deliver(
+    input: SendPayload,
+    options: ChannelAddressDeliveryOptions<TState> & StartsNewAddressOption,
+  ): Promise<Delivery>;
+  send(
+    message: MessageContent,
+    options: ChannelAddressDeliveryOptions<TState> & StartsNewAddressOption,
+  ): Promise<Delivery>;
   respond(
     answers: SendPayload["answers"],
     options: ChannelAddressDeliveryOptions<TState>,
@@ -165,14 +184,19 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       };
-      const result = await input.runtime.dispatchContinuation({
-        command,
-        continuationToken: namespacedToken,
-        successor: runInput,
-      });
-      if (result.status === "accepted")
+      const answering = payload.answers !== undefined && payload.answers.length > 0;
+      // Answers always belong to the session that asked, so only a message may skip the lookup.
+      const result =
+        options[startsNewAddress] === true && !answering
+          ? undefined
+          : await input.runtime.dispatchContinuation({
+              command,
+              continuationToken: namespacedToken,
+              successor: runInput,
+            });
+      if (result?.status === "accepted")
         return commandDelivery(input.runtime, result, delivery.deliveryId);
-      if (payload.answers && payload.answers.length > 0) {
+      if (answering) {
         throw new SessionNotActiveError();
       }
       const started = await input.runtime.createSession(runInput);

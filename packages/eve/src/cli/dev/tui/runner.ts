@@ -68,6 +68,7 @@ import {
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import { describeRemoteAuthCompletedMutations } from "./remote-auth-result.js";
 import { prepareRemoteTuiAccess } from "./remote-startup.js";
+import type { StartupOnboardingResult } from "./startup-onboarding.js";
 import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   BOOT_DETECTIONS,
@@ -365,6 +366,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   onboard?: boolean;
+  /** Onboarding that already ran on the startup screen; the runner settles its outcome. */
+  startupOnboarding?: StartupOnboardingResult;
   /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
   onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
   onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
@@ -434,6 +437,7 @@ export class EveTUIRunner {
   #startupPrompt?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
+  readonly #startupOnboarding: StartupOnboardingResult | undefined;
   #reportedFirstResponse = false;
   readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
   readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
@@ -518,6 +522,7 @@ export class EveTUIRunner {
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
     if (options.startup !== undefined) this.#startup = options.startup;
     this.#onboard = options.onboard === true;
+    this.#startupOnboarding = options.startupOnboarding;
     this.#onOnboardingStep = options.onOnboardingStep;
     this.#onOnboardingTerminal = options.onOnboardingTerminal;
     if (options.appRoot !== undefined) {
@@ -1426,12 +1431,21 @@ export class EveTUIRunner {
   }
 
   async #runInitialAgentOnboarding(title: string): Promise<PromptCommandOutcome | undefined> {
-    this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
-    const outcome = await this.#executeExtensionCommand(
-      { type: "extension", name: "login", argument: "" },
-      title,
-      { trigger: "startup", initialModelStep: "provider" },
-    );
+    let outcome: PromptCommandOutcome | undefined;
+    if (this.#startupOnboarding === undefined) {
+      this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
+      outcome = await this.#executeExtensionCommand(
+        { type: "extension", name: "login", argument: "" },
+        title,
+        { trigger: "startup", initialModelStep: "provider" },
+      );
+    } else if (this.#startupOnboarding.reported === true) {
+      return undefined;
+    } else {
+      // The startup screen already reported `model_provider`; report the rest once settled.
+      const pending = this.#startupOnboarding.outcome;
+      outcome = pending && (await this.#settleCommandOutcome(pending));
+    }
     if (!outcome?.cancelled && outcome?.failed !== true)
       this.#onOnboardingStep?.({ flow: "onboarding", step: "connection_ready" });
     this.#onOnboardingTerminal?.({

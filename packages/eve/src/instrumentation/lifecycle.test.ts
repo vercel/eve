@@ -900,6 +900,36 @@ describe("trace policies", () => {
     ]);
   });
 
+  it("narrows every provider's policy to a forwarded ceiling", async () => {
+    const observed: InstrumentationEvent[] = [];
+    const hooks = createUnboundInstrumentationHooks({
+      parallel: [
+        {
+          events: { "model.call.started": (event) => void observed.push(event) },
+          name: "sentry",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+        },
+      ],
+    }).forTrace!(traceContext("weather", "public"), {
+      ceiling: { recordInputs: false, recordOutputs: false },
+    });
+
+    await hooks.publish({
+      idempotencyKey: "model-1",
+      input: { instructions: "private prompt", messages: [] },
+      model: { modelId: "test", provider: "test" },
+      scope,
+      type: "model.call.started",
+    });
+
+    expect(hooks).toMatchObject({
+      authoredCapturesInputs: false,
+      authoredCapturesOutputs: false,
+      capturesContent: false,
+    });
+    expect(observed).toMatchObject([{ input: undefined }]);
+  });
+
   it("does not snapshot denied error content", async () => {
     const observed = vi.fn();
     const error = Object.defineProperty({}, "secret", {

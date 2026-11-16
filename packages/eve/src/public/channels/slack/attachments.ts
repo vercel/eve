@@ -103,7 +103,7 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): MessageFil
  * deliver.
  */
 export async function collectInboundFileParts(input: {
-  readonly mention: Pick<SlackMessage, "attachments" | "ts">;
+  readonly mention: Pick<SlackMessage, "attachments" | "threadTs" | "ts">;
   readonly thread: SlackThread;
   readonly policy: UploadPolicy;
   /** Whether the triggering message mentions the app. */
@@ -118,6 +118,8 @@ export async function collectInboundFileParts(input: {
   const fromMention = collectSlackFileParts(input.mention.attachments, input.policy);
   if (fromMention.length > 0 || !input.isMentioned) return fromMention;
   if (isUploadsDisabled(input.policy)) return [];
+  // A mention that starts its thread has no earlier messages to look back over.
+  if (input.mention.threadTs === input.mention.ts) return [];
 
   if (input.thread.recentMessages.length === 0) {
     try {

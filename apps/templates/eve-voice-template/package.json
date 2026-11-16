@@ -17,7 +17,7 @@
     "typecheck": "next typegen apps/web && tsgo --noEmit -p apps/web/tsconfig.json"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.93",
+    "@ai-sdk/openai": "4.0.118",
     "@ai-sdk/react": "4.0.177",
     "@neondatabase/serverless": "1.1.0",
     "@shadcn/react": "0.3.1",

@@ -295,6 +295,7 @@ describe("ensureChannel", () => {
     );
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).not.toContain('"better-auth"');
+    expect(packageJson).not.toContain('"@opentelemetry/api"');
     expect(packageJson).toContain('"next": "16.2.6"');
     expect(packageJson).toContain('"shiki": "3.23.0"');
     expect(packageJson).toContain('"@shikijs/core": "3.23.0"');
@@ -358,6 +359,7 @@ describe("ensureChannel", () => {
       dependencies: Record<string, string>;
     };
     expect(packageJson.dependencies["better-auth"]).toBe("1.6.26-test");
+    expect(packageJson.dependencies["@opentelemetry/api"]).toBe("1.9.0");
     expect(packageJson.dependencies.next).toBe("16.3.0");
 
     const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");

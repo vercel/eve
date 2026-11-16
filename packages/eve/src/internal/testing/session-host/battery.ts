@@ -1,5 +1,6 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
+import { startsNewAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
@@ -117,6 +118,25 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               .read();
             expect(tail.value?.meta.position.line).toBe(lines.at(-1));
             expect(await violations(runtime, first.sessionId)).toEqual([]);
+          },
+        );
+      });
+
+      it("delivers a send marked as opening a new address to the session already holding it", async () => {
+        await withHost(
+          { name: `${name}-new-address`, respond: () => textStreamResult("Noted, Alice.") },
+          async ({ runtime, settled }) => {
+            const address = alice(runtime, `${name}:new-address`);
+            const first = await (
+              await address.send("Alice asks.", { auth: null, [startsNewAddress]: true })
+            ).result();
+            // Wrongly marked: the start finds the address taken and hands the message to its owner.
+            const second = await (
+              await address.send("Alice asks again.", { auth: null, [startsNewAddress]: true })
+            ).result();
+            expect([first.status, second.status]).toEqual(["completed", "completed"]);
+            expect(second.sessionId).toBe(first.sessionId);
+            await settled();
           },
         );
       });

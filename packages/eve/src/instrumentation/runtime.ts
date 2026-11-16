@@ -2,7 +2,6 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
   InstrumentationScope,
   InstrumentationContextRunner,
@@ -50,7 +49,10 @@ import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/o
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
-import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  defaultContentCapture,
+} from "#shared/forwarded-trace-policy.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import {
@@ -203,10 +205,10 @@ export function bindInstrumentationRuntime(
   };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
     return (
-      baseHooks.forTrace?.({
-        agentName: boundSession.agentName,
-        ...sessionContext.conversation,
-      }) ?? baseHooks
+      baseHooks.forTrace?.(
+        { agentName: boundSession.agentName, ...sessionContext.conversation },
+        { ceiling: sessionContext.forwardedTracePolicy?.ceiling },
+      ) ?? baseHooks
     );
   };
   const captureExecutionRuntime = () => {
@@ -325,7 +327,10 @@ export function bindInstrumentationRuntime(
         );
         const conversation = sessionContext.conversation;
         const audience = conversation.audience;
-        const capturesContent = shouldCaptureInstrumentationContent(conversation);
+        const defaultContent = defaultContentCapture(
+          conversation,
+          sessionContext.forwardedTracePolicy?.ceiling,
+        );
         const effectiveDecision =
           decision === undefined
             ? decision
@@ -337,7 +342,7 @@ export function bindInstrumentationRuntime(
               );
         const capturesRuntimeContextInput =
           effectiveDecision === undefined
-            ? capturesContent
+            ? defaultContent.recordInputs
             : effectiveDecision.action === "record" && effectiveDecision.recordInputs;
         const dropsTrace = decision?.action === "drop";
         const content = {
@@ -345,12 +350,12 @@ export function bindInstrumentationRuntime(
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordInputs
-              : capturesContent),
+              : defaultContent.recordInputs),
           recordOutputs:
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordOutputs
-              : capturesContent),
+              : defaultContent.recordOutputs),
         };
         // eve's AI SDK OpenTelemetry integration is on the call only when eve does not own agent
         // spans; it keeps the OpenTelemetry decision.
