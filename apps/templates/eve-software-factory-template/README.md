@@ -106,8 +106,6 @@ Hand the agent a task ("users report the password reset email arrives twice, fix
 
 `pnpm validate` runs formatting/lint checks, TypeScript, offline regression tests, and discovery with zero errors or warnings. The standalone workflow in `.github/workflows/ci.yml` splits those checks and tests Node 24/26; GitHub only executes it when this template is a repository root. Live sandboxes, model calls, builds, and full-pipeline evals require deployment credentials and a scratch repository.
 
-See [upstream parity decisions](.github/UPSTREAM-PARITY.md) for the pinned product reference and deliberate local safety differences.
-
 ## Resources
 
 - [Foreman Docs](https://ask-foreman.dev/docs)
