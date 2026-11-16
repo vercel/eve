@@ -44,7 +44,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
   only. It reads the `action_token` auth attribute that eve's `defaultSlackAuth`
   sets in `agent/channels/slack.ts`.
   `agent/tools/read_slack_conversation.ts` reads a public channel or thread the
-  bot is in. Both use `callSlack` from `agent/lib/slack.ts`.
+  bot is in. `agent/tools/post_slack_file.ts` uploads a sandbox file to the
+  session's own Slack thread, taken from channel metadata, never model input.
+  All three use `callSlack` from `agent/lib/slack.ts`.
 - `agent/skills/`: procedures and reference material loaded on demand.
 - `agent/connections/`, `agent/tools/`, `agent/subagents/`, `agent/extensions/`:
   added as the brain grows. Names come from file paths.
