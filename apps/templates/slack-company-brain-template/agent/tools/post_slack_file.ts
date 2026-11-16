@@ -84,10 +84,12 @@ export default defineTool({
     if (bytes.byteLength === 0) return failed("The file is empty.");
 
     const filename = basename(path);
+    const uploadBody: Record<string, unknown> = { filename, length: bytes.byteLength };
+    if (altText) uploadBody.alt_txt = altText;
     const upload = await callSlack<{ upload_url: string; file_id: string }>(
       teamId,
       "files.getUploadURLExternal",
-      { filename, length: bytes.byteLength, ...(altText ? { alt_txt: altText } : {}) },
+      uploadBody,
     );
     if (!upload.ok || !upload.upload_url || !upload.file_id) {
       if (upload.error === "missing_scope") {
@@ -108,11 +110,12 @@ export default defineTool({
     });
     if (!sent.ok) throw new Error(`Slack file upload failed with HTTP ${sent.status}`);
 
-    const completed = await callSlack(teamId, "files.completeUploadExternal", {
+    const completeBody: Record<string, unknown> = {
       files: JSON.stringify([{ id: upload.file_id, title: title ?? filename }]),
       channel_id: channelId,
-      ...(threadTs ? { thread_ts: threadTs } : {}),
-    });
+    };
+    if (threadTs) completeBody.thread_ts = threadTs;
+    const completed = await callSlack(teamId, "files.completeUploadExternal", completeBody);
     if (!completed.ok) {
       throw new Error(
         `Slack files.completeUploadExternal failed: ${completed.error ?? "unknown error"}`,
