@@ -3,6 +3,7 @@ import {
   intakeIssueNumber,
   isAutonomous,
   isScheduleAppAuth,
+  isTicketIntake,
   isTrusted,
 } from "../trust.js";
 
@@ -94,11 +95,12 @@ export function factoryBrainPolicy(ctx: ApprovalContext): ApprovalStatus {
 }
 
 /**
- * Label writes: the one reversible write an unattended run also needs, so it
- * can mark the work item as picked up.
+ * Label writes let vetted unattended GitHub runs mark work as picked up.
+ * HTTP tickets have no vetted issue and cannot mutate repository labels.
  */
 export function labelPolicy(ctx: ApprovalContext): ApprovalStatus {
-  return isAutonomous(ctx.session.auth.current)
+  const auth = ctx.session.auth.current;
+  return isAutonomous(auth) && !isTicketIntake(auth)
     ? "not-applicable"
     : writePolicy(ctx);
 }
@@ -131,12 +133,14 @@ export function shipPolicy(ctx: ApprovalContext): ApprovalStatus {
  * The only sessions that reach the issue-lifecycle tools are trusted mentions,
  * autonomous label runs, and the local dev TUI; an untrusted public commenter
  * never gets a session (see the channel's `onComment`), so allowing this can't
- * hand issue control to an arbitrary account. Unlike {@link commentPolicy}
- * this is deliberately not scoped to one issue, because deduplication closes
- * the duplicates, not the intake issue.
+ * hand issue control to an arbitrary account. HTTP ticket sessions are denied:
+ * their bodies have not been vetted by a repository writer. Unlike
+ * {@link commentPolicy}, vetted GitHub runs are deliberately not scoped to one
+ * issue, because deduplication closes the duplicates, not the intake issue.
  */
 export function closeIssuePolicy(ctx: ApprovalContext): ApprovalStatus {
-  return isAutonomous(ctx.session.auth.current)
+  const auth = ctx.session.auth.current;
+  return isAutonomous(auth) && !isTicketIntake(auth)
     ? "not-applicable"
     : writePolicy(ctx);
 }

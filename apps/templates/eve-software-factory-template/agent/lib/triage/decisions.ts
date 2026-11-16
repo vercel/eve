@@ -240,12 +240,12 @@ const buildTriageQuestions = (
 
 type Answers = Readonly<Record<string, unknown>>;
 
-const choiceOf = <T extends string>(
+const choiceOf = <T extends string, Fallback extends T | null>(
   answers: Answers,
   key: string,
   allowed: readonly T[],
-  fallback: T
-): { choice: T; confidence: number | null } => {
+  fallback: Fallback
+): { choice: T | Fallback; confidence: number | null } => {
   const answer = answers[key] as
     | { choice?: unknown; probabilities?: Record<string, unknown> }
     | undefined;
@@ -386,10 +386,10 @@ const CI_CAUSE_CRITERIA = {
 } as const satisfies Record<CiFailureCause, string>;
 
 export interface CiDiagnosis {
-  readonly cause: CiFailureCause;
+  readonly cause: CiFailureCause | null;
   readonly confidence: number | null;
   /** True only when changing the branch's code is the right response. */
-  readonly fix_with_code: boolean;
+  readonly fix_with_code: boolean | null;
 }
 
 /**
@@ -421,11 +421,11 @@ export const diagnoseCiFailure = async (
     result.answers as Answers,
     "cause",
     CI_FAILURE_CAUSES,
-    "code"
+    null
   );
   return {
     cause: cause.choice,
     confidence: cause.confidence,
-    fix_with_code: cause.choice === "code",
+    fix_with_code: cause.choice === null ? null : cause.choice === "code",
   };
 };

@@ -86,7 +86,7 @@ curl "$FACTORY_URL/intake/v1/tickets" \
   --data '{"externalId":"support-123","title":"Duplicate email delivery","body":"Alice receives two reset emails for one request. Investigate and add a regression test."}'
 ```
 
-A successful submission returns `202` with `ticketId`. Poll `GET /intake/v1/tickets/:ticketId` with the same bearer for `status`, `result`, and `sessionEnded`. The run is unattended, can deliver draft PRs, cannot comment on unrelated GitHub threads, and cannot write shared memory. Clarification ends the run with questions; submit answers as a new ticket with a new `externalId`.
+A successful submission returns `202` with `ticketId`. Poll `GET /intake/v1/tickets/:ticketId` with the same bearer for `status`, `result`, and `sessionEnded`. The run is unattended and can deliver draft PRs, but cannot comment on GitHub threads, change issue or PR labels or state, or write shared memory. Clarification ends the run with questions; submit answers as a new ticket with a new `externalId`.
 
 The strict request schema requires `title` (up to 300 characters) and `body` (up to 20,000). Optional fields are `externalId` (200), `source` (100), `requester` (200), `priority` (`low`, `normal`, `high`, or `urgent`), and at most 20 `labels` (50 characters each). Metadata is single-line untrusted text, not identity or authority. Unknown fields, including `callbackUrl`, are rejected. Requests are capped at 64 KiB and 15 seconds of body reading; status reads stop after 4 MiB, 4,096 events, or 15 seconds. Responses are capped at 64 KiB, with final text limited to 16,000 characters.
 

@@ -11,7 +11,8 @@ import { FACTORY_REPO } from "./constants.js";
  * dispatch; the approval policies deny it everything except labels, progress
  * comments on its own intake issue, closing or reopening issues, and draft
  * pull requests, because an unattended turn has nobody to answer an approval
- * card and would park forever.
+ * card and would park forever. HTTP ticket sessions use this principal too,
+ * but their intake authenticator excludes label and issue-lifecycle writes.
  */
 export const AUTONOMOUS_PRINCIPAL = "github:foreman-factory";
 
@@ -108,6 +109,11 @@ export function intakeIssueNumber(
   }
   const issue = Number(stamped);
   return Number.isSafeInteger(issue) && issue > 0 ? issue : null;
+}
+
+/** Whether an unattended session came from the HTTP ticket intake rather than a vetted GitHub label. */
+export function isTicketIntake(auth: SessionAuthContext | null): boolean {
+  return auth?.authenticator === "intake-token";
 }
 
 /**

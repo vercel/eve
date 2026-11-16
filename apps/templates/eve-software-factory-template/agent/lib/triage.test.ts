@@ -65,6 +65,16 @@ test("CI diagnosis does not turn missing evidence into a passing or code-fix ver
     fix_with_code: null,
   });
   assert.equal(request, null);
+  for (const invalid of [{}, { cause: { choice: "unreadable" } }]) {
+    answers = invalid;
+    // biome-ignore lint/performance/noAwaitInLoops: each case changes the model reply
+    assert.deepEqual(await diagnose.execute({ log: "Test job failed" }, {}), {
+      cause: null,
+      confidence: null,
+      fix_with_code: null,
+    });
+    assert.ok(request);
+  }
   for (const [cause, fix] of [
     ["code", true],
     ["infrastructure", false],

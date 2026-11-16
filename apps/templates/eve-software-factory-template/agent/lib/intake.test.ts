@@ -33,6 +33,7 @@ mock.module("@vercel/blob", {
 });
 const { default: channel } = (await import("../channels/intake.js")) as any;
 const policies = await import("./github/approval.js");
+const { stampAutonomous } = await import("./trust.js");
 const post = channel.routes[0].handler;
 const get = channel.routes[1].handler;
 const sent: any[] = [];
@@ -118,15 +119,36 @@ test("HTTP intake authenticates before work, rejects oversized/unknown input, an
   assert.equal(auth.principalType, "service");
   const approvalCtx = {
     session: { auth: { current: auth } },
-    toolInput: { issueNumber: 7 },
+    toolInput: { issueNumber: 7, state: "closed" },
   } as any;
   for (const policy of [
     policies.writePolicy,
     policies.commentPolicy,
     policies.factoryBrainPolicy,
     policies.shipPolicy,
+    policies.labelPolicy,
+    policies.closeIssuePolicy,
+    policies.updateIssuePolicy,
   ]) {
     assert.equal((policy(approvalCtx) as any).type, "denied");
+  }
+  const issueCtx = {
+    ...approvalCtx,
+    session: {
+      auth: {
+        current: stampAutonomous(
+          { ...auth, authenticator: "github-webhook" },
+          7
+        ),
+      },
+    },
+  };
+  for (const policy of [
+    policies.labelPolicy,
+    policies.closeIssuePolicy,
+    policies.updateIssuePolicy,
+  ]) {
+    assert.equal(policy(issueCtx), "not-applicable");
   }
   assert.equal(
     policies.createPullRequestPolicy({
