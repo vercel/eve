@@ -13,10 +13,18 @@ export interface InitOnboarding {
   /** Shows whether init is still installing once onboarding no longer owns the status line. */
   setInstalling(installing: boolean): void;
   /**
-   * Restores the terminal and returns any prompt the person typed, for `eve dev` to pre-fill.
+   * Restores the terminal and returns what the person typed, for `eve dev` to carry on with.
    * Cancels onboarding first if it is still open.
    */
-  close(): Promise<string | undefined>;
+  close(): Promise<InitCarriedInput>;
+}
+
+/** What the person typed on the onboarding screen. */
+export interface InitCarriedInput {
+  /** The unsent prompt, for `eve dev` to pre-fill. */
+  readonly draft?: string;
+  /** Messages queued with Enter, oldest first, for `eve dev` to send once ready. */
+  readonly queued?: readonly string[];
 }
 
 export interface InitOnboardingTelemetry {
@@ -90,7 +98,7 @@ export async function startInitOnboarding(input: {
     renderer.setStartupPhase(installing ? "installing" : "starting");
   });
 
-  let closed: Promise<string | undefined> | undefined;
+  let closed: Promise<InitCarriedInput> | undefined;
   return {
     finished,
     interrupted: interrupt.signal,
@@ -101,15 +109,24 @@ export async function startInitOnboarding(input: {
     close() {
       closed ??= (async () => {
         closing = true;
+        // eve dev paints its startup screen where this one was.
+        renderer.handOff();
         if (onboarding) {
           renderer.requestInterrupt();
           await finished;
         }
-        const { draft, queuedPrompt } = startup.finish();
+        const { draft, queued } = startup.finish();
         await startup.shutdown();
-        const carried = [queuedPrompt, draft].filter((text) => text !== undefined && text !== "");
-        // The prompt is single-line: eve dev strips newlines from pre-filled input.
-        return carried.length === 0 ? undefined : carried.join(" ");
+        if ((await finished).cancelled) {
+          // Without a model, queued messages would fail; return them to the prompt instead.
+          // The prompt is single-line: eve dev strips newlines from pre-filled input.
+          const carried = [...queued, draft].filter((text) => text !== "");
+          return carried.length === 0 ? {} : { draft: carried.join(" ") };
+        }
+        const carried: { draft?: string; queued?: readonly string[] } = {};
+        if (draft !== "") carried.draft = draft;
+        if (queued.length > 0) carried.queued = queued;
+        return carried;
       })();
       return closed;
     },

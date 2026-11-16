@@ -446,6 +446,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #everInteractive = false;
   #partingLinePrinted = false;
+  /** Another process takes over the terminal after teardown; see {@link handOff}. */
+  #handingOff = false;
   #exitRequested = false;
   /** True after the first consecutive Ctrl+C at the idle chat prompt. */
   #exitArmed = false;
@@ -670,7 +672,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
   }
 
-  beginStartupDraft(options: { initialDraft?: string; title: string }): void {
+  beginStartupDraft(options: {
+    initialDraft?: string;
+    queued?: readonly string[];
+    title: string;
+  }): void {
+    for (const message of options.queued ?? []) this.#startupQueue.enqueue(message);
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
@@ -724,10 +731,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#attachInput();
   }
 
-  finishStartupDraft(): { draft: string; queuedPrompt: string | undefined } {
+  finishStartupDraft(): { draft: string; queued: readonly string[] } {
     const result = {
       draft: this.#startupEditor?.text ?? this.#inputText,
-      queuedPrompt: this.#startupQueue.takePrompt(),
+      queued: this.#startupQueue.take(),
     };
     this.#startupEditor = undefined;
     this.#startupConsumer = undefined;
@@ -2782,6 +2789,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  /**
+   * Makes teardown erase the screen without a parting line or trailing blank
+   * row, for when another process (`eve dev` after `eve init`) takes over the
+   * terminal and paints its own screen in the same place.
+   */
+  handOff(): void {
+    this.#handingOff = true;
+    this.#partingLinePrinted = true;
+  }
+
   requestInterrupt(): void {
     if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });
     this.#stop();
@@ -2948,7 +2965,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Restore the real `process.stdout` before the trailing newline so it is
     // not intercepted by the foreign-output capture.
     this.#removeLogCapture();
-    this.#live.newline();
+    if (!this.#handingOff) this.#live.newline();
 
     if (this.#input.isTTY) {
       // Disable bracketed paste, restoring the terminal to how we found it.

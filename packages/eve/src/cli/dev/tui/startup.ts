@@ -66,7 +66,7 @@ export function inlineArgumentSuggestions(appRoot: string) {
 export interface DevelopmentTuiStartup {
   readonly diagnostics: DevDiagnostics | undefined;
   readonly renderer: TerminalRenderer;
-  finish(): { draft: string; queuedPrompt: string | undefined };
+  finish(): { draft: string; queued: readonly string[] };
   shutdown(): Promise<void>;
 }
 
@@ -74,6 +74,8 @@ export async function startDevelopmentTuiStartup(
   input: TuiDisplayOptions & {
     readonly appRoot: string;
     readonly initialInput?: string;
+    /** Messages to show queued, sent once the agent is ready. */
+    readonly queuedInput?: readonly string[];
     readonly onExitRequest: () => void;
   },
 ): Promise<DevelopmentTuiStartup> {
@@ -86,6 +88,7 @@ export async function startDevelopmentTuiStartup(
   });
   renderer.beginStartupDraft({
     initialDraft: input.initialInput,
+    queued: input.queuedInput,
     title: input.name ?? "eve",
   });
   return {

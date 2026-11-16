@@ -50,6 +50,7 @@ import {
 
 import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
+import { coalesceQueuedMessages } from "./message-queue.js";
 import {
   formatPromptCommandHelp,
   parsePromptCommand,
@@ -335,7 +336,7 @@ export interface PromptCommandHandler {
 }
 
 type TuiStartup = {
-  finish(): { draft: string; queuedPrompt: string | undefined };
+  finish(): { draft: string; queued: readonly string[] };
 };
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
@@ -608,7 +609,7 @@ export class EveTUIRunner {
 
   #finishStartup(): string | undefined {
     const startup = this.#startup?.finish();
-    this.#startupPrompt = startup?.queuedPrompt;
+    this.#startupPrompt = coalesceQueuedMessages(startup?.queued ?? []);
     return startup?.draft ?? this.#initialInput;
   }
 

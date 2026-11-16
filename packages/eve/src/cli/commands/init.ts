@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import pc from "#compiled/picocolors/index.js";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
-import { EVE_INIT_INPUT_ENV } from "#cli/dev/command-options.js";
+import { EVE_INIT_INPUT_ENV, EVE_INIT_QUEUED_INPUT_ENV } from "#cli/dev/command-options.js";
 import type {
   EveCliSetupFailureCode,
   EveCliSetupStep,
@@ -58,6 +58,7 @@ import { initAgentReadySummary } from "./agent-instructions.js";
 import { startGitInitialization, type GitInitialization } from "./init-git.js";
 import {
   startInitOnboarding,
+  type InitCarriedInput,
   type InitOnboarding,
   type InitOnboardingTelemetry,
 } from "./init-onboarding.js";
@@ -635,7 +636,7 @@ export async function runInitCommand(
 
   trackStep?.("handoff");
   let onboardingCancelled = false;
-  let carriedInput: string | undefined;
+  let carriedInput: InitCarriedInput = {};
   if (onboarding !== undefined) {
     onboardingCancelled = (await onboarding.finished).cancelled;
     carriedInput = await onboarding.close();
@@ -708,7 +709,10 @@ export async function runInitCommand(
     ...baseDevArguments,
     ...(onboarding !== undefined ? ["--onboarded"] : freshScaffold ? ["--onboard"] : []),
   ];
-  if (carriedInput !== undefined) process.env[EVE_INIT_INPUT_ENV] = carriedInput;
+  if (carriedInput.draft !== undefined) process.env[EVE_INIT_INPUT_ENV] = carriedInput.draft;
+  if (carriedInput.queued !== undefined) {
+    process.env[EVE_INIT_QUEUED_INPUT_ENV] = JSON.stringify(carriedInput.queued);
+  }
   if (onboardingCancelled) logger.log(pc.dim("Connect a model with /login when you’re ready."));
   logger.log("");
   if (

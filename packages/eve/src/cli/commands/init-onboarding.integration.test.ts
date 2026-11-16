@@ -78,7 +78,7 @@ describe("startInitOnboarding", () => {
     const onboarding = await startInitOnboarding({ projectPath, telemetry: events });
     await screen.waitForText("Connect a model");
 
-    await expect(onboarding.close()).resolves.toBeUndefined();
+    await expect(onboarding.close()).resolves.toEqual({});
 
     // `close()` cancels with a synthetic Ctrl-C; only a person's Ctrl-C stops the install.
     expect(onboarding.interrupted.aborted).toBe(false);
@@ -102,7 +102,7 @@ describe("startInitOnboarding", () => {
     await onboarding.close();
   });
 
-  it("reports a finished connection and carries the typed prompt to eve dev", async () => {
+  it("reports a finished connection and carries the queue and draft to eve dev", async () => {
     const projectPath = await mkdtemp(join(tmpdir(), "eve-init-onboarding-finish-"));
     const events = telemetry();
     const onboarding = await startInitOnboarding({ projectPath, telemetry: events });
@@ -112,10 +112,17 @@ describe("startInitOnboarding", () => {
     await expect(onboarding.finished).resolves.toEqual({ cancelled: false });
     input.type("Help Alice");
     input.enter();
-    input.type("plan her week");
+    input.type("and Bob");
+    input.enter();
+    input.type("plan their week");
 
-    await expect(onboarding.close()).resolves.toBe("Help Alice plan her week");
+    await expect(onboarding.close()).resolves.toEqual({
+      queued: ["Help Alice", "and Bob"],
+      draft: "plan their week",
+    });
     expect(onboarding.interrupted.aborted).toBe(false);
+    // eve dev paints its own screen in place, so nothing of this one stays behind.
+    expect(screen.snapshot().trim()).toBe("");
     expect(events.trackSetupStep.mock.calls).toEqual([
       [{ flow: "onboarding", step: "model_provider" }],
       [{ flow: "onboarding", step: "connection_ready" }],

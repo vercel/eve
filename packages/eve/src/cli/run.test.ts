@@ -592,7 +592,7 @@ describe("eve dev --input", () => {
       });
       const startup = {
         renderer: {},
-        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        finish: vi.fn(() => ({ draft: "", queued: [] })),
         shutdown: vi.fn(async () => {}),
       };
       const startDevelopmentTuiStartup = vi.fn(async () => startup);
@@ -651,7 +651,7 @@ describe("eve dev --input", () => {
     const order: string[] = [];
     const startup = {
       renderer: {},
-      finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+      finish: vi.fn(() => ({ draft: "", queued: [] })),
       shutdown: vi.fn(async () => {
         order.push("shutdown");
       }),
@@ -696,7 +696,7 @@ describe("eve dev --input", () => {
       let requestExit!: () => void;
       const startup = {
         renderer: {},
-        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        finish: vi.fn(() => ({ draft: "", queued: [] })),
         shutdown: vi.fn(async () => {}),
       };
       const startDevelopmentTuiStartup = vi.fn(async (input: { onExitRequest: () => void }) => {
@@ -896,6 +896,39 @@ describe("eve dev --input", () => {
       expect(process.env.EVE_INIT_INPUT).toBeUndefined();
     } finally {
       delete process.env.EVE_INIT_INPUT;
+    }
+  });
+
+  it("keeps messages queued during eve init queued on the startup screen", async () => {
+    const startup = {
+      renderer: {},
+      finish: vi.fn(() => ({ draft: "", queued: [] })),
+      shutdown: vi.fn(async () => {}),
+    };
+    const startDevelopmentTuiStartup = vi.fn(async () => startup);
+    vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+    vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui: vi.fn(async () => {}) }));
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    process.env.EVE_INIT_QUEUED_INPUT = JSON.stringify(["Help Alice", "and Bob"]);
+    try {
+      await withInteractiveTerminal(async () => {
+        await runCli(["dev", "--onboarded"], { error: () => {}, log: () => {} }, { startHost });
+      });
+      expect(startDevelopmentTuiStartup).toHaveBeenCalledWith(
+        expect.objectContaining({ queuedInput: ["Help Alice", "and Bob"] }),
+      );
+      expect(process.env.EVE_INIT_QUEUED_INPUT).toBeUndefined();
+    } finally {
+      delete process.env.EVE_INIT_QUEUED_INPUT;
+      vi.doUnmock("#cli/dev/tui/startup.js");
+      vi.doUnmock("#cli/dev/tui/tui.js");
     }
   });
 
