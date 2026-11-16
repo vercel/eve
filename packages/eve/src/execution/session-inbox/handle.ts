@@ -5,7 +5,7 @@ import type { Hook } from "#internal/workflow/runtime.js";
 const DOMAIN = "eve:inbox:v1:";
 const MAX_HANDLE_LENGTH = 8_192;
 
-type InboxHook = Omit<Hook, "metadata">;
+export type InboxHook = Omit<Hook, "metadata">;
 
 // Match resumeHook's descriptor validation without reading lazy user metadata
 // or retaining capabilities that only a fresh backend lookup can attest.
@@ -26,17 +26,20 @@ function signature(body: string, key: string): Buffer {
   return createHmac("sha256", key).update(DOMAIN).update(body).digest();
 }
 
+/** What a handle carries of `hook`, or `undefined` for a hook no handle can route to. */
+function inboxDescriptor(hook: unknown): InboxHook | undefined {
+  const parsed = parseInboxHook(hook);
+  if (parsed?.resumeContext?.encryptionPublicKey === undefined) return undefined;
+  // OTel carriers can include private server baggage. Signing does not hide it.
+  return { ...parsed, resumeContext: { ...parsed.resumeContext, traceCarrier: undefined } };
+}
+
 /** Opaque transport state; never includes user metadata or transient capabilities. */
 export function issueInboxHandle(hook: unknown): string | undefined {
   const key = signingKey();
   if (key === undefined) return undefined;
-  const parsed = parseInboxHook(hook);
-  if (parsed?.resumeContext?.encryptionPublicKey === undefined) return undefined;
-  // OTel carriers can include private server baggage. Signing does not hide it.
-  const descriptor = {
-    ...parsed,
-    resumeContext: { ...parsed.resumeContext, traceCarrier: undefined },
-  };
+  const descriptor = inboxDescriptor(hook);
+  if (descriptor === undefined) return undefined;
   const body = Buffer.from(JSON.stringify(descriptor)).toString("base64url");
   const handle = `v1.${body}.${signature(body, key).toString("base64url")}`;
   return handle.length <= MAX_HANDLE_LENGTH ? handle : undefined;
@@ -57,4 +60,37 @@ export function readInboxHandle(handle: string): InboxHook | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A session inbox's owner as this process last resolved it, with the session it serves. */
+export interface RememberedInboxOwner {
+  readonly hook: InboxHook;
+  readonly sessionId: string;
+}
+
+/**
+ * The owners this process resolved, by physical inbox token, so its next command there can skip
+ * the lookup as a client's handle would. Process memory, so it needs no signing key. Bounded; the
+ * oldest go first.
+ */
+const rememberedOwners = new Map<string, RememberedInboxOwner>();
+const REMEMBERED_OWNERS_LIMIT = 10_000;
+
+export function rememberInboxOwner(hook: unknown, sessionId: string): void {
+  const descriptor = inboxDescriptor(hook);
+  if (descriptor === undefined) return;
+  rememberedOwners.delete(descriptor.token);
+  if (rememberedOwners.size >= REMEMBERED_OWNERS_LIMIT) {
+    const oldest = rememberedOwners.keys().next();
+    if (oldest.done !== true) rememberedOwners.delete(oldest.value);
+  }
+  rememberedOwners.set(descriptor.token, { hook: descriptor, sessionId });
+}
+
+export function recallInboxOwner(token: string): RememberedInboxOwner | undefined {
+  return rememberedOwners.get(token);
+}
+
+export function forgetInboxOwner(token: string): void {
+  rememberedOwners.delete(token);
 }

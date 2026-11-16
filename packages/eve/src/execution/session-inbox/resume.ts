@@ -1,4 +1,10 @@
-import { issueInboxHandle } from "#execution/session-inbox/handle.js";
+import {
+  forgetInboxOwner,
+  issueInboxHandle,
+  recallInboxOwner,
+  rememberInboxOwner,
+  type InboxHook,
+} from "#execution/session-inbox/handle.js";
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
 import { HookNotFoundError, WorkflowWorldError } from "#compiled/@workflow/errors/index.js";
@@ -59,14 +65,18 @@ export async function resumeSessionInbox(
   command = withPreV27Answers(command);
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
+  const physicalToken = sessionInboxHookToken(token);
+  const remembered = recallInboxOwner(physicalToken);
   let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
   try {
     hook = await resumeCurrentOwner(
-      sessionInboxHookToken(token),
+      physicalToken,
       command,
       typeof address === "string" ? undefined : address.inbox,
+      remembered?.hook,
     );
   } catch (error) {
+    forgetInboxOwner(physicalToken);
     if (!HookNotFoundError.is(error)) throw error;
     if (knownSessionId !== undefined) {
       const started = await resumeSessionStartHook(knownSessionId, command);
@@ -88,7 +98,14 @@ export async function resumeSessionInbox(
     get sessionId() {
       return (identity ??= (async () => {
         try {
-          return knownSessionId ?? requireSessionId(await hook.metadata);
+          // The owner this process remembered names its session without reading the metadata.
+          const sessionId =
+            knownSessionId ??
+            (remembered !== undefined && remembered.hook.hookId === hook.hookId
+              ? remembered.sessionId
+              : requireSessionId(await hook.metadata));
+          rememberInboxOwner(hook, sessionId);
+          return sessionId;
         } catch (cause) {
           // A failed identity read must never cause a second delivery. An owner whose
           // deployment was deleted can never replay what it accepted, so replacing it
@@ -112,9 +129,10 @@ async function resumeCurrentOwner(
   token: string,
   command: unknown,
   inbox: string | undefined,
+  remembered: InboxHook | undefined,
 ): Promise<Awaited<ReturnType<typeof resumeRunnableHook>>> {
   try {
-    return await resumeRunnableHook(token, command, inbox);
+    return await resumeRunnableHook(token, command, inbox, remembered);
   } catch (error) {
     if (!isOwnerDeploymentDeletedError(error)) throw error;
     const holder = await findSessionHookHolder(token);

@@ -275,6 +275,74 @@ function runKeyFailure(reason: string) {
   );
 }
 
+describe("remembering a continuation's owner", () => {
+  const guardedWorld = { capabilities: { deploymentAffinity: true, resolvedHookResume: true } };
+  /** A hook a handle could carry: its run's public key routes a resume without a lookup. */
+  function routableHook(runId: string, token: string, sessionId: string) {
+    return {
+      createdAt: new Date("2026-11-01T00:00:00Z"),
+      environment: "preview",
+      hookId: `hook-${runId}`,
+      metadata: Promise.resolve({ sessionId }),
+      ownerId: "team_test",
+      projectId: "prj_test",
+      resumeContext: {
+        deploymentId: "dpl_test",
+        encryptionPublicKey: "public-key",
+        workflowName: "session",
+      },
+      runId,
+      token,
+    };
+  }
+  const send = { kind: "send", payload: { message: "Alice follows up in the thread." } } as const;
+
+  it("resumes the owner it resolved before without a lookup or a metadata read", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:remembered");
+    const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
+    resumeHookMock.mockResolvedValueOnce(routableHook("owner-1", token, "session-1"));
+    await expect((await resumeSessionInbox("slack:remembered", send)).sessionId).resolves.toBe(
+      "session-1",
+    );
+    resumeHookMock.mockResolvedValueOnce({
+      ...descriptor,
+      get metadata() {
+        throw new Error("A remembered owner's metadata must not be read");
+      },
+    });
+    const receipt = await resumeSessionInbox("slack:remembered", send);
+    await expect(receipt.sessionId).resolves.toBe("session-1");
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([token, descriptor]);
+  });
+
+  it("resolves the owner again after the remembered one refuses", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:moved");
+    const { metadata: _metadata, ...first } = routableHook("owner-1", token, "session-1");
+    const { metadata: _successorMetadata, ...successor } = routableHook(
+      "owner-2",
+      token,
+      "session-2",
+    );
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockRejectedValueOnce(new HookNotFoundError(token))
+      .mockResolvedValue(routableHook("owner-2", token, "session-2"));
+    for (const expected of ["session-1", "session-2", "session-2"]) {
+      await expect((await resumeSessionInbox("slack:moved", send)).sessionId).resolves.toBe(
+        expected,
+      );
+    }
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([
+      token,
+      first,
+      token,
+      successor,
+    ]);
+  });
+});
+
 function sessionHook(runId: string, token: string, metadata: Record<string, unknown>) {
   return {
     hookId: `hook-${runId}`,
