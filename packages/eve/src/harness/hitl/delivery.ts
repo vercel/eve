@@ -21,8 +21,8 @@ import type { SessionView } from "#harness/session-machine/view.js";
 /**
  * The delivery a step answers with: input queued behind earlier work joins it, unless the
  * runtime still runs calls (queued input waits for them). A stale answer, to a request that
- * already closed, never authorizes anything: a stale session-limit answer is dropped, and
- * any other becomes plain text the model reads.
+ * already closed, never authorizes anything: a stale session-limit answer, or a repeat of the
+ * answer its request settled on, is dropped, and any other becomes plain text the model reads.
  */
 export function deliver(
   view: SessionView,

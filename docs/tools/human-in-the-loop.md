@@ -375,6 +375,8 @@ Every [channel](/docs/channels) turns requests into native UI and sends the user
 
 In your own frontend, use `openInteractions(view)` and `respond([{ interactionId, optionId }])` on the same session. A request stays `open` until its `interaction.settled` event, and you can answer while other work runs. See [Building a frontend](/docs/guides/frontend#human-in-the-loop-prompts).
 
+An answer to a request that's no longer open settles nothing. Sending the answer the request settled on again does nothing, so you can safely resend an answer whose `respond()` failed. Any other answer reaches the model as the person's message, and doesn't authorize an earlier action.
+
 ## How pause and resume works
 
 Approvals and questions pause and resume the same way:

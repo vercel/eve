@@ -1252,7 +1252,7 @@ describe("approvals off the happy path", () => {
     ]);
   });
 
-  it("runs a call once when its approval is answered twice; the late answer reads as text", async () => {
+  it("runs a call once when its approval is answered twice; the repeat is dropped", async () => {
     const { events, ran } = await withSession(
       "edge-approval-twice",
       { message: "Deploy it.", model: deployModel(), tools: deployTools },
@@ -1261,16 +1261,59 @@ describe("approvals off the happy path", () => {
         const [approval] = session.approvals();
         await session.answer(approval!, "approve");
         await session.next("approved");
-        // A closed request takes no answer; the session reads it as the person's words, so it
-        // can't approve anything again.
-        await session.answer(approval!, "approve");
-        await session.until("reply", (event) => event.type === "turn.settled");
+        // A closed request takes no answer, and the same answer again says nothing new, so it
+        // neither approves anything again nor starts a turn.
+        const repeat = await session.answer(approval!, "approve");
+        await session.until(
+          "the repeat settles",
+          (event) => event.type === "delivery.settled" && event.data.deliveryId === repeat,
+        );
       },
     );
 
     expect(ran).toEqual(["deploy"]);
     expect(settlements(events)).toEqual(["call_deploy:completed"]);
     expect(ofType(events, "response.submitted")).toHaveLength(1);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("runs a call once when its approval's answer is resent before it settles", async () => {
+    const { events, ran } = await withSession(
+      "edge-approval-resent",
+      { message: "Deploy it.", model: deployModel(), tools: deployTools },
+      async (session) => {
+        await session.next("asks");
+        const [approval] = session.approvals();
+        await session.answer(approval!, "approve");
+        const resent = await session.answer(approval!, "approve");
+        await session.until(
+          "the resent answer settles",
+          (event) => event.type === "delivery.settled" && event.data.deliveryId === resent,
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(settlements(events)).toEqual(["call_deploy:completed"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("reads a different answer to a settled approval as text", async () => {
+    const { events, ran } = await withSession(
+      "edge-approval-changed",
+      { message: "Deploy it.", model: deployModel(), tools: deployTools },
+      async (session) => {
+        await session.next("asks");
+        const [approval] = session.approvals();
+        await session.answer(approval!, "approve");
+        await session.next("approved");
+        await session.answer(approval!, "deny");
+        await session.until("reply", (event) => event.type === "turn.settled");
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(settlements(events)).toEqual(["call_deploy:completed"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
   });
 

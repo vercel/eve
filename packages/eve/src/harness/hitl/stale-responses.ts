@@ -2,7 +2,7 @@ import { appendMessage, normalizeMessage } from "#harness/messages.js";
 import type { MessageContent } from "#shared/message-content.js";
 import { isSessionLimitContinuationRequestId } from "#harness/hitl/budget-request.js";
 import type { HarnessStepInput } from "#harness/types.js";
-import { askedCall } from "#protocol/session-projection/reader.js";
+import { askedCall, decidingAnswer } from "#protocol/session-projection/reader.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { Answer } from "#shared/input.js";
 
@@ -50,7 +50,8 @@ export function dropStaleSessionLimitContinuationResponses(input: {
  * cleared by a follow-up message, or cancelled.
  *
  * Responses for pending requests stay structured; stale responses become
- * plain user-message text. A stale response never reaches structured HITL
+ * plain user-message text, except a repeat of the answer its request settled
+ * on, which is dropped. A stale response never reaches structured HITL
  * processing, so a stale approval cannot authorize an earlier tool call.
  * Request details the session still knows are best-effort model context.
  *
@@ -71,9 +72,10 @@ export function convertStaleResponsesToUserMessage(input: {
   if (currentResponses.length === answers.length)
     return { kind: "unchanged", stepInput: input.stepInput };
   const staleResponses = answers.filter(
-    ({ interactionId }) =>
-      !input.pendingRequestIds.has(interactionId) &&
-      input.view.interactions[interactionId]?.request.kind !== "budget",
+    (answer) =>
+      !input.pendingRequestIds.has(answer.interactionId) &&
+      input.view.interactions[answer.interactionId]?.request.kind !== "budget" &&
+      !repeatsDecidingAnswer(input.view, answer),
   );
   const { answers: _answers, ...rest } = input.stepInput;
   const retained = currentResponses.length === 0 ? rest : { ...rest, answers: currentResponses };
@@ -89,6 +91,16 @@ export function convertStaleResponsesToUserMessage(input: {
     formatDisplayMessage(staleResponses, view),
   );
   return { displayMessage, kind: "converted", stepInput: { ...retained, message: modelMessage } };
+}
+
+// A double press or a resent answer repeats the answer its request settled on; as text it would
+// only start a turn about something already decided.
+function repeatsDecidingAnswer(view: SessionView, answer: Answer): boolean {
+  const row = view.interactions[answer.interactionId];
+  const decided = row === undefined ? undefined : decidingAnswer(row);
+  return (
+    decided !== undefined && decided.optionId === answer.optionId && decided.text === answer.text
+  );
 }
 
 function formatModelMessage(responses: readonly Answer[], view: SessionView): string {

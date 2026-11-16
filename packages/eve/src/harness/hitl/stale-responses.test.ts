@@ -8,8 +8,8 @@ import {
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/hitl/stale-responses.js";
 
-/** The tables of a session that asked to approve a call, which closed. */
-const knownApproval = tablesOf([
+/** A session that asked to approve a call. */
+const approvalAsked = [
   { data: {}, type: "session.started" },
   {
     data: { cause: { deliveryId: "d0" }, follows: null, turnId: "turn_0" },
@@ -46,7 +46,10 @@ const knownApproval = tablesOf([
     scope: { turnId: "turn_0" },
     type: "interaction.opened",
   },
-] as SessionEvent[]);
+] as SessionEvent[];
+
+/** The tables of a session that asked to approve a call, which closed. */
+const knownApproval = tablesOf(approvalAsked);
 
 /** An answer as the session received it, from one delivery. */
 function submitted(interactionId: string, optionId: string) {
@@ -114,6 +117,40 @@ it("converts an attributed stale approval using its option label", () => {
   expect(result.displayMessage).toBe("Approve");
   expect(result.stepInput.answers).toBeUndefined();
   expect(result.stepInput.message).toEqual(expect.stringContaining('"requestType": "approval"'));
+});
+
+/** The tables of {@link knownApproval} after the person approved. */
+const approvedApproval = tablesOf([
+  ...approvalAsked,
+  {
+    data: { interactionId: "approval-1", outcome: "accepted", response: { optionId: "approve" } },
+    scope: { turnId: "turn_0" },
+    type: "interaction.settled",
+  },
+] as SessionEvent[]);
+
+it("drops a repeat of the answer a request settled on", () => {
+  const result = convertStaleResponsesToUserMessage({
+    view: approvedApproval,
+    pendingRequestIds: new Set(),
+    stepInput: { answers: [submitted("approval-1", "approve")] },
+  });
+
+  expect(result).toEqual({ kind: "unchanged", stepInput: {} });
+});
+
+it("converts a different answer to a settled request", () => {
+  const result = convertStaleResponsesToUserMessage({
+    view: approvedApproval,
+    pendingRequestIds: new Set(),
+    stepInput: { answers: [submitted("approval-1", "cancel")] },
+  });
+
+  expect(result.kind).toBe("converted");
+  if (result.kind !== "converted") {
+    throw new Error("Expected the stale response to be converted.");
+  }
+  expect(result.displayMessage).toBe("Cancel");
 });
 
 it("keeps responses for pending requests structured while converting stale ones", () => {
