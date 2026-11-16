@@ -27,10 +27,15 @@ describe.each(["static", "dynamic"] as const)(
     let initializeError: { code: number; message: string } | undefined;
     let initializeProtocolVersion: string;
     let callResult: Record<string, unknown>;
+    let omitCallResultType: boolean;
 
-    async function createClient(protocolVersionDiscovery?: boolean) {
+    async function createClient(
+      protocolVersionDiscovery?: boolean,
+      fetch?: typeof globalThis.fetch,
+    ) {
       const authored = defineMcpClientConnection({
         description: "Support cases",
+        fetch,
         headers: { Authorization: "Bearer fixture-token", "X-Workspace": "fixture-workspace" },
         instanceKey: "fixture-workspace",
         protocolVersionDiscovery,
@@ -79,6 +84,7 @@ describe.each(["static", "dynamic"] as const)(
       initializeError = undefined;
       initializeProtocolVersion = "2025-11-25";
       callResult = { content: [{ type: "text", text: "fixture-user" }] };
+      omitCallResultType = false;
 
       // Replace only HTTP I/O: eve's connection, bundled SDK, and protocol parsing stay real.
       vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -134,7 +140,11 @@ describe.each(["static", "dynamic"] as const)(
         return Response.json({
           jsonrpc: "2.0",
           id: message.id,
-          result: protocolVersion === "2026-07-28" ? { ...result, resultType: "complete" } : result,
+          result:
+            protocolVersion === "2026-07-28" &&
+            !(message.method === "tools/call" && omitCallResultType)
+              ? { ...result, resultType: "complete" }
+              : result,
         });
       });
     });
@@ -263,6 +273,30 @@ describe.each(["static", "dynamic"] as const)(
         { method: "server/discover", protocolVersion: "2026-07-28" },
         { method: "tools/list", protocolVersion: "2026-07-28" },
       ]);
+    });
+
+    it("lets an authored fetch fill in a result the server sends without resultType", async () => {
+      discoveryError = undefined;
+      omitCallResultType = true;
+      await createClient();
+      await expect(client.executeTool("getMyUser", {}, { callId: "strict" })).rejects.toThrow(
+        "Modern MCP result is missing resultType",
+      );
+      await client.close();
+
+      await createClient(undefined, async (request, init) => {
+        const response = await globalThis.fetch(request, init);
+        if (!response.headers.get("content-type")?.includes("application/json")) return response;
+        const reply = (await response.json()) as { result?: Record<string, unknown> };
+        if (reply.result !== undefined) reply.result.resultType ??= "complete";
+        return Response.json(reply, { status: response.status });
+      });
+      await expect(
+        client.executeTool("getMyUser", {}, { callId: "adapted" }),
+      ).resolves.toMatchObject({
+        content: [{ type: "text", text: "fixture-user" }],
+        isError: false,
+      });
     });
 
     it("propagates a failed handshake without retrying it or switching transports", async () => {

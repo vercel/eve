@@ -222,6 +222,33 @@ describe("McpConnectionClient", () => {
     }
   });
 
+  it("sends every request through the authored fetch, after eve's headers, and reads its response", async () => {
+    const reply = new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }));
+    const authored = vi.fn<typeof globalThis.fetch>().mockResolvedValue(reply);
+    const network = vi.spyOn(globalThis, "fetch");
+    try {
+      for (const forwardPrincipal of [false, true]) {
+        createMCPClient.mockReset().mockResolvedValue({ close: vi.fn() });
+        authored.mockClear();
+        await new McpConnectionClient(
+          makeConnection({ fetch: authored, forwardPrincipal }),
+        ).connect();
+        const fetch: typeof globalThis.fetch = createMCPClient.mock.calls[0]![0].transport.fetch;
+        const response = await contextStorage.run(ctxWithAuth(userAuth("alice")), () =>
+          fetch("https://mcp.example.com", {}),
+        );
+
+        expect(response).toBe(reply);
+        const headers = new Headers(authored.mock.calls[0]![1]?.headers);
+        expect(headers.get("authorization")).toBe("Bearer test-token");
+        expect(headers.has("eve-forwarded-principal")).toBe(forwardPrincipal);
+      }
+      expect(network).not.toHaveBeenCalled();
+    } finally {
+      network.mockRestore();
+    }
+  });
+
   it("resolves each request's headers with the approver of the call that sent it", async () => {
     createMCPClient.mockResolvedValue({ close: vi.fn() });
     const connection = makeConnection({

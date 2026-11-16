@@ -121,6 +121,8 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly protocolVersionDiscovery?: boolean;
   /** MCP only: send the turn's principals in `eve-forwarded-principal`. */
   readonly forwardPrincipal?: boolean;
+  /** MCP only: the authored `fetch` every request to the server goes through. */
+  readonly fetch?: typeof globalThis.fetch;
   readonly approval?: Approval;
   readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
