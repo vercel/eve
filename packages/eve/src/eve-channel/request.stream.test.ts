@@ -158,6 +158,26 @@ describe("createSessionStreamResponse", () => {
     await live.response.body?.cancel();
   });
 
+  it("checks the version of a stranded earlier eve's session resumed past its first line", async () => {
+    const v26 = { data: {}, meta: { at }, type: "session.started" };
+    const { session } = sessionOf([v26, v26, v26]);
+    // A stranded session refuses every follow, the version check's included.
+    const stranded = {
+      ...session,
+      getLineStream: (options: { readonly follow?: boolean; readonly startIndex: number }) =>
+        options.follow === false
+          ? session.getLineStream(options)
+          : Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
+      hasRunnableOwner: async () => false,
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      stranded,
+    );
+    expect(response.status).toBe(200);
+    expect((await records(response)).at(-1)).toEqual({ $eve: "stream.ended" });
+  });
+
   // #5782: a followed v26 session reconnects every lease, so re-reading its history from the
   // first line on each reconnect costs CPU that grows with the session.
   it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {

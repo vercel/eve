@@ -367,7 +367,7 @@ export async function createSessionStreamResponse(
         : undefined;
     // Handled below; this keeps an early rejection from being reported as unhandled.
     early?.catch(() => {});
-    const earlierEve = startedOnEarlierEve(session, (startIndex ?? 0) > 0);
+    const earlierEve = startedOnEarlierEve(session, follow && (startIndex ?? 0) > 0);
     let tailIndex: number | undefined;
     if (includeTailIndex || early === undefined) {
       try {
@@ -448,19 +448,19 @@ export function rememberCurrentSession(sessionId: string): void {
 /**
  * True when the session's first stored line is a v26 event. v27 readers can't read such a
  * stream, so serving it as version 27 would leave a client waiting on facts that never come.
- * Reads at most one line; an empty, unreadable, or slow stream reads as current. A cursor past
- * the first line shows it exists, so the read follows the stream to it instead of first looking
- * up the tail that a bounded read stops at.
+ * Reads at most one line; an empty, unreadable, or slow stream reads as current. A followed
+ * cursor past the first line shows it exists, so the read follows the stream to it instead of
+ * first looking up the tail that a bounded read stops at; a session that refuses the follow, as a
+ * stranded one does, falls back to the bounded read.
  */
 async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Promise<boolean> {
   if (currentSessions.has(session.id)) return false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<unknown> | undefined;
   const first = (async () => {
-    const lines = await internalSession(session).getLineStream({
-      follow: hasFirstLine,
-      startIndex: 0,
-    });
+    const open = (follow: boolean) =>
+      internalSession(session).getLineStream({ follow, startIndex: 0 });
+    const lines = await (hasFirstLine ? open(true).catch(() => open(false)) : open(false));
     reader = lines.getReader();
     const { done, value } = await reader.read();
     if (done) return false;
