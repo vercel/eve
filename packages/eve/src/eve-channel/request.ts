@@ -461,7 +461,13 @@ async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Pro
   const first = (async () => {
     const open = (follow: boolean) =>
       internalSession(session).getLineStream({ follow, startIndex: 0 });
-    const lines = await (hasFirstLine ? open(true).catch(() => open(false)) : open(false));
+    const lines = await (hasFirstLine
+      ? open(true).catch((error: unknown) => {
+          // A missing or expired session refuses the bounded read too.
+          if (settled || isRunMissing(error) || isRunExpired(error)) throw error;
+          return open(false);
+        })
+      : open(false));
     reader = lines.getReader();
     if (settled) void reader.cancel().catch(() => {});
     const { done, value } = await reader.read();

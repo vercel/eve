@@ -208,6 +208,29 @@ describe("createSessionStreamResponse", () => {
     expect((await records(response)).at(-1)).toEqual({ $eve: "stream.ended" });
   });
 
+  it("answers a missing session resumed past its first line without a bounded version check", async () => {
+    const { follows, session } = sessionOf([]);
+    const missing = Object.assign(new Error("Run not found."), {
+      name: "WorkflowRunNotFoundError",
+    });
+    const gone = {
+      ...session,
+      getLineStream: async (options: {
+        readonly follow?: boolean;
+        readonly startIndex: number;
+      }) => {
+        await session.getLineStream(options);
+        throw missing;
+      },
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      gone,
+    );
+    expect(response.status).toBe(404);
+    expect(follows).toEqual([true, true]);
+  });
+
   // #5782: a followed v26 session reconnects every lease, so re-reading its history from the
   // first line on each reconnect costs CPU that grows with the session.
   it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {
