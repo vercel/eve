@@ -1,5 +1,13 @@
 # @eve/recall
 
+## 0.1.1
+
+Released 2026-11-16 · [Compare with 0.1.0](https://github.com/vercel/eve/compare/%40eve%2Frecall%400.1.0...%40eve%2Frecall%400.1.1)
+
+### Dependencies
+
+- Updated eve to 1.0.1.
+
 ## 0.1.0
 
 Released 2026-11-15 · [View commits](https://github.com/vercel/eve/commits/%40eve%2Frecall%400.1.0)
