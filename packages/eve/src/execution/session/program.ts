@@ -389,12 +389,15 @@ async function runSessionLoop(
               outcome: "ignored",
               source: next.kind,
             });
+          // The session no longer waits on its first input, so a settling prewarm won't start it.
+          void startTimer().catch(() => {});
           continue;
         case "turn":
           // The idle timer's step starts beside the turn's, so the turn doesn't wait on it.
           void startTimer().catch(() => {});
           return await runDeliveredTurn(next);
         case "cancel-turn":
+          void startTimer().catch(() => {});
           continue;
       }
     }
@@ -403,9 +406,8 @@ async function runSessionLoop(
   // prewarm settles while it still waits, not beside the prewarm at boot: a timer step in flight
   // when the message arrives would hold the first turn's step until it finished.
   const defersTimer = boot.start.kind === "first-message";
-  let timerStart: Promise<void> | undefined;
-  const startTimer = (): Promise<void> =>
-    (timerStart ??= sessionTimeout?.start() ?? Promise.resolve());
+  // `start()` starts the timer once; later calls wait on that start.
+  const startTimer = (): Promise<void> => sessionTimeout?.start() ?? Promise.resolve();
   const runInitialAction = async (): Promise<SessionActionResult> => {
     if (boot.compactFirst === true) {
       await runTurn({ control: "compact" });

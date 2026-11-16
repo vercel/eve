@@ -236,6 +236,38 @@ describe("idle timer of a session created without a message", () => {
       }
     });
   });
+
+  it("starts when a control arrives during the prewarm", async () => {
+    const started = Promise.withResolvers<void>();
+    const runtime = await createTestRuntime({
+      agent: { name: "prewarm-timer-control" },
+      beforeSandboxStart: () => started.promise,
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          sessionTimeoutMs: 60_000,
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      const token = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+      try {
+        await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]), {
+          timeout: 10_000,
+        });
+        await resumeHook(token, { deliveryId: "timer-clear", kind: "clear" });
+        started.resolve();
+        await waitForPrewarmStep(run.runId);
+        expect((await deadline(run.runId)).getTime()).toBeGreaterThan(Date.now());
+      } finally {
+        started.resolve();
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+  });
 });
 
 describe("prewarm handoff while the prewarm step runs", () => {
