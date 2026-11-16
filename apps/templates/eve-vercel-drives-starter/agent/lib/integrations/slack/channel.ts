@@ -97,13 +97,14 @@ export const withIdentityContext = (
  * @param config - Native channel overrides.
  * @returns A channel definition whose inbound turns carry Slack profile context.
  * @remarks Without SLACK_CONNECTOR, compilation uses slack/placeholder; Slack delivery still requires a configured connector.
- * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name. Thread history defaults to messages since the agent's last reply.
+ * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name. Thread history defaults to messages since the agent's last reply. Message edits are ignored unless the caller supplies `onMessageEdited`, which runs without identity enrichment.
  */
 export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
   const {
     onMessage,
     onAppMention,
     onDirectMessage,
+    onMessageEdited = () => null,
     threadContext = { since: "last-agent-reply" },
     ...channelConfig
   } = config;
@@ -125,6 +126,7 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
       resolveIdentities
     ),
     onMessage: withIdentityContext(handlers.onMessage, resolveIdentities),
+    onMessageEdited,
     threadContext,
   });
 };

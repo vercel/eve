@@ -1,4 +1,11 @@
-import { issueInboxHandle } from "#execution/session-inbox/handle.js";
+import {
+  forgetInboxOwner,
+  issueInboxHandle,
+  recallInboxOwner,
+  rememberInboxOwner,
+  type InboxHook,
+  type RememberedInboxOwner,
+} from "#execution/session-inbox/handle.js";
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
 import { HookNotFoundError, WorkflowWorldError } from "#compiled/@workflow/errors/index.js";
@@ -59,14 +66,18 @@ export async function resumeSessionInbox(
   command = withPreV27Answers(command);
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
+  const physicalToken = sessionInboxHookToken(token);
+  const remembered = recallInboxOwner(physicalToken);
   let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
   try {
     hook = await resumeCurrentOwner(
-      sessionInboxHookToken(token),
+      physicalToken,
       command,
       typeof address === "string" ? undefined : address.inbox,
+      remembered?.hook,
     );
   } catch (error) {
+    forgetInboxOwner(physicalToken);
     if (!HookNotFoundError.is(error)) throw error;
     if (knownSessionId !== undefined) {
       const started = await resumeSessionStartHook(knownSessionId, command);
@@ -81,6 +92,10 @@ export async function resumeSessionInbox(
     if (command.kind === "session-failure" || command.kind === "session-prewarm") throw error;
     return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
   }
+  // The remembered owner refused, so forget it now: callers that never read `sessionId` would
+  // otherwise try it first on every command.
+  if (remembered !== undefined && remembered.hook.hookId !== hook.hookId)
+    forgetInboxOwner(physicalToken);
   let identity: Promise<string> | undefined;
   return {
     ownerRunId: hook.runId,
@@ -88,8 +103,15 @@ export async function resumeSessionInbox(
     get sessionId() {
       return (identity ??= (async () => {
         try {
-          return knownSessionId ?? requireSessionId(await hook.metadata);
+          const sessionId =
+            knownSessionId ??
+            (remembered !== undefined && remembered.hook.hookId === hook.hookId
+              ? await liveSessionId(remembered)
+              : requireSessionId(await hook.metadata));
+          rememberInboxOwner(hook, sessionId);
+          return sessionId;
         } catch (cause) {
+          forgetInboxOwner(physicalToken);
           // A failed identity read must never cause a second delivery. An owner whose
           // deployment was deleted can never replay what it accepted, so replacing it
           // delivers the command once.
@@ -99,6 +121,18 @@ export async function resumeSessionInbox(
       })());
     },
   };
+}
+
+/**
+ * A remembered owner's session. Its resumed hook carries no metadata, so this repeats the run key
+ * read that hydrating metadata does: only that read shows the owner's deployment was deleted.
+ */
+async function liveSessionId({ hook, sessionId }: RememberedInboxOwner): Promise<string> {
+  const world = await getWorld();
+  await world.getEncryptionKeyForRun?.(hook.runId, {
+    deploymentId: hook.resumeContext?.deploymentId,
+  });
+  return sessionId;
 }
 
 /**
@@ -112,9 +146,10 @@ async function resumeCurrentOwner(
   token: string,
   command: unknown,
   inbox: string | undefined,
+  remembered: InboxHook | undefined,
 ): Promise<Awaited<ReturnType<typeof resumeRunnableHook>>> {
   try {
-    return await resumeRunnableHook(token, command, inbox);
+    return await resumeRunnableHook(token, command, inbox, remembered);
   } catch (error) {
     if (!isOwnerDeploymentDeletedError(error)) throw error;
     const holder = await findSessionHookHolder(token);

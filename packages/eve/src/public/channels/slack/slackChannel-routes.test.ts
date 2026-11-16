@@ -2,11 +2,16 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createChannelOperations,
+  type ChannelReceiveContext,
+} from "#channel/channel-operations.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { Card, CardText } from "#public/channels/slack/cards.js";
 import type { SlackPostInput } from "#public/channels/slack/api.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import type { Runtime } from "#channel/types.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,
@@ -119,16 +124,27 @@ async function firePost(
   send: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ id: "s1" }),
   resolveSession: () => Promise<unknown> = () => Promise.resolve({ id: "s1" }),
 ): Promise<void> {
+  await postWith(channel, request, {
+    from: mockChannelContext<SlackChannelState>(
+      send as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
+    ).from,
+    resolveSession: resolveSession as never,
+  });
+}
+
+/** Like {@link firePost}, with the channel operations the webhook delivers through. */
+async function postWith(
+  channel: unknown,
+  request: Request,
+  operations: ChannelReceiveContext<SlackChannelState>,
+): Promise<void> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
   const post = channel.routes.find((route) => route.method === "POST");
   if (!post || !isHttpRouteDefinition(post)) throw new Error("Expected a POST route.");
   const waitUntil = vi.fn();
   await post.handler(request, {
     ...mockAgentRouteArgs(),
-    from: mockChannelContext<SlackChannelState>(
-      send as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
-    ).from,
-    resolveSession: resolveSession as never,
+    ...operations,
     waitUntil,
     attachSession: vi.fn() as never,
     to: vi.fn() as never,
@@ -442,6 +458,67 @@ describe("slackChannel messageContext.users", () => {
     expect(turn).toContain("id: U01\\ndisplay_name: alice\\nreal_name: Alice Doe\\n</sender>");
     expect(turn).not.toContain("alice@example.com");
     expect(input.auth?.attributes).toMatchObject({ full_name: "Alice Doe" });
+  });
+
+  it("starts the session of a mention that starts its thread without looking for one", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const runtime: Runtime = {
+      createSession: vi.fn().mockResolvedValue({ events: new ReadableStream(), sessionId: "s1" }),
+      dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" }),
+      dispatchSession: vi.fn(),
+      getEventStream: vi.fn(),
+      getLineStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
+      resolveContinuation: vi.fn(),
+    };
+    // The real operations, so a layer that drops the mark between the webhook and the runtime fails.
+    const operations = createChannelOperations<SlackChannelState>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+    const thread = { continuationToken: "slack:C01:1700000000.000001" };
+
+    await postWith(channel, mention({ ts: "1700000000.000001" }), operations);
+    expect(runtime.createSession).toHaveBeenCalledWith(expect.objectContaining(thread));
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+
+    // A reply's thread may have a session already, so the send looks for it first.
+    await postWith(
+      channel,
+      mention({ ts: "1700000000.000002", threadTs: "1700000000.000001" }),
+      operations,
+    );
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(expect.objectContaining(thread));
+    expect(runtime.createSession).toHaveBeenCalledOnce();
+  });
+
+  it("sends a mention to its session while Slack is still confirming the acknowledgement", async () => {
+    const acknowledged = Promise.withResolvers<Response>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) =>
+      String(request).endsWith("assistant.threads.setStatus")
+        ? await acknowledged.promise
+        : await answer(request, init),
+    );
+    let statusPending = false;
+    const send = vi.fn(async () => {
+      statusPending = slackCalls("assistant.threads.setStatus").length === 1;
+      acknowledged.resolve(Response.json({ ok: true }));
+      return { sessionId: "s1" };
+    });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      mention({ ts: "1700000000.000001" }),
+      send,
+    );
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(statusPending).toBe(true);
   });
 
   it("uses an authored resolve instead of the built-in users.info cache", async () => {
@@ -801,8 +878,9 @@ describe("slackChannel message status and guidance", () => {
   });
 
   // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
-  // hook runs, so `deferred` can only keep the rest of the turn quiet. A `hidden` tool sets
-  // `label: false`: it shows no status and doesn't end a deferred turn's quiet.
+  // hook runs, so `deferred` can only keep the rest of the turn quiet. A turn's first model run
+  // keeps the status its start just wrote. A `hidden` tool sets `label: false`: it shows no
+  // status and doesn't end a deferred turn's quiet.
   it.each<{
     name: string;
     request: () => Request;
@@ -820,8 +898,7 @@ describe("slackChannel message status and guidance", () => {
       name: "immediate reply",
       request: threadReply,
       status: "immediate",
-      trace:
-        "post:Thinking... turn:Thinking... model:Thinking... tool:Get weather model:Get weather",
+      trace: "post:Thinking... turn:Thinking... model tool:Get weather model:Get weather",
     },
     {
       name: "deferred mention",
@@ -848,7 +925,7 @@ describe("slackChannel message status and guidance", () => {
       request: threadReply,
       status: "immediate",
       steps: ["turn", "model", "hidden", "model"],
-      trace: "post:Thinking... turn:Thinking... model:Thinking... hidden model:Thinking...",
+      trace: "post:Thinking... turn:Thinking... model hidden model:Thinking...",
     },
   ])("$name", async ({ request, status, steps = ["turn", "model", "tool", "model"], trace }) => {
     const edits: unknown[] = [];
@@ -883,6 +960,47 @@ describe("slackChannel message status and guidance", () => {
     expect("message" in input && input.message).toEqual(
       expect.stringContaining(`<guidance>\n${guidance}\n</guidance>`),
     );
+  });
+
+  it("writes a turn's status without holding the turn, and posts the reply after it", async () => {
+    const slack = Promise.withResolvers<void>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
+      if (String(request).endsWith("assistant.threads.setStatus")) await slack.promise;
+      return answer(request, init);
+    });
+    const background: Promise<unknown>[] = [];
+    const harness = slackRenderingHarness(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      { channelId: "C01", teamId: "T01", threadTs: "1700000000.000001" },
+      { waitUntil: (promise) => void background.push(promise) },
+    );
+    const operations = () =>
+      fetchMock.mock.calls
+        .map(([request]) => String(request).replace("https://slack.com/api/", ""))
+        .filter((operation) => operation !== "chat.getPermalink");
+
+    // Both handlers return while Slack is still answering the status write.
+    await harness.step("turn");
+    await harness.step("model");
+    expect(background).toHaveLength(2);
+    const replied = harness.event({
+      type: "content.completed",
+      data: { kind: "text", phase: "reply", value: "Sunny.", runId: "r1", partId: "p1" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    // Slack answers everything but the status at once, so the reply would have posted by now.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(operations()).toEqual(["assistant.threads.setStatus"]);
+    slack.resolve();
+    await replied;
+    await Promise.all(background);
+
+    // The first model run keeps the status its turn just wrote, and the reply posts after it.
+    expect(operations()).toEqual(["assistant.threads.setStatus", "chat.postMessage"]);
   });
 });
 

@@ -156,7 +156,9 @@ To restrict editing or approval to designated people, follow the [team directory
 
 ### Customize approval cards and handle failed operations
 
-To change the approval card's wording or layout, edit [publication-message.ts](agent/lib/contentful/publication-message.ts). Keep the list of entries and assets visible so the approver knows what will be published. [publication-input.ts](agent/lib/contentful/publication-input.ts) supplies the preview, and eve posts its native approval controls separately. Publication stays blocked until Slack confirms preview delivery; preserve this check and eve's authenticated response handling.
+To change the approval card's wording or layout, edit [publication-message.ts](agent/lib/contentful/publication-message.ts). Keep the list of entries and assets visible so the approver knows what will be published. [publication-input.ts](agent/lib/contentful/publication-input.ts) supplies the preview, and eve posts its native **Publish** and **Cancel** controls separately. When several approvals are requested together, every publication preview appears before the group's controls. Publication stays blocked until Slack confirms preview delivery and the controls are rendered; preserve these checks and eve's authenticated response handling. If either delivery fails, later interaction events do not retry the group's controls or unlock publication. Cancel the request and ask for approval again unless the failed group's first event is explicitly replayed; replay reuses confirmed preview deliveries.
+
+Request page publication from the main Slack conversation, not a delegated task, so the preview can be shown there. Explicit batches containing only exempt components can still publish from delegated tasks.
 
 Before publishing, the agent checks whether the entries have changed since the request was prepared. Publication stops at the first failure, so inspect the reported results before retrying: some items may already be live. If an operation involving asset uploads returns a recovery ID, give that ID to the agent and ask it to resume the operation. The saved record lets it reuse uploads that already succeeded.
 
@@ -200,6 +202,10 @@ Try a paragraph edit on a test entry and confirm that neighboring blocks and oth
 
 ## Control Slack replies
 
+Message edits don't start another reply or repeat content changes. Send a new message to correct a request. To handle edits, pass `onMessageEdited` to `createSlackChannel` in [agent/channels/slack.ts](agent/channels/slack.ts).
+
+Mentions and DMs retain earlier thread messages as attributed context rather than replaying them as requests from the current sender.
+
 Mention the agent or send it a direct message to start a conversation. In a thread with no other participants besides you and the agent, you can send follow-up messages without mentioning it again. Slack must be configured to send those messages to the agent and let it read the thread; see [eve's Slack setup guide](https://eve.dev/docs/channels/slack).
 
 To have the agent reply to new messages in selected channels without a mention, set:
@@ -210,7 +216,7 @@ SLACK_AUTO_REPLY_CHANNEL_IDS=C0123456789,C0987654321
 
 Replace the examples with Slack channel IDs. Only new posts from people start a reply in these channels, and users in other channels can still mention the agent or send it a direct message.
 
-To require mentions for thread follow-ups, add `autoReply: false` inside the existing `createSlackChannel` configuration in [agent/channels/slack.ts](agent/channels/slack.ts). Keep the `inputRequests` setting, which connects the custom publication card. Clear `SLACK_AUTO_REPLY_CHANNEL_IDS` as well to stop replies to new channel messages that don't mention the agent.
+To require mentions for thread follow-ups, add `autoReply: false` inside the existing `createSlackChannel` configuration in [agent/channels/slack.ts](agent/channels/slack.ts). Keep the `interactions` setting, which connects the publication preview and control labels. Clear `SLACK_AUTO_REPLY_CHANNEL_IDS` as well to stop replies to new channel messages that don't mention the agent.
 
 Other Slack apps and Workflows can start a conversation by mentioning the agent. Their turns run with the bot's Slack identity rather than a person's, so the agent can look up and draft content for them but won't change or publish entries or save writing preferences for a bot. When someone replies in the thread, the agent acts with that person's permissions.
 

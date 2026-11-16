@@ -5,14 +5,22 @@ import {
 } from "eve/sandbox/vercel";
 import { sanitizeCommandOutput } from "./bootstrap-diagnostics.js";
 import { FALLBACK_BOT_NAME, resolveBotName } from "./bot-name.js";
+import { basePolicy, EGRESS_SETUP_HINT, egressMode } from "./egress.js";
 import { fetchRepository } from "./git-transfer.js";
+import {
+  INSTALL_SCRIPTS_OFF_COMMAND,
+  installScriptsBlocked,
+} from "./install-scripts.js";
+import { FACTORY_TOOLING_VERSION, installFactoryTooling } from "./tooling.js";
 
 // Snapshot settings shared by every factory sandbox environment. One kept
 // snapshot keeps storage flat across template rebuilds; the 14-day expiration
 // (Vercel removes unresumable sandboxes after 14 days anyway) stops a quiet
 // stretch from expiring the template.
 export const FACTORY_SANDBOX_CREATE_OPTIONS = {
+  env: { FACTORY_TOOLING_VERSION },
   keepLastSnapshots: { count: 1, deleteEvicted: true },
+  prepare: installFactoryTooling,
   resources: { vcpus: 4 },
   snapshotExpiration: 14 * 24 * 60 * 60 * 1000,
 } satisfies VercelSandboxEnvironmentOptions;
@@ -28,6 +36,9 @@ export const FACTORY_SANDBOX_CREATE_OPTIONS = {
 export function createFactoryEnvironment() {
   return VercelSandbox.environment(FACTORY_SANDBOX_CREATE_OPTIONS);
 }
+
+/** Live policies belong on open(), not the snapshot's environment options. */
+export const factoryOpenOptions = () => ({ networkPolicy: basePolicy() });
 
 /**
  * Runs a command in the sandbox and throws on a nonzero exit, so a broken
@@ -98,9 +109,21 @@ export async function factoryInit(
     sandbox,
     `git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/repo && git config --global user.name "${identity.name}" && git config --global user.email "${identity.email}"`
   );
+  if (installScriptsBlocked()) {
+    await runOrThrow(sandbox, INSTALL_SCRIPTS_OFF_COMMAND);
+  }
   await fetchRepository(sandbox);
   const setup = process.env.FACTORY_SETUP_COMMAND;
   if (setup) {
-    await runOrThrow(sandbox, `cd repo && ${setup}`);
+    try {
+      await runOrThrow(sandbox, `cd repo && ${setup}`);
+    } catch (error) {
+      if (egressMode() === "open" || !(error instanceof Error)) {
+        throw error;
+      }
+      throw new Error(`${error.message}\n${EGRESS_SETUP_HINT}`, {
+        cause: error,
+      });
+    }
   }
 }

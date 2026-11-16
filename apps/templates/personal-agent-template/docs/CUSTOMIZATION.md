@@ -83,6 +83,8 @@ Each category stores **one prose block**. Saves replace the entire block, not pa
 
 See existing tools: [`agent/tools/weather.ts`](../agent/tools/weather.ts), [`agent/tools/save_memory.ts`](../agent/tools/save_memory.ts).
 
+[`agent/tools/ask_question.ts`](../agent/tools/ask_question.ts) enables eve's opt-in question tool. The model can ask one clarifying question, with optional choices, and wait for the user's answer. Web chat shows an input card; other channels use their native input flow.
+
 ## 5. Add a skill
 
 Skills are markdown files in [`agent/skills/`](../agent/skills/). See [`daily-summary.md`](../agent/skills/daily-summary.md) for an example. Reference skills from home quick actions in [`apps/web/app/pages/index.vue`](../apps/web/app/pages/index.vue).

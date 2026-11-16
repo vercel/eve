@@ -33,7 +33,7 @@ export function useConnectors() {
     const name = connected?.name ?? connectedId.charAt(0).toUpperCase() + connectedId.slice(1);
 
     if (connected?.connectionName) {
-      await resolveAuthorizationChallenge(connected.connectionName);
+      await resolveAuthorizationChallenge(connected);
     }
 
     toast.add({

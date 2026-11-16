@@ -5,7 +5,12 @@ import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
-  adapters: { gchat: createGoogleChatAdapter() },
+  adapters: {
+    gchat: createGoogleChatAdapter({
+      endpointUrl: process.env.GOOGLE_CHAT_ENDPOINT_URL!,
+      botUserId: process.env.GOOGLE_CHAT_BOT_USER_ID!,
+    }),
+  },
   state: createMemoryState(),
   // Hand every message to eve, even mid-reply, so eve can steer the running turn.
   concurrency: "concurrent",

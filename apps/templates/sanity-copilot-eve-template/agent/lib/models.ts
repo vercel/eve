@@ -9,7 +9,7 @@
 /**
  * Model for the root Sanity copilot.
  */
-export const ROOT_MODEL = "anthropic/claude-opus-5.5";
+export const ROOT_MODEL = "anthropic/claude-fable-5.2";
 
 /**
  * Model for the fresh-context `reviewer` subagent.

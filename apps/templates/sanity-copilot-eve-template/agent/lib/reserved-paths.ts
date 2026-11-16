@@ -22,8 +22,8 @@ export const RESERVED_PATH_ERROR =
  *
  * @remarks
  * Use the same decoded, slash-stripped representation for storage paths and URL paths.
- * Reject nested escapes, traversal, URL delimiters, backslashes, and control characters:
- * their interpretation can differ between the storage API and an HTTP URL.
+ * Reject nested escapes, traversal, repeated separators, URL delimiters, backslashes, and
+ * control characters: their interpretation can differ between the storage API and an HTTP URL.
  *
  * @param pathname - A Blob object pathname, e.g. `drafts/post.md`.
  * @returns `true` when the path is reserved, malformed, or ambiguous.
@@ -33,12 +33,16 @@ export const isReservedPath = (pathname: string): boolean => {
     const decoded = decodeURIComponent(pathname);
     const normalized = decoded.replace(LEADING_SLASHES, "");
     return (
+      decoded.includes("//") ||
       AMBIGUOUS_PATH.test(normalized) ||
       Array.from(normalized).some((char) => {
         const code = char.charCodeAt(0);
         return code < 32 || code === 127;
       }) ||
-      RESERVED_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+      RESERVED_PREFIXES.some(
+        (prefix) =>
+          normalized === prefix.slice(0, -1) || normalized.startsWith(prefix)
+      )
     );
   } catch {
     return true;
@@ -47,21 +51,3 @@ export const isReservedPath = (pathname: string): boolean => {
 
 const LEADING_SLASHES = /^\/+/;
 const AMBIGUOUS_PATH = /[%\\?#]|(?:^|\/)\.{1,2}(?:\/|$)/;
-
-/**
- * Whether a Blob URL points at a reserved object.
- *
- * @remarks
- * A Blob URL embeds the object pathname as its URL path. The storage-path guard decodes it
- * exactly once and refuses malformed or ambiguous encodings rather than guessing a namespace.
- *
- * @param url - A full Blob URL.
- * @returns `true` when the URL addresses a reserved object or cannot be checked safely.
- */
-export const isReservedUrl = (url: string): boolean => {
-  try {
-    return isReservedPath(new URL(url).pathname);
-  } catch {
-    return true;
-  }
-};

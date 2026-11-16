@@ -2,6 +2,7 @@ import { defineSandbox } from "eve/sandbox";
 import {
   createFactoryEnvironment,
   factoryInit,
+  factoryOpenOptions,
 } from "../../lib/github/repo-sandbox.js";
 
 /**
@@ -16,7 +17,7 @@ import {
 export const environment = createFactoryEnvironment();
 
 export default defineSandbox(async () => {
-  const sandbox = await environment.open();
+  const sandbox = await environment.open(factoryOpenOptions());
   await factoryInit(sandbox);
   return sandbox;
 });

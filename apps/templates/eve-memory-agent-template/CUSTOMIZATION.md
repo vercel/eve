@@ -52,7 +52,7 @@ Keep the existing Memory section alongside your own guidance. It tells the agent
 
 ### Model and token limits
 
-Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `openai/gpt-6.1-sol-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
+Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `anthropic/claude-fable-5.2` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
 The same file limits each session to `300_000` input tokens through the `limits.sessionUsage` callback. Each model call counts the input it sends, including earlier messages in the thread, so a long Slack thread reaches the limit sooner than its length suggests. When a session crosses the limit, eve pauses it and asks whether to continue, and **Approve** grants another window of the same size. Increase the limit if threads pause too often. See [eve's agent configuration](https://eve.dev/docs/agent-config) for other usage limits.
 
@@ -499,6 +499,10 @@ How a handler failure affects the turn depends on when the handler runs:
 The full provider contract is in [eve's memory provider guide](https://eve.dev/docs/memory/custom-provider), and the built-in [file memory](https://eve.dev/docs/memory/file) provider is a working reference.
 
 ## Control Slack identity lookups
+
+Message edits don't start another reply or update memory. Send a new message to correct a request. To handle edits, pass `onMessageEdited` to `createSlackChannel` in [agent/channels/slack.ts](agent/channels/slack.ts).
+
+Mentions and DMs retain earlier thread messages as attributed context rather than replaying them as requests from the current sender.
 
 Before responding to each message, the agent looks up the Slack profile of everyone involved in the thread and adds their names and profile images to the conversation as context. This uses the `users:read` permission. The agent never adds email addresses, so it can't reveal them to other people in a channel. Profile names help the agent address people, but memory scopes use verified Slack IDs, never names.
 

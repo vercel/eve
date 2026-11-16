@@ -2,6 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { REPO_DIR, validateBranch } from "../../../lib/github/git-remote.js";
 import { pushBranch } from "../../../lib/github/git-transfer.js";
+import { assertPushAuthority } from "../../../lib/trust.js";
 import { environment } from "../sandbox.js";
 
 /** Pushes one factory ref through an isolated bare repository, never the station's Git config. */
@@ -12,8 +13,13 @@ export default defineTool({
     if (refusal) {
       return { error: refusal, success: false as const };
     }
+    assertPushAuthority(input.branch, ctx.session.auth.current);
     const sandbox = await ctx.getSandbox(environment);
-    const sha = await pushBranch(sandbox, input.branch);
+    const sha = await pushBranch(
+      sandbox,
+      input.branch,
+      ctx.session.auth.current
+    );
     return { branch: input.branch, sha, success: true as const };
   },
   inputSchema: z.object({

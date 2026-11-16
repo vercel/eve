@@ -101,6 +101,7 @@ const SAMPLE_ENV: Record<string, string> = {
     type: "service_account",
   }),
   GOOGLE_CHAT_PROJECT_NUMBER: "123456789",
+  LARK_DOMAIN: "lark",
   LIVEBLOCKS_SECRET_KEY: "sk_test_conformance",
   LIVEBLOCKS_WEBHOOK_SECRET: "whsec_Y29uZm9ybWFuY2U=",
   MATRIX_BASE_URL: "https://matrix.example.com",

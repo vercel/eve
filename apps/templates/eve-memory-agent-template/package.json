@@ -15,6 +15,7 @@
     "check": "oxlint --config lint.config.ts && oxfmt --check",
     "fix": "oxlint --config lint.config.ts --fix && oxfmt --write",
     "test": "vitest run",
+    "test:smoke": "vitest run --config vitest.config.ts agent/lib/integrations/slack/channel.test.ts agent/lib/memory/scope.test.ts",
     "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run knip",
     "knip": "knip"
   },
@@ -22,7 +23,7 @@
     "@vercel/connect": "2.9.3",
     "ai": "^7.0.173",
     "eve": "^1.0.0",
-    "just-bash": "3.1.0",
+    "just-bash": "3.6.0",
     "zod": "4.5.4"
   },
   "devDependencies": {

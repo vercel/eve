@@ -1,5 +1,5 @@
-import { type AuthFn, localDev, vercelOidc } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+import { type EveAuthFn, eveChannel } from "eve/channels/eve";
 
 const localDevAuth = localDev();
 
@@ -14,9 +14,18 @@ const localDevAuth = localDev();
  * for anything it would reject, so it never affects production — and only upgrades the resolved
  * principal to a user. Drop it if you don't exercise user-scoped tools from the dev TUI.
  */
-const localDevUser: AuthFn<Request> = async (request) => {
+const localDevUser: EveAuthFn = async (request) => {
   const local = await localDevAuth(request);
-  return local ? { ...local, principalType: "user" } : null;
+  // Upgrading local-dev to user must not hide discovery or eval stubs from
+  // that already-verified local caller. Production auth is unchanged.
+  return local
+    ? {
+        ...local,
+        allowAgentInfo: true,
+        allowToolStubs: true,
+        principalType: "user",
+      }
+    : null;
 };
 
 export default eveChannel({ auth: [localDevUser, vercelOidc()] });

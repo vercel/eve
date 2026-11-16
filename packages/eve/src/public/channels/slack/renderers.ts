@@ -125,8 +125,10 @@ export interface SlackRenderer {
   /**
    * Acknowledges a mention or DM as soon as it arrives, while the message hook
    * is still deciding, and another channel message once `onMessage`
-   * dispatches it. eve's default sets the `Thinking...` status. If the hook
-   * drops the message, eve clears the thread status.
+   * dispatches it. A mention or DM's session starts without waiting for it, so
+   * it has no ordering guarantee relative to the turn's output. eve's default
+   * sets the `Thinking...` status. If the hook drops the message, eve clears
+   * the thread status.
    */
   readonly received?: (
     message: SlackMessage,
