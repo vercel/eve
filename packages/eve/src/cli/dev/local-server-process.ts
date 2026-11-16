@@ -113,6 +113,8 @@ export function createDevelopmentServer(
         execArgv: [
           ...process.execArgv,
           "--import",
+          new URL("../../internal/package-imports-hook.js", import.meta.url).href,
+          "--import",
           new URL("./console-records-preload.js", import.meta.url).href,
         ],
       },

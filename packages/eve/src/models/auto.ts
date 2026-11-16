@@ -23,7 +23,7 @@ import type {
   PublicAgentDynamicModelResult,
 } from "#shared/agent-definition.js";
 
-import { decide } from "#ai/decide.js";
+import { decideFor } from "#ai/decide.js";
 import { DEFAULT_DECISION_MODEL } from "#ai/decision-adapter.js";
 
 type AutoModelSelection = ModelOptionSelection;
@@ -149,7 +149,7 @@ export function auto<const T extends ModelOptions>(
       throw new Error("auto requires user text to select a model.");
     }
     try {
-      const result = await decide({
+      const result = await decideFor("model-selection", {
         model: decisionModel,
         state,
         questions: {

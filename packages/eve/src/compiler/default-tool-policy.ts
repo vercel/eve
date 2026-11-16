@@ -8,7 +8,7 @@ import type {
 } from "#compiler/node-source-state.js";
 import { deriveMemorySlot } from "#compiler/normalize-definitions.js";
 import { canonicalSourceSlot, composeAgentModuleCandidates } from "#compiler/source-graph.js";
-import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
+import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
 
 export function applyAgentToolPolicy(
   phaseOne: PhaseOneNodeSourceState,
@@ -43,9 +43,7 @@ export function canDisableToolWithoutSelectedSource(
 ): boolean {
   return (
     state.projected.subagents.some((entry) => entry.source.subagentId === toolName) ||
-    scheduleCollections.some(
-      (collection) => scheduleCollectionToolPrefix(collection.name) === toolName,
-    ) ||
+    scheduleCollections.some((collection) => scheduleCollectionToolSlot(collection) === toolName) ||
     state.orderedCandidates.some(
       (candidate) =>
         candidate.backing.kind !== "resource" && memoryToolName(candidate.logicalPath) === toolName,

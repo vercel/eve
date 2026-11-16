@@ -151,6 +151,12 @@ await decision.complete({ usage: { inputTokens: 42, outputTokens: 3 } });
 Omit `identity` for a decision made outside any run. Decision usage isn't added
 to the turn's totals.
 
+`purpose` is recorded as `agent.decision.purpose`, and a decision in a run
+records `agent.turn.id`. Pass the per-question results as `output` in the
+OpenTelemetry GenAI `gen_ai.decision.results` shape; they are output content,
+recorded only when the capture records outputs. A refusal is a result, not a
+failure.
+
 ## AI SDK
 
 `aiSdkTelemetry` is an AI SDK telemetry integration. It records each

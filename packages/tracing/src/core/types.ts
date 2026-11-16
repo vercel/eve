@@ -206,6 +206,8 @@ export interface ModelOptions {
 export interface DecisionOptions {
   readonly provider?: string;
   readonly modelId: string;
+  /** What the decision is for, such as `model-selection` or `tool-approval`. */
+  readonly purpose?: string;
 }
 export interface ToolOptions {
   readonly callId: string;

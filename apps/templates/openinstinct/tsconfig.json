@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "esModuleInterop": true,
+    "incremental": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@agent/*": ["./agent/*"],
+      "@app/*": ["./app/*"],
+      "@db": ["./db/index.ts"],
+      "@db/*": ["./db/*"],
+      "@evals/*": ["./evals/*"],
+      "@shared/environment": ["./shared/environment/env.ts"],
+      "@shared/*": ["./shared/*"],
+      "@tests/*": ["./tests/*"],
+      "@tools/*": ["./tools/*"],
+      "@web/*": ["./web/*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", "evals/browser/dashboard"]
+}

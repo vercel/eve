@@ -170,9 +170,11 @@ An ordinary agent turn produces this trace:
 
 ```text
 invoke_agent <agent>
+  ├── decision <model>
   ├── agent.step
   │     ├── chat <model>
   │     └── execute_tool <tool>
+  │           ├── decision <model>
   │           └── agent.approval
   ├── chat <model>
   └── agent.approval

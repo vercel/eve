@@ -896,7 +896,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
   });
 
@@ -987,10 +987,11 @@ describe("runInitCommand", () => {
   });
 
   it.each([
+    ["npm", "package-lock.json", ["exec", "--", "eve", "dev", "--onboard"]],
     ["yarn", "yarn.lock", ["eve", "dev", "--onboard"]],
     ["bun", "bun.lock", ["x", "eve", "dev", "--onboard"]],
   ] as const)(
-    "scaffolds a fresh %s workspace member without nested root-only package fields",
+    "scaffolds a fresh %s workspace member without nested root-only package fields or skipping peer resolution",
     async (kind, lockfile, devArguments) => {
       const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
       const appsDirectory = join(workspaceRoot, "apps");
@@ -1036,16 +1037,17 @@ describe("runInitCommand", () => {
       expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
+      // A workspace's tree isn't eve's alone, so npm still resolves its peers.
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
-        expect.anything(),
+        expect.objectContaining({ skipPeerDependencyResolution: false }),
       );
       expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
     },
   );
 
-  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration", async () => {
+  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration or peer resolution", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-web-npm-"));
     const output = logger();
     const deps = dependencies();
@@ -1059,7 +1061,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "npm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: true }),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("npm", projectPath, [
       "exec",
@@ -1179,7 +1181,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectRoot,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
     // An existing project's history is its own; only fresh scaffolds get git init.
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();

@@ -16,7 +16,11 @@ import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
-const DEVELOPMENT_PROVIDER = inMemoryScheduleProvider();
+// Local schedules accept what a deployment accepts, so a schedule that works under `eve dev` deploys.
+const DEVELOPMENT_PROVIDER: ScheduleProvider = {
+  ...inMemoryScheduleProvider(),
+  validateExpression: validateVercelExpression,
+};
 const CLIENT_OPTIONS = new WeakMap<ScheduleProvider, VercelScheduleProviderOptions>();
 
 /** Client options of a Vercel provider, so delivery verification talks to the same endpoint. */
@@ -47,6 +51,7 @@ export function vercelScheduleProvider(
 
   const provider: ScheduleProvider = {
     kind: "vercel",
+    validateExpression: validateVercelExpression,
     async create(context, input) {
       const schedules = await client(context.abortSignal);
       const schedule: VercelSchedule = await schedules.create({
@@ -142,6 +147,44 @@ function createDispatchPayload(context: ScheduleProviderContext, payload: unknow
     },
     payload,
   };
+}
+
+const VERCEL_CRON_FIELDS = [
+  { name: "minute", min: 0, max: 59 },
+  { name: "hour", min: 0, max: 23 },
+  { name: "day-of-month", min: 1, max: 31 },
+  { name: "month", min: 1, max: 12 },
+  { name: "day-of-week", min: 0, max: 6 },
+] as const;
+
+/**
+ * The cron rules Vercel Schedules documents: numeric fields in range, and not both a day of the
+ * month and a day of the week. Checking here turns a rejected write, which a person may already
+ * have approved, into an error the caller can correct first.
+ */
+function validateVercelExpression(expression: ScheduleExpression): void {
+  if (expression.type !== "cron") return;
+  const invalid = (reason: string) =>
+    new Error(
+      `Vercel Schedules can't run the cron expression "${expression.cron}": ${reason} Use numbers with "*", ",", "-", and "/"; write months as 1-12 and weekdays as 0-6, where 0 is Sunday.`,
+    );
+  if (!/^[0-9*,/ -]+$/u.test(expression.cron))
+    throw invalid("it accepts no names or special characters such as MON, JAN, ?, or L.");
+  const fields = expression.cron.split(" ");
+  for (const [index, field] of fields.entries()) {
+    const { name, min, max } = VERCEL_CRON_FIELDS[index]!;
+    for (const part of field.split(",")) {
+      const match = /^(?:\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/u.exec(part);
+      if (match === null) throw invalid(`the ${name} field "${field}" is malformed.`);
+      const [, start, end, step] = match;
+      const from = start === undefined ? min : Number(start);
+      const to = end === undefined ? from : Number(end);
+      if (from < min || to > max || from > to || (step !== undefined && Number(step) < 1))
+        throw invalid(`the ${name} field "${field}" is outside ${min}-${max}.`);
+    }
+  }
+  if (fields[2] !== "*" && fields[4] !== "*")
+    throw invalid("it can't set both a day of the month and a day of the week.");
 }
 
 function toVercelExpression(expression: ScheduleExpression) {

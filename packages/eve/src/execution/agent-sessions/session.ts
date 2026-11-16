@@ -92,6 +92,18 @@ class RunAgentSession implements AgentSession {
    * their replies. A turn's end settles a prefix of `#awaited`, which is correct only then.
    */
   #delivered: Promise<void> = Promise.resolve();
+  /**
+   * Whether the agent is remote: true from the first message whose call says so, and for the
+   * rest of the handle's life. Naming a remote agent's reply hook takes the host a step, so once
+   * one message awaited that, every later one does: a hook opened without waiting would
+   * register its reply ahead of an earlier message's.
+   */
+  #remote = false;
+  /**
+   * The handle's last remote reply hook, opened or not. They open one after another, so replies
+   * are registered in the order their messages were sent, whichever naming step ends first.
+   */
+  #remoteReplyHooks: Promise<unknown> = Promise.resolve();
 
   constructor(input: {
     readonly key: string;
@@ -119,19 +131,22 @@ class RunAgentSession implements AgentSession {
     const outputSchema = normalizeRequestedOutputSchema(
       serializeOutputSchema(options.outputSchema),
     );
+    // The run's auth, call, and context follow the call it serves now; a queued message keeps
+    // those of the call it was sent for, so they are read before a remote reply hook is awaited.
+    const sender: AgentSessionSender = { context: this.#run.agentContext, from: this.#run.from };
+    const auth = this.#run.auth;
+    // A call without the list could be to a remote agent, so it is treated as one.
+    this.#remote ||= sender.context.remoteAgents?.includes(this.#name) ?? true;
     // Unlike hooks the session can answer at once, this one isn't registered
     // before its token goes out: the child resumes it only after booting and
     // finishing a turn, long after this suspension writes the hook.
-    const reply = this.#awaitReply(outputSchema !== undefined);
-    // The run's auth, call, and context follow the call it serves now; a queued message keeps
-    // those of the call it was sent for.
-    const sender: AgentSessionSender = { context: this.#run.agentContext, from: this.#run.from };
-    const sending: AgentSessionMessage = {
-      auth: this.#run.auth,
-      message,
-      outputSchema,
-      replyTo: reply.hook.token,
-    };
+    const hook = this.#remote
+      ? await this.#openRemoteReplyHook()
+      : this.#run.host.createHook<AgentTurnReply>();
+    // Nothing is awaited between here and the delivery's place in line, so replies and
+    // deliveries keep the order of their messages.
+    const reply = this.#awaitReply(hook, outputSchema !== undefined);
+    const sending: AgentSessionMessage = { auth, message, outputSchema, replyTo: hook.token };
     const delivery = this.#delivered.then(() => this.#deliver(sending, sender));
     // A failed delivery fails only its own send; the next message is still delivered.
     this.#delivered = delivery.catch(() => undefined);
@@ -147,8 +162,17 @@ class RunAgentSession implements AgentSession {
     return response as AgentResponse<TOutput>;
   }
 
-  #awaitReply(expectsData: boolean): AwaitedReply {
-    const hook = this.#run.host.createHook<AgentTurnReply>();
+  /** Opens the next remote reply hook, after the hook of every message sent before it. */
+  #openRemoteReplyHook(): Promise<RunHook<AgentTurnReply>> {
+    const opening = this.#remoteReplyHooks.then(() =>
+      this.#run.host.createRemoteReplyHook<AgentTurnReply>(),
+    );
+    // A hook that fails to open fails only its own send.
+    this.#remoteReplyHooks = opening.catch(() => undefined);
+    return opening;
+  }
+
+  #awaitReply(hook: RunHook<AgentTurnReply>, expectsData: boolean): AwaitedReply {
     let settle: (end: AgentTurnEnd) => void = () => {};
     const ended = new Promise<AgentTurnEnd>((resolve) => {
       settle = resolve;

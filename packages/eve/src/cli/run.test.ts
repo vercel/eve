@@ -593,7 +593,8 @@ describe("eve dev --input", () => {
       };
       const startDevelopmentTuiStartup = vi.fn(async () => startup);
       const runDevelopmentTui = vi.fn(async () => {});
-      vi.doMock("#cli/dev/tui/tui.js", () => ({ startDevelopmentTuiStartup, runDevelopmentTui }));
+      vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+      vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui }));
       const startHost = vi.fn(() => ({
         start: async () => {
           await ready;
@@ -622,6 +623,7 @@ describe("eve dev --input", () => {
         });
         expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ startup }));
       } finally {
+        vi.doUnmock("#cli/dev/tui/startup.js");
         vi.doUnmock("#cli/dev/tui/tui.js");
       }
     },

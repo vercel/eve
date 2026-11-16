@@ -9,6 +9,7 @@ import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-wo
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
+  EVE_HEALTH_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
@@ -439,6 +440,14 @@ async function startNitroDevelopmentServer(
       options.onBootProgress,
     );
     devServer.prepareSpare();
+    // A worker loads a generation on its first channel request. Asking now
+    // overlaps that load with the rest of startup and the client's own first
+    // request. An app without the eve channel has no health route, so this
+    // does nothing there. A generation that fails to load logs its error under
+    // this request first, and again when a client asks.
+    void fetch(new URL(EVE_HEALTH_ROUTE_PATH, serverUrl))
+      .then(async (response) => await response.body?.cancel())
+      .catch(() => undefined);
     await workflowWorld?.start();
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({

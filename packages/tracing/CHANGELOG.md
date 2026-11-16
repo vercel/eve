@@ -1,5 +1,58 @@
 # @vercel/agent-runs
 
+## 1.0.0
+
+Released 2026-11-15 · [Compare with 0.0.4](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.4...%40vercel%2Fagent-runs%401.0.0)
+
+### Breaking Changes
+
+- `@vercel/agent-runs` 1.0 puts its public API under semantic versioning, so it changes incompatibly only in a major release. ([#5620](https://github.com/vercel/eve/pull/5620))
+
+### Features
+
+- Record an `agent.approval` span for every wait on a person, including questions, budget prompts, and connection sign-ins, not just tool approvals.
+  `agent.approval.kind` is `tool-approval`, `question`, `budget`, or `sign-in`. A wait sits under the tool call it's about, or under the turn when no call owns it, and a sign-in names its connection in `eve.connection.name`. Instrumentation providers now receive sign-ins on `interaction.opened` and `interaction.settled`, with `signIn.name` naming the connection or tool; the sign-in URL and code stay out of the event. Questions and sign-ins from workflow tools such as `ask_question` now reach providers too, reported by the session that owns the tool call; a request a subagent asks is still reported once, by that session. `@vercel/agent-runs` adds `TurnOperation.approval` and `findApproval`, and an optional `kind` and `connectionName` on approvals. ([#6004](https://github.com/vercel/eve/pull/6004))
+- Decision spans now name their turn and purpose, and record per-question results as `gen_ai.decision.results` when the trace records outputs.
+  `decision <model>` spans carry `agent.turn.id` and `agent.decision.purpose` (`model-selection`, `tool-approval`, `agent-routing`, or `custom`), so Agent Runs can place a model-selection decision in a turn that is still running. Results follow the proposed OpenTelemetry GenAI decision conventions: choices, predicates, scores with their levels, and refusals, each keyed by the question's position. They are output content, recorded only when outputs are and dropped for any destination that declines outputs. `AgentRun.decision` accepts an optional `purpose`, and completing a decision with `output` records it as the results. ([#6389](https://github.com/vercel/eve/pull/6389))
+- Add `decision <model>` OpenTelemetry spans for `decide`, automatic model selection, and tool approvals, with policy-aware model, usage, cost, and failure metadata that distinguishes refusals from request failures.
+  A decision sits under the operation it runs in, or under the turn when model routing runs before the turn's first step. `@vercel/agent-runs` adds `AgentRun.decision` and an optional `AgentTelemetry.activeSpan`, so a decision nests under a host span inside its operation but not under a host span from another trace, such as a workflow step. ([#5349](https://github.com/vercel/eve/pull/5349))
+
+### Bug Fixes
+
+- A context compaction's summary request during a turn now exports its own `chat <model>` span under the turn's `invoke_agent` span, with its token usage, cost, and `ai.settings.context.eve.compaction.request=summary`, so traces no longer undercount compacting turns.
+  Model spans now also carry `agent.turn.id`. `@vercel/agent-runs` adds `TurnOperation.modelCall` for model calls a turn makes outside its steps.
+  Thanks @zackleman for reporting this in #5922. ([#6251](https://github.com/vercel/eve/pull/6251))
+- Name the memory store on memory provider tool calls, so a trace query by `gen_ai.memory.store.id` finds a scope's tool reads and writes as well as its recall and capture.
+  The `execute_tool` span of a memory provider tool, such as `profile__save`, now carries `gen_ai.memory.store.id` and `agent.memory.slot`, matching the `search_memory` and `upsert_memory` spans of the same slot. The store ID is the slot's opaque scope key, so it is recorded whatever the trace policy captures. `@vercel/agent-runs` adds an optional `memory` lifecycle to `ActiveOperation` on tool operations to record it. ([#6147](https://github.com/vercel/eve/pull/6147))
+- Fix durable agent traces keeping every finished turn that called tools in parallel: each one stayed in the session's serialized context, so step inputs grew with every turn.
+  A checkpoint this process had already written, read back through another execution context, was treated as another process's write and forked the turn's trace tree; the stale copy then overwrote the tool completions and the checkpoint was never deleted. A replaced tree now also stops persisting. ([#5835](https://github.com/vercel/eve/pull/5835))
+- Update eve's bundled dependencies, including the AI SDK, Vercel SDKs, Chat SDK, and MCP, to their latest releases, and OpenTelemetry to its latest 2.x releases.
+  eve now requires `ai` 7.0.172 or later.
+  YAML frontmatter, eval data files, and OpenAPI specs now parse with js-yaml 5 and YAML 1.2 values. An unquoted date such as `2024-01-02` loads as a string instead of a `Date`, and a `0b` binary literal such as `0b101` loads as a string instead of a number. The YAML 1.1 tags `!!timestamp`, `!!binary`, `!!set`, `!!omap`, and `!!pairs` are no longer recognized, and a mapping with a non-scalar key, such as `? [a]`, throws. `<<` merge keys still work.
+  MCP connections over Streamable HTTP now fail when the `server/discover` request fails before the server answers, instead of retrying with `initialize`. Set `protocolVersionDiscovery: false` for a server that can't handle that request. Servers that answer `server/discover` with a JSON-RPC error or an HTTP error status other than `401` still use `initialize`, and servers that reject the protocol version with a supported legacy version still negotiate it. ([#6378](https://github.com/vercel/eve/pull/6378))
+- Keep oversized checkpoints honest by preserving the real `agent.trace.content.input`/`output` capture flags and keeping the turn's copied input/output as a truncated copy (or omitting it) instead of rewriting the flags to `false` when a turn node exceeds the checkpoint size budget. ([#5945](https://github.com/vercel/eve/pull/5945))
+- Raise the tracing content caps from 32 KiB per attribute and 64 KiB per checkpointed operation to 250 KiB and 512 KiB, so prompts up to 250 KiB are captured in full instead of truncated. ([#5945](https://github.com/vercel/eve/pull/5945))
+- Make connection sign-ins countable in traces: each sign-in span names its agent, a failed sign-in records its reason, and a call a connection refused records which connection and why.
+  `agent.approval` spans now carry `gen_ai.agent.name` and `agent.name`, so a query scoped to one agent no longer drops its sign-in prompts. A sign-in that fails with a reason code such as `access_denied` records it as `agent.connection.authorization.reason`; a sign-in that ends any other way, such as one a new message withdrew, records none. A tool call that fails with `ConnectionAuthorizationFailedError`, including one that never asked anyone to sign in, such as `principal_required` or `sign_in_unavailable` in a turn a schedule started, records `eve.connection.name` and `agent.connection.authorization.reason` on its `execute_tool` span. Only reason codes are recorded: a free-text reason or error message stays off the span whatever the trace policy records. ([#6078](https://github.com/vercel/eve/pull/6078))
+- Store a turn's attributes once in its checkpoint.
+  The turn's copy of the model input and output was also saved in the turn's data, which doubled that content in every checkpoint write and sent large prompts into the oversized-checkpoint fallback. Exported spans are unchanged. ([#5949](https://github.com/vercel/eve/pull/5949))
+
+## 1.0.0-rc.7
+
+Released 2026-11-13 · [Compare with 1.0.0-rc.6](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.6...%40vercel%2Fagent-runs%401.0.0-rc.7)
+
+### Features
+
+- Decision spans now name their turn and purpose, and record per-question results as `gen_ai.decision.results` when the trace records outputs.
+  `decision <model>` spans carry `agent.turn.id` and `agent.decision.purpose` (`model-selection`, `tool-approval`, `agent-routing`, or `custom`), so Agent Runs can place a model-selection decision in a turn that is still running. Results follow the proposed OpenTelemetry GenAI decision conventions: choices, predicates, scores with their levels, and refusals, each keyed by the question's position. They are output content, recorded only when outputs are and dropped for any destination that declines outputs. `AgentRun.decision` accepts an optional `purpose`, and completing a decision with `output` records it as the results. ([#6389](https://github.com/vercel/eve/pull/6389))
+
+### Bug Fixes
+
+- Update eve's bundled dependencies, including the AI SDK, Vercel SDKs, Chat SDK, and MCP, to their latest releases, and OpenTelemetry to its latest 2.x releases.
+  eve now requires `ai` 7.0.172 or later.
+  YAML frontmatter, eval data files, and OpenAPI specs now parse with js-yaml 5 and YAML 1.2 values. An unquoted date such as `2024-01-02` loads as a string instead of a `Date`, and a `0b` binary literal such as `0b101` loads as a string instead of a number. The YAML 1.1 tags `!!timestamp`, `!!binary`, `!!set`, `!!omap`, and `!!pairs` are no longer recognized, and a mapping with a non-scalar key, such as `? [a]`, throws. `<<` merge keys still work.
+  MCP connections over Streamable HTTP now fail when the `server/discover` request fails before the server answers, instead of retrying with `initialize`. Set `protocolVersionDiscovery: false` for a server that can't handle that request. Servers that answer `server/discover` with a JSON-RPC error or an HTTP error status other than `401` still use `initialize`, and servers that reject the protocol version with a supported legacy version still negotiate it. ([#6378](https://github.com/vercel/eve/pull/6378))
+
 ## 1.0.0-rc.6
 
 Released 2026-11-12 · [Compare with 1.0.0-rc.5](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.5...%40vercel%2Fagent-runs%401.0.0-rc.6)

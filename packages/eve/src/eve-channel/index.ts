@@ -71,6 +71,7 @@ import {
   parseSessionControlBody,
   parseSessionMessageBody,
   parseStartIndex,
+  rememberCurrentSession,
   requireSessionId,
 } from "#eve-channel/request.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
@@ -449,6 +450,9 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           );
         }
 
+        // This eve started the session's run, so its stream records current lines. An operation's
+        // session may be one an earlier create started; its stream is checked when it's read.
+        if (operationToken === undefined) rememberCurrentSession(handle.sessionId);
         return Response.json(
           createdSessionBody(handle.sessionId, body, initialDeliveryId ?? handle.deliveryId),
           {

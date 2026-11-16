@@ -9,7 +9,7 @@ import {
   ConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
@@ -914,18 +914,16 @@ async function completeSignIn(
   if (callbackUrl === undefined) throw new Error("Expected the sign-in to name its callback.");
   const callback = parseEveConnectionCallbackRoutePath(new URL(callbackUrl).pathname);
   if (callback === undefined) throw new Error(`Expected a callback route: ${callbackUrl}`);
-  await resumeAuthorizationCallback(callback.token, {
-    kind: "authorization-callback",
-    payloads: [
-      {
-        authorizationCallback: {
-          attemptId: callback.attemptId,
-          callback: { method: "GET", params },
-          connectionName: callback.name,
-        },
-      },
-    ],
+  const url = new URL(callbackUrl);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  const response = await handleConnectionCallbackRequest(new Request(url), {
+    params: { attemptId: callback.attemptId, name: callback.name, token: callback.token },
+    requestIp: null,
+    waitUntil() {},
   });
+  if (response.status !== 200) {
+    throw new Error(`The callback route answered ${String(response.status)} for ${callbackUrl}.`);
+  }
 }
 
 function isSignInOpened(event: SessionStreamEvent): boolean {

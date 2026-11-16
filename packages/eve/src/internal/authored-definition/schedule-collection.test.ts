@@ -52,6 +52,30 @@ describe("normalizeScheduleCollectionDefinition", () => {
     );
   });
 
+  it("rejects a named scope's approval on code-only definitions at type and runtime boundaries", () => {
+    const { scope: _scope, ...shared } = valid as typeof valid & { scope?: unknown };
+    const invalid = {
+      ...shared,
+      tool: false as const,
+      scopes: {
+        personal: { resolve: () => "alice", approval: { create: () => "user-approval" as const } },
+      },
+    };
+    // @ts-expect-error A code-only definition's scopes cannot configure model-call approval.
+    const definition = defineDynamicSchedules(invalid);
+    expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(
+      '"scopes.personal.approval" cannot be configured when tool is false',
+    );
+    // The same scope without approval is a valid code-only definition.
+    const { approval: _approval, ...personal } = invalid.scopes.personal;
+    expect(() =>
+      normalizeScheduleCollectionDefinition(
+        defineDynamicSchedules({ ...shared, tool: false, scopes: { personal } }),
+        "Invalid.",
+      ),
+    ).not.toThrow();
+  });
+
   it("defaults to Vercel and preserves an explicit provider override", () => {
     vi.stubEnv("EVE_DEV", "");
     try {

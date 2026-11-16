@@ -1,0 +1,16 @@
+minimumReleaseAgeExclude:
+  - "@chat-adapter/*"
+  - "@ai-sdk/*"
+  - "@vercel/*"
+  - "@workflow/*"
+  - ai
+  - chat
+  - eve
+  - workflow
+
+overrides:
+  "zod@>=4.0.0 <4.6.6": "4.6.7"
+
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - "node-liblzma"

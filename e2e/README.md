@@ -152,6 +152,16 @@ high-volume session execution and repeated session resumption respectively.
 Its parallel-tool-calls eval scripts ten tool calls into one model step and
 proves the durable runtime executes them concurrently, which a live model
 cannot guarantee because it may split the calls across steps.
+Its slack-new-thread eval benchmarks eve's Slack path: it posts signed
+`app_mention` webhooks that each start a new thread to the fixture's Slack
+channel, whose stubbed Slack answers every Web API call after 15 ms, and the
+mock model reports how long after the webhook arrived it was called. The eval
+logs those times for the benchmark's `overhead.slack_new_thread_ms`, the
+median of its trials (a slow first trial shows only in the samples). The clock
+starts once the receiving server is up and verifying the webhook, so it is not
+an instance cold start. The fixture runs its evals one at a time against one
+server and world store, so this one follows whichever stress evals ran first;
+adding evals or changing their volume can shift it.
 
 ## Fixtures
 
@@ -226,7 +236,13 @@ matrices from the registry:
   workflow, including its workspace package name for Turbo filtering. A
   fixture can set `e2e.worlds` to a subset of registered world
   names, or to `[]` when its evals require local dev behavior; omitting it
-  selects every world. A registered world's `package` reaches the job as
+  selects every world. A world in `e2e/matrix.json` can list `fixtures` to run
+  only those: `vercel` does, because each fixture there is a deployment on
+  every relevant PR. List a fixture there only when it exercises something
+  that differs on a Vercel deployment, such as Workflow on Vercel's queues,
+  function packaging, Vercel Sandbox, Blob or cron, or the deployment's own
+  address. A fixture whose evals are all tagged `real-model` gets no
+  world legs, since the world suites would have nothing to run. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
   deploy target's default).
 

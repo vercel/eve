@@ -41,6 +41,8 @@ export interface ScheduleScopeContext {
   readonly abortSignal: AbortSignal;
   readonly operation?: ScheduleOperation;
   readonly name?: string;
+  /** The named scope the call acts on, when the definition declares `scopes`. */
+  readonly scopeName?: string;
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;
@@ -166,6 +168,11 @@ export interface ScheduleProvider {
   disable(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord>;
   invoke(context: ScheduleProviderContext, name: string): Promise<void>;
   delete(context: ScheduleProviderContext, name: string): Promise<boolean>;
+  /**
+   * Throws, or rejects, when the backend can't run `expression`. eve awaits it while it prepares
+   * a create or a timing update, so a model's call fails before a person is asked to approve it.
+   */
+  validateExpression?(expression: ScheduleExpression): void | Promise<void>;
 }
 
 export interface ScheduleClientCreate<TPayload> {
@@ -201,10 +208,10 @@ export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   /**
    * Accepts the `to().send()` options that apply to a fresh session. `auth` is
    * the schedule's creator. A send never reaches a session the schedule didn't
-   * start, so `turnPolicy` has nothing to act on. A send with an
-   * `idempotencyKey` reaches the session an earlier send from this schedule
-   * with the same key and target started, so a retried callback whose key
-   * includes `occurrence.executionId` doesn't start a second session.
+   * start, so `turnPolicy` has nothing to act on. A send reaches the session
+   * an earlier send from this schedule with the same `idempotencyKey` and
+   * target started. Without a key, eve derives one from the occurrence and the
+   * message, so a retried callback doesn't start a second session.
    */
   send(
     message: MessageContent,
@@ -266,12 +273,51 @@ export type ScheduleScopeResolverContext = ScheduleScopeContext & {
 
 /**
  * Trusted caller context passed to `preparePayload`. `name` is the display label on create
- * and the unique management name on update.
+ * and the unique management name on update. `expression` tells a recurring schedule from a
+ * one-time one, so the payload needn't repeat it.
  */
 export type SchedulePreparePayloadContext = ScheduleScopeContext & {
   readonly operation: "create" | "update";
   readonly name: string;
+  /**
+   * The timing the schedule has after this write: what the caller passed, or the stored timing
+   * when an update replaces only the payload. A relative delay is as written, not yet resolved.
+   * A timing-only update doesn't prepare again, so a value derived from this keeps the timing it
+   * was prepared with.
+   */
+  readonly expression: ScheduleTiming;
 };
+
+/** Authorizes a management operation: returns the namespace it acts in, or `null` to deny. */
+export type ScheduleScopeResolver = (
+  context: ScheduleScopeResolverContext,
+) => ScheduleScopeResolverResult | Promise<ScheduleScopeResolverResult>;
+
+/**
+ * One named scope of a definition: its resolver, or the resolver with what this scope does
+ * differently from the definition.
+ */
+export type ScheduleNamedScope<TPayload = unknown, TPrepared = TPayload> =
+  | ScheduleScopeResolver
+  | {
+      /** Tells the model what this scope holds; shown beside its name in the tools' `scope` input. */
+      readonly description?: string;
+      /**
+       * Stable name the scope's schedules are stored under, in place of `<definition>/<scope>`.
+       * Set it to a collection's old name to keep the schedules already stored there.
+       */
+      readonly id?: string;
+      readonly resolve: ScheduleScopeResolver;
+      /** Replaces the definition's `preparePayload` for this scope. Returns the same shape. */
+      readonly preparePayload?: (
+        payload: TPayload,
+        context: SchedulePreparePayloadContext,
+      ) => TPrepared | Promise<TPrepared>;
+      /** Replaces the definition's `run` for this scope. */
+      readonly run?: (args: DynamicSchedulesRunArgs<TPrepared>) => void | Promise<void>;
+      /** Policies that replace the definition's for this scope, operation by operation. */
+      readonly approval?: ScheduleApprovals<TPrepared>;
+    };
 
 /** A dynamic schedules definition, as authored with `defineDynamicSchedules`. */
 export interface DynamicSchedulesDefinition<
@@ -319,9 +365,14 @@ export interface DynamicSchedulesDefinition<
     context: SchedulePreparePayloadContext,
   ) => TPrepared | Promise<TPrepared>;
   /** Authorizes every management operation. Defaults to `byPrincipal`. */
-  readonly scope?: (
-    context: ScheduleScopeResolverContext,
-  ) => ScheduleScopeResolverResult | Promise<ScheduleScopeResolverResult>;
+  readonly scope?: ScheduleScopeResolver;
+  /**
+   * Named scopes, for one kind of schedule with more than one owner, such as a person's own
+   * schedules and a channel's shared ones. Replaces `scope`. Each management tool and
+   * `schedules(definition, { scope })` call names one, and its resolver authorizes the call.
+   * A scope's schedules are stored apart from the others, under `<definition>/<scope>` or its `id`.
+   */
+  readonly scopes?: Readonly<Record<string, ScheduleNamedScope<TPayload, NoInfer<TPrepared>>>>;
   /**
    * Resolves the captured creator to current execution auth. Return `{ attributes }` to run as
    * the stored creator with those attributes, or a full `SessionAuthContext`, whose identity
@@ -363,17 +414,31 @@ type DynamicSchedulesOptions<
   TPrepared = TInput,
 > = Omit<
   DynamicSchedulesDefinition<TInput, TSchema, TPrepared>,
-  "provider" | "tool" | "approval"
+  "provider" | "tool" | "approval" | "scope" | "scopes"
 > & {
   /** Defaults to vercelScheduleProvider(): hosted production scheduling, process-local storage in eve dev. */
   readonly provider?: ScheduleProvider;
 } & (
-    | { readonly tool: false; readonly approval?: never }
-    | {
+    | ({ readonly tool: false; readonly approval?: never } & ScopeOptions<
+        CodeOnlyNamedScope<TInput, NoInfer<TPrepared>>
+      >)
+    | ({
         readonly tool?: true | "deferred";
         readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
-      }
+      } & ScopeOptions<ScheduleNamedScope<TInput, NoInfer<TPrepared>>>)
   );
+
+/** One `scope`, or named `scopes`, never both. */
+type ScopeOptions<TNamedScope> =
+  | { readonly scope?: ScheduleScopeResolver; readonly scopes?: never }
+  | { readonly scope?: never; readonly scopes: Readonly<Record<string, TNamedScope>> };
+
+/** A named scope of a definition without tools, which has no approval policies to replace. */
+type CodeOnlyNamedScope<TPayload, TPrepared> =
+  | ScheduleScopeResolver
+  | (Omit<Exclude<ScheduleNamedScope<TPayload, TPrepared>, ScheduleScopeResolver>, "approval"> & {
+      readonly approval?: never;
+    });
 
 /**
  * Defines dynamic schedules: schedules created at runtime whose occurrences invoke `run`.

@@ -12,7 +12,8 @@ import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitr
 import { createDevBootProgressReporter } from "./boot-progress.js";
 import type { DevelopmentCliOptions } from "./command-options.js";
 import { runInteractiveDevelopmentUi } from "./run-interactive-ui.js";
-import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "./tui/tui.js";
+import type { DevelopmentTuiStartup } from "./tui/startup.js";
+import type { RunDevelopmentTuiInput } from "./tui/tui.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "./ui-options.js";
 import {
   parseDevelopmentHeaderOption,
@@ -45,8 +46,8 @@ interface DevelopmentCommandTelemetry {
   trackSetupTerminal: EveCliTelemetry["trackSetupTerminal"];
 }
 
-async function loadDevelopmentTuiModule() {
-  return await import("#cli/dev/tui/tui.js");
+async function loadDevelopmentTuiStartupModule() {
+  return await import("#cli/dev/tui/startup.js");
 }
 
 async function loadStartHost(): Promise<NonNullable<DevelopmentCommandRuntime["startHost"]>> {
@@ -266,14 +267,17 @@ export function registerDevelopmentCommand(input: {
     let tuiStartup: DevelopmentTuiStartup | undefined;
     const tuiStartupPromise =
       mode === "tui" && runtime.runDevelopmentTui === undefined
-        ? loadDevelopmentTuiModule().then((module) => {
+        ? loadDevelopmentTuiStartupModule().then(async (module) => {
             onBootProgress({ type: "before-first-paint" });
-            return module.startDevelopmentTuiStartup({
+            const startup = await module.startDevelopmentTuiStartup({
               appRoot: applicationContext.root,
               initialInput: options.input,
               onExitRequest: lifecycle.requestStop,
               ...resolveTuiDisplayOptions(options),
             });
+            // The rest of the TUI loads while the server boots, off the prompt's path.
+            void import("#cli/dev/tui/tui.js").catch(() => undefined);
+            return startup;
           })
         : undefined;
 

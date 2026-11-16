@@ -55,7 +55,7 @@ import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import {
   assertScheduleCollectionNameAvailable,
   assertScheduleCollectionNamesDistinctFromSchedules,
-  compileScheduleCollectionDefinition,
+  compileScheduleCollectionDefinitions,
 } from "#compiler/normalize-schedule-collection.js";
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
 import { assertSkillNameAvailable, compileSkillSource } from "#compiler/normalize-skill.js";
@@ -566,13 +566,14 @@ class AgentGraphCompiler {
                 })
               : entry.source.definition;
           if (isScheduleCollectionDefinition(value)) {
-            const collection = compileScheduleCollectionDefinition(
+            for (const collection of compileScheduleCollectionDefinitions(
               entry.source,
               value,
               input.manifest.agentId,
-            );
-            assertScheduleCollectionNameAvailable(scheduleCollections, collection);
-            scheduleCollections.push(collection);
+            )) {
+              assertScheduleCollectionNameAvailable(scheduleCollections, collection);
+              scheduleCollections.push(collection);
+            }
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
             break;
           }

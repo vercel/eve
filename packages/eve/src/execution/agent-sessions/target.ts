@@ -70,6 +70,23 @@ export function resolveAgentAction(input: {
     : { ...common, kind: "subagent-call", subagentName: definition.name };
 }
 
+/**
+ * The names {@link resolveAgentAction} resolves to a remote agent, by its own lookup, so a name
+ * a subagent and a dynamic agent share is whichever of them that lookup finds.
+ */
+export function remoteAgentNames(
+  bundle: CompiledBundle,
+  dynamicSelections: DynamicSubagentSelections,
+): readonly string[] {
+  const names = new Set(bundle.subagentRegistry.subagentsByName.keys());
+  for (const selection of Object.values(dynamicSelections)) {
+    if (selection !== null) names.add(selection.prepared.name);
+  }
+  return [...names].filter(
+    (name) => findAgentDefinition(bundle, dynamicSelections, name)?.kind === "remote",
+  );
+}
+
 /** What a call to an agent carries: its message, normalized, and the output it asks for. */
 function agentActionInput(input: AgentActionInput): JsonObject {
   return {

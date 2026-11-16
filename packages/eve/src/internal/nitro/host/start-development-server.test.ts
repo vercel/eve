@@ -286,6 +286,13 @@ describe("normalizeDevelopmentServerClientUrl", () => {
   });
 });
 
+/** Readiness probes of a recorded server, not the started server's warm-up request. */
+function stateProbes() {
+  return (mocks.fetch.mock.calls as unknown[][]).filter(
+    ([url]) => !String(url).endsWith("/eve/v1/health"),
+  );
+}
+
 describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -516,6 +523,8 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
+    // The worker starts loading the published generation before a client asks.
+    expect(mocks.fetch).toHaveBeenCalledWith(new URL("/eve/v1/health", "http://localhost:2000/"));
     await server.close();
   });
 
@@ -871,7 +880,7 @@ describe("createDevelopmentServer", () => {
         signal: expect.any(AbortSignal),
       },
     );
-    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(stateProbes()).toHaveLength(1);
     expect(mocks.createHostNitro).toHaveBeenCalledOnce();
     expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
 
@@ -886,7 +895,7 @@ describe("createDevelopmentServer", () => {
       existing: "attach-if-unconfigured",
     });
 
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(stateProbes()).toEqual([]);
     expect(mocks.createHostNitro).toHaveBeenCalledOnce();
 
     await server.close();

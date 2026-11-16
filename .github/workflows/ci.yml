@@ -457,6 +457,11 @@ jobs:
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
 
+      - name: Setup uv for Python template services
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.12.17"
+
       # Each template installs its own dependencies from its own lockfile; the
       # only workspace package this check reads is the packed eve.
       - name: Install dependencies

@@ -293,8 +293,16 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
       options?: SessionStreamOptions,
     ): Promise<ReadableStream<unknown>> {
       if (options?.follow === false) return readSessionRecordHistory(sessionId, options.startIndex);
-      await assertFollowableSession(sessionId);
-      return readSessionRecords(sessionId, options?.startIndex);
+      // Made before the session check, the stream starts reading alongside it, so its first line
+      // is on its way by the time the check passes instead of a round trip later.
+      const records = readSessionRecords(sessionId, options?.startIndex);
+      try {
+        await assertFollowableSession(sessionId);
+      } catch (error) {
+        await records.cancel().catch(() => {});
+        throw error;
+      }
+      return records;
     },
 
     async getStreamTailIndex(sessionId: string): Promise<number> {

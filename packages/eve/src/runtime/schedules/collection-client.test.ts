@@ -70,6 +70,44 @@ describe("dynamic schedules client", () => {
     });
   });
 
+  it("asks the provider to validate timing before it prepares a create or a timing update", async () => {
+    const { definition, provider, create } = setup();
+    const prepare = vi.fn(
+      (value: { task: string; destination: "my-dm" | "team-channel" }) => value,
+    );
+    // A provider may check against its backend, so the hook can be async.
+    const validateExpression = vi.fn(async (expression: { type: string; cron?: string }) => {
+      if (expression.cron === "0 9 * * MON") throw new Error("Provider can't run MON.");
+    });
+    const client = createScheduleCollectionClient(
+      { ...definition, provider: { ...provider, validateExpression }, preparePayload: prepare },
+      callContext,
+    );
+    const cron = (value: string) => ({ type: "cron" as const, cron: value });
+
+    await expect(
+      client.prepareCreate({ ...input, expression: cron("0 9 * * MON") }),
+    ).rejects.toThrow("Provider can't run MON.");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+
+    const created = await client.create({ ...input, expression: cron("0 9 * * 1") });
+    await expect(
+      client.prepareUpdate(created.name, { expression: cron("0 9 * * MON") }),
+    ).rejects.toThrow("Provider can't run MON.");
+    // eve's own timing rules still apply, with the hook and without it.
+    for (const bound of [client, setup().client]) {
+      await expect(bound.prepareCreate({ ...input, expression: cron("0 9 * *") })).rejects.toThrow(
+        "exactly five fields",
+      );
+    }
+    // A relative delay reaches the provider as the one-time expression it resolves to.
+    await client.prepareCreate(input);
+    expect(validateExpression).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "single", timezone: "UTC" }),
+    );
+  });
+
   it("rejects invalid input before preparation, and rejected or oversized preparation before writes", async () => {
     const { definition, create } = setup();
     const prepare = vi.fn((value: { task: string; destination: "my-dm" | "team-channel" }) => {
@@ -160,5 +198,29 @@ describe("dynamic schedules client", () => {
     ).rejects.toThrow();
     expect(update).not.toHaveBeenCalled();
     await expect(client.get(created.name)).resolves.toEqual(created);
+  });
+
+  it("tells preparePayload the timing a write leaves the schedule with", async () => {
+    const { definition } = setup();
+    const timings: unknown[] = [];
+    const client = createScheduleCollectionClient(
+      {
+        ...definition,
+        preparePayload: (
+          value: { task: string; destination: "my-dm" | "team-channel" },
+          context,
+        ) => {
+          timings.push(context.expression);
+          return value;
+        },
+      },
+      callContext,
+    );
+    const cron = { type: "cron" as const, cron: "0 9 * * 1" };
+    const created = await client.create({ ...input, expression: cron });
+    // A payload-only update reads the stored timing; a relative delay arrives as written.
+    await client.update(created.name, { payload });
+    await client.update(created.name, { payload, expression: input.expression });
+    expect(timings).toEqual([cron, cron, input.expression]);
   });
 });

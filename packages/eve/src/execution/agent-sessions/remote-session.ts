@@ -23,6 +23,7 @@ import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import { NonRetryableError } from "#shared/run-errors.js";
 import { turnSteeredMessage } from "#runtime/connections/identity-hold.js";
 import type { SessionAuth } from "#context/keys.js";
+import { isRemoteReplyHookToken } from "#execution/callback-hook-tokens.js";
 import { loadAgentRoster, type AgentRoster } from "#execution/agent-sessions/roster.js";
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
@@ -41,6 +42,7 @@ export async function startRemoteSession(
 ): Promise<StartedAgentSession> {
   const { auth, context, target } = input;
   const { action } = target;
+  const replyTo = remoteReplyToken(input.replyTo, action.name);
   const registry = remoteRegistryOf(input.roster, action.remoteAgentName);
   const dynamicBinding = bindingFor(context, action.nodeId);
   const remote = resolveRemoteAgentForAction({
@@ -66,9 +68,9 @@ export async function startRemoteSession(
     initiatorAuth: auth.initiator,
     operationId: access.operationId,
     originAudience: context.trace.originAudience,
-    parent: createParentContext(context, input.replyTo),
+    parent: createParentContext(context, replyTo),
     remote,
-    session: { continuationToken: input.replyTo },
+    session: { continuationToken: replyTo },
   });
   const address: {
     -readonly [K in keyof RemoteAgentSession["address"]]: RemoteAgentSession["address"][K];
@@ -107,6 +109,7 @@ export async function sendRemoteSessionMessage(
   idempotencyKey: string,
 ): Promise<AgentSessionReceipt> {
   const { address, context } = input;
+  const replyTo = remoteReplyToken(input.replyTo, address.name);
   const remote = await resolveSessionRemote(context, address);
   holdForwardedCaller(remote, input.auth.steeredBy, address.name);
   return await continueRemoteAgentSession({
@@ -114,11 +117,8 @@ export async function sendRemoteSessionMessage(
     callback: {
       callId: context.parent.callId,
       subagentName: address.name,
-      token: input.replyTo,
-      url: createWorkflowCallbackUrl(
-        address.callbackBaseUrl,
-        createEveCallbackRoutePath(input.replyTo),
-      ),
+      token: replyTo,
+      url: createWorkflowCallbackUrl(address.callbackBaseUrl, createEveCallbackRoutePath(replyTo)),
     },
     earlierProtocol: address.earlierProtocol,
     idempotencyKey,
@@ -127,6 +127,20 @@ export async function sendRemoteSessionMessage(
     remote,
     sessionId: address.sessionId,
   });
+}
+
+/**
+ * The token `name`, a remote agent, replies with. Its reply reaches eve's callback route with
+ * nothing else to vouch for it, so the agent is never handed a token that route refuses: one a
+ * run named for a local agent's reply, which anyone who knew the run's ids could compute. A call
+ * holds such a token when its context didn't list the agent as remote, as when `eve dev` reloads
+ * the agent as a remote one after the call started.
+ */
+function remoteReplyToken(replyTo: string, name: string): string {
+  if (isRemoteReplyHookToken(replyTo)) return replyTo;
+  throw new NonRetryableError(
+    `Agent "${name}" is remote, but this call's context doesn't list it as remote, so its reply hook can't take a remote agent's reply. Start the call again.`,
+  );
 }
 
 /** Cancels a remote session's running turn. */

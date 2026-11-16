@@ -59,6 +59,7 @@ export default defineDynamicSchedules({
 | `id`             | Name from the file path    | Names the definition and the schedules stored under it. See [Keep a stable identity](#keep-a-stable-identity).                    |
 | `description`    | None                       | Text added to each management tool's description.                                                                                 |
 | `scope`          | `byPrincipal`              | Decides which caller can manage which schedules.                                                                                  |
+| `scopes`         | None                       | Named scopes, in place of `scope`, for schedules with more than one owner. See [Declare named scopes](#declare-named-scopes).     |
 | `provider`       | `vercelScheduleProvider()` | Stores schedules and fires them. See [Choose a provider and test locally](#choose-a-provider-and-test-locally).                   |
 | `preparePayload` | None                       | Checks and reshapes the payload before eve saves it. See [Prepare payloads and destinations](#prepare-payloads-and-destinations). |
 | `tool`           | `true`                     | How the model reaches the management tools. See [Expose management tools](#expose-management-tools).                              |
@@ -117,6 +118,59 @@ approval: {
 
 `toolInput.payload` is also the prepared payload. Approval policies apply only to model calls, not to code that uses `schedules(definition)`. So eve rejects `approval` with `tool: false`, in TypeScript and at runtime. Approvals don't bypass `scope` checks.
 
+### Declare named scopes
+
+Some schedules have more than one owner: a person's own, and the ones a channel shares. Declare each owner as a named scope with `scopes`, in place of `scope`:
+
+```ts title="agent/schedules/workflows.ts"
+export default defineDynamicSchedules({
+  inputSchema: z.object({ task: z.string() }).strict(),
+  scopes: {
+    personal: byPrincipal,
+    channel: {
+      description: "Shared with everyone in the current channel.",
+      // currentChannel is application code. Return null where no channel applies.
+      resolve: (context) => currentChannel(context),
+    },
+  },
+  // auth, run
+});
+```
+
+The definition still offers one set of tools, named for the file: `schedule__workflows__create`, `schedule__workflows__list`, and so on. Each takes a `scope` input, here `"personal"` or `"channel"`, and the model sees each scope's `description` beside its name. The named scope's resolver authorizes the call, as `scope` does for a definition without names.
+
+A scope is a resolver function, or an object that also says what the scope does differently:
+
+| Field            | Purpose                                                                                                           |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `resolve`        | Required. Authorizes each operation and returns the namespace, as `scope` does.                                   |
+| `description`    | Tells the model what the scope holds, beside its name. Without it, only the name is shown.                        |
+| `id`             | The name the scope's schedules are stored under. Defaults to `<definition>/<scope>`, such as `workflows/channel`. |
+| `preparePayload` | Replaces the definition's `preparePayload` for this scope. It returns the same shape.                             |
+| `run`            | Replaces the definition's `run` for this scope.                                                                   |
+| `approval`       | Policies that replace the definition's for this scope, operation by operation.                                    |
+
+The definition's `description` is added to every management tool as common instructions. A scope's `description` explains only that scope, beside its name in the tool's `scope` input.
+
+`inputSchema`, `auth`, `events`, `tool`, and `provider` are the definition's, for every scope. A shared `preparePayload` or `scope` resolver reads which scope it acts for from `context.scopeName`.
+
+Each scope stores its schedules apart, so `occurrence.collection` is the scope's stored name. To turn two existing definitions into one, set each scope's `id` to the old definition's name, and the schedules already stored there keep running:
+
+```ts
+scopes: {
+  personal: { id: "personal-tasks", resolve: byPrincipal },
+  channel: { id: "channel-tasks", resolve: (context) => currentChannel(context) },
+},
+```
+
+| With named scopes   | Behavior                                                                                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `once()` grants     | Kept for each scope. Approving an operation for `"personal"` doesn't approve it for `"channel"`.                                                                                                                    |
+| A response policy   | Decides who answers that scope's approvals. A scope without one keeps the default: only the requester answers. Once any scope sets one for an operation, each answer to that tool needs an authenticated responder. |
+| Replacing the tools | The tool file named for the definition, `agent/tools/schedule__workflows.ts`, replaces or disables the set.                                                                                                         |
+| The client          | `schedules(definition, { scope: "channel" })` binds one scope.                                                                                                                                                      |
+| Names that clash    | The build fails when a scope's stored name, or the definition's tool name, is already another definition's.                                                                                                         |
+
 ## Use the authenticated client
 
 ```ts title="agent/tools/list-requests.ts"
@@ -151,6 +205,8 @@ Your tools, hooks, and channel events can read `ctx.session.schedule`. It is `un
 | `delay`           | `minutes`, a whole number from 1 through 525,600           | “In one minute”: `{ type: "delay", minutes: 1 }` |
 | `single`          | `at`, a `YYYY-MM-DDTHH:mm` local datetime, IANA `timezone` | One absolute time                                |
 | `cron`            | `cron`, a five-field expression, IANA `timezone`           | Recurring work                                   |
+
+Vercel Schedules takes numeric cron fields with `*`, `,`, `-`, and `/`: months are `1-12` and weekdays are `0-6`, where `0` is Sunday. An expression can't set both a day of the month and a day of the week. An expression that breaks these rules, such as one with `MON` or `JAN`, fails before the write is prepared, so a model's call is corrected before a person is asked to approve it. `eve dev` applies the same rules.
 
 Omit `timezone` to use UTC. A delay starts when the approved write runs, not when approval is requested. It rounds up to the next minute, which adds up to 59 seconds before provider and execution latency. A separate client retry computes a new time, so a delay isn't idempotent across retries.
 
@@ -203,13 +259,14 @@ Create a provider when your application needs a different scheduling backend, st
 
 Your provider owns schedule storage, timing, and occurrence delivery. eve handles payload validation, management authorization, approvals, and creator revalidation.
 
-| Part of the contract | What your provider implements                                                                                                                        |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                       |
-| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                            |
-| Storage              | Preserve the supplied payload and delivery target. Return `ScheduleRecord` values without payload or creator data, and a `SchedulePage` from `list`. |
-| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                 |
-| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.    |
+| Part of the contract | What your provider implements                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                         |
+| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                              |
+| Storage              | Preserve the supplied payload and delivery target. Return `ScheduleRecord` values without payload or creator data, and a `SchedulePage` from `list`.   |
+| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                   |
+| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.      |
+| Timing checks        | Optional `validateExpression`, sync or async. Throw for a cron or one-time expression your backend can't run. eve calls it before it prepares a write. |
 
 `ScheduleProviderContext` is also exported from `eve/experimental/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
 
@@ -236,7 +293,9 @@ async run({ payload, schedule, to }) {
 
 After the callback and its `waitUntil` promises finish, eve calls `occurrence.dispatched` with `sessionIds`. That event means the callback succeeded, not that the agent finished its task. Channels send the output and report session failures.
 
-Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback and start new sessions. Deduplicate side effects with `occurrence.executionId` plus the schedule or resource identity. For sessions, put it in the send's key, as in `` idempotencyKey: `${occurrence.executionId}:digest` ``. A retried send with the same key and target then reaches the session the first attempt started. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
+Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback. Deduplicate your own side effects with `occurrence.executionId` plus the schedule or resource identity.
+
+A retried callback doesn't start its sessions again. eve keys each send by the occurrence, the target, and the message, so a repeat of the same send reaches the session the first attempt started. A message that differs between attempts, such as one that includes the current time, starts another session; pass your own `idempotencyKey`, such as `` `${occurrence.executionId}:digest` ``, to keep it to one. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
 
 `occurrence.failed` reports an occurrence that won't run: a permanent failure, such as `auth` returning `null`, or a provider that ran out of retries. Its `reason` says why.
 
@@ -280,6 +339,10 @@ Without `preparePayload`, eve validates payloads before saving and again before 
 | Authenticated client code | Once, before writing, with no approval.                                                                                                                                                           |
 
 Preparation can repeat when a write is retried, so avoid irreversible effects. Reads, timing-only updates, state changes, and runs never call it.
+
+`context.expression` is the timing the schedule has after the write: the one the caller passed, or the stored one when an update replaces only the payload. Read `context.expression.type` to tell a recurring schedule (`"cron"`) from a one-time one, so the payload doesn't need a field for it. A relative delay arrives as written, not resolved to a time.
+
+A timing-only update doesn't call `preparePayload`, so a value you derive from `context.expression` keeps the timing it was prepared with. Vercel Schedules rejects an update that changes a schedule between recurring and one-time. With another provider, send the payload again when you change a schedule's kind.
 
 `auth`, `run`, and occurrence events infer the prepared return type. Declare `preparePayload` before them, or give it an explicit return type. Without preparation, the payload type comes from the schema.
 

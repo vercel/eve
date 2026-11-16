@@ -100,6 +100,7 @@ function agentContext(
     agents,
     capabilities: { requestInput: true },
     parent: { callId, rootSessionId: "session", sessionId: "session", turn },
+    remoteAgents: [] as readonly string[],
   } as AgentSessionContext;
 }
 

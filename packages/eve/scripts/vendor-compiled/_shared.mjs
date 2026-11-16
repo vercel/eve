@@ -41,7 +41,7 @@
  * ```
  */
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
@@ -784,7 +784,11 @@ async function bundleStandaloneModule({
     external: module.external ?? [],
     moduleTypes: module.loader ?? {},
     platform,
-    plugins: [...(module.plugins ?? []), createSharedSpecifierPlugin(sharedSpecifiers, [module])],
+    plugins: [
+      ...(module.plugins ?? []),
+      createSharedSpecifierPlugin(sharedSpecifiers, [module]),
+      createRuntimeDependencyPlugin(packageRoot),
+    ],
     resolve: module.resolve ?? getDefaultResolve(),
     treeshake: true,
     output: {
@@ -834,6 +838,7 @@ async function bundleModuleGroup({
       sharedSpecifiers,
       preparedModules.map(({ module }) => module),
     ),
+    createRuntimeDependencyPlugin(packageRoot),
   ];
 
   await buildWithRolldown({
@@ -938,6 +943,62 @@ function collectSharedSpecifiers(preparedModules) {
     }
   }
   return shared;
+}
+
+/**
+ * A vendored package that resolves one of eve's own runtime `dependencies` to the very install
+ * eve depends on imports it at runtime instead of bundling another copy. A different version
+ * stays bundled, as the package was tested with it, and so does a CommonJS `require()`, which
+ * an ESM bundle cannot leave external.
+ */
+function createRuntimeDependencyPlugin(packageRoot) {
+  const installs = resolveInstalls(runtimeDependencyNames(packageRoot), packageRoot);
+  return {
+    name: "eve:vendored-runtime-dependencies",
+    async resolveId(source, importer, options) {
+      // Only bare package names: rolldown accepts deep paths Node's ESM loader rejects.
+      const install = installs.get(source);
+      if (install === undefined || options.kind === "require-call") return null;
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+      if (resolved === null || resolved.external || !isInsideDirectory(resolved.id, install)) {
+        return null;
+      }
+      return { id: source, external: true };
+    },
+  };
+}
+
+function runtimeDependencyNames(packageRoot) {
+  const manifestPath = join(packageRoot, "package.json");
+  return existsSync(manifestPath)
+    ? Object.keys(JSON.parse(readFileSync(manifestPath, "utf8")).dependencies ?? {})
+    : [];
+}
+
+/** Maps each package name to the install directory it resolves to from `fromDir`. */
+function resolveInstalls(names, fromDir) {
+  const resolveFrom = createRequire(join(fromDir, "package.json"));
+  const installs = new Map();
+  for (const name of names) {
+    let dir;
+    try {
+      dir = dirname(resolveFrom.resolve(name));
+    } catch {
+      continue; // Not resolvable with `require` conditions: leave it bundled.
+    }
+    // Walk up rather than resolving `<name>/package.json`, which `exports` may hide.
+    for (; dir !== parse(dir).root; dir = dirname(dir)) {
+      const manifestPath = join(dir, "package.json");
+      if (
+        existsSync(manifestPath) &&
+        JSON.parse(readFileSync(manifestPath, "utf8")).name === name
+      ) {
+        installs.set(name, realpathSync(dir));
+        break;
+      }
+    }
+  }
+  return installs;
 }
 
 const SHARED_FACADE_PREFIX = "\0eve-shared-facade:";
@@ -1055,6 +1116,16 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     scriptHash.update("\0");
   }
 
+  // Which runtime dependencies a bundle imports instead of bundling depends on whether the
+  // vendored package resolves them to eve's install, which a lockfile change alone can alter.
+  // Recording only the packages that don't keeps the stamp small. This checks resolution from
+  // each vendored package's own root; the plugin decides per importer, so a transitive
+  // dependency that changes where it resolves eve's runtime dependencies doesn't re-vendor,
+  // just as other transitive version changes don't.
+  const runtimeDependencies = runtimeDependencyNames(packageRoot);
+  const eveInstalls = resolveInstalls(runtimeDependencies, packageRoot);
+  const unsharedRuntimeDependencies = [];
+
   const moduleFingerprints = {};
   const moduleVersions = {};
   for (const module of modules) {
@@ -1064,6 +1135,12 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
       module.packageJsonName,
     );
     moduleVersions[module.packageName] = packageInfo.packageJson.version ?? "0.0.0";
+    const moduleInstalls = resolveInstalls(runtimeDependencies, packageInfo.packageRoot);
+    for (const [name, install] of eveInstalls) {
+      if (moduleInstalls.get(name) !== install) {
+        unsharedRuntimeDependencies.push(`${module.packageName}>${name}`);
+      }
+    }
 
     if (module.fingerprintFiles !== undefined) {
       const moduleHash = createHash("sha256");
@@ -1085,6 +1162,7 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
     ),
+    unsharedRuntimeDependencies,
   };
 }
 

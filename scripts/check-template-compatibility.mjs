@@ -25,6 +25,27 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibilit
 // a 4-vCPU runner.
 const MAX_CONCURRENT_TEMPLATES = 3;
 
+// These values satisfy build-time validation without granting service access.
+// Runtime requests still require the deployment's real configuration.
+const BUILD_ENV_BY_TEMPLATE = {
+  "eve-software-factory-template": {
+    FACTORY_REPO: "acme/widgets",
+    LINEAR_CONNECTOR: "linear/template-ci",
+  },
+  "kody-eve-template": {
+    LINEAR_CONNECTOR: "linear/template-ci",
+    REDIS_URL: "redis://127.0.0.1:6379",
+    RESEND_FROM_ADDRESS: "kody@example.com",
+    DIGEST_REPO: "acme/widgets",
+    DIGEST_EMAIL: "team@example.com",
+  },
+  openinstinct: {
+    DATABASE_URL: "postgresql://compatibility:compatibility@127.0.0.1:1/compatibility",
+    KERNEL_API_KEY: "compatibility-build-only",
+    BETTER_AUTH_URL: "http://localhost:3000",
+  },
+};
+
 // Templates ordered by their measured wall time in CI, longest first, so the
 // expensive `next build`/`nuxt build` templates start on the first worker slots
 // instead of queueing behind cheap ones. Durations come from the per-command
@@ -150,13 +171,47 @@ const checkVercelServices = async (template, destination) => {
     // withEve generates and owns the agent services.
     if (service.framework === "eve") continue;
     const label = `Template "${template}" vercel.ts service "${name}"`;
+    const serviceRoot = join(destination, service.root ?? ".");
+    if (service.framework === undefined && typeof service.entrypoint === "string") {
+      if (
+        !existsSync(join(serviceRoot, "pyproject.toml")) ||
+        !existsSync(join(serviceRoot, "uv.lock"))
+      ) {
+        throw new Error(
+          `${label} must declare pyproject.toml and uv.lock for Python service validation.`,
+        );
+      }
+      if (!/^[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*:[a-zA-Z_]\w*$/.test(service.entrypoint)) {
+        throw new Error(`${label} must use a Python module:attribute ASGI entrypoint.`);
+      }
+      await run(template, "uv", ["sync", "--frozen", "--all-groups"], { cwd: serviceRoot });
+      await run(template, "uv", ["run", "--no-sync", "ruff", "check", "."], { cwd: serviceRoot });
+      await run(template, "uv", ["run", "--no-sync", "ruff", "format", "--check", "."], {
+        cwd: serviceRoot,
+      });
+      await run(template, "uv", ["run", "--no-sync", "pytest"], { cwd: serviceRoot });
+      await run(
+        template,
+        "uv",
+        [
+          "run",
+          "--no-sync",
+          "python",
+          "-c",
+          "import importlib, sys; module, name = sys.argv[1].split(':'); app = getattr(importlib.import_module(module), name); assert callable(app), 'ASGI entrypoint must be callable'",
+          service.entrypoint,
+        ],
+        { cwd: serviceRoot },
+      );
+      built++;
+      continue;
+    }
     if (!VERCEL_WEB_FRAMEWORKS.has(service.framework)) {
       throw new Error(
         `${label} uses framework ${JSON.stringify(service.framework)}, which is not a Vercel Framework Preset slug. Use one of: ${[...VERCEL_WEB_FRAMEWORKS].join(", ")}.`,
       );
     }
-    const serviceRoot = join(destination, service.root ?? ".");
-    if (existsSync(join(serviceRoot, "package.json"))) continue;
+    if (existsSync(join(serviceRoot, "package.json")) && !service.buildCommand) continue;
     if (!service.buildCommand) {
       throw new Error(
         `${label} has no package.json in ${service.root}, so Vercel cannot find the framework binary. Set buildCommand to run it from the root node_modules.`,
@@ -177,7 +232,18 @@ const checkTemplate = async (template, tarball, tarballName) => {
   const destination = join(temporaryDirectory, template);
   cpSync(source, destination, {
     filter: (path) =>
-      !["node_modules", ".next", ".nuxt", ".output", ".eve", ".vercel"].includes(basename(path)),
+      ![
+        "node_modules",
+        ".venv",
+        ".pytest_cache",
+        ".ruff_cache",
+        "__pycache__",
+        ".next",
+        ".nuxt",
+        ".output",
+        ".eve",
+        ".vercel",
+      ].includes(basename(path)),
     recursive: true,
   });
 
@@ -193,29 +259,26 @@ const checkTemplate = async (template, tarball, tarballName) => {
   manifest.dependencies.eve = `file:${tarball}`;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-  // The shipped Discord template pins the old gateway API. Exercise its documented
-  // 1.0 migration only in the upgraded copy, after checking the lockfile unchanged.
-  if (template === "eve-discord-agent-template") {
-    const daemonPath = join(destination, "daemon", "main.ts");
-    const daemon = readFileSync(daemonPath, "utf8")
-      .replace('"eve/channels/discord/gateway"', '"eve/experimental/channels/discord/gateway"')
-      .replaceAll("experimental_runDiscordGatewayRelay", "runDiscordGatewayRelay");
-    writeFileSync(daemonPath, daemon);
-  }
-
   process.stdout.write(`\n[${template}] Checking ${template} against ${tarballName}\n`);
   await run(template, "pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
   await run(template, "pnpm", ["typecheck"], { cwd: destination });
   // Preparing a Vercel Sandbox snapshot needs Vercel credentials, which this
   // check does not have. Such templates skip the prewarm.
-  const sandboxPath = join(destination, "agent", "sandbox.ts");
-  const vercelSandbox =
-    existsSync(sandboxPath) && readFileSync(sandboxPath, "utf8").includes("eve/sandbox/vercel");
+  const agentDirectory = join(destination, "agent");
+  const vercelSandbox = readdirSync(agentDirectory, { recursive: true }).some(
+    (path) =>
+      basename(path) === "sandbox.ts" &&
+      readFileSync(join(agentDirectory, path), "utf8").includes("eve/sandbox/vercel"),
+  );
+  const buildOptions = {
+    cwd: destination,
+    env: { ...process.env, ...BUILD_ENV_BY_TEMPLATE[template] },
+  };
   await run(
     template,
     "pnpm",
     ["exec", "eve", "build", ...(vercelSandbox ? ["--skip-sandbox-prewarm"] : [])],
-    { cwd: destination },
+    buildOptions,
   );
   // A template's `pnpm build` is `eve build` plus, at most, its web app, which
   // the service builds just produced the way Vercel does. Run it only when
@@ -223,7 +286,7 @@ const checkTemplate = async (template, tarball, tarballName) => {
   const builtServices = await checkVercelServices(template, destination);
   const build = manifest.scripts?.build;
   if (!vercelSandbox && build && build !== "eve build" && builtServices === 0) {
-    await run(template, "pnpm", ["build"], { cwd: destination });
+    await run(template, "pnpm", ["build"], buildOptions);
   }
   if (manifest.scripts?.["test:smoke"]) {
     await run(template, "pnpm", ["test:smoke"], { cwd: destination });
