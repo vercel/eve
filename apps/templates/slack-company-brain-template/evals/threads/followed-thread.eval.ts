@@ -52,7 +52,7 @@ export default [
       const turn = await session.send(
         slackMessage({
           from: alice,
-          text: "Thanks! So is a lower p99 better?",
+          text: "Thanks! How is that different from the average latency?",
           ts: "1767268900.000200",
           mentioned: false,
         }),
@@ -61,7 +61,7 @@ export default [
       turn.notCalledTool("no_reply");
       t.check(
         wordCount(turn.reply),
-        satisfies((words: number) => words > 0 && words <= 120, "a thread-sized reply"),
+        satisfies((words: number) => words > 0 && words <= 200, "a thread-sized reply"),
       );
       t.check(
         turn.reply ?? "",

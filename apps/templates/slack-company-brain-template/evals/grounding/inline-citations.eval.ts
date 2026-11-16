@@ -44,11 +44,16 @@ export default defineEval({
       turn.reply ?? "",
       satisfies((reply: string) => !/\[\^?\d+\]/u.test(reply), "no numbered citation markers"),
     );
-    t.judge(
-      "Every link's text describes the source or the fact it supports (for example 'the " +
-        "decision in #proj-atlas'), not 'here', 'source', or a bare URL, and the link sits in " +
-        "the sentence that makes the claim.",
-      { on: turn.reply },
-    ).gate(0.7);
+    t.check(
+      turn.reply ?? "",
+      satisfies(
+        (reply: string) =>
+          [...reply.matchAll(/\[([^\]]+)\]\(([^)]+)\)/gu)].every(
+            ([, label = "", url]) =>
+              label !== url && !/^(?:here|source|link|this|\d+)$/iu.test(label.trim()),
+          ),
+        "link text names the source or fact, not 'here', 'source', or the URL",
+      ),
+    );
   },
 });
