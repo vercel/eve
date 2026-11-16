@@ -902,24 +902,6 @@ describe("verifyVercelOidc", () => {
     await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
   });
 
-  it("refuses another issuer's token without fetching this issuer's keys", async () => {
-    // A route that accepts GitHub Actions and Vercel tokens tries both; a Vercel token must not
-    // wait on GitHub's discovery document before the Vercel strategy gets it.
-    const issuer = await installMockedVercelIssuer("another-issuer");
-    try {
-      const token = await issuer.signToken({});
-      await expect(
-        verifyOidc(token, {
-          audiences: ["agent-framework-bench"],
-          issuer: "https://token.actions.githubusercontent.com",
-        }),
-      ).resolves.toEqual({ ok: false });
-      expect(globalThis.fetch).not.toHaveBeenCalled();
-    } finally {
-      issuer.restore();
-    }
-  });
-
   it("rejects tokens with no audience claim", async () => {
     const { privateKey } = await generateKeyPair("RS256");
     const token = await new SignJWT({})
@@ -1427,6 +1409,35 @@ describe("verifyVercelOidc", () => {
       );
 
       await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    } finally {
+      issuer.restore();
+    }
+  });
+});
+
+describe("verifyOidc", () => {
+  // A route that accepts GitHub Actions and Vercel tokens tries both; a Vercel token must not
+  // wait on GitHub's discovery document before the Vercel strategy gets it.
+  it.each([
+    [
+      "another issuer's token",
+      (sign: (claims: Record<string, unknown>) => Promise<string>) => sign({}),
+    ],
+    ["a malformed token", async () => "not-a-jwt"],
+    [
+      "a token with no issuer",
+      () => new SignJWT({}).setProtectedHeader({ alg: "HS256" }).sign(new Uint8Array(32)),
+    ],
+  ])("refuses %s without fetching this issuer's keys", async (_, createToken) => {
+    const issuer = await installMockedVercelIssuer("another-issuer");
+    try {
+      await expect(
+        verifyOidc(await createToken(issuer.signToken), {
+          audiences: ["agent-framework-bench"],
+          issuer: "https://token.actions.githubusercontent.com",
+        }),
+      ).resolves.toEqual({ ok: false });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     } finally {
       issuer.restore();
     }
