@@ -16,8 +16,16 @@ export const LEASE_LOCK_PATH = "/tmp/eve-github-lease.lock";
  */
 const GUARD_PATH = `${LEASE_LOCK_PATH}.guard`;
 
+/**
+ * How long a command may hold the lease before eve stops it. Every other `gh` command in the
+ * sandbox waits behind the holder, so a hung command must not hold it for long. Almost every
+ * command finishes in seconds.
+ */
+export const LEASE_HOLD_MS = 5 * 60_000;
+/** How long a finishing command gets to clear its credential before another can take over its lock. */
+const RELEASE_MARGIN_SECONDS = 60;
 /** A holder that has not released for this long has stopped: its lock is broken. */
-const STALE_AFTER_SECONDS = 10 * 60;
+const STALE_AFTER_SECONDS = LEASE_HOLD_MS / 1000 + RELEASE_MARGIN_SECONDS;
 /** Guards are held only for a few shell commands; one this old was left by a stopped sandbox. */
 const GUARD_STALE_AFTER_SECONDS = 60;
 /**
@@ -51,8 +59,6 @@ function acquireCommand(owner: string): string {
   ].join("\n");
 }
 
-/** How long a finishing command gets to clear its credential before another can take over its lock. */
-const RELEASE_MARGIN_SECONDS = 60;
 /**
  * A finishing command whose lock is younger than this may clear its credential without the guard.
  * Another command takes over a lock only once it is older than {@link STALE_AFTER_SECONDS}, so the
@@ -114,6 +120,16 @@ function waitForRetry(signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
+/** A command held the lease for {@link LEASE_HOLD_MS}, so eve stopped it. */
+export class GitHubCommandTimeoutError extends Error {
+  constructor() {
+    super(
+      `This GitHub command ran for more than ${LEASE_HOLD_MS / 60_000} minutes, so eve stopped it to let other GitHub commands in this sandbox run. Use a command that returns without waiting, such as \`gh pr checks\` without \`--watch\`, or split the work into smaller commands.`,
+    );
+    this.name = "GitHubCommandTimeoutError";
+  }
+}
+
 /** What a holder does with the sandbox lease lock. */
 export interface SandboxLeaseLockOptions {
   /**
@@ -132,12 +148,14 @@ export interface SandboxLeaseLockOptions {
  * parent's, would otherwise replace or clear each other's credential mid-command.
  *
  * Throws a retryable error when another command holds the lock for longer than
- * {@link LEASE_WAIT_MS}, and stops waiting when `signal` aborts.
+ * {@link LEASE_WAIT_MS}, and stops waiting when `signal` aborts. `run` receives a signal that
+ * aborts with {@link GitHubCommandTimeoutError} once it has held the lock for
+ * {@link LEASE_HOLD_MS}, or when `signal` aborts.
  */
 export async function withSandboxLeaseLock<T>(
   sandbox: SandboxSession,
   owner: string,
-  run: () => PromiseLike<T>,
+  run: (signal: AbortSignal) => PromiseLike<T>,
   { cleanup, signal }: SandboxLeaseLockOptions = {},
 ): Promise<T> {
   const deadline = Date.now() + LEASE_WAIT_MS;
@@ -183,9 +201,16 @@ export async function withSandboxLeaseLock<T>(
     }
     span.end();
   }
+  const hold = new AbortController();
+  const timer = setTimeout(() => hold.abort(new GitHubCommandTimeoutError()), LEASE_HOLD_MS);
   try {
-    return await run();
+    return await run(signal ? AbortSignal.any([signal, hold.signal]) : hold.signal);
+  } catch (error) {
+    // A provider rejects an aborted command with its own error; report why eve stopped it.
+    if (hold.signal.aborted && !signal?.aborted) throw hold.signal.reason;
+    throw error;
   } finally {
+    clearTimeout(timer);
     await release(sandbox, owner, cleanup);
   }
 }

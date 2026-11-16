@@ -22,7 +22,11 @@ import {
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
-import { LEASE_LOCK_PATH, withSandboxLeaseLock } from "../../extension/lib/sandbox-lease-lock.ts";
+import {
+  LEASE_HOLD_MS,
+  LEASE_LOCK_PATH,
+  withSandboxLeaseLock,
+} from "../../extension/lib/sandbox-lease-lock.ts";
 
 type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
 
@@ -894,6 +898,87 @@ test("a lease breaks a lock whose holder stopped", async () => {
   }
 });
 
+test("a lease breaks a lock held past the hold limit", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf hung > '${lockPath}/owner'`]);
+    // Past the hold limit and its release margin, but younger than the old 10-minute stale window.
+    const age = new Date(Date.now() - LEASE_HOLD_MS - 2 * 60_000);
+    execFileSync("touch", ["-t", touchTimestamp(age), lockPath]);
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      run: (input) => runLockCommand(input.command, lockPath),
+    };
+    let owner = "";
+    await withSandboxLeaseLock(sandboxFake as SandboxSession, "next", async () => {
+      owner = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+    });
+    assert.equal(owner, "next");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a lease stops a command that holds it past the hold limit", async (t) => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      run: (input) => runLockCommand(input.command, lockPath),
+    };
+    let cleaned = false;
+    const holding = withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "hung",
+      (signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("command aborted")), {
+            once: true,
+          });
+          t.mock.timers.tick(LEASE_HOLD_MS);
+        }),
+      {
+        cleanup: async () => {
+          cleaned = true;
+        },
+      },
+    );
+    await assert.rejects(holding, { name: "GitHubCommandTimeoutError" });
+    assert.equal(cleaned, true);
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
+  } finally {
+    t.mock.timers.reset();
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a lease stops its command when the call is cancelled", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  const controller = new AbortController();
+  try {
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      run: (input) => runLockCommand(input.command, lockPath),
+    };
+    const holding = withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "holder",
+      (signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          controller.abort(new Error("cancelled"));
+        }),
+      { signal: controller.signal },
+    );
+    await assert.rejects(holding, /cancelled/u);
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
 test("a lease waits on the host and stops when its call is cancelled", async () => {
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
@@ -1026,6 +1111,12 @@ function heldLockSandbox(lockPath: string): SandboxSession {
     },
   };
   return sandbox as SandboxSession;
+}
+
+/** Formats `date` for `touch -t` (`CCYYMMDDhhmm.SS`, local time), which macOS and Linux both accept. */
+function touchTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}.${pad(date.getSeconds())}`;
 }
 
 /** Runs a lease lock command in a real shell against `lockPath` instead of the sandbox's path. */

@@ -277,7 +277,7 @@ export async function executeGitHubShell(
       sandbox,
       dependencies,
       { authorization, placeholder, placeholderAuthorization, token },
-      () => {
+      (signal) => {
         const env: Record<string, string> = {
           GH_CONFIG_DIR: githubConfig,
           GH_PROMPT_DISABLED: "1",
@@ -302,7 +302,7 @@ export async function executeGitHubShell(
         });
         env.GIT_TERMINAL_PROMPT = "0";
         env.PATH = "/usr/local/bin:/usr/bin:/bin";
-        return sandbox.run({ command, env });
+        return sandbox.run({ command, env, signal });
       },
       config.broker,
     );
@@ -336,7 +336,7 @@ async function withGitHubCredentialLease<T>(
   sandbox: SandboxSession,
   { sessionId, abortSignal }: Pick<GitHubShellDependencies, "sessionId" | "abortSignal">,
   credential: LeaseCredential,
-  run: () => PromiseLike<T>,
+  run: (signal: AbortSignal) => PromiseLike<T>,
   broker: GitHubConfig["broker"],
 ): Promise<T> {
   const previous = leaseQueues.get(sessionId) ?? Promise.resolve();
@@ -351,7 +351,7 @@ async function withGitHubCredentialLease<T>(
     return await withSandboxLeaseLock(
       sandbox,
       credential.placeholder,
-      () => leaseCredential(sandbox, credential, run, broker),
+      (signal) => leaseCredential(sandbox, credential, () => run(signal), broker),
       {
         // Clears the policy only while this command still holds the lock, so a command whose
         // lock was broken as stale can't clear its successor's credential.
