@@ -183,7 +183,6 @@ function stubCoreQuickJSEntrypoint() {
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
-  chunkGroup: "workflow",
   plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
   entries: [
     { entry: "dist/serialization.js", outputPath: "serialization" },

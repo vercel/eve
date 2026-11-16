@@ -53,7 +53,7 @@ import {
   type InitCommandOptions,
 } from "./init-agent-workspace.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
-import { tryInitializeGit } from "./init-git.js";
+import { startGitInitialization, type GitInitialization } from "./init-git.js";
 import { InitTargetError } from "./init-telemetry.js";
 import {
   reportExistingProjectChanges,
@@ -77,7 +77,7 @@ export interface InitCommandDependencies {
   scaffoldBaseProject: typeof scaffoldBaseProject;
   hasInteractiveTerminal: typeof hasInteractiveTerminal;
   spawnPackageManager: typeof spawnPackageManager;
-  tryInitializeGit: typeof tryInitializeGit;
+  startGitInitialization: typeof startGitInitialization;
   validateModelSlug: typeof validateModelSlug;
 }
 
@@ -92,7 +92,7 @@ const defaultDependencies: InitCommandDependencies = {
   scaffoldBaseProject,
   hasInteractiveTerminal,
   spawnPackageManager,
-  tryInitializeGit,
+  startGitInitialization,
   validateModelSlug,
 };
 
@@ -391,25 +391,35 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger, progressOptions);
     }
 
+    // Git setup doesn't read node_modules, so only the initial commit waits for the install.
+    let git: GitInitialization | undefined;
+    if (project.kind === "created") {
+      initLog.debug("starting git repository setup");
+      git = dependencies.startGitInitialization(project.projectPath);
+    }
     activeInitStep = "install_dependencies";
     trackStep?.(activeInitStep);
     progress.update("Installing dependencies", project.packageManager);
     initLog.debug(`installing dependencies with ${project.packageManager}`);
     const installStartedAt = dependencies.now();
     const diagnostics = createInstallDiagnostics();
-    const installResult = await dependencies.runPackageManagerInstall(
-      project.packageManager,
-      project.projectPath,
-      {
+    const installResult = await dependencies
+      .runPackageManagerInstall(project.packageManager, project.projectPath, {
         autoApprove: true,
         bypassMinimumReleaseAge: true,
         progressDetails: false,
+        skipPeerDependencyResolution:
+          project.kind === "created" &&
+          !project.workspaceMember &&
+          project.workspaceRootMutations.length === 0,
         onOutput: (line) => {
           diagnostics.append(line.text);
           if (debug) initLog.debug(line.text);
         },
-      },
-    );
+      })
+      // A failed project is removed next, so Git must not still be running in it. On success
+      // this costs nothing: the commit waits for the same setup.
+      .finally(() => git?.settled());
     const installElapsedMs = dependencies.now() - installStartedAt;
     if (!packageManagerInstallSucceeded(installResult)) {
       installFailureCode = packageManagerInstallFailureCode(installResult);
@@ -455,11 +465,13 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
+      // Every created project starts Git setup above; this only narrows the type.
+      if (git === undefined) throw new Error("Git setup was not started for the new project.");
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
       progress.update("Initializing Git");
-      initLog.debug("initializing git repository");
-      const gitResult = await dependencies.tryInitializeGit(project.projectPath);
+      initLog.debug("committing git repository");
+      const gitResult = await git.commit();
       return {
         ...project,
         elapsedMs: dependencies.now() - startedAt,

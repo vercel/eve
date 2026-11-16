@@ -1,10 +1,10 @@
-import type { Experimental_SandboxProcess } from "ai";
+import type { SandboxProcess } from "eve/sandbox";
 import { describe, expect, it, vi } from "vitest";
 
 import { MIRROR_PREFETCH_COMMAND, prefetchMirror } from "./prefetch";
 
 /* A started process whose completion the caller would have to wait for. */
-const startedProcess = (): Experimental_SandboxProcess => ({
+const startedProcess = (): SandboxProcess => ({
   kill: vi.fn(() => Promise.resolve()),
   stderr: new ReadableStream(),
   stdout: new ReadableStream(),

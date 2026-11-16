@@ -231,19 +231,20 @@ describe("runPnpmInstall", () => {
 });
 
 describe("runPackageManagerInstall", () => {
-  test("automatically approves npm prompts and bypasses inherited release-age policies", async () => {
+  test("automatically approves npm prompts, bypasses release-age policies, and skips peer resolution", async () => {
     expect(
       packageManagerInstallSucceeded(
         await runPackageManagerInstall("npm", "/tmp/app", {
           autoApprove: true,
           bypassMinimumReleaseAge: true,
+          skipPeerDependencyResolution: true,
         }),
       ),
     ).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledWith(
       "npm",
-      ["install", "--yes", "--min-release-age=0"],
+      ["install", "--yes", "--min-release-age=0", "--legacy-peer-deps"],
       expect.objectContaining({ cwd: "/tmp/app" }),
     );
   });

@@ -1,5 +1,5 @@
 import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import type { SessionAuth } from "#context/keys.js";
@@ -28,8 +28,18 @@ const mocks = vi.hoisted(() => {
     admitted: [] as string[],
     /** Delivery steps that have not landed yet, oldest first. */
     pending: [] as PendingDelivery[],
-    createHook: () => {
-      const token = `reply-${String(tokens++)}`;
+    /**
+     * The step that names a remote reply hook. Every second name takes longer, as a step started
+     * later may end first: replies must still follow the order their messages were sent.
+     */
+    createRemoteReplyToken: vi.fn(async () => {
+      const index = tokens++;
+      if (index % 2 === 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      return `reply-${String(index)}`;
+    }),
+    /** A hook under the token it is given, or under the next one when the host leaves it unnamed. */
+    createHook: (options?: { readonly token?: string }) => {
+      const token = options?.token ?? `reply-${String(tokens++)}`;
       const queue: unknown[] = [];
       let wake: (() => void) | undefined;
       let disposed = false;
@@ -69,6 +79,7 @@ vi.mock("#execution/agent-sessions/requests.js", () => ({
   forwardAgentSessionRequest: vi.fn(async () => {}),
 }));
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  createRemoteReplyTokenStep: mocks.createRemoteReplyToken,
   cancelAgentSessionTurnStep: vi.fn(async () => {}),
   endAgentSessionsStep: vi.fn(async () => {}),
   stopLateAgentSessionStep: vi.fn(async () => {}),
@@ -102,12 +113,16 @@ function auth(principalId: string): SessionAuth {
   };
 }
 
+/** The remote agents the calls a test's run serves list, or `undefined` for calls without a list. */
+let remoteAgents: readonly string[] | undefined = [];
+
 function agentContext(callId: string): AgentSessionContext {
   return {
     agents: { reviewer: { description: "Review the plan." } },
     capabilities: { requestInput: true },
     bundle: { source: { kind: "development" } },
     dynamicSelections: {},
+    ...(remoteAgents !== undefined && { remoteAgents }),
     sandbox: { sessionId: "session" },
     trace: { originAudience: "unknown" },
     parent: {
@@ -199,30 +214,119 @@ async function landNewestFirst(): Promise<void> {
 beforeEach(() => {
   mocks.admitted.length = 0;
   mocks.pending.length = 0;
+  mocks.createRemoteReplyToken.mockClear();
   mocks.reset();
+  remoteAgents = [];
 });
 
-it("settles every message a turn read when concurrent deliveries could land out of order", async () => {
+describe.each([
+  { agent: "a local agent", remote: false },
+  { agent: "a remote agent", remote: true },
+])("messages to $agent", ({ remote }) => {
+  beforeEach(() => {
+    remoteAgents = remote ? ["reviewer"] : [];
+  });
+
+  it("settles every message a turn read when concurrent deliveries could land out of order", async () => {
+    const { sessions } = serveRun();
+    const reviewer = sessions.open("reviewer");
+    const seed = await reviewer.send("seed");
+    const sends = Promise.all([reviewer.send("left"), reviewer.send("right")]);
+    await landNewestFirst();
+    const [left, right] = await sends;
+
+    endChildTurn("reviewed all three");
+    const settled = await Promise.race([
+      Promise.all([seed.result(), left.result(), right.result()]),
+      new Promise<"unsettled">((resolve) => setTimeout(() => resolve("unsettled"), 500)),
+    ]);
+    expect(settled).not.toBe("unsettled");
+    expect(settled).toMatchObject([
+      { reply: "reviewed all three", status: "completed" },
+      { reply: "reviewed all three", status: "completed" },
+      { reply: "reviewed all three", status: "completed" },
+    ]);
+    // The child admitted the messages in the order they were sent.
+    expect(mocks.admitted).toEqual(["reply-0", "reply-1", "reply-2"]);
+    // Only a remote agent's reply hook takes a step to name.
+    expect(mocks.createRemoteReplyToken).toHaveBeenCalledTimes(remote ? 3 : 0);
+  });
+
+  it("delivers and records each message for the call and auth it was sent with", async () => {
+    const { sessions, sent, serve } = serveRun();
+    const reviewer = sessions.open("reviewer");
+    await reviewer.send("Alice opens the review.");
+    const alices = reviewer.send("Alice adds a checklist.");
+    // The task now serves Bob's call before Alice's queued message is delivered.
+    serve("call-2", "bob");
+    const bobs = reviewer.send("Bob adds a rollout note.");
+    await landNewestFirst();
+    await Promise.all([alices, bobs]);
+
+    const { sendAgentSessionMessageStep } = await import("#execution/agent-sessions/steps.js");
+    expect(
+      vi
+        .mocked(sendAgentSessionMessageStep)
+        .mock.calls.map(([input]) => [input.message, input.auth.current?.principalId]),
+    ).toEqual([
+      ["Alice adds a checklist.", "alice"],
+      ["Bob adds a rollout note.", "bob"],
+    ]);
+    expect(
+      sent.flatMap((message) =>
+        message.kind === "agent-sent" ? [[message.deliveryId, message.from.callId]] : [],
+      ),
+    ).toEqual([
+      ["delivery-reply-0", "call-1"],
+      ["delivery-reply-1", "call-1"],
+      ["delivery-reply-2", "call-2"],
+    ]);
+  });
+});
+
+it("keeps naming reply hooks by the step once a call found the agent remote", async () => {
+  remoteAgents = ["reviewer"];
+  const { sessions, serve } = serveRun();
+  const reviewer = sessions.open("reviewer");
+  await reviewer.send("Alice opens the review.");
+  // A dynamic remote agent is the calling turn's selection. Bob's turn didn't make it, but the
+  // session Alice's call opened is still the remote one.
+  remoteAgents = [];
+  serve("call-2", "bob");
+  const bobs = reviewer.send("Bob adds a rollout note.");
+  await landNewestFirst();
+  await bobs;
+
+  expect(mocks.createRemoteReplyToken).toHaveBeenCalledTimes(2);
+});
+
+it("names the reply hook by the step for a call that doesn't say which agents are remote", async () => {
+  // A session on an eve from before the list dispatched this call to a task this build runs.
+  remoteAgents = undefined;
+  const { sessions } = serveRun();
+
+  await sessions.open("reviewer").send("Alice opens the review.");
+
+  expect(mocks.createRemoteReplyToken).toHaveBeenCalledTimes(1);
+});
+
+it("fails only the message whose remote reply hook could not be named", async () => {
+  remoteAgents = ["reviewer"];
   const { sessions } = serveRun();
   const reviewer = sessions.open("reviewer");
   const seed = await reviewer.send("seed");
-  const sends = Promise.all([reviewer.send("left"), reviewer.send("right")]);
-  await landNewestFirst();
-  const [left, right] = await sends;
+  mocks.createRemoteReplyToken.mockRejectedValueOnce(new Error("The naming step failed."));
+  const left = reviewer.send("left");
+  const right = reviewer.send("right");
 
-  endChildTurn("reviewed all three");
-  const settled = await Promise.race([
-    Promise.all([seed.result(), left.result(), right.result()]),
-    new Promise<"unsettled">((resolve) => setTimeout(() => resolve("unsettled"), 500)),
+  await expect(left).rejects.toThrow("The naming step failed.");
+  await landNewestFirst();
+  const sent = await right;
+  endChildTurn("reviewed both");
+  await expect(Promise.all([seed.result(), sent.result()])).resolves.toMatchObject([
+    { reply: "reviewed both", status: "completed" },
+    { reply: "reviewed both", status: "completed" },
   ]);
-  expect(settled).not.toBe("unsettled");
-  expect(settled).toMatchObject([
-    { reply: "reviewed all three", status: "completed" },
-    { reply: "reviewed all three", status: "completed" },
-    { reply: "reviewed all three", status: "completed" },
-  ]);
-  // The child admitted the messages in the order they were sent.
-  expect(mocks.admitted).toEqual(["reply-0", "reply-1", "reply-2"]);
 });
 
 it("leaves a message the child admitted after the turn ended pending for the next turn", async () => {
@@ -241,35 +345,4 @@ it("leaves a message the child admitted after the turn ended pending for the nex
   expect(settled).toBe(false);
   endChildTurn("second turn");
   await expect(pending.result()).resolves.toMatchObject({ reply: "second turn" });
-});
-
-it("delivers and records each message for the call and auth it was sent with", async () => {
-  const { sessions, sent, serve } = serveRun();
-  const reviewer = sessions.open("reviewer");
-  await reviewer.send("Alice opens the review.");
-  const alices = reviewer.send("Alice adds a checklist.");
-  // The task now serves Bob's call before Alice's queued message is delivered.
-  serve("call-2", "bob");
-  const bobs = reviewer.send("Bob adds a rollout note.");
-  await landNewestFirst();
-  await Promise.all([alices, bobs]);
-
-  const { sendAgentSessionMessageStep } = await import("#execution/agent-sessions/steps.js");
-  expect(
-    vi
-      .mocked(sendAgentSessionMessageStep)
-      .mock.calls.map(([input]) => [input.message, input.auth.current?.principalId]),
-  ).toEqual([
-    ["Alice adds a checklist.", "alice"],
-    ["Bob adds a rollout note.", "bob"],
-  ]);
-  expect(
-    sent.flatMap((message) =>
-      message.kind === "agent-sent" ? [[message.deliveryId, message.from.callId]] : [],
-    ),
-  ).toEqual([
-    ["delivery-reply-0", "call-1"],
-    ["delivery-reply-1", "call-1"],
-    ["delivery-reply-2", "call-2"],
-  ]);
 });

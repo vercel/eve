@@ -1,4 +1,7 @@
-import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
+import { isSignInCallbackToken } from "#execution/callback-hook-tokens.js";
+import { deliverToHostedHook } from "#execution/hosts.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 /**
  * Framework-shipped callback route used by in-turn interactive
  * connection authorization.
@@ -49,22 +52,31 @@ export async function handleConnectionCallbackRequest(
     );
   }
 
+  // The route is unauthenticated, so it delivers only to a hook that takes sign-in callbacks:
+  // never to one authored code named, or one eve opened for anything else.
+  if (!isSignInCallbackToken(token)) return callbackNotPending();
+
   const callback = await projectAuthorizationCallback(request);
 
+  const payload: AuthorizationCallbackPayload = {
+    kind: "authorization-callback",
+    payloads: [{ authorizationCallback: { attemptId, callback, connectionName: name } }],
+  };
   try {
-    const authorizationCallback = { attemptId, callback, connectionName: name };
-    await resumeAuthorizationCallback(token, {
-      kind: "authorization-callback" as const,
-      payloads: [{ authorizationCallback }],
-    });
+    // A session a host runs in this process holds its hook there, not in Workflow.
+    if (!(await deliverToHostedHook(token, payload))) await resumeRunnableHook(token, payload);
   } catch {
-    return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
+    return callbackNotPending();
   }
 
   // RFC 6749 section 4.1.2.1: the IdP reports denied consent and other failures with `error`.
   return buildAuthorizationCompletePage(
     callback.params.error === undefined ? "authorized" : "failed",
   );
+}
+
+function callbackNotPending(): Response {
+  return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
 }
 
 /**

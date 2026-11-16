@@ -5,9 +5,9 @@
  * @packageDocumentation
  */
 
-import type { Experimental_SandboxSession } from "ai";
 import type { HookEvent } from "eve/hooks";
 import { defineHook } from "eve/hooks";
+import type { SandboxSession } from "eve/sandbox";
 
 import { defineState } from "../../state";
 import { prefetchMirror } from "./prefetch";
@@ -36,7 +36,7 @@ const requestsMirrorSql = (event: HookEvent<"call.requested">): boolean =>
 
 /** The part of the hook context the warm-up needs. */
 interface WarmContext {
-  getSandbox: () => PromiseLike<Pick<Experimental_SandboxSession, "spawn">>;
+  getSandbox: () => PromiseLike<Pick<SandboxSession, "spawn">>;
 }
 
 /**

@@ -38,7 +38,10 @@ const message = {
 
 beforeEach(() => {
   vi.stubEnv("SLACK_CONNECTOR", "slack/test");
-  credentials.mockReturnValue({ botToken: "test-token" });
+  credentials.mockReturnValue({
+    botToken: "test-token",
+    vercelConnect: { connector: "slack/test" },
+  });
   post.mockResolvedValue({ ok: true });
 });
 

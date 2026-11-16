@@ -359,5 +359,8 @@ beforeEach(installTestState);
 
 beforeEach(() => {
   vi.spyOn(slackApi, "request").mockImplementation(postMock);
-  vi.spyOn(slackApi, "credentials").mockReturnValue({ botToken: "test-token" });
+  vi.spyOn(slackApi, "credentials").mockReturnValue({
+    botToken: "test-token",
+    vercelConnect: { connector: "slack/test" },
+  });
 });

@@ -227,7 +227,7 @@
       },
       "meta": {
         "eve": {
-          "requires": ">=1.0.0-rc.5"
+          "requires": ">=1.0.0"
         }
       },
       "files": [
@@ -452,7 +452,7 @@
       },
       "meta": {
         "eve": {
-          "requires": ">=1.0.0-rc.10 <2.0.0"
+          "requires": ">=1.0.0 <2.0.0"
         }
       },
       "files": [
@@ -2893,7 +2893,7 @@
           },
           "docs": "/docs/channels/telegram",
           "implementation": "native",
-          "requires": ">=1.0.0-rc.2"
+          "requires": ">=1.0.0"
         }
       }
     },
@@ -2926,7 +2926,7 @@
       "title": "Recall.ai",
       "description": "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
       "dependencies": [
-        "@eve/recall@^0.1.0-rc.0"
+        "@eve/recall@^0.1.0"
       ],
       "envVars": {
         "RECALL_API_KEY": "",
@@ -2943,7 +2943,7 @@
         "eve": {
           "docs": "/docs/channels/recall",
           "implementation": "native",
-          "requires": ">=1.0.0-rc.15"
+          "requires": ">=1.0.0"
         }
       }
     },

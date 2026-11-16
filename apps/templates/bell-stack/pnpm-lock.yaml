@@ -27,13 +27,13 @@ importers:
         version: 4.3.0
       '@stripe/link-integrations-eve':
         specifier: 0.5.0
-        version: 0.5.0(eve@1.0.0-rc.17(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)))
+        version: 0.5.0(eve@1.0.0(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)))
       ai:
         specifier: 7.0.172
         version: 7.0.172(zod@4.6.7)
       eve:
-        specifier: 1.0.0-rc.17
-        version: 1.0.0-rc.17(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))
+        specifier: ^1.0.0
+        version: 1.0.0(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))
       next:
         specifier: 16.4.3
         version: 16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -613,13 +613,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@napi-rs/wasm-runtime@1.2.5':
-    resolution: {integrity: sha512-HshSvXzmBxNzqejd3k/KemgQ3hdREUYFRRrgxOZ+gPljDIsO2SDZrVZMd4Z/HsxudQbE62OVyVFE8z9BCurfjA==}
-    engines: {node: ^20.19.0 || ^22.13.0 || >=23.5.0}
-    peerDependencies:
-      '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
-      '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
   '@napi-rs/wasm-runtime@1.2.6':
     resolution: {integrity: sha512-mRyDmEw9/fCDXCGfL1sbgIw/GUK0PVxRW4YwgPN61F3LQ+fSyoBFarJVzgGyhF6kRzEQZ0FejDqm4WLXSeqQmw==}
@@ -1628,8 +1621,8 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
-  eve@1.0.0-rc.17:
-    resolution: {integrity: sha512-B06xjUcbDZ3c09GHorde8Ww1P7IijKXzwVaKv1ntk2PxTr804glczF6uQ6MLgHVyO/cNU6nN8lv5J6MHDCfcIg==}
+  eve@1.0.0:
+    resolution: {integrity: sha512-N4v0GYcJ/ClAtffQo8viUjBVR+F/FhaAQ/tfke4rC2mSyJueUczrT5GvQF3tiX+6Uq612O2n0IJUGpAwHr7OvQ==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -3322,7 +3315,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@napi-rs/wasm-runtime@1.2.5(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
+  '@napi-rs/wasm-runtime@1.2.6(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
       '@emnapi/core': 1.10.0
       '@emnapi/runtime': 1.10.0
@@ -3501,10 +3494,10 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@stripe/link-integrations-eve@0.5.0(eve@1.0.0-rc.17(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)))':
+  '@stripe/link-integrations-eve@0.5.0(eve@1.0.0(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)))':
     dependencies:
       '@stripe/link-sdk': 3.1.0
-      eve: 1.0.0-rc.17(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))
+      eve: 1.0.0(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))
       zod: 4.6.7
 
   '@stripe/link-sdk@3.1.0':
@@ -3709,7 +3702,7 @@ snapshots:
     dependencies:
       '@emnapi/core': 1.10.0
       '@emnapi/runtime': 1.10.0
-      '@napi-rs/wasm-runtime': 1.2.5(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
+      '@napi-rs/wasm-runtime': 1.2.6(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
     optional: true
 
   '@unrs/resolver-binding-win32-arm64-msvc@1.12.2':
@@ -4387,7 +4380,7 @@ snapshots:
 
   esutils@2.0.3: {}
 
-  eve@1.0.0-rc.17(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)):
+  eve@1.0.0(@opentelemetry/api@1.9.1)(ai@7.0.172(zod@4.6.7))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)):
     dependencies:
       ai: 7.0.172(zod@4.6.7)
       nitro: 3.0.261103-rc

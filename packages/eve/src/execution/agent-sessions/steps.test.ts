@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getStepMetadata: () => ({ stepId: "step_0" }),
-  getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
+  getWorkflowMetadata: () => ({ url: "https://parent.example", workflowRunId: "run_0" }),
 }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/workflow-runtime.js")>()),
@@ -161,6 +161,14 @@ describe("openAgentSessionStep", () => {
       }),
     ).rejects.toBeInstanceOf(NonRetryableError);
     expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("opens no remote agent under a reply token that names a local agent's reply hook", async () => {
+    mocks.targetKind = "remote";
+
+    const opening = open();
+    await expect(opening).rejects.toBeInstanceOf(NonRetryableError);
+    await expect(opening).rejects.toThrow("can't take a remote agent's reply");
   });
 
   it("rejects an invalid model selection without retrying", async () => {

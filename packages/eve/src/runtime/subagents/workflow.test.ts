@@ -75,6 +75,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 const agentContext = {
   agents: {},
   capabilities: { requestInput: false },
+  remoteAgents: [] as readonly string[],
   parent: {
     callId: "call-1",
     rootSessionId: "session",

@@ -112,6 +112,7 @@ function addressOpenedFor(
 async function send(
   context: AgentSessionContext,
   address: AgentSessionAddress,
+  replyTo = "eve:reply:v1:reply-1",
 ): Promise<{ readonly authorization?: string }> {
   await sendAgentSessionMessageStep({
     address,
@@ -119,7 +120,7 @@ async function send(
     context,
     key: "finance",
     message: "Close the books.",
-    replyTo: "reply-1",
+    replyTo,
   } as never);
   const call = continueRemoteAgentSession.mock.calls.at(-1);
   if (call === undefined) throw new Error("The step sent nothing to the child.");
@@ -155,6 +156,13 @@ describe("a dynamic remote agent's child", () => {
     await expect(
       send(contextSelecting("acme"), addressOpenedFor("acme", "https://old.finance.example")),
     ).rejects.toThrow("now resolves to another destination");
+    expect(continueRemoteAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("sends a remote agent no reply token that names a local agent's reply hook", async () => {
+    await expect(
+      send(contextSelecting("acme"), addressOpenedFor("acme"), "reply-1"),
+    ).rejects.toThrow("can't take a remote agent's reply");
     expect(continueRemoteAgentSession).not.toHaveBeenCalled();
   });
 

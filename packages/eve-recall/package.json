@@ -1,6 +1,6 @@
 {
   "name": "@eve/recall",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0",
   "description": "Recall.ai meeting channel for eve agents: Zoom, Google Meet, and Microsoft Teams meetings through Recall.ai bots",
   "keywords": [
     "eve",
@@ -50,7 +50,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "eve": ">=1.0.0-rc.3"
+    "eve": ">=1.0.0"
   },
   "engines": {
     "node": ">=24"

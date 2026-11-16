@@ -29,7 +29,7 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import type { GitInitResult } from "./init-git.js";
+import type { GitInitialization, GitInitResult } from "./init-git.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -80,7 +80,9 @@ function dependencies(
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
-  tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
+  startGitInitialization: ReturnType<
+    typeof vi.fn<InitCommandDependencies["startGitInitialization"]>
+  >;
   validateModelSlug: ReturnType<typeof vi.fn<InitCommandDependencies["validateModelSlug"]>>;
 } {
   return {
@@ -114,7 +116,10 @@ function dependencies(
     runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
     hasInteractiveTerminal: () => true,
     spawnPackageManager: vi.fn(async () => packageProcessResult()),
-    tryInitializeGit: vi.fn(async () => gitResult),
+    startGitInitialization: vi.fn(() => ({
+      commit: async () => gitResult,
+      settled: async () => undefined,
+    })),
     validateModelSlug: vi.fn(async () => null),
   };
 }
@@ -437,7 +442,7 @@ describe("runInitCommand", () => {
         beforePackageJson,
       );
       expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-      expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+      expect(deps.startGitInitialization).not.toHaveBeenCalled();
       expect(deps.spawnPackageManager).not.toHaveBeenCalled();
       const transcript = stripAnsi(output.messages.join("\n"));
       expect(transcript.match(/☰eve v/gu)).toHaveLength(1);
@@ -529,7 +534,7 @@ describe("runInitCommand", () => {
       projectPath,
       expect.any(Object),
     );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
       "--reporter=silent",
       "exec",
@@ -707,7 +712,7 @@ describe("runInitCommand", () => {
         projectPath,
         expect.any(Object),
       );
-      expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+      expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
       expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
         "--reporter=silent",
         "exec",
@@ -896,7 +901,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
   });
 
@@ -987,10 +992,11 @@ describe("runInitCommand", () => {
   });
 
   it.each([
+    ["npm", "package-lock.json", ["exec", "--", "eve", "dev", "--onboard"]],
     ["yarn", "yarn.lock", ["eve", "dev", "--onboard"]],
     ["bun", "bun.lock", ["x", "eve", "dev", "--onboard"]],
   ] as const)(
-    "scaffolds a fresh %s workspace member without nested root-only package fields",
+    "scaffolds a fresh %s workspace member without nested root-only package fields or skipping peer resolution",
     async (kind, lockfile, devArguments) => {
       const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
       const appsDirectory = join(workspaceRoot, "apps");
@@ -1036,16 +1042,17 @@ describe("runInitCommand", () => {
       expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
+      // A workspace's tree isn't eve's alone, so npm still resolves its peers.
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
-        expect.anything(),
+        expect.objectContaining({ skipPeerDependencyResolution: false }),
       );
       expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
     },
   );
 
-  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration", async () => {
+  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration or peer resolution", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-web-npm-"));
     const output = logger();
     const deps = dependencies();
@@ -1059,7 +1066,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "npm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: true }),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("npm", projectPath, [
       "exec",
@@ -1137,7 +1144,7 @@ describe("runInitCommand", () => {
 
     await expect(pathExists(join(parentDirectory, "web-agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
@@ -1149,7 +1156,7 @@ describe("runInitCommand", () => {
     await expect(runInitCommand(output, parentDirectory, name, {}, deps)).rejects.toThrow();
 
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
@@ -1179,10 +1186,10 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectRoot,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
     // An existing project's history is its own; only fresh scaffolds get git init.
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
       "--reporter=silent",
       "exec",
@@ -1289,7 +1296,7 @@ describe("runInitCommand", () => {
     await runInitCommand(output, projectRoot, ".", {}, deps);
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectRoot);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(projectRoot);
   });
 
   it("creates missing parent directories for a nested fresh target", async () => {
@@ -1403,7 +1410,7 @@ describe("runInitCommand", () => {
       projectRoot,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectRoot, ["x", "eve", "dev"]);
   });
 
@@ -1442,7 +1449,7 @@ describe("runInitCommand", () => {
       projectRoot,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
   });
 
   it("reports agent file conflicts before writing anything", async () => {
@@ -1492,7 +1499,7 @@ describe("runInitCommand", () => {
       parentDirectory,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(parentDirectory);
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
     expect(output.messages.join("\n")).toContain("Created an eve agent in");
   });
@@ -1514,7 +1521,7 @@ describe("runInitCommand", () => {
       projectPath,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
     // The dev server is handed off as text, never spawned — the dev TUI would
     // wedge the launching agent. The handoff's content is the unit test's job.
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
@@ -1541,24 +1548,84 @@ describe("runInitCommand", () => {
     expect(output.messages.join("\n")).toContain("npm exec -- eve dev");
   });
 
-  it("stops before Git and dev when dependency installation fails, replaying its output", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-fail-"));
+  it("commits the Git repository only after dependencies install", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-git-order-"));
     const output = logger();
     const deps = dependencies();
+    const events: string[] = [];
+    deps.startGitInitialization.mockImplementation(() => {
+      events.push("git:start");
+      return {
+        commit: async () => {
+          events.push("git:commit");
+          return { kind: "initialized" };
+        },
+        settled: async () => undefined,
+      };
+    });
+    deps.runPackageManagerInstall.mockImplementation(async () => {
+      events.push("install");
+      return packageInstallResult();
+    });
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(events).toEqual(["git:start", "install", "git:commit"]);
+  });
+
+  it("stops before the Git commit and dev when dependency installation fails, replaying its output", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-fail-"));
+    const projectPath = join(parentDirectory, "my-agent");
+    const output = logger();
+    const deps = dependencies();
+    // Git is still setting up when the install fails. Windows can't remove a directory that a
+    // running process uses as its working directory, so cleanup has to wait for Git.
+    const gitSetup = Promise.withResolvers<void>();
+    const commit = vi.fn<GitInitialization["commit"]>(async () => ({ kind: "initialized" }));
+    const settled = vi.fn<GitInitialization["settled"]>(() => gitSetup.promise);
+    deps.startGitInitialization.mockImplementation(() => ({ commit, settled }));
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
       options?.onOutput?.({ stream: "stdout", text: "Packages: +12" });
       options?.onOutput?.({ stream: "stderr", text: "ERR_PNPM_FETCH_404 not found" });
       return packageInstallResult(1);
     });
 
+    const run = runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+    const failed = expect(run).rejects.toThrow("Failed to install dependencies");
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(pathExists(projectPath)).resolves.toBe(true);
+    gitSetup.resolve();
+    await failed;
+
+    await expect(pathExists(projectPath)).resolves.toBe(false);
+    expect(commit).not.toHaveBeenCalled();
+    expect(settled).toHaveBeenCalledOnce();
+    expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("waits for Git setup before rethrowing an unexpected install error", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-throw-"));
+    const output = logger();
+    const deps = dependencies();
+    const events: string[] = [];
+    deps.startGitInitialization.mockImplementation(() => ({
+      commit: async () => ({ kind: "initialized" }),
+      settled: async () => {
+        events.push("git:settled");
+      },
+    }));
+    deps.runPackageManagerInstall.mockImplementation(async () => {
+      events.push("install");
+      throw new Error("install crashed");
+    });
+
     await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
-      "Failed to install dependencies",
+      "install crashed",
     );
 
-    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
-    expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(events).toEqual(["install", "git:settled"]);
   });
 
   it("hands off to pnpm dev without extra configuration", async () => {
@@ -1710,7 +1777,8 @@ describe("runInitCommand", () => {
         debugLines.some((line) => line.startsWith("[eve:init] installing dependencies with")),
       ).toBe(true);
       expect(debugLines).toContain("[eve:init] Progress: resolved 62, reused 62, done");
-      expect(debugLines).toContain("[eve:init] initializing git repository");
+      expect(debugLines).toContain("[eve:init] starting git repository setup");
+      expect(debugLines).toContain("[eve:init] committing git repository");
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),

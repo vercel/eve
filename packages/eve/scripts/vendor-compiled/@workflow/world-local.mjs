@@ -60,7 +60,6 @@ const workflowWorldLocalVersionPlugin = {
 export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
-  chunkGroup: "workflow",
   fingerprintFiles: ["dist/fs.js"],
   declaration: await loadDeclaration("workflow-world-local.d.ts"),
   plugins: [workflowWorldLocalVersionPlugin, workflowWorldLocalStreamReadPlugin],
