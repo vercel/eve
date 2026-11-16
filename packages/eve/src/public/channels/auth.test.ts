@@ -1416,6 +1416,23 @@ describe("verifyVercelOidc", () => {
 });
 
 describe("verifyOidc", () => {
+  it("authenticates a token from its issuer through discovery", async () => {
+    const issuer = await installMockedVercelIssuer("same-issuer");
+    try {
+      const result = await verifyOidc(
+        await issuer.signToken({}, { audience: "agent-framework-bench" }),
+        { audiences: ["agent-framework-bench"], issuer: issuer.issuer },
+      );
+      expect(result.ok).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${issuer.issuer}/.well-known/openid-configuration`,
+        expect.anything(),
+      );
+    } finally {
+      issuer.restore();
+    }
+  });
+
   // A route that accepts GitHub Actions and Vercel tokens tries both; a token GitHub did not
   // issue must not wait on GitHub's discovery document before the next strategy gets it.
   it.each([
