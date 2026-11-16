@@ -233,9 +233,9 @@ describe("Slack reply streaming", () => {
     await write(LONG);
     await complete(LONG);
 
-    const [start_] = calls().filter(([operation]) => operation === "chat.startStream");
-    expect(start_?.[1]).not.toHaveProperty("thread_ts");
-    expect(start_?.[1]).toMatchObject({ recipient_user_id: "U01" });
+    const [started] = calls().filter(([operation]) => operation === "chat.startStream");
+    expect(started?.[1]).not.toHaveProperty("thread_ts");
+    expect(started?.[1]).toMatchObject({ recipient_user_id: "U01" });
   });
 
   it("is off by default", async () => {
