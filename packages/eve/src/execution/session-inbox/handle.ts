@@ -59,15 +59,21 @@ export function readInboxHandle(handle: string): InboxHook | undefined {
   }
 }
 
+/** A session inbox's owner as this process last resolved it, with the session it serves. */
+export interface RememberedInboxOwner {
+  readonly hook: InboxHook;
+  readonly sessionId: string;
+}
+
 /**
  * The owners this process resolved, by physical inbox token, so its next command there can skip
  * the lookup as a client's handle would. Process memory, so it needs no signing key and keeps the
  * trace carrier. Bounded; the oldest go first.
  */
-const rememberedOwners = new Map<string, InboxHook>();
+const rememberedOwners = new Map<string, RememberedInboxOwner>();
 const REMEMBERED_OWNERS_LIMIT = 10_000;
 
-export function rememberInboxOwner(hook: unknown): void {
+export function rememberInboxOwner(hook: unknown, sessionId: string): void {
   const parsed = parseInboxHook(hook);
   if (parsed?.resumeContext?.encryptionPublicKey === undefined) return;
   rememberedOwners.delete(parsed.token);
@@ -75,10 +81,10 @@ export function rememberInboxOwner(hook: unknown): void {
     const oldest = rememberedOwners.keys().next();
     if (oldest.done !== true) rememberedOwners.delete(oldest.value);
   }
-  rememberedOwners.set(parsed.token, parsed);
+  rememberedOwners.set(parsed.token, { hook: parsed, sessionId });
 }
 
-export function recallInboxOwner(token: string): InboxHook | undefined {
+export function recallInboxOwner(token: string): RememberedInboxOwner | undefined {
   return rememberedOwners.get(token);
 }
 

@@ -4,6 +4,7 @@ import {
   recallInboxOwner,
   rememberInboxOwner,
   type InboxHook,
+  type RememberedInboxOwner,
 } from "#execution/session-inbox/handle.js";
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
@@ -66,13 +67,14 @@ export async function resumeSessionInbox(
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
   const physicalToken = sessionInboxHookToken(token);
+  const remembered = recallInboxOwner(physicalToken);
   let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
   try {
     hook = await resumeCurrentOwner(
       physicalToken,
       command,
       typeof address === "string" ? undefined : address.inbox,
-      recallInboxOwner(physicalToken),
+      remembered?.hook,
     );
   } catch (error) {
     forgetInboxOwner(physicalToken);
@@ -97,9 +99,12 @@ export async function resumeSessionInbox(
     get sessionId() {
       return (identity ??= (async () => {
         try {
-          // Even a remembered owner's metadata is read: only that read shows a deleted deployment.
-          const sessionId = knownSessionId ?? requireSessionId(await hook.metadata);
-          rememberInboxOwner(hook);
+          const sessionId =
+            knownSessionId ??
+            (remembered !== undefined && remembered.hook.hookId === hook.hookId
+              ? await liveSessionId(remembered)
+              : requireSessionId(await hook.metadata));
+          rememberInboxOwner(hook, sessionId);
           return sessionId;
         } catch (cause) {
           forgetInboxOwner(physicalToken);
@@ -112,6 +117,18 @@ export async function resumeSessionInbox(
       })());
     },
   };
+}
+
+/**
+ * A remembered owner's session. Its resumed hook carries no metadata, so this repeats the run key
+ * read that hydrating metadata does: only that read shows the owner's deployment was deleted.
+ */
+async function liveSessionId({ hook, sessionId }: RememberedInboxOwner): Promise<string> {
+  const world = await getWorld();
+  await world.getEncryptionKeyForRun?.(hook.runId, {
+    deploymentId: hook.resumeContext?.deploymentId,
+  });
+  return sessionId;
 }
 
 /**

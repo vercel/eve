@@ -301,7 +301,10 @@ describe("remembering a continuation's owner", () => {
     getWorldMock.mockResolvedValue(guardedWorld);
     const token = sessionInboxHookToken("slack:remembered");
     const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
-    resumeHookMock.mockResolvedValue(routableHook("owner-1", token, "session-1"));
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      // Resuming a remembered descriptor returns a hook without metadata.
+      .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
     for (let attempt = 0; attempt < 2; attempt++) {
       await expect((await resumeSessionInbox("slack:remembered", send)).sessionId).resolves.toBe(
         "session-1",
@@ -313,20 +316,20 @@ describe("remembering a continuation's owner", () => {
   it("reports a remembered owner whose deployment was deleted as stranded", async () => {
     getWorldMock.mockResolvedValue({
       ...guardedWorld,
+      getEncryptionKeyForRun: vi.fn().mockRejectedValue(runKeyFailure("Deployment not found.")),
       runs: { get: vi.fn(async (runId: string) => ({ attributes: {}, runId })) },
     });
     const token = sessionInboxHookToken("slack:deleted");
-    resumeHookMock.mockResolvedValueOnce(routableHook("owner-1", token, "session-1"));
+    const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
     await expect((await resumeSessionInbox("slack:deleted", send)).sessionId).resolves.toBe(
       "session-1",
     );
-    resumeHookMock.mockResolvedValueOnce({
-      ...routableHook("owner-1", token, "session-1"),
-      metadata: Promise.reject(runKeyFailure("Deployment not found.")),
-    });
     const receipt = await resumeSessionInbox("slack:deleted", send);
     await expect(receipt.sessionId).rejects.toBeInstanceOf(StrandedSessionOwnerError);
-    expect(resumeHookMock.mock.calls[1]?.[0]).toMatchObject({ runId: "owner-1", token });
+    expect(resumeHookMock.mock.calls[1]?.[0]).toEqual(descriptor);
   });
 
   it("resolves the owner again after the remembered one refuses", async () => {
