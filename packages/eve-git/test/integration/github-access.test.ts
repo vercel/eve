@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
 
-import {
-  createInstallationCheckCache,
-  type GitHubAccess,
+import type {
+  GitHubAccess,
+  InstallationCheckCache,
+  InstallationChecksPassed,
 } from "../../extension/lib/github-policy.ts";
 import {
   executeGitHubShell,
@@ -393,6 +394,19 @@ test("concurrent App commands each read their own repository with their own toke
   assert.deepEqual(allowed.authorized, ["token-2"]);
   assert.deepEqual(refused.authorized, []);
 });
+
+function createInstallationCheckCache(now: () => number = Date.now): InstallationCheckCache {
+  let passed: InstallationChecksPassed = {};
+  return {
+    now,
+    state: {
+      get: () => passed,
+      update: (fn) => {
+        passed = fn(passed);
+      },
+    },
+  };
+}
 
 function runUser(
   access: GitHubAccess | undefined,

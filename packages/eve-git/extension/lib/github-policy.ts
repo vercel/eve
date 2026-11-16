@@ -124,21 +124,25 @@ function privateWritePermissions(configured: readonly string[] | undefined): rea
 }
 
 /** Installation checks that passed, by caller and access value, with when each stops being reused. */
-export interface InstallationCheckCache {
-  readonly now: () => number;
-  readonly passed: Map<string, number>;
+export type InstallationChecksPassed = Readonly<Record<string, number>>;
+
+/** Where passed checks are kept; the session's `defineState` handle in the shell. */
+export interface InstallationCheckState {
+  get(): InstallationChecksPassed;
+  update(fn: (current: InstallationChecksPassed) => InstallationChecksPassed): void;
 }
 
-export function createInstallationCheckCache(now: () => number = Date.now): InstallationCheckCache {
-  return { now, passed: new Map() };
+export interface InstallationCheckCache {
+  readonly now: () => number;
+  readonly state: InstallationCheckState;
 }
 
 /**
  * Refuses the command when the caller's App installation reaches a repository
  * the access setting rules out. A user token can't be narrowed when it is
  * minted, so the installation is the boundary. The check stops at the first
- * refused repository. A passed check is reused for 60 seconds; a refusal or a
- * failed lookup is never reused.
+ * refused repository. A passed check is kept in the session's state and reused
+ * for 60 seconds; a refusal or a failed lookup is never reused.
  */
 export async function assertUserInstallation(options: {
   readonly access: GitHubAccess;
@@ -149,7 +153,7 @@ export async function assertUserInstallation(options: {
   const { access, cache, token } = options;
   const key = `${access}:${createHash("sha256").update(token).digest("hex")}`;
   const now = cache.now();
-  const reusableUntil = cache.passed.get(key);
+  const reusableUntil = cache.state.get()[key];
   if (reusableUntil !== undefined && now < reusableUntil) return;
   const installations: z.infer<typeof installationsSchema>["installations"] = [];
   for await (const batch of githubPages(
@@ -196,8 +200,10 @@ export async function assertUserInstallation(options: {
       }
     }
   }
-  for (const [passedKey, until] of cache.passed) if (until <= now) cache.passed.delete(passedKey);
-  cache.passed.set(key, now + INSTALLATION_CHECK_TTL_MS);
+  cache.state.update((current) => ({
+    ...Object.fromEntries(Object.entries(current).filter(([, until]) => until > now)),
+    [key]: now + INSTALLATION_CHECK_TTL_MS,
+  }));
 }
 
 function readOnly(configured: readonly string[]): readonly string[] {

@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import { getToken } from "@vercel/connect";
-import type { SessionAuthContext } from "eve/context";
+import { defineState, type SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import type { ToolAuthProvider, ToolContext } from "eve/tools";
 
@@ -16,8 +16,8 @@ import { connectUserAuthorization } from "./connect-user-auth.ts";
 import {
   appTokenPermissions,
   assertUserInstallation,
-  createInstallationCheckCache,
   type InstallationCheckCache,
+  type InstallationChecksPassed,
   GitHubPolicyLookupError,
   repositoryRequiredMessage,
   type GitHubAccess,
@@ -28,7 +28,10 @@ import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
 export type { GitHubCoAuthor } from "./attribution.ts";
 
-const installationChecks = createInstallationCheckCache();
+const installationChecks = defineState<InstallationChecksPassed>(
+  "eve-git.installation-checks",
+  () => ({}),
+);
 
 export type { GitHubAccess } from "./github-policy.ts";
 
@@ -154,7 +157,7 @@ interface GitHubShellDependencies {
   /** Resolves and re-authorizes user-scoped providers; the tool's `ctx.getToken` and `ctx.requireAuth`. */
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
-  /** Passed user installation checks; defaults to one cache shared by every command in the process. */
+  /** Passed user installation checks; defaults to the session's state, shared by every command of the session. */
   readonly installationChecks?: InstallationCheckCache;
   readonly getSandbox: () => Promise<SandboxSession>;
   /**
@@ -252,7 +255,7 @@ export async function executeGitHubShell(
       try {
         await assertUserInstallation({
           access,
-          cache: dependencies.installationChecks ?? installationChecks,
+          cache: dependencies.installationChecks ?? { now: Date.now, state: installationChecks },
           fetch: fetchGitHub,
           token,
         });
