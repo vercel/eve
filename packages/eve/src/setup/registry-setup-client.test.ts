@@ -101,6 +101,36 @@ describe("createRegistrySetupClient", () => {
     });
   });
 
+  it("sends a search action as JSON and resolves the picked action with its own value", async () => {
+    const processStub = new SetupProcessStub();
+    const setup = client(processStub);
+
+    const selected = setup.prompter.select({
+      message: "Project to link",
+      search: true,
+      options: [{ value: "prj_1", label: "web" }],
+      searchAction: {
+        label: (query) => `Search for '${query}'`,
+        value: (query) => `search:${query}`,
+        load: async () => [],
+      },
+    });
+
+    const sent = processStub.sent.at(-1);
+    expect(sent).toEqual(JSON.parse(JSON.stringify(sent)));
+    expect(sent).toMatchObject({
+      type: "prompt",
+      prompt: {
+        kind: "select",
+        options: { searchAction: { labelTemplate: "Search for '\0query\0'" } },
+      },
+    });
+    const id = (sent as { id: number }).id;
+    processStub.emit("message", { type: "prompt-result", id, value: "\0search-action:acme" });
+
+    await expect(selected).resolves.toBe("search:acme");
+  });
+
   it("reports only the first terminal outcome", () => {
     const processStub = new SetupProcessStub();
     const setup = client(processStub);

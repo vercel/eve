@@ -1,4 +1,5 @@
 import { InteractionRequired, InvalidAnswerError } from "./ask.js";
+import { searchActionQuery } from "./cli/select-state.js";
 import { setupPrerequisiteOf } from "./integrations/shared/prerequisite.js";
 import type {
   EditableSelectOptions,
@@ -12,6 +13,7 @@ import { setupQuestionToWire } from "./setup-question-wire.js";
 import { WizardCancelledError } from "./step.js";
 import {
   REGISTRY_SETUP_PROTOCOL_VERSION,
+  REGISTRY_SETUP_SEARCH_QUERY,
   type RegistrySetupChildMessage,
   type RegistrySetupCompletion,
   type RegistrySetupOutcome,
@@ -143,10 +145,23 @@ export function createRegistrySetupClient(
 
   function select<T extends PrompterValue>(options: SingleSelectOptions<T>): Promise<T>;
   function select<T extends PrompterValue>(options: MultiSelectOptions<T>): Promise<T[]>;
-  function select<T extends PrompterValue>(
+  async function select<T extends PrompterValue>(
     options: SingleSelectOptions<T> | MultiSelectOptions<T>,
   ): Promise<T | T[]> {
-    return prompt<T | T[]>({ kind: "select", options });
+    if (options.multiple === true) return await prompt<T[]>({ kind: "select", options });
+    // IPC serializes JSON, which drops the search action's functions. The label
+    // travels as a template and the parent answers with the encoded query.
+    const { searchAction, ...rest } = options;
+    if (searchAction === undefined) return await prompt<T>({ kind: "select", options: rest });
+    const value = await prompt<T | string>({
+      kind: "select",
+      options: {
+        ...rest,
+        searchAction: { labelTemplate: searchAction.label(REGISTRY_SETUP_SEARCH_QUERY) },
+      },
+    });
+    const query = typeof value === "string" ? searchActionQuery(value) : undefined;
+    return query === undefined ? (value as T) : searchAction.value(query);
   }
 
   const prompter: Prompter = {
