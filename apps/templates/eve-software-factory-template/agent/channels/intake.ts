@@ -19,7 +19,7 @@ import {
   ticketIdFor,
   ticketSchema,
 } from "../lib/intake/ticket.js";
-import { autonomousForTicket } from "../lib/trust.js";
+import { autonomousForTicket, ticketBranch } from "../lib/trust.js";
 
 const INTAKE_TASK = [
   "This work item came through the intake API. The run is unattended: never wait for approval or input.",
@@ -94,10 +94,14 @@ export default defineChannel({
       } catch {
         return json({ code: "intake_not_claimed", ok: false, ticketId }, 409);
       }
+      const auth = autonomousForTicket(address);
       try {
         await from(address).send(renderTicket(ticket), {
-          auth: autonomousForTicket(),
-          context: [INTAKE_TASK],
+          auth,
+          context: [
+            INTAKE_TASK,
+            `Your assigned branch is ${ticketBranch(auth)}. Use only this branch, including reviewer iterations before PR creation. Once any PR exists for this head, stop: revisions require trusted GitHub or Linear intake.`,
+          ],
           idempotencyKey: `intake:${ticketId}`,
           title: ticket.title,
         });

@@ -18,9 +18,10 @@
     "fix": "ultracite fix",
     "start": "eve start",
     "test": "node --import tsx --test --experimental-test-module-mocks agent/lib/*.test.ts",
+    "test:git-transfer": "node --import tsx --test --experimental-test-module-mocks agent/lib/git-transfer.scenario.test.ts",
     "test:smoke": "pnpm test",
     "typecheck": "tsc",
-    "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run discovery"
+    "validate": "pnpm run check && pnpm run typecheck && pnpm run test:smoke && pnpm run discovery"
   },
   "dependencies": {
     "@github-tools/eve-extension": "^0.13.0",

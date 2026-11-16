@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mock, test } from "node:test";
 
 process.env.FACTORY_REPO = "acme/widgets";
@@ -74,9 +75,17 @@ test("HTTP intake authenticates before work, rejects oversized/unknown input, an
       assert.equal((await post(request(ticket, token), ctx)).status, 401);
     })
   );
-  assert.equal(
-    (await post(request({ ...ticket, trusted: true }), ctx)).status,
-    400
+  await Promise.all(
+    [
+      { trusted: true },
+      { ticketBranch: "factory/ready" },
+      { auth: { ticketBranch: "factory/ready" } },
+    ].map(async (stamp) => {
+      assert.equal(
+        (await post(request({ ...ticket, ...stamp }), ctx)).status,
+        400
+      );
+    })
   );
   assert.equal(
     (
@@ -117,6 +126,14 @@ test("HTTP intake authenticates before work, rejects oversized/unknown input, an
   assert.equal(sent.length, 1);
   const { auth } = sent[0].options;
   assert.equal(auth.principalType, "service");
+  assert.equal(auth.attributes.factoryRepository, "acme/widgets");
+  const expectedBranch = `factory/ticket-${createHash("sha256").update(sent[0].address).digest("hex")}`;
+  assert.equal(auth.attributes.ticketBranch, expectedBranch);
+  assert.ok(
+    sent[0].options.context.some((text: string) =>
+      text.includes(expectedBranch)
+    )
+  );
   const approvalCtx = {
     session: { auth: { current: auth } },
     toolInput: { issueNumber: 7, state: "closed" },

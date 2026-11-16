@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import type { SessionAuthContext } from "eve/context";
-import { FACTORY_REPO } from "./constants.js";
+import { FACTORY_BRANCH_PREFIX, FACTORY_REPO } from "./constants.js";
+
+const TICKET_BRANCH_DIGEST = /^[a-f0-9]{64}$/;
 
 /**
  * Constructed principal for unattended factory runs (an issue labeled
@@ -84,13 +87,48 @@ export function stampAutonomous(
 }
 
 /** HTTP intake has no GitHub thread and never inherits caller trust. */
-export function autonomousForTicket(): SessionAuthContext {
+export function autonomousForTicket(address: string): SessionAuthContext {
+  const digest = createHash("sha256").update(address).digest("hex");
   return {
-    attributes: { factoryRepository: FACTORY_REPO.toLowerCase() },
+    attributes: {
+      factoryRepository: FACTORY_REPO.toLowerCase(),
+      ticketBranch: `${FACTORY_BRANCH_PREFIX}ticket-${digest}`,
+    },
     authenticator: "intake-token",
     principalId: AUTONOMOUS_PRINCIPAL,
     principalType: "service",
   };
+}
+
+/** Exact server-assigned branch authority; ticket sessions without it fail closed. */
+export function ticketBranch(auth: SessionAuthContext | null): string {
+  const branch = auth?.attributes.ticketBranch;
+  if (
+    !(isTicketIntake(auth) && isAutonomous(auth)) ||
+    auth?.principalType !== "service" ||
+    auth.attributes.factoryRepository !== FACTORY_REPO.toLowerCase() ||
+    typeof branch !== "string" ||
+    !branch.startsWith(`${FACTORY_BRANCH_PREFIX}ticket-`) ||
+    !TICKET_BRANCH_DIGEST.test(
+      branch.slice(`${FACTORY_BRANCH_PREFIX}ticket-`.length)
+    )
+  ) {
+    throw new Error("HTTP ticket push authority is missing or invalid.");
+  }
+  return branch;
+}
+
+/** Check before opening a station and again at the credential broker boundary. */
+export function assertPushAuthority(
+  branch: string,
+  auth: SessionAuthContext | null
+): void {
+  if (auth === undefined) {
+    throw new Error("Push authentication context is required.");
+  }
+  if (isTicketIntake(auth) && branch !== ticketBranch(auth)) {
+    throw new Error("HTTP tickets may push only their server-assigned branch.");
+  }
 }
 
 /**

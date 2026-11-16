@@ -1,3 +1,4 @@
+// biome-ignore-all lint/performance/noAwaitInLoops: real Git and shared broker state require sequential assertions
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
@@ -79,7 +80,10 @@ mock.module("@vercel/sandbox", {
 });
 const pusher = await import("../subagents/implementer/tools/push_branch.js");
 const pushTool = pusher.default as any;
-const { fetchRepository } = await import("./github/git-transfer.js");
+const transfer = await import("./github/git-transfer.js");
+const { fetchRepository, pushBranch } = transfer;
+const { autonomousForTicket, ticketBranch, stampTrusted, stampAutonomous } =
+  await import("./trust.js");
 mock.method(globalThis, "fetch", async (url: string) =>
   Response.json(
     url.includes("/branches/")
@@ -163,7 +167,7 @@ test("push entry point transfers only the validated feature ref despite hostile 
   );
   const result = await pushTool.execute(
     { branch: "factory/fix" },
-    { getSandbox: async () => station }
+    { getSandbox: async () => station, session: { auth: { current: null } } }
   );
   assert.equal(result.success, true);
   assert.equal(result.sha, head);
@@ -187,14 +191,195 @@ test("push entry point transfers only the validated feature ref despite hostile 
   assert.equal(stopped, 2);
 });
 
+test("HTTP ticket pushes are confined to their stamped branch and freeze at PR delivery", async (t) => {
+  const auth = autonomousForTicket("ticket:alice:work-1");
+  const owned = ticketBranch(auth);
+  const other = ticketBranch(autonomousForTicket("ticket:bob:work-2"));
+  let pulls: () => Response = () => Response.json([]);
+  let lookups = 0;
+  mock.method(globalThis, "fetch", (url: string) => {
+    lookups += 1;
+    if (url.includes("/pulls?")) {
+      const query = new URL(url).searchParams;
+      assert.equal(query.get("head"), `acme:${owned}`);
+      assert.equal(query.get("state"), "all");
+      return pulls();
+    }
+    return Response.json(
+      url.includes("/branches/")
+        ? { protected: false }
+        : { default_branch: "main" }
+    );
+  });
+  const context = (current: unknown) => ({
+    getSandbox: async () => station,
+    session: { auth: { current } },
+  });
+  const remoteHead = async (branch: string) =>
+    (await git("--git-dir", remotePath, "rev-parse", branch)).stdout.trim();
+  const commit = async (message: string) => {
+    await git(
+      "-C",
+      stationPath,
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-m",
+      message
+    );
+    return (await git("-C", stationPath, "rev-parse", "HEAD")).stdout.trim();
+  };
+  // Both forbidden targets exist and permit a fast-forward: the old
+  // prefix-only broker would change these remote refs.
+  for (const branch of ["factory/ready", other]) {
+    await git("-C", stationPath, "branch", branch, "main");
+    await git(
+      "-C",
+      stationPath,
+      "-c",
+      "core.hooksPath=/dev/null",
+      "push",
+      remotePath,
+      branch
+    );
+    await git("-C", stationPath, "branch", "-f", branch, "HEAD");
+    const before = await remoteHead(branch);
+    const transfers = stopped;
+    const requests = lookups;
+    await assert.rejects(
+      pushTool.execute(
+        { branch },
+        {
+          ...context(auth),
+          getSandbox: () =>
+            assert.fail("unauthorized branches must not open a station"),
+        }
+      ),
+      {
+        message: "HTTP tickets may push only their server-assigned branch.",
+      }
+    );
+    assert.equal(await remoteHead(branch), before);
+    assert.equal(stopped, transfers);
+    assert.equal(lookups, requests);
+  }
+  await git("-C", stationPath, "checkout", "-b", owned);
+  for (const invalid of [
+    { ...auth, attributes: { factoryRepository: "acme/widgets" } },
+    {
+      ...auth,
+      attributes: { ...auth.attributes, ticketBranch: "factory/fix" },
+    },
+    {
+      ...auth,
+      attributes: { ...auth.attributes, factoryRepository: "acme/other" },
+    },
+    { ...auth, principalId: "github:123" },
+  ]) {
+    await assert.rejects(
+      pushTool.execute({ branch: owned }, context(invalid)),
+      { message: "HTTP ticket push authority is missing or invalid." }
+    );
+  }
+  await assert.rejects(
+    pushTool.execute({ branch: owned }, context(undefined)),
+    { message: "Push authentication context is required." }
+  );
+  await assert.rejects(
+    pushBranch(station as any, owned, { ...auth, attributes: {} }),
+    { message: "HTTP ticket push authority is missing or invalid." }
+  );
+  const first = await pushTool.execute({ branch: owned }, context(auth));
+  assert.equal(first.success, true);
+  assert.equal(await remoteHead(owned), first.sha);
+  const revision = await commit("Address reviewer findings before delivery");
+  assert.equal(
+    (await pushTool.execute({ branch: owned }, context(auth))).sha,
+    revision
+  );
+  assert.equal(await remoteHead(owned), revision);
+  await commit("Alice requests a revision after delivery");
+  for (const [name, response] of [
+    ["ready PR", () => Response.json([{ draft: false, state: "open" }])],
+    ["draft PR", () => Response.json([{ draft: true, state: "open" }])],
+    ["closed PR", () => Response.json([{ draft: false, state: "closed" }])],
+    ["lookup failure", () => new Response("unavailable", { status: 503 })],
+    ["malformed data", () => Response.json({ message: "unexpected" })],
+    ["invalid JSON", () => new Response("not JSON")],
+    [
+      "pagination",
+      () =>
+        Response.json([], {
+          headers: { link: '<https://api.github.com/next>; rel="next"' },
+        }),
+    ],
+  ] as const) {
+    await t.test(name, async () => {
+      pulls = response;
+      const transfers = stopped;
+      const inertStation = {
+        ...station,
+        readFile: () => assert.fail("denied push must not read a bundle"),
+        run: () => assert.fail("denied push must not export station objects"),
+      };
+      await assert.rejects(
+        pushTool.execute(
+          { branch: owned },
+          { ...context(auth), getSandbox: async () => inertStation }
+        ),
+        (error: Error) => {
+          assert.notEqual(
+            error.name,
+            "AssertionError",
+            "broker must reject before touching station objects"
+          );
+          return true;
+        }
+      );
+      assert.equal(await remoteHead(owned), revision);
+      assert.equal(stopped, transfers);
+    });
+  }
+  // Trusted human/Linear and vetted GitHub label sessions retain revision
+  // authority even after delivery; only bearer tickets carry the freeze.
+  for (const current of [
+    stampTrusted({
+      ...auth,
+      attributes: { repository: "acme/widgets" },
+      authenticator: "github-webhook",
+      principalId: "github:123",
+    }),
+    stampTrusted({
+      ...auth,
+      attributes: {},
+      authenticator: "linear",
+      principalId: "linear:alice",
+    }),
+    stampAutonomous(
+      {
+        ...auth,
+        attributes: { repository: "acme/widgets" },
+        authenticator: "github-webhook",
+      },
+      7
+    ),
+  ]) {
+    const result = await pushTool.execute({ branch: owned }, context(current));
+    assert.equal(result.success, true);
+    assert.equal(await remoteHead(owned), result.sha);
+  }
+});
+
 test("push refuses configured default and protected branches even when they have the factory prefix", async () => {
+  const transfers = stopped;
   mock.method(globalThis, "fetch", async () =>
     Response.json({ default_branch: "factory/default" })
   );
   await assert.rejects(
     pushTool.execute(
       { branch: "factory/default" },
-      { getSandbox: async () => station }
+      { getSandbox: async () => station, session: { auth: { current: null } } }
     ),
     DEFAULT_BRANCH_ERROR
   );
@@ -208,9 +393,9 @@ test("push refuses configured default and protected branches even when they have
   await assert.rejects(
     pushTool.execute(
       { branch: "factory/protected" },
-      { getSandbox: async () => station }
+      { getSandbox: async () => station, session: { auth: { current: null } } }
     ),
     { message: "Protected branches cannot be pushed by the factory." }
   );
-  assert.equal(stopped, 2);
+  assert.equal(stopped, transfers);
 });

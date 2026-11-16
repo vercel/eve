@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { Sandbox } from "@vercel/sandbox";
+import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import { FACTORY_BRANCH_PREFIX, FACTORY_REPO } from "../constants.js";
+import { assertPushAuthority, isTicketIntake } from "../trust.js";
 import { githubCredentials } from "./credentials.js";
 import {
   brokerPolicy,
@@ -130,7 +132,11 @@ export async function fetchRepository(
   return String(head.stdout).trim();
 }
 
-async function assertPushTarget(branch: string): Promise<void> {
+async function assertPushTarget(
+  branch: string,
+  auth: SessionAuthContext | null
+): Promise<void> {
+  assertPushAuthority(branch, auth);
   const refusal = validateBranch(branch);
   if (refusal) {
     throw new Error(refusal);
@@ -148,6 +154,23 @@ async function assertPushTarget(branch: string): Promise<void> {
       redirect: "error",
       signal: AbortSignal.timeout(15_000),
     });
+  if (isTicketIntake(auth)) {
+    // Any historical PR freezes delivery. Refuse ambiguous or paginated
+    // responses rather than treating a failed lookup as permission to push.
+    const [owner] = FACTORY_REPO.split("/");
+    const pulls = await request(
+      `/pulls?state=all&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`
+    );
+    if (!pulls.ok || pulls.headers.has("link")) {
+      throw new Error("Could not verify ticket branch pull requests.");
+    }
+    const data: unknown = await pulls.json();
+    if (!Array.isArray(data) || data.length !== 0) {
+      throw new Error(
+        "HTTP ticket branches cannot be pushed once a pull request exists."
+      );
+    }
+  }
   const repository = await request("");
   if (!repository.ok) {
     throw new Error(
@@ -171,9 +194,10 @@ async function assertPushTarget(branch: string): Promise<void> {
 /** Push exactly one validated ref from a fresh bare repository, without checkout. */
 export async function pushBranch(
   station: SandboxSession,
-  branch: string
+  branch: string,
+  auth: SessionAuthContext | null
 ): Promise<string> {
-  await assertPushTarget(branch);
+  await assertPushTarget(branch, auth);
   const path = `/tmp/factory-${randomUUID()}.bundle`;
   const result = await station.run({
     command: `git -C ${REPO_DIR} bundle create '${path}' 'refs/heads/${branch}'`,
