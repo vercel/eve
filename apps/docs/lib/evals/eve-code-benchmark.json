@@ -16,90 +16,90 @@
       "harnesses": [
         {
           "harness": "eve-code",
-          "version": "a5086a4",
-          "resolved": 25,
+          "version": "f32038a",
+          "resolved": 26,
           "attempts": 36,
           "resolveRate": {
-            "estimate": 0.6944444444444444,
-            "low": 0.5,
+            "estimate": 0.7222222222222222,
+            "low": 0.5555555555555556,
             "high": 0.8611111111111112
           },
-          "costUsd": 18.642761299999993,
-          "costPerResolvedUsd": 0.7457104519999997,
-          "inputTokens": 34991059,
-          "outputTokens": 1018236,
-          "cachedShare": 0.9409121627327712,
-          "latencyP50Ms": 287728,
-          "latencyP90Ms": 456029.5,
-          "source": "a5086a426eea2a8ab571a72b4a90ea236f7fb881",
-          "runUrl": "https://github.com/vercel/eve/actions/runs/41954497974",
-          "measuredAt": "2026-11-05T02:41:13.342Z"
+          "costUsd": 17.794268199999994,
+          "costPerResolvedUsd": 0.6843949307692305,
+          "inputTokens": 31444182,
+          "outputTokens": 985742,
+          "cachedShare": 0.936485388616565,
+          "latencyP50Ms": 262290,
+          "latencyP90Ms": 387156.5,
+          "source": "f32038a7c1a0bcedc4c7c7b31e79f65f388a0bdd",
+          "runUrl": "https://github.com/vercel/eve/actions/runs/43815700113",
+          "measuredAt": "2026-11-16T06:34:41.876Z"
         },
         {
           "harness": "opencode",
           "version": "2.2.5",
-          "resolved": 29,
+          "resolved": 26,
           "attempts": 36,
           "resolveRate": {
-            "estimate": 0.8055555555555556,
-            "low": 0.6388888888888888,
-            "high": 0.9444444444444445
+            "estimate": 0.7222222222222222,
+            "low": 0.5555555555555556,
+            "high": 0.8611111111111112
           },
-          "costUsd": 21.443203215000004,
-          "costPerResolvedUsd": 0.7394208005172416,
-          "inputTokens": 43749608,
-          "outputTokens": 1156839,
-          "cachedShare": 0.9473121907743722,
-          "latencyP50Ms": 335062.5,
-          "latencyP90Ms": 465720.5,
-          "source": "a5086a426eea2a8ab571a72b4a90ea236f7fb881",
-          "runUrl": "https://github.com/vercel/eve/actions/runs/41954497974",
-          "measuredAt": "2026-11-05T02:42:03.815Z"
+          "costUsd": 22.152479605000003,
+          "costPerResolvedUsd": 0.852018446346154,
+          "inputTokens": 47085937,
+          "outputTokens": 1178717,
+          "cachedShare": 0.9496340701471014,
+          "latencyP50Ms": 325376,
+          "latencyP90Ms": 467478,
+          "source": "f32038a7c1a0bcedc4c7c7b31e79f65f388a0bdd",
+          "runUrl": "https://github.com/vercel/eve/actions/runs/43815700113",
+          "measuredAt": "2026-11-16T06:38:08.165Z"
         },
         {
           "harness": "pi",
           "version": "1.5.0",
-          "resolved": 24,
+          "resolved": 21,
           "attempts": 36,
           "resolveRate": {
-            "estimate": 0.6666666666666666,
-            "low": 0.4444444444444444,
-            "high": 0.8611111111111112
+            "estimate": 0.5833333333333334,
+            "low": 0.3333333333333333,
+            "high": 0.8055555555555557
           },
           "costUsd": null,
           "costPerResolvedUsd": null,
-          "inputTokens": 23473819,
-          "outputTokens": 887104,
-          "cachedShare": 0.9194773121493354,
-          "latencyP50Ms": 261128.5,
-          "latencyP90Ms": 405675.5,
-          "source": "a5086a426eea2a8ab571a72b4a90ea236f7fb881",
-          "runUrl": "https://github.com/vercel/eve/actions/runs/41954497974",
-          "measuredAt": "2026-11-05T02:43:12.731Z"
+          "inputTokens": 25356611,
+          "outputTokens": 889104,
+          "cachedShare": 0.9268430233046522,
+          "latencyP50Ms": 264890.5,
+          "latencyP90Ms": 411127.5,
+          "source": "f32038a7c1a0bcedc4c7c7b31e79f65f388a0bdd",
+          "runUrl": "https://github.com/vercel/eve/actions/runs/43815700113",
+          "measuredAt": "2026-11-16T06:36:14.526Z"
         },
         {
           "harness": "fx",
           "version": "0.0.16",
-          "resolved": 28,
+          "resolved": 30,
           "attempts": 36,
           "resolveRate": {
-            "estimate": 0.7777777777777778,
+            "estimate": 0.8333333333333334,
             "low": 0.6388888888888888,
-            "high": 0.9166666666666665
+            "high": 1
           },
           "costUsd": null,
           "costPerResolvedUsd": null,
-          "inputTokens": 50870273,
-          "outputTokens": 1175670,
-          "cachedShare": 0.9481481257236422,
-          "latencyP50Ms": 344930.5,
-          "latencyP90Ms": 499385,
-          "source": "a5086a426eea2a8ab571a72b4a90ea236f7fb881",
-          "runUrl": "https://github.com/vercel/eve/actions/runs/41954497974",
-          "measuredAt": "2026-11-05T02:44:29.381Z"
+          "inputTokens": 53401581,
+          "outputTokens": 1215692,
+          "cachedShare": 0.950392142884309,
+          "latencyP50Ms": 345315,
+          "latencyP90Ms": 545093.5,
+          "source": "f32038a7c1a0bcedc4c7c7b31e79f65f388a0bdd",
+          "runUrl": "https://github.com/vercel/eve/actions/runs/43815700113",
+          "measuredAt": "2026-11-16T06:44:55.550Z"
         }
       ],
-      "generatedAt": "2026-11-05T03:20:41.869Z"
+      "generatedAt": "2026-11-16T07:21:39.139Z"
     }
   }
 }
