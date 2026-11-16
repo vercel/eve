@@ -12,7 +12,7 @@ importers:
         specifier: 2.9.3
         version: 2.9.3(ai@7.0.173(zod@4.5.4))(eve@1.0.0)
       ai:
-        specifier: ^7.0.93
+        specifier: ^7.0.172
         version: 7.0.173(zod@4.5.4)
       eve:
         specifier: ^1.0.0

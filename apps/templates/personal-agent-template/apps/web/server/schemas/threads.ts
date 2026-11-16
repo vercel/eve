@@ -10,6 +10,7 @@ export const createThreadBodySchema = z.object({
 });
 
 const eveSessionSchema = z.object({
+  inbox: z.string().min(1).optional(),
   sessionId: z.string().trim().min(1),
   streamIndex: z.number().int().min(0),
 });
