@@ -66,14 +66,13 @@ export async function resumeSessionInbox(
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
   const physicalToken = sessionInboxHookToken(token);
-  const remembered = recallInboxOwner(physicalToken);
   let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
   try {
     hook = await resumeCurrentOwner(
       physicalToken,
       command,
       typeof address === "string" ? undefined : address.inbox,
-      remembered?.hook,
+      recallInboxOwner(physicalToken),
     );
   } catch (error) {
     forgetInboxOwner(physicalToken);
@@ -98,15 +97,12 @@ export async function resumeSessionInbox(
     get sessionId() {
       return (identity ??= (async () => {
         try {
-          // The owner this process remembered names its session without reading the metadata.
-          const sessionId =
-            knownSessionId ??
-            (remembered !== undefined && remembered.hook.hookId === hook.hookId
-              ? remembered.sessionId
-              : requireSessionId(await hook.metadata));
-          rememberInboxOwner(hook, sessionId);
+          // Even a remembered owner's metadata is read: only that read shows a deleted deployment.
+          const sessionId = knownSessionId ?? requireSessionId(await hook.metadata);
+          rememberInboxOwner(hook);
           return sessionId;
         } catch (cause) {
+          forgetInboxOwner(physicalToken);
           // A failed identity read must never cause a second delivery. An owner whose
           // deployment was deleted can never replay what it accepted, so replacing it
           // delivers the command once.
