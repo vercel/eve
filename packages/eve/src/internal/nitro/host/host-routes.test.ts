@@ -241,7 +241,8 @@ describe("createHostRouteTable", () => {
   it.each([
     { mode: "development", vercel: false, world: undefined, direct: false },
     { mode: "development", vercel: false, world: "@workflow/world-postgres", direct: true },
-    { mode: "production", vercel: false, world: undefined, direct: false },
+    { mode: "production", vercel: false, world: undefined, direct: true },
+    { mode: "production", vercel: true, world: undefined, direct: false },
     { mode: "production", vercel: false, world: "@workflow/world-postgres", direct: true },
     { mode: "production", vercel: true, world: "@workflow/world-postgres", direct: false },
   ] as const)(
