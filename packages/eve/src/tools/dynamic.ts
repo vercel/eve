@@ -5,9 +5,10 @@ import {
 import type { ToolDefinition } from "#tools/definition.js";
 
 /**
- * One tool a dynamic resolver returns, created with `defineTool()`. A single returned entry is
- * named after the file; entries of a returned map are named by their keys, prefixed with the
- * mount namespace for an extension's resolver.
+ * One tool a dynamic resolver returns, created with `defineTool()`, or a `defineWorkflowTool()`
+ * that a top-level `const` holds. A single returned entry is named after the file; entries of a
+ * returned map are named by their keys, prefixed with the mount namespace for an extension's
+ * resolver.
  */
 export type DynamicToolEntry = Pick<ToolDefinition, "description" | "inputSchema">;
 

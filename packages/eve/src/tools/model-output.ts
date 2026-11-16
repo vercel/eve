@@ -6,9 +6,12 @@
  * The `content` variant carries an ordered list of
  * {@link ToolModelOutputPart} entries, letting a tool hand the model
  * text alongside inline files (e.g. a screenshot as vision input).
+ * The `error-text` variant shows the model a failure, such as a command
+ * that exited non-zero, while the call itself still completes.
  */
 export type ToolModelOutput =
   | { readonly type: "text"; readonly value: string }
+  | { readonly type: "error-text"; readonly value: string }
   | { readonly type: "json"; readonly value: unknown }
   | { readonly type: "content"; readonly value: readonly ToolModelOutputPart[] };
 
@@ -56,6 +59,13 @@ export const toolOutput = {
   /** Builds a text output: the model sees `value` as the tool result. */
   text(value: string): ToolModelOutput {
     return { type: "text", value };
+  },
+  /**
+   * Builds a text output that providers mark as an error result. The call
+   * still completes, so hooks and channels receive its output unchanged.
+   */
+  errorText(value: string): ToolModelOutput {
+    return { type: "error-text", value };
   },
   /** Builds a JSON output; `value` must be JSON-serializable. */
   json(value: unknown): ToolModelOutput {

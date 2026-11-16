@@ -1,3 +1,4 @@
+// @linux-only: Slack answer/card protocol
 import { describe, expect, it } from "vitest";
 
 import { withChannelConversation } from "#internal/testing/channel-conformance/harness.js";

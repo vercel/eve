@@ -3,8 +3,9 @@ import { defineEval } from "eve/evals";
 const MESSAGES = ["limit alpha", "limit beta", "limit gamma", "limit delta"] as const;
 const CHILD_TOKEN = "SUBAGENT_TOKEN=echo-marker-9F2X";
 const LIMIT_ERROR = "WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED";
-// Models that honor the tool's advertised limit won't write the fourth call
-// themselves, so the eval hands them the program to run unchanged.
+// The program makes one more agent call than the tool allows. The marker in the
+// message selects a scripted parent that runs it unchanged, since a live model
+// that honors the advertised limit may refuse to.
 const PROGRAM = [
   "const results = [];",
   'results.push(await ctx.agent("echo-marker", { message: "limit alpha" }));',
@@ -47,13 +48,12 @@ function isFourElementLimitResult(output: unknown): boolean {
  * call throws a catchable `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED` error after replay.
  */
 export default defineEval({
-  tags: ["real-model"],
   description:
     "Sequential generated-program calls share one maxSubagents budget and resolve excess calls with WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED.",
   async test(t) {
     await t.send(
       [
-        "Alice is checking that the workflow tool enforces its agent budget. The program below makes one more agent call than the tool allows, and catching that call's error is what she is checking.",
+        "E2E_WORKFLOW_SUBAGENT_LIMIT Alice is checking that the workflow tool enforces its agent budget. The program below makes one more agent call than the tool allows, and catching that call's error is what she is checking.",
         "Use the workflow tool exactly once and pass this program as its js, unchanged:",
         "",
         "```js",

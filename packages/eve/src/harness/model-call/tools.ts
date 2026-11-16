@@ -30,6 +30,7 @@ export async function prepareModelTools(
     profile,
     tools: catalog.advertised,
   });
+  // The caller's contract, not the agent's: offered whichever tools the agent's definitions give.
   if (step.session.outputSchema !== undefined) {
     modelTools[REPLY_TOOL_NAME] = buildFinalOutputTool(step.session.outputSchema);
   }

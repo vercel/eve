@@ -107,6 +107,40 @@ export function normalizeProviderToolHistory(input: {
   };
 }
 
+/**
+ * Whether `messages` end on local tool results while a provider tool called beside them still
+ * runs. Anthropic defers that call until the local results arrive, and its result opens the next
+ * response, so a request must end on those results: anything after them ends the turn early.
+ */
+export function awaitsProviderToolResult(messages: readonly ModelMessage[]): boolean {
+  return awaitedProviderToolCallIds(messages).size > 0;
+}
+
+/** The provider calls whose results `messages` end waiting on, as {@link awaitsProviderToolResult}. */
+export function awaitedProviderToolCallIds(messages: readonly ModelMessage[]): ReadonlySet<string> {
+  let index = messages.length;
+  while (index > 0 && messages[index - 1]!.role === "tool") index -= 1;
+  const calls = messages[index - 1];
+  if (index === messages.length || calls?.role !== "assistant" || !Array.isArray(calls.content)) {
+    return new Set();
+  }
+  const answered = new Set<string>();
+  for (const part of [...calls.content, ...messages.slice(index).flatMap(toolContent)]) {
+    if (part.type === "tool-result") answered.add(part.toolCallId);
+  }
+  return new Set(
+    calls.content.flatMap((part) =>
+      part.type === "tool-call" && part.providerExecuted === true && !answered.has(part.toolCallId)
+        ? [part.toolCallId]
+        : [],
+    ),
+  );
+}
+
+function toolContent(message: ModelMessage): ToolModelMessage["content"] {
+  return message.role === "tool" ? message.content : [];
+}
+
 function findProviderToolCallsToNormalize(input: {
   readonly messages: readonly ModelMessage[];
   readonly providerExecutedOutcomeIds: ReadonlySet<string>;

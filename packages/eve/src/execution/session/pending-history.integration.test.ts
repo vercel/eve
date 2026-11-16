@@ -1,13 +1,13 @@
+// @linux-only: pending history
 import { describe, expect, it } from "vitest";
 import { defineChannel, POST } from "#public/definitions/channel.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 
 const channel = defineChannel({
   routes: [POST("/drop", async () => new Response("ok"))],
@@ -29,28 +29,25 @@ describe("pending session history", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: {
-            history: [
-              { role: "user", text: "Earlier question" },
-              { role: "assistant", text: "Earlier answer" },
-            ],
-          },
-          serializedContext: buildSerializedContext({
-            channelKind: "channel:drop",
-            continuationToken,
-          }),
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: {
+          history: [
+            { role: "user", text: "Earlier question" },
+            { role: "assistant", text: "Earlier answer" },
+          ],
         },
-      ]);
+        serializedContext: buildSerializedContext({
+          channelKind: "channel:drop",
+          continuationToken,
+        }),
+      });
       const stream = captureTurnEvents(run);
       try {
         const inbox = sessionInboxHookToken(continuationToken);
-        await waitForHook({ runId: run.runId }, { token: inbox });
         const send = (message: string) =>
-          resumeHook(inbox, {
+          resumeRoutedHook(inbox, {
             kind: "send",
             payload: { message },
             delivery: createChannelDeliveryMetadata({

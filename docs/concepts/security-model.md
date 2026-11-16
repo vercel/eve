@@ -18,7 +18,7 @@ The app runtime is the trusted side. Your tool implementations, model calls, con
 
 The sandbox is the isolated side. It has its own `/workspace` filesystem but no `process.env`, no secrets, and no path back into the app runtime. On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.
 
-Only shell commands execute in the sandbox. The built-in `bash`, `read_file`, and `write_file` tools, and opt-in tools such as `glob` and `grep`, run in the app runtime and _proxy_ into the sandbox.
+Only shell commands execute in the sandbox. The built-in `bash`, `read_file`, `write_file`, and `edit_file` tools, and opt-in tools such as `glob` and `grep`, run in the app runtime and _proxy_ into the sandbox.
 
 The model sees only tool definitions and results. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`, and the call never touches the sandbox.
 
@@ -65,7 +65,7 @@ Credential brokering gives the model _authenticated_ network access from inside 
 
 ## Channel verification
 
-A [channel](../channels/overview) authenticates its own inbound traffic. The built-in platform channels follow two rules, and so must any channel you write:
+A [channel](/docs/channels) authenticates its own inbound traffic. The built-in platform channels follow two rules, and so must any channel you write:
 
 - **Verify signatures in constant time.** Platform channels (Slack, GitHub,
   Telegram, Twilio) verify the platform's HMAC signature over the raw request

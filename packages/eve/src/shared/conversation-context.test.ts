@@ -188,6 +188,64 @@ describe("buildConversationContext", () => {
     expect(context).toMatchObject({ audience: "public", channel: { kind: "subagent" } });
   });
 
+  it("records the space the channel reports", () => {
+    const context = buildConversationContext(
+      run({
+        adapter: {
+          kind: "http",
+          state: { channel: "C1" },
+          instrumentation: {
+            space: ({ state }) => ({ id: `acme:${String(state?.channel)}`, type: "shared" }),
+          },
+        },
+      }),
+      "production",
+    );
+
+    expect(context.space).toEqual({ id: "acme:C1", type: "shared" });
+  });
+
+  it.each([
+    ["a malformed space", () => ({ id: "", type: "shared" })],
+    ["an unknown type", () => ({ id: "acme:C1", type: "room" })],
+    [
+      "a throwing projection",
+      () => {
+        throw new Error("boom");
+      },
+    ],
+    ["a Promise", () => Promise.resolve({ id: "acme:C1", type: "shared" })],
+  ])("reports no space for %s", (_label, space) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const context = buildConversationContext(
+      run({ adapter: { kind: "http", instrumentation: { space: space as never } } }),
+      "production",
+    );
+
+    expect(context).not.toHaveProperty("space");
+  });
+
+  it("inherits the parent space for local subagents", () => {
+    const context = buildConversationContext(
+      run({
+        adapter: {
+          kind: "subagent",
+          instrumentation: { space: () => ({ id: "other:C2", type: "shared" }) },
+        },
+        inheritedConversation: {
+          audience: "private",
+          channel: { kind: "channel:slack", name: "slack" },
+          environment: "production",
+          principalType: "user",
+          space: { id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" },
+        },
+      }),
+      "production",
+    );
+
+    expect(context.space).toEqual({ id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" });
+  });
+
   it("lets a trusted forwarded origin win over local classification", () => {
     const context = buildConversationContext(
       run({
@@ -220,6 +278,36 @@ describe("ConversationContextKey", () => {
     expect(
       ConversationContextKey.codec?.deserialize({ audience: "public" }, new Map() as never),
     ).toEqual(UNKNOWN_CONVERSATION_CONTEXT);
+  });
+
+  it("keeps a space's visibility and drops one it doesn't know", () => {
+    const context = {
+      ...buildConversationContext(run({ auth }), "production"),
+      space: { id: "slack:T1:C1", type: "shared", visibility: "private" },
+    } as const;
+
+    expect(ConversationContextKey.codec?.deserialize(context, new Map() as never)).toEqual(context);
+    expect(
+      ConversationContextKey.codec?.deserialize(
+        { ...context, space: { ...context.space, visibility: "secret" } },
+        new Map() as never,
+      ),
+    ).toMatchObject({ space: { id: "slack:T1:C1", type: "shared" } });
+  });
+
+  it("round-trips a space and drops a malformed one", () => {
+    const context = {
+      ...buildConversationContext(run({ auth }), "production"),
+      space: { id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" },
+    } as const;
+
+    expect(ConversationContextKey.codec?.deserialize(context, new Map() as never)).toEqual(context);
+    expect(
+      ConversationContextKey.codec?.deserialize(
+        { ...context, space: { id: "slack:T1:C1", type: "room" } },
+        new Map() as never,
+      ),
+    ).not.toHaveProperty("space");
   });
 
   it("keeps audience out of the durable channel adapter wire shape", () => {

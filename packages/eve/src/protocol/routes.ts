@@ -4,9 +4,6 @@
  */
 export const EVE_ROUTE_PREFIX = "/eve/v1";
 
-/** Reservation pattern for the production cron bridge's unguessable token. */
-export const EVE_PRODUCTION_CRON_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/cron/:token`;
-
 /**
  * Stable framework-owned health route.
  */
@@ -121,14 +118,14 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  * during in-turn interactive connection authorization.
  *
  * `:name` is the connection name, `:attemptId` identifies the exact challenge,
- * and `:token` is the workflow hook token minted by the workflow body so the
- * route handler can resume the suspended turn via `resumeHook(token, payload)`.
+ * and `:token` names the hook that takes the callback: the session's stable
+ * inbox, or a workflow tool run's own sign-in hook. The route resumes no
+ * other hook.
  *
  * The route is unauthenticated by design: an OAuth IdP follows this URL
  * via a 3xx redirect from the user's browser with no eve credentials
- * attached. The token is the unguessable capability that authorizes the
- * resume; anyone who has it can deliver the callback payload, which is
- * exactly what the IdP needs to do.
+ * attached. The token only addresses the hook. A callback is read when its
+ * `:attemptId`, drawn at random for each challenge, matches a pending one.
  */
 export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:attemptId/:token`;
 
@@ -136,7 +133,8 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  * Stable framework-owned route pattern for terminal session callbacks.
  *
  * The `:token` segment is an unguessable workflow hook capability. The route
- * is unauthenticated by design and resumes the matching parked runtime action.
+ * is unauthenticated by design and resumes the matching parked runtime action:
+ * only the hook a remote agent's reply arrives on, which the token's prefix names.
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
@@ -203,6 +201,34 @@ export function createEveConnectionCallbackRoutePath(
 }
 
 /**
+ * Reads the connection, attempt and token a connection callback path names, under any prefix the
+ * deployment serves eve at, or `undefined` for another path.
+ */
+export function parseEveConnectionCallbackRoutePath(
+  pathname: string,
+): { readonly name: string; readonly attemptId: string; readonly token: string } | undefined {
+  const segments = pathname.split("/");
+  const [connections, name, callback, attemptId, token] = segments.slice(-5);
+  if (connections !== "connections" || callback !== "callback") return undefined;
+  if (!name || !attemptId || !token) return undefined;
+  const decoded = [name, attemptId, token].map(decodedSegment);
+  const [decodedName, decodedAttemptId, decodedToken] = decoded;
+  if (decodedName === undefined || decodedAttemptId === undefined || decodedToken === undefined)
+    return undefined;
+  return { attemptId: decodedAttemptId, name: decodedName, token: decodedToken };
+}
+
+/** One path segment, decoded, or `undefined` when its percent-encoding is malformed. */
+function decodedSegment(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch (error) {
+    if (error instanceof URIError) return undefined;
+    throw error;
+  }
+}
+
+/**
  * Creates the stable framework-owned terminal callback route path.
  */
 export function createEveCallbackRoutePath(token: string): string {
@@ -213,3 +239,9 @@ export function createEveCallbackRoutePath(token: string): string {
 export function createEveSessionStubsRoutePath(sessionId: string): string {
   return `${createEveSessionRoutePath(sessionId)}/stubs`;
 }
+
+/** The route where an `eve dev` worker reaches the Workflow World its CLI parent serves. */
+export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = `${EVE_ROUTE_PREFIX}/dev/internal/workflow-world`;
+
+/** The parent's route for a World stream an `eve dev` worker reads. */
+export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;

@@ -169,15 +169,14 @@ jobs:
     # Each case can take up to its agent time limit (15 minutes by default, longer
     # for cases that set timeoutSeconds) plus sandbox setup.
     timeout-minutes: 240
+    environment:
+      name: eve-ci
+      deployment: false
     strategy:
       fail-fast: false
       matrix:
         model: ${{ fromJSON(needs.request.outputs.models) }}
     env:
-      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       MODEL: ${{ matrix.model }}
       CASES: ${{ needs.request.outputs.cases }}
       RUNS: ${{ needs.request.outputs.runs }}
@@ -210,6 +209,11 @@ jobs:
       # still fails the job and the next night retries.
       - name: Run benchmark
         working-directory: apps/benchmarks
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
           if ! pnpm benchmark "$CASES" --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
             --treatment "$TREATMENT"; then
@@ -278,6 +282,9 @@ jobs:
       github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: eve-benchmark-publish
+      deployment: false
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

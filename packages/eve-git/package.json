@@ -15,6 +15,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
     "@vercel/connect": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"

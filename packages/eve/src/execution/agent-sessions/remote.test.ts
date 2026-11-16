@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
@@ -16,8 +16,8 @@ import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js"
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credentials.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
-import { digestOf } from "#reactions/state.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
+import { digestOf } from "#definitions/state.js";
 
 // The parent's stream, which a restore folds its view from: here, nothing yet.
 vi.mock("#execution/session-event-stream.js", async (importOriginal) => ({
@@ -403,7 +403,7 @@ describe("startRemoteAgentSession", () => {
         remote: createRemoteAgent(),
         session: { continuationToken: "eve:parent-token" },
       }),
-    ).rejects.toBeInstanceOf(FatalError);
+    ).rejects.toBeInstanceOf(NonRetryableError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -588,7 +588,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow("may have completed");
     await expect(result).rejects.toThrow("Do not retry automatically");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -614,7 +614,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow("may have completed");
     await expect(result).rejects.toThrow("Remote session: remote-session");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -639,7 +639,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow(`protocol ${String(REMOTE_AGENT_PROTOCOL_VERSION + 1)}`);
     await expect(result).rejects.not.toThrow("may have completed");
   });
@@ -1102,19 +1102,58 @@ describe("respondToRemoteAgentSession", () => {
   });
 
   it("names a current-protocol child's answers, so a retried step repeats the same delivery", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { deliveryId: "receipt-1", ok: true, sessionId: "remote-session" },
+          { status: 202 },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
-    await respondToRemoteAgentSession({
-      auth: null,
-      headers: {},
-      idempotencyKey: "eve-answers:abc",
-      remote: { name: "research", sessionId: "remote-session", url: "https://remote.example.com" },
-      responses: [{ interactionId: "approval-1", optionId: "approve" }],
-    });
+    // The child relays how the answers settle under the receipt it admitted them as.
+    await expect(
+      respondToRemoteAgentSession({
+        auth: null,
+        headers: {},
+        idempotencyKey: "eve-answers:abc",
+        remote: {
+          name: "research",
+          sessionId: "remote-session",
+          url: "https://remote.example.com",
+        },
+        responses: [{ interactionId: "approval-1", optionId: "approve" }],
+      }),
+    ).resolves.toBe("receipt-1");
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       answers: [{ interactionId: "approval-1", optionId: "approve" }],
       idempotencyKey: "eve-answers:abc",
     });
+  });
+
+  it("keeps no receipt that is too long to store or that another session gave", async () => {
+    const receipts = [
+      { deliveryId: "r".repeat(257), ok: true, sessionId: "remote-session" },
+      { deliveryId: "receipt-1", ok: true, sessionId: "other-session" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(receipts.shift(), { status: 202 })),
+    );
+    const respond = () =>
+      respondToRemoteAgentSession({
+        auth: null,
+        headers: {},
+        remote: {
+          name: "research",
+          sessionId: "remote-session",
+          url: "https://remote.example.com",
+        },
+        responses: [{ interactionId: "approval-1", optionId: "approve" }],
+      });
+    // The answers still stand; this session just cannot credit them by receipt.
+    await expect(respond()).resolves.toBeUndefined();
+    await expect(respond()).resolves.toBeUndefined();
   });
 
   it("answers a protocol 2 child with the v26 responses it takes", async () => {

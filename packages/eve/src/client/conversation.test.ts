@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { call, interaction, turn } from "#protocol/session-projection/public-view.js";
+import {
+  call,
+  interaction,
+  reply,
+  showsActivity,
+  turn,
+} from "#protocol/session-projection/public-view.js";
 import { Conversation, conversationOf } from "#client/conversation.js";
 import type { EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -143,6 +149,32 @@ describe("the conversation", () => {
     ).toEqual(["Checking.", "call_0", "Done."]);
   });
 
+  it("shows a call and a reply the turn made without a model run in the turn's message", () => {
+    const own = { turnId };
+    const conversation = observe([
+      ...started.filter((event) => event.type !== "model.requested"),
+      { data: { ...requested.data, owner: own }, scope: own, type: "call.requested" },
+      { data: { callId: "call_0" }, scope: own, type: "call.started" },
+      { data: { callId: "call_0", outcome: "completed" }, scope: own, type: "call.settled" },
+      {
+        data: { kind: "text", partId: "p_0", phase: "reply", value: "Deployed." },
+        scope: own,
+        type: "content.completed",
+      },
+      {
+        data: { outcome: "completed", reply: ["p_0"], turnId },
+        scope: own,
+        type: "turn.settled",
+      },
+    ]);
+    expect(
+      assistantParts(conversation).map((part) =>
+        part.type === "text" ? part.text : part.type === "tool" ? part.callId : part.type,
+      ),
+    ).toEqual(["call_0", "Deployed."]);
+    expect(reply(conversation.state.view, turnId).map((part) => part.value)).toEqual(["Deployed."]);
+  });
+
   it("shows what still streams as previews, until its fact completes it", () => {
     const conversation = observe([
       ...started,
@@ -198,6 +230,25 @@ describe("the conversation", () => {
       output: { done: 2 },
       state: "completed",
     });
+  });
+
+  it("marks a call whose tool set label: false, so showsActivity leaves its part out", () => {
+    const hidden = observe([
+      ...started,
+      {
+        data: {
+          callId: "call_0",
+          capability: { hidden: true, kind: "tool", name: "react" },
+          input: { emoji: "eyes" },
+          owner: { runId },
+        },
+        scope,
+        type: "call.requested",
+      },
+    ]);
+    expect(tool(hidden)).toMatchObject({ hidden: true, name: "react" });
+    expect(showsActivity(tool(hidden)!)).toBe(false);
+    expect(tool(observe([...started, requested]))).not.toHaveProperty("hidden");
   });
 
   it("leaves out a call a retry replaced", () => {

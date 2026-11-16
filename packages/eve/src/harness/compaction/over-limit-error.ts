@@ -1,6 +1,7 @@
 /**
- * Compaction finished and the history is still over the limit. Retrying would
- * summarize the same history again, so the step reports it as a terminal failure.
+ * What the agent sends besides the history leaves it no room under the limit compaction measures
+ * against. Under the threshold, the step compacts against the model's window instead; under the
+ * window, only the turn fails, without a provider call.
  */
 export class CompactionOverLimitError extends Error {
   override readonly name = "CompactionOverLimitError";

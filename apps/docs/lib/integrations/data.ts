@@ -264,7 +264,7 @@ export default teamsChannel({
     logo: "telegram",
     docsHref: "/docs/channels/telegram",
     keywords: ["chat", "messaging", "bot"],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/telegram.ts\`:
+    install: `Add Telegram from eve's registry, then follow the guided Connect or portable credential setup:
 
 \`\`\`bash
 eve add channel/telegram
@@ -272,14 +272,15 @@ eve add channel/telegram
     quickStart: `Create \`agent/channels/telegram.ts\`:
 
 \`\`\`ts
-// agent/channels/telegram.ts
+import { connectTelegramCredentials } from "@vercel/connect/eve";
 import { telegramChannel } from "eve/channels/telegram";
 
 export default telegramChannel({
-  credentials: { botToken: () => process.env.TELEGRAM_BOT_TOKEN! },
+  botUsername: "my_bot",
+  credentials: connectTelegramCredentials("telegram/my-agent"),
 });
 \`\`\``,
-    configure: `Create a bot with [@BotFather](https://t.me/botfather), then register the webhook to point at eve's route (\`/eve/v1/telegram\`). Store the bot token in an environment variable. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
+    configure: `Create a bot by sending \`/newbot\` to [@BotFather](https://t.me/BotFather). Connect-backed setup stores the bot token in a Telegram connector, registers the bot's webhook, and routes verified updates to \`/eve/v1/telegram\`. With portable credentials, deploy first, then call \`setWebhook\` for that route with your secret token. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
   },
   twilio: {
     logo: "twilio",
@@ -438,9 +439,10 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 - **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
 - **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
 - **TanStack Start.** Add the \`eveTanStack()\` Vite plugin to \`vite.config.ts\` next to \`nitro()\`, then call \`useEveAgent()\` from \`eve/react\`. See the [TanStack Start guide](/docs/guides/frontend/tanstack).
+- **Other Vite apps.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`. See the [Vite guide](/docs/guides/frontend/vite).
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`baseUrl\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
-    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
+    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -1298,11 +1300,10 @@ The registry also writes \`agent/schedules/gmail-maintenance.ts\`, which calls \
 From your linked Vercel project:
 
 \`\`\`bash
-vercel crons list
-vercel crons run <maintenance-job-path>
+vercel schedules invoke eve.gmail-maintenance
 \`\`\`
 
-Replace \`<maintenance-job-path>\` with the Gmail maintenance route listed by the first command. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
+For an agent added with \`withEve\`, the schedule name includes the agent's name, such as \`eve.support.gmail-maintenance\`. Run \`vercel schedules list\` to find it. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
 
 **Existing labelled mail is not imported on first setup.** The first successful \`watch()\` initializes the cursor at registration time. Send a new message from another account and apply the handoff label after initialization. Later watch renewals preserve the existing cursor. See the [Gmail adapter setup guide](https://chat-sdk.dev/adapters/official/gmail#setup) for Google Cloud, Pub/Sub, OAuth scopes, and watch-renewal requirements.`,
   },
@@ -1959,14 +1960,190 @@ Automatic capture is unsupported in this reviewed configuration. The published a
 
 The reviewed configuration expects a running Memanto server at \`MEMANTO_BASE_URL\`. If you omit it during \`eve dev\`, the adapter starts a local server with the unpinned default \`memanto\` package through \`uvx\`. That local-server path is outside the reviewed compatibility boundary. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
   },
+  memco: {
+    logo: "memco",
+    docsHref: "https://docs.memco.ai/integrations/eve/",
+    keywords: [
+      "memory",
+      "shared memory",
+      "team memory",
+      "multi-tenant",
+      "semantic search",
+      "feedback",
+      "memco",
+    ],
+    install: `Give your eve agent shared memory across conversations. Agents can search existing knowledge, save findings, and add evidence or feedback to memories accessible to their memco identity.
+
+Install the memco provider:
+
+\`\`\`bash
+eve add memory/memco
+\`\`\`
+
+This installs the independently maintained \`@memco/eve\` package and writes a memory slot. You need Node.js 24 or later and a [memco](https://memco.ai) account. memco hosts the memory service.`,
+    quickStart: `### Shared identity
+
+Use one API token for a personal agent or one trusted team. Every caller shares the token's memco identity and accessible memory. For separate customers, use the multi-tenant setup below.
+
+Create a token in the [memco dashboard](https://spark.memco.ai/) and set it in the server environment, or an uncommitted \`.env.local\` for local development:
+
+\`\`\`bash title=".env.local"
+MEMCO_API_TOKEN=...
+\`\`\`
+
+The command writes this memory slot:
+
+\`\`\`ts title="agent/memory/memco.ts"
+import { memco } from "@memco/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "The team's shared memory: search it before working something out.",
+  provider: memco({ domain: "knowledge" }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+\`byPrincipal\` disables memory for anonymous and runtime callers and enables it in \`eve dev\`. It does not create private memco memory per caller when they share a token.
+
+### Multi-tenant
+
+Use an API client to share knowledge within each customer organization while keeping customers' networks separate. The client needs \`network-management\` and \`user-management\` scopes and the admin grant to act for users. See the [credential guide](https://docs.memco.ai/sdk/embedding-memory/#managing-networks-and-users).
+
+\`\`\`bash title=".env.local"
+MEMCO_CLIENT_ID=...
+MEMCO_CLIENT_SECRET=...
+\`\`\`
+
+Replace the slot with one scoped by \`byTenant\`:
+
+\`\`\`ts title="agent/memory/memco.ts"
+import { byTenant, memco } from "@memco/eve";
+import { defineMemory } from "eve/memory";
+
+export default defineMemory({
+  description: "Your organization's shared memory: search it before working something out.",
+  provider: memco({ domain: "knowledge" }),
+  namespace: "acme-support-agent",
+  scope: byTenant((principal) => {
+    const tenant = principal.attributes.tenantId;
+    return typeof tenant === "string" ? tenant : null;
+  }),
+});
+\`\`\`
+
+The provider provisions a network for each tenant and a separate identity for each user in that tenant. Users share their tenant's knowledge.
+
+Derive \`tenantId\` from verified sign-in, never from a prompt or model input. Tenant IDs must be unique within the app namespace, including across sign-in providers. Use separate sessions for mutually untrusted tenants.
+
+\`byTenant\` disables memory for non-user callers or an unresolved tenant, including eve's local development caller. Test through a channel with authenticated users. Pairing \`byTenant\` with a single API token fails rather than sharing one identity across tenants.
+
+To show readable names in memco, pass \`userName\` to \`memco()\`. Derive it from verified sign-in and consider what personal information the name sends to memco.`,
+    configure: `### How the agent uses memory
+
+\`agent/memory/memco.ts\` creates the \`memco\` slot. The provider supplies a domain briefing and reminders to search before working and save reusable findings. Retrieval happens when the agent calls a memory tool; the provider does not automatically search with each incoming message.
+
+The credential and service determine which tools the agent receives:
+
+| Tool | What it does |
+| --- | --- |
+| \`memco__search\` | Finds existing knowledge |
+| \`memco__get_memory\` | Reads a memory |
+| \`memco__create_memory\` | Saves a finding |
+| \`memco__enrich_memory\` | Adds evidence or missing detail to a memory |
+| \`memco__share_feedback\` | Reports relevance and correctness feedback |
+| \`memco__revert_memory\` | Undoes an eligible recent write by the user |
+
+Add instructions about what the agent should search for and save to \`agent/instructions.md\`.
+
+### Namespaces and deployment
+
+Set a stable, explicit \`namespace\` before launch, unique per app within your memco organization. In multi-tenant mode, the namespace, tenant ID, and domain identify the tenant network. Changing the namespace points tenants at new networks without deleting old ones.
+
+An explicit namespace has no environment suffix. Use a separate memco organization or a distinct namespace for multi-tenant Preview deployments. A namespace does not partition stored memory when callers share one API token; use separate identities to isolate production and previews in token mode.
+
+### Data and permissions
+
+The provider does not capture conversation transcripts. The agent writes findings through memory tools, and their inputs, including search queries, are sent to memco. By default, the model can call these tools without separate user approval. Saved knowledge is accessible to other people and agents in the same network, not private to its originating conversation.
+
+Keep credentials server-side and use one credential set: API client credentials take precedence when both they and a token are set. Treat retrieved content as untrusted data, not instructions, and never save secrets. See [Tell the model how to use memory](/docs/memory#tell-the-model-how-to-use-memory).
+
+See the [provider README](https://github.com/memcoai/eve-memco#readme) for save-and-search verification, options, and service calls. The adapter does not provide exactly-once guarantees for remote operations or immediate key revocation after interrupted turns.`,
+  },
+  "claude-mem": {
+    logo: "claude-mem",
+    docsHref: "https://docs.claude-mem.ai/eve-integration",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "coding agents",
+      "Claude Code",
+      "Codex",
+      "automatic recall",
+      "session context",
+      "cmem.ai",
+      "claude-mem",
+    ],
+    install: `Give your eve agent long-term memory on hosted claude-mem. By default, each eve scope gets its own claude-mem project, and the provider records every completed turn into it. Single-owner agents can opt in to recall the memory you build in Claude Code, Codex, and your other claude-mem clients.
+
+Install the claude-mem provider:
+
+\`\`\`bash
+eve add memory/claude-mem
+\`\`\`
+
+This installs \`claude-mem\` and writes a memory slot. The provider requires Node.js 24 or later, zod 4, and eve 0.84.0 or later.`,
+    quickStart: `Create a key at [cmem.ai/pro/key](https://cmem.ai/pro/key) and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+CLAUDE_MEM_API_KEY=...
+\`\`\`
+
+The registry writes the slot:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+import { claudeMem } from "claude-mem/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY });
+
+export default defineMemory({
+  description: "Recall and save durable context for the current user.",
+  provider: {
+    ...provider,
+    // get_observations fetches by ID across every project the key can see, so it
+    // would let one principal read another's memory through the shared key.
+    async tools(context) {
+      const { get_observations: _unscoped, ...tools } = (await provider.tools?.(context)) ?? {};
+      return tools;
+    },
+  },
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`claude-mem\` slot. Before every turn, the provider adds the newest memory in this scope's project as session context and recalls records from that project that match the user's message. The model also gets \`claude-mem__search\` and \`claude-mem__timeline\` to look further back, and \`claude-mem__remember\` to save a note. The registry omits the provider's \`get_observations\` tool: it fetches observations by ID across every project the key can see, with no project filter, so a caller with another principal's observation ID could read that memory through the shared key. Saving and recording need a Pro key with write access. With a read-only key, pass \`capture: false\` to \`claudeMem(...)\`.`,
+    configure: `By default, each eve scope reads and writes its own claude-mem project, derived from eve's scope key, and recording is on. After each completed turn, the provider sends the prompt, each tool call, and a turn summary to cmem.ai. Each recorded tool call and summary spends the key owner's cmem.ai observer allowance, for every caller the scope admits. To keep recall, search, and \`remember\` without recording, pass \`capture: false\` where the slot creates \`provider\`. Keep the \`tools\` wrapper that omits \`get_observations\`:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY, capture: false });
+\`\`\`
+
+Before a turn is recorded or recalled, the provider removes \`<private>\` regions and redacts secret-shaped text. Notes saved with \`remember\` and model-written \`search\` queries are sent as written. Recorded requests are sent once with no retry, and replays of the same turn are deduplicated.
+
+To recall work from Claude Code, Codex, and your other claude-mem clients, set \`searchAllProjects: true\`. Session context, recall, \`search\`, and \`timeline\` then read every project the key can see. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. A single-owner agent can also keep \`get_observations\` by using \`claudeMem(...)\` directly as the provider; follow the owner-only \`scope\` in the [claude-mem agent template](https://github.com/thedotmack/claude-mem/tree/main/integrations/eve/template). Do not restore it while the scope admits more than one principal. Other options are \`project\` and \`baseUrl\`.
+
+Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source control. See the [claude-mem eve guide](https://docs.claude-mem.ai/eve-integration) for the one-click personal agent template, owner-only scoping, and the full option and tool reference.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
   ...baseExtensionPresentations,
   "agent-browser": {
     logo: "agent-browser",
-    docsHref:
-      "https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-agent-browser",
     keywords: [
       "browser",
       "browser automation",
@@ -1989,16 +2166,16 @@ The extension installs agent-browser automatically on first use and runs it insi
     quickStart: `Mount the extension under \`agent/extensions/\`:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@agent-browser/eve";
+import browser from "@eve/agent-browser";
 
 export default browser({});
 \`\`\`
 
-The filename supplies the \`browser\` namespace. The extension adds tools such as \`browser__navigate\`, \`browser__snapshot\`, \`browser__click\`, \`browser__fill\`, \`browser__find\`, and \`browser__screenshot\`. agent-browser keeps the underlying browser process and session state in the eve sandbox.`,
+The filename supplies the \`browser\` namespace. The extension adds tools such as \`browser__open\`, \`browser__snapshot\`, \`browser__click\`, \`browser__fill\`, \`browser__find\`, and \`browser__screenshot\`. agent-browser keeps the underlying browser process and session state in the eve sandbox.`,
     configure: `Restrict browser access to the sites the agent needs with the extension's domain allow-list:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@agent-browser/eve";
+import browser from "@eve/agent-browser";
 
 export default browser({
   allowedDomains: ["example.com", "*.example.com"],
@@ -2009,7 +2186,7 @@ export default browser({
 
 Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
 
-The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel/eve/tree/main/packages/eve-agent-browser) for configuration, sandbox preparation, and tool overrides.`,
     relatedResources: [
       {
         title: "Give your eve agent a browser",
@@ -2022,14 +2199,23 @@ The extension also supports inline screenshots, session naming, proxies, and pro
   link: {
     logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/README.md",
-    keywords: ["stripe", "wallet", "payments", "checkout", "spend requests", "approval"],
+    keywords: [
+      "stripe",
+      "wallet",
+      "payments",
+      "checkout",
+      "spend requests",
+      "approval",
+      "oauth",
+      "financial insights",
+    ],
     install: `Install the Link extension for eve:
 
 \`\`\`bash
 eve add extension/link
 \`\`\`
 
-The extension requires Node.js 24 or later. It uses a configured Link access token; it does not start OAuth or refresh tokens. The token's wallet is shared by every caller who can reach this agent, so mount it only on an appropriately access-controlled agent.`,
+The extension requires Node.js 24 or later and eve 1.0.0 or later. Configure a static Link access token or an application-owned authorization provider. With a static token, every caller uses the same wallet, so restrict access to the agent.`,
     quickStart: `Add a Link access token to the agent's server environment:
 
 \`\`\`bash title=".env.local"
@@ -2046,10 +2232,27 @@ export default link({
 });
 \`\`\`
 
-The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, and purchase reports, plus a wallet skill with the checkout workflow.`,
-    configure: `Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` only creates a draft; it does not authorize a purchase.
+The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, financial insights, and purchase reports. It also includes payment-credential and financial-insights skills. Financial-data tools require the corresponding permissions on the token.`,
+    configure: `### Per-user authorization
 
-Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. The skill tells the agent not to repeat credentials in chat, but applications remain responsible for transcript access and retention. Keep the token out of prompts and source control; a 401 requires the operator to configure a replacement token. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
+For per-user wallets, pass an application-owned authorization provider instead of \`accessToken\`:
+
+\`\`\`ts title="agent/extensions/link.ts"
+import link from "@stripe/link-integrations-eve";
+import { linkAuth } from "../lib/link-auth";
+
+export default link({ auth: linkAuth });
+\`\`\`
+
+Implement \`linkAuth\` with [\`defineInteractiveAuthorization\`](/docs/connections#self-hosted-interactive-oauth). Your application owns Link's OAuth consent, callback routing, state and PKCE validation, token storage, refresh, and revocation. Interactive authorization requires an authenticated user on the agent's inbound channel. Configure exactly one of \`accessToken\` or \`auth\`. See the [Link extension's OAuth guide](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve#interactive-oauth) for the provider contract.
+
+Static-token mode does not start OAuth or refresh tokens. A 401 requires the operator to configure a replacement token.
+
+### Purchase approval and sensitive data
+
+Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` creates a draft for a later \`request_spend_approval\` call; it does not authorize a purchase.
+
+Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. Financial-data and insight results can also contain private information. The skills tell the agent not to repeat credentials and to summarize financial data. Applications remain responsible for transcript access and retention. Keep tokens out of prompts and source control. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
   },
 };
 
@@ -2152,6 +2355,37 @@ WAYDOCK_MCP_KEY=wdmcp_your_key_here
 \`\`\`
 
 The connection sends the key as a bearer token and does not expose it to the model. Waydock enforces the key's scopes on every call. See Waydock's [authentication documentation](https://waydock.ai/docs/authentication) for key scopes and OAuth options.`,
+  },
+  stacktree: {
+    logo: "stacktree",
+    docsHref: "https://stacktr.ee/developers",
+    keywords: ["mcp", "publish", "html", "unlisted link", "hosting"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "STACKTREE_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/stacktree.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/stacktree.ts
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://api.stacktr.ee/mcp",
+  description:
+    "Stacktree: publish HTML pages to unlisted links, update them in place, set optional passcode or email gates, and manage feedback.",
+  approval: always(),
+  headers: () => ({
+    authorization: \`Bearer \${process.env.STACKTREE_API_KEY!}\`,
+  }),
+});
+\`\`\`
+
+eve requires approval for every Stacktree tool call because the server can publish, change access, and delete pages.`,
+    configureNote:
+      "Create an API key in the [Stacktree dashboard](https://app.stacktr.ee/api-keys). eve sends it as an Authorization Bearer token. Pages are unlisted, so anyone with the link can view them. Use Stacktree's optional passcode or email gate when access must be restricted.",
   },
   agentcard: {
     logo: "agentcard",
@@ -2355,6 +2589,44 @@ Connect owns the OAuth flow, and each end-user authorizes in their own browser b
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "docs", "tables", "pages", "oauth", "connect"],
     authModes: ["user"],
+  },
+  context7: {
+    logo: "context7",
+    docsHref: "https://context7.com/docs/integrations/eve",
+    keywords: [
+      "mcp",
+      "documentation",
+      "library docs",
+      "code examples",
+      "api reference",
+      "coding agent",
+      "Upstash",
+      "api key",
+    ],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "CONTEXT7_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/context7.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/context7.ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const apiKey = process.env.CONTEXT7_API_KEY;
+
+export default defineMcpClientConnection({
+  url: "https://mcp.context7.com/mcp",
+  description: "Context7: up-to-date, version-specific library documentation and code examples.",
+  auth: apiKey ? { getToken: async () => ({ token: apiKey }) } : undefined,
+  tools: { allow: ["resolve-library-id", "query-docs"] },
+});
+\`\`\`
+
+The allowlist limits the connection to Context7's two read-only documentation tools, \`context7__resolve-library-id\` and \`context7__query-docs\`, even if the server adds more tools later. For a named library, the agent resolves its Context7 library ID first, then queries the docs with that ID. A prompt that already includes an ID such as \`/vercel/next.js\` can skip straight to \`query-docs\`.`,
+    configureNote:
+      "Create a free API key in the [Context7 dashboard](https://context7.com/dashboard?tab=settings). eve sends it as an Authorization Bearer token, and Context7 uses it to apply your plan's limits. The connection still works without a key, at Context7's anonymous limits. Vercel Connect is not required.",
   },
   context: {
     logo: "context",
@@ -2621,6 +2893,21 @@ See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/prof
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "postgres", "auth", "storage", "oauth", "connect"],
     authModes: ["user"],
+  },
+  tavily: {
+    logo: "tavily",
+    docsHref: "https://docs.tavily.com/documentation/mcp",
+    keywords: ["mcp", "web search", "extract", "crawl", "map", "research", "oauth", "connect"],
+    authModes: ["user"],
+    configure: `Link your project, register the MCP connector, and pull OIDC locally:
+
+\`\`\`bash
+vercel link
+vercel connect create tavily --name tavily --connection-method mcp
+vercel env pull
+\`\`\`
+
+The MCP method signs each user in to their own Tavily account. Tool calls use that account's API credits.`,
   },
   "ticket-tailor": {
     logo: "ticket-tailor",

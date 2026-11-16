@@ -1,5 +1,6 @@
 import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { describe, expect, it } from "vitest";
+import { dataAgentTemplateUrl } from "../templates/links";
 import {
   createDocsRedirects,
   createIntegrationRedirects,
@@ -103,8 +104,8 @@ describe("createIntegrationRedirects", () => {
 
 describe("docsRedirects", () => {
   it.each([
-    ["/docs/channels", "/docs/channels/overview"],
-    ["/docs/guides/deployment.md", "/docs/guides/deployment/overview.md"],
+    ["/docs/channels/overview", "/docs/channels"],
+    ["/docs/guides/deployment/overview.md", "/docs/guides/deployment.md"],
     ["/docs/guides/frontend/add-a-web-app", "/docs/guides/frontend/nextjs"],
     ["/docs/guides/frontend/add-a-web-app.mdx", "/docs/guides/frontend/nextjs.mdx"],
     ["/docs/introduction.md", "/docs/getting-started.md"],
@@ -120,6 +121,12 @@ describe("docsRedirects", () => {
     ["/docs/reference/project-layout", "/docs/getting-started"],
     ["/docs/reference/project-layout.md", "/docs/getting-started.md"],
     ["/docs/dynamic-capabilities", "/docs/guides/dynamic-capabilities"],
+    ["/docs/patterns/dynamic-scheduling", "/docs/experimental/dynamic-schedules"],
+    ["/docs/patterns/dynamic-scheduling.md", "/docs/experimental/dynamic-schedules.md"],
+    ["/docs/patterns/dynamic-scheduling.mdx", "/docs/experimental/dynamic-schedules.mdx"],
+    ["/en/docs/patterns/dynamic-scheduling", "/docs/experimental/dynamic-schedules"],
+    ["/en/docs/patterns/dynamic-scheduling.md", "/docs/experimental/dynamic-schedules.md"],
+    ["/en/docs/patterns/dynamic-scheduling.mdx", "/docs/experimental/dynamic-schedules.mdx"],
     ["/docs/guides/state", "/docs/concepts/state"],
     ["/docs/dynamic-workflows", "/docs/concepts/built-in-tools"],
     ["/docs/guides/dynamic-workflows", "/docs/concepts/built-in-tools"],
@@ -131,12 +138,18 @@ describe("docsRedirects", () => {
     ["/docs/guides/acp.md", "/docs/protocols/acp.md"],
     ["/docs/guides/ucp", "/docs/protocols/ucp"],
     ["/docs/guides/ucp.mdx", "/docs/protocols/ucp.mdx"],
-    ["/docs/evals", "/docs/evals/overview"],
+    ["/docs/evals/overview", "/docs/evals"],
+    ["/docs/guides/frontend/overview", "/docs/guides/frontend"],
+    ["/docs/guides/client/overview.md", "/docs/guides/client.md"],
     ["/docs/guides/evaluate", "/docs/guides/decide"],
     ["/docs/guides/evaluate.md", "/docs/guides/decide.md"],
     ["/docs/sandbox/microsandbox", "/docs/sandbox"],
     ["/docs/sandbox/microsandbox.md", "/docs/sandbox.md"],
     ["/en/docs/sandbox/microsandbox.mdx", "/docs/sandbox.mdx"],
+    ["/docs/guides/prepare-for-1-0", "/docs/guides/upgrade"],
+    ["/docs/guides/prepare-for-1-0.md", "/docs/guides/upgrade.md"],
+    ["/docs/concepts/upgrade-to-v27-events", "/docs/guides/upgrade/session-events"],
+    ["/docs/concepts/upgrade-to-v27-events.md", "/docs/guides/upgrade/session-events.md"],
   ])("redirects %s to %s", (source, destination) => {
     expect(docsRedirects).toContainEqual({ source, destination, permanent: true });
   });
@@ -179,18 +192,11 @@ describe("compatibilityRedirects", () => {
     "/templates",
     "/templates.md",
     "/templates.mdx",
-    "/templates/eve-voice-template",
-    "/templates/eve-discord-agent.md",
-    "/templates/eve-company-brain-template",
-    "/templates/eve-coding-agent-template",
-    "/templates/bell-stack",
-    "/templates/eve-design-template",
     "/templates/unknown-template.mdx",
     "/resources",
     "/en/templates",
     "/en/templates.md",
     "/en/templates.mdx",
-    "/en/templates/eve-voice-template.mdx",
     "/en/templates/unknown-template",
     "/en/resources",
   ])("falls back to the gallery for %s", async (source) => {
@@ -208,6 +214,12 @@ describe("compatibilityRedirects", () => {
     ["eve-chat-template", "eve-chat-template"],
     ["eve-agent-with-python", "eve-agent-with-python"],
     ["eve-slack-agent", "eve-slack-agent"],
+    ["eve-voice-template", "eve-voice-template"],
+    ["eve-discord-agent", "eve-discord-agent"],
+    ["eve-company-brain-template", "eve-company-brain-template"],
+    ["eve-coding-agent-template", "eve-coding-agent-template"],
+    ["bell-stack", "bell-stack"],
+    ["eve-design-template", "eve-design-template"],
     ["eve-data-analyst-template", "eve-data-analyst"],
     ["eve-contentful-agent-template", "eve-contentful-agent"],
     ["eve-vercel-drives-starter", "eve-vercel-drives-starter"],
@@ -233,6 +245,21 @@ describe("compatibilityRedirects", () => {
         expect(response.headers.get("location")).toBe(
           `https://vercel.com/templates/eve/${destination}`,
         );
+      }
+    }
+  });
+
+  it("redirects the data agent template to its source", async () => {
+    for (const prefix of ["", "/en"]) {
+      for (const extension of ["", ".md", ".mdx"]) {
+        const response = await unstable_getResponseFromNextConfig({
+          url: `https://eve.dev${prefix}/templates/eve-data-agent-template${extension}`,
+          nextConfig: {
+            redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
+          },
+        });
+        expect(response.status).toBe(307);
+        expect(response.headers.get("location")).toBe(dataAgentTemplateUrl);
       }
     }
   });

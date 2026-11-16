@@ -61,10 +61,10 @@ const SLEEP_OUTPUT_SCHEMA = defineJsonSchema<SleepToolOutput>({
 export const sleep: WorkflowExecuteToolDefinition<SleepToolInput, SleepToolOutput> = frameworkTool(
   defineWorkflowTool({
     description: SLEEP_TOOL_DESCRIPTION,
-    execute: executeSleepTool,
+    execute: interactionOnly(executeSleepTool),
     inputSchema: SLEEP_INPUT_SCHEMA,
     outputSchema: SLEEP_OUTPUT_SCHEMA,
     toModelOutput: toInterruptibleModelOutput,
   }),
 );
-import { frameworkTool } from "./framework-tool.js";
+import { frameworkTool, interactionOnly } from "./framework-tool.js";

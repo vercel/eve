@@ -1,6 +1,6 @@
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
-import { resolveProductionOrigin } from "./routing.js";
+import { resolveProductionOrigin } from "./production-origin.js";
 
 /**
  * Subset of a SvelteKit `RequestEvent` the eve hook reads. Kept structural so

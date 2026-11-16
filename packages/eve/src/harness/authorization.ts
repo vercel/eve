@@ -45,8 +45,15 @@ import type { JsonValue } from "#shared/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
 
-const AUTHORIZATION_BRAND = "__eveAuthorization" as const;
 const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
+
+/**
+ * Marks a signal the runtime minted. A symbol key can't come from JSON, so a tool result that
+ * carries data shaped like a signal (an MCP or OpenAPI response, a file, a fetched page) stays data
+ * instead of parking the turn and naming who it resumes as. Registered, because the runtime can
+ * load this module more than once in one process.
+ */
+const AUTHORIZATION_SIGNAL: unique symbol = Symbol.for("eve.authorizationSignal");
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -85,7 +92,7 @@ export interface AuthorizationChallenge {
 }
 
 export interface AuthorizationSignal {
-  readonly [AUTHORIZATION_BRAND]: true;
+  readonly [AUTHORIZATION_SIGNAL]: true;
   readonly challenges: readonly AuthorizationChallenge[];
 }
 
@@ -121,7 +128,7 @@ export interface AuthorizationResult {
 export function requestAuthorization(
   challenges: readonly AuthorizationChallenge[],
 ): AuthorizationSignal {
-  return { [AUTHORIZATION_BRAND]: true, challenges };
+  return { [AUTHORIZATION_SIGNAL]: true, challenges };
 }
 
 /**
@@ -218,7 +225,7 @@ export function createAuthorizationAttempt(
 
 export function isAuthorizationSignal(value: unknown): value is AuthorizationSignal {
   if (typeof value !== "object" || value === null) return false;
-  return (value as Record<string, unknown>)[AUTHORIZATION_BRAND] === true;
+  return (value as { readonly [AUTHORIZATION_SIGNAL]?: unknown })[AUTHORIZATION_SIGNAL] === true;
 }
 
 export function isAuthorizationPendingModelOutput(
@@ -285,6 +292,15 @@ interface NamedAuthorizationResult extends AuthorizationResult {
 export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthorizationResult[]>(
   "eve.pendingAuthorizationResult",
 );
+
+/** Reports a callback's sign-in once a call completes it: with why it failed, if it did. */
+export type SignInCompleted = (result: AuthorizationResult, failure?: Error) => Promise<void>;
+
+/**
+ * How the step reports a sign-in the moment a resumed call completes it, so the other askers for
+ * the same grant resume then rather than when the call returns.
+ */
+export const SignInCompletedKey = new ContextKey<SignInCompleted>("eve.signInCompleted");
 
 /**
  * Deployment base URL for building callback URLs. Set by the

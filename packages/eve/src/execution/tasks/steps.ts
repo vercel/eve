@@ -1,4 +1,3 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -29,6 +28,7 @@ import { usageSince } from "#shared/token-usage-math.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   PublishedSessionEvents,
+  SessionStepInput,
   SessionStepState,
 } from "#execution/publish-session-events.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
@@ -43,10 +43,10 @@ import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-in
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
-import { delegatedUsageFact } from "#harness/facts.js";
+import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
 import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
 
 /** The messages a task's run sends that change its record. */
@@ -83,12 +83,7 @@ export async function applyTaskRunMessage(
         : counted.table;
     return await commitSessionStep(
       { ...input, sessionState: saveTable(input.sessionState, session, table) },
-      (view) => [
-        {
-          turn: view.turn,
-          events: counted.spend === undefined ? [] : [delegatedUsageFact(undefined, counted.spend)],
-        },
-      ],
+      (view) => [lateTaskSpend(view, counted.spend)],
       { origin: "own" },
     );
   }
@@ -96,7 +91,7 @@ export async function applyTaskRunMessage(
     // The run may not have existed when cancellation tried to stop it. Started follows
     // registration of its control hook; keep its address until the outcome arrives.
     await ignoreGoneTarget(
-      resumeHook(findTask(table, taskId)!.run!.hookToken, {
+      resumeRoutedHook(findTask(table, taskId)!.run!.hookToken, {
         kind: "end",
         reason: TASK_CANCEL_REASON,
       }),
@@ -158,25 +153,6 @@ export async function applyTaskRunMessage(
 }
 
 /**
- * Delegated spend, owned by the call this commit settles. One reply may settle several calls
- * with the same result; its spend belongs once to the latest served call (the message's
- * source), never once per recipient. A serve body can keep spending after it replied or while
- * cancellation unwinds: no open call owns that, and an immutable settlement can't be amended,
- * so it is the task's own `delegated-late` usage.
- */
-function spendFact(
-  events: readonly SessionEvent[],
-  sourceCallId: string | undefined,
-  spend: TokenUsage,
-  taskId: string,
-): SessionEvent {
-  const settled = events.filter((event) => event.type === "call.settled");
-  const call = settled.find((event) => event.data.callId === sourceCallId) ?? settled[0];
-  if (call !== undefined) return delegatedUsageFact(call.data.callId, spend);
-  return { ...delegatedUsageFact(undefined, spend), scope: { taskId } };
-}
-
-/**
  * Cancels tasks, and the calls the turn waits on when `turnCalls` is set. The tasks' calls
  * settle as cancelled and the session publishes that first. A cancelled agent or `task()` task
  * ends now, without waiting for its run to finish cleanup. A resumable tool's run only stops its
@@ -187,7 +163,7 @@ function spendFact(
  * questions itself, and the session decides each one.
  */
 export async function cancelTasksStep(
-  input: SessionStepState & TaskCancellationInput,
+  input: SessionStepInput & TaskCancellationInput,
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, cancelTasks);
@@ -288,17 +264,13 @@ function spent(
   spend: TokenUsage,
   taskId: string,
 ): Decision {
-  return (view) => ({
-    events: [
-      spendFact(
-        settles.flatMap((decide) => decide(view).events),
-        sourceCallId,
-        spend,
-        taskId,
-      ),
-    ],
-    turn: view.turn,
-  });
+  return (view) =>
+    taskSpend(view, {
+      settling: settles.flatMap((decide) => decide(view).events),
+      sourceCallId,
+      spend,
+      taskId,
+    });
 }
 
 /** Settles a task's settled calls; calls only settle on a known task. */
@@ -317,7 +289,7 @@ function taskSettled(
  */
 export async function sendTaskRunCommands(commands: TaskRunCommands): Promise<void> {
   for (const command of commands.commands) {
-    await ignoreGoneTarget(resumeHook(commands.run.hookToken, toControlMessage(command)));
+    await ignoreGoneTarget(resumeRoutedHook(commands.run.hookToken, toControlMessage(command)));
   }
 }
 

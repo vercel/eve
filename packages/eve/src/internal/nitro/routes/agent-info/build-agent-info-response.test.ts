@@ -79,7 +79,7 @@ describe("buildAgentInfoResponse", () => {
     );
   });
 
-  it("reports selected memory and provider-tool wrapper provenance", async () => {
+  it("reports a memory", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       modules: [
@@ -110,17 +110,6 @@ describe("buildAgentInfoResponse", () => {
       expect.objectContaining({
         description: "Caller profile.",
         slot: "profile",
-      }),
-    );
-    expect(response.tools.dynamic).toContainEqual(
-      expect.objectContaining({
-        binding: expect.objectContaining({
-          backing: expect.objectContaining({
-            dependencies: { memory: response.memories[0]?.sourceId },
-            parameters: expect.objectContaining({ slot: "profile" }),
-          }),
-        }),
-        slug: "profile",
       }),
     );
     expect(response.agent.config.binding).not.toHaveProperty("usage");

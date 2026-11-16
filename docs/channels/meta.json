@@ -2,19 +2,20 @@
   "title": "Channels",
   "defaultOpen": false,
   "pages": [
-    "overview",
     "eve",
-    "mcp",
     "slack",
-    "linq",
     "photon",
-    "discord",
-    "teams",
-    "telegram",
-    "twilio",
+    "linq",
     "github",
+    "discord",
+    "telegram",
     "linear",
+    "teams",
+    "twilio",
+    "recall",
     "chat-sdk",
+    "mcp",
+    "a2a",
     "custom"
   ]
 }

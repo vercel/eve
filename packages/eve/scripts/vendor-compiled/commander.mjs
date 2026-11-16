@@ -4,12 +4,10 @@ import { join } from "node:path";
 /**
  * Vendor config for `commander`. The package ships:
  *
- *   - `index.js`            CJS entry (`module.exports = { Command, ... }`)
- *   - `esm.mjs`             ESM wrapper that re-exports named bindings.
+ *   - `index.js`            ESM entry with named exports.
  *   - `typings/index.d.ts`  Single-file declaration with no external imports.
  *
- * Rolldown resolves this ESM entry through `esm.mjs`, collapses the CJS
- * `index.js` graph through the wrapper, and produces named exports matching
+ * Rolldown bundles the `index.js` graph and keeps the named exports matching
  * the source-side usage (`Command`, `CommanderError`,
  * `InvalidArgumentError`).
  *

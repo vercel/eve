@@ -1,6 +1,6 @@
 ---
 name: pr-shepherd
-description: Takes a finished eve branch from review to merge. Opens the PR early, runs a fresh-context reviewer subagent, fixes critical findings, addresses, replies to, and resolves review comments, pushes, monitors CI (rerunning flaky jobs or fixing real failures), then squash-merges or enables auto-merge. Use after the initial implementation is complete, or when asked to open, babysit, land, or "get a PR green".
+description: Takes a finished eve branch from review to merge. Opens the PR early, runs a fresh-context reviewer subagent, fixes critical findings, addresses, replies to, and resolves review comments, pushes, monitors CI (rerunning flaky jobs or fixing real failures), then squash-merges or enables auto-merge. Follow only when the user explicitly asks to shepherd, babysit, land, or merge a PR, or to "get a PR green". Do not start it on your own after finishing an implementation or when only asked to open a PR.
 metadata:
   internal: true
 ---

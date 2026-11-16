@@ -1,3 +1,5 @@
+import { stepCatalog } from "#definitions/step.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import { appendTaskContext } from "#execution/tasks/model-step.js";
 import {
   anchorToTurn,
@@ -5,6 +7,7 @@ import {
   followsToolResults,
   type HarnessModelMessage,
   normalizeModelMessages,
+  turnAnchorOf,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { hasUnansweredToolCall } from "#harness/model-call/response.js";
@@ -19,8 +22,8 @@ import { followingToolResults, type TurnInput } from "./intake.js";
 type ClientContext = NonNullable<ReturnType<typeof getTurnClientContextState>>;
 
 /**
- * What the model reads this step: durable history, with the task results and notes the step
- * delivers and the turn's input, and the client's context for the turn, which keeps one position
+ * What the model reads this step: durable history, which holds the turn's input, with the task
+ * results the step delivers, and the client's context for the turn, which keeps one position
  * across the turn's steps and never joins history.
  */
 export interface Prompt {
@@ -30,27 +33,51 @@ export interface Prompt {
 }
 
 export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
+  const built = await settleHistory(step, turn);
+  step.session = built.session;
+  return {
+    clientContext: getTurnClientContextState(step.session.state, turn.turnId),
+    messages: built.messages,
+  };
+}
+
+/**
+ * History repaired and with the task results the step delivers, the session that records the
+ * delivery, and the turn as the repair left its client context's position. The step's session is
+ * left as it was, so a preview can read the same prompt without delivering anything.
+ */
+async function settleHistory(
+  step: Step,
+  turn: TurnInput,
+): Promise<{
+  readonly messages: HarnessModelMessage[];
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
+}> {
   const repaired = repairToolHistory({
+    endsRequest: turn.messages.length === 0,
     messages: step.session.history,
     insertionIndex: turn.storedClientContext?.insertionIndex,
   });
-  const messages = validateHarnessModelMessages(repaired.messages);
-  step.session = { ...step.session, history: [...messages] };
+  let session = changeHistory(step.session, { repaired: repaired.messages });
+  // Its own copy: task results join it below.
+  const messages = [...session.history];
   if (turn.storedClientContext !== undefined && repaired.insertionIndex !== undefined) {
     const storedClientContext = {
       ...turn.storedClientContext,
       insertionIndex: repaired.insertionIndex,
     };
     turn = { ...turn, storedClientContext };
-    step.session = setTurnClientContextState(step.session, storedClientContext);
+    session = setTurnClientContextState(session, storedClientContext);
   }
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
-      session: step.session,
-      tools: step.config.tools,
+      session,
+      // Dynamic values can read these results, so use the tools kept before evaluating them.
+      tools: await stepCatalog(step),
     });
-    step.session = taskContext.session;
+    session = taskContext.session;
     // A turn a task's result starts brings no input of its own: what eve adds for the turn
     // sits ahead of the results instead.
     messages.push(
@@ -59,40 +86,42 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
       ),
     );
   }
-
-  const placed = placeTurnInput(step, messages, turn);
-  return {
-    clientContext: getTurnClientContextState(step.session.state, turn.turnId),
-    messages: placed,
-  };
+  return { messages, session, turn };
 }
 
 /**
- * The prompt the session's dynamic values are evaluated with: history and the turn's input,
- * without the task results and the client context's position a prompt settles.
+ * Commits the prepared prompt only after dynamic evaluation succeeds, without projecting task
+ * results again. A model call that fails leaves the turn's input in history.
  */
-export function previewPrompt(step: Step, turn: TurnInput): Prompt {
-  const messages = validateHarnessModelMessages([...step.session.history]);
-  return {
-    clientContext: turnClientContext(messages, turn),
-    messages: withTurnInput(messages, turn),
-  };
-}
-
-/**
- * The turn's input after `messages`, past a tool-result boundary when they end in tool results.
- * The client's context takes its position here, and never joins the messages.
- */
-export function placeTurnInput(
-  step: Step,
-  messages: readonly HarnessModelMessage[],
-  turn: TurnInput,
-): HarnessModelMessage[] {
-  const clientContext = turnClientContext(messages, turn);
-  if (clientContext !== undefined) {
-    step.session = setTurnClientContextState(step.session, clientContext);
+export function commitTurnInput(step: Step, prepared: PreparedPrompt): Prompt {
+  step.session = prepared.session;
+  if (prepared.clientContext !== undefined) {
+    step.session = setTurnClientContextState(step.session, prepared.clientContext);
   }
-  return withTurnInput(messages, turn);
+  step.session = changeHistory(step.session, { extend: prepared.messages });
+  return {
+    clientContext: getTurnClientContextState(step.session.state, prepared.turn.turnId),
+    messages: [...step.session.history],
+  };
+}
+
+/**
+ * The prompt the session's dynamic values are evaluated with: the one the model call reads, with
+ * the task results it delivers, without committing the turn's input or the delivery.
+ */
+export async function previewPrompt(step: Step, turn: TurnInput): Promise<PreparedPrompt> {
+  const settled = await settleHistory(step, turn);
+  const messages = validateHarnessModelMessages(settled.messages);
+  return {
+    ...settled,
+    clientContext: turnClientContext(messages, settled.turn),
+    messages: withTurnInput(messages, settled.turn),
+  };
+}
+
+interface PreparedPrompt extends Prompt {
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
 }
 
 function turnClientContext(
@@ -124,7 +153,12 @@ export function withClientContext(
 ): HarnessModelMessage[] {
   const { clientContext } = prompt;
   if (clientContext === undefined || clientContext.messages.length === 0) return [...messages];
-  const insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  let insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  // What eve announced for the turn joined history at the same position, ahead of the turn's
+  // input. The context goes after it, so the durable prefix the next turn reads stays cached.
+  while (insertionIndex < messages.length && isAnnouncement(messages[insertionIndex]!)) {
+    insertionIndex += 1;
+  }
   return [
     ...messages.slice(0, insertionIndex),
     ...clientContext.messages.map((content) =>
@@ -132,6 +166,19 @@ export function withClientContext(
     ),
     ...messages.slice(insertionIndex),
   ];
+}
+
+/**
+ * A message `announce()` added ahead of a turn's input: only it puts unanchored `context.state` and
+ * `context.instruction` messages at a turn's start. Other framework messages there, such as a
+ * compaction checkpoint or its "Continue.", keep the context ahead of them.
+ */
+function isAnnouncement(message: HarnessModelMessage): boolean {
+  return (
+    message.role === "user" &&
+    (message.kind === "context.state" || message.kind === "context.instruction") &&
+    turnAnchorOf(message) === undefined
+  );
 }
 
 /** The prompt as the model reads it: with the client's context. */

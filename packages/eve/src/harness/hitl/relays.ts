@@ -24,6 +24,30 @@ export interface Relay extends RelayRoute {
    * can answer the request once that run ends.
    */
   readonly runId?: string;
+  /**
+   * This session's delivery for each receipt a remote asker gave answers it forwarded. A remote
+   * admits answers under a delivery id of its own, and names that id when it relays how they
+   * settled.
+   */
+  readonly receipts?: Readonly<Record<string, string>>;
+}
+
+const FORWARDED_SHARE = /^(.+)_forwarded_\d+$/;
+
+/**
+ * The delivery id a child admits its share of a forwarded payload under. One payload can answer
+ * several children, and nested relays can bring two shares to one session, so every share after
+ * the first gets an id of its own. The id is unique within the receiving child only; the
+ * forwarding session still records its answers under `deliveryId` and maps what the child relays
+ * back with {@link forwardedFrom}.
+ */
+export function forwardedShareId(deliveryId: string, share: number): string {
+  return share === 0 ? deliveryId : `${deliveryId}_forwarded_${share}`;
+}
+
+/** The forwarding session's delivery id for a share id {@link forwardedShareId} named. */
+export function forwardedFrom(deliveryId: string): string {
+  return FORWARDED_SHARE.exec(deliveryId)?.[1] ?? deliveryId;
 }
 
 /** Reads one stored route, or `undefined` when it is malformed. */
@@ -61,6 +85,10 @@ export function parseRelay(value: unknown): Relay | undefined {
     if (typeof runId !== "string" || runId.length === 0) return undefined;
     relay.runId = runId;
   }
+  // Receipts only credit answers; the route still reaches the asker without them.
+  const receipts = Reflect.get(value, "receipts");
+  if (isRecord(receipts) && Object.values(receipts).every((id) => typeof id === "string"))
+    relay.receipts = receipts as Record<string, string>;
   return relay;
 }
 

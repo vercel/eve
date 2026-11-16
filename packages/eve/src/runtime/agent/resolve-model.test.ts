@@ -5,6 +5,7 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { defineDynamic, dynamicEvaluate } from "#dynamic/definition.js";
 import { createModelMetadata, type ModelMetadata } from "#internal/model-catalog.js";
+import { agent } from "#public/tools/agent.js";
 import {
   InvalidRuntimeModelSelectionError,
   loadDynamicRuntimeModelDefinition,
@@ -90,24 +91,38 @@ describe("dynamic runtime model resolution", () => {
     expect(result.reference.promptCache).toEqual({ anthropic: { ttl: "1h" } });
   });
 
-  it("rejects prompt cache options on an AI Gateway selection", async () => {
+  it("rejects prompt cache options on a non-Anthropic AI Gateway selection", async () => {
     const modelMetadata = metadataSource();
     await expect(
       resolveRuntimeModelSelection({
         modelMetadata,
         selection: {
-          model: "anthropic/claude-opus-5",
+          model: "openai/gpt-5.5",
           modelOptions: { promptCache: { anthropic: {} } },
         },
         durability: "durable",
       }),
-    ).rejects.toThrow('modelOptions.promptCache for "anthropic/claude-opus-5"');
+    ).rejects.toThrow('modelOptions.promptCache for "openai/gpt-5.5"');
     expect(modelMetadata).not.toHaveBeenCalled();
+  });
+
+  it("carries prompt cache options on an Anthropic AI Gateway selection", async () => {
+    const result = await resolveRuntimeModelSelection({
+      selection: {
+        model: "anthropic/claude-opus-5",
+        modelContextWindowTokens: 200_000,
+        modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+      },
+      durability: "durable",
+      modelMetadata: metadataSource(),
+    });
+    expect(result.reference.promptCache).toEqual({ anthropic: { ttl: "1h" } });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("does not resolve a source-free eve mock model without the test seam", async () => {
@@ -116,6 +131,19 @@ describe("dynamic runtime model resolution", () => {
     const model = await resolveRuntimeModelReference({ id: "eve-mock/dynamic-subagent" });
 
     expect(model).toBe("eve-mock/dynamic-subagent");
+  });
+
+  it("leaves a model id to a custom AI SDK default provider under eve dev", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("EVE_DEV_CONTROL_URL", "http://127.0.0.1:1");
+    vi.stubEnv("EVE_DEV_WORKFLOW_TRANSPORT_SECRET", "secret");
+    vi.stubEnv("EVE_MODEL_CONNECTION", undefined);
+    vi.stubGlobal("AI_SDK_DEFAULT_PROVIDER", { languageModel: vi.fn() });
+
+    const model = await resolveRuntimeModelReference({ id: "openai/gpt-5.6-luna" });
+
+    expect(model).toBe("openai/gpt-5.6-luna");
   });
 
   it("resolves a source-free eve mock model through the explicit test seam", async () => {
@@ -274,6 +302,46 @@ describe("dynamic runtime model resolution", () => {
     ).rejects.toThrow(/durable model selections must be serializable/);
 
     expect(modelMetadata).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent({ models }) option references", () => {
+  const TOOL_SOURCE = {
+    logicalPath: "tools/agent.ts",
+    sourceId: DYNAMIC_MODEL_SOURCE.sourceId,
+    sourceKind: "module" as const,
+  };
+  const haiku = createLanguageModel("anthropic.messages", "claude-haiku-5");
+  const moduleMap = createModuleMap({
+    default: agent({
+      models: { haiku: { description: "Cheap lookups", model: haiku } },
+    }),
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("reads the live model again from the tool's module", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const model = await resolveRuntimeModelReference(
+      { id: "anthropic/claude-haiku-5", source: TOOL_SOURCE, sourceModelOption: "haiku" },
+      { moduleMap, nodeId: undefined },
+    );
+
+    expect(model).toBe(haiku);
+  });
+
+  it("explains an option a later deployment removed", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    await expect(
+      resolveRuntimeModelReference(
+        { id: "anthropic/claude-haiku-5", source: TOOL_SOURCE, sourceModelOption: "sonnet" },
+        { moduleMap, nodeId: undefined },
+      ),
+    ).rejects.toThrow(
+      'The model option "sonnet" this session chose is no longer one of the agent({ models }) options in "tools/agent.ts".',
+    );
   });
 });
 

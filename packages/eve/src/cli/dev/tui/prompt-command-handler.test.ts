@@ -318,6 +318,7 @@ describe("createPromptCommandHandler", () => {
         ),
       ).resolves.toEqual({
         message: expect.stringMatching(/^\/add failed: /),
+        failed: true,
       });
       expect(setupFlow.begin).not.toHaveBeenCalled();
     } finally {

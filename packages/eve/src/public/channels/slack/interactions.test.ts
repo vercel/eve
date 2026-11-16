@@ -82,6 +82,41 @@ describe("parseShortcutPayload", () => {
 });
 
 describe("parseBlockActionsPayload", () => {
+  it("resolves a click on an ephemeral thread reply to its thread and exposes the response URL", () => {
+    const { message: _message, ...withoutMessage } = makePayload({
+      type: "block_actions",
+      actions: [{ action_id: "resume", value: "U0123456789" }],
+    });
+    const body = new URLSearchParams({
+      payload: JSON.stringify({
+        ...withoutMessage,
+        // Slack sends no `message` for a click on an ephemeral message; the
+        // container carries its channel, timestamp, and thread.
+        container: {
+          type: "message",
+          message_ts: "1700000000.000300",
+          channel_id: "C0123456789",
+          is_ephemeral: true,
+          thread_ts: "1700000000.000100",
+        },
+        response_url: "https://hooks.slack.com/actions/T01/1/abc",
+      }),
+    }).toString();
+    const payload = parseSlackWebhookBody(body, {
+      contentType: "application/x-www-form-urlencoded",
+    });
+    if (payload.kind !== "block_actions") throw new Error("expected block_actions");
+
+    const parsed = parseBlockActionsPayload(payload);
+
+    expect(parsed).toMatchObject({ channelId: "C0123456789", threadTs: "1700000000.000100" });
+    expect(parsed?.actions[0]).toMatchObject({
+      actionId: "resume",
+      messageTs: "1700000000.000300",
+      responseUrl: "https://hooks.slack.com/actions/T01/1/abc",
+    });
+  });
+
   it("exposes the actor as a nested user object on each parsed action", () => {
     const parsed = parseBlockActionsPayload(
       makePayload({

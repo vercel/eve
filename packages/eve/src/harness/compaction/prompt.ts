@@ -234,14 +234,17 @@ function renderToolResultOutput(value: unknown, limit: number): string {
 
 /**
  * The text a tool-result output is measured and clipped by, in history
- * capping and in the summarizer transcript alike: a text output is its
- * value, any other output its JSON. Sharing it keeps a capped history
- * result whole when the summarizer renders it.
+ * capping and in the summarizer transcript alike: a text or error-text
+ * output is its value, any other output its JSON. Sharing it keeps a capped
+ * history result whole when the summarizer renders it.
  */
 export function serializeToolResultOutput(output: unknown): string {
   if (output !== null && typeof output === "object") {
     const candidate = output as { readonly type?: unknown; readonly value?: unknown };
-    if (candidate.type === "text" && typeof candidate.value === "string") {
+    if (
+      (candidate.type === "text" || candidate.type === "error-text") &&
+      typeof candidate.value === "string"
+    ) {
       return candidate.value;
     }
   }
@@ -362,7 +365,7 @@ export function sliceUtf16Safe(value: string, limit: number): string {
 /**
  * Keeps the head and tail of an oversized tool payload, never exceeding
  * `limit`. Tool output often ends with what matters most: the failing test,
- * the error, or the `exitCode` and `status` that `bash` serializes last.
+ * the error, or the exit code that `bash` reports last.
  */
 export function clipMiddleUtf16Safe(value: string, limit: number): string {
   if (value.length <= limit) {

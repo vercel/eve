@@ -4,10 +4,9 @@ import {
   prepareCoordinationDispatch,
   type CoordinationDispatchInput,
   type CoordinationDispatchResult,
-  type PendingDispatchFacts,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
+import { commitSessionStep, type SessionStepInput } from "#execution/publish-session-events.js";
 import {
   type SessionStateTransition,
   type WithSessionStateDelta,
@@ -17,6 +16,7 @@ import {
   startWorkflowTask,
   startWorkflowToolCallRun,
   type StartWorkflowTaskInput,
+  type StartWorkflowToolRun,
 } from "#execution/tools/workflow/start.js";
 import {
   runEntryToStart,
@@ -24,61 +24,59 @@ import {
   startsEveryRun,
   startTaskRun,
 } from "#execution/tasks/start.js";
-import { readTaskTable, type TaskTable } from "#execution/tasks/table.js";
+import {
+  readTaskTable,
+  removeTask,
+  writeTaskTable,
+  type TaskTable,
+} from "#execution/tasks/table.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import { hasWorkflowAdmission } from "#harness/workflow-admission.js";
 import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { startTask, type TaskCallStart } from "#harness/session-machine/transitions.js";
+import {
+  startDispatchedCalls,
+  startTask,
+  type PendingDispatch,
+  type TaskCallStart,
+} from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
-import type { FactOf } from "#protocol/session-events/facts.js";
-import { callSettledFrom, callStarted } from "#harness/call-facts.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /**
- * Starts the runs of the pending calls and records them on the session. A
- * retry starts its runs again, since a Workflow start has no idempotency key,
- * so this step publishes nothing and commits as soon as the runs are
- * recorded. See {@link publishDispatchedCallsStep}.
+ * The dispatch Workflow's `dispatchCoordinationStep` runs (`workflow-host/dispatch-step.ts`),
+ * starting each run with `startRun`: Workflow starts its runs on the current deployment, and
+ * another host starts them its own way.
  */
-export async function dispatchCoordinationStep(
+export function dispatchCoordinationOn(
+  startRun: StartWorkflowToolRun,
+): (
   input: CoordinationDispatchInput,
-): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
-  "use step";
-  return await withSessionStateDelta(input, dispatchCoordination);
+) => Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
+  return async (input) =>
+    await withSessionStateDelta(input, (state) => dispatchCoordination(state, startRun));
 }
 
 /**
- * Publishes, as one commit, what {@link dispatchCoordinationStep} recorded: the calls the turn
+ * Publishes, as one commit, what the dispatch recorded: the calls the turn
  * waits on started, the tasks it started or reached, and the calls it refused. Run ownership is
  * checkpointed first, so retrying the publication cannot start those runs again.
  */
 export async function publishDispatchedCallsStep(
-  input: SessionStepState & { readonly pending: PendingDispatchFacts },
+  input: SessionStepInput & { readonly pending: PendingDispatch },
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, ({ pending, ...target }) =>
-    commitSessionStep(
-      target,
-      (view) => {
-        // One introduction per task in this commit, based on the public table, not the private
-        // runtime address the dispatch already recorded.
-        const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
-        const events = [
-          ...pending.executing,
-          ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
-          ...pending.refused,
-        ];
-        return [{ events, turn: view.turn }];
-      },
-      { origin: "own" },
-    ),
+    commitSessionStep(target, (view) => [startDispatchedCalls(view, pending)], { origin: "own" }),
   );
 }
 
 async function dispatchCoordination(
   input: CoordinationDispatchInput,
+  startRun: StartWorkflowToolRun,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
@@ -97,15 +95,43 @@ async function dispatchCoordination(
   let nextSession: HarnessSessionBase = session;
   const results: RuntimeActionResult[] = [];
   const started: TaskCallStart[] = [];
-  const refused: FactOf<"call.settled">[] = [];
-  const executing: FactOf<"call.started">[] = [];
+  const refused: PendingDispatch["refused"][number][] = [];
+  const executing: PendingDispatch["executing"][number][] = [];
   // Prospective facts for this admission batch use the same fold as committed facts. This
   // shadow is never saved: limits count work actually started earlier in the batch without
   // introducing a private lifecycle counter or treating undispatched intents as queued work.
   const admissionView = copyView(storedProjection(session.state).view);
+  const admitted: RuntimeWorkflowTaskRequest[] = [];
+  for (const task of prepared.plan) {
+    if (hasWorkflowAdmission(task)) {
+      admitted.push(task);
+      continue;
+    }
+    const result = createRuntimeToolResultFromValue({
+      callId: task.callId,
+      toolName: task.toolName,
+      output: {
+        code: "TOOL_EXECUTION_DENIED",
+        message:
+          "The call was not started: it was not admitted to run, for example because it was " +
+          "made before an upgrade. Make the call again to run it.",
+        tool: { result: "not_run" },
+      },
+      isError: true,
+    });
+    results.push(result);
+    // No approval policy refused it, so it isn't labelled as one.
+    refused.push({ policy: "admission", result });
+    if (task.entry.entryPoint === "task" || task.entry.entryPoint === "serve") {
+      nextSession = writeTaskTable(
+        nextSession,
+        removeTask(readTaskTable(nextSession.state), task.entry.taskId),
+      );
+    }
+  }
 
   const starts = withPrestartedRuns(
-    prepared.plan.map((task) => ({
+    admitted.map((task) => ({
       agentContext: captureAgentSessionContext(prepared, task.callId),
       auth: {
         current: prepared.auth,
@@ -114,10 +140,11 @@ async function dispatchCoordination(
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,
-      session,
+      session: nextSession,
+      startRun,
       task,
     })),
-    readTaskTable(session.state),
+    readTaskTable(nextSession.state),
     admissionView,
   );
 
@@ -131,7 +158,7 @@ async function dispatchCoordination(
     if (dispatched.result !== undefined) results.push(dispatched.result);
     // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
     else if (task.entry.entryPoint === "execute")
-      executing.push(callStarted(task.callId, { clearedBy: task.clearedBy }));
+      executing.push({ callId: task.callId, clearedBy: task.clearedBy });
     if (dispatched.started !== undefined) {
       started.push(dispatched.started);
       const shadow = sessionView(
@@ -145,12 +172,7 @@ async function dispatchCoordination(
       );
     }
     if (dispatched.refusal !== undefined && dispatched.result !== undefined)
-      refused.push(
-        callSettledFrom(dispatched.result, {
-          rejected: true,
-          cause: { policy: dispatched.refusal },
-        }),
-      );
+      refused.push({ policy: dispatched.refusal, result: dispatched.result });
   }
 
   return {

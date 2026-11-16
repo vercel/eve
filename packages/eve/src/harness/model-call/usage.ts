@@ -4,7 +4,6 @@ import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { turnUsage } from "#harness/session-usage.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type { Step } from "#harness/step/context.js";
-import { setEveAttributes } from "#runtime/attributes/emit.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 /** What one model call reported spending; a field it didn't report is absent. */
@@ -69,8 +68,10 @@ function readGatewayMetadata(
  */
 export async function recordModelUsage(
   step: Step,
-  input: { readonly model: LanguageModel },
+  input: { readonly model: LanguageModel; readonly tools: number },
 ): Promise<void> {
+  const { setAttributes } = step.config;
+  if (setAttributes === undefined) return;
   const usage = turnUsage(step.view().projection.view, step.position().turnId);
   const attributes = {
     "$eve.model": gatewayModelId(input.model),
@@ -79,8 +80,7 @@ export async function recordModelUsage(
     "$eve.cache_read_tokens": usage.cacheReadTokens,
     "$eve.cache_write_tokens": usage.cacheWriteTokens,
     "$eve.cost_usd": usage.costUsd,
-    "$eve.tool_count": step.config.tools.size,
+    "$eve.tool_count": input.tools,
   };
-  await step.config.titleAttributeWrite;
-  await setEveAttributes(attributes);
+  await setAttributes(attributes);
 }

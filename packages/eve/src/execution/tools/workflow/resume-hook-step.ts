@@ -1,7 +1,7 @@
-import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { isRunTargetGone } from "#shared/run-errors.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 
-/** `resumeHook` as a step, so the runtime API stays out of the owner. */
+/** Resumes a hook wherever it's held, as a step on Workflow, so the runtime API stays out of the owner. */
 export async function resumeHookStep(
   token: string,
   payload: unknown,
@@ -10,9 +10,9 @@ export async function resumeHookStep(
   "use step";
 
   try {
-    await resumeHook(token, payload);
+    await resumeRoutedHook(token, payload);
   } catch (error) {
-    if (options?.ifPresent === true && isTaskWorkflowTargetGone(error)) return;
+    if (options?.ifPresent === true && isRunTargetGone(error)) return;
     throw error;
   }
 }

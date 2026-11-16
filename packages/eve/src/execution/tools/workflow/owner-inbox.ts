@@ -1,4 +1,5 @@
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
+import { relayEvent } from "#channel/relay-event.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type {
   WorkflowToolAskRequest,
@@ -83,23 +84,21 @@ export function workflowAskPayload(
   if (authored.display !== undefined) request.display = authored.display;
   if (authored.title !== undefined) request.title = authored.title;
   if (authored.options !== undefined) request.options = [...authored.options];
+  if (authored.initialOptionId !== undefined) request.initialOptionId = authored.initialOptionId;
   return {
     callId: from.callId,
     childSessionId: from.runId,
     events: [
-      {
-        data: {
+      relayEvent("interaction.opened", {
+        interactionId: replyTo,
+        origin: {
+          call: { callId: from.callId, input: from.input, name: from.toolName },
           interactionId: replyTo,
-          origin: {
-            call: { callId: from.callId, input: from.input, name: from.toolName },
-            interactionId: replyTo,
-            sessionId: from.runId,
-          },
-          request,
-          subject: { callId: from.callId },
+          sessionId: from.runId,
         },
-        type: "interaction.opened",
-      },
+        request,
+        subject: { callId: from.callId },
+      }),
     ],
     kind: "subagent-interaction",
     route: { childContinuationToken: replyTo },

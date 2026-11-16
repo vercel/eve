@@ -4,6 +4,8 @@ import {
 } from "#internal/authored-module.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { CompiledDefinition, CompiledDefinitionKind } from "#compiler/manifest.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import {
   type AgentModuleBinding,
@@ -96,4 +98,37 @@ export async function loadModuleBackedDefinition(input: {
       `Failed to execute the ${input.kind} export "${input.source.exportName ?? "default"}" from "${input.displayPath ?? input.source.logicalPath}": ${toErrorMessage(error)}`,
     );
   }
+}
+
+/** What `source` compiles to as a file eve asks at runtime, named `slug`. */
+export function compiledDefinition(
+  kind: CompiledDefinitionKind,
+  source: ModuleSourceRef,
+  slug: string,
+  extra: Pick<CompiledDefinition, "description" | "eventNames"> = {},
+): CompiledDefinition {
+  return {
+    ...(source.exportName !== undefined && { exportName: source.exportName }),
+    ...extra,
+    kind,
+    logicalPath: source.logicalPath,
+    slug,
+    sourceId: source.sourceId,
+    sourceKind: "module",
+  };
+}
+
+/** The definition `value` compiles to when it's a `defineDynamic()` export, or `undefined`. */
+export function dynamicDefinition(
+  kind: CompiledDefinitionKind,
+  source: ModuleSourceRef,
+  value: unknown,
+  slug: string,
+): CompiledDefinition | undefined {
+  if (!isDynamicSentinel(value)) return undefined;
+  assertDynamicSentinelKeys(
+    value,
+    `Expected the ${kind} export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
+  );
+  return compiledDefinition(kind, source, slug);
 }

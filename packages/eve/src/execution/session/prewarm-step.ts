@@ -6,12 +6,10 @@ import {
   replaceDurableSessionSnapshot,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession, projectToDurableSession } from "#execution/session.js";
 import type { SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { createLogger } from "#internal/logging.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.session.prewarm");
 
@@ -38,12 +36,7 @@ async function prewarmSession(input: SessionPrewarmInput): Promise<{
 }> {
   try {
     const ctx = await deserializeContext(input.serializedContext);
-    const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
-    const session = hydrateDurableSession({
-      compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
-      durable: readDurableSession(input.sessionState),
-      turnAgent: effectiveAgent.turnAgent,
-    });
+    const session = hydrateDurableSession(readDurableSession(input.sessionState));
     // The providers' commit waits for the work the prewarmers started.
     const scoped = await withContextScope(ctx, session, async (current) => {
       startSessionPrewarmers(ctx, "session");

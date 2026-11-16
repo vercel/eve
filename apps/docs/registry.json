@@ -13,6 +13,7 @@
       ],
       "meta": {
         "eve": {
+          "hidden": true,
           "requires": ">=0.62.0",
           "install": {
             "pnpm": {
@@ -99,12 +100,33 @@
       ]
     },
     {
+      "name": "extension/code",
+      "type": "registry:item",
+      "title": "Code",
+      "description": "Add coding instructions, project AGENTS.md or CLAUDE.md, and investigation and review skills to an eve agent.",
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "meta": {
+        "eve": {
+          "requires": ">=0.76.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/code.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/code.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/agent-browser",
       "type": "registry:item",
       "title": "agent-browser",
       "description": "Add browser automation tools backed by agent-browser to an eve agent.",
       "dependencies": [
-        "@agent-browser/eve"
+        "@eve/agent-browser"
       ],
       "files": [
         {
@@ -196,7 +218,7 @@
       "name": "extension/link",
       "type": "registry:item",
       "title": "Link",
-      "description": "Give an eve agent guarded access to a Link wallet for payment methods, purchase requests, and checkout credentials.",
+      "description": "Give an eve agent guarded access to a Link wallet for payments, purchase requests, and financial insights.",
       "dependencies": [
         "@stripe/link-integrations-eve"
       ],
@@ -205,7 +227,7 @@
       },
       "meta": {
         "eve": {
-          "requires": ">=0.54.4"
+          "requires": ">=1.0.0"
         }
       },
       "files": [
@@ -418,6 +440,54 @@
       ]
     },
     {
+      "name": "memory/memco",
+      "type": "registry:item",
+      "title": "memco",
+      "description": "Give agents shared memory to learn from work and each other, with separate networks for each customer.",
+      "dependencies": [
+        "@memco/eve"
+      ],
+      "envVars": {
+        "MEMCO_API_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=1.0.0 <2.0.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/memco.ts",
+          "type": "registry:file",
+          "target": "agent/memory/memco.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/claude-mem",
+      "type": "registry:item",
+      "title": "claude-mem",
+      "description": "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
+      "dependencies": [
+        "claude-mem"
+      ],
+      "envVars": {
+        "CLAUDE_MEM_API_KEY": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.84.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/claude-mem.ts",
+          "type": "registry:file",
+          "target": "agent/memory/claude-mem.ts"
+        }
+      ]
+    },
+    {
       "name": "tool/agent",
       "type": "registry:item",
       "title": "Agent",
@@ -505,6 +575,19 @@
           "path": "registry/tools/write_file.ts",
           "type": "registry:file",
           "target": "agent/tools/write_file.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/edit_file",
+      "type": "registry:item",
+      "title": "Edit File",
+      "description": "Edit sandbox files by exact text replacement.",
+      "files": [
+        {
+          "path": "registry/tools/edit_file.ts",
+          "type": "registry:file",
+          "target": "agent/tools/edit_file.ts"
         }
       ]
     },
@@ -1110,6 +1193,22 @@
           "path": "registry/connections/context.ts",
           "type": "registry:file",
           "target": "agent/connections/context.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/context7",
+      "type": "registry:item",
+      "title": "Context7",
+      "description": "Look up up-to-date, version-specific library docs and code examples.",
+      "envVars": {
+        "CONTEXT7_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/context7.ts",
+          "type": "registry:file",
+          "target": "agent/connections/context7.ts"
         }
       ]
     },
@@ -1888,6 +1987,22 @@
       ]
     },
     {
+      "name": "connection/stacktree",
+      "type": "registry:item",
+      "title": "Stacktree",
+      "description": "Publish and update unlisted HTML pages through Stacktree's MCP server.",
+      "envVars": {
+        "STACKTREE_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/stacktree.ts",
+          "type": "registry:file",
+          "target": "agent/connections/stacktree.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/supabase",
       "type": "registry:item",
       "title": "Supabase",
@@ -1917,6 +2032,41 @@
           "path": "registry/connections/supabase.ts",
           "type": "registry:file",
           "target": "agent/connections/supabase.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/tavily",
+      "type": "registry:item",
+      "title": "Tavily",
+      "description": "Search the web, extract page content, crawl sites, and map URLs.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "tavily",
+              "tavily",
+              "tavily",
+              "--connection-method",
+              "mcp"
+            ]
+          },
+          "requires": ">=0.55.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/tavily.ts",
+          "type": "registry:file",
+          "target": "agent/connections/tavily.ts"
         }
       ]
     },
@@ -2222,7 +2372,7 @@
         "clsx@2.1.1",
         "lucide-react@1.16.0",
         "nanoid@5.1.11",
-        "next@16.3.6",
+        "next@16.4.1",
         "radix-ui@1.4.3",
         "react@19.2.6",
         "react-dom@19.2.6",
@@ -2232,7 +2382,7 @@
         "tailwindcss@4.3.0",
         "tw-animate-css@1.4.0",
         "use-stick-to-bottom@1.1.4",
-        "zod@4.5.4"
+        "zod@4.6.7"
       ],
       "devDependencies": [
         "@types/node@26",
@@ -2465,8 +2615,8 @@
         "tailwindcss@4.3.0",
         "tw-animate-css@1.4.0",
         "use-stick-to-bottom@1.1.4",
-        "vite@8.3.1",
-        "zod@4.5.4"
+        "vite@8.3.3",
+        "zod@4.6.7"
       ],
       "devDependencies": [
         "@types/node@26",
@@ -2723,20 +2873,27 @@
       "type": "registry:item",
       "title": "Telegram",
       "description": "Connect your agent to a Telegram bot for 1:1 and group chats.",
-      "envVars": {
-        "TELEGRAM_BOT_TOKEN": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/telegram.ts",
-          "type": "registry:file",
-          "target": "agent/channels/telegram.ts"
-        }
+      "dependencies": [
+        "@vercel/connect@>=2.7.0"
+      ],
+      "devDependencies": [
+        "vercel@>=58.7.0"
       ],
       "meta": {
         "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "setup",
+              "telegram"
+            ]
+          },
           "docs": "/docs/channels/telegram",
-          "implementation": "native"
+          "implementation": "native",
+          "requires": ">=1.0.0"
         }
       }
     },
@@ -2760,6 +2917,33 @@
         "eve": {
           "docs": "/docs/channels/twilio",
           "implementation": "native"
+        }
+      }
+    },
+    {
+      "name": "channel/recall",
+      "type": "registry:item",
+      "title": "Recall.ai",
+      "description": "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
+      "dependencies": [
+        "@eve/recall@^0.1.0"
+      ],
+      "envVars": {
+        "RECALL_API_KEY": "",
+        "RECALL_WORKSPACE_VERIFICATION_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/recall.ts",
+          "type": "registry:file",
+          "target": "agent/channels/recall.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/recall",
+          "implementation": "native",
+          "requires": ">=1.0.0"
         }
       }
     },

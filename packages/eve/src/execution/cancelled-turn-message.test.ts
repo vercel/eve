@@ -6,12 +6,7 @@ import type { HarnessSession } from "#harness/types.js";
 
 function session(): HarnessSession {
   return {
-    agent: {
-      modelReference: { id: "test-model" },
-      system: "You are a test assistant.",
-      tools: [],
-    },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:cancelled-turn-message",
     history: [],
     sessionId: "cancelled-turn-message",

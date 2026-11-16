@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { describe, it } from "vitest";
+import { beforeAll, describe, it } from "vitest";
 
 import type { ScenarioAppDescriptor } from "../../src/internal/testing/scenario-app.js";
 import {
@@ -20,6 +20,7 @@ import { useTemporaryDirectories } from "../../src/internal/testing/use-temporar
 
 const runFile = promisify(execFile);
 const createScratchDirectory = useTemporaryDirectories();
+const createSharedDirectory = useTemporaryDirectories({ scope: "file" });
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
 const ROOT_TYPE_DEFINITIONS = fileURLToPath(
@@ -30,6 +31,7 @@ const TSC_BIN_PATH = fileURLToPath(
 );
 const COMPILED_VENDOR_TYPES = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const PORTABILITY_TEST_TIMEOUT_MS = 30_000;
+const DECLARATION_EMIT_TIMEOUT_MS = 120_000;
 
 interface PortabilityCase {
   readonly descriptor: ScenarioAppDescriptor;
@@ -244,22 +246,73 @@ export default defineMemory({
 ];
 
 describe("public API declaration portability", () => {
+  let emittedDistRoot: string;
+
+  // A file's declarations do not depend on the other roots in the program, so
+  // one emit serves every case. Each case still gets its own export map.
+  beforeAll(async () => {
+    emittedDistRoot = await emitPublicDeclarations(
+      [...new Set(PORTABILITY_CASES.flatMap((testCase) => testCase.include))],
+      await createSharedDirectory("eve-public-api-portability-emit-"),
+    );
+  }, DECLARATION_EMIT_TIMEOUT_MS);
+
   for (const testCase of PORTABILITY_CASES) {
     it(
       testCase.name,
       async () => {
-        await expectPortableFixtureToTypecheck(testCase);
+        await expectPortableFixtureToTypecheck(testCase, emittedDistRoot);
       },
       PORTABILITY_TEST_TIMEOUT_MS,
     );
   }
 });
 
-async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Promise<void> {
-  const scratchRoot = await createScratchDirectory("eve-public-api-portability-");
-  const emittedPackageRoot = join(scratchRoot, "eve");
-  const appRoot = join(scratchRoot, "app");
+/** Emits declarations for `include` and eve's compiled vendor types, and returns the `dist` root. */
+async function emitPublicDeclarations(
+  include: readonly string[],
+  scratchRoot: string,
+): Promise<string> {
+  const distRoot = join(scratchRoot, "dist");
   const emitTsconfigPath = join(scratchRoot, "tsconfig.emit.json");
+
+  await writeFile(
+    emitTsconfigPath,
+    `${JSON.stringify(
+      {
+        extends: join(EVE_PACKAGE_ROOT, "tsconfig.json"),
+        compilerOptions: {
+          declaration: true,
+          declarationMap: false,
+          emitDeclarationOnly: true,
+          noEmit: false,
+          noEmitOnError: true,
+          outDir: distRoot,
+          rootDir: EVE_PACKAGE_ROOT,
+          typeRoots: [ROOT_TYPE_DEFINITIONS],
+        },
+        include: include.map((path) => join(EVE_PACKAGE_ROOT, path)),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  await runFile(process.execPath, [TSC_BIN_PATH, "-p", emitTsconfigPath], {
+    cwd: REPO_ROOT,
+  });
+
+  await copyCompiledVendorTypes(join(distRoot, "compiled"));
+  return distRoot;
+}
+
+async function expectPortableFixtureToTypecheck(
+  testCase: PortabilityCase,
+  emittedDistRoot: string,
+): Promise<void> {
+  const scratchRoot = await createScratchDirectory("eve-public-api-portability-");
+  const appRoot = join(scratchRoot, "app");
+  const emittedPackageRoot = join(appRoot, "node_modules", "eve");
   const consumerTsconfigPath = join(appRoot, "tsconfig.json");
 
   await mkdir(emittedPackageRoot, { recursive: true });
@@ -279,42 +332,13 @@ async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Prom
       2,
     )}\n`,
   );
-  await writeFile(
-    emitTsconfigPath,
-    `${JSON.stringify(
-      {
-        extends: join(EVE_PACKAGE_ROOT, "tsconfig.json"),
-        compilerOptions: {
-          declaration: true,
-          declarationMap: false,
-          emitDeclarationOnly: true,
-          noEmit: false,
-          noEmitOnError: true,
-          outDir: join(emittedPackageRoot, "dist"),
-          rootDir: EVE_PACKAGE_ROOT,
-          typeRoots: [ROOT_TYPE_DEFINITIONS],
-        },
-        include: testCase.include.map((path) => join(EVE_PACKAGE_ROOT, path)),
-      },
-      null,
-      2,
-    )}\n`,
-  );
-
-  await runFile(process.execPath, [TSC_BIN_PATH, "-p", emitTsconfigPath], {
-    cwd: REPO_ROOT,
-  });
-
-  await copyCompiledVendorTypes(join(emittedPackageRoot, "dist", "compiled"));
+  // A real copy, not a link: TypeScript names declarations by their real path.
+  await cp(emittedDistRoot, join(emittedPackageRoot, "dist"), { recursive: true });
 
   await mkdir(appRoot, { recursive: true });
   await writeDescriptorAppFiles({
     appRoot,
     descriptor: testCase.descriptor,
-  });
-  await mkdir(join(appRoot, "node_modules"), { recursive: true });
-  await cp(emittedPackageRoot, join(appRoot, "node_modules", "eve"), {
-    recursive: true,
   });
   await writeFile(
     join(appRoot, "package.json"),

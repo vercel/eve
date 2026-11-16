@@ -18,20 +18,36 @@ export async function getVercelSandboxCredentials(
   const projectId =
     readNonEmptyString(createOptions, "projectId") ??
     readNonEmptyEnvironmentVariable("VERCEL_PROJECT_ID");
-  const envToken =
-    readNonEmptyString(createOptions, "token") ??
-    readNonEmptyEnvironmentVariable("VERCEL_OIDC_TOKEN") ??
-    readNonEmptyEnvironmentVariable("VERCEL_TOKEN");
+  const withIds = (token: string | undefined): VercelSandboxCredentials | undefined =>
+    token && teamId && projectId ? { projectId, teamId, token } : undefined;
 
-  if (envToken && teamId && projectId) {
-    return { projectId, teamId, token: envToken };
+  const explicit = withIds(readNonEmptyString(createOptions, "token"));
+  if (explicit) {
+    return explicit;
   }
 
-  const oidcToken = await getVercelOidcToken({
-    project: projectId,
-    team: teamId,
-  });
-  return getVercelSandboxCredentialsFromOidcToken(oidcToken);
+  const accessToken = withIds(readNonEmptyEnvironmentVariable("VERCEL_TOKEN"));
+  if (accessToken && !readNonEmptyEnvironmentVariable("VERCEL_OIDC_TOKEN")) {
+    return accessToken;
+  }
+
+  // Never send `VERCEL_OIDC_TOKEN` as-is: it can expire before it is used, for
+  // example when a build starts long after its environment was issued. The
+  // helper uses the SDK's five-minute refresh buffer so near-expiry tokens
+  // fall back before template builds, not during SDK requests.
+  try {
+    const oidcToken = await getVercelOidcToken({
+      project: projectId,
+      team: teamId,
+      expirationBufferMs: 5 * 60_000,
+    });
+    return withIds(oidcToken) ?? getVercelSandboxCredentialsFromOidcToken(oidcToken);
+  } catch (error) {
+    if (accessToken) {
+      return accessToken;
+    }
+    throw error;
+  }
 }
 
 /** Credentials when eve can resolve them; otherwise `{}` so the SDK falls back to its own resolution. */

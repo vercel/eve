@@ -12,7 +12,7 @@ import { installMockedVercelIssuer } from "#internal/testing/mock-vercel-oidc-is
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { EveAuthFn, EveAuthResult } from "#public/channels/eve.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";

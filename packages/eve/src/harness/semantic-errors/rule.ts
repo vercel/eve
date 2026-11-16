@@ -9,6 +9,8 @@ import type { ErrorLink, ErrorSignals } from "./signals.js";
  * - `transient` — the failure is expected to clear on retry.
  * - `recoverable` — the current request cannot proceed, but the same session
  *   remains useful after an external fix.
+ * - `refused` — the provider refused what the request carried. The failed
+ *   turn's input leaves history, so the next turn doesn't send it again.
  */
 export type SemanticErrorTag =
   | "gateway"
@@ -18,7 +20,8 @@ export type SemanticErrorTag =
   | "system"
   | "config"
   | "transient"
-  | "recoverable";
+  | "recoverable"
+  | "refused";
 
 /** A predicate over one extracted cause-chain link. */
 export type LinkPredicate = (link: ErrorLink) => boolean;
@@ -105,6 +108,11 @@ export function nameIs(...names: readonly string[]): LinkPredicate {
 /** Matches when the link's `code` equals any of the given codes. */
 export function codeIs(...codes: readonly string[]): LinkPredicate {
   return (link) => link.code !== undefined && codes.includes(link.code);
+}
+
+/** Matches when the link's HTTP status equals any of the given statuses. */
+export function statusCodeIs(...statusCodes: readonly number[]): LinkPredicate {
+  return (link) => link.statusCode !== undefined && statusCodes.includes(link.statusCode);
 }
 
 /** Matches when the link's gateway body `type` equals any of the given types. */

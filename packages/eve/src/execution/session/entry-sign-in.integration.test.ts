@@ -1,3 +1,4 @@
+// @linux-only: sign-in flow
 import { describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -6,7 +7,6 @@ import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -15,8 +15,8 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
@@ -24,7 +24,7 @@ import type { ToolContext } from "#tools/definition.js";
 import { toInputSchema } from "#tools/schema.js";
 
 describe("workflowEntry sign-ins", () => {
-  it("fails a sign-in when completeAuthorization rejects its callback", async () => {
+  it("declines a sign-in when the provider reports the person refused, without completing it", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-denied");
 
     await runtime.run(async () => {
@@ -35,16 +35,18 @@ describe("workflowEntry sign-ins", () => {
         const asked = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        // The provider redirects back with a denial, which completeAuthorization rejects.
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        // The provider redirects back with a denial: there is nothing to complete.
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [weatherCallback(signInId(asked), { error: "access_denied" })],
         });
 
         const resumed = await stream.nextUntil("resumed turn", isTurnSettled);
-        expect(completeCalls()).toBe(1);
+        expect(completeCalls()).toBe(0);
         expect(filterEventsByType(resumed, "interaction.settled")).toMatchObject([
-          { data: { interactionId: signInId(asked), outcome: "failed", reason: "access_denied" } },
+          {
+            data: { interactionId: signInId(asked), outcome: "declined", reason: "access_denied" },
+          },
         ]);
       } finally {
         stream.dispose();
@@ -63,7 +65,7 @@ describe("workflowEntry sign-ins", () => {
       try {
         const beforeSignIn = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [weatherCallback(signInId(beforeSignIn))],
         });
@@ -115,7 +117,7 @@ describe("workflowEntry sign-ins", () => {
       try {
         const beforeSignIn = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [weatherCallback(signInId(beforeSignIn))],
         });
@@ -151,11 +153,7 @@ describe("workflowEntry sign-ins", () => {
         const asked = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        await waitForHook(
-          { runId: run.runId },
-          { token: sessionInboxHookToken(continuationToken) },
-        );
-        await resumeHook(sessionInboxHookToken(continuationToken), {
+        await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
           auth: userAuth("user-1"),
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -305,18 +303,16 @@ async function startWeatherRun(
   continuationToken: string,
   message = "Use the get_weather tool to check the weather in Lisbon.",
 ) {
-  return await startSessionOwner(workflowEntry, [
-    {
-      kind: "initial",
-      ownerDeploymentId: "dpl_inline",
-      input: { message },
-      serializedContext: buildSerializedContext({
-        auth: userAuth("user-1"),
-        channelKind: "http",
-        continuationToken,
-      }),
-    },
-  ]);
+  return await startTestSession("in-process", {
+    kind: "initial",
+    ownerDeploymentId: "dpl_inline",
+    input: { message },
+    serializedContext: buildSerializedContext({
+      auth: userAuth("user-1"),
+      channelKind: "http",
+      continuationToken,
+    }),
+  });
 }
 
 function weatherCallback(

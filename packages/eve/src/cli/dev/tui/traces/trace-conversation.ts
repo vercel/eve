@@ -582,6 +582,8 @@ function unwrapJsonString(raw: string | undefined): string | undefined {
 }
 
 function isModelSpan(span: LocalTraceSpan): boolean {
+  // A compaction's summary call has its own prompt and reply, not the conversation's.
+  if (span.attributes["ai.settings.context.eve.compaction.request"] !== undefined) return false;
   return (
     (span.name.startsWith("ai.") && span.name.includes("do")) ||
     span.attributes["gen_ai.operation.name"] === "chat"

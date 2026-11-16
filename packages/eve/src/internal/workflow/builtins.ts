@@ -1,9 +1,19 @@
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
+
 /**
  * Built-in Workflow response body steps used by eve-owned workflow bundles.
  *
  * These mirror Workflow's tiny `workflow/internal/builtins` module without
  * requiring eve to depend on Workflow's umbrella package.
+ *
+ * Every Workflow step bundle registers these steps, so Workflow's host
+ * installs with them: the step code in the bundle reads the attempt of the
+ * step running now from it (a retried step repairs what its interrupted
+ * attempt wrote), and reaches Workflow for the hooks, runs and streams no
+ * host in this realm holds. A bundle that runs eve's steps can't run them
+ * without it.
  */
+installWorkflowHost();
 export async function __builtin_response_array_buffer(
   this: Request | Response,
 ): Promise<ArrayBuffer> {
@@ -45,10 +55,9 @@ function formatUnknownError(error: unknown): string {
  * so adding the function here is sufficient to register it.
  *
  * Implementation notes — kept intentionally close to the upstream:
- * - Reads world and run id directly from the runtime's `globalThis`
- *   symbols rather than importing `@workflow/core`. Importing the
- *   compiled core from a step file would re-introduce the bundling
- *   chain we want to keep out of step bodies.
+ * - Reads world, attempt and run id directly from the runtime's
+ *   `globalThis` symbols, as upstream's step does, so it behaves exactly
+ *   as upstream's whichever copy of `@workflow/core` a bundle inlines.
  * - Treats missing world support as a silent best-effort no-op with a
  *   single process-wide warning, matching upstream behaviour and the
  *   contract on `setEveAttributes`.

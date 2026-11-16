@@ -62,6 +62,11 @@ export const SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12000;
 export const SLACK_MAX_BLOCKS_PER_MESSAGE = 50;
 
 /**
+ * A `container` block's `title` is capped at 150 characters.
+ */
+export const SLACK_CONTAINER_TITLE_MAX_LENGTH = 150;
+
+/**
  * `views.open` modal title is capped at 24 characters.
  */
 export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;
@@ -124,6 +129,13 @@ export function truncateCardSubtext(value: string): string {
  */
 export function truncateMessageText(value: string): string {
   return truncateWithEllipsis(value, SLACK_MESSAGE_TEXT_MAX_LENGTH);
+}
+
+/**
+ * Caps a `container` block's title at the Slack limit with a trailing ellipsis.
+ */
+export function truncateContainerTitle(value: string): string {
+  return truncateWithEllipsis(value, SLACK_CONTAINER_TITLE_MAX_LENGTH);
 }
 
 /**

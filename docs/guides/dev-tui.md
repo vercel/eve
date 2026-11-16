@@ -100,11 +100,11 @@ A tool call shows the tool's `label`, or eve's text for a built-in tool, such as
 
 A task, such as a subagent call, writes one transcript line when it starts and one when it finishes, fails, or is stopped. The finished line shows the duration and, for a subagent, what it did, such as `Read 3 files, Ran 2 commands`.
 
-While tasks work, a drawer above the prompt shows each task's name, latest tool, and elapsed time. Subagents get readable labels, such as `subagent(stock price)` for `stock-price` or `subagent(worker)` for the code extension's `code__worker`. Work started by a subagent appears beneath it. The drawer caps its height, puts tasks awaiting approval first, and yields to questions and approvals on small terminals. The model's `eve__task_wait` and `eve__task_cancel` calls appear only as the **Waiting** header and a stopped task's line.
+While tasks work, a drawer above the prompt shows each task's name, latest tool, and elapsed time. Subagents get readable labels, such as `subagent(stock price)` for `stock-price`. Work started by a subagent appears beneath it. The drawer caps its height, puts tasks awaiting approval first, and yields to questions and approvals on small terminals. The model's `eve__task_wait` and `eve__task_cancel` calls appear only as the **Waiting** header and a stopped task's line.
 
 The prompt stays open while the agent works, including turns started elsewhere, such as a scheduled run. Pressing `Enter` during a turn sends your message as steering, which adds it to the running turn:
 
-- Before the agent starts writing its reply, steering stops the model and continues the turn with your message. Running tools finish first.
+- Before the agent starts writing its reply or an eve tool call's input, steering stops the model and continues the turn with your message. Running tools finish first.
 - After the reply starts, the streamed text stays, and your message joins the turn at its next step. See [Message delivery and steering](../concepts/execution-model-and-durability#message-delivery-and-steering).
 
 Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or run `/cancel`, to cancel a running turn. A cancel sent before the turn starts applies only to that turn, never to a later one. If the cancel doesn't finish, press `Ctrl+C` again to stop waiting and start a new session; the next `Ctrl+C` exits. At an idle prompt, press `Ctrl+C` twice to exit.

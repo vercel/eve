@@ -34,7 +34,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
     ],
     ["the removed capture hook", { resolvePayload: () => ({}) }, "resolvePayload"],
     ["the removed deliveries", { deliveries: {} }, "deliveries"],
-  ])("rejects a subscription with %s", (_label, override, message) => {
+  ])("rejects a definition with %s", (_label, override, message) => {
     const definition = defineDynamicSchedules({ ...valid, ...override } as never);
     expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(message);
   });
@@ -52,6 +52,30 @@ describe("normalizeScheduleCollectionDefinition", () => {
     );
   });
 
+  it("rejects a named scope's approval on code-only definitions at type and runtime boundaries", () => {
+    const { scope: _scope, ...shared } = valid as typeof valid & { scope?: unknown };
+    const invalid = {
+      ...shared,
+      tool: false as const,
+      scopes: {
+        personal: { resolve: () => "alice", approval: { create: () => "user-approval" as const } },
+      },
+    };
+    // @ts-expect-error A code-only definition's scopes cannot configure model-call approval.
+    const definition = defineDynamicSchedules(invalid);
+    expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(
+      '"scopes.personal.approval" cannot be configured when tool is false',
+    );
+    // The same scope without approval is a valid code-only definition.
+    const { approval: _approval, ...personal } = invalid.scopes.personal;
+    expect(() =>
+      normalizeScheduleCollectionDefinition(
+        defineDynamicSchedules({ ...shared, tool: false, scopes: { personal } }),
+        "Invalid.",
+      ),
+    ).not.toThrow();
+  });
+
   it("defaults to Vercel and preserves an explicit provider override", () => {
     vi.stubEnv("EVE_DEV", "");
     try {
@@ -66,6 +90,32 @@ describe("normalizeScheduleCollectionDefinition", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it.each(["", " ", "has space", "daily.report", "/requests", "requests/", "a//b", "é", 7])(
+    "rejects the id %j",
+    (id) => {
+      const definition = defineDynamicSchedules({ ...valid, id } as never);
+      expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(
+        'Invalid. "id" must be',
+      );
+    },
+  );
+
+  it("rejects an id longer than 64 characters", () => {
+    const definition = defineDynamicSchedules({ ...valid, id: "a".repeat(65) });
+    expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow('"id"');
+  });
+
+  it.each([
+    "requests",
+    "native-channel-workflows",
+    "billing/requests",
+    "crm__sync",
+    "a".repeat(64),
+  ])("accepts the id %j", (id) => {
+    const definition = defineDynamicSchedules({ ...valid, id });
+    expect(normalizeScheduleCollectionDefinition(definition, "Invalid.").id).toBe(id);
   });
 
   it("accepts a schema and callback without configured deliveries", () => {

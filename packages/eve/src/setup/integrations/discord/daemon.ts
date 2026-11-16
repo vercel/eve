@@ -36,7 +36,7 @@ export function discordDaemonFiles(
   };
   return {
     ".dockerignore": "node_modules\n",
-    Dockerfile: `FROM node:24-slim
+    Dockerfile: `FROM node:26-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./

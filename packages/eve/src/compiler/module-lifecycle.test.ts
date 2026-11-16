@@ -9,13 +9,9 @@ import {
 
 const owner = { kind: "application" as const };
 
-function programmaticBinding(
-  moduleId: string,
-  dependencies?: Readonly<Record<string, string>>,
-): AgentModuleBinding {
+function programmaticBinding(moduleId: string): AgentModuleBinding {
   return {
     backing: {
-      dependencies,
       kind: "programmatic",
       moduleId,
       registryId: "lifecycle-test",
@@ -60,36 +56,12 @@ describe("node module lifecycle", () => {
     });
   });
 
-  it("links transitive programmatic dependencies into runtime entries", () => {
-    const context = new NodeModuleEvaluationContext([]);
-    context.setBindings({
-      dependency: programmaticBinding("dependency.ts"),
-      root: programmaticBinding("root.ts", { dependency: "dependency" }),
-    });
-    context.requireRuntimeEntry("root");
-
-    expect(context.finalizeBindings()).toMatchObject({
-      dependency: { usage: { compile: false, runtimeEntry: true } },
-      root: { usage: { compile: false, runtimeEntry: true } },
-    });
-  });
-
-  it("rejects missing dependencies, cycles, and unused selected bindings", () => {
+  it("rejects a runtime entry without a binding, and unused selected bindings", () => {
     const missing = new NodeModuleEvaluationContext([]);
-    missing.setBindings({ root: programmaticBinding("root.ts", { dependency: "missing" }) });
-    missing.requireRuntimeEntry("root");
+    missing.setBindings({});
+    missing.requireRuntimeEntry("missing");
     expect(() => missing.finalizeBindings()).toThrow(
       'Runtime module entry "missing" has no selected binding.',
-    );
-
-    const cyclic = new NodeModuleEvaluationContext([]);
-    cyclic.setBindings({
-      left: programmaticBinding("left.ts", { right: "right" }),
-      right: programmaticBinding("right.ts", { left: "left" }),
-    });
-    cyclic.requireRuntimeEntry("left");
-    expect(() => cyclic.finalizeBindings()).toThrow(
-      'Compiled module dependency cycle includes "left".',
     );
 
     const unused = new NodeModuleEvaluationContext([]);

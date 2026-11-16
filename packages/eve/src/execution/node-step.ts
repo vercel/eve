@@ -1,10 +1,10 @@
 import type { LanguageModel } from "ai";
-import { isFrameworkTool } from "#tools/provided/framework-tool.js";
+import { isFrameworkTool, isInteractionOnly } from "#tools/provided/framework-tool.js";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/kernel.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
@@ -29,7 +29,7 @@ import {
   resolveWebSearchActivityLabel,
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
-import type { ToolLoopHarnessConfig } from "#harness/types.js";
+import type { KernelConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
@@ -39,7 +39,7 @@ const log = createLogger("execution.node-step");
  * `createWorkflowRuntime`, so callers pass the constructor directly —
  * no wrapper needed.
  */
-type CreateRuntime = (config: {
+export type CreateRuntime = (config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
 }) => Runtime;
@@ -49,7 +49,7 @@ type CreateRuntime = (config: {
  */
 interface CreateExecutionNodeStepInput {
   readonly steeringSignal?: AbortSignal;
-  /** Cancellation signal forwarded to the tool-loop harness. */
+  /** Cancellation signal forwarded to the kernel. */
   readonly abortSignal?: AbortSignal;
   /**
    * Session-level capabilities propagated from the runtime, so
@@ -60,20 +60,23 @@ interface CreateExecutionNodeStepInput {
   readonly clearOnly?: boolean;
   /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
-  readonly controlDelivery?: ToolLoopHarnessConfig["controlDelivery"];
+  readonly controlDelivery?: KernelConfig["controlDelivery"];
   /**
    * Runtime constructor used by the subagent tool executor to start
    * delegated child runs on the same workflow runtime as the parent.
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
-  readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
-  readonly typedAnswers?: ToolLoopHarnessConfig["typedAnswers"];
+  readonly signInCompletions?: KernelConfig["signInCompletions"];
+  readonly typedAnswers?: KernelConfig["typedAnswers"];
   readonly instrumentation: ExecutionInstrumentation | undefined;
-  readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
+  readonly setAttributes?: KernelConfig["setAttributes"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
+  /** Who runs the step, as its events name it. */
+  readonly agent: RuntimeAgentIdentity;
+  /** The compiled node whose `agent/tools/` the step runs. */
   readonly node: ResolvedRuntimeAgentNode;
-  readonly sessionUsageLimit?: ToolLoopHarnessConfig["sessionUsageLimit"];
+  readonly sessionUsageLimit?: KernelConfig["sessionUsageLimit"];
 }
 
 /**
@@ -85,7 +88,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
-  const step = createToolLoopHarness({
+  const step = createKernel({
     steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
@@ -97,10 +100,10 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     signInCompletions: input.signInCompletions,
     typedAnswers: input.typedAnswers,
     resolveModel,
-    runtimeIdentity: buildRuntimeIdentity(input.node),
+    runtimeIdentity: buildRuntimeIdentity(input.agent),
     sessionUsageLimit: input.sessionUsageLimit,
     tools,
-    titleAttributeWrite: input.titleAttributeWrite,
+    setAttributes: input.setAttributes,
   });
   if (instrumentation === undefined) return step;
   return async (session, stepInput) => {
@@ -112,16 +115,22 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   };
 }
 
+/** The agent a step runs, as its runtime identity names it. */
+export interface RuntimeAgentIdentity {
+  readonly id: string;
+  readonly name?: string;
+}
+
 /**
- * Builds a {@link RuntimeIdentity} from the resolved runtime agent node
- * and the current eve package installation.
+ * Builds a {@link RuntimeIdentity} from the session's agent and the current eve package
+ * installation.
  */
-export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
+export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdentity {
   const packageInfo = resolveInstalledPackageInfo();
 
   const identity: RuntimeIdentity = {
-    agentId: node.turnAgent.id,
-    agentName: node.agent.config?.name,
+    agentId: agent.id,
+    agentName: agent.name,
     eveVersion: packageInfo.version,
   };
 
@@ -239,6 +248,7 @@ function createRegisteredHarnessToolDefinition(input: {
     }),
     frameworkTool: isFrameworkTool(def) || def.owner.kind === "framework",
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
+    ...(isInteractionOnly(def) && { interactionOnly: true }),
     name: def.name,
     approval: def.approval,
     outputSchema: def.outputSchema,

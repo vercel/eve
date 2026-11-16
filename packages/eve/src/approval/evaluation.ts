@@ -107,6 +107,22 @@ export function inheritApprovalContext<T extends ApprovalContext>(
   return { ...context, [evaluationKey]: evaluation };
 }
 
+/**
+ * Keeps what a policy remembers under `scope`, so one tool that acts for several owners keeps a
+ * separate decision for each: approving one doesn't approve the others.
+ */
+export function scopeApprovalEvaluation<T extends ApprovalContext>(context: T, scope: string): T {
+  const evaluation = approvalEvaluation(context);
+  if (evaluation === undefined) return context;
+  const scoped = (key: string) => JSON.stringify([scope, key]);
+  const narrowed: ApprovalEvaluation = Object.freeze({
+    ask: (remember: RememberRequest) => evaluation.ask({ ...remember, key: scoped(remember.key) }),
+    read: (key: string) => evaluation.read(scoped(key)),
+    recheck: evaluation.recheck,
+  });
+  return { ...context, [evaluationKey]: narrowed };
+}
+
 /** Whether `context` is the re-check of an approved call just before it runs. */
 export function isApprovalRecheck(context: ApprovalContext): boolean {
   return approvalEvaluation(context)?.recheck === true;

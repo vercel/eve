@@ -1,14 +1,11 @@
+import { changeHistory } from "#harness/session-machine/history.js";
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
 import type { StepResult } from "#harness/types.js";
 import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import {
-  type HarnessModelMessage,
-  resolveAssistantStepText,
-  validateHarnessModelMessages,
-} from "#harness/messages.js";
+import { resolveAssistantStepText } from "#harness/messages.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import {
   appendMissingToolResultMessages,
@@ -17,9 +14,8 @@ import {
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
-import { failTurnForReaction, type Step } from "#harness/step/context.js";
-import { turnSettled } from "#harness/facts.js";
-import { fail, suspendStep } from "#harness/session-machine/transitions.js";
+import { failTurnForEffect, type Step, stepReference } from "#harness/step/context.js";
+import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
@@ -101,7 +97,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   step.session = {
     ...step.session,
     compaction: withPromptMeasurement(step.session.compaction, {
+      promptMessages,
       inputTokens: result.usage?.inputTokens,
+      modelId: stepReference(step).id,
       promptMessageCount: input.durableModelPromptMessageCount,
       requestEnvelopeTokens: input.requestEnvelopeTokens,
     }),
@@ -127,21 +125,26 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
     const { sequence, stepIndex, turnId } = step.position();
     const dispatched = collectWorkflowCalls({
+      clearances: result.policyApprovals ?? {},
       session: step.session,
       toolCalls: workflowToolCalls,
       tools: input.catalog,
       turnId,
     });
-    step.session = { ...dispatched.session, history: validateHarnessModelMessages(promptMessages) };
+    step.session = changeHistory(dispatched.session, { extend: promptMessages });
+    // A call that ran in this step can already end the turn: its `execute` output is only here.
+    // The turn then ends once the parked calls settle, however they do. A provider-run call's
+    // outcome still goes to the model.
+    const endsTurn =
+      !normalizedProviderHistory.outcomeEndsResponse &&
+      (await stepEndsTurn(result, responseMessages, input.endsTurnTools));
     const parked = {
+      ...(endsTurn && { endsTurn: true as const }),
       event: { sequence, stepIndex, turnId },
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
       messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests.map((task) => ({
-        ...task,
-        clearedBy: result.policyApprovals?.[task.callId],
-      })),
+      tasks: dispatched.workflowRequests,
     };
     if (approvalRequests.length > 0) {
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
@@ -158,47 +161,43 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // History grows by append only; nothing rewrites earlier messages mid-turn,
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
-  // history, and it runs before the model call (see `maybeCompact`).
-  step.session = {
-    ...step.session,
-    history: validateHarnessModelMessages([...promptMessages, ...responseMessages]),
-  };
-
+  // history, and it runs before the model call (see `historyBeforeCall`).
   // An `eve__reply` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
-  const calledFinalOutput =
-    step.session.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
+  const finalOutput =
+    step.session.outputSchema === undefined ? undefined : extractFinalOutput(result);
+  const calledFinalOutput = finalOutput !== undefined;
   const workingTasks = workingTaskIds(step.session);
   const finalOutputRejected = calledFinalOutput && workingTasks.length > 0;
-  let responseTail: readonly ModelMessage[] = responseMessages;
-  if (finalOutputRejected) {
-    responseTail = rejectFinalOutput(responseMessages, result, workingTasks);
-    step.session = {
-      ...step.session,
-      history: validateHarnessModelMessages([...promptMessages, ...responseTail]),
-    };
-  }
+  const responseTail: readonly ModelMessage[] = finalOutputRejected
+    ? rejectFinalOutput(responseMessages, result, workingTasks)
+    : responseMessages;
+  // A delivered structured value replaces the un-executed `eve__reply` call, which would be a
+  // dangling tool_use on the next turn.
+  const historyTail: readonly ModelMessage[] =
+    calledFinalOutput && !finalOutputRejected
+      ? [{ content: JSON.stringify(finalOutput), role: "assistant" }]
+      : responseTail;
+  step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
+  const delivered = calledFinalOutput && !finalOutputRejected;
   const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
+  // The model reads what it hasn't yet: its calls' results, unless a call ended the turn; a
+  // provider-run call's outcome; and input that joined the turn while it ran.
   const continueLoop =
-    (!calledFinalOutput || finalOutputRejected) &&
+    !delivered &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasQueuedTurnInput(step.view()));
   if (continueLoop) return { next: step.runStep, session: step.session };
-  // The turn rule: no turn ends while its tasks work. The session waits for
-  // one to settle, then calls the model again in the same turn.
+  // No turn ends while its tasks work: the session waits for one to settle, then calls the model
+  // again in the same turn.
   if (workingTasks.length > 0) {
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
-
-  return settleTurn(step, {
-    history: promptMessages,
-    result,
-    // Text written before an `endsTurn` call was narration, not the reply.
-    stepOutput: endsTurn ? null : stepOutput,
-  });
+  // Text written before an `endsTurn` call was narration, not the reply.
+  return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
 }
 
 /**
@@ -225,9 +224,11 @@ function answerCallsThatWontRun(
 }
 
 /**
- * Whether the step ends the turn: every tool call targets a tool that can end
- * the turn and succeeded, and each `endsTurn` function accepts its call's
- * `execute` output. A failed or invalid call lets the model recover instead.
+ * Whether the step ends the turn: some tool call targets a tool that can end
+ * the turn, succeeded, and its `endsTurn` function, if any, accepts its call's
+ * `execute` output. Its sibling calls have already settled by then, so they
+ * run to completion whatever their outcome. A failed or invalid ending call
+ * lets the model recover instead.
  */
 async function stepEndsTurn(
   result: HarnessStepResult,
@@ -243,24 +244,49 @@ async function stepEndsTurn(
       if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
     }
   }
-  const succeeded = toolCalls.every((toolCall) => {
-    const output = outputs.get(toolCall.toolCallId);
-    return (
-      endsTurnTools.has(toolCall.toolName) && output !== undefined && !isToolResultError(output)
-    );
-  });
-  if (!succeeded) return false;
   const executeOutputs = new Map(
     (result.toolResults ?? []).map((toolResult) => [toolResult.toolCallId, toolResult.output]),
   );
-  for (const toolCall of toolCalls) {
-    const endsTurn = endsTurnTools.get(toolCall.toolName);
-    if (typeof endsTurn !== "function") continue;
-    if (!(await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))) {
-      return false;
+  return await callsEndTurn(
+    toolCalls.map((toolCall) => {
+      const output = outputs.get(toolCall.toolCallId);
+      return {
+        failed: output === undefined || isToolResultError(output),
+        output: executeOutputs.get(toolCall.toolCallId),
+        toolCallId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+      };
+    }),
+    endsTurnTools,
+  );
+}
+
+/** A call as the turn rule reads it: `failed` when it has no result or an error result. */
+export interface EndingCall {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly failed: boolean;
+  readonly output: unknown;
+}
+
+/**
+ * Whether some call ends the turn: it targets a tool that can end it, succeeded, and its
+ * `endsTurn` function, if any, accepts its call's output. Other calls in the same step don't keep
+ * the turn going. Every successful call's function runs, in call order.
+ */
+export async function callsEndTurn(
+  calls: readonly EndingCall[],
+  endsTurnTools: EndsTurnTools,
+): Promise<boolean> {
+  let ends = false;
+  for (const call of calls) {
+    const endsTurn = endsTurnTools.get(call.toolName);
+    if (endsTurn === undefined || call.failed) continue;
+    if (typeof endsTurn !== "function" || (await callEndsTurn(endsTurn, call.output, call))) {
+      ends = true;
     }
   }
-  return true;
+  return ends;
 }
 
 /** A throwing `endsTurn` function keeps the turn going rather than failing it. */
@@ -316,34 +342,29 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
 /**
  * Closes a terminal turn. An unmet output schema fails the turn recoverably;
  * otherwise the structured value (or prose) ends the turn and the session
- * waits for the next message. The structured value replaces the un-executed
- * `eve__reply` call, which would be a dangling tool_use on the next turn,
- * and the schema, scoped to the turn, clears.
+ * waits for the next message, and the schema, scoped to the turn, clears.
  */
-async function settleTurn(
+export async function settleTurn(
   step: Step,
   input: {
-    readonly history: readonly HarnessModelMessage[];
-    readonly result: HarnessStepResult;
+    /** The step's response, which only an output-schema turn reads. */
+    readonly result?: HarnessStepResult;
     readonly stepOutput: string | null;
   },
 ): Promise<StepResult> {
-  const { history, result, stepOutput } = input;
+  const { result, stepOutput } = input;
   // A hook that failed after the turn's last model call fails it rather than let it complete.
-  const hookFailure = await failTurnForReaction(step);
+  const hookFailure = await failTurnForEffect(step);
   if (hookFailure !== undefined) return hookFailure;
   const schema = step.session.outputSchema;
   step.session = clearTurnClientContextState(step.session);
 
   if (schema === undefined) {
-    await step.apply(
-      turnSettled(step.view().projection, { outcome: "completed" }),
-      step.session.history,
-    );
+    await step.apply(complete(step.view()), step.session.history);
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
-  const structured = extractFinalOutput(result);
+  const structured = result === undefined ? undefined : extractFinalOutput(result);
   // The schema belongs to the settled turn. A later conversation turn that
   // omits outputSchema must not inherit its contract.
   if (structured === undefined) {
@@ -356,14 +377,7 @@ async function settleTurn(
     };
   }
 
-  step.session = {
-    ...step.session,
-    history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
-    outputSchema: undefined,
-  };
-  await step.apply(
-    turnSettled(step.view().projection, { outcome: "completed" }),
-    step.session.history,
-  );
+  step.session = { ...step.session, outputSchema: undefined };
+  await step.apply(complete(step.view()), step.session.history);
   return { next: null, session: step.session, settledTurn: { output: structured } };
 }

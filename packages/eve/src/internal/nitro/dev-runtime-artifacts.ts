@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { resolveDevelopmentStateDirectory } from "#internal/application/dev-environment.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
-import { resolveExtensionExternalDependencyPaths } from "#internal/nitro/host/extension-external-dependency-plugin.js";
+import { resolveExtensionExternalDependencyPaths } from "#internal/nitro/host/extension-external-dependencies.js";
 import {
   createDevelopmentSourceSnapshotPlan,
   toDevelopmentSourceSnapshotPath,
@@ -21,18 +21,13 @@ import {
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { resolveDevelopmentRuntimeArtifactsSnapshotsDirectory } from "#internal/nitro/dev-runtime-generation-metadata.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 
-interface DevelopmentRuntimeArtifactsPointerV1 {
-  readonly appRoot: string;
-  readonly kind: "eve-dev-runtime-artifacts-pointer";
-  readonly version: 1;
-}
-
-interface DevelopmentRuntimeArtifactsPointerV2 {
+interface DevelopmentRuntimeArtifactsPointer {
   readonly appRoot: string;
   readonly kind: "eve-dev-runtime-artifacts-pointer";
   readonly runtimeAppRoot: string;
@@ -55,11 +50,6 @@ export interface DevelopmentRuntimeArtifactsSnapshot {
 export interface ActiveDevelopmentRuntimeArtifactsSnapshot {
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
-}
-
-export interface DevelopmentRuntimeArtifactsActivation {
-  commit(): void;
-  rollback(): Promise<void>;
 }
 
 /**
@@ -215,10 +205,10 @@ function findPackageRoot(entryPath: string, packageName: string): string {
 /**
  * Moves the dev runtime pointer so future sessions use a staged snapshot.
  */
-export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(input: {
+export async function activateDevelopmentRuntimeArtifactsSnapshot(input: {
   readonly appRoot: string;
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
-}): Promise<DevelopmentRuntimeArtifactsActivation> {
+}): Promise<void> {
   const materializedIndex = await readMaterializedAuthoredModuleIndex(
     input.snapshot.runtimeAppRoot,
   );
@@ -243,7 +233,7 @@ export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(inp
     await writeFile(markerPath, "");
     await writeDevelopmentRuntimeArtifactsPointer(input);
     if (
-      previousPointer?.version === DEV_RUNTIME_ARTIFACTS_POINTER_VERSION &&
+      previousPointer !== undefined &&
       previousPointer.snapshotRoot !== input.snapshot.snapshotRoot &&
       isDevelopmentRuntimeArtifactsSnapshotRoot(input.appRoot, previousPointer.snapshotRoot)
     ) {
@@ -263,27 +253,6 @@ export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(inp
       previousPointerSource,
     });
   }
-
-  let settled = false;
-  return {
-    commit() {
-      settled = true;
-    },
-    async rollback() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      const rollbackError = await restoreDevelopmentRuntimeArtifactsActivation({
-        markerPath,
-        pointerPath,
-        previousPointerSource,
-      });
-      if (rollbackError !== undefined) {
-        throw rollbackError;
-      }
-    },
-  };
 }
 
 /**
@@ -292,17 +261,7 @@ export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(inp
 export function readDevelopmentRuntimeArtifactsSnapshotRoot(
   pointerPath: string | undefined,
 ): string | undefined {
-  const pointer = readDevelopmentRuntimeArtifactsPointer(pointerPath);
-
-  if (pointer === undefined) {
-    return undefined;
-  }
-
-  if (pointer.version === 1) {
-    return pointer.appRoot;
-  }
-
-  return pointer.runtimeAppRoot;
+  return readDevelopmentRuntimeArtifactsPointer(pointerPath)?.runtimeAppRoot;
 }
 
 export function readActiveDevelopmentRuntimeArtifactsSnapshot(
@@ -311,7 +270,7 @@ export function readActiveDevelopmentRuntimeArtifactsSnapshot(
   const pointer = readDevelopmentRuntimeArtifactsPointer(
     resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
   );
-  if (pointer === undefined || pointer.version === 1) {
+  if (pointer === undefined) {
     return undefined;
   }
   return {
@@ -347,11 +306,9 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
     resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot),
   );
   return await pruneDevelopmentRuntimeArtifactsSnapshotDirectory({
-    activeSnapshotRoot:
-      pointer?.version === DEV_RUNTIME_ARTIFACTS_POINTER_VERSION ? pointer.snapshotRoot : undefined,
+    activeSnapshotRoot: pointer?.snapshotRoot,
     gracePeriodMs: input.gracePeriodMs,
     now: input.now,
-    protectAll: pointer?.version === 1,
     retainCount: input.retainCount,
     snapshotsDirectory: resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(input.appRoot),
   });
@@ -374,36 +331,18 @@ function collectExtensionMountSourceRoots(manifest?: CompiledAgentManifest): str
 
 function readDevelopmentRuntimeArtifactsPointer(
   pointerPath: string | undefined,
-): DevelopmentRuntimeArtifactsPointerV1 | DevelopmentRuntimeArtifactsPointerV2 | undefined {
+): DevelopmentRuntimeArtifactsPointer | undefined {
   if (pointerPath === undefined || !existsSync(pointerPath)) {
     return undefined;
   }
 
   try {
-    const pointer = JSON.parse(readFileSync(pointerPath, "utf8")) as Partial<
-      DevelopmentRuntimeArtifactsPointerV1 | DevelopmentRuntimeArtifactsPointerV2
-    >;
+    const pointer = JSON.parse(
+      readFileSync(pointerPath, "utf8"),
+    ) as Partial<DevelopmentRuntimeArtifactsPointer>;
 
     if (
-      pointer.kind !== "eve-dev-runtime-artifacts-pointer" ||
-      typeof pointer.version !== "number"
-    ) {
-      return undefined;
-    }
-
-    if (
-      pointer.version === 1 &&
-      typeof pointer.appRoot === "string" &&
-      pointer.appRoot.length > 0
-    ) {
-      return {
-        appRoot: pointer.appRoot,
-        kind: "eve-dev-runtime-artifacts-pointer",
-        version: 1,
-      };
-    }
-
-    if (
+      pointer.kind === "eve-dev-runtime-artifacts-pointer" &&
       pointer.version === DEV_RUNTIME_ARTIFACTS_POINTER_VERSION &&
       typeof pointer.appRoot === "string" &&
       typeof pointer.runtimeAppRoot === "string" &&
@@ -561,7 +500,7 @@ async function writeDevelopmentRuntimeArtifactsPointer(input: {
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
 }): Promise<void> {
   const pointerPath = resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot);
-  const pointer: DevelopmentRuntimeArtifactsPointerV2 = {
+  const pointer: DevelopmentRuntimeArtifactsPointer = {
     appRoot: input.appRoot,
     kind: "eve-dev-runtime-artifacts-pointer",
     runtimeAppRoot: input.snapshot.runtimeAppRoot,
@@ -680,13 +619,4 @@ function collectManifestRootPaths(value: unknown): string[] {
   }
 
   return paths;
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }

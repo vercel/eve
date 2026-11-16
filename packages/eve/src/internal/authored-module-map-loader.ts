@@ -120,14 +120,7 @@ async function hydrateCompiledNodeScope(
   for (const { binding, sourceId } of collectRuntimeModuleBindingsForManifest(manifest)) {
     modules[sourceId] =
       binding.backing.kind === "programmatic"
-        ? await loadFrameworkProgrammaticModule(
-            binding.backing,
-            Object.fromEntries(
-              Object.entries(binding.backing.dependencies ?? {}).map(
-                ([alias, dependencySourceId]) => [alias, modules[dependencySourceId]!],
-              ),
-            ),
-          )
+        ? await loadFrameworkProgrammaticModule(binding.backing)
         : memoizeModuleNamespaceFactories(
             await loadAuthoredModuleNamespace(resolveSourcePath(binding.backing.sourcePath), {
               appRoot: binding.owner.kind === "application" ? appRoot : undefined,

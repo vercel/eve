@@ -181,3 +181,50 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
       .map((row) => row.interactionId),
   );
 }
+
+/**
+ * The parked steps whose response already ended the turn with a call that ran before they parked,
+ * by their coordinates: a step's object changes as its results arrive.
+ */
+export function endingStepKeys(view: SessionView): ReadonlySet<string> {
+  return new Set(
+    view.turn.suspended.flatMap((parked) =>
+      parked.endsTurn === true ? [stepCoordinatesKey(parked.event)] : [],
+    ),
+  );
+}
+
+/** Whether one of the `ending` steps committed: it no longer waits on a call. */
+export function committedEndingStep(view: SessionView, ending: ReadonlySet<string>): boolean {
+  if (ending.size === 0) return false;
+  const waiting = new Set(view.turn.suspended.map((parked) => stepCoordinatesKey(parked.event)));
+  return [...ending].some((key) => !waiting.has(key));
+}
+
+/**
+ * Whether every call of each parked response has a result, counting `settledIds`, and none ran at
+ * its provider, whose outcome the model reads.
+ */
+export function parkedCallsAnswered(
+  suspended: readonly SuspendedStep[],
+  settledIds: ReadonlySet<string>,
+): boolean {
+  return suspended.every((parked) => {
+    const answered = answeredCallIds(parked.messages);
+    return parked.messages.every(
+      ({ content, role }) =>
+        role !== "assistant" ||
+        typeof content === "string" ||
+        content.every(
+          (part) =>
+            part.type !== "tool-call" ||
+            (part.providerExecuted !== true &&
+              (answered.has(part.toolCallId) || settledIds.has(part.toolCallId))),
+        ),
+    );
+  });
+}
+
+function stepCoordinatesKey(event: StepCoordinates): string {
+  return `${event.turnId}:${event.sequence}:${event.stepIndex}`;
+}

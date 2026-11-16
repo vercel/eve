@@ -82,6 +82,7 @@
   "SlackInteractionContext",
   "SlackMentionResult",
   "SlackMessage",
+  "SlackMessageEdit",
   "SlackOpenCodeChannelOptions",
   "SlackOpenedCodeChannel",
   "SlackPostInput",

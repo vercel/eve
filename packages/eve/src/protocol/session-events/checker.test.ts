@@ -129,6 +129,44 @@ describe("createStreamChecker", () => {
     expect(rulesOf(lines)).toEqual(["closure"]);
   });
 
+  it("accepts a call and a reply the turn makes without a run, and refuses a part it can't place", () => {
+    const part = (scope?: object) => ({
+      data: { kind: "text", partId: "p_own", phase: "reply", value: "Done." },
+      ...(scope !== undefined && { scope }),
+      type: "content.completed",
+    });
+    const ownTurn = (...facts: unknown[]) => [
+      ...repliedTurn().slice(0, 2),
+      ...commits(
+        [
+          {
+            data: {
+              callId: "c_0",
+              capability: { kind: "tool", name: "deploy" },
+              owner: turn,
+            },
+            scope: turn,
+            type: "call.requested",
+          },
+          { data: { callId: "c_0" }, scope: turn, type: "call.started" },
+          { data: { callId: "c_0", outcome: "completed" }, scope: turn, type: "call.settled" },
+          ...facts,
+        ],
+        [
+          { data: { outcome: "completed", turnId: "turn_0" }, scope: turn, type: "turn.settled" },
+          {
+            data: { deliveryId: "d_0", outcome: "handled", turnId: "turn_0" },
+            type: "delivery.settled",
+          },
+        ],
+      ),
+    ];
+    expect(rulesOf(ownTurn(part(turn)))).toEqual([]);
+    expect(rulesOf(ownTurn(part()))).toEqual(["schema"]);
+    expect(rulesOf(ownTurn(part({ turnId: "turn_9" })))).toEqual(["introduce-before-reference"]);
+    expect(rulesOf([...ownTurn(), ...commits([part(turn)])])).toEqual(["closure"]);
+  });
+
   it("accepts a run's attempts in order, and refuses one out of order or after it settled", () => {
     const started = (attempt: number) => ({
       data: { attempt, modelId: "m", runId: "run_0" },
@@ -256,6 +294,106 @@ describe("createStreamChecker", () => {
       ),
     );
     expect(rulesOf(lines)).toEqual(["batch-settles-together"]);
+  });
+
+  describe("a call a person was asked about", () => {
+    const requested = (callId: string) => ({
+      data: { callId, capability: { kind: "tool", name: "deploy" }, owner: { runId: "run_0" } },
+      scope: run,
+      type: "call.requested",
+    });
+    const asked = (callId: string, interactionId: string, origin?: object) => ({
+      data: {
+        interactionId,
+        ...(origin !== undefined && { origin }),
+        request: { kind: "approval", prompt: "Deploy?" },
+        subject: { callId },
+      },
+      type: "interaction.opened",
+    });
+    const settled = (interactionId: string, outcome: string) => ({
+      data: { interactionId, outcome },
+      type: "interaction.settled",
+    });
+    const started = (callId: string, clearedBy?: object) => ({
+      data: { callId, ...(clearedBy !== undefined && { clearedBy }) },
+      type: "call.started",
+    });
+    const rules = (...lines: unknown[][]) =>
+      rulesOf([...repliedTurn().slice(0, 4), ...commits(...lines)]);
+
+    it("starts once its approval is accepted, cleared by it", () => {
+      expect(
+        rules(
+          [requested("c_0"), asked("c_0", "i_0")],
+          [settled("i_0", "accepted"), started("c_0", { interactionId: "i_0" })],
+        ),
+      ).toEqual([]);
+    });
+
+    it("doesn't start while its approval is open", () => {
+      expect(
+        rules([requested("c_0"), asked("c_0", "i_0")], [started("c_0", { interactionId: "i_0" })]),
+      ).toEqual(["cleared-before-start"]);
+    });
+
+    it("doesn't start after a person declined it", () => {
+      expect(
+        rules(
+          [requested("c_0"), asked("c_0", "i_0")],
+          [settled("i_0", "declined"), started("c_0", { interactionId: "i_0" })],
+        ),
+      ).toEqual(["cleared-before-start"]);
+    });
+
+    it("names its own approval, not another call's", () => {
+      expect(
+        rules(
+          [requested("c_0"), requested("c_1"), asked("c_0", "i_0"), asked("c_1", "i_1")],
+          [
+            settled("i_0", "accepted"),
+            settled("i_1", "accepted"),
+            started("c_0", { interactionId: "i_1" }),
+          ],
+        ),
+      ).toEqual(["cleared-before-start"]);
+      expect(
+        rules(
+          [requested("c_0"), requested("c_1"), asked("c_1", "i_1")],
+          [settled("i_1", "accepted"), started("c_0", { interactionId: "i_1" })],
+        ),
+      ).toEqual(["cleared-before-start"]);
+    });
+
+    it("isn't cleared by a policy once a person was asked", () => {
+      expect(
+        rules(
+          [requested("c_0"), asked("c_0", "i_0")],
+          [settled("i_0", "accepted"), started("c_0", { policy: "approval" })],
+        ),
+      ).toEqual(["cleared-before-start"]);
+    });
+
+    it("starts through a policy when nobody was asked", () => {
+      expect(rules([requested("c_0")], [started("c_0", { policy: "approval" })])).toEqual([]);
+      expect(rules([requested("c_0")], [started("c_0")])).toEqual([]);
+    });
+
+    it("answers to its latest approval, when it was asked again", () => {
+      expect(
+        rules(
+          [requested("c_0"), asked("c_0", "i_0")],
+          [settled("i_0", "interrupted")],
+          [asked("c_0", "i_1")],
+          [settled("i_1", "accepted"), started("c_0", { interactionId: "i_1" })],
+        ),
+      ).toEqual([]);
+    });
+
+    it("leaves a relayed approval to the child that asked", () => {
+      const origin = { interactionId: "child_i", sessionId: "child" };
+      expect(rules([requested("c_0"), asked("c_0", "i_0", origin)], [started("c_0")])).toEqual([]);
+    });
   });
 
   it("skips a line at a position it already checked", () => {

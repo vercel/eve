@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { expect, it, vi } from "vitest";
 
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -44,9 +45,10 @@ function opened(sessionId: string): Extract<WorkflowToolRunMessage, { kind: "age
 
 it("relays what a fan-out sent between relays as one delivery, in order", async () => {
   const inbox = openWorkflowToolRunOwnerInbox();
-  const owner = createBlockingWorkflow({
-    owner: { inbox: "session-inbox" },
-  } as WorkflowToolRunInput);
+  const owner = createBlockingWorkflow(
+    { owner: { inbox: "session-inbox" } } as WorkflowToolRunInput,
+    workflowRunHost,
+  );
   // Alice's triage opens three reviewers before the run reads its inbox.
   for (const sessionId of ["child-1", "child-2", "child-3"])
     await inbox.owner.send(opened(sessionId));
@@ -56,10 +58,11 @@ it("relays what a fan-out sent between relays as one delivery, in order", async 
   await owner.relay(read.next.value);
 
   expect(inbox.owner.sent).toBe(3);
-  expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("session-inbox", {
-    kind: "workflow-batch",
-    messages: [opened("child-1"), opened("child-2"), opened("child-3")],
-  });
+  expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith(
+    "session-inbox",
+    { kind: "workflow-batch", messages: [opened("child-1"), opened("child-2"), opened("child-3")] },
+    undefined,
+  );
 });
 
 it("splits what queued up into deliveries of at most 64,000 characters, in order", async () => {
@@ -95,9 +98,10 @@ it("splits what queued up into deliveries of at most 64,000 characters, in order
 
 it("relays a lone message as itself", async () => {
   mocks.resumeHookStep.mockClear();
-  const owner = createBlockingWorkflow({
-    owner: { inbox: "session-inbox" },
-  } as WorkflowToolRunInput);
+  const owner = createBlockingWorkflow(
+    { owner: { inbox: "session-inbox" } } as WorkflowToolRunInput,
+    workflowRunHost,
+  );
 
   await owner.relay([opened("child-1")]);
 

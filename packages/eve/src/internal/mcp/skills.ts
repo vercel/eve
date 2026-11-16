@@ -488,9 +488,9 @@ function parseFrontmatterJson(
   let file;
   try {
     file = parseFrontmatter(text);
-    // JSON as `JSON.stringify` writes it: js-yaml's `Date` timestamps become
-    // ISO strings and non-finite numbers `null`, and `JSON.parse` keeps a
-    // `__proto__` key as an own property instead of setting the prototype.
+    // JSON as `JSON.stringify` writes it: non-finite numbers become `null`, and
+    // `JSON.parse` keeps a `__proto__` key as an own property instead of
+    // setting the prototype.
     data = JSON.parse(JSON.stringify(file?.data ?? {}));
   } catch {
     return undefined;

@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 import { discoverAgent } from "#discover/discover-agent.js";
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
+import { sourcesOf } from "#discover/manifest.js";
 import {
   captureVercel,
   runVercelCaptureStdout,
@@ -168,7 +169,7 @@ export function defaultSelfModificationSetupOperations(
   return {
     async detectChannelNames() {
       const discovered = await discoverAgent({ appRoot, agentRoot: join(appRoot, "agent") });
-      return discovered.manifest.channels.map((source) =>
+      return sourcesOf(discovered.manifest, "channel").map((source) =>
         stripLogicalPathExtension(source.logicalPath).replace(/^channels\//, ""),
       );
     },

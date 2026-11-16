@@ -19,7 +19,7 @@ export default defineNuxtConfig({
 });
 ```
 
-The module looks for an `agent/` folder in the Nuxt project root. Pass `eveRoot` when the agent lives elsewhere:
+The module looks for an `agent/` folder in the Nuxt project root, mounted at `/eve/v1/*`. An `agents/` workspace mounts each member at `/eve/<name>/v1/*` instead. Pass `eveRoot` when the agent lives elsewhere:
 
 ```ts
 export default defineNuxtConfig({
@@ -80,12 +80,12 @@ async function handleSubmit() {
 </template>
 ```
 
-The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default policy, which rejects unverified requests, and for channel configuration.
+The browser still needs a production authentication policy. See [Authenticate browser requests](/docs/guides/frontend#authenticate-browser-requests) for the default policy, which rejects unverified requests, and for channel configuration.
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes to it. The browser talks only to the Nuxt origin. Concurrent Nuxt processes for the same eve root share one eve dev server. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
-- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds, the module adds an eve [service](https://vercel.com/docs/services) and routes `/eve/v1/**` to it before filesystem routing. The Nuxt app serves everything else, and no `vercel.json` is required. By default, the generated service runs the installed eve binary from the agent root, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Local dev.** `npm run dev` starts an eve dev server for each agent beside `nuxt dev` and proxies the eve routes to it. The browser talks only to the Nuxt origin. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
+- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds, the module adds an eve [service](https://vercel.com/docs/services) per agent and routes its transport requests to it before filesystem routing. The Nuxt app serves everything else, and no `vercel.json` is required. When `vercel.json` declares services, or a `vercel.ts` composes them with `withEve` from `eve/vercel`, the module generates nothing and that configuration controls routing. By default, each generated service runs the installed eve binary from its agent root, so agent directories don't need their own `package.json`. When the agents need their own build step, set `eveBuildCommand`:
 
   ```ts
   export default defineNuxtConfig({
@@ -96,7 +96,7 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** The module doesn't start eve in production; run the eve service yourself. `nuxt build` writes a proxy rule that sends `/eve/v1/**` to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. Override the local port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
+- **Non-Vercel hosts.** The module doesn't start eve in production; run the eve service yourself. `nuxt build` writes proxy rules that send the eve routes to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. With `EVE_NUXT_PRODUCTION_ORIGIN`, each `agents/` workspace member keeps its own path on that host (`/eve/<name>/v1`). Without it, each member runs as its own server serving `/eve/v1`, on consecutive ports from `4274` in alphabetical order of member name (`4274`, `4275`, ...). Override the first port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
 
   ```bash
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
@@ -129,4 +129,4 @@ Vercel doesn't route the `experimentalServices` field in `vercel.json`: both ser
 
 - [`useEveAgent` (Vue)](./use-eve-agent-vue): the composable API
 - [Auth & route protection](../auth-and-route-protection)
-- [Deployment](../deployment/overview)
+- [Deployment](/docs/guides/deployment)

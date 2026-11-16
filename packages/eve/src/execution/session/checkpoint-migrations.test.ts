@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
-import { SESSION_CHECKPOINT_VERSION } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+} from "#execution/session/checkpoint.js";
+import { digestOf } from "#definitions/state.js";
 
 function checkpoint(version: number) {
   return {
@@ -36,6 +40,71 @@ describe("migrateSessionCheckpoint", () => {
           admittedDeliveryKeys,
         }),
       ).toMatchObject({ kind: "incompatible" });
+    },
+  );
+
+  it("drops the system prompt an 18 stored with its session", () => {
+    const session = { continuationToken: "http:alice", sessionId: "session-1" };
+    const stored = {
+      ...checkpoint(18),
+      sessionState: {
+        sessionId: "session-1",
+        snapshot: { session: { ...session, agent: { system: "Help Alice." } } },
+        version: 2,
+      },
+    };
+    expect(migrateSessionCheckpoint(stored)).toEqual({
+      checkpoint: {
+        ...stored,
+        sessionState: { ...stored.sessionState, snapshot: { session } },
+        version: SESSION_CHECKPOINT_VERSION,
+      },
+      kind: "current",
+    });
+  });
+
+  it("keeps an 18's offered catalog tools as the catalog's value", () => {
+    const offered = { connections: false, searchableSkills: false, skills: true, tools: true };
+    const migrated = migrateSessionCheckpoint({
+      ...checkpoint(18),
+      serializedContext: {
+        "eve.offeredCatalogTools": offered,
+        "eve.reactions": { latest: { "*": 7 }, slots: {} },
+      },
+    });
+
+    expect(migrated).toMatchObject({ kind: "current" });
+    const { serializedContext } = (migrated as { checkpoint: SessionCheckpoint }).checkpoint;
+    expect(serializedContext).toEqual({
+      "eve.reactions": {
+        latest: { "*": 7 },
+        slots: { "eve.catalog": { digest: "", since: 7, value: offered } },
+      },
+    });
+  });
+
+  it.each([true, false])(
+    "announces an 18's dynamic user instruction only while its history holds it (held: %s)",
+    (held) => {
+      const content = "Alice prefers tables.";
+      const value = { content, role: "user" };
+      const migrated = migrateSessionCheckpoint({
+        ...checkpoint(18),
+        history: held ? [{ content, kind: "context.instruction", role: "user" }] : [],
+        serializedContext: {
+          "eve.reactions": {
+            appended: { "instructions:prefs": digestOf(value) },
+            latest: {},
+            slots: { "instructions:prefs": { digest: digestOf(value), since: 1, value } },
+          },
+        },
+      });
+
+      const { serializedContext } = (migrated as { checkpoint: SessionCheckpoint }).checkpoint;
+      expect(serializedContext["eve.reactions"]).not.toHaveProperty("appended");
+      expect(serializedContext["eve.historyState"]).toEqual(
+        held ? { announcements: { "instructions:prefs": digestOf(value) } } : undefined,
+      );
     },
   );
 
@@ -123,13 +192,52 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
     expect(saved).toEqual(before);
   });
 
-  it("leaves a session to its owner only until a task it still runs finishes", () => {
-    const task = { calls: [], id: "t", results: [], run: { hookToken: "h", runId: "r" } };
-    expect(
-      migrateSessionCheckpoint(
-        eve083Checkpoint({ "eve.taskTable": { tasks: [task], version: 1 } }),
-      ),
-    ).toEqual({ detail: "checkpoint version 17: session holds a running task", kind: "busy" });
+  describe("a session that delegated", () => {
+    const run = { hookToken: "helper-hook", runId: "helper-run", started: true };
+    const idle = {
+      calls: [],
+      id: "helper-1",
+      kind: "agent",
+      name: "helper",
+      resumable: true,
+      results: [],
+      run,
+    };
+    const withTasks = (...tasks: object[]) =>
+      migrateSessionCheckpoint(eve083Checkpoint({ "eve.taskTable": { tasks, version: 1 } }));
+
+    it("moves past an idle subagent and lists its run to end", () => {
+      const result = withTasks(idle, { ...idle, id: "done", run: undefined });
+      if (result.kind !== "pre-v27") throw new Error(JSON.stringify(result));
+      expect(result.imported.retiredRuns).toEqual([
+        { hookToken: "helper-hook", runId: "helper-run" },
+      ]);
+      expect(result.imported.checkpoint.sessionState.snapshot.session.state).toEqual({});
+    });
+
+    it.each([
+      ["a task still runs", { ...idle, resumable: false }, "session holds a running task"],
+      [
+        "a subagent is working",
+        { ...idle, calls: [{ callId: "call-2", turnId: "turn_2" }] },
+        "session holds a running task",
+      ],
+      [
+        "a subagent's run hasn't started",
+        { ...idle, run: { ...run, started: false } },
+        "session holds a running task",
+      ],
+      [
+        "a finished task's result is unread",
+        { ...idle, results: [{ output: "Done.", status: "completed" }], run: undefined },
+        "session holds task results the model hasn't read",
+      ],
+    ])("leaves the session to its owner while %s", (_name, task, reason) => {
+      expect(withTasks(idle, task)).toEqual({
+        detail: `checkpoint version 17: ${reason}`,
+        kind: "busy",
+      });
+    });
   });
 });
 

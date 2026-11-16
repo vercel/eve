@@ -7,6 +7,7 @@ import type { UserPart } from "#protocol/session-events/envelope.js";
 import type { SessionView } from "#protocol/session-projection/session-view.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
+import type { SessionContext } from "#context/session-context.js";
 
 /**
  * The session's latest turn, running or not. Its `id` keys a memo that runs once per turn: it
@@ -44,7 +45,12 @@ export type DynamicKey = unknown;
  * Runs `fn` the first time the session sees `key` from this definition, keeps the JSON it returns,
  * and returns the kept result for the same key afterwards, in any process. Only the keys the
  * latest successful evaluation used stay kept, and a deployment change discards them: a key used
- * again after either runs `fn` again. Code outside a memo runs again at every evaluation.
+ * again after either runs `fn` again.
+ *
+ * Code outside a memo runs again at every evaluation, which is every model call. Put every
+ * network request, database query, API call, and sandbox read inside a memo. The key sets how
+ * long the result stays fixed: `ctx.turn?.id ?? null` for once per turn, `ctx.session.id` for once
+ * per session, or a tenant or channel ID to keep it until that ID changes.
  */
 export type Memo = <T>(
   key: DynamicKey,
@@ -96,6 +102,24 @@ export interface DynamicModelContext extends SessionFrame {
 export interface DynamicContext extends DynamicModelContext {
   /** The model chosen for the session. */
   readonly model: { readonly id: string };
+  /**
+   * Resolves the session's sandbox, starting it on first use, as `ctx.getSandbox()` does in a
+   * tool or hook. A dynamic value runs before every model call, so call it inside `ctx.memo`,
+   * keyed on what would change what you read: outside a memo, every model call waits on the
+   * sandbox, and the first one waits for it to start.
+   *
+   * ```ts
+   * const checkout = calls(ctx.view, { name: "checkout" })
+   *   .filter((call) => call.state === "completed")
+   *   .at(-1);
+   * if (!checkout) return null;
+   * const guidelines = await ctx.memo(["agents-md", checkout.callId], async () => {
+   *   const sandbox = await ctx.getSandbox();
+   *   return sandbox.readTextFile({ path: "AGENTS.md" });
+   * });
+   * ```
+   */
+  readonly getSandbox: SessionContext["getSandbox"];
 }
 
 /**
@@ -121,7 +145,10 @@ export type DefineDynamic<TResult, TContext = DynamicContext> = (
  * installs what it returns, or nothing for `null`. The folder or field decides what it returns:
  * tools in `agent/tools/`, skills in `agent/skills/`, a model in an agent's `model` field.
  *
- * Work that shouldn't repeat goes in `ctx.memo(key, fn)`: `fn` runs once per key, and a later
+ * The function runs before every model call, not once per turn: a turn with 20 model calls runs
+ * it 20 times. Wrap every network request, database query, API call, and sandbox read in
+ * `ctx.memo(key, fn)`. Outside a memo, that work adds its latency to every model call and counts
+ * against the service's rate limits on each one. Inside, `fn` runs once per key, and a later
  * evaluation, in any process, gets the result it kept.
  *
  * ```ts
@@ -152,21 +179,6 @@ function assertDynamicFunction(value: unknown, subject: string): void {
     );
   }
   throw new Error(`${subject} takes a function: defineDynamic(async (ctx) => value).`);
-}
-
-const FRAMEWORK_DEFINITION = Symbol.for("eve.framework-definition");
-
-/**
- * Marks a definition eve generates, such as a memory slot's tools: its function receives eve's
- * own evaluation context, with the step's state.
- */
-export function asFrameworkDefinition<T extends object>(definition: T): T {
-  Object.defineProperty(definition, FRAMEWORK_DEFINITION, { value: true });
-  return definition;
-}
-
-export function isFrameworkDefinition(value: unknown): boolean {
-  return typeof value === "object" && value !== null && FRAMEWORK_DEFINITION in value;
 }
 
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {

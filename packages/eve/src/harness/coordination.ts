@@ -19,6 +19,8 @@ import {
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
+import { requireClearance, type Clearance } from "#harness/clearance.js";
+import { admitWorkflowTask } from "#harness/workflow-admission.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessSession, HarnessToolLookup } from "#harness/types.js";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
@@ -111,6 +113,7 @@ function toolResult(
  * response alone: the session reads them from there.
  */
 export function collectWorkflowCalls(input: {
+  readonly clearances: Readonly<Record<string, Clearance>>;
   readonly session: HarnessSession;
   readonly toolCalls: readonly CoordinationToolCall[];
   readonly tools: HarnessToolLookup;
@@ -124,6 +127,10 @@ export function collectWorkflowCalls(input: {
   for (const toolCall of input.toolCalls) {
     const definition = input.tools.get(toolCall.toolName);
     if (isTaskTool(definition)) continue;
+    const clearance = input.clearances[toolCall.toolCallId];
+    if (clearance === undefined)
+      throw new Error(`Call "${toolCall.toolCallId}" has no clearance to dispatch.`);
+    requireClearance(clearance, toolCall.toolCallId);
     const committed = commitCallEntry(session, {
       callId: toolCall.toolCallId,
       definition,
@@ -136,12 +143,15 @@ export function collectWorkflowCalls(input: {
     });
     session = committed.session;
     workflowRequests.push(
-      createCoordinationRequestFromToolCall({
-        entry: committed.entry,
-        input: committed.input,
-        toolCall,
-        tools: input.tools,
-      }),
+      admitWorkflowTask(
+        createCoordinationRequestFromToolCall({
+          entry: committed.entry,
+          input: committed.input,
+          toolCall,
+          tools: input.tools,
+        }),
+        clearance,
+      ),
     );
   }
   return { session, workflowRequests };

@@ -160,6 +160,30 @@ describe("startProductionServer", () => {
     },
   );
 
+  it("keeps inherited variables that change how the built server listens or shuts down out of it", async () => {
+    // srvx skips graceful shutdown, and so Nitro's close hooks, when CI or
+    // TEST is set, and SERVER_SHUTDOWN_TIMEOUT would outlast eve's kill
+    // grace; a socket path would replace the port eve waits on.
+    vi.stubEnv("CI", "1");
+    vi.stubEnv("NITRO_UNIX_SOCKET", "/tmp/eve.sock");
+    vi.stubEnv("SERVER_SHUTDOWN_TIMEOUT", "60");
+    vi.stubEnv("TEST", "1");
+    const { startProductionServer } = await import("./start-production-server.js");
+    const child = createChildProcess();
+    (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
+    mocks.spawn.mockReturnValueOnce(child);
+
+    const server = await startProductionServer("/tmp/app", { host: "127.0.0.1", port: 4321 });
+    const { env } = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv };
+    expect({
+      CI: env.CI,
+      NITRO_UNIX_SOCKET: env.NITRO_UNIX_SOCKET,
+      SERVER_SHUTDOWN_TIMEOUT: env.SERVER_SHUTDOWN_TIMEOUT,
+      TEST: env.TEST,
+    }).toEqual({});
+    await server.close();
+  });
+
   it("uses PORT when no explicit port is provided", async () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
@@ -208,5 +232,58 @@ describe("startProductionServer", () => {
     expect(server.url).toBe(`http://127.0.0.1:${port}/`);
 
     await server.close();
+  });
+
+  it("retries a resolved port that another process claimed before the built server bound it", async () => {
+    const { startProductionServer } = await import("./start-production-server.js");
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const children = [createChildProcess(), createChildProcess()];
+    mocks.spawn
+      .mockImplementationOnce((_command, _args, options) => {
+        const port = (options as { env?: NodeJS.ProcessEnv }).env?.PORT;
+        (children[0]!.stderr as PassThrough).write(
+          `[srvx] Failed to start server: Error: listen EADDRINUSE: address already in use 127.0.0.1:${port}\n`,
+        );
+        return children[0]!;
+      })
+      .mockImplementationOnce((_command, _args, options) => {
+        const port = (options as { env?: NodeJS.ProcessEnv }).env?.PORT;
+        (children[1]!.stdout as PassThrough).write(`Listening on http://127.0.0.1:${port}/\n`);
+        return children[1]!;
+      });
+
+    const server = await startProductionServer("/tmp/app", { host: "127.0.0.1", port: 0 });
+    const retryPort = (mocks.spawn.mock.calls[1]?.[2] as { env: NodeJS.ProcessEnv }).env.PORT;
+
+    expect(mocks.spawn).toHaveBeenCalledTimes(2);
+    expect(server.url).toBe(`http://127.0.0.1:${retryPort}/`);
+    expect(children[0]!.kill).toHaveBeenCalledWith("SIGTERM");
+    // The retried attempt's failure is not the user's problem.
+    expect(stderrWrite.mock.calls.map(([chunk]) => String(chunk)).join("")).not.toContain(
+      "EADDRINUSE",
+    );
+
+    await server.close();
+  });
+
+  it("reports a taken port once after the last ephemeral attempt", async () => {
+    const { startProductionServer } = await import("./start-production-server.js");
+    const { BuiltServerPortInUseError } = await import("#shared/built-server-start-failure.js");
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    mocks.spawn.mockImplementation((_command, _args, options) => {
+      const child = createChildProcess();
+      const port = (options as { env?: NodeJS.ProcessEnv }).env?.PORT;
+      (child.stderr as PassThrough).write(
+        `[srvx] Failed to start server: Error: listen EADDRINUSE: address already in use 127.0.0.1:${port}\n`,
+      );
+      return child;
+    });
+
+    await expect(
+      startProductionServer("/tmp/app", { host: "127.0.0.1", port: 0 }),
+    ).rejects.toBeInstanceOf(BuiltServerPortInUseError);
+    expect(mocks.spawn).toHaveBeenCalledTimes(3);
+    const written = stderrWrite.mock.calls.map(([chunk]) => String(chunk)).join("");
+    expect(written.match(/EADDRINUSE/g)).toHaveLength(1);
   });
 });

@@ -31,7 +31,7 @@ export const noReply: ToolDefinition<NoReplyToolInput, string> = frameworkTool(
     availableInSubagents: false,
     description: NO_REPLY_TOOL_DESCRIPTION,
     endsTurn: true,
-    execute: () => "No reply was sent.",
+    execute: interactionOnly(() => "No reply was sent."),
     inputSchema: {
       type: "object",
       properties: {
@@ -45,4 +45,4 @@ export const noReply: ToolDefinition<NoReplyToolInput, string> = frameworkTool(
     },
   }),
 );
-import { frameworkTool } from "./framework-tool.js";
+import { frameworkTool, interactionOnly } from "./framework-tool.js";

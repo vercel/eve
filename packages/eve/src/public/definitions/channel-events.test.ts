@@ -101,6 +101,23 @@ describe("defineChannel delivery", () => {
     expect(readInputText(result ?? undefined)).toBe("yes");
     expect(readClientContext(result ?? undefined)).toEqual(["Turn-only context"]);
   });
+  it("shows a deliver hook the answer text, and lets a replacement change it", async () => {
+    const seen: (string | undefined)[] = [];
+    const adapter = adapterOf(
+      defineChannel({
+        routes: [],
+        deliver: (payload) => {
+          seen.push(payload.answerText);
+          return { message: payload.message, answerText: "2" };
+        },
+      }),
+    );
+    const payload = attachInputText({ message: "Alice: the second one" }, "the second one");
+    const result = await adapter.deliver!(payload, buildAdapterContext(adapter, sessionContext()));
+    expect(seen).toEqual(["the second one"]);
+    expect(result?.message).toBe("Alice: the second one");
+    expect(readInputText(result ?? undefined)).toBe("2");
+  });
 });
 
 describe("defineChannel events", () => {

@@ -29,7 +29,11 @@ export interface RouteHandlerArgs<TState = undefined> {
    * on the returned handle; the target channel owns its address and initial state.
    */
   readonly to: CrossChannelToFn;
-  /** Path parameters matched for the current route. */
+  /**
+   * Path parameters matched for the current route, percent-decoded except
+   * `%2F` and `%5C`, which stay encoded so a parameter never gains a path
+   * separator.
+   */
   params: Readonly<Record<string, string>>;
   /** Keeps background work alive after the route returns its response. */
   waitUntil: (task: Promise<unknown>) => void;
@@ -52,8 +56,8 @@ export interface RouteHandlerArgs<TState = undefined> {
    * Reads one file of a compiled skill as raw bytes. `path` is relative to
    * the skill root and defaults to its `SKILL.md`. Rejects paths that are
    * absolute or contain `.`, `..`, or empty segments, files the skill does
-   * not list, and files over 512 KiB. Production builds ship skill files as
-   * server assets, so they count toward the deployed function's size.
+   * not list, and files over 512 KiB. Production builds embed skill files in
+   * the server bundle, so they count toward the deployed function's size.
    */
   readSkill(skill: string, path?: string): Promise<Uint8Array>;
   /** Runs one of the agent's tools as `auth`, outside any conversation. */

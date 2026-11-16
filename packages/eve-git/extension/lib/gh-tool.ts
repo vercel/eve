@@ -47,6 +47,9 @@ export function defineGhTool(
     approval: ({ toolInput }) => githubShellApproval(toolInput as GitHubShellInput | undefined),
     inputSchema: githubShellInputSchema,
     outputSchema: ghOutputSchema,
+    label: {
+      start: (input) => input.description,
+    },
     execute(input, ctx) {
       return executeGitHubShell(input, github(), {
         context: ctx,
@@ -55,6 +58,7 @@ export function defineGhTool(
         requireAuth: (provider, options) => ctx.requireAuth(provider, options),
         getSandbox: () => ctx.getSandbox(),
         sessionId: ctx.session.id,
+        abortSignal: ctx.abortSignal,
       });
     },
   });

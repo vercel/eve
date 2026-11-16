@@ -375,6 +375,37 @@ async function requestSignIn(conversation: ChannelConversation, message: string)
 
 const SIGN_IN_OPENERS = /^(?:authori[sz]e|sign in)$/iu;
 
+/**
+ * Fails when a person can still see the calendar sign-in: its link, its code,
+ * or a Cancel that would act on it.
+ */
+async function expectSignInPromptGone(conversation: ChannelConversation, after: string) {
+  const left = (await conversation.visible()).filter(
+    ({ options, text }) =>
+      text.includes(CALENDAR.url) ||
+      text.includes(CALENDAR.userCode) ||
+      options.some((option) => option.label === SIGN_IN_CANCEL_LABEL),
+  );
+  expect(
+    left.map(({ text }) => text),
+    `the sign-in prompt is still shown ${after}`,
+  ).toEqual([]);
+}
+
+const SIGN_IN_CANCEL_LABEL = "Cancel";
+
+/**
+ * Presses the Cancel the calendar sign-in's prompt shows. The press settles once the channel's
+ * background work for it does, so whatever it shows the person has been shown.
+ */
+async function pressSignInCancel(conversation: ChannelConversation) {
+  const cancel = (await conversation.visible())
+    .flatMap(({ options }) => options)
+    .find((option) => option.label === SIGN_IN_CANCEL_LABEL);
+  expect(cancel, "a Cancel on the sign-in prompt to press").toBeDefined();
+  await conversation.press(cancel!);
+}
+
 /** Starts a calendar sign-in, then moves on with a new message before finishing it. */
 async function abandonSignIn(conversation: ChannelConversation) {
   await conversation.say(READ_CALENDAR);
@@ -906,7 +937,7 @@ const budgetRules = [
 const signInRules = [
   {
     rule: "a sign-in names the service and shows its sign-in link",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     // A public surface has nowhere private to show a link.
@@ -921,7 +952,7 @@ const signInRules = [
   },
   {
     rule: "a sign-in shows its confirmation code",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     surfaces: ["shared", "private"],
@@ -933,7 +964,7 @@ const signInRules = [
   {
     rule: "only the person signing in sees the sign-in link and code",
     source:
-      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: [],
     variesByConversation: true,
     surfaces: ["public", "shared"],
@@ -952,7 +983,7 @@ const signInRules = [
   {
     rule: "someone else pressing a sign-in isn't shown its link or code",
     source:
-      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: ["another-person", "buttons"],
     variesByConversation: true,
     surfaces: ["shared"],
@@ -976,7 +1007,7 @@ const signInRules = [
   },
   {
     rule: "a sign-in without a link shows its instructions",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -986,7 +1017,7 @@ const signInRules = [
   },
   {
     rule: "after signing in, the agent carries on with the request",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     async run(conversation) {
       await conversation.say(READ_CALENDAR);
@@ -998,7 +1029,7 @@ const signInRules = [
   },
   {
     rule: "completing a sign-in tells the person it succeeded",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -1009,8 +1040,52 @@ const signInRules = [
     },
   },
   {
+    rule: "completing a sign-in stops showing its link and code",
+    source: "#5995",
+    requires: [],
+    variesByConversation: true,
+    // A public surface never shows the link or code, so there is nothing to take away.
+    surfaces: ["shared", "private"],
+    async run(conversation) {
+      await requestSignIn(conversation, READ_CALENDAR);
+      await conversation.waitForShown(CALENDAR.url);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after signing in");
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      await pressSignInCancel(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
+      expect(conversation.runsOf("read_calendar"), "read_calendar ran after Cancel").toBe(0);
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in after the session's run ended removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      // An ended run never withdraws its sign-in, so Cancel finds no turn left to cancel.
+      await conversation.cancelRunsInWorld();
+      await pressSignInCancel(conversation);
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
+    },
+  },
+  {
     rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -1027,7 +1102,7 @@ const signInRules = [
   },
   {
     rule: "message after ignored sign-in tells user it was cancelled",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -1105,7 +1180,7 @@ const approvalPermissionRules = [
 const callerRules = [
   {
     rule: "a tool sees the person who sent the message as its caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: [],
     // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
     variesByConversation: true,
@@ -1122,7 +1197,7 @@ const callerRules = [
   },
   {
     rule: "another person's message reaches tools as a different caller, and each person stays the same caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: ["another-person"],
     async run(conversation) {
       const [alice, bob, aliceAgain] = await lookUpNotesAs(conversation, ["alice", "bob", "alice"]);
@@ -1133,10 +1208,44 @@ const callerRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
+/** Each person in turn asks for {@link PLAIN_TOOL}; returns the space each run saw. */
+async function spacesSeenBy(conversation: ChannelConversation, people: readonly Person[]) {
+  await lookUpNotesAs(conversation, people);
+  return conversation.spacesOf(PLAIN_TOOL);
+}
+
+const spaceRules = [
+  {
+    rule: "a tool sees the conversation's space as the platform names it",
+    source: "docs/channels/index.mdx#spaces",
+    requires: [],
+    // A DM is a different kind of space, and some platforms name it differently, e.g. Discord's unguilded channel.
+    variesByConversation: true,
+    async run(conversation) {
+      const [space] = await spacesSeenBy(conversation, ["alice"]);
+      expect(space, `${PLAIN_TOOL} saw the space ${JSON.stringify(space)}`).toEqual(
+        conversation.space ?? null,
+      );
+    },
+  },
+  {
+    rule: "another person in the conversation sees the same space",
+    source: "docs/channels/index.mdx#spaces",
+    requires: ["another-person"],
+    async run(conversation) {
+      const spaces = await spacesSeenBy(conversation, ["alice", "bob"]);
+      expect(spaces, `${PLAIN_TOOL} saw the spaces ${JSON.stringify(spaces)}`).toEqual([
+        conversation.space ?? null,
+        conversation.space ?? null,
+      ]);
+    },
+  },
+] as const satisfies readonly ContractRule[];
+
 const attachmentRules = [
   {
     rule: "an image a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     variesByConversation: true,
     async run(conversation) {
@@ -1145,7 +1254,7 @@ const attachmentRules = [
   },
   {
     rule: "a PDF a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       await expectFileReachesAgent(conversation, REPORT);
@@ -1168,7 +1277,7 @@ const attachmentRules = [
   },
   {
     rule: "a file sent earlier in the conversation is still there on a later message",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       const text = `Alice attached ${DIAGRAM.name}.`;
@@ -1195,6 +1304,7 @@ export const channelContractSections = [
   { title: "Budget prompts", rules: budgetRules },
   { title: "Sign-ins", rules: signInRules },
   { title: "Tool callers", rules: callerRules },
+  { title: "Conversation spaces", rules: spaceRules },
   { title: "Attachments", rules: attachmentRules },
 ] as const;
 

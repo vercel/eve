@@ -29,7 +29,8 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import type { GitInitResult } from "./init-git.js";
+import type { GitInitialization, GitInitResult } from "./init-git.js";
+import type { InitOnboarding } from "./init-onboarding.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -80,7 +81,10 @@ function dependencies(
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
-  tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
+  startGitInitialization: ReturnType<
+    typeof vi.fn<InitCommandDependencies["startGitInitialization"]>
+  >;
+  startInitOnboarding: ReturnType<typeof vi.fn<InitCommandDependencies["startInitOnboarding"]>>;
   validateModelSlug: ReturnType<typeof vi.fn<InitCommandDependencies["validateModelSlug"]>>;
 } {
   return {
@@ -114,8 +118,26 @@ function dependencies(
     runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
     hasInteractiveTerminal: () => true,
     spawnPackageManager: vi.fn(async () => packageProcessResult()),
-    tryInitializeGit: vi.fn(async () => gitResult),
+    startGitInitialization: vi.fn(() => ({
+      commit: async () => gitResult,
+      settled: async () => undefined,
+    })),
+    startInitOnboarding: vi.fn(async () => fakeOnboarding()),
     validateModelSlug: vi.fn(async () => null),
+  };
+}
+
+function fakeOnboarding(
+  overrides: Partial<{ cancelled: boolean; carriedInput: string; interrupted: AbortSignal }> = {},
+): InitOnboarding & {
+  close: ReturnType<typeof vi.fn<InitOnboarding["close"]>>;
+  setInstalling: ReturnType<typeof vi.fn<InitOnboarding["setInstalling"]>>;
+} {
+  return {
+    finished: Promise.resolve({ cancelled: overrides.cancelled === true }),
+    interrupted: overrides.interrupted ?? new AbortController().signal,
+    setInstalling: vi.fn<InitOnboarding["setInstalling"]>(),
+    close: vi.fn<InitOnboarding["close"]>(async () => overrides.carriedInput),
   };
 }
 
@@ -139,6 +161,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  process.exitCode = undefined;
 });
 
 describe("runInitCommand", () => {
@@ -155,6 +178,8 @@ describe("runInitCommand", () => {
       );
       const output = logger();
       const deps = dependencies();
+      // Without the onboarding screen, the install shows on init's own progress row.
+      deps.startInitOnboarding.mockRejectedValue(new Error("terminal UI unavailable"));
       deps.runPackageManagerInstall.mockImplementation(async (_kind, _path, options) => {
         expect(screen.snapshot()).toContain("Installing dependencies");
         if (outcome === "cancelled") throw new WizardCancelledError();
@@ -189,6 +214,8 @@ describe("runInitCommand", () => {
       const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-chat-"));
       const output = logger();
       const deps = dependencies();
+      // Covers onboarding inside `eve dev`, the fallback when init can't open it during the install.
+      deps.startInitOnboarding.mockRejectedValue(new Error("terminal UI unavailable"));
       const screen = new MockScreen({ columns: 100, rows: 30 });
       const input = new MockUserInput();
       const renderer = new TerminalRenderer({
@@ -325,6 +352,8 @@ describe("runInitCommand", () => {
         expect(screen.rawOutput()).not.toContain("\u001B[3J");
         expect(transcript.match(/☰eve v/gu) ?? []).toHaveLength(startsDevelopment ? 0 : 1);
         expect(deps.spawnPackageManager).toHaveBeenCalledTimes(startsDevelopment ? 1 : 0);
+        // Onboarding during the install opens only where eve dev would start.
+        expect(deps.startInitOnboarding).toHaveBeenCalledTimes(startsDevelopment ? 1 : 0);
       } finally {
         for (const [index, key] of properties.entries()) {
           const descriptor = original[index];
@@ -384,7 +413,7 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
-      "--onboard",
+      "--onboarded",
     ]);
   });
 
@@ -437,7 +466,7 @@ describe("runInitCommand", () => {
         beforePackageJson,
       );
       expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-      expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+      expect(deps.startGitInitialization).not.toHaveBeenCalled();
       expect(deps.spawnPackageManager).not.toHaveBeenCalled();
       const transcript = stripAnsi(output.messages.join("\n"));
       expect(transcript.match(/☰eve v/gu)).toHaveLength(1);
@@ -529,24 +558,22 @@ describe("runInitCommand", () => {
       projectPath,
       expect.any(Object),
     );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
       "--reporter=silent",
       "exec",
       "eve",
       "dev",
-      "--onboard",
+      "--onboarded",
     ]);
     const messages = output.messages.map(stripAnsi);
-    expect(messages).toHaveLength(6);
-    expect(messages[0]).toBe("");
-    expect(messages.slice(1, 4)).toEqual([
+    // The onboarding screen shows the install and Git phases instead of init's progress row.
+    expect(messages).toEqual([
+      "",
       "Creating agent...",
-      "Installing dependencies...",
-      "Initializing Git...",
+      `✓ Created an eve agent in ${projectPath} in 13.8s`,
+      "",
     ]);
-    expect(messages[4]).toBe(`✓ Created an eve agent in ${projectPath} in 13.8s`);
-    expect(messages[5]).toBe("");
     expect(messages.join("\n")).not.toContain("$ eve dev");
     expect(output.messages.join("\n")).not.toContain("Instructions ");
   });
@@ -667,6 +694,8 @@ describe("runInitCommand", () => {
         projectRoot,
         expect.anything(),
       );
+      // An existing project already has its own setup; eve dev onboards it if needed.
+      expect(deps.startInitOnboarding).not.toHaveBeenCalled();
     },
   );
 
@@ -707,13 +736,13 @@ describe("runInitCommand", () => {
         projectPath,
         expect.any(Object),
       );
-      expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+      expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
       expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
         "--reporter=silent",
         "exec",
         "eve",
         "dev",
-        "--onboard",
+        "--onboarded",
       ]);
       expect(output.messages.map(stripAnsi).join("\n")).toContain(
         `Created an eve agent in ${projectPath}`,
@@ -744,9 +773,9 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev", "--onboard"]],
-    ["yarn", ["eve", "dev", "--onboard"]],
-    ["bun", ["x", "eve", "dev", "--onboard"]],
+    ["npm", ["exec", "--", "eve", "dev", "--onboarded"]],
+    ["yarn", ["eve", "dev", "--onboarded"]],
+    ["bun", ["x", "eve", "dev", "--onboarded"]],
   ] as const)(
     "scaffolds a fresh project owned by the invoking manager %s without package-manager pins",
     async (kind, devArguments) => {
@@ -807,15 +836,15 @@ describe("runInitCommand", () => {
       "x",
       "eve",
       "dev",
-      "--onboard",
+      "--onboarded",
     ]);
   });
 
   it.each([
-    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--onboard"]],
-    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--onboard"]],
-    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--onboard"]],
-    ["pnpm", "pnpm-lock.yaml", "npm", ["--reporter=silent", "exec", "eve", "dev", "--onboard"]],
+    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--onboarded"]],
+    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--onboarded"]],
+    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--onboarded"]],
+    ["pnpm", "pnpm-lock.yaml", "npm", ["--reporter=silent", "exec", "eve", "dev", "--onboarded"]],
   ] as const)(
     "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
     async (kind, lockfile, invokingManager, devArguments) => {
@@ -885,18 +914,18 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(output.messages.join("\n")).toContain(
       `⚠ Updated workspace root configuration at ${join(workspaceRoot, "pnpm-workspace.yaml")}`,
     );
     expect(output.messages.join("\n")).toContain(
-      `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "24.x"`,
+      `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "26.x"`,
     );
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
   });
 
@@ -932,7 +961,7 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -977,7 +1006,7 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -987,10 +1016,11 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["yarn", "yarn.lock", ["eve", "dev", "--onboard"]],
-    ["bun", "bun.lock", ["x", "eve", "dev", "--onboard"]],
+    ["npm", "package-lock.json", ["exec", "--", "eve", "dev", "--onboarded"]],
+    ["yarn", "yarn.lock", ["eve", "dev", "--onboarded"]],
+    ["bun", "bun.lock", ["x", "eve", "dev", "--onboarded"]],
   ] as const)(
-    "scaffolds a fresh %s workspace member without nested root-only package fields",
+    "scaffolds a fresh %s workspace member without nested root-only package fields or skipping peer resolution",
     async (kind, lockfile, devArguments) => {
       const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
       const appsDirectory = join(workspaceRoot, "apps");
@@ -1033,19 +1063,20 @@ describe("runInitCommand", () => {
         overrides?: unknown;
         resolutions?: unknown;
       };
-      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
+      // A workspace's tree isn't eve's alone, so npm still resolves its peers.
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
-        expect.anything(),
+        expect.objectContaining({ skipPeerDependencyResolution: false }),
       );
       expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
     },
   );
 
-  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration", async () => {
+  it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration or peer resolution", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-web-npm-"));
     const output = logger();
     const deps = dependencies();
@@ -1059,14 +1090,14 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "npm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: true }),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("npm", projectPath, [
       "exec",
       "--",
       "eve",
       "dev",
-      "--onboard",
+      "--onboarded",
     ]);
   });
 
@@ -1091,7 +1122,7 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
-      "--onboard",
+      "--onboarded",
     ]);
   });
 
@@ -1119,7 +1150,7 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
-      "--onboard",
+      "--onboarded",
     ]);
   });
 
@@ -1137,7 +1168,7 @@ describe("runInitCommand", () => {
 
     await expect(pathExists(join(parentDirectory, "web-agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
@@ -1149,7 +1180,7 @@ describe("runInitCommand", () => {
     await expect(runInitCommand(output, parentDirectory, name, {}, deps)).rejects.toThrow();
 
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
@@ -1174,15 +1205,15 @@ describe("runInitCommand", () => {
     // than a stale dashboard pin.
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
       dependencies: { "@vercel/connect": "0.2.2", ai: "7.0.0", eve: "^0.6.0", zod: "^3.25.0" },
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectRoot,
-      expect.anything(),
+      expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
     // An existing project's history is its own; only fresh scaffolds get git init.
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
       "--reporter=silent",
       "exec",
@@ -1235,10 +1266,10 @@ describe("runInitCommand", () => {
     await runInitCommand(output, projectRoot, ".", {}, deps);
 
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x", npm: ">=10" },
+      engines: { node: "26.x", npm: ">=10" },
     });
     expect(output.messages.join("\n")).toContain(
-      '⚠ Overrode package.json engines.node from ">=22" to "24.x"',
+      '⚠ Overrode package.json engines.node from ">=22" to "26.x"',
     );
   });
 
@@ -1254,10 +1285,10 @@ describe("runInitCommand", () => {
     await runInitCommand(output, projectRoot, ".", {}, deps);
 
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x", npm: ">=10" },
+      engines: { node: "26.x", npm: ">=10" },
     });
     expect(output.messages.join("\n")).toContain(
-      '⚠ Overrode package.json engines.node from ">=24" to "24.x"',
+      '⚠ Overrode package.json engines.node from ">=24" to "26.x"',
     );
   });
 
@@ -1289,7 +1320,7 @@ describe("runInitCommand", () => {
     await runInitCommand(output, projectRoot, ".", {}, deps);
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectRoot);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(projectRoot);
   });
 
   it("creates missing parent directories for a nested fresh target", async () => {
@@ -1403,7 +1434,7 @@ describe("runInitCommand", () => {
       projectRoot,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectRoot, ["x", "eve", "dev"]);
   });
 
@@ -1435,14 +1466,14 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
     expect(projectPackageJson.engines).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectRoot,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.startGitInitialization).not.toHaveBeenCalled();
   });
 
   it("reports agent file conflicts before writing anything", async () => {
@@ -1492,7 +1523,7 @@ describe("runInitCommand", () => {
       parentDirectory,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(parentDirectory);
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
     expect(output.messages.join("\n")).toContain("Created an eve agent in");
   });
@@ -1514,7 +1545,7 @@ describe("runInitCommand", () => {
       projectPath,
       expect.anything(),
     );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+    expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
     // The dev server is handed off as text, never spawned — the dev TUI would
     // wedge the launching agent. The handoff's content is the unit test's job.
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
@@ -1541,24 +1572,84 @@ describe("runInitCommand", () => {
     expect(output.messages.join("\n")).toContain("npm exec -- eve dev");
   });
 
-  it("stops before Git and dev when dependency installation fails, replaying its output", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-fail-"));
+  it("commits the Git repository only after dependencies install", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-git-order-"));
     const output = logger();
     const deps = dependencies();
+    const events: string[] = [];
+    deps.startGitInitialization.mockImplementation(() => {
+      events.push("git:start");
+      return {
+        commit: async () => {
+          events.push("git:commit");
+          return { kind: "initialized" };
+        },
+        settled: async () => undefined,
+      };
+    });
+    deps.runPackageManagerInstall.mockImplementation(async () => {
+      events.push("install");
+      return packageInstallResult();
+    });
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(events).toEqual(["git:start", "install", "git:commit"]);
+  });
+
+  it("stops before the Git commit and dev when dependency installation fails, replaying its output", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-fail-"));
+    const projectPath = join(parentDirectory, "my-agent");
+    const output = logger();
+    const deps = dependencies();
+    // Git is still setting up when the install fails. Windows can't remove a directory that a
+    // running process uses as its working directory, so cleanup has to wait for Git.
+    const gitSetup = Promise.withResolvers<void>();
+    const commit = vi.fn<GitInitialization["commit"]>(async () => ({ kind: "initialized" }));
+    const settled = vi.fn<GitInitialization["settled"]>(() => gitSetup.promise);
+    deps.startGitInitialization.mockImplementation(() => ({ commit, settled }));
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
       options?.onOutput?.({ stream: "stdout", text: "Packages: +12" });
       options?.onOutput?.({ stream: "stderr", text: "ERR_PNPM_FETCH_404 not found" });
       return packageInstallResult(1);
     });
 
+    const run = runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+    const failed = expect(run).rejects.toThrow("Failed to install dependencies");
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(pathExists(projectPath)).resolves.toBe(true);
+    gitSetup.resolve();
+    await failed;
+
+    await expect(pathExists(projectPath)).resolves.toBe(false);
+    expect(commit).not.toHaveBeenCalled();
+    expect(settled).toHaveBeenCalledOnce();
+    expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("waits for Git setup before rethrowing an unexpected install error", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-throw-"));
+    const output = logger();
+    const deps = dependencies();
+    const events: string[] = [];
+    deps.startGitInitialization.mockImplementation(() => ({
+      commit: async () => ({ kind: "initialized" }),
+      settled: async () => {
+        events.push("git:settled");
+      },
+    }));
+    deps.runPackageManagerInstall.mockImplementation(async () => {
+      events.push("install");
+      throw new Error("install crashed");
+    });
+
     await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
-      "Failed to install dependencies",
+      "install crashed",
     );
 
-    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
-    expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(events).toEqual(["install", "git:settled"]);
   });
 
   it("hands off to pnpm dev without extra configuration", async () => {
@@ -1570,6 +1661,198 @@ describe("runInitCommand", () => {
       runInitCommand(output, parentDirectory, "my-agent", {}, deps),
     ).resolves.toBeUndefined();
     expect(deps.spawnPackageManager).toHaveBeenCalledTimes(1);
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith(
+      "pnpm",
+      join(parentDirectory, "my-agent"),
+      ["--reporter=silent", "exec", "eve", "dev", "--onboarded"],
+    );
+  });
+
+  it("runs onboarding during the install and hands eve dev the typed prompt", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-"));
+    const projectPath = join(parentDirectory, "my-agent");
+    const deps = dependencies();
+    const events: string[] = [];
+    const onboarding = fakeOnboarding({ carriedInput: "Help Alice plan her week" });
+    onboarding.setInstalling.mockImplementation((installing: boolean) => {
+      if (!installing) events.push("installed");
+    });
+    deps.startInitOnboarding.mockImplementation(async (input) => {
+      events.push(`onboarding:${input.projectPath}`);
+      return onboarding;
+    });
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _root, options) => {
+      events.push("install");
+      // The onboarding screen owns stdin, so the install must not read it.
+      expect(options?.nonInteractive).toBe(true);
+      return packageInstallResult();
+    });
+    let handedInput: string | undefined;
+    deps.spawnPackageManager.mockImplementation(async () => {
+      handedInput = process.env.EVE_INIT_INPUT;
+      return packageProcessResult();
+    });
+
+    try {
+      await runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+    } finally {
+      delete process.env.EVE_INIT_INPUT;
+    }
+
+    expect(events).toEqual([`onboarding:${projectPath}`, "install", "installed"]);
+    expect(onboarding.close).toHaveBeenCalled();
+    // The prompt travels in the environment: Windows shells split argv, and argv shows in `ps`.
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--reporter=silent",
+      "exec",
+      "eve",
+      "dev",
+      "--onboarded",
+    ]);
+    expect(handedInput).toBe("Help Alice plan her week");
+  });
+
+  it("points to /login when onboarding during the install was cancelled", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-cancel-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.startInitOnboarding.mockResolvedValue(fakeOnboarding({ cancelled: true }));
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(output.messages.map(stripAnsi)).toContain(
+      "Connect a model with /login when you’re ready.",
+    );
+    expect(deps.spawnPackageManager.mock.calls[0]?.[2]).toContain("--onboarded");
+  });
+
+  it("restores the terminal before replaying a failed install under onboarding", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-fail-"));
+    const output = logger();
+    const deps = dependencies();
+    const onboarding = fakeOnboarding();
+    let errorsWhenClosed: number | undefined;
+    onboarding.close.mockImplementation(async () => {
+      errorsWhenClosed ??= output.errors.length;
+      return undefined;
+    });
+    deps.startInitOnboarding.mockResolvedValue(onboarding);
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _path, options) => {
+      options?.onOutput?.({ stream: "stderr", text: "npm error registry unavailable" });
+      return packageInstallResult(1);
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "Failed to install dependencies",
+    );
+
+    expect(errorsWhenClosed).toBe(0);
+    expect(output.errors).toContain("npm error registry unavailable");
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("stops the install and removes the project when Ctrl-C interrupts onboarding", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-interrupt-"));
+    const projectPath = join(parentDirectory, "my-agent");
+    const output = logger();
+    const deps = dependencies();
+    const interrupt = new AbortController();
+    const onboarding = fakeOnboarding({ cancelled: true, interrupted: interrupt.signal });
+    deps.startInitOnboarding.mockResolvedValue(onboarding);
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _path, options) => {
+      expect(options?.signal).toBe(interrupt.signal);
+      interrupt.abort();
+      return {
+        kind: "installed",
+        result: { ...packageProcessResult(), termination: { kind: "aborted" } },
+      };
+    });
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(onboarding.close).toHaveBeenCalled();
+    expect(await pathExists(projectPath)).toBe(false);
+    expect(output.messages).toContain(
+      `Cancelled. eve removed the incomplete project at "${projectPath}".`,
+    );
+    expect(output.errors).toEqual([]);
+    // Like an interrupted CLI, so `eve init my-agent && cd my-agent` stops here.
+    expect(process.exitCode).toBe(130);
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["while Git sets up", "git"],
+    ["just as the install finishes", "install"],
+  ] as const)(
+    "keeps the project and stops before eve dev when Ctrl-C lands %s",
+    async (_name, when) => {
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-interrupt-late-"));
+      const projectPath = join(parentDirectory, "my-agent");
+      const output = logger();
+      const deps = dependencies();
+      const interrupt = new AbortController();
+      deps.startInitOnboarding.mockResolvedValue(
+        fakeOnboarding({ cancelled: true, interrupted: interrupt.signal }),
+      );
+      deps.runPackageManagerInstall.mockImplementation(async () => {
+        if (when === "install") interrupt.abort();
+        return packageInstallResult();
+      });
+      const commit = vi.fn<GitInitialization["commit"]>(async () => {
+        if (when === "git") interrupt.abort();
+        return { kind: "initialized" };
+      });
+      deps.startGitInitialization.mockImplementation(() => ({
+        commit,
+        settled: async () => undefined,
+      }));
+
+      await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+      expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
+      expect(commit).toHaveBeenCalledOnce();
+      await expect(pathExists(join(projectPath, "agent", "agent.ts"))).resolves.toBe(true);
+      expect(output.messages.map(stripAnsi).join("\n")).toContain(
+        `Cancelled before starting eve dev. To start it: cd ${JSON.stringify(projectPath)} && pnpm exec eve dev`,
+      );
+      expect(process.exitCode).toBe(130);
+      expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    },
+  );
+
+  it("makes the initial commit once onboarding finishes", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-commit-"));
+    const deps = dependencies();
+    const commit = vi.fn<GitInitialization["commit"]>(async () => ({ kind: "initialized" }));
+    deps.startGitInitialization.mockImplementation(() => ({
+      commit,
+      settled: async () => undefined,
+    }));
+    const finished = Promise.withResolvers<{ cancelled: boolean }>();
+    deps.startInitOnboarding.mockResolvedValue({
+      ...fakeOnboarding(),
+      finished: finished.promise,
+    });
+
+    const run = runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+    await vi.waitFor(() => expect(deps.runPackageManagerInstall).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // A provider choice can still rewrite agent.ts, so the commit waits for it.
+    expect(commit).not.toHaveBeenCalled();
+    finished.resolve({ cancelled: false });
+    await run;
+
+    expect(commit).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to onboarding in eve dev when init can't open it", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-fallback-"));
+    const deps = dependencies();
+    deps.startInitOnboarding.mockRejectedValue(new Error("terminal UI unavailable"));
+
+    await runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
+
     expect(deps.spawnPackageManager).toHaveBeenCalledWith(
       "pnpm",
       join(parentDirectory, "my-agent"),
@@ -1710,7 +1993,8 @@ describe("runInitCommand", () => {
         debugLines.some((line) => line.startsWith("[eve:init] installing dependencies with")),
       ).toBe(true);
       expect(debugLines).toContain("[eve:init] Progress: resolved 62, reused 62, done");
-      expect(debugLines).toContain("[eve:init] initializing git repository");
+      expect(debugLines).toContain("[eve:init] starting git repository setup");
+      expect(debugLines).toContain("[eve:init] committing git repository");
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
@@ -1760,6 +2044,8 @@ describe("runInitCommand", () => {
       const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-progress-"));
       const output = logger();
       const deps = dependencies();
+      // Without the onboarding screen, the install shows on init's own progress row.
+      deps.startInitOnboarding.mockRejectedValue(new Error("terminal UI unavailable"));
       const screen = new MockScreen({ columns: 80, rows: 10 });
       const snapshots: string[] = [];
       const isTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");

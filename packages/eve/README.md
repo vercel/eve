@@ -10,9 +10,7 @@ The framework is called eve. The published npm package is `eve`. The CLI binary 
 
 The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
 
-## Preview Terms and Safeguards
-
-eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+## Safeguards
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
@@ -160,7 +158,7 @@ CLI commands:
 
 ## Deploying
 
-eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployment guide](https://eve.dev/docs/guides/deployment/overview) for the deployment path, environment variables, and configuration.
+eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployment guide](https://eve.dev/docs/guides/deployment) for the deployment path, environment variables, and configuration.
 
 ## Read Next
 
@@ -172,9 +170,9 @@ These files ship inside the installed package at `node_modules/eve/docs/`:
 - [`agent.ts`](https://eve.dev/docs/agent-config) — agent config reference
 - [Automatic Model Selection](https://eve.dev/docs/guides/decide) — choose an agent model for each request
 - [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
-- [Vercel Deployment](https://eve.dev/docs/guides/deployment/overview) — deploy to production
+- [Vercel Deployment](https://eve.dev/docs/guides/deployment) — deploy to production
 
-By authoring concern: [Tools](https://eve.dev/docs/tools) · [Channels](https://eve.dev/docs/channels/overview) · [Hooks](https://eve.dev/docs/guides/hooks) · [Skills](https://eve.dev/docs/skills) · [Sandbox](https://eve.dev/docs/sandbox) · [Connections](https://eve.dev/docs/connections) · [Subagents](https://eve.dev/docs/subagents) · [Schedules](https://eve.dev/docs/schedules) · [Evals](https://eve.dev/docs/evals/overview)
+By authoring concern: [Tools](https://eve.dev/docs/tools) · [Channels](https://eve.dev/docs/channels) · [Hooks](https://eve.dev/docs/guides/hooks) · [Skills](https://eve.dev/docs/skills) · [Sandbox](https://eve.dev/docs/sandbox) · [Connections](https://eve.dev/docs/connections) · [Subagents](https://eve.dev/docs/subagents) · [Schedules](https://eve.dev/docs/schedules) · [Evals](https://eve.dev/docs/evals)
 
 By runtime concern: [Sessions and Streaming](https://eve.dev/docs/concepts/sessions-runs-and-streaming) · [Session Context](https://eve.dev/docs/guides/session-context) · [Context Control](https://eve.dev/docs/concepts/context-control) · [Auth and Route Protection](https://eve.dev/docs/guides/auth-and-route-protection) · [CLI, Build, and Debugging](https://eve.dev/docs/reference/cli) · [Instrumentation](https://eve.dev/docs/guides/instrumentation)
 

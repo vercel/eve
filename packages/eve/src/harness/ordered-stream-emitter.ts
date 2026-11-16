@@ -1,7 +1,8 @@
 import { eventsOf } from "#harness/publication.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { ProgressOf } from "#protocol/session-events/facts.js";
-import type { HarnessEmitFn } from "#harness/types.js";
+import type { Progress, ProgressOf } from "#protocol/session-events/facts.js";
+import { isProgressType } from "#protocol/session-events/catalog.js";
+import type { HarnessEmitFn, SessionPublication } from "#harness/types.js";
 
 type AppendStreamEvent = ProgressOf<"content.delta"> | ProgressOf<"call.input">;
 
@@ -12,8 +13,8 @@ interface PendingEmission {
   deltaCharacters: number;
   deltaParts?: string[];
   event: SessionEvent;
-  /** A commit of several events, emitted together and never merged. */
-  commit?: readonly SessionEvent[];
+  /** A publication emitted as it came, never merged: a commit, or a record that doesn't append. */
+  publication?: SessionPublication;
   messages?: readonly import("ai").ModelMessage[];
   sourceEvents: number;
 }
@@ -83,7 +84,7 @@ export function createOrderedStreamEmitter(
       settleCapacityWaiters();
 
       try {
-        await emitFn(next.commit ?? materializeEvent(next), next.messages);
+        await emitFn(next.publication ?? (materializeEvent(next) as Progress), next.messages);
       } catch (error) {
         if (!failed) {
           failure = error;
@@ -138,7 +139,7 @@ export function createOrderedStreamEmitter(
       if (event === undefined) return;
       if (events.length > 1) {
         pending.push({
-          commit: events,
+          publication,
           deltaCharacters: 0,
           event,
           messages,
@@ -156,13 +157,15 @@ export function createOrderedStreamEmitter(
       const delta = appendDelta(event);
       if (
         last === undefined ||
-        last.commit !== undefined ||
+        last.publication !== undefined ||
         !mergeAdjacentEmissions(last, event, messages)
       ) {
         pending.push({
           deltaCharacters: delta?.length ?? 0,
           event,
           messages,
+          // A fact keeps the commit it came in; progress merges, and is rebuilt as it emits.
+          ...(!isProgressType(event.type) && { publication }),
           sourceEvents: 1,
         });
       } else {

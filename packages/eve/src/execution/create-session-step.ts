@@ -3,17 +3,12 @@ import {
   type DurableCompiledArtifactsSource,
   resolveDurableCompiledArtifactsSource,
 } from "#runtime/durable-compiled-artifacts-source.js";
-import {
-  createDurableSessionValues,
-  type DurableSessionState,
-} from "#execution/durable-session-store.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { createInitialSessionValues } from "#execution/initial-session-values.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { createSession } from "#execution/session.js";
 import type { JsonObject } from "#shared/json.js";
-import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { withPendingHistory } from "#execution/session/pending-history.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /**
@@ -51,26 +46,9 @@ export async function createSessionStep(input: {
     compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
     nodeId: input.nodeId,
   });
-  const effectiveAgent = resolveEffectiveAgentRuntimeFromConfig(
-    bundle,
-    input.dynamicSubagentAgentConfig,
-    input.agentSessionRuntimeOverrides,
-  );
+  if (bundle.turnAgent.configResolver === true && input.dynamicSubagentAgentConfig === undefined) {
+    throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
+  }
 
-  const session = createSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    continuationToken: input.continuationToken,
-    outputSchema: input.outputSchema,
-    rootSessionId: input.rootSessionId,
-    sessionId: input.sessionId,
-    turnAgent: effectiveAgent.turnAgent,
-  });
-
-  const state = withPendingHistory(session.state, input.history);
-  const { history, sessionState } = createDurableSessionValues(
-    state === session.state ? session : { ...session, state },
-  );
-  return { history, state: sessionState };
+  return createInitialSessionValues(input);
 }

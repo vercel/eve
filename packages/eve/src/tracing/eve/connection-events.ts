@@ -16,7 +16,7 @@ import { SessionIdKey } from "#context/keys.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
@@ -151,7 +151,7 @@ export async function withConnectionEventSpan<T>(
       saved?.decision ??
       resolveTracePolicy(settings.tracePolicy, {
         ...session.conversation,
-        agentName: input.ctx.require(BundleKey).resolvedAgent.config?.name ?? "eve",
+        agentName: sessionAgent(input.ctx).name ?? "eve",
       });
     const active = activeTraceOperation();
     const reference =

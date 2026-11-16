@@ -9,8 +9,6 @@ interface BundlerLog {
   };
 }
 
-export type BundlerDefaultLogHandler = (level: string, log: unknown) => void;
-
 function normalizePath(value: string): string {
   return value.replaceAll("\\", "/");
 }
@@ -59,10 +57,10 @@ function isVendoredDependencyWarning(log: unknown): boolean {
  * dependency code (`node_modules` or eve's compiled vendor modules), which the
  * user cannot act on, and forwards everything else.
  */
-export function onVendoredDependencyLog(
-  level: string,
-  log: unknown,
-  defaultHandler: BundlerDefaultLogHandler,
+export function onVendoredDependencyLog<Level extends string, Log>(
+  level: Level,
+  log: Log,
+  defaultHandler: (level: Level, log: Log) => void,
 ): void {
   if (level === "warn" && isVendoredDependencyWarning(log)) {
     return;

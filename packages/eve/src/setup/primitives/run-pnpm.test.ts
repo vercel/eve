@@ -231,19 +231,20 @@ describe("runPnpmInstall", () => {
 });
 
 describe("runPackageManagerInstall", () => {
-  test("automatically approves npm prompts and bypasses inherited release-age policies", async () => {
+  test("automatically approves npm prompts, bypasses release-age policies, and skips peer resolution", async () => {
     expect(
       packageManagerInstallSucceeded(
         await runPackageManagerInstall("npm", "/tmp/app", {
           autoApprove: true,
           bypassMinimumReleaseAge: true,
+          skipPeerDependencyResolution: true,
         }),
       ),
     ).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledWith(
       "npm",
-      ["install", "--yes", "--min-release-age=0"],
+      ["install", "--yes", "--min-release-age=0", "--legacy-peer-deps"],
       expect.objectContaining({ cwd: "/tmp/app" }),
     );
   });
@@ -305,7 +306,7 @@ describe("pnpmPackageManager", () => {
 
   test("uses PATH pnpm under pnpm when npm_execpath is not available", () => {
     vi.stubEnv("PNPM_HOME", "/old/pnpm-home");
-    vi.stubEnv("npm_config_user_agent", "pnpm/11.5.2 npm/? node/v24.15.0 darwin arm64");
+    vi.stubEnv("npm_config_user_agent", "pnpm/11.5.2 npm/? node/v26.13.1 darwin arm64");
     mockedExistsSync.mockReturnValue(true);
 
     expect(pnpmPackageManager.resolveInvocation(["install"])).toEqual({
@@ -360,5 +361,38 @@ describe("spawnPnpm", () => {
     child.emit("error", error);
     await expect(result).resolves.toMatchObject({ termination: { kind: "aborted" } });
     child.emit("close", null);
+  });
+
+  test("settles an aborted running child only once it closes", async () => {
+    const child = createMockChildProcess();
+    Object.defineProperty(child, "pid", { value: 4242 });
+    mockedSpawn.mockReturnValueOnce(child);
+    const controller = new AbortController();
+    let settled = false;
+
+    const result = spawnPnpm("/tmp/eve-agent", ["install"], { signal: controller.signal });
+    void result.then(() => {
+      settled = true;
+    });
+    controller.abort();
+    const error: NodeJS.ErrnoException = new Error("The operation was aborted");
+    error.name = "AbortError";
+    child.emit("error", error);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Cleanup after an abort must not race a package manager that is still writing files.
+    expect(settled).toBe(false);
+
+    child.emit("close", null, "SIGTERM");
+    await expect(result).resolves.toMatchObject({ termination: { kind: "aborted" } });
+  });
+
+  test("settles immediately when aborted before spawning", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      spawnPnpm("/tmp/eve-agent", ["install"], { signal: controller.signal }),
+    ).resolves.toMatchObject({ termination: { kind: "aborted" } });
+    expect(mockedSpawn).not.toHaveBeenCalled();
   });
 });

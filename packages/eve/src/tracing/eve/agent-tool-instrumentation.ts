@@ -20,6 +20,7 @@ import type {
   AgentTraceStateStore,
 } from "#tracing/eve/agent-trace-state.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
+import { connectionAuthorizationAttributes } from "#tracing/eve/connection-authorization.js";
 import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 import type {
   AgentRun,
@@ -288,6 +289,9 @@ export function createAgentToolInstrumentation(input: {
         });
         return result;
       } catch (error) {
+        // Content-free, so recorded whatever the trace policy says about the error itself.
+        const authorization = connectionAuthorizationAttributes(error);
+        if (authorization !== undefined) execution.tool.attributes(authorization);
         await finishExecution(execution, {
           completedAtMs: Date.now(),
           failed: true,

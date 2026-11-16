@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StoredLine, UserPart } from "#protocol/session-events/envelope.js";
-import { turnInput } from "#reactions/turn.js";
+import { turnInput } from "#definitions/turn.js";
 import {
   emptySessionView,
   emptyPreviews,
@@ -339,6 +339,22 @@ describe("the shared fold", () => {
     // A step that resumes after the tasks and writes nothing leaves the answer the turn gave.
     const quiet = folded([opening!, request!, interim!, resumed(false)]);
     expect(reply(quiet, "turn_0").map((part) => part.value)).toEqual(["Reply 0."]);
+  });
+
+  it("answers a turn with a reply the turn wrote itself, over its run's", () => {
+    const [opening, request, answered] = turnLines(0, { opensSession: true });
+    const own: StoredLine = {
+      at,
+      facts: [
+        {
+          data: { kind: "text", partId: "p_own", phase: "reply", value: "Mine." },
+          scope: { turnId: "turn_0" },
+          type: "content.completed",
+        },
+      ],
+    };
+    const view = folded([opening!, request!, answered!, own]);
+    expect(reply(view, "turn_0").map((part) => part.value)).toEqual(["Mine."]);
   });
 
   it("records a run's current attempt, each retry's start moving it on", () => {

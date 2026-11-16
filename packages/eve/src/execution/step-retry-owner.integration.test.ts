@@ -1,266 +1,21 @@
-import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
-import type { AnyEventRequest } from "@workflow/world";
-import { MockLanguageModelV4 } from "ai/test";
+// @linux-only: step retry semantics; in-process
 import { expect, it, onTestFinished, vi } from "vitest";
-import { z } from "zod";
-import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { defineDynamic } from "#dynamic/definition.js";
 import {
-  sessionCommandHookToken,
-  sessionInboxHookToken,
-} from "#execution/session-inbox/address.js";
-import { workflowEntry } from "#execution/session/entry.js";
-import { markMockModel } from "#internal/mock-model-identity.js";
-import { createTestRuntime } from "#internal/testing/app-harness.js";
+  finalizeInstrumentationProviders,
+  registerInstrumentationProvider,
+} from "#instrumentation/providers.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
-import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { captureTurnEvents } from "#internal/testing/events.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { withInterruptedSession } from "#internal/testing/interrupted-session.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { defineAgent } from "#public/definitions/agent.js";
-import { defineHook } from "#public/definitions/hook.js";
-import { forgetSessionLive } from "#reactions/state.js";
-import { always } from "#tools/approval/policies.js";
-import { defineTool } from "#tools/definition.js";
-import { defineWorkflowTool } from "#tools/workflow-definition.js";
-import { deployServiceWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import { defineInstrumentation } from "#public/instrumentation/index.js";
 
-// A turn step that published and then lost its checkpoint runs again from the checkpoint. The
-// harness loses each step's completion once, right after the step published the fact named,
-// as a process that exits before its checkpoint saves does.
+// A turn step that published and then lost its checkpoint, or whose stream died, runs again from
+// the checkpoint. The in-process host loses the step's completion after it ran, as a process that
+// exits before its checkpoint saves does, or fails its writes, and runs it again as its next
+// attempt. That Workflow retries a lost completion or a step that fails every attempt the same way
+// is the host battery's (`internal/testing/session-host/`).
 
-vi.setConfig({ testTimeout: 90_000 });
-
-type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
-
-const ALICE = {
-  attributes: {},
-  authenticator: "test",
-  issuer: "test",
-  principalId: "alice",
-  principalType: "user" as const,
-};
-
-interface Session {
-  readonly next: (label: string) => Promise<SessionStreamEvent[]>;
-  readonly answer: (interactionId: string, optionId: string) => Promise<void>;
-  readonly send: (message: string) => Promise<void>;
-  readonly events: () => readonly SessionStreamEvent[];
-  readonly interrupted: () => number;
-}
-
-async function withInterruptedSession(
-  name: string,
-  options: {
-    readonly tools: readonly {
-      readonly name: string;
-      readonly approval?: boolean;
-      /** Runs as a workflow, whose result the turn waits on. */
-      readonly workflow?: true;
-    }[];
-    /** What the model answers each call, from the prompt it reads. */
-    readonly respond: (prompt: string, call: number) => StreamResult;
-    /** The step that publishes the `nth` of these facts loses its completion once. */
-    readonly interruptAfter?: { readonly type: string; readonly nth?: number };
-    /** Which turn-step completions, counted from 1, are lost. */
-    readonly loseTurnStep?: (completion: number) => boolean;
-    /** How many turn-step attempts, from the first, fail their first session write. */
-    readonly failTurnStepWrites?: number;
-  },
-  body: (session: Session) => Promise<void>,
-) {
-  const prompts: string[] = [];
-  const ran: string[] = [];
-  const model = markMockModel(
-    new MockLanguageModelV4({
-      doStream: async (call: LanguageModelV4CallOptions) => {
-        const prompt = JSON.stringify(call.prompt);
-        prompts.push(prompt);
-        return options.respond(prompt, prompts.length);
-      },
-      modelId: name,
-      provider: "eve-test",
-    }),
-  );
-  let seen = 0;
-  let armed = false;
-  let interrupted = 0;
-  const runtime = await createTestRuntime({
-    agent: {
-      definition: defineAgent({
-        model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
-      }),
-      name,
-    },
-    modules: [
-      {
-        loadNamespace: async () => ({
-          default: defineHook({
-            events: {
-              [options.interruptAfter?.type ?? "session.started"]() {
-                seen += 1;
-                if (
-                  options.interruptAfter !== undefined &&
-                  seen === (options.interruptAfter.nth ?? 1)
-                )
-                  armed = true;
-              },
-            },
-          }),
-        }),
-        logicalPath: "hooks/interrupt.ts",
-      },
-      ...options.tools.map((tool) => ({
-        loadNamespace: async () => ({
-          default: tool.workflow
-            ? defineWorkflowTool({
-                description: `Run ${tool.name} for Alice.`,
-                execute: deployServiceWorkflow,
-                inputSchema: { properties: { service: { type: "string" } }, type: "object" },
-              })
-            : defineTool({
-                approval: tool.approval === true ? { request: always() } : undefined,
-                description: `Run ${tool.name} for Alice.`,
-                execute: () => {
-                  ran.push(tool.name);
-                  return { done: tool.name };
-                },
-                inputSchema: z.object({}).passthrough(),
-              }),
-        }),
-        logicalPath: `tools/${tool.name}.ts`,
-      })),
-    ],
-  });
-  const continuationToken = `http:${name}`;
-  const events: SessionStreamEvent[] = [];
-  await runtime.run(async () => {
-    const world = await getWorld();
-    const createBatch = world.events.createBatch;
-    world.events.createBatch = undefined;
-    const create = world.events.create.bind(world.events);
-    let sessionId: string | undefined;
-    let turnSteps = 0;
-    let failingWrites = options.failTurnStepWrites ?? 0;
-    let failNextWrite = false;
-    const getWriter = WritableStream.prototype.getWriter;
-    const writerSpy = vi.spyOn(WritableStream.prototype, "getWriter").mockImplementation(function (
-      this: WritableStream<Uint8Array>,
-    ) {
-      const writer = getWriter.call(this);
-      const write = writer.write.bind(writer);
-      writer.write = async (chunk) => {
-        if (failNextWrite) {
-          failNextWrite = false;
-          throw new Error("The session stream is unavailable");
-        }
-        return await write(chunk);
-      };
-      return writer;
-    });
-    const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-      const [runId, event] = args as [string, AnyEventRequest];
-      const turnStep =
-        event.eventType === "step_completed" &&
-        String((event.eventData as { stepName?: string }).stepName).includes("turnStep");
-      const lose = turnStep && options.loseTurnStep?.(++turnSteps) === true;
-      if (
-        runId === sessionId &&
-        event.eventType === "step_started" &&
-        String((event.eventData as { stepName?: string }).stepName).includes("turnStep") &&
-        failingWrites > 0
-      ) {
-        failingWrites -= 1;
-        failNextWrite = true;
-      }
-      if ((lose || armed) && runId === sessionId && event.eventType === "step_completed") {
-        armed = false;
-        interrupted += 1;
-        forgetSessionLive(runId);
-        throw new Error("Process exited after publication, before checkpoint");
-      }
-      return await create(...args);
-    });
-    const run = await startSessionOwner(workflowEntry, [
-      {
-        input: { message: "Help Alice with her account." },
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        serializedContext: {
-          ...buildSerializedContext({ auth: ALICE, channelKind: "http", continuationToken }),
-          "eve.capabilities": { requestInput: true },
-        },
-      },
-    ]);
-    sessionId = run.runId;
-    const commandInbox = sessionInboxHookToken(sessionCommandHookToken(run.runId));
-    const stream = captureTurnEvents(run);
-    try {
-      await body({
-        async answer(interactionId, optionId) {
-          await resumeHook(commandInbox, {
-            auth: ALICE,
-            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-            kind: "send",
-            payload: { answers: [{ interactionId, optionId }] },
-          });
-        },
-        events: () => events,
-        interrupted: () => interrupted,
-        async next(label) {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const read = await Promise.race([
-            stream.nextTurn(),
-            new Promise<never>((_resolve, reject) => {
-              timer = setTimeout(
-                () =>
-                  reject(
-                    new Error(
-                      `Timed out waiting for ${label} after: ${events.map((event) => event.type).join(", ")}`,
-                    ),
-                  ),
-                60_000,
-              );
-            }),
-          ]).finally(() => clearTimeout(timer));
-          events.push(...read);
-          return read;
-        },
-        async send(message) {
-          await resumeHook(sessionInboxHookToken(continuationToken), {
-            auth: ALICE,
-            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-            kind: "send",
-            payload: { message },
-          });
-        },
-      });
-    } finally {
-      stream.dispose();
-      spy.mockRestore();
-      writerSpy.mockRestore();
-      world.events.createBatch = createBatch;
-      await run.cancel().catch(() => {});
-    }
-  });
-  // Every line follows the one before it, and no fact is written twice.
-  const lines = [...new Set(events.map(({ meta }) => meta.position.line))];
-  expect(lines).toEqual(Array.from({ length: lines.length }, (_, index) => index + lines[0]!));
-  const ids = {
-    "call.requested": "callId",
-    "model.requested": "runId",
-    "turn.settled": "turnId",
-    "turn.started": "turnId",
-  } as const;
-  for (const [type, field] of Object.entries(ids)) {
-    const written = events
-      .filter((event) => event.type === type)
-      .map((event) => (event.data as Record<string, unknown>)[field]);
-    expect(new Set(written).size, type).toBe(written.length);
-  }
-  return { prompts, ran, observed: seen };
-}
+vi.setConfig({ testTimeout: 30_000 });
 
 const ofType = <T extends SessionStreamEvent["type"]>(
   events: readonly SessionStreamEvent[],
@@ -268,54 +23,95 @@ const ofType = <T extends SessionStreamEvent["type"]>(
 ) =>
   events.filter((event): event is Extract<SessionStreamEvent, { type: T }> => event.type === type);
 
-it("keeps a turn that settled before its checkpoint was lost, and the session goes on", async () => {
+// A short conversation whose first turn runs a workflow tool and an ordinary tool, and whose
+// second only replies. The model answers from what the prompt holds, so a retry that reads
+// what its interrupted attempt did comes to the same replies.
+const respondToConversation = (prompt: string, call: number) =>
+  prompt.includes("Thanks!")
+    ? textStreamResult("You're welcome.")
+    : !prompt.includes("plan:billing")
+      ? toolCallStreamResult({
+          input: JSON.stringify({ service: "billing" }),
+          toolCallId: `deploy-${call}`,
+          toolName: "deploy",
+        })
+      : !prompt.includes('"toolName":"lookup"') && !prompt.includes("- lookup")
+        ? toolCallStreamResult({ input: "{}", toolCallId: `lookup-${call}`, toolName: "lookup" })
+        : textStreamResult("Billing is deployed, and Alice's record is ready.");
+
+/** Each turn's outcome and reply. */
+function transcript(events: readonly SessionStreamEvent[]) {
+  const texts = new Map(
+    ofType(events, "content.completed").map(({ data }) => [data.partId, data.value]),
+  );
+  return ofType(events, "turn.settled").map(({ data }) => ({
+    outcome: data.outcome,
+    reply: (data.reply ?? []).map((partId) => texts.get(partId)),
+  }));
+}
+
+/** Runs the conversation, losing turn-step completion `lost`, if any. */
+async function converse(lost: number | undefined) {
+  let completions = 0;
   const { prompts, ran } = await withInterruptedSession(
-    "retry-settled",
+    `replay-sweep-${lost ?? "none"}`,
     {
-      interruptAfter: { type: "turn.settled" },
-      respond: (_prompt, call) =>
-        call === 1
-          ? toolCallStreamResult({ input: "{}", toolCallId: "lookup", toolName: "lookup" })
-          : textStreamResult(call === 2 ? "Alice's record is ready." : "You're welcome."),
-      tools: [{ name: "lookup" }],
+      loseTurnStep: (completion) => {
+        completions = completion;
+        return completion === lost;
+      },
+      respond: respondToConversation,
+      tools: [{ name: "deploy", workflow: true }, { name: "lookup" }],
     },
     async (session) => {
-      await session.next("first turn");
-      await vi.waitFor(() => expect(session.interrupted()).toBe(1));
+      const settled = async (label: string) => {
+        while (ofType(await session.next(label), "turn.settled").length === 0);
+      };
+      await settled("first turn");
       await session.send("Thanks!");
-      await session.next("second turn");
+      await settled("second turn");
+      expect(transcript(session.events())).toEqual([
+        { outcome: "completed", reply: ["Billing is deployed, and Alice's record is ready."] },
+        { outcome: "completed", reply: ["You're welcome."] },
+      ]);
+      // The workflow ran once: a retry reads its result instead of asking for it again.
+      const deploys = new Set(
+        ofType(session.events(), "call.requested")
+          .filter(({ data }) => data.capability.name === "deploy")
+          .map(({ data }) => data.callId),
+      );
+      expect(
+        ofType(session.events(), "call.settled").filter(
+          ({ data }) => deploys.has(data.callId) && data.outcome === "completed",
+        ),
+      ).toHaveLength(1);
+      // The last step may lose its completion only after the reader saw what it wrote.
+      await vi.waitFor(() => expect(session.interrupted()).toBe(lost === undefined ? 0 : 1));
     },
   );
   expect(ran).toEqual(["lookup"]);
-  expect(prompts).toHaveLength(3);
-  // The next turn reads the settled turn's input and reply.
-  expect(prompts[2]).toContain("Help Alice with her account.");
-  expect(prompts[2]).toContain("Alice's record is ready.");
+  // The second turn reads the first's input and reply.
+  expect(prompts.at(-1)).toContain("Help Alice with her account.");
+  expect(prompts.at(-1)).toContain("Billing is deployed, and Alice's record is ready.");
+  return completions;
+}
+
+/** How many turn steps the conversation runs when none loses its completion. */
+const TURN_STEPS = 4;
+
+it("runs the conversation in its turn steps when none loses its completion", async () => {
+  expect(await converse(undefined)).toBe(TURN_STEPS);
 });
 
-it("runs the model again after an interrupted step, without running its tool again", async () => {
-  const { prompts, ran } = await withInterruptedSession(
-    "retry-after-tool",
-    {
-      interruptAfter: { type: "call.settled" },
-      respond: (prompt, call) =>
-        call === 1
-          ? toolCallStreamResult({ input: "{}", toolCallId: "lookup", toolName: "lookup" })
-          : textStreamResult(
-              prompt.includes("result was lost") ? "I checked: it ran." : "Unexpected prompt.",
-            ),
-      tools: [{ name: "lookup" }],
-    },
-    async (session) => {
-      const turn = await session.next("first turn");
-      await vi.waitFor(() => expect(session.interrupted()).toBe(1));
-      expect(ofType(turn, "turn.settled")).toMatchObject([{ data: { outcome: "completed" } }]);
-    },
-  );
-  expect(ran).toEqual(["lookup"]);
-  expect(prompts).toHaveLength(2);
-  expect(prompts[1]).toContain("lookup");
-});
+it.each(Array.from({ length: TURN_STEPS }, (_, index) => index + 1))(
+  "comes to the same conversation when turn step %i loses its completion",
+  async (lost) => {
+    await converse(lost);
+  },
+);
+
+// What the conversation above doesn't reach: approvals, and steps that lose their completion
+// more than once.
 
 it("does not run an approved call again when the step that ran it is interrupted", async () => {
   const { prompts, ran } = await withInterruptedSession(
@@ -365,40 +161,6 @@ it("does not run an approved call again when the step that ran it is interrupted
   // The model reads that deploy ran, and doesn't read the applied approval again as new input.
   expect(prompts[2]).toContain("result was lost");
   expect(prompts[2]).not.toContain("earlier interactive prompt");
-});
-
-it("hands a workflow's result to the step again when the step that read it is interrupted", async () => {
-  const { prompts, ran } = await withInterruptedSession(
-    "retry-workflow-result",
-    {
-      // The step that reads the deploy's result runs lookup, then loses its checkpoint.
-      interruptAfter: { nth: 2, type: "call.settled" },
-      respond: (_prompt, call) =>
-        call === 1
-          ? toolCallStreamResult({
-              input: JSON.stringify({ service: "billing" }),
-              toolCallId: "deploy",
-              toolName: "deploy",
-            })
-          : call === 2
-            ? toolCallStreamResult({ input: "{}", toolCallId: "lookup", toolName: "lookup" })
-            : textStreamResult("Billing is deployed."),
-      tools: [{ name: "deploy", workflow: true }, { name: "lookup" }],
-    },
-    async (session) => {
-      const turn = await session.next("reply");
-      await vi.waitFor(() => expect(session.interrupted()).toBe(1));
-      if (ofType(turn, "turn.settled").length === 0) await session.next("reply after retry");
-      expect(ofType(session.events(), "turn.settled")).toMatchObject([
-        { data: { outcome: "completed" } },
-      ]);
-    },
-  );
-  expect(ran).toEqual(["lookup"]);
-  expect(prompts).toHaveLength(3);
-  // The retry reads the workflow's result, and that lookup may already have run.
-  expect(prompts[2]).toContain("plan:billing");
-  expect(prompts[2]).toContain("result was lost");
 });
 
 it("fails the turn, not the session, when its steps are interrupted too many times", async () => {
@@ -461,9 +223,8 @@ it("keeps an approved call's recorded outcome in history after retry exhaustion"
         const events = await session.next("approval retry or failed turn");
         if (ofType(events, "turn.settled").length > 0) break;
       }
-      // No attempt threw; the workflow's own exhaustion error is the failure.
       expect(ofType(session.events(), "turn.settled")).toMatchObject([
-        { data: { error: { code: "FatalError", id: expect.any(String) }, outcome: "failed" } },
+        { data: { error: { code: "TURN_FAILED", id: expect.any(String) }, outcome: "failed" } },
       ]);
       await session.send("Check what happened before continuing.");
       const next = await session.next("next turn");
@@ -474,42 +235,72 @@ it("keeps an approved call's recorded outcome in history after retry exhaustion"
   expect(prompts.at(-1)).toContain("This call completed, but its result was lost");
 });
 
-it("fails the turn, not the session, when a step fails every attempt", async () => {
-  // A failed attempt waits this long for its stream's writes before it retries.
-  vi.stubEnv("WORKFLOW_STEP_STREAM_DRAIN_TIMEOUT_MS", "500");
-  onTestFinished(() => {
-    vi.unstubAllEnvs();
+it("retries a step whose stream write failed, and each model attempt settles once", async () => {
+  const name = "retry-dead-stream";
+  const started: string[] = [];
+  const settled: { readonly key: string; readonly outcome: string }[] = [];
+  await registerInstrumentationProvider({
+    agentName: name,
+    slot: "capture",
+    value: defineInstrumentation({
+      events: {
+        "model.started": (event) => void started.push(event.idempotencyKey),
+        "model.settled": (event) =>
+          void settled.push({ key: event.idempotencyKey, outcome: event.outcome }),
+      },
+    }),
   });
-  const { observed } = await withInterruptedSession(
-    "retry-exhausted",
+  finalizeInstrumentationProviders({ serviceName: name });
+  onTestFinished(() => {
+    delete (globalThis as Record<symbol, unknown>)[
+      Symbol.for("eve.harness-instrumentation-providers")
+    ];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+  });
+
+  const { prompts } = await withInterruptedSession(
+    name,
     {
-      // Every attempt of the first step fails to write; the recovery step's write succeeds.
-      failTurnStepWrites: 4,
-      respond: (_prompt, call) =>
-        call === 1
-          ? toolCallStreamResult({ input: "{}", toolCallId: "lookup", toolName: "lookup" })
-          : textStreamResult("Done."),
-      tools: [{ name: "lookup" }],
+      // The answer's first content write fails; the host retries the step with a fresh stream.
+      failWriteOf: '"content.',
+      respond: () => textStreamResult("Alice's account is ready."),
+      tools: [],
     },
     async (session) => {
-      const turn = await session.next("failed turn");
-      // The turn reports what the last attempt threw, under an id its log line carries.
-      expect(ofType(turn, "turn.settled")).toMatchObject([
-        {
-          data: {
-            error: {
-              code: "STEP_FAILED",
-              id: expect.any(String),
-              message: "The session stream is unavailable",
-            },
-            outcome: "failed",
-          },
-        },
-      ]);
+      const turn = await session.next("turn");
+      expect(ofType(turn, "turn.settled")).toMatchObject([{ data: { outcome: "completed" } }]);
+      expect(session.failedWrites()).toBe(1);
+    },
+  );
+  // The failed step called the model once, without retrying the call itself.
+  expect(prompts).toHaveLength(2);
+  // The retry closes the cut attempt as abandoned; nothing else settles it.
+  expect(started).toHaveLength(2);
+  expect(settled.map(({ key }) => key)).toEqual(started);
+  expect(settled.map(({ outcome }) => outcome)).toEqual(["abandoned", "completed"]);
+});
+
+it("cancels a turn stopped while its step kept failing, and the session goes on", async () => {
+  const { prompts } = await withInterruptedSession(
+    "retry-exhausted-stopped",
+    {
+      failTurnStepWrites: 4,
+      holdRetryUntilStopped: true,
+      respond: () => textStreamResult("Done."),
+      tools: [],
+    },
+    async (session) => {
+      // Alice stops the turn while its first attempt is failing.
+      await vi.waitFor(() => expect(session.failedWrites()).toBeGreaterThan(0));
+      await session.cancel();
+      const turn = await session.next("cancelled turn");
+      expect(ofType(turn, "turn.settled")).toMatchObject([{ data: { outcome: "cancelled" } }]);
+      expect(ofType(turn, "turn.settled")[0]?.data).not.toHaveProperty("error");
       await session.send("Try again, please.");
       const next = await session.next("next turn");
       expect(ofType(next, "turn.settled")).toMatchObject([{ data: { outcome: "completed" } }]);
     },
   );
-  expect(observed).toBe(1);
+  // The stopped turn's input stays in history, as a cancel before the model read it keeps it.
+  expect(prompts.at(-1)).toContain("Help Alice with her account.");
 });

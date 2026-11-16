@@ -1,9 +1,9 @@
 ---
-title: "eve"
+title: "eve (HTTP & web)"
 description: "The default HTTP API for an agent, covering session routes, auth, and customization."
 ---
 
-The eve channel is the framework's default HTTP API under `/eve/v1`. The terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and SDK clients use it to start sessions, send messages, and stream events. It also serves the health, agent info, callback, and task input routes.
+The eve channel is the framework's default HTTP API under `/eve/v1`. The terminal UI, [`useEveAgent`](/docs/guides/frontend), `curl`, and SDK clients use it to start sessions, send messages, and stream events. It also serves the health, agent info, callback, and task input routes.
 
 Each deployment serves its own API with its own host and authentication policy. `eve.dev` hosts framework documentation only; it is not a shared API, authorization server, MCP server, or A2A server.
 
@@ -95,13 +95,12 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
-A follow-up message joins the running turn by default; see [Overlapping messages](./overview#overlapping-messages). Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. `answers` only answer the requests they name.
+A follow-up message joins the running turn by default; see [Overlapping messages](/docs/channels#overlapping-messages). Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. `answers` only answer the requests they name.
 
-| Session state                         | Response                                                                                         |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Unknown or terminal                   | `409` with `{"code":"session_not_active","error":"The session is no longer active.","ok":false}` |
-| Workflow exists but inbox isn't ready | `409 session_not_ready`                                                                          |
-| Built by another eve version          | `409 session_stranded` with the `eveVersion` that built it                                       |
+| Session state                | Response                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| Unknown or terminal          | `409` with `{"code":"session_not_active","error":"The session is no longer active.","ok":false}` |
+| Built by another eve version | `409 session_stranded` with the `eveVersion` that built it                                       |
 
 ### Send files
 
@@ -368,7 +367,7 @@ export default defineChannel({
 
 The client then resumes the session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when another session already owned the address or another `create()` or `send()` claimed it first. That session comes back unchanged, without your `history`. Use a new address for each new conversation or branch.
 
-`create()` returns once the new session claims its address, so an immediate `send()` reaches it. It throws if no session claims the address within 15 seconds. On a [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session) session, `create()` throws `SessionStrandedError` instead of replacing a conversation you may mean to import; call `end()` on the address, then `create()` again.
+`create()` returns once a session owns the address, so an immediate `send()` reaches it. The new session takes the address as it starts, so `create()` doesn't wait for the session to boot. On a [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session) session, `create()` throws `SessionStrandedError` instead of replacing a conversation you may mean to import; call `end()` on the address, then `create()` again.
 
 `send()` accepts the same `history` option and adds the entries right before that message and its `context`, whether it creates or continues the session. The eve channel's `onMessage` can return `history` too, which applies to every message it's returned for.
 
@@ -396,13 +395,13 @@ The default home page at `GET /` and `HEAD /` is a separate `home` channel. Auth
 
 ## Clients
 
-The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the eve channel from React UI.
+The browser side of this API lives in the [Frontend](/docs/guides/frontend) docs, where `useEveAgent` drives the eve channel from React UI.
 
-For scripts, server-to-server calls, evals, tests, and custom clients, use the [Client SDK](../guides/client/overview), which wraps the session routes, stream cursor, and reconnect loop.
+For scripts, server-to-server calls, evals, tests, and custom clients, use the [Client SDK](/docs/guides/client), which wraps the session routes, stream cursor, and reconnect loop.
 
 ## What to read next
 
-- [Frontend](../guides/frontend/overview): drive the eve channel from browser UI with `useEveAgent`
-- [Client SDK](../guides/client/overview): call the eve channel from TypeScript
+- [Frontend](/docs/guides/frontend): drive the eve channel from browser UI with `useEveAgent`
+- [Client SDK](/docs/guides/client): call the eve channel from TypeScript
 - [Auth & route protection](../guides/auth-and-route-protection): the route auth policy
 - [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): the routes this channel exposes

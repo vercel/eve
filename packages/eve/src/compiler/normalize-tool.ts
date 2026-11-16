@@ -1,12 +1,14 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
-import type { ToolSourceRef } from "#discover/manifest.js";
-import type { CompiledToolDefinition, CompiledDynamicToolDefinition } from "#compiler/manifest.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { CompiledDefinition, CompiledToolDefinition } from "#compiler/manifest.js";
 import {
+  compiledDefinition,
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
+import { WEB_SEARCH_TOOL_DESCRIPTION } from "#tools/provided/web-search.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -22,7 +24,7 @@ export type CompiledToolEntry =
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
     }
-  | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
+  | { readonly kind: "dynamic"; readonly definition: CompiledDefinition };
 
 /**
  * Compiles one authored tool module into the normalized tool entry
@@ -38,7 +40,7 @@ export type CompiledToolEntry =
  */
 export async function compileToolEntry(
   _agentRoot: string,
-  source: ToolSourceRef,
+  source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledToolEntry> {
   const entry = normalizeToolDefinition(
@@ -78,8 +80,7 @@ export async function compileToolEntry(
           availability: [],
           handling: { kind: "provider-tool", ...entry.selection },
         },
-        description:
-          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
+        description: WEB_SEARCH_TOOL_DESCRIPTION,
         exportName: source.exportName,
         hasExecute: false,
         hasModelOutputProjection: false,
@@ -95,16 +96,7 @@ export async function compileToolEntry(
   }
 
   if (entry.kind === "dynamic-tool") {
-    return {
-      kind: "dynamic-tool",
-      definition: {
-        exportName: source.exportName,
-        logicalPath: source.logicalPath,
-        slug: toolName,
-        sourceId: source.sourceId,
-        sourceKind: "module",
-      },
-    };
+    return { definition: compiledDefinition("tool", source, toolName), kind: "dynamic" };
   }
 
   const { workflow } = entry.definition;

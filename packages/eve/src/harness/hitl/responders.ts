@@ -1,3 +1,5 @@
+import { REQUESTER_ONLY_FEEDBACK, sameResponder } from "#approval/requester-only.js";
+import { transition } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { contextStorage } from "#context/container.js";
@@ -33,8 +35,6 @@ import type { Answer } from "#shared/input.js";
 
 const UNAUTHENTICATED_FEEDBACK = "Authentication is required to respond to this approval.";
 const INVALID_FEEDBACK = "Respond to this approval with Approve or Cancel.";
-const REQUESTER_ONLY_FEEDBACK =
-  "Only the person who requested this action can respond to this approval.";
 const UNAVAILABLE_REASON =
   "The tool this approval was for is no longer available, so the call won't run.";
 const TEMPORARILY_UNAVAILABLE_REASON =
@@ -143,8 +143,8 @@ export async function weighResponders(
   view: SessionView,
   input: {
     readonly now: number;
-    /** The entries of the step that asked, which carry the policy. */
-    readonly toolsOf: (step: SuspendedStep | undefined) => Promise<HarnessToolLookup>;
+    /** The entries parked calls run with, which carry the policy. */
+    readonly tools: () => Promise<HarnessToolLookup>;
   },
 ): Promise<WeighedResponders> {
   const tables = view.projection.view;
@@ -180,7 +180,7 @@ export async function weighResponders(
       request,
       responseId,
       step,
-      toolsOf: input.toolsOf,
+      tools: input.tools,
     });
     switch (weighed.kind) {
       case "allowed":
@@ -213,13 +213,13 @@ export async function weighResponders(
       }
     }
   }
-  return {
+  return transition({
     challenges,
     events,
     responders: upsert,
     turn: view.turn,
     unavailable,
-  };
+  });
 }
 
 /**
@@ -265,11 +265,11 @@ async function weigh(input: {
   readonly request: ApprovalAsk;
   readonly responseId: string;
   readonly step: SuspendedStep;
-  readonly toolsOf: (step: SuspendedStep | undefined) => Promise<HarnessToolLookup>;
+  readonly tools: () => Promise<HarnessToolLookup>;
 }): Promise<Weighed> {
   let tools: HarnessToolLookup;
   try {
-    tools = await input.toolsOf(input.step);
+    tools = await input.tools();
   } catch (error) {
     // A resolver or its infrastructure failed: the entry may still exist, so the request waits.
     logError(log, "approval tools could not be restored", error, {
@@ -328,16 +328,6 @@ function decisionOf(response: Answer): "approve" | "deny" | undefined {
   if (response.optionId === "approve") return "approve";
   if (response.optionId === "deny") return "deny";
   return undefined;
-}
-
-/** Whether two auth contexts name the same principal. */
-export function sameResponder(left: SessionAuthContext, right: SessionAuthContext): boolean {
-  return (
-    left.authenticator === right.authenticator &&
-    (left.issuer ?? "") === (right.issuer ?? "") &&
-    left.principalType === right.principalType &&
-    left.principalId === right.principalId
-  );
 }
 
 async function withTimeout<T>(promise: Promise<T> | T): Promise<T> {

@@ -1,13 +1,13 @@
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { declared } from "#runtime/types.js";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { dynamicEvaluate, type DynamicSentinel } from "#dynamic/definition.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { compiledOf, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
@@ -240,30 +240,48 @@ describe("mounted extension via authored-source loader", () => {
           'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs":
-          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "high" } });',
+          'import code from "eve/extensions/code"; export default code({ vercel: { connector: "vercel/one" } });',
         "agent/extensions/two.mjs":
-          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "low" } });',
+          'import code from "eve/extensions/code"; export default code({ vercel: { connector: "vercel/two" } });',
       },
     });
     const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
-    const workers = ["one", "two"].map((name) =>
-      manifest.subagents.find((subagent) => subagent.name === `${name}__worker`)!,
+    // Keep the Connect token request offline: an unexpired OIDC token skips the
+    // refresh, and the request itself fails before reaching the network.
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    vi.stubEnv(
+      "VERCEL_OIDC_TOKEN",
+      `e30.${Buffer.from(JSON.stringify({ exp })).toString("base64url")}.sig`,
     );
-    expect(workers[0]?.owner).toMatchObject({ mountId: "extensions/one" });
-    // Each mounted worker reads its own extension configuration.
-    const reasoningOf = (map: typeof moduleMap, worker: (typeof workers)[number]) => {
-      if (!("config" in worker.agent)) throw new Error("Expected a worker config.");
-      const definition = map.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
-        .default as { model: DynamicSentinel<{ reasoning: string }, object> };
-      return (dynamicEvaluate(definition.model)({}) as { reasoning: string }).reasoning;
-    };
-    const reasoning = workers.map((worker) => reasoningOf(moduleMap, worker));
-    expect(reasoning).toEqual(["high", "low"]);
-    const second = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
-    });
-    const secondReasoning = workers.map((worker) => reasoningOf(second, worker));
-    expect(secondReasoning).toEqual(["high", "low"]);
+    vi.stubEnv("VERCEL_OIDC_TOKEN_FILE", "");
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
+    try {
+      // Each mounted authentication hook requests a token for its own connector.
+      const authenticate = (map: typeof moduleMap, mount: string) => {
+        const hook = compiledOf(manifest, "hook").find(
+          (entry) => entry.slug === `${mount}__authenticate`,
+        )!;
+        const definition = map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[hook.sourceId]!
+          .default as {
+          events: Record<string, (event: unknown, ctx: object) => Promise<void>>;
+        };
+        return definition.events["turn.started"]!({}, { getSandbox: async () => ({}) });
+      };
+      const second = await loadCompiledModuleMapFromAuthoredSource({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+      });
+      for (const map of [moduleMap, second]) {
+        await expect(authenticate(map, "one")).rejects.toThrow(
+          'Connect token request failed for "vercel/one": offline',
+        );
+        await expect(authenticate(map, "two")).rejects.toThrow(
+          'Connect token request failed for "vercel/two": offline',
+        );
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("keeps state independent across mounts and context restoration", async () => {
@@ -538,6 +556,57 @@ describe("mounted extension without config", () => {
   });
 });
 
+describe("mounted extension schedule collections", () => {
+  it("mount-prefixes a path-derived collection name and keeps an explicit id verbatim", async () => {
+    const collection = (id?: string) =>
+      [
+        'import { defineDynamicSchedules } from "eve/experimental/schedules";',
+        'import { inMemoryScheduleProvider } from "eve/experimental/schedules/testing";',
+        "const inputSchema = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } };",
+        `export default defineDynamicSchedules({ ${id === undefined ? "" : `id: ${JSON.stringify(id)}, `}provider: inMemoryScheduleProvider(), inputSchema, auth: () => null, run: async () => {} });`,
+      ].join("\n");
+    const app = await createAppRoot("eve-mounted-extension-schedule-collections-", {
+      files: {
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "You are a precise assistant.",
+        "agent/extensions/crm.mjs": 'export { default } from "@acme/crm";',
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
+        "node_modules/@acme/crm/extension/extension.mjs":
+          'import { defineExtension } from "eve/extension";\nexport default defineExtension();',
+        "node_modules/@acme/crm/extension/schedules/requests.mjs": collection(),
+        "node_modules/@acme/crm/extension/schedules/workflows.mjs": collection("crm-workflows"),
+      },
+    });
+
+    const { graph, manifest } = await compileRuntimeGraph(app.appRoot);
+    expect(
+      manifest.scheduleCollections.map(({ logicalPath, name }) => [logicalPath, name]),
+    ).toEqual([
+      ["schedules/crm__requests.mjs", "crm__requests"],
+      ["schedules/crm__workflows.mjs", "crm-workflows"],
+    ]);
+    expect(declared(graph.root.agent, "schedules").map(({ name }) => name)).toEqual([
+      "crm__requests",
+      "crm-workflows",
+    ]);
+
+    await writeFile(
+      join(app.appRoot, "agent/extensions/other.mjs"),
+      'export { default } from "@acme/crm";',
+    );
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
+      'Schedule collections "schedules/crm__workflows.mjs" and "schedules/other__workflows.mjs" both resolve to the name "crm-workflows".',
+    );
+  });
+});
+
 describe("mounted extension with an unsupported capability contract", () => {
   it("fails compilation when the distribution requires an unsupported generation", async () => {
     const app = await createAppRoot("eve-mounted-extension-incompatible-", {
@@ -695,7 +764,7 @@ describe("mounted extension via directory form with override", () => {
     const legacy = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_legacy");
     expect(legacy).toBeUndefined();
 
-    const pulse = graph.root.agent.dynamicToolResolvers.find(
+    const pulse = declared(graph.root.agent, "tool").find(
       (resolver) => resolver.slug === "crm__crm_pulse",
     );
     expect(pulse).toBeUndefined();

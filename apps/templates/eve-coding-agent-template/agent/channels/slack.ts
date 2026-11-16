@@ -5,7 +5,17 @@ import { call } from "eve/events";
 import { CODE_CHANNELS, syncCodeChannel } from "../lib/code-channel";
 
 // Tools that can change the workspace or what the context bar shows.
-const SYNC_AFTER = new Set(["bash", "code__apply_patch", "git__gh", "update_code_channel_status"]);
+// `code__apply_patch` is the editing tool in the eve release this template's
+// lockfile pins; newer eve has a default `edit_file` instead. Drop
+// `code__apply_patch` once the lockfile pins a release with `edit_file`, and
+// revisit the `write_file` disable: newer instructions create files with it.
+const SYNC_AFTER = new Set([
+  "bash",
+  "code__apply_patch",
+  "edit_file",
+  "git__gh",
+  "update_code_channel_status",
+]);
 
 // In a code channel, posts the agent's progress notes and refreshes the context
 // bar and diff view after each tool that can change them, so people watch the
@@ -47,10 +57,16 @@ const codeChannelSurfaces = defineSlackRenderer({
   },
 });
 
-// `eve add channel/slack` creates or picks a Slack app and writes its connector
-// UID here, so keep it a string literal.
+// The "Deploy with Vercel" button provisions a Slack connector and stores its
+// UID in SLACK_CONNECTOR. Otherwise, `eve add channel/slack` creates or picks a
+// Slack app and writes its connector UID into the literal below, so keep that
+// argument a string literal.
+const slackConnector = process.env.SLACK_CONNECTOR;
+
 export default slackChannel({
-  credentials: connectSlackCredentials("slack/coding-agent"),
+  credentials: slackConnector
+    ? connectSlackCredentials(slackConnector)
+    : connectSlackCredentials("slack/coding-agent"),
   codeChannels: CODE_CHANNELS,
   renderers: [codeChannelSurfaces],
 });

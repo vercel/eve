@@ -1,6 +1,7 @@
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { truncateHead } from "#execution/sandbox/truncate-output.js";
-import { convertHtmlToMarkdown, extractTextFromHtml } from "#execution/web-fetch/html.js";
+import { extractTextFromHtml } from "#execution/web-fetch/html.js";
+import { convertHtmlToMarkdown } from "#shared/html-to-markdown.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5 MB

@@ -1,3 +1,9 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
+
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import type { AgentWorkspace } from "#internal/project-context.js";
+
 /**
  * Public, versioned summary of an eve agent emitted by `eve`
  * during `eve build`.
@@ -108,6 +114,7 @@ export interface VercelEveInstructionsEntry {
 export interface VercelEveScheduleEntry {
   readonly name: string;
   readonly cron: string;
+  readonly timezone?: string;
   readonly logicalPath: string;
 }
 
@@ -275,4 +282,24 @@ export function normalizeChannelKindForDisplay(
     return "webhook";
   }
   return "unknown";
+}
+
+/** Write the root summary index Vercel uses to compose member summaries for the dashboard. */
+export async function writeMultiAgentSummary(workspace: AgentWorkspace): Promise<void> {
+  const summary: VercelEveMultiAgentSummary = {
+    agents: workspace.members.map((member) => ({
+      name: member.name,
+      routePrefix: `/eve/${member.name}`,
+      summaryPath: relative(
+        workspace.root,
+        join(member.appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
+      ).replaceAll("\\", "/"),
+    })),
+    generatorVersion: resolveInstalledPackageInfo().version,
+    kind: VERCEL_EVE_MULTI_AGENT_SUMMARY_KIND,
+    schemaVersion: VERCEL_EVE_MULTI_AGENT_SUMMARY_VERSION,
+  };
+  const outputPath = join(workspace.root, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`);
 }

@@ -20,7 +20,7 @@ const DEV_DISPATCH_SCHEDULE_PATH_PATTERN = new RegExp(
 /**
  * Builds the dev-only dispatch response for one authored schedule.
  *
- * Only mounted by `configure-nitro-routes.ts` when Nitro is running in
+ * Only mounted by `host-routes.ts` when Nitro is running in
  * dev mode — production builds never see this handler. The handler reads
  * the schedule id straight off the request URL, hands off to
  * `dispatchScheduleInDev` for the production-equivalent dispatch path,

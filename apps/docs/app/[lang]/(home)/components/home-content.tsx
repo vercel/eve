@@ -8,6 +8,7 @@ import { AgentTypes } from "./agent-types";
 import { ArchitectureDiagram } from "./architecture";
 import { GetStarted } from "./get-started";
 import { Hero } from "./hero";
+import { HowItWorks } from "./how-it-works";
 import { Production } from "./production";
 import { WhyEve } from "./why-eve";
 
@@ -39,6 +40,7 @@ export const HomeContent = () => (
     <JsonLd data={webSiteStructuredData(tagline)} />
     <Hero tagline={tagline} />
     <AgentTypes />
+    <HowItWorks />
     <WhyEve />
     <Production />
     <ArchitectureDiagram />

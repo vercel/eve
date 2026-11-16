@@ -5,13 +5,12 @@ import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { prepareAuthoredRuntimeModules } from "#internal/authored-runtime-modules.js";
 import { writeMaterializedAuthoredModules } from "#internal/materialized-authored-modules.js";
 import {
-  activateDevelopmentRuntimeArtifactsSnapshotTransaction,
+  activateDevelopmentRuntimeArtifactsSnapshot,
   pruneDevelopmentRuntimeArtifactsSnapshots,
   stageDevelopmentRuntimeArtifactsSnapshot,
-  type DevelopmentRuntimeArtifactsActivation,
   type DevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts.js";
-import { isPathInsideOrEqual } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
@@ -19,15 +18,6 @@ export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapsh
   /** Identity of the authored sources the workflow driver and step registrations are built from. */
   readonly workflowSourceFingerprint?: string;
 }
-
-interface DevelopmentGenerationPruneState {
-  requested: boolean;
-  reconciliationPending: boolean;
-  running: Promise<void> | undefined;
-  onRuntimePruned?: () => Promise<void>;
-}
-
-const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPruneState>();
 
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
@@ -89,42 +79,15 @@ export async function stageDevelopmentGeneration(
   }
 }
 
+/** Moves the dev runtime pointer so new sessions load `generation`. */
 export async function activateDevelopmentGeneration(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
-  readonly onRuntimePruned?: () => Promise<void>;
 }): Promise<void> {
-  const activation = await activateDevelopmentGenerationTransaction(input);
-  activation.commit();
-}
-
-export async function activateDevelopmentGenerationTransaction(input: {
-  readonly appRoot: string;
-  readonly generation: DevelopmentGeneration;
-  readonly onRuntimePruned?: () => Promise<void>;
-}): Promise<DevelopmentRuntimeArtifactsActivation> {
-  const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
+  await activateDevelopmentRuntimeArtifactsSnapshot({
     appRoot: input.appRoot,
     snapshot: input.generation,
   });
-  let settled = false;
-  return {
-    commit() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      activation.commit();
-      requestDevelopmentGenerationPrune(input.appRoot, input.onRuntimePruned);
-    },
-    async rollback() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      await activation.rollback();
-    },
-  };
 }
 
 export async function discardDevelopmentGeneration(
@@ -133,62 +96,61 @@ export async function discardDevelopmentGeneration(
   await rm(generation.snapshotRoot, { force: true, recursive: true });
 }
 
-function requestDevelopmentGenerationPrune(
-  appRoot: string,
-  onRuntimePruned: (() => Promise<void>) | undefined,
-): void {
-  const state: DevelopmentGenerationPruneState = developmentGenerationPruneStates.get(appRoot) ?? {
-    requested: false,
-    reconciliationPending: false,
-    running: undefined,
-  };
-  developmentGenerationPruneStates.set(appRoot, state);
-  state.requested = true;
-  state.onRuntimePruned = onRuntimePruned;
-  if (state.running === undefined) {
-    startDevelopmentGenerationPruning(appRoot, state);
-  }
-}
+/**
+ * Creates a serial queue that prunes retired generations in the background.
+ * Requests made while a prune runs coalesce into one more pass. When a pass
+ * removes snapshots, `onRuntimePruned` reconciles the Workflow runs they
+ * owned; a failed reconciliation, or a failed prune that may have removed
+ * some, is retried after the next pass even if that pass removes nothing.
+ * `close()` drops pending requests and resolves once the running pass ends.
+ */
+export function createDevelopmentGenerationPruner(input: {
+  readonly appRoot: string;
+  readonly onRuntimePruned?: () => Promise<void>;
+}): DevelopmentGenerationPruner {
+  let requested = false;
+  let closed = false;
+  let running: Promise<void> | undefined;
+  let reconciliationPending = false;
 
-function startDevelopmentGenerationPruning(
-  appRoot: string,
-  state: DevelopmentGenerationPruneState,
-): void {
-  state.running = (async () => {
-    while (state.requested) {
-      state.requested = false;
-      const onRuntimePruned = state.onRuntimePruned;
-      let removedSnapshots: boolean;
+  const run = async (): Promise<void> => {
+    while (requested && !closed) {
+      requested = false;
       try {
-        removedSnapshots = await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+        const removed = await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot: input.appRoot });
+        reconciliationPending ||= removed;
       } catch (error) {
-        // A failed prune may already have removed some snapshots.
-        state.reconciliationPending ||= onRuntimePruned !== undefined;
-        throw error;
+        reconciliationPending = true;
+        console.warn(`[eve:dev] failed to prune runtime generations: ${String(error)}`);
+        continue;
       }
-      state.reconciliationPending ||= removedSnapshots && onRuntimePruned !== undefined;
-      try {
-        if (state.reconciliationPending && onRuntimePruned !== undefined) {
-          await onRuntimePruned();
-          state.reconciliationPending = false;
+      if (reconciliationPending && input.onRuntimePruned !== undefined) {
+        try {
+          await input.onRuntimePruned();
+          reconciliationPending = false;
+        } catch (error) {
+          console.warn(`[eve:dev] failed to reconcile expired Workflow runs: ${String(error)}`);
         }
-      } catch (error) {
-        console.warn(`[eve:dev] failed to reconcile expired Workflow runs: ${String(error)}`);
       }
     }
-  })()
-    .catch((error) => {
-      console.warn(`[eve:dev] failed to prune runtime generations: ${String(error)}`);
-    })
-    .finally(() => {
-      state.running = undefined;
-      if (state.requested) {
-        startDevelopmentGenerationPruning(appRoot, state);
-      } else if (!state.reconciliationPending) {
-        developmentGenerationPruneStates.delete(appRoot);
-      } else {
-        // Retry failed cleanup on the next activation, even if its prune is a no-op.
-        state.onRuntimePruned = undefined;
-      }
-    });
+    running = undefined;
+  };
+
+  return {
+    request() {
+      if (closed) return;
+      requested = true;
+      running ??= run();
+    },
+    async close() {
+      closed = true;
+      await running;
+    },
+  };
+}
+
+export interface DevelopmentGenerationPruner {
+  /** Requests a pass; ignored once closed. */
+  request(): void;
+  close(): Promise<void>;
 }

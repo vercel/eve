@@ -50,6 +50,7 @@ export async function resolveSchedules(
   return [...input.manifest.schedules].map((schedule) => {
     const base = {
       cron: schedule.cron,
+      ...(schedule.timezone !== undefined && { timezone: schedule.timezone }),
       hasRun: schedule.hasRun,
       logicalPath: schedule.logicalPath,
       name: schedule.name,

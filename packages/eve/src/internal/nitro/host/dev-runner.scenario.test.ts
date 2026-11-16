@@ -1,15 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { createNodeDevelopmentRunner } from "#internal/nitro/host/dev-runner.js";
+import { EveDevRunner } from "#internal/nitro/host/dev-runner.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-describe("Node development runner", () => {
-  it("runs the worker IPC close hook during graceful shutdown", async () => {
+describe("eve development runner", () => {
+  it("shuts down gracefully on close without a cause, running the worker IPC close hook", async () => {
     const root = await createScratchDirectory("eve-dev-runner-shutdown-");
     const entryPath = join(root, "worker.mjs");
     const markerPath = join(root, "closed.txt");
@@ -31,7 +31,7 @@ describe("Node development runner", () => {
       "utf8",
     );
 
-    const runner = createNodeDevelopmentRunner({
+    const runner = new EveDevRunner({
       entry: entryPath,
       name: "eve-dev-runner-shutdown-test",
       workerData: {},
@@ -50,8 +50,6 @@ describe("Node development runner", () => {
 
     expect(closeDurationMs).toBeLessThan(5_000);
     await expect(readFile(markerPath, "utf8")).resolves.toBe("gracefully-closed\n");
-    const lateCloseListener = vi.fn();
-    runner.onceClosed(lateCloseListener);
-    expect(lateCloseListener).toHaveBeenCalledWith(undefined);
+    await runner.terminated;
   });
 });

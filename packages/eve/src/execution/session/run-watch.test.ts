@@ -18,14 +18,22 @@ afterEach(() => {
 });
 
 describe("watchRunEnd", () => {
+  it("resolves before its first interval when the run already ended", async () => {
+    hasRunEndedStepMock.mockResolvedValue(true);
+    const watch = watchRunEnd("run-b");
+
+    await expect(watch.ended).resolves.toBeUndefined();
+    expect(hasRunEndedStepMock).toHaveBeenCalledTimes(1);
+    expect(hasRunEndedStepMock).toHaveBeenCalledWith({ runId: "run-b" });
+    expect(sleeps).toHaveLength(0);
+  });
+
   it("checks after each interval and resolves once the run has ended", async () => {
     hasRunEndedStepMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const watch = watchRunEnd("run-b");
 
     await vi.waitFor(() => expect(sleeps).toHaveLength(1));
     sleeps[0]!();
-    await vi.waitFor(() => expect(sleeps).toHaveLength(2));
-    sleeps[1]!();
 
     await expect(watch.ended).resolves.toBeUndefined();
     expect(hasRunEndedStepMock).toHaveBeenCalledTimes(2);
@@ -40,14 +48,13 @@ describe("watchRunEnd", () => {
 
     await vi.waitFor(() => expect(sleeps).toHaveLength(1));
     sleeps[0]!();
-    await vi.waitFor(() => expect(sleeps).toHaveLength(2));
-    sleeps[1]!();
 
     await expect(watch.ended).resolves.toBeUndefined();
     expect(hasRunEndedStepMock).toHaveBeenCalledTimes(2);
   });
 
   it("checks nothing more once stopped", async () => {
+    hasRunEndedStepMock.mockResolvedValue(false);
     const watch = watchRunEnd("run-b");
     await vi.waitFor(() => expect(sleeps).toHaveLength(1));
 
@@ -55,7 +62,7 @@ describe("watchRunEnd", () => {
     sleeps[0]!();
     await Promise.resolve();
 
-    expect(hasRunEndedStepMock).not.toHaveBeenCalled();
+    expect(hasRunEndedStepMock).toHaveBeenCalledTimes(1);
     expect(sleeps).toHaveLength(1);
   });
 });

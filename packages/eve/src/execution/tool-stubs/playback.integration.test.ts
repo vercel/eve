@@ -1,7 +1,10 @@
+// @linux-only: tool stub replay on Workflow
 import { jsonSchema } from "ai";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
-import { toolStubProvider } from "#context/providers/tool-stubs.js";
+import { ToolStubPlaybackKey } from "#context/providers/tool-stubs-key.js";
+import { toolStubPlayback } from "#execution/tool-stub-host.js";
+import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 import { appendTaskContext } from "#execution/tasks/model-step.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import {
@@ -24,6 +27,8 @@ import {
 } from "#execution/tool-stubs/steps.js";
 import { STUB_CONTEXT_KEY } from "#tool-stubs/types.js";
 
+// It checks the playback Workflow serves on a hook and the failures it publishes for eval
+// verification, which an in-process session doesn't keep, so it runs on Workflow.
 describe("durable tool stub playback", () => {
   it("allocates concurrent calls once and reuses an earlier result after later workflow resumes", async () => {
     const runtime = await createTestRuntime({ agent: { name: "stub-playback" } });
@@ -138,13 +143,11 @@ describe("durable tool stub playback", () => {
             auth: { current: null, initiator: null },
           });
           await contextStorage.run(context, async () => {
-            context.set(
-              ToolStubsKey,
-              reportingFails ? { ...scope, token: "unavailable-playback" } : scope,
-            );
+            const served = reportingFails ? { ...scope, token: "unavailable-playback" } : scope;
+            context.set(ToolStubsKey, served);
             context.setVirtualContext(
-              toolStubProvider.key,
-              toolStubProvider.create(context)!.value,
+              ToolStubPlaybackKey,
+              toolStubPlayback(workflowToolStubs, served),
             );
             const outputError = new Error("Invalid output.");
             const definition = {

@@ -11,10 +11,7 @@ import {
   AGENT_TOOL_NAME,
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot
-// be written; the attribute contract is covered by emit.test.ts.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
@@ -44,7 +41,6 @@ type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknow
 function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
-    instructions: ["You are a test agent."],
     model: { id: "test-model" },
     tools: [],
     workspaceSpec: { rootEntries: [] },
@@ -128,7 +124,7 @@ async function createNodeWithSourceOwnedTools(input: {
 describe("createNodeHarnessTools", () => {
   it("adds the framework label start callback to provider-managed web search", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["web_search"] });
-    const label = createNodeHarnessTools({ node }).get("web_search")?.label?.start;
+    const label = labelCallbacks(createNodeHarnessTools({ node }).get("web_search")?.label)?.start;
 
     expect(label?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
   });
@@ -139,7 +135,9 @@ describe("createNodeHarnessTools", () => {
       owner: { kind: "application" },
     });
 
-    expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
+    expect(
+      labelCallbacks(createNodeHarnessTools({ node }).get("web_search")?.label)?.start,
+    ).toBeUndefined();
   });
 
   it("lowers the compiled framework agent tool as a workflow tool", async () => {

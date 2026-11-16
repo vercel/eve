@@ -1,6 +1,7 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import type { ClearedBy } from "#protocol/session-events/families/call.js";
+import { approvedClearance, type Clearance } from "#harness/clearance.js";
+import type { SessionView } from "#harness/session-machine/view.js";
 import {
   asSchema,
   generateId,
@@ -26,9 +27,12 @@ import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { callProgress, callSettledFrom, callStarted } from "#harness/call-facts.js";
+import { callProgress } from "#harness/call-facts.js";
+import { settleCall, startCall } from "#harness/session-machine/calls.js";
+import { withUsageCall } from "#harness/usage-sink.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -70,7 +74,8 @@ export interface ToolSignIn {
 /** How one call came out: its result for the model, or what it waits on instead. */
 export interface CallOutcome {
   readonly remember?: RememberRequest;
-  readonly clearedBy?: ClearedBy;
+  /** What cleared a call the runtime runs outside the step, such as a workflow tool's. */
+  readonly clearance?: Clearance;
   readonly settled: readonly CallResult[];
   /** What `execute` returned, for `endsTurn`. */
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
@@ -95,8 +100,8 @@ export async function executeToolCall(
     readonly modelCallId?: string;
     /** Runs just before the tool does, as the step's steering protection. */
     readonly beforeExecute?: () => void;
-    /** What cleared a call a person approved: the interaction that asked them. */
-    readonly clearedBy?: ClearedBy;
+    /** The session as the call resumes, where a person's acceptance clears a call they approved. */
+    readonly view?: () => Pick<SessionView, "projection">;
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
     /**
@@ -127,7 +132,7 @@ export async function executeToolCall(
       const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
       await input.beforeResult?.(message);
       await input.publish(
-        callSettledFrom(
+        settleCall(
           createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
           {},
         ),
@@ -163,7 +168,12 @@ export async function executeToolCall(
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
-    const clearedBy = input.clearedBy ?? decision.clearedBy;
+    // A call a person approved runs on their acceptance; the recheck only confirms it still may.
+    const clearance =
+      (approval === "recheck" && input.view !== undefined
+        ? approvedClearance(input.view().projection.view, callId)
+        : undefined) ?? decision.clearance;
+    if (clearance === undefined) throw new Error(`Call "${callId}" has no clearance to run.`);
     let output: unknown;
     let failed = false;
     let failure = "";
@@ -184,27 +194,39 @@ export async function executeToolCall(
           started = true;
           // A call a person approved starts when it runs, after the recheck: the approval cleared
           // it, and the policy could still have refused it.
-          await input.publish(callStarted(callId, clearedBy === undefined ? {} : { clearedBy }));
-          const executed = invokeTool(definition, args, {
-            ...(input.responder !== undefined && { approval: { responder: input.responder } }),
-            abortSignal: input.abortSignal,
-            messages: [...input.messages],
-            toolCallId: callId,
-          });
-          // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
-          // waiting, and whatever the tool returns later is dropped.
-          const abandon = approval === "evaluate" ? input.abortSignal : undefined;
-          if (isAsyncIterable(executed)) {
-            for await (const partial of untilAborted(executed, abandon)) {
-              output = partial;
-              const visible = withoutSignInSecrets(partial);
-              await input.publish(
-                callProgress(callId, visible, projectToolLabel(definition, "delta", args, visible)),
-              );
+          await input.publish(startCall(clearance));
+          // Usage the tool records belongs to its call, including while a streaming tool iterates.
+          await withUsageCall(callId, async () => {
+            const executed = invokeTool(
+              definition,
+              args,
+              {
+                ...(input.responder !== undefined && { approval: { responder: input.responder } }),
+                abortSignal: input.abortSignal,
+                messages: [...input.messages],
+                toolCallId: callId,
+              },
+              clearance,
+            );
+            // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
+            // waiting, and whatever the tool returns later is dropped.
+            const abandon = approval === "evaluate" ? input.abortSignal : undefined;
+            if (isAsyncIterable(executed)) {
+              for await (const partial of untilAborted(executed, abandon)) {
+                output = partial;
+                const visible = withoutSignInSecrets(partial);
+                await input.publish(
+                  callProgress(
+                    callId,
+                    visible,
+                    projectToolLabel(definition, "delta", args, visible),
+                  ),
+                );
+              }
+            } else {
+              output = await raceAbort(Promise.resolve(executed), abandon);
             }
-          } else {
-            output = await raceAbort(Promise.resolve(executed), abandon);
-          }
+          });
         } finally {
           executionMs = performance.now() - startedAt;
         }
@@ -214,6 +236,8 @@ export async function executeToolCall(
         { error, input: args, toolCallId: callId, toolName, type: "tool-error" },
         executionMs,
       );
+      // `call.started` or a progress write failed: the call can't settle on that stream.
+      throwIfSessionStreamDead(error);
       throwIfTurnAborted(input.abortSignal);
       logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
       failed = true;
@@ -262,7 +286,7 @@ export async function executeToolCall(
     settled.push(completed);
     await input.beforeResult?.(failed ? thrown : undefined);
     await input.publish(
-      callSettledFrom(
+      settleCall(
         createRuntimeToolResultFromValue({
           callId,
           isError: failed,
@@ -276,6 +300,8 @@ export async function executeToolCall(
     );
     return { settled, toolResults };
   } catch (error) {
+    // A settlement that couldn't reach the stream can't be settled again there.
+    throwIfSessionStreamDead(error);
     if (input.abortSignal?.aborted === true) {
       if (!started) throwIfTurnAborted(input.abortSignal);
       if (completed !== undefined) return { settled: [completed], toolResults };
@@ -285,7 +311,7 @@ export async function executeToolCall(
     logError(log, "tool call failed", error, { toolName, toolCallId: callId });
     await input.beforeResult?.(failure);
     const failed = failedCall({ callId, toolName, message: failure });
-    await input.publish(callSettledFrom(failed.result));
+    await input.publish(settleCall(failed.result));
     return { settled: [{ part: failed.part }], toolResults };
   }
 }
@@ -382,8 +408,27 @@ function toolTelemetry(
     telemetry === undefined || telemetry.isEnabled === false
       ? []
       : [telemetry.integrations ?? []].flat();
+  // eve runs these calls itself, so the AI SDK never filters their events. Apply its rules here:
+  // an integration can ignore the flags and record whatever the event carries.
+  const hideInputs = telemetry?.recordInputs === false;
+  const hideOutputs = telemetry?.recordOutputs === false;
+  const recorded = (toolOutput: ToolExecutionEnd["toolOutput"]): ToolExecutionEnd["toolOutput"] => {
+    if (!hideInputs && !hideOutputs) return toolOutput;
+    const kept: Record<string, unknown> = { ...toolOutput };
+    if (hideInputs) kept.input = undefined;
+    if (hideOutputs) {
+      kept.output = undefined;
+      kept.error = undefined;
+    } else if (kept.error != null) {
+      // A raw error can carry the call's input.
+      kept.error = new Error("AI SDK operation failed");
+    }
+    return kept as ToolExecutionEnd["toolOutput"];
+  };
   const event = {
     ...execution,
+    messages: hideInputs ? [] : execution.messages,
+    toolCall: hideInputs ? { ...execution.toolCall, input: undefined } : execution.toolCall,
     functionId: telemetry?.functionId,
     recordInputs: telemetry?.recordInputs,
     recordOutputs: telemetry?.recordOutputs,
@@ -413,7 +458,7 @@ function toolTelemetry(
         integration.onToolExecutionEnd?.({
           ...event,
           toolExecutionMs,
-          toolOutput,
+          toolOutput: recorded(toolOutput),
         } as ToolExecutionEnd),
       ),
   };
@@ -429,7 +474,7 @@ export interface InlineCallResults {
   readonly approvals: readonly ApprovalAsk[];
   /** The calls that stopped for a sign-in. */
   readonly signIns: readonly ToolSignIn[];
-  readonly policyApprovals?: Readonly<Record<string, ClearedBy>>;
+  readonly policyApprovals?: Readonly<Record<string, Clearance>>;
 }
 
 /** Nothing ran: the response ended early, or made no local calls. */
@@ -490,9 +535,10 @@ export async function executeInlineCalls(input: {
               : undefined;
           return { call, executed, approval };
         } catch (error) {
+          throwIfSessionStreamDead(error);
           throwIfTurnAborted(input.abortSignal);
           const failed = failedCall({ ...action, message: toError(error) });
-          await input.publish(callSettledFrom(failed.result));
+          await input.publish(settleCall(failed.result));
           return { call, executed: { settled: [{ part: failed.part }], toolResults: [] } };
         }
       },
@@ -504,7 +550,7 @@ export async function executeInlineCalls(input: {
   return {
     policyApprovals: Object.fromEntries(
       executed.flatMap(({ call, executed }) =>
-        executed.clearedBy === undefined ? [] : [[call.toolCallId, executed.clearedBy]],
+        executed.clearance === undefined ? [] : [[call.toolCallId, executed.clearance]],
       ),
     ),
     approvals: executed.flatMap(({ approval }) => (approval === undefined ? [] : [approval])),
@@ -526,7 +572,6 @@ async function decideDeferredCall(
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
-  if (definition.approval === undefined) return { settled: [], toolResults: [] };
   const decision = await decideApproval(definition, {
     abortSignal: input.abortSignal,
     approvalMemory: input.approvalMemory,
@@ -539,7 +584,7 @@ async function decideDeferredCall(
     return {
       settled: [],
       toolResults: [],
-      clearedBy: decision.clearedBy,
+      clearance: decision.clearance,
     };
   return await publishDenial(call, {
     publish: input.publish,
@@ -562,7 +607,7 @@ export async function publishDenial(
     type: "tool-result",
   } satisfies ToolResultPart;
   await input.publish(
-    callSettledFrom(
+    settleCall(
       {
         callId: call.callId,
         isError: true,

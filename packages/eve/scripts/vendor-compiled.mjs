@@ -13,8 +13,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveNitroRolldownVersion } from "./nitro-rolldown.mjs";
-import { collectFilesRecursively, runVendor } from "./vendor-compiled/_shared.mjs";
+import { resolveRolldownVersion } from "./rolldown.mjs";
+import { collectFilesRecursively, findPackageJson, runVendor } from "./vendor-compiled/_shared.mjs";
 import { MODULES } from "./vendor-compiled/index.mjs";
 import { syncExtensions } from "./sync-extensions.mjs";
 
@@ -30,12 +30,24 @@ const vendorCompiledDir = join(here, "vendor-compiled");
 const scriptFiles = [
   fileURLToPath(import.meta.url),
   join(packageRoot, "package.json"),
-  join(here, "nitro-rolldown.mjs"),
+  join(here, "rolldown.mjs"),
   join(packageRoot, "src", "internal", "bundler", "vendored-dependency-log.ts"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
 ];
 
 await syncExtensions();
+
+// env-runner's worker entry bundles srvx and crossws, whose versions its own
+// manifest only bounds, so a lockfile change alone must re-vendor it.
+const envRunner = await findPackageJson("env-runner", packageRoot);
+const envRunnerServerVersions = Object.fromEntries(
+  await Promise.all(
+    ["crossws", "srvx"].map(async (name) => [
+      `env-runner>${name}`,
+      (await findPackageJson(name, envRunner.packageRoot)).packageJson.version,
+    ]),
+  ),
+);
 
 await runVendor({
   packageRoot,
@@ -43,7 +55,8 @@ await runVendor({
   modules: MODULES,
   scriptFiles,
   toolVersions: {
-    rolldown: resolveNitroRolldownVersion(),
+    ...envRunnerServerVersions,
+    rolldown: resolveRolldownVersion(),
     typescript: require("typescript/package.json").version,
   },
 });

@@ -125,12 +125,13 @@ export function registerTelegramHitlPrompt(
 }
 
 /**
- * Forgets a resolved prompt, returning the edit that
- * replaces its keyboard with the outcome, or `undefined` when eve never posted it.
+ * Forgets a resolved prompt, returning the edit that replaces its keyboard with the outcome and
+ * who gave it (`by`), or `undefined` when eve never posted it.
  */
 export function takeTelegramResolvedPrompt(
   state: TelegramHitlState,
   resolution: RequestSettlement,
+  by?: string,
 ): { readonly messageId: string; readonly text: string } | undefined {
   const prompt = state.hitlPrompts?.[resolution.interactionId];
   if (prompt === undefined) return undefined;
@@ -138,7 +139,10 @@ export function takeTelegramResolvedPrompt(
   state.hitlPrompts = rest;
   return {
     messageId: prompt.messageId,
-    text: telegramResolvedPromptText(prompt.text, resolvedPromptLabel(resolution, prompt.options)),
+    text: telegramResolvedPromptText(
+      prompt.text,
+      resolvedPromptLabel(resolution, prompt.options, by),
+    ),
   };
 }
 

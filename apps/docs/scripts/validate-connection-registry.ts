@@ -45,8 +45,10 @@ const expectedSlugs = connectionEntries()
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
 const API_KEY_CONNECTIONS: Readonly<Record<string, readonly string[]>> = {
   "browser-use": ["BROWSER_USE_API_KEY"],
+  context7: ["CONTEXT7_API_KEY"],
   dataforseo: ["DATAFORSEO_USERNAME", "DATAFORSEO_PASSWORD"],
   firecrawl: ["FIRECRAWL_API_KEY"],
+  stacktree: ["STACKTREE_API_KEY"],
   waydock: ["WAYDOCK_MCP_KEY"],
 };
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
@@ -67,6 +69,7 @@ const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
 const CONNECT_METHODS: Readonly<Record<string, "mcp" | "oauth">> = {
   agentcard: "mcp",
   sanity: "mcp",
+  tavily: "mcp",
   vercel: "mcp",
 };
 const CONNECT_PRINCIPAL_TYPES: Readonly<Record<string, "app" | "user">> = {

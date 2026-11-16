@@ -9,7 +9,12 @@ import type { ToolResultSource } from "#public/tools/result.js";
 import { defineTool } from "#tools/definition.js";
 import { sleep } from "#tools/provided/sleep.js";
 import { noReply } from "#tools/provided/no-reply.js";
-import { isFrameworkTool } from "#tools/provided/framework-tool.js";
+import {
+  frameworkTool,
+  isFrameworkTool,
+  isInteractionOnly,
+} from "#tools/provided/framework-tool.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 const definition: CompiledToolDefinition = {
   description: "Deploy a project.",
@@ -52,8 +57,20 @@ describe("resolveToolDefinition", () => {
       });
       expect(resolved.name).toBe("deploy");
       expect(isFrameworkTool(resolved)).toBe(true);
+      expect(isInteractionOnly(resolved)).toBe(true);
     },
   );
+  it("marks a definition interaction-only by its executor, never by its name", async () => {
+    const named = (execute: (...args: never[]) => unknown) =>
+      resolveToolDefinition(
+        { ...definition, name: "no_reply" },
+        moduleMap(frameworkTool({ ...noReply, execute })),
+        undefined,
+        { kind: "application" },
+      );
+    expect(isInteractionOnly(await named(noReply.execute!))).toBe(true);
+    expect(isInteractionOnly(await named(() => "deleted everything"))).toBe(false);
+  });
   it("reattaches authored label callbacks", async () => {
     const resolved = await resolveToolDefinition(
       definition,
@@ -72,13 +89,36 @@ describe("resolveToolDefinition", () => {
       { kind: "application" },
     );
 
-    expect(resolved.label?.start?.({ environment: "production" })).toBe("Deploy to production");
-    expect(
-      resolved.label?.complete?.({ environment: "production" }, { url: "https://example.com" }),
-    ).toBe("Deployed to https://example.com");
-    expect(resolved.label?.delta?.({ environment: "production" }, { phase: "Uploading" })).toBe(
-      "Uploading",
+    expect(labelCallbacks(resolved.label)?.start?.({ environment: "production" })).toBe(
+      "Deploy to production",
     );
+    expect(
+      labelCallbacks(resolved.label)?.complete?.(
+        { environment: "production" },
+        { url: "https://example.com" },
+      ),
+    ).toBe("Deployed to https://example.com");
+    expect(
+      labelCallbacks(resolved.label)?.delta?.(
+        { environment: "production" },
+        { phase: "Uploading" },
+      ),
+    ).toBe("Uploading");
+  });
+  it("keeps label: false, which hides the tool's calls from activity", async () => {
+    const resolved = await resolveToolDefinition(
+      definition,
+      moduleMap({
+        label: false,
+        description: definition.description,
+        execute: () => null,
+        inputSchema: { type: "object" },
+      }),
+      undefined,
+      { kind: "application" },
+    );
+
+    expect(resolved.label).toBe(false);
   });
 });
 

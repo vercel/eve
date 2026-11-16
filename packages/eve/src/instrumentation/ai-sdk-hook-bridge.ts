@@ -18,7 +18,9 @@ import {
 import { structuralProviderMetadata } from "#instrumentation/content.js";
 import { modelContent, modelUsage } from "#compiled/@vercel/agent-runs/ai-sdk.js";
 
-type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
+type TelemetryEvent<TKey extends keyof Telemetry & `on${string}`> = Parameters<
+  NonNullable<Telemetry[TKey]>
+>[0];
 
 interface AttemptState {
   readonly capturesInputs: boolean;

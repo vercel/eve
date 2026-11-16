@@ -1,4 +1,4 @@
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import {
   assertPublicHostname,
   createPublicDispatcher,
@@ -59,7 +59,7 @@ export async function postSessionCallbackRequest(input: {
           error: new Error(blocked.message),
         });
       }
-      throw new FatalError(`Callback delivery refused: ${blocked.message}`);
+      throw new NonRetryableError(`Callback delivery refused: ${blocked.message}`);
     }
     // Fetch errors can contain the capability URL or credentials in their
     // cause chain. Log a safe summary, but preserve the original rejection.
@@ -205,8 +205,8 @@ function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
   });
 }
 
-function invalidCallbackOriginsError(): FatalError {
-  return new FatalError(
+function invalidCallbackOriginsError(): NonRetryableError {
+  return new NonRetryableError(
     "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments. A leading `*.` label (e.g. `https://*.preview.example.com`) matches exactly one subdomain label and needs at least two labels after it; `*.vercel.app` and trailing dots are not allowed.",
   );
 }

@@ -21,6 +21,8 @@ import {
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import { selectionModel } from "#models/options.js";
+import { readAgentToolModels } from "#tools/agent-models.js";
 import {
   isDynamicModelDefinition,
   type AgentModelOptionsDefinition,
@@ -103,6 +105,9 @@ async function loadSourceBackedRuntimeModelReference(
     moduleMap: scope.moduleMap,
     nodeId: scope.nodeId,
   });
+  if (reference.sourceModelOption !== undefined) {
+    return agentToolOptionModel(definition, reference.sourceModelOption, reference.source);
+  }
   const normalizedDefinition = normalizeAgentDefinition(
     definition,
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
@@ -124,6 +129,27 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
+  return toAiSdkLanguageModel(model);
+}
+
+/** The live model of one `agent({ models })` option, which the child's step reads from the tool. */
+function agentToolOptionModel(
+  definition: unknown,
+  key: string,
+  source: NonNullable<RuntimeModelReference["source"]>,
+): LanguageModel {
+  const option = readAgentToolModels(definition)?.get(key);
+  if (option === undefined) {
+    throw new Error(
+      `The model option "${key}" this session chose is no longer one of the agent({ models }) options in "${source.logicalPath}".`,
+    );
+  }
+  const model = selectionModel(option.selection);
+  if (typeof model === "string") {
+    throw new Error(
+      `Expected the agent({ models }) option "${key}" in "${source.logicalPath}" to hold a provider model.`,
+    );
+  }
   return toAiSdkLanguageModel(model);
 }
 
@@ -196,7 +222,7 @@ export async function resolveRuntimeModelSelection(input: {
   const selectedModel = selection.model;
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
-    if (promptCache !== undefined) throw gatewayPromptCacheError(id);
+    if (promptCache !== undefined && !isAnthropicGatewayId(id)) throw gatewayPromptCacheError(id);
     const contextWindowTokens =
       selection.modelContextWindowTokens ??
       (
@@ -208,6 +234,7 @@ export async function resolveRuntimeModelSelection(input: {
       reference: {
         id,
         contextWindowTokens,
+        promptCache,
         providerOptions,
         reasoning: selection.reasoning,
       },
@@ -223,7 +250,11 @@ export async function resolveRuntimeModelSelection(input: {
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
   const routesThroughGateway = selectedModel.provider.split(".")[0] === "gateway";
-  if (promptCache !== undefined && routesThroughGateway) {
+  if (
+    promptCache !== undefined &&
+    routesThroughGateway &&
+    !isAnthropicGatewayId(selectedModel.modelId)
+  ) {
     throw gatewayPromptCacheError(formattedId);
   }
   // A Gateway instance carries its Gateway model id, as a string selection does.
@@ -264,9 +295,13 @@ function invalidSelectionError(error: unknown): InvalidRuntimeModelSelectionErro
   );
 }
 
+function isAnthropicGatewayId(modelId: string): boolean {
+  return modelId.split("/")[0] === "anthropic";
+}
+
 function gatewayPromptCacheError(modelId: string): Error {
   return new InvalidRuntimeModelSelectionError(
-    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies only to models eve calls directly; Gateway manages its own prompt caching through providerOptions.gateway.caching.`,
+    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies to Anthropic models and to models eve calls directly; Gateway manages its own prompt caching for other models through providerOptions.gateway.caching.`,
   );
 }
 

@@ -1,9 +1,11 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
-import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { Runtime } from "#channel/types.js";
+import { installedDurableHost } from "#execution/hosts.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
@@ -11,10 +13,12 @@ import type {
   SchedulePatch,
   DynamicSchedulesDefinition,
   ScheduleEnvelope,
-  SchedulePageResult,
+  SchedulePage,
   SchedulePrincipalReference,
   ScheduleScopeContext,
+  ScheduleScopeResolverContext,
   ScheduleScopeValue,
+  ScheduleTiming,
 } from "#public/schedules/subscription.js";
 import { projectScheduleRecord } from "#runtime/schedules/record.js";
 import { byPrincipal } from "#public/schedules/scope.js";
@@ -69,6 +73,23 @@ export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleCli
   ): Promise<import("#public/schedules/subscription.js").ScheduleRecord>;
 }
 
+function noScheduledRuns(): never {
+  throw new Error(
+    "This host keeps no scheduled runs: run a schedule's occurrence from a deployed agent.",
+  );
+}
+
+/** Without a durable host, an occurrence that starts a session is refused, saying why. */
+const NO_SCHEDULED_RUNS: Runtime = {
+  createSession: async () => noScheduledRuns(),
+  dispatchContinuation: async () => noScheduledRuns(),
+  dispatchSession: async () => noScheduledRuns(),
+  getEventStream: async () => noScheduledRuns(),
+  getLineStream: async () => noScheduledRuns(),
+  getStreamTailIndex: async () => noScheduledRuns(),
+  resolveContinuation: async () => noScheduledRuns(),
+};
+
 export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   definition: DynamicSchedulesDefinition<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
   callContext: ScheduleBoundCallContext,
@@ -78,9 +99,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   const contextFor = (
     operation: NonNullable<ScheduleScopeContext["operation"]>,
     name?: string,
-  ): ScheduleScopeContext & {
-    readonly operation: NonNullable<ScheduleScopeContext["operation"]>;
-  } => {
+  ): ScheduleScopeResolverContext => {
     const context = { ...callContext, operation } as ScheduleScopeContext & {
       operation: NonNullable<ScheduleScopeContext["operation"]>;
       name?: string;
@@ -99,24 +118,19 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
         : await definition.scope({ ...context, operation });
     if (scope === null) throw new Error(`Schedule ${operation} is not available in this context.`);
     validateScope(scope);
-    const provider: ScheduleProviderContext = {
+    const provider = createScheduleProviderContext({
       abortSignal: callContext.abortSignal,
+      application: callContext.application,
+      bundle: () => requireCompiledBundle(loadContext()),
       collection: callContext.collection,
-      namespace: deriveScheduleNamespace(callContext.application, callContext.collection, scope),
+      runtime: () =>
+        installedDurableHost()?.createRuntime({
+          compiledArtifactsSource: requireCompiledBundle(loadContext()).compiledArtifactsSource,
+        }) ?? NO_SCHEDULED_RUNS,
+      definition,
       operationId: nextOperationId(),
-      target: {
-        key: callContext.application,
-        deliver: async ({ payload, occurrence }) => {
-          await dispatchScheduledOccurrence({
-            bundle: loadContext().require(BundleKey),
-            collection: callContext.collection,
-            definition,
-            occurrence: { ...occurrence, collection: callContext.collection },
-            payload: payload as ScheduleCollectionPayload<unknown>,
-          });
-        },
-      },
-    };
+      scope,
+    });
     return { scope, provider };
   };
 
@@ -125,6 +139,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     scope: ScheduleScopeValue,
     operation: "create" | "update",
     name: string,
+    expression: ScheduleTiming,
   ) => {
     const creator = principalReference(callContext.session.auth.current);
     if (creator === null)
@@ -138,6 +153,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
             ...contextFor(operation, name),
             operation,
             name,
+            expression,
           })
     ) as TPrepared;
     return createScheduleCollectionPayload({
@@ -145,6 +161,12 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       collection: callContext.collection,
       envelope: { version: 3, payload: preparedPayload, scope, principal: creator },
     }).envelope;
+  };
+
+  // eve's own rules first, whatever the provider checks; then what only the provider knows.
+  const validateTiming = async (timing: ScheduleTiming): Promise<void> => {
+    const expression = resolveScheduleTiming(timing);
+    await definition.provider.validateExpression?.(expression);
   };
 
   const prepareUpdate = async (name: string, patch: ScheduleClientUpdate<unknown>) => {
@@ -156,10 +178,10 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     if (patch.expression === undefined && patch.payload === undefined)
       throw new Error("Schedule update requires an expression or replacement payload.");
     const normalized = validateScheduleName(name);
-    if (patch.expression !== undefined) resolveScheduleTiming(patch.expression);
+    if (patch.expression !== undefined) await validateTiming(patch.expression);
     const { scope, provider } = await resolveNamespace("update", normalized);
-    if ((await definition.provider.get(provider, normalized)) === null)
-      throw new Error("Schedule was not found in the authorized scope.");
+    const stored = await definition.provider.get(provider, normalized);
+    if (stored === null) throw new Error("Schedule was not found in the authorized scope.");
     const prepared: PreparedScheduleUpdate<TPrepared> = {
       name: normalized,
       namespace: provider.namespace,
@@ -167,7 +189,13 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       envelope:
         patch.payload === undefined
           ? undefined
-          : await prepareEnvelope(patch.payload, scope, "update", normalized),
+          : await prepareEnvelope(
+              patch.payload,
+              scope,
+              "update",
+              normalized,
+              patch.expression ?? stored.expression,
+            ),
     };
     return { prepared: snapshotPreparedWrite(prepared), provider };
   };
@@ -175,12 +203,18 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   const prepareCreation = async (input: ScheduleClientCreate<unknown>) => {
     const displayName = validateScheduleName(input.name);
     // Validate timing before preparation; relative delays are resolved again at the write boundary.
-    resolveScheduleTiming(input.expression);
+    await validateTiming(input.expression);
     const { scope, provider } = await resolveNamespace("create", displayName);
     const prepared = snapshotPreparedWrite({
       displayName,
       expression: input.expression,
-      envelope: await prepareEnvelope(input.payload, scope, "create", displayName),
+      envelope: await prepareEnvelope(
+        input.payload,
+        scope,
+        "create",
+        displayName,
+        input.expression,
+      ),
     });
     return { prepared, provider };
   };
@@ -259,7 +293,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       const { provider } = await resolveNamespace("invoke", normalized);
       await definition.provider.invoke(provider, normalized);
     },
-    async list(input = {}): Promise<SchedulePageResult> {
+    async list(input = {}): Promise<SchedulePage> {
       const limit = validateScheduleListLimit(input.limit);
       const { provider } = await resolveNamespace("list");
       const query: { cursor?: string; limit?: number } = {};
@@ -314,16 +348,4 @@ function validateScope(scope: ScheduleScopeValue): void {
     values.some((value) => typeof value !== "string" || value.trim().length === 0)
   )
     throw new Error("Schedule scope must be a non-empty string or tuple of non-empty strings.");
-}
-
-function deriveScheduleNamespace(
-  application: string,
-  collection: string,
-  scope: ScheduleScopeValue,
-): string {
-  if (application.trim().length === 0) throw new Error("Schedule application must not be empty.");
-  const digest = createHash("sha256")
-    .update(JSON.stringify(["eve-schedule-namespace-v2", application, collection, scope]))
-    .digest("base64url");
-  return `eve-${digest}`;
 }

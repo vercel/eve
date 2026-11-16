@@ -35,6 +35,8 @@ export type CallObservation = ObservationTiming & {
   readonly name: string;
   readonly kind: CapabilityKind;
   readonly label: string;
+  /** Its tool set `label: false`, so readers showing activity leave it out. */
+  readonly hidden?: true;
   readonly runId?: string;
   readonly turnId?: string;
   readonly taskId?: string;
@@ -101,7 +103,10 @@ export interface RunObservation extends ObservationTiming {
 
 export interface ContentObservation extends ObservationTiming {
   readonly partId: string;
-  readonly runId: string;
+  /** The model run that wrote the part; absent when its turn wrote it. */
+  readonly runId?: string;
+  /** The turn the part belongs to, when known. */
+  readonly turnId?: string;
   readonly kind: ContentKind;
   readonly phase: ContentPhase;
   readonly value?: JsonValue;

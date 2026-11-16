@@ -41,13 +41,13 @@
  * ```
  */
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildWithNitroRolldown } from "../nitro-rolldown.mjs";
+import { buildWithRolldown } from "../rolldown.mjs";
 import { onVendoredDependencyLog } from "../../src/internal/bundler/vendored-dependency-log.ts";
 
 const declarationsDir = fileURLToPath(new URL("./declarations/", import.meta.url));
@@ -138,12 +138,12 @@ export function createDeclarationCopier({
       for (const specifier of collectRelativeDeclarationReferences(sourceText)) {
         const candidates = /\.d\.[cm]?ts$/u.test(specifier)
           ? [specifier]
-          : /\.[cm]?js$/u.test(specifier)
+          : /\.[cm]?[jt]s$/u.test(specifier)
             ? [
                 specifier
-                  .replace(/\.js$/u, ".d.ts")
-                  .replace(/\.mjs$/u, ".d.mts")
-                  .replace(/\.cjs$/u, ".d.cts"),
+                  .replace(/\.[jt]s$/u, ".d.ts")
+                  .replace(/\.m[jt]s$/u, ".d.mts")
+                  .replace(/\.c[jt]s$/u, ".d.cts"),
               ]
             : [`${specifier}.d.ts`, `${specifier}/index.d.ts`];
         let resolved;
@@ -648,7 +648,7 @@ async function pathExists(path) {
   }
 }
 
-async function findPackageJson(packageName, packageRoot, packageJsonName = packageName) {
+export async function findPackageJson(packageName, packageRoot, packageJsonName = packageName) {
   let currentPath;
   try {
     currentPath = dirname(require.resolve(packageName, { paths: [packageRoot] }));
@@ -778,13 +778,17 @@ async function bundleStandaloneModule({
     );
   }
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     cwd: packageRoot,
     input: entries[0].input,
     external: module.external ?? [],
     moduleTypes: module.loader ?? {},
     platform,
-    plugins: [...(module.plugins ?? []), createSharedSpecifierPlugin(sharedSpecifiers, [module])],
+    plugins: [
+      ...(module.plugins ?? []),
+      createSharedSpecifierPlugin(sharedSpecifiers, [module]),
+      createRuntimeDependencyPlugin(packageRoot),
+    ],
     resolve: module.resolve ?? getDefaultResolve(),
     treeshake: true,
     output: {
@@ -834,9 +838,10 @@ async function bundleModuleGroup({
       sharedSpecifiers,
       preparedModules.map(({ module }) => module),
     ),
+    createRuntimeDependencyPlugin(packageRoot),
   ];
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     cwd: packageRoot,
     input: entrypoints,
     external,
@@ -852,7 +857,10 @@ async function bundleModuleGroup({
       dir: compiledRoot,
       entryFileNames: "[name].js",
       format: "esm",
-      minify: true,
+      // App bundlers re-bundle the browser `client` group. webpack before 5.90
+      // drops import bindings used after `var a = class {}, b = f()` (#5037),
+      // so keep each declaration in its own statement there.
+      minify: chunkGroup === "client" ? { compress: { joinVars: false } } : true,
       sourcemap: false,
     },
     onLog: onVendoredDependencyLog,
@@ -935,6 +943,62 @@ function collectSharedSpecifiers(preparedModules) {
     }
   }
   return shared;
+}
+
+/**
+ * A vendored package that resolves one of eve's own runtime `dependencies` to the very install
+ * eve depends on imports it at runtime instead of bundling another copy. A different version
+ * stays bundled, as the package was tested with it, and so does a CommonJS `require()`, which
+ * an ESM bundle cannot leave external.
+ */
+function createRuntimeDependencyPlugin(packageRoot) {
+  const installs = resolveInstalls(runtimeDependencyNames(packageRoot), packageRoot);
+  return {
+    name: "eve:vendored-runtime-dependencies",
+    async resolveId(source, importer, options) {
+      // Only bare package names: rolldown accepts deep paths Node's ESM loader rejects.
+      const install = installs.get(source);
+      if (install === undefined || options.kind === "require-call") return null;
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+      if (resolved === null || resolved.external || !isInsideDirectory(resolved.id, install)) {
+        return null;
+      }
+      return { id: source, external: true };
+    },
+  };
+}
+
+function runtimeDependencyNames(packageRoot) {
+  const manifestPath = join(packageRoot, "package.json");
+  return existsSync(manifestPath)
+    ? Object.keys(JSON.parse(readFileSync(manifestPath, "utf8")).dependencies ?? {})
+    : [];
+}
+
+/** Maps each package name to the install directory it resolves to from `fromDir`. */
+function resolveInstalls(names, fromDir) {
+  const resolveFrom = createRequire(join(fromDir, "package.json"));
+  const installs = new Map();
+  for (const name of names) {
+    let dir;
+    try {
+      dir = dirname(resolveFrom.resolve(name));
+    } catch {
+      continue; // Not resolvable with `require` conditions: leave it bundled.
+    }
+    // Walk up rather than resolving `<name>/package.json`, which `exports` may hide.
+    for (; dir !== parse(dir).root; dir = dirname(dir)) {
+      const manifestPath = join(dir, "package.json");
+      if (
+        existsSync(manifestPath) &&
+        JSON.parse(readFileSync(manifestPath, "utf8")).name === name
+      ) {
+        installs.set(name, realpathSync(dir));
+        break;
+      }
+    }
+  }
+  return installs;
 }
 
 const SHARED_FACADE_PREFIX = "\0eve-shared-facade:";
@@ -1052,6 +1116,16 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     scriptHash.update("\0");
   }
 
+  // Which runtime dependencies a bundle imports instead of bundling depends on whether the
+  // vendored package resolves them to eve's install, which a lockfile change alone can alter.
+  // Recording only the packages that don't keeps the stamp small. This checks resolution from
+  // each vendored package's own root; the plugin decides per importer, so a transitive
+  // dependency that changes where it resolves eve's runtime dependencies doesn't re-vendor,
+  // just as other transitive version changes don't.
+  const runtimeDependencies = runtimeDependencyNames(packageRoot);
+  const eveInstalls = resolveInstalls(runtimeDependencies, packageRoot);
+  const unsharedRuntimeDependencies = [];
+
   const moduleFingerprints = {};
   const moduleVersions = {};
   for (const module of modules) {
@@ -1061,6 +1135,12 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
       module.packageJsonName,
     );
     moduleVersions[module.packageName] = packageInfo.packageJson.version ?? "0.0.0";
+    const moduleInstalls = resolveInstalls(runtimeDependencies, packageInfo.packageRoot);
+    for (const [name, install] of eveInstalls) {
+      if (moduleInstalls.get(name) !== install) {
+        unsharedRuntimeDependencies.push(`${module.packageName}>${name}`);
+      }
+    }
 
     if (module.fingerprintFiles !== undefined) {
       const moduleHash = createHash("sha256");
@@ -1082,6 +1162,7 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
     ),
+    unsharedRuntimeDependencies,
   };
 }
 

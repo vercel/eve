@@ -1,4 +1,5 @@
-import type { SessionEvent } from "#protocol/session-event.js";
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
+import type { Fact, Progress } from "#protocol/session-events/facts.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { LanguageModel } from "ai";
@@ -13,65 +14,58 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
-import type { InternalToolDefinition } from "#tools/definition.js";
-import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
+import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
-/**
- * Serializable tool definition stored on the session.
- *
- * Carries schema but no execute function so the session stays serializable
- * across workflow step boundaries.
- */
-export type SessionToolDefinition = Readonly<InternalToolDefinition>;
-
 /** Authored-key → opaque-value map stored on `session.state`. */
 export type SessionStateMap = Readonly<Record<string, unknown>>;
 
-/** Prompt observations that survive rebuilding the agent's settings on each turn. */
-export interface CompactionState {
-  readonly lastKnownInputTokens?: number;
-  readonly lastKnownPromptMessageCount?: number;
-  /** The previous request's non-history estimate, also used before the next request is built. */
+/**
+ * Where a compaction ended: the summary with the recent tail verbatim, with only its text, or
+ * the summary alone (clipped, and the request cut, when even that is over the threshold).
+ */
+export type CompactionStage = "summary-only" | "tail" | "text-tail";
+
+/** One model's count of a prompt: its first `promptMessageCount` history messages and envelope. */
+export interface PromptMeasurement {
+  readonly inputTokens: number;
+  readonly promptMessageCount: number;
   readonly requestEnvelopeTokens?: number;
 }
 
-/** Compaction configuration stored on the session. */
+/** Prompt observations that survive rebuilding the agent's settings on each turn. */
+export interface CompactionState {
+  /**
+   * Provider input tokens per estimated token, from the last measured call. It describes the
+   * session's content, not one prompt, so it survives a compaction.
+   */
+  readonly estimateRatio?: number;
+  readonly lastKnownInputTokens?: number;
+  readonly lastKnownPromptMessageCount?: number;
+  /** The stage the last compaction ended at, kept through the first measured call after it. */
+  readonly lastStage?: CompactionStage;
+  /** The previous request's non-history estimate, also used before the next request is built. */
+  readonly requestEnvelopeTokens?: number;
+  /**
+   * Each model's latest measurement of the current history, by model ID. Before a call, use
+   * whichever counts higher: its own model's measurement or the latest baseline.
+   */
+  readonly measurementsByModel?: Readonly<Record<string, PromptMeasurement>>;
+}
+
+/** How one model call's history compacts: the session's observations, and the model's limit. */
 export interface CompactionConfig extends CompactionState {
+  /** The model's context window, when eve knows it. */
+  readonly contextWindowTokens?: number;
   readonly recentWindowSize: number;
+  /** The input tokens, on the provider's ruler, a compaction's tail stages must reach. */
+  readonly target: number;
   readonly threshold: number;
   readonly thresholdPercent?: number;
 }
-
-/**
- * Serializable agent configuration stored on the session.
- */
-interface SessionAgentBase {
-  /**
-   * Optional model used only for compaction summaries.
-   *
-   * When omitted, the harness uses the active turn model for compaction.
-   */
-  readonly compactionModelReference?: RuntimeModelReference;
-  readonly reasoning?: AgentReasoningDefinition;
-  readonly system: string;
-  readonly tools: readonly SessionToolDefinition[];
-}
-
-export type SessionAgent = SessionAgentBase &
-  (
-    | {
-        readonly dynamicModel?: never;
-        readonly modelReference: RuntimeModelReference;
-      }
-    | {
-        readonly dynamicModel: true;
-        readonly modelReference?: RuntimeModelReference;
-      }
-  );
 
 /**
  * A {@link HarnessSession} without its conversation history. Session steps
@@ -79,8 +73,7 @@ export type SessionAgent = SessionAgentBase &
  * never becomes part of their Workflow step input.
  */
 export interface HarnessSessionBase {
-  readonly agent: SessionAgent;
-  readonly compaction: CompactionConfig;
+  readonly compaction: CompactionState;
   readonly continuationToken: string;
   readonly outputSchema?: JsonObject;
   /**
@@ -105,14 +98,6 @@ export interface HarnessSessionBase {
  */
 export interface HarnessSession extends HarnessSessionBase {
   readonly history: HarnessModelMessage[];
-}
-
-export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
-  const reference = session.agent.modelReference;
-  if (reference === undefined) {
-    throw new Error("Expected a concrete model selection for the active model call.");
-  }
-  return reference;
 }
 
 /** The delivery a control arrived as: its id, and who sent it, as the wire names them. */
@@ -270,11 +255,17 @@ export interface ResolvedCall<T extends ToolCallLike> {
 /** Resolves a model tool call to the entry it runs, if it reaches one. */
 export type CallResolver = <T extends ToolCallLike>(toolCall: T) => ResolvedCall<T> | undefined;
 
+declare const committedBrand: unique symbol;
+
 /**
- * What one publish writes: one event, or every event of one transition, which the writer commits
- * as one line so readers never see half of it.
+ * The facts of one kernel transition, which the writer commits as one line so readers never see
+ * half of it. Only the kernel (`harness/session-machine/`, `harness/hitl/`) builds one: the sink
+ * takes no other facts.
  */
-export type SessionPublication = SessionEvent | readonly SessionEvent[];
+export type Commit = readonly Fact[] & { readonly [committedBrand]: true };
+
+/** What one publish writes: one transition's facts, or one transient progress record. */
+export type SessionPublication = Commit | Progress;
 
 /** The sink the harness emits to: see {@link HandleEventFn}. */
 export type HarnessEmitFn = HandleEventFn;
@@ -297,9 +288,9 @@ export type HandleEventFn = (
 ) => Promise<void>;
 
 /**
- * Dependencies injected into the tool-loop harness at construction time.
+ * Dependencies injected into the kernel at construction time.
  */
-export interface ToolLoopHarnessConfig {
+export interface KernelConfig {
   readonly steeringSignal?: AbortSignal;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
@@ -322,8 +313,11 @@ export interface ToolLoopHarnessConfig {
    * Omitted in production until an instrumentation runtime opts in.
    */
   readonly instrumentation?: SessionInstrumentation;
-  /** Attribute work that must finish before cumulative model usage is persisted. */
-  readonly titleAttributeWrite?: Promise<void>;
+  /**
+   * Tags the turn's run with what its model steps spent. The workflow wrapper provides it, inside
+   * a workflow step; absent, nothing is tagged.
+   */
+  readonly setAttributes?: (attributes: Record<string, EveAttributeValue>) => Promise<void>;
   /**
    * Sign-in callbacks the step's delivery carried. Each completes before anything else runs, and
    * a connection's sign-in resumes the turn that asked for it.

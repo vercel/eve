@@ -3,11 +3,31 @@ import { Readable } from "node:stream";
 
 import { toErrorMessage } from "#shared/errors.js";
 
+// RFC 9110 hop-by-hop fields. Forwarded to the worker, they describe the
+// client's connection, not the pooled one to the worker: a client's
+// `Connection: close` meeting a response's `Connection: keep-alive` pools a
+// socket the worker already marked closing, so the next request on it gets an
+// empty 400.
+const HOP_BY_HOP_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
 export function createPublicRequest(request: IncomingMessage, signal: AbortSignal): Request {
   const authority = request.headers.host ?? "localhost";
   const url = new URL(request.url ?? "/", `http://${authority}`);
+  const hopByHop = new Set(HOP_BY_HOP_HEADERS);
+  for (const token of request.headers.connection?.split(",") ?? []) {
+    hopByHop.add(token.trim().toLowerCase());
+  }
   const headers = new Headers();
   for (const [name, value] of Object.entries(request.headers)) {
+    if (hopByHop.has(name)) continue;
     if (Array.isArray(value)) {
       for (const item of value) {
         headers.append(name, item);

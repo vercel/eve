@@ -7,5 +7,6 @@ These apps verify eve's frontend framework integrations and act as runnable exam
 - `framework-nuxt` covers the `eve/nuxt` module.
 - `framework-sveltekit` covers the `eve/sveltekit` Vite plugin.
 - `framework-tanstack` covers the `eve/tanstack` Vite plugin.
+- `framework-vite` covers the `eve/vite` Vite plugin.
 
 Keep these apps small and focused on framework wiring. Smoke-test-only behavior belongs in `apps/fixtures`.

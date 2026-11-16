@@ -11,7 +11,10 @@ type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][numbe
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
 import type { AssistantStepFinishReason } from "#harness/finish-reason.js";
-import { announcedKind, callRequested, callSettledFrom } from "#harness/call-facts.js";
+import { announcedKind } from "#harness/call-facts.js";
+import { requestCall, settleCall } from "#harness/session-machine/calls.js";
+import { completeParts } from "#harness/session-machine/content.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { CallRow } from "#protocol/session-projection/tables.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -26,7 +29,10 @@ import {
   isInvalidToolCall,
   resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
-import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type {
+  RuntimeToolCallActionRequest,
+  RuntimeToolResultActionResult,
+} from "#shared/action-types.js";
 import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
@@ -145,7 +151,7 @@ async function consumeStreamContent(
     value: string,
     phase: "narration" | "reply",
   ): Promise<void> => {
-    await emitFn({ data: { kind, partId, phase, runId, value }, type: "content.completed" });
+    await emitFn(completeParts([{ kind, partId, phase, runId, value }]));
   };
 
   const flushCurrentMessage = async (phase: "narration" | "reply" = "narration"): Promise<void> => {
@@ -200,7 +206,14 @@ async function consumeStreamContent(
 
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
-    await emitFn(callRequested({ action, owner: { runId }, label: projection.presentationLabel }));
+    await emitFn(
+      requestCall({
+        action,
+        owner: { runId },
+        label: projection.presentationLabel,
+        hidden: projection.hidden,
+      }),
+    );
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -256,15 +269,16 @@ async function consumeStreamContent(
 
   /** A call whose input didn't validate is introduced with its error, and fails at once. */
   const emitInvalidCall = async (
-    action: Parameters<typeof callRequested>[0]["action"],
+    action: RuntimeToolCallActionRequest,
     result: RuntimeToolResultActionResult,
   ): Promise<void> => {
     emittedActionCallIds.add(action.callId);
     const message =
       typeof result.output === "string" ? result.output : JSON.stringify(result.output ?? null);
     await emitFn(
-      callRequested({
+      requestCall({
         action,
+        hidden: options?.tools.get(action.toolName)?.label === false,
         inputError: { code: "INVALID_TOOL_INPUT", message },
         owner: { runId },
       }),
@@ -286,7 +300,7 @@ async function consumeStreamContent(
             actionInputs.get(result.callId),
             result.output,
           );
-    await emitFn(callSettledFrom(result, { label: resultPresentation }));
+    await emitFn(settleCall(result, { label: resultPresentation }));
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
@@ -375,7 +389,9 @@ async function consumeStreamContent(
             part.providerExecuted === true ||
             // AI Gateway streams a provider tool's input unflagged, under an id its call never uses.
             options.tools.get(part.toolName)?.behavior?.handling?.kind === "provider-tool" ||
-            options.excludedActionToolNames.has(part.toolName)
+            options.excludedActionToolNames.has(part.toolName) ||
+            // A preview would show a call its tool keeps out of activity before `hidden` arrives.
+            options.tools.get(part.toolName)?.label === false
           ) {
             streamingActionInputs.delete(part.id);
             break;
@@ -456,32 +472,26 @@ async function consumeStreamContent(
     // Interrupted text stands; a failed/retried attempt instead leaves its incomplete previews
     // behind. Complete the streamed prefixes as one content transition before the run closes.
     if (options?.interruptSignal?.aborted === true) {
-      const completed: SessionEvent[] = [];
+      const completed: FactOf<"content.completed">["data"][] = [];
       if (reasoningPartId !== undefined && currentReasoning.length > 0)
         completed.push({
-          type: "content.completed",
-          data: {
-            partId: reasoningPartId,
-            runId,
-            kind: "reasoning",
-            phase: "narration",
-            value: currentReasoning,
-            interrupted: true,
-          },
+          partId: reasoningPartId,
+          runId,
+          kind: "reasoning",
+          phase: "narration",
+          value: currentReasoning,
+          interrupted: true,
         });
       if (messagePartId !== undefined && currentMessage.length > 0)
         completed.push({
-          type: "content.completed",
-          data: {
-            partId: messagePartId,
-            runId,
-            kind: "text",
-            phase: "narration",
-            value: currentMessage,
-            interrupted: true,
-          },
+          partId: messagePartId,
+          runId,
+          kind: "text",
+          phase: "narration",
+          value: currentMessage,
+          interrupted: true,
         });
-      if (completed.length > 0) await emitFn(completed);
+      if (completed.length > 0) await emitFn(completeParts(completed));
     }
     throw error;
   }

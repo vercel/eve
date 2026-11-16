@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
@@ -25,19 +26,32 @@ afterEach(async () => {
 
 interface HostVariant {
   readonly channel?: { readonly path: string };
+  readonly connection?: { readonly events: boolean };
+  readonly extensionSpecifier?: string;
+  readonly extensionConfig?: { readonly region: string };
   readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
+  /** Where the app's package.json lives: its own root, or an enclosing workspace. */
+  readonly packageJson?: "own" | "enclosing";
   readonly schedule?: { readonly cron: string; readonly content: string };
   readonly tool?: "ordinary" | "workflow" | "workflow-program";
+  readonly tsconfig?: boolean;
   readonly workflowSourceFingerprint?: string;
   readonly workflowWorld?: "local" | "vercel";
 }
 
 async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmentApplicationHost> {
-  const appRoot = await mkdtemp(join(tmpdir(), "eve-host-fingerprint-"));
-  temporaryDirectories.push(appRoot);
+  const root = await mkdtemp(join(tmpdir(), "eve-host-fingerprint-"));
+  temporaryDirectories.push(root);
+  const appRoot = variant.packageJson === "enclosing" ? join(root, "app") : root;
   const agentRoot = join(appRoot, "agent");
   await mkdir(agentRoot, { recursive: true });
+  if (variant.packageJson !== undefined) {
+    await writeFile(join(root, "package.json"), '{ "name": "fingerprint-host" }\n');
+  }
+  if (variant.tsconfig === true) {
+    await writeFile(join(appRoot, "tsconfig.json"), "{}\n");
+  }
 
   let instrumentationSourcePath: string | undefined;
   if (variant.instrumentationSource !== undefined) {
@@ -116,6 +130,19 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     modules,
     name: "fingerprint-host",
   });
+  if (variant.connection !== undefined) {
+    manifest.connections = [
+      {
+        connectionName: "issues",
+        ...(variant.connection.events && { experimental_events: true }),
+      },
+    ] as CompiledAgentManifest["connections"];
+  }
+  if (variant.extensionSpecifier !== undefined) {
+    manifest.extensionMounts = [
+      extensionMount(appRoot, variant.extensionSpecifier, variant.extensionConfig),
+    ];
+  }
 
   return {
     appRoot,
@@ -132,7 +159,18 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
           }),
       workflowWorldPluginPath: join(appRoot, "workflow-world.mjs"),
     },
-    compileResult: { manifest } as PreparedDevelopmentApplicationHost["compileResult"],
+    compileResult: {
+      manifest,
+      paths: { compileDirectoryPath: join(appRoot, ".eve", "compile") },
+    } as PreparedDevelopmentApplicationHost["compileResult"],
+    scheduleRegistrations: [],
+    schedules: [],
+    workflowBuildDir: join(appRoot, ".eve", "workflow"),
+    workspace: {
+      nitroBuildDir: join(appRoot, ".eve", "nitro"),
+      nitroOutputDir: join(appRoot, ".eve", "output"),
+    } as PreparedDevelopmentApplicationHost["workspace"],
+    workspaceExtensions: [],
     generation: {
       fingerprint: "generation",
       ...(variant.workflowSourceFingerprint === undefined
@@ -140,6 +178,32 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
         : { workflowSourceFingerprint: variant.workflowSourceFingerprint }),
     } as PreparedDevelopmentApplicationHost["generation"],
   } as PreparedDevelopmentApplicationHost;
+}
+
+function extensionMount(
+  appRoot: string,
+  specifier: string,
+  config?: { readonly region: string },
+): CompiledExtensionMount {
+  const packageRoot = join(appRoot, "node_modules", "layout-extension");
+  return {
+    ...(config && {
+      programmaticImport: {
+        config,
+        entryPath: join(packageRoot, "dist", "index.mjs"),
+        specifier,
+      },
+    }),
+    externalDependencies: [],
+    mountId: "extensions/layout",
+    mountLogicalPath: "extensions/layout.ts",
+    mountSourceId: "extensions/layout.ts",
+    mountSourcePath: join(appRoot, "agent", "extensions", "layout.ts"),
+    namespace: "layout",
+    packageName: "layout-extension",
+    sourceRoot: join(packageRoot, "dist", "extension"),
+    specifier,
+  };
 }
 
 describe("computeDevelopmentHostFingerprint", () => {
@@ -182,6 +246,74 @@ describe("computeDevelopmentHostFingerprint", () => {
     );
 
     expect(withRoute).not.toBe(base);
+  });
+
+  it("treats connection event receivers as structural", async () => {
+    const withoutEvents = await computeDevelopmentHostFingerprint(
+      await createHost({ connection: { events: false } }),
+    );
+    const withEvents = await computeDevelopmentHostFingerprint(
+      await createHost({ connection: { events: true } }),
+    );
+
+    expect(withEvents).not.toBe(withoutEvents);
+  });
+
+  it("treats the specifier an extension is mounted from as structural", async () => {
+    const host = await createHost({ extensionSpecifier: "layout-extension" });
+    const root = await computeDevelopmentHostFingerprint(host);
+    host.compileResult.manifest.extensionMounts = [
+      extensionMount(host.appRoot, "layout-extension/tools"),
+    ];
+    const subpath = await computeDevelopmentHostFingerprint(host);
+
+    expect(subpath).not.toBe(root);
+  });
+
+  it("is stable for the same extension mount installed in different app roots", async () => {
+    const first = await computeDevelopmentHostFingerprint(
+      await createHost({ extensionSpecifier: "layout-extension" }),
+    );
+    const second = await computeDevelopmentHostFingerprint(
+      await createHost({ extensionSpecifier: "layout-extension" }),
+    );
+
+    expect(first).toBe(second);
+  });
+
+  it("treats the app's tsconfig as structural", async () => {
+    const plain = await computeDevelopmentHostFingerprint(await createHost());
+    const first = await computeDevelopmentHostFingerprint(await createHost({ tsconfig: true }));
+    const second = await computeDevelopmentHostFingerprint(await createHost({ tsconfig: true }));
+
+    expect(first).not.toBe(plain);
+    expect(second).toBe(first);
+  });
+
+  it("treats the package root authored imports stay inside as structural", async () => {
+    const own = await computeDevelopmentHostFingerprint(await createHost({ packageJson: "own" }));
+    const otherRoot = await computeDevelopmentHostFingerprint(
+      await createHost({ packageJson: "own" }),
+    );
+    const enclosing = await computeDevelopmentHostFingerprint(
+      await createHost({ packageJson: "enclosing" }),
+    );
+
+    expect(otherRoot).toBe(own);
+    expect(enclosing).not.toBe(own);
+  });
+
+  it("leaves a programmatic extension mount's config runtime-only", async () => {
+    const host = await createHost({
+      extensionConfig: { region: "us" },
+      extensionSpecifier: "layout-extension",
+    });
+    const before = await computeDevelopmentHostFingerprint(host);
+    host.compileResult.manifest.extensionMounts = [
+      extensionMount(host.appRoot, "layout-extension", { region: "eu" }),
+    ];
+
+    expect(await computeDevelopmentHostFingerprint(host)).toBe(before);
   });
 
   it("treats configured environment values as structural", async () => {

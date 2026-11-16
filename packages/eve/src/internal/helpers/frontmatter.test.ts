@@ -40,7 +40,7 @@ describe("parseFrontmatter", () => {
   it("refuses code-evaluating YAML tags", () => {
     expect(() =>
       parseFrontmatter('---\nrun: !!js/function "function () { return 1; }"\n---\n'),
-    ).toThrow(/unknown tag/);
+    ).toThrow(/unknown scalar tag/);
   });
 });
 
@@ -67,5 +67,24 @@ describe("parseYaml", () => {
 
   it.each(["", "# comment only\n"])("parses %j to an empty object", (source) => {
     expect(parseYaml(source)).toEqual({});
+  });
+
+  it.each([
+    [
+      "dates as strings",
+      "day: 2024-01-02\nat: 2024-01-02T03:04:05Z\n",
+      { day: "2024-01-02", at: "2024-01-02T03:04:05Z" },
+    ],
+    [
+      "<< merge keys",
+      "base: &base { model: small }\ncase:\n  <<: *base\n  input: hi\n",
+      { base: { model: "small" }, case: { model: "small", input: "hi" } },
+    ],
+  ])("keeps %s as JSON data", (_label, source, expected) => {
+    expect(parseYaml(source)).toEqual(expected);
+  });
+
+  it("rejects a stream with more than one document", () => {
+    expect(() => parseYaml("a: 1\n---\nb: 2\n")).toThrow("single YAML document");
   });
 });

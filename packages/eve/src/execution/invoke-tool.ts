@@ -1,7 +1,7 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import type { ApprovalDecision } from "#approval/status.js";
-import { decideApproval } from "#harness/tools.js";
+import { requireClearance } from "#harness/clearance.js";
+import { decideApproval, type GateDecision } from "#harness/tools.js";
 import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
 import {
   compiledToolOwner,
@@ -29,7 +29,8 @@ import type { HarnessToolMap } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -190,7 +191,9 @@ async function runInvocation(input: {
     sessionId,
   });
   context.setVirtualContext(SandboxKey, sandbox.access);
-  if (runtime.bundle !== undefined) context.setVirtualContext(BundleKey, runtime.bundle);
+  if (runtime.bundle !== undefined) {
+    context.setVirtualContext(SessionAgentKey, await compiledSessionAgent(runtime.bundle));
+  }
 
   try {
     return await contextStorage.run(context, () =>
@@ -298,27 +301,25 @@ async function runCall(input: {
   const { callId, definition, observer } = input;
   const signal = input.signal ?? new AbortController().signal;
 
-  let approval: ApprovalDecision = { denied: false };
-  if (definition.approval !== undefined) {
-    try {
-      approval = await decideApproval(definition, {
-        abortSignal: signal,
-        callId,
-        input: input.input,
-      });
-    } catch (error) {
-      observer.failedWith(error);
-      return failedFromError(error, definition.name, "approval policy failed");
-    }
-    if (approval.denied)
-      return {
-        outcome: "rejected",
-        reason:
-          approval.reason ?? `The tool "${definition.name}" was denied by its approval policy.`,
-        cause: { policy: "approval" },
-      };
-    if (approval.awaitsPerson === true) return { outcome: "rejected", reason: "approval-required" };
+  let approval: GateDecision;
+  try {
+    approval = await decideApproval(definition, {
+      abortSignal: signal,
+      callId,
+      input: input.input,
+    });
+  } catch (error) {
+    observer.failedWith(error);
+    return failedFromError(error, definition.name, "approval policy failed");
   }
+  if (approval.denied)
+    return {
+      outcome: "rejected",
+      reason: approval.reason ?? `The tool "${definition.name}" was denied by its approval policy.`,
+      cause: { policy: "approval" },
+    };
+  if (approval.clearance === undefined) return { outcome: "rejected", reason: "approval-required" };
+  requireClearance(approval.clearance, callId);
 
   const executeOptions: ToolExecuteOptions = {
     abortSignal: signal,

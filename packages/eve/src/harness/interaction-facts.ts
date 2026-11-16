@@ -61,6 +61,18 @@ export function signInOpened(
     readonly prompt?: string;
   },
 ): FactOf<"interaction.opened"> {
+  return fact("interaction.opened", signInRequest(challenge, input));
+}
+
+/** What `interaction.opened` carries for a sign-in, as its fact or a relay payload's event. */
+export function signInRequest(
+  challenge: AuthorizationChallenge,
+  input: {
+    readonly subject: InteractionSubject;
+    readonly origin?: InteractionOpenedData["origin"];
+    readonly prompt?: string;
+  },
+): InteractionOpenedData {
   const details = challenge.challenge;
   const signIn: SignInChallenge = defined({
     callbackUrl: challenge.hookUrl,
@@ -80,7 +92,7 @@ export function signInOpened(
     prompt: input.prompt ?? details.instructions ?? `Authorization required for ${challenge.name}`,
     signIn,
   });
-  return fact("interaction.opened", {
+  return defined({
     audience:
       challenge.principalId === undefined ? undefined : { principalIds: [challenge.principalId] },
     interactionId: signInInteractionId(challenge),

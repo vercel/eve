@@ -84,6 +84,8 @@ export type EveToolPart = {
   readonly kind: CapabilityKind;
   readonly name: string;
   readonly label: string;
+  /** Its tool set `label: false`, so activity leaves it out; see `showsActivity`. */
+  readonly hidden?: true;
   readonly interaction?: Interaction;
 } & (
   | {

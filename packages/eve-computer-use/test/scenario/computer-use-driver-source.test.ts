@@ -72,6 +72,9 @@ test("computer-use bootstrap writes all assets and installs pinned dependencies 
   const installScript = files.get("/custom/workspace/.eve-code/install-computer-use.sh") ?? "";
   assert.match(installScript, /computer-use requires an apt-based sandbox image/u);
   assert.match(installScript, /firefox-esr/u);
+  // Mozilla stops serving an ESR line after its end of life, so any line gate
+  // breaks every new install once that happens (#5829).
+  assert.doesNotMatch(installScript, /firefox-esr[=/]|madison firefox-esr|Pin: version/u);
   assert.match(installScript, /\bffmpeg\b/u);
   assert.match(installScript, /\bxterm\b/u);
   assert.match(

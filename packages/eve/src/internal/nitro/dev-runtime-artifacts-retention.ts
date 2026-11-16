@@ -24,13 +24,9 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
   readonly activeSnapshotRoot: string | undefined;
   readonly gracePeriodMs?: number;
   readonly now?: number;
-  readonly protectAll: boolean;
   readonly retainCount?: number;
   readonly snapshotsDirectory: string;
 }): Promise<boolean> {
-  if (input.protectAll) {
-    return false;
-  }
   const now = input.now ?? Date.now();
   const gracePeriodMs = Math.max(
     0,

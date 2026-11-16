@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
@@ -26,6 +26,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import type { AgentModuleBinding } from "#compiler/source-graph.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -87,6 +88,7 @@ export async function compileAgentConfig(
   } = {};
 
   const compiledConfig: {
+    approval?: boolean;
     build?: CompiledAgentDefinition["build"];
     compaction: {
       model?: CompiledRuntimeModelReference;
@@ -112,6 +114,11 @@ export async function compileAgentConfig(
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
+  }
+
+  // A function can't enter the manifest; the runtime loads it from the agent config module.
+  if (definition.approval !== undefined) {
+    compiledConfig.approval = true;
   }
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
@@ -218,14 +225,13 @@ async function normalizeAuthoredModelReference(input: {
   if (typeof input.value === "string") {
     const routing = classifyModelRouting(input.value, input.providerOptions);
     rejectGatewayPromptCache(input, routing);
-    return await withCompiledRuntimeModelLimits(
-      {
-        id: formatLanguageModelGatewayId(input.value),
-        providerOptions: parseProviderOptionsRecord(input.providerOptions),
-        routing,
-      },
-      input,
-    );
+    const reference: CompiledRuntimeModelReference = {
+      id: formatLanguageModelGatewayId(input.value),
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing,
+    };
+    if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    return await withCompiledRuntimeModelLimits(reference, input);
   }
 
   const source = input.source;
@@ -324,8 +330,9 @@ function rejectGatewayPromptCache(
   routing: ModelRouting,
 ): void {
   if (input.promptCache === undefined || routing.kind !== "gateway") return;
+  if (routing.target === "anthropic") return;
   throw new Error(
-    `${input.sourcePath ?? "agent.ts"}: modelOptions.promptCache applies only to models eve calls directly, but "${formatLanguageModelGatewayId(input.value)}" routes through AI Gateway, which manages its own prompt caching. Remove promptCache, or configure Gateway caching with providerOptions.gateway.caching.`,
+    `${input.sourcePath ?? "agent.ts"}: modelOptions.promptCache applies to Anthropic models and to models eve calls directly, but "${formatLanguageModelGatewayId(input.value)}" routes through AI Gateway, which manages its own prompt caching. Remove promptCache, or configure Gateway caching with providerOptions.gateway.caching.`,
   );
 }
 
@@ -345,17 +352,11 @@ function resolveTopLevelAgentRoot(manifest: AgentSourceManifest): string {
   const nestedAgentRoot = resolve(appRoot, "agent");
   const agentRoot = resolve(manifest.agentRoot);
 
-  if (isPathInsideOrEqual(nestedAgentRoot, agentRoot)) {
+  if (isPathInsideOrEqual(agentRoot, nestedAgentRoot)) {
     return nestedAgentRoot;
   }
 
   return appRoot;
-}
-
-function isPathInsideOrEqual(parentPath: string, childPath: string): boolean {
-  const relativePath = relative(parentPath, childPath);
-
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 async function withCompiledRuntimeModelLimits(

@@ -5,7 +5,9 @@ import { Flag } from "lucide-react";
 import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
 import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
+import { AmbientListeningFlow } from "./ambient-listening-flow";
 import { EveCodeBenchmark } from "./eve-code-benchmark";
+import { TabsWithChildren } from "./synced-tabs";
 import {
   Capabilities,
   Capability,
@@ -32,11 +34,13 @@ const localComponents: MDXComponents = {
   Flag,
   Folder,
   AgentRuntimeDiagram,
+  AmbientListeningFlow,
   Capabilities,
   Capability,
   EveCodeBenchmark,
   Step,
   Steps,
+  TabsWithChildren,
   TemplateCard,
   TemplateCards,
   UseCaseSummaries,

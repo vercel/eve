@@ -1,0 +1,58 @@
+minimumReleaseAgeStrict: true
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  # Explicitly requested Link SDK upgrade; remove once this release clears the
+  # 24-hour gate (2026-10-03 15:14 UTC). Future versions remain age-gated.
+  - "@stripe/link-sdk@0.11.0"
+  # Eve 0.44.4's current official scaffold resolves the matching AI SDK release cohort.
+  - "@ai-sdk/*"
+  - ai
+  - "@vercel/*"
+  - "@onkernel/*"
+  - eve
+  # These browser and rendering transitive releases are locked by the current Eve UI scaffold.
+  - baseline-browser-mapping
+  - caniuse-lite
+  - electron-to-chromium
+  - mermaid
+  - picomatch
+  - systeminformation
+allowBuilds:
+  "@google/genai": false
+  cbor-extract: false
+  esbuild: true
+  protobufjs: false
+  sharp: true
+patchedDependencies:
+  "@linqapp/chat-sdk-adapter@0.5.1": patches/@linqapp__chat-sdk-adapter@0.5.1.patch
+overrides:
+  "dompurify@<3.4.17": "3.4.17"
+  "zod@>=4.0.0 <4.6.6": "4.6.7"
+  "sharp@>=0.35.0 <0.35.5": "0.35.5"
+  "tinypool@>=2.1.0 <2.1.2": "2.1.2"
+  "js-yaml@>=4.0.0 <4.3.2": "4.3.2"
+  "minimatch@>=10.0.0 <10.2.6": "10.2.6"
+  "path-to-regexp@>=6.0.0 <6.3.0": "6.3.0"
+  "smol-toml@>=1.0.0 <1.9.1": "1.9.1"
+  "proxy-addr@>=2.0.0 <2.0.8": "2.0.8"
+  "tar@>=7.0.0 <7.5.23": "7.5.23"
+  "undici@>=6.0.0 <6.29.1": "6.29.1"
+  "undici@>=7.0.0 <7.30.1": "7.30.1"
+  "path-to-regexp@>=8.0.0 <8.4.0": "8.4.0"
+  "@tootallnate/once@>=2.0.0 <2.0.1": "2.0.1"
+  "ajv@>=8.0.0 <8.18.0": "8.18.0"
+  "fast-uri@>=3.0.0 <3.1.9": "3.1.9"
+  "ip-address@>=10.0.0 <10.7.6": "10.7.6"
+  "qs@>=6.0.0 <6.17.1": "6.17.1"
+  "brace-expansion@>=1.0.0 <1.1.22": "1.1.22"
+  "brace-expansion@>=2.0.0 <2.1.8": "2.1.8"
+  "hono@>=4.0.0 <4.13.18": "4.13.18"
+  "@modelcontextprotocol/sdk@>=1.0.0 <1.32.2": "1.32.2"
+  "systeminformation@>=5.0.0 <5.33.22": "5.33.22"
+  "postcss-selector-parser@>=7.0.0 <7.2.1": "7.2.1"
+  "source-map-js@>=1.0.0 <1.2.2": "1.2.2"
+  "@fastify/busboy@>=3.0.0 <3.2.5": "3.2.5"
+  "@hono/node-server@>=1.0.0 <1.19.19": "1.19.19"
+  "@hono/node-server@>=2.0.0 <2.1.6": "2.1.6"
+  "body-parser@>=2.0.0 <2.4.0": "2.4.0"
+  "undici@>=5.0.0 <5.29.0": "5.29.0"

@@ -1,7 +1,49 @@
+// Stop at the first failing array element before the SDK's errorsText joins
+// every Ajv error. Keep its dialect selection and format validation unchanged.
+// Fail the build on upstream drift rather than silently restoring allErrors.
+function createFailFastValidationPlugin() {
+  const source = `function createDefaultAjvInstance(engineClass) {
+\tconst ajv = new engineClass({
+\t\tstrict: false,
+\t\tvalidateFormats: true,
+\t\tvalidateSchema: false,
+\t\tallErrors: true
+\t});`;
+  let patched = false;
+  return {
+    name: "eve-mcp-fail-fast-validation",
+    buildStart() {
+      patched = false;
+    },
+    transform(code, id) {
+      if (
+        !/\/@modelcontextprotocol\/server\/dist\/ajvProvider-[^/]+\.mjs$/.test(
+          id.replaceAll("\\", "/"),
+        )
+      ) {
+        return null;
+      }
+      if (code.split(source).length !== 2) {
+        throw new Error("MCP SDK default Ajv configuration changed.");
+      }
+      patched = true;
+      return {
+        code: code.replace(source, source.replace("allErrors: true", "allErrors: false")),
+        map: null,
+      };
+    },
+    buildEnd(error) {
+      if (!error && !patched)
+        throw new Error("MCP SDK fail-fast validation patch was not applied.");
+    },
+  };
+}
+
 export default {
   packageName: "@modelcontextprotocol/server",
   compiledPath: "@modelcontextprotocol/server",
   chunkGroup: "workflow",
+  plugins: [createFailFastValidationPlugin()],
   entries: [
     {
       entry: "dist/index.mjs",
@@ -82,6 +124,7 @@ export interface McpServerOptions {
   readonly cacheHints?: Partial<Record<CacheableResultMethod, CacheHint>>;
   readonly capabilities?: McpJsonObject;
   readonly instructions?: string;
+  readonly maxToolInputElements?: number;
 }
 
 export declare class Server {
@@ -180,6 +223,7 @@ export declare function createMcpHandler(
   factory: (context: McpRequestContext) => McpServer | Server | Promise<McpServer | Server>,
   options?: {
     readonly legacy?: "reject" | "stateless";
+    readonly maxRequestBodySize?: number;
     readonly onerror?: (error: Error) => void;
     readonly responseMode?: "auto" | "json" | "stream";
   },

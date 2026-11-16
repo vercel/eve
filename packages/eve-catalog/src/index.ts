@@ -128,6 +128,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "recall",
+    name: "Recall.ai",
+    kind: "channel",
+    tagline: "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
+    surfaces: { scaffoldable: false, registry: true, gallery: false },
+  },
+  {
     slug: "blooio",
     name: "Blooio",
     kind: "channel",
@@ -388,6 +395,22 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "memco",
+    name: "memco",
+    kind: "memory",
+    tagline:
+      "Give agents shared memory to learn from work and each other, with separate networks for each customer.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "claude-mem",
+    name: "claude-mem",
+    kind: "memory",
+    tagline:
+      "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",
@@ -595,6 +618,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       description:
         "context.dev: search the live web, scrape and crawl sites, extract structured data, parse files, retrieve brand intelligence, monitor changes, and run batch jobs.",
       mcp: { url: "https://mcp.context.dev/mcp" },
+    },
+  },
+  {
+    slug: "context7",
+    name: "Context7",
+    kind: "connection",
+    tagline: "Look up up-to-date, version-specific library docs and code examples.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Context7: up-to-date, version-specific library documentation and code examples.",
+      mcp: { url: "https://mcp.context7.com/mcp" },
     },
   },
   {
@@ -864,6 +899,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "stacktree",
+    name: "Stacktree",
+    kind: "connection",
+    tagline: "Publish and update unlisted HTML pages through Stacktree's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Stacktree: publish HTML pages to unlisted links, update them in place, set optional passcode or email gates, and manage feedback.",
+      mcp: { url: "https://api.stacktr.ee/mcp" },
+    },
+  },
+  {
     slug: "supabase",
     name: "Supabase",
     kind: "connection",
@@ -872,6 +919,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Supabase: databases, authentication, and storage.",
       mcp: { url: "https://mcp.supabase.com/mcp" },
+    },
+  },
+  {
+    slug: "tavily",
+    name: "Tavily",
+    kind: "connection",
+    tagline: "Search the web, extract page content, crawl sites, and map URLs.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Tavily: search the web, extract page content, crawl sites, and map URLs.",
+      mcp: { url: "https://mcp.tavily.com/mcp" },
     },
   },
   {

@@ -24,6 +24,19 @@ const PREBUILT_EVE_ENTRY = join(EVE_PACKAGE_ROOT, "dist", "src", "index.js");
  * cannot clobber each other's shared tarball, and it is removed on teardown.
  */
 export default async function packScenarioTarball(): Promise<() => Promise<void>> {
+  // A config with several scenario projects runs this once per project in one process: the
+  // first packs, and the others reuse its tarball, which its teardown removes.
+  const packed = process.env.EVE_SCENARIO_EVE_TARBALL_PATH;
+  if (
+    packed !== undefined &&
+    (await access(packed).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    return async () => {};
+  }
+
   try {
     await access(PREBUILT_EVE_ENTRY);
   } catch {

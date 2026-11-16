@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   isPrivateSlackConversation,
+  readSlackConversationKind,
   readSlackConversationPrivacy,
 } from "#public/channels/slack/privacy.js";
 
@@ -69,5 +70,37 @@ describe("Slack conversation privacy", () => {
         request: vi.fn().mockRejectedValue(new Error("missing_scope")),
       }),
     ).resolves.toBe(true);
+  });
+
+  it.each([
+    { channel: { is_im: true }, spaceType: "direct" },
+    { channel: { is_mpim: true, is_private: true }, spaceType: "shared" },
+    { channel: { is_channel: true, is_private: false }, spaceType: "shared" },
+    { channel: { is_private: true }, spaceType: "shared" },
+    { channel: {}, spaceType: undefined },
+  ])(
+    "reads an app mention's space type from conversations.info: $spaceType",
+    async ({ channel, spaceType }) => {
+      const request = vi.fn().mockResolvedValue({ ok: true, channel });
+      const kind = await readSlackConversationKind({ channelId: "G01", raw: {}, request });
+      expect(kind.spaceType).toBe(spaceType);
+    },
+  );
+
+  it("reports visibility from the event or the lookup, and none when it can't tell", async () => {
+    const lookup = (channel: unknown) => vi.fn().mockResolvedValue({ ok: true, channel });
+    const kind = (raw: Record<string, unknown>, request = lookup({})) =>
+      readSlackConversationKind({ channelId: "C01", raw, request });
+
+    expect((await kind({ channel_type: "channel" })).visibility).toBe("public");
+    expect((await kind({ channel_type: "group" })).visibility).toBe("private");
+    expect((await kind({}, lookup({ is_private: false }))).visibility).toBe("public");
+    expect((await kind({}, lookup({ is_private: true }))).visibility).toBe("private");
+    // Audience still fails closed, but visibility reports only what Slack said.
+    const unknown = await kind(
+      {},
+      vi.fn().mockResolvedValue({ ok: false, error: "missing_scope" }),
+    );
+    expect(unknown).toEqual({ isPrivate: true });
   });
 });

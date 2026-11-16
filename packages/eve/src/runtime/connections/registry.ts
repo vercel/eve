@@ -107,6 +107,11 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     return this.#connections.map((c) => c.connectionName);
   }
 
+  /** The names of the connections the agent declares, without the dynamic ones installed. */
+  getStaticConnectionNames(): readonly string[] {
+    return this.#staticConnections.map((c) => c.connectionName);
+  }
+
   /**
    * Returns the resolved definitions for all connections.
    */

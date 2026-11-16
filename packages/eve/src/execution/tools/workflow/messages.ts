@@ -2,7 +2,7 @@ import type { Principal } from "#protocol/session-events/envelope.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
-import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
+import type { AgentSessionAddress } from "#execution/agent-sessions/start.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolQuestion, ToolAnswer } from "#tools/definition.js";

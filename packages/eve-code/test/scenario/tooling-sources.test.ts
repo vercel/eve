@@ -6,23 +6,17 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { DIAGNOSTICS_WORKER_SOURCE, GH_SIGNED_COMMIT_SOURCE } from "../../extension/lib/tooling.ts";
+import { GH_SIGNED_COMMIT_SOURCE } from "../../extension/lib/tooling.ts";
 import { installCodeTooling } from "../../extension/lib/sandbox.ts";
 
 const execFileAsync = promisify(execFile);
 
-test("embedded Node tooling sources parse", async () => {
+test("embedded signed commit source parses", async () => {
   const dir = await mkdtemp(join(tmpdir(), "eve-code-tooling-"));
   try {
-    const files = [
-      ["diagnostics.cjs", DIAGNOSTICS_WORKER_SOURCE],
-      ["gh-signed-commit.cjs", GH_SIGNED_COMMIT_SOURCE],
-    ] as const;
-    for (const [name, source] of files) {
-      const path = join(dir, name);
-      await writeFile(path, source);
-      await execFileAsync(process.execPath, ["--check", path]);
-    }
+    const path = join(dir, "gh-signed-commit.cjs");
+    await writeFile(path, GH_SIGNED_COMMIT_SOURCE);
+    await execFileAsync(process.execPath, ["--check", path]);
   } finally {
     await rm(dir, { force: true, recursive: true });
   }

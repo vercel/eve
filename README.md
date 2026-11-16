@@ -107,8 +107,6 @@ npm run dev
 ```
 
 That's a working agent. Add human-in-the-loop prompts, subagents, and schedules as needed.
-Follow the [first-agent tutorial](https://eve.dev/docs/tutorial/first-agent) for a complete
-walkthrough.
 
 ### Add Web Chat
 
@@ -142,8 +140,3 @@ participating, you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
 Please do not open public issues for security vulnerabilities. Instead, follow
 [SECURITY.md](SECURITY.md) and report responsibly to
 [responsible.disclosure@vercel.com](mailto:responsible.disclosure@vercel.com).
-
-## Beta terms
-
-eve is currently in beta and subject to the [Vercel beta terms](https://vercel.com/docs/release-phases/public-beta-agreement);
-the framework, APIs, documentation, and behavior may change before general availability.

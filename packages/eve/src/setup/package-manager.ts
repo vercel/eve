@@ -54,7 +54,7 @@ export function resolvePackageManager(input: {
  * Identifies the package manager that launched the current process from an
  * npm user-agent string. Every manager advertises itself there when running
  * a binary (`npx`, `pnpm dlx`, `yarn dlx`, `bunx`, run-scripts), e.g.
- * `"pnpm/10.4.0 npm/? node/v24.0.0 darwin arm64"` → pnpm. A binary executed
+ * `"pnpm/10.4.0 npm/? node/v26.0.0 darwin arm64"` → pnpm. A binary executed
  * directly carries no user agent and yields undefined.
  */
 export function packageManagerFromUserAgent(

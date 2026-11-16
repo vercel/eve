@@ -248,10 +248,6 @@ export interface OtelHarnessSettings {
   readonly functionId?: string;
   readonly traceChannelRequests: boolean;
   readonly tracePolicy?: TraceCapturePolicy;
-  /** Whether AI SDK spans include model and tool inputs. */
-  readonly recordInputs: boolean;
-  /** Whether AI SDK spans include model and tool outputs. */
-  readonly recordOutputs: boolean;
 }
 
 /**
@@ -290,12 +286,10 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   const runtimeContextResolvers: RuntimeContextResolver[] = [];
   let declaration: OtelDeclaration | undefined;
   let declared = false;
-  let capturesContent = false;
 
   for (const value of values) {
     if (isOtelIntegration(value)) {
       declared = true;
-      capturesContent = true;
       spanProcessors.push(...value.spanProcessors);
       metricReaders.push(...value.metricReaders);
       if (value.runtimeContext !== undefined) {
@@ -316,8 +310,6 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   const options = declaration?.options ?? {};
   const settings: OtelHarnessSettings = {
     functionId: options.functionId,
-    recordInputs: capturesContent,
-    recordOutputs: capturesContent,
     traceChannelRequests: options.traceChannelRequests === true,
   };
   if (options.tracePolicy !== undefined) {

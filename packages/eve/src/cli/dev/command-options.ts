@@ -16,6 +16,8 @@ export interface DevelopmentCliOptions {
   input?: string;
   /** Internal fresh-agent handoff from `eve init`. */
   onboard?: boolean;
+  /** Internal handoff from `eve init` after it already ran onboarding during the install. */
+  onboarded?: boolean;
   logs?: LogDisplayMode;
   name?: string;
   port?: number;
@@ -32,3 +34,9 @@ export interface ProductionCliOptions {
   port?: number;
   schedules?: boolean;
 }
+
+/**
+ * Carries the prompt typed during `eve init`'s onboarding to `eve dev --onboarded`. Unlike
+ * `--input`, it isn't split by the Windows shell or shown in process lists and npm logs.
+ */
+export const EVE_INIT_INPUT_ENV = "EVE_INIT_INPUT";

@@ -1,3 +1,4 @@
+// @linux-only: TUI placeholder from agent info; virtual paths
 import { expect, it } from "vitest";
 
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
@@ -13,7 +14,7 @@ it("recognizes scaffold instructions and bundled capabilities through compiled a
     agentRoot: "/virtual/local-cues/agent",
     appRoot: "/virtual/local-cues",
   });
-  source.instructions.push({
+  source.sources.push({
     sourceId: "instructions.md",
     logicalPath: "instructions.md",
     sourceKind: "markdown",

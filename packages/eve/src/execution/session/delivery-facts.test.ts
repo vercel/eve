@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { admitDeliveries } from "#execution/session/delivery-facts.js";
+import { planAdmission } from "#execution/session/delivery-facts.js";
+import { admitDeliveries } from "#harness/session-machine/deliveries.js";
+
+const admittedFacts = (admission: ReturnType<typeof planAdmission>) =>
+  admitDeliveries(admission.deliveries);
 import { attachClientContext } from "#internal/client-context.js";
 
 it.each([
@@ -8,7 +12,7 @@ it.each([
   { status: "settled" as const, facts: [] },
 ])("settles an ignored delivery once when its recorded status is $status", ({ status, facts }) => {
   const payload = {};
-  const admission = admitDeliveries({
+  const admission = planAdmission({
     channelKind: "channel:test",
     status: () => status,
     delivery: {
@@ -26,7 +30,7 @@ it.each([
     },
     payloads: [{ payload, input: undefined }],
   });
-  expect(admission.facts.map((fact) => fact.type)).toEqual(facts);
+  expect(admittedFacts(admission).map((fact) => fact.type)).toEqual(facts);
   expect(admission.inputs).toEqual([]);
 });
 
@@ -46,7 +50,7 @@ it("takes answer provenance from admission, not helper fields returned by a deli
     deliveryId: "earlier-delivery",
     responseId: "earlier-response",
   };
-  const admitted = admitDeliveries({
+  const admitted = planAdmission({
     channelKind: "channel:test",
     delivery: {
       kind: "deliver",
@@ -58,7 +62,7 @@ it("takes answer provenance from admission, not helper fields returned by a deli
     },
     payloads: [{ payload, input: { answers: [answer] } }],
   });
-  expect(admitted.facts[0]).toMatchObject({
+  expect(admittedFacts(admitted)[0]).toMatchObject({
     type: "delivery.admitted",
     data: { principal: { id: "alice", type: "user" } },
   });
@@ -75,7 +79,7 @@ it("takes answer provenance from admission, not helper fields returned by a deli
 
 it("keeps turn context a server's onMessage supplied out of the public admission fact", () => {
   const payload = attachClientContext({}, ["Verified plan: hobby"]);
-  const admitted = admitDeliveries({
+  const admitted = planAdmission({
     channelKind: "eve",
     delivery: {
       kind: "deliver",
@@ -87,6 +91,6 @@ it("keeps turn context a server's onMessage supplied out of the public admission
     },
     payloads: [{ payload, input: { message: "What plan am I on?" } }],
   });
-  expect(admitted.facts.map((fact) => fact.type)).toEqual(["delivery.admitted"]);
-  expect(JSON.stringify(admitted.facts)).not.toContain("Verified plan");
+  expect(admittedFacts(admitted).map((fact) => fact.type)).toEqual(["delivery.admitted"]);
+  expect(JSON.stringify(admittedFacts(admitted))).not.toContain("Verified plan");
 });

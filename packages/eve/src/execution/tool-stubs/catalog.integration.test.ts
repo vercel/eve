@@ -1,8 +1,11 @@
+// @linux-only: tool stubs through eve__tool
+import { mintClearance } from "#harness/clearance.js";
 import { describe, expect, it } from "vitest";
 
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
-import { toolStubProvider } from "#context/providers/tool-stubs.js";
-import { workflowEntry } from "#execution/session/entry.js";
+import { ToolStubPlaybackKey } from "#context/providers/tool-stubs-key.js";
+import { toolStubPlayback } from "#execution/tool-stub-host.js";
+import { createInProcessToolStubs } from "#execution/in-process/tool-stubs.js";
 import { invokeTool, isRunnableTool } from "#harness/tools.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
@@ -11,12 +14,9 @@ import {
   fakeConnection,
   inlineTool,
 } from "#internal/testing/catalog-fixtures.js";
-import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { start } from "#internal/workflow/runtime.js";
 import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
-import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
+import type { ToolStub } from "#tool-stubs/types.js";
 
 /** The last value a tool execution produced, as eve records it. */
 async function settle(output: unknown): Promise<unknown> {
@@ -55,25 +55,16 @@ describe("tool stubs through eve__tool", () => {
     });
     const runtime = await createTestRuntime();
     await runtime.run(async () => {
-      const token = "catalog-stub-playback";
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: {},
-          serializedContext: {
-            ...buildSerializedContext({ channelKind: "http" }),
-            [STUB_CONTEXT_KEY]: { token, rules },
-          },
-        },
-      ]);
-      try {
-        await waitForHook({ runId: run.runId }, { token });
+      // The in-process host's stubs, served as they are while a stubbed root session runs.
+      const toolStubs = createInProcessToolStubs();
+      const sessionId = "catalog-stub-session";
+      const scope = { rootSessionId: sessionId, rules, token: "catalog-stub-playback" };
+      await toolStubs.serve(scope, sessionId, async () => {
         const {
           catalog,
           ctx,
           run: inSession,
-        } = catalogContext({
+        } = await catalogContext({
           connections: [linear],
           tools: [
             inlineTool("refund_invoice", {
@@ -88,11 +79,11 @@ describe("tool stubs through eve__tool", () => {
         });
         ctx.set(SessionKey, {
           auth: { current: null, initiator: null },
-          sessionId: run.runId,
+          sessionId,
           turn: { id: "turn-0", sequence: 0 },
         });
-        ctx.set(ToolStubsKey, { rootSessionId: run.runId, rules, token });
-        ctx.setVirtualContext(toolStubProvider.key, toolStubProvider.create(ctx)!.value);
+        ctx.set(ToolStubsKey, scope);
+        ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(toolStubs, scope));
         // eve runs an eve__tool call as the call to the entry it resolves to.
         const call = (toolCallId: string, input: Record<string, unknown>) =>
           inSession(async () => {
@@ -101,7 +92,14 @@ describe("tool stubs through eve__tool", () => {
               throw new Error(`eve__tool ${JSON.stringify(input)} reached no runnable entry.`);
             }
             const options = { messages: [], toolCallId };
-            return await settle(invokeTool(resolved.definition, resolved.call.input, options));
+            return await settle(
+              invokeTool(
+                resolved.definition,
+                resolved.call.input,
+                options,
+                mintClearance(toolCallId),
+              ),
+            );
           });
 
         expect(
@@ -117,9 +115,7 @@ describe("tool stubs through eve__tool", () => {
         expect(linear.calls).toEqual([]);
         await call("issues-2", { name: "linear__list_issues", input: { status: "closed" } });
         expect(linear.calls).toEqual([{ input: { status: "closed" }, tool: "list_issues" }]);
-      } finally {
-        await run.cancel();
-      }
+      });
     });
   });
 });

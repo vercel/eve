@@ -1,3 +1,4 @@
+// @linux-only: callback context accessors
 import { describe, expect, it } from "vitest";
 
 import { loadContext } from "#context/container.js";

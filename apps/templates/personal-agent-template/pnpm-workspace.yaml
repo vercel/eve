@@ -5,7 +5,9 @@ minimumReleaseAgeExclude:
   - eve
   - "@vercel/connect"
   - ai
-  - eve
+  - "@comark/nuxt@0.9.1"
+  - "@comark/vue@0.9.1"
+  - comark@0.9.1
 
 allowBuilds:
   "@parcel/watcher": false
@@ -13,3 +15,7 @@ allowBuilds:
   esbuild: true
   sharp: false
   vue-demi: false
+
+# Keep transitive schema validation on the patched Zod 4 release.
+overrides:
+  "zod@>=4.0.0 <4.6.6": "4.6.7"

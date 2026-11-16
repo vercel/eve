@@ -21,7 +21,10 @@ import type {
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
-import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+import {
+  VERCEL_EVE_GIT_SANDBOX_IMAGE,
+  VERCEL_EVE_SANDBOX_IMAGE,
+} from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
   createVercelNetworkPolicySetter,
@@ -103,9 +106,10 @@ export function createVercelSandbox(
     timeout: input.createOptions?.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS,
   };
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
+  const image = createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE;
   const usesEveBase =
     createOptions.source === undefined &&
-    (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE) === VERCEL_EVE_SANDBOX_IMAGE;
+    (image === VERCEL_EVE_SANDBOX_IMAGE || image === VERCEL_EVE_GIT_SANDBOX_IMAGE);
 
   return {
     async onSessionEnd(context, state, { signal }) {
@@ -124,10 +128,7 @@ export function createVercelSandbox(
         const templateKey = `eve-sbx-tpl-vercel-${context
           .templateKey({
             createOptions: vercelIdentityOptions(createOptions),
-            resolvedImage:
-              createOptions.source === undefined
-                ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
-                : undefined,
+            resolvedImage: createOptions.source === undefined ? image : undefined,
             version: 4,
           })
           .slice(0, 32)}`;
@@ -159,7 +160,17 @@ export function createVercelSandbox(
           `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
         );
       }
-      await ensureVercelSandboxBaseRuntime(sandbox);
+      try {
+        await ensureVercelSandboxBaseRuntime(sandbox);
+      } catch (error) {
+        // A stopped sandbox whose snapshot expired lost its filesystem; `start()` replaces it.
+        if (isVercelSnapshotNotFoundError(error)) {
+          throw new SandboxSessionGoneError(
+            `Vercel sandbox session "${state.sandboxName}" can no longer resume: its snapshot expired or was deleted.`,
+          );
+        }
+        throw error;
+      }
       return createVercelConnection(sandbox);
     },
     async start(context, options, artifact) {
@@ -206,36 +217,12 @@ export function createVercelSandbox(
     };
     try {
       const session = await ensureUsableSession({
-        // Only an expired snapshot gives a tool session a fresh sandbox.
         expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
         inheritsBaseRuntime:
           artifact.snapshotId !== undefined && mounts === undefined && usesEveBase,
         input: ensureSessionInput,
         session: await ensureSession(ensureSessionInput),
       });
-      // Template-less sessions run base setup with open egress, so the policy
-      // from open() or else the environment applies only once it finishes.
-      const networkPolicy = sessionCreateOptions.networkPolicy;
-      if (session.created && artifact.snapshotId === undefined && networkPolicy !== undefined) {
-        try {
-          await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
-        } catch (error) {
-          try {
-            await deleteNamedVercelSandbox({
-              createOptions: sessionCreateOptions,
-              sandboxModule,
-              sandboxName: session.sandbox.name,
-            });
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              `Failed to apply network policy and discard Vercel sandbox session "${context.session.id}".`,
-              { cause: error },
-            );
-          }
-          throw error;
-        }
-      }
       return session.sandbox;
     } catch (error) {
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
@@ -531,11 +518,12 @@ function createSessionCreateParams(
   const createOptions: VercelCreateOptions = { ...input.createOptions };
   if (input.mounts !== undefined) createOptions.mounts = input.mounts;
   if (input.snapshotId === undefined) {
-    return withBaseSetupNetworkPolicy({
+    // Base setup only checks local runtime paths; it needs no open egress.
+    return {
       ...createOptions,
       name: sandboxName,
       persistent: true,
-    });
+    };
   }
 
   /*

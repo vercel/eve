@@ -362,7 +362,8 @@ function attachQuitGuard<T>(prompt: Prompt<T>): QuitGuard {
 }
 
 function toPromptState(state: State): PromptState {
-  return state;
+  // eve prompts never validate asynchronously, so clack's "validating" state is still active input.
+  return state === "validating" ? "active" : state;
 }
 
 function railForState(state: State): string {

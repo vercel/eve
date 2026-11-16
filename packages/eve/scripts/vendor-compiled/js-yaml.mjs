@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import { loadDeclaration } from "./_shared.mjs";
 
 /**
- * Vendor config for `js-yaml` v4. Only `load` is vendored: v4's default
- * schema has no code-evaluating `!!js/*` types, so eve can parse untrusted
- * YAML without an esprima dependency or a guard around the parser.
+ * Vendor config for `js-yaml` v5. Only the loader, `CORE_SCHEMA`, and
+ * `mergeTag` are vendored: v5 has no code-evaluating `!!js/*` types, so eve
+ * can parse untrusted YAML without a guard around the parser.
  */
 export default {
   packageName: "js-yaml",

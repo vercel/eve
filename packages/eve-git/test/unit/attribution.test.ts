@@ -116,3 +116,9 @@ test("leaves other commands unchanged", async () => {
     assert.deepEqual(await attribute(argv), argv);
   }
 });
+
+test("reports a missing pull request body file", async () => {
+  assert.deepEqual(await attribute(["gh", "pr", "create", "--body-file", "missing.md"]), {
+    missingBodyFile: "missing.md",
+  });
+});

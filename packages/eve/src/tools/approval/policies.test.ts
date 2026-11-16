@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const decide = vi.hoisted(() => vi.fn());
-vi.mock("#ai/decide.js", () => ({ decide }));
+vi.mock("#ai/decide.js", () => ({ decideFor: decide }));
 
 import type { ApprovalContext } from "#approval/definition.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";
@@ -42,11 +42,27 @@ describe("dynamic tool approval helpers", () => {
 
     await expect(auto()(context)).resolves.toBe(expected);
     expect(decide).toHaveBeenCalledWith(
+      "tool-approval",
       expect.objectContaining({
         signal: expect.any(AbortSignal),
         maxRetries: 0,
         model: "typesafe-ai/jev",
         state: { action: { input: context.toolInput, tool: "deploy" } },
+      }),
+    );
+  });
+
+  it("forwards provider options to the decision model", async () => {
+    decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
+
+    await auto({
+      modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+    })(approvalContext());
+
+    expect(decide).toHaveBeenCalledWith(
+      "tool-approval",
+      expect.objectContaining({
+        providerOptions: { gateway: { zeroDataRetention: true } },
       }),
     );
   });
@@ -65,6 +81,7 @@ describe("dynamic tool approval helpers", () => {
     })(context);
 
     expect(decide).toHaveBeenCalledWith(
+      "tool-approval",
       expect.objectContaining({
         model: "custom-decider",
         questions: {
@@ -88,7 +105,7 @@ describe("dynamic tool approval helpers", () => {
 
     const policy = auto({ model });
     await expect(policy(context)).resolves.toBe("approved");
-    expect(decide).toHaveBeenCalledWith(expect.objectContaining({ model }));
+    expect(decide).toHaveBeenCalledWith("tool-approval", expect.objectContaining({ model }));
   });
 
   it.each([new Date(), new Map([["kind", "delete"]]), new Set(["delete"]), Number.NaN])(

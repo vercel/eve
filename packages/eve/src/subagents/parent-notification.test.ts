@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { ChannelKey, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   bindTurnCallerContext,
@@ -24,6 +26,9 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
 
+// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
+installWorkflowHost();
+
 const resumeHookMock = vi.mocked(resumeHook);
 const fetchMock = vi.fn();
 
@@ -43,7 +48,7 @@ function createSerializedContext(
   vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
 
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, bundle);
+  ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
   ctx.set(SessionIdKey, "child-session");
   ctx.set(ChannelKey, {
     ...SUBAGENT_ADAPTER,
