@@ -901,7 +901,7 @@ async function writeBuiltAgent(agentRoot: string): Promise<void> {
   await writeFile(join(agentRoot, ".output", "server", "index.mjs"), "// built agent\n");
 }
 
-/** Model the child binding its configured listener without requiring a log line. */
+/** Model srvx reporting the child's successful bind on its configured origin. */
 function spawnListeningServer(): void {
   spawnMock.mockImplementation((_command, _args, options) => {
     const child = Object.assign(new EventEmitter(), {
@@ -915,6 +915,10 @@ function spawnListeningServer(): void {
     });
     setImmediate(() => {
       listeningPorts.add(Number(options.env.PORT));
+      child.stdout.emit(
+        "data",
+        Buffer.from(`➜ Listening on: http://127.0.0.1:${options.env.PORT}/\n`),
+      );
     });
     return child;
   });

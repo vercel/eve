@@ -369,7 +369,7 @@ npm run build:web
 next start apps/web
 ```
 
-The agent listens on port `4274`. Set `EVE_NEXT_PRODUCTION_PORT` to change it.
+The agent listens on port `4274`. Set `EVE_NEXT_PRODUCTION_PORT` to change it. Next.js waits for the agent to confirm it has bound its configured port before serving requests. Another process listening on that port causes startup to fail; no authored health route is required.
 
 With several agents, a root `eve build` doesn't build them for `next start`. Run `eve build` in each `agents/<name>/` directory instead.
 

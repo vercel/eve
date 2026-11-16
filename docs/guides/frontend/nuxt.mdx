@@ -123,7 +123,7 @@ The browser still needs a production authentication policy. See [Authenticate br
   EVE_NUXT_PRODUCTION_ROOT=./relocated-backend node .output/server/index.mjs
   ```
 
-  Each agent's transport requests wait for its listener during startup, for up to three minutes. Startup does not require an authored health route. If an agent fails to start, its routes return `503`; check the Nuxt server logs for the cause. Other agents and frontend pages remain available. With the default eve channel, use `/eve/v1/health` (or `/eve/<name>/v1/health`) for deployment readiness checks.
+  Each agent's transport requests wait up to three minutes for that agent to confirm it has bound its configured port. Another process listening on the port does not count as readiness. Startup does not require an authored health route. If an agent fails to start, its routes return `503`; check the Nuxt server logs for the cause. Other agents and frontend pages remain available. With the default eve channel, use `/eve/v1/health` (or `/eve/<name>/v1/health`) for deployment readiness checks.
 
   Managed startup supports one Node.js process with Nitro's `node-server` preset. For `node-cluster`, worker deployments, or multiple frontend processes, use an externally managed eve service. Set `EVE_NUXT_PRODUCTION_ORIGIN` at build time, as shown below. Keep Nitro's graceful shutdown enabled; do not set `NITRO_SHUTDOWN_DISABLED`. Shutdown cancels eve startup before draining HTTP requests and waits up to 21 seconds for eve to terminate.
 

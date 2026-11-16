@@ -23,7 +23,7 @@ const config = {
   portRetryHint: "choose another port",
 };
 
-function mockServer(listening: boolean) {
+function mockServer() {
   vi.useFakeTimers();
   const child = Object.assign(new EventEmitter(), {
     stdout: new PassThrough(),
@@ -36,11 +36,9 @@ function mockServer(listening: boolean) {
     }),
   });
   spawnMock.mockReturnValue(child);
-  let connections = 0;
   connectMock.mockImplementation(() => {
     const socket = Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() });
-    const ready = connections++ > 0 && listening;
-    queueMicrotask(() => socket.emit(ready ? "connect" : "error", new Error("ECONNREFUSED")));
+    queueMicrotask(() => socket.emit("error", new Error("ECONNREFUSED")));
     return socket;
   });
   return child;
@@ -49,15 +47,31 @@ function mockServer(listening: boolean) {
 afterEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 
 describe("startEveProductionServer", () => {
-  it("preserves normalized port 80 without a startup log", async () => {
-    mockServer(true);
+  it("waits for the child's complete matching bind line and preserves normalized port 80", async () => {
+    const child = mockServer();
+    for (const key of ["TEST", "CI", "SERVER_SHUTDOWN_TIMEOUT", "NITRO_UNIX_SOCKET"]) {
+      vi.stubEnv(key, "inherited");
+    }
     const controller = new AbortController();
     const ready = startEveProductionServer({ ...config, signal: controller.signal });
+    let resolved = false;
+    void ready.then(() => {
+      resolved = true;
+    });
     await vi.advanceTimersByTimeAsync(100);
+    child.stdout.write('metadata: "http://127.0.0.1:80/"\n');
+    child.stdout.write("➜ Listening on: http://127.0.0.1:8080/\n");
+    child.stdout.write("Listening on: https://127.0.0.1:80/\n");
+    child.stdout.write("dependency example: Listening on: http://127.0.0.1:80/\n");
+    child.stdout.write("\u001b[32m➜ Listening on:\u001b[0m http://127.0.0.1:80");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(resolved).toBe(false);
+    child.stdout.write("/\n");
     const handle = await ready;
     expect(handle.origin).toBe("http://127.0.0.1");
     // Keep the inherited environment out of assertion failure logs.
@@ -66,6 +80,12 @@ describe("startEveProductionServer", () => {
       PORT: "80",
       NITRO_PORT: "80",
     });
+    expect([
+      environment.TEST,
+      environment.CI,
+      environment.SERVER_SHUTDOWN_TIMEOUT,
+      environment.NITRO_UNIX_SOCKET,
+    ]).toEqual([undefined, undefined, undefined, undefined]);
     const closing = handle.close!();
     await vi.advanceTimersByTimeAsync(20_000);
     await closing;
@@ -74,7 +94,7 @@ describe("startEveProductionServer", () => {
   it.each(["timeout", "abort"])(
     "bounds %s and reaps a child that ignores SIGTERM",
     async (reason) => {
-      const child = mockServer(false);
+      const child = mockServer();
       const controller = new AbortController();
       const failed = expect(
         startEveProductionServer({ ...config, signal: controller.signal }),

@@ -267,6 +267,21 @@ function findLocalServerOrigin(output: string): string | undefined {
   return undefined;
 }
 
+function findProductionServerOrigin(output: string, expectedOrigin: string): string | undefined {
+  // srvx emits this line only after its own successful bind. A TCP probe can
+  // instead reach a process that claimed the port after our preflight.
+  const lines = output.replace(ANSI_ESCAPE_PATTERN, "").split("\n");
+  lines.pop(); // Wait for the complete line, including a possibly chunked URL.
+  for (const line of lines) {
+    const match = /^(?:➜\s+)?Listening on:?\s+(https?:\/\/\S+)\s*$/.exec(line.trim());
+    const url = match?.[1] === undefined ? null : URL.parse(match[1]);
+    if (url !== null && url.origin === expectedOrigin) {
+      return expectedOrigin;
+    }
+  }
+  return undefined;
+}
+
 function formatEveDevOutputLine(line: string, logLabel: string | undefined): string | undefined {
   const normalizedLine = line.replace(/\r$/, "");
   const trimmedLine = normalizedLine.replace(ANSI_ESCAPE_PATTERN, "").trim();
@@ -355,7 +370,6 @@ function startServerProcess(input: {
   readonly env?: Record<string, string>;
   readonly listen?: { readonly host: string; readonly port: string; readonly retryHint: string };
   readonly logLabel?: string;
-  readonly readinessOrigin?: string;
   readonly signal?: AbortSignal;
   readonly readOrigin?: (output: string) => string | undefined;
   readonly timeoutMs?: number;
@@ -364,12 +378,18 @@ function startServerProcess(input: {
 
   input.signal?.throwIfAborted();
   return new Promise((resolvePromise, reject) => {
+    const env = { ...process.env, ...input.env };
+    if (input.listen !== undefined) {
+      // srvx must report its bind and run bounded graceful shutdown. Nitro's
+      // Unix socket override must not replace the configured loopback port.
+      delete env.TEST;
+      delete env.CI;
+      delete env.SERVER_SHUTDOWN_TIMEOUT;
+      delete env.NITRO_UNIX_SOCKET;
+    }
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
-      env: {
-        ...process.env,
-        ...input.env,
-      },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let closed = false;
@@ -430,24 +450,19 @@ function startServerProcess(input: {
     });
     const timeout = setTimeout(() => {
       cleanup();
-      const condition =
-        input.readinessOrigin === undefined ? "print its server URL" : "become ready";
+      const condition = input.listen === undefined ? "print its server URL" : "bind its listener";
       void close().then(() =>
         reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to ${condition}.`)),
       );
     }, timeoutMs);
 
-    let readinessTimer: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
-    const readinessAbort = new AbortController();
     // Accumulated because a failure line can span several `data` chunks.
     let startupOutput = "";
     const cleanup = () => {
       settled = true;
       startupOutput = "";
       clearTimeout(timeout);
-      clearTimeout(readinessTimer);
-      readinessAbort.abort();
       child.off("error", handleError);
       child.off("exit", handleEarlyExit);
     };
@@ -465,7 +480,7 @@ function startServerProcess(input: {
       cleanup();
       reject(
         new Error(
-          `eve server process exited before ${input.readinessOrigin === undefined ? "printing its server URL" : "becoming ready"} (code ${String(code)}, signal ${String(signal)}).`,
+          `eve server process exited before ${input.listen === undefined ? "printing its server URL" : "binding its listener"} (code ${String(code)}, signal ${String(signal)}).`,
         ),
       );
     };
@@ -488,7 +503,7 @@ function startServerProcess(input: {
         return;
       }
 
-      const origin = input.readOrigin?.(text);
+      const origin = input.readOrigin?.(input.listen === undefined ? text : startupOutput);
 
       if (origin === undefined) {
         return;
@@ -515,23 +530,8 @@ function startServerProcess(input: {
     child.stdout.on("data", handleStdout);
     child.stderr.on("data", handleStderr);
 
-    // Authored channels may omit health routes; readiness belongs to the listener.
-    const checkReadiness = async () => {
-      if (settled || input.readinessOrigin === undefined) return;
-      const ready = await isListening(input.readinessOrigin, readinessAbort.signal);
-      if (settled) return;
-      if (ready && child.exitCode === null && child.signalCode === null) {
-        cleanup();
-        resolvePromise({ origin: input.readinessOrigin, process: child, close });
-      } else {
-        readinessTimer = setTimeout(checkReadiness, DEV_SERVER_REGISTRY_POLL_MS);
-      }
-    };
     input.signal?.addEventListener("abort", abort, { once: true });
     if (input.signal?.aborted) abort();
-    if (!settled && input.readinessOrigin !== undefined) {
-      readinessTimer = setTimeout(checkReadiness, DEV_SERVER_REGISTRY_POLL_MS);
-    }
   });
 }
 
@@ -581,7 +581,7 @@ export async function startEveProductionServer(input: {
   }
 
   input.signal?.throwIfAborted();
-  // An existing listener must not satisfy the new child's readiness check.
+  // Preflight gives an early diagnostic, not proof of the child's bind.
   const occupied = await isListening(input.origin, input.signal);
   input.signal?.throwIfAborted();
   if (occupied) {
@@ -601,7 +601,7 @@ export async function startEveProductionServer(input: {
       PORT: port,
     },
     listen: { host: parsedOrigin.hostname, port, retryHint: input.portRetryHint },
-    readinessOrigin: input.origin,
+    readOrigin: (output) => findProductionServerOrigin(output, parsedOrigin.origin),
     signal: input.signal,
   });
 }

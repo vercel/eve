@@ -78,8 +78,10 @@ async function assertNuxtHealth(
   expectedStatus = 200,
   pendingStartupPidPath?: string,
   routePrefixes = ["/eve/v1"],
+  reservedPorts: readonly number[] = [],
 ): Promise<void> {
-  const port = await findFreePort();
+  let port = await findFreePort();
+  while (reservedPorts.includes(port)) port = await findFreePort();
   let output = "";
   let backendPid: number | undefined;
   const pendingRequest = new AbortController();
@@ -449,7 +451,9 @@ createServer((req, res) => {
   res.setHeader("content-type", "application/json");
   res.statusCode = req.url === "/eve/v1/health" ? 200 : 404;
   res.end(JSON.stringify({ ok: true, status: "ready", prefix: "/eve/${name}/v1" }));
-}).listen(Number(process.env.PORT), "127.0.0.1");`,
+}).listen(Number(process.env.PORT), "127.0.0.1", () => {
+  console.log("➜ Listening on: http://127.0.0.1:" + process.env.PORT + "/");
+});`,
         );
       }
       await assertNuxtHealth(
@@ -462,6 +466,7 @@ createServer((req, res) => {
         200,
         undefined,
         ["/eve/alpha/v1", "/eve/beta/v1"],
+        [evePort, evePort + 1],
       );
       for (const name of ["alpha", "beta"]) {
         const pid = Number(await readFile(join(deployment, "backend/agents", name, "pid"), "utf8"));
