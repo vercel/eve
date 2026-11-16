@@ -97,7 +97,7 @@ Verify a sending domain and create at least one segment in the [Resend dashboard
 
 ```text
 agent/
-  agent.ts                  # the lead: model, code mode, no optional built-ins, the memory-removal gate
+  agent.ts                  # the lead: model, no built-in tools, the memory-removal gate
   instructions.md           # the lead's behavior: ground, route, hand back
   channels/                 # Slack (Vercel Connect) and the default HTTP channel (dev TUI, evals)
   connections/notion.ts     # Notion workspace, user-scoped OAuth
