@@ -42,7 +42,7 @@ export interface WebSearchToolDefinition {
 /**
  * Configures the framework-provided `web_search` tool.
  *
- * When no configuration file is present, eve uses Exa for AI Gateway
+ * When no configuration file is present, eve uses Parallel for AI Gateway
  * models.
  *
  * @example
@@ -50,7 +50,7 @@ export interface WebSearchToolDefinition {
  * // agent/tools/web_search.ts
  * import { webSearch } from "eve/tools/web_search";
  *
- * export default webSearch({ provider: "parallel" });
+ * export default webSearch({ provider: "exa" });
  * ```
  */
 export function webSearch(input: WebSearchToolInput): WebSearchToolDefinition {
@@ -83,7 +83,7 @@ export function resolveWebSearchActivityLabel(input: unknown): string {
 }
 
 /** Default provider-managed web search configuration. */
-export const defaultWebSearch = webSearch({ provider: "exa" });
+export const defaultWebSearch = webSearch({ provider: "parallel" });
 
 export default defaultWebSearch;
 
