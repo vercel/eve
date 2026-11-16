@@ -58,11 +58,6 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> extends
   readonly scope?: Scope;
   /** The immutable snapshot of the event's line, supplied by its publisher. */
   readonly view?: SessionView;
-  /**
-   * @internal The publisher's queue for an event handler's background work. Without one, the
-   * handler waits for that work before it returns.
-   */
-  readonly waitUntil?: (task: Promise<unknown>) => void;
 }
 
 /**

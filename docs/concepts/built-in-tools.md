@@ -242,7 +242,7 @@ export default disableTool();
 
 ### `web_search`
 
-`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Exa unless you set `provider`; direct provider models use their native search.
+`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Parallel unless you set `provider`; direct provider models use their native search.
 
 ```sh
 eve add tool/web_search
@@ -251,7 +251,7 @@ eve add tool/web_search
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "exa" });
+export default webSearch({ provider: "parallel" });
 ```
 
 Choose another AI Gateway search provider:
@@ -259,7 +259,7 @@ Choose another AI Gateway search provider:
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "parallel" });
+export default webSearch({ provider: "exa" });
 ```
 
 Select Browserbase Search in the same slot:

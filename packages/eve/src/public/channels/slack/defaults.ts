@@ -49,8 +49,6 @@ import {
   hideStatus,
   reasoningStatus,
   showStatus,
-  showStatusBehindTurn,
-  statusWritesSettled,
 } from "#public/channels/slack/thread-status.js";
 
 const log = createLogger("slack.defaults");
@@ -76,8 +74,6 @@ interface StepStream {
   readonly partKinds: Map<string, string>;
 }
 const streamByState = new WeakMap<SlackChannelState, StepStream>();
-/** Turns whose first model run hasn't started, by channel state, so it skips a status rewrite. */
-const turnsJustStarted = new WeakSet<SlackChannelState>();
 
 function stepStream(state: SlackChannelState, runId: string): StepStream {
   const current = streamByState.get(state);
@@ -555,32 +551,26 @@ export const defaultEvents: SlackChannelInternalEvents = {
 
   // A model run means nothing to someone reading the thread, so the status
   // keeps naming the work, such as the call that just finished, and is written
-  // again so Slack doesn't time it out, or in case a tool's post cleared it. The
-  // turn's first run has nothing before it that could, so it keeps the status the
-  // turn just wrote. Only task results the run is about to read change it. The
-  // model call doesn't wait for Slack.
-  "model.started"(event, ctx) {
+  // again so Slack doesn't time it out. Only task results the run is about to
+  // read change it.
+  async "model.started"(event, ctx) {
     const { channel } = ctx;
     const turnId = event.scope?.turnId;
     if (turnId === undefined) return;
-    const firstRun = turnsJustStarted.delete(channel.state);
     const pending = channel.state.pendingTaskResults;
     channel.state.pendingTaskResults = null;
-    const results = pending?.turnId === turnId ? reviewingResults(pending.names) : undefined;
-    showStatusBehindTurn(ctx, () => {
-      const text = results ?? channel.state.threadStatus?.text ?? "Thinking...";
-      return { text, force: !firstRun || text !== "Thinking..." };
-    });
+    const status =
+      pending?.turnId === turnId
+        ? reviewingResults(pending.names)
+        : (channel.state.threadStatus?.text ?? "Thinking...");
+    await showStatus(channel, status, { force: true });
   },
 
-  // The turn's first model call doesn't wait for Slack.
-  "turn.started"(_event, ctx) {
-    const { channel } = ctx;
+  async "turn.started"(_event, { channel }) {
     channel.state.pendingTaskResults = null;
     channel.state.pendingToolCallMessage = null;
     streamByState.delete(channel.state);
-    turnsJustStarted.add(channel.state);
-    showStatusBehindTurn(ctx, () => ({ text: "Thinking...", force: true }));
+    await showStatus(channel, "Thinking...", { force: true });
   },
 
   // Shows the newest heading or sentence of reasoning, each for at least a few seconds, so a
@@ -677,8 +667,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await clearStatus(channel);
       return;
     }
-    // Slack clears the status when the reply posts, so a status still being written goes first.
-    await statusWritesSettled(channel);
+    // Slack clears the status when the reply posts.
     channel.state.threadStatus = null;
     await deliverCompletedSlackReply(channel, text, { turnId: ctx.session.turn.id });
   },
@@ -686,7 +675,6 @@ export const defaultEvents: SlackChannelInternalEvents = {
   // A reply clears the status, but a turn ended by an `endsTurn` tool posts
   // none, and Slack would otherwise show the status until it times out.
   async "turn.settled"({ data }, { channel }) {
-    await statusWritesSettled(channel);
     if (data.outcome !== "failed") {
       await clearStatus(channel);
       return;

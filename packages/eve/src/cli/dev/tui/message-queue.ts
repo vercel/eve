@@ -31,17 +31,21 @@ export class MessageQueue {
     return true;
   }
 
-  /** Every queued message coalesced into one prompt; clears the queue. */
-  takePrompt(): string | undefined {
-    if (this.#messages.length === 0) return undefined;
-    const combined = this.#messages.join("\n\n");
+  /** Every queued message, oldest first; clears the queue. */
+  take(): string[] {
+    const messages = this.#messages;
     this.#messages = [];
-    return combined;
+    return messages;
   }
 
   view(): MessageQueueView {
     return { messages: [...this.#messages], full: this.full };
   }
+}
+
+/** Queued messages coalesced into the one prompt the agent receives. */
+export function coalesceQueuedMessages(messages: readonly string[]): string | undefined {
+  return messages.length === 0 ? undefined : messages.join("\n\n");
 }
 
 export interface MessageQueuePanelRowsInput {

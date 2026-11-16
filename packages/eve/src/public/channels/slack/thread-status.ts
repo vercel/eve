@@ -8,8 +8,7 @@ import {
   SLACK_TYPING_STATUS_MAX_LENGTH,
   truncateTypingStatus,
 } from "#public/channels/slack/limits.js";
-import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
 /**
  * Slack drops a status two minutes after it was set. One with the same text
@@ -26,53 +25,11 @@ export interface SlackThreadStatus {
 }
 
 /**
- * Status writes running behind the turn (`showStatusBehindTurn`), by the state of the channel
- * that queued them: each waits for the one before it.
- */
-const statusWrites = new WeakMap<SlackChannelState, Promise<void>>();
-
-/** Waits for the status writes running behind the turn, so a later write never lands first. */
-export async function statusWritesSettled(channel: SlackEventContext): Promise<void> {
-  await statusWrites.get(channel.state);
-}
-
-/**
- * `showStatus` without holding the turn: the model call doesn't wait for the Slack round trip.
- * The write queues behind earlier ones, and every other status write and the reply wait for it,
- * so the thread never shows them out of order. `next` runs when the write does, so it reads the
- * status the earlier writes left.
- */
-export function showStatusBehindTurn(
-  ctx: ChannelEventContext<SlackEventContext>,
-  next: () => { readonly text: string; readonly force?: boolean },
-): void {
-  const { channel } = ctx;
-  const written = (statusWrites.get(channel.state) ?? Promise.resolve()).then(() => {
-    const { text, ...options } = next();
-    return writeStatus(channel, text, options);
-  });
-  statusWrites.set(
-    channel.state,
-    written.catch(() => {}),
-  );
-  ctx.waitUntil(written);
-}
-
-/**
  * Sets the thread status, unless the same text is already showing or the turn
  * is quiet because an edit or a deferred message started it. `force` writes it anyway, for moments
  * Slack may have cleared it, and so a long turn keeps it from timing out.
  */
 export async function showStatus(
-  channel: SlackEventContext,
-  text: string,
-  options?: { readonly force?: boolean },
-): Promise<void> {
-  await statusWritesSettled(channel);
-  await writeStatus(channel, text, options);
-}
-
-async function writeStatus(
   channel: SlackEventContext,
   text: string,
   options?: { readonly force?: boolean },
@@ -104,7 +61,6 @@ export async function restoreStatus(channel: SlackEventContext): Promise<void> {
  * it resumes. It is no longer showing, so the next write always goes out.
  */
 export async function hideStatus(channel: SlackEventContext): Promise<void> {
-  await statusWritesSettled(channel);
   const current = channel.state.threadStatus;
   if (current) channel.state.threadStatus = { ...current, atMs: 0 };
   if (isCodeChannel(channel)) {
@@ -120,7 +76,6 @@ function isCodeChannel(channel: SlackEventContext): boolean {
 
 /** Clears the thread status and forgets it: the turn has nothing more to show. */
 export async function clearStatus(channel: SlackEventContext): Promise<void> {
-  await statusWritesSettled(channel);
   channel.state.threadStatus = null;
   await channel.thread.startTyping();
 }
