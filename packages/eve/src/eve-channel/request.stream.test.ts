@@ -204,7 +204,7 @@ describe("createSessionStreamResponse", () => {
   });
 
   it("checks a session's version once, after reading a current first line", async () => {
-    const { session, starts } = sessionOf([line("a"), line("b")]);
+    const { follows, session, starts } = sessionOf([line("a"), line("b")]);
     const read = async (startIndex: number) =>
       await records(
         await createSessionStreamResponse(
@@ -214,8 +214,10 @@ describe("createSessionStreamResponse", () => {
       );
 
     expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
-    // The live read, then the version check's read from the first line.
+    // The live read, then the version check's read from the first line. The cursor shows the
+    // first line exists, so the check follows to it without bounding the read at the tail.
     expect(starts).toEqual([1, 0]);
+    expect(follows).toEqual([true, true]);
     expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
     expect(starts).toEqual([1, 0, 1]);
   });
