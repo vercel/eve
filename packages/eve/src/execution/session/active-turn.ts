@@ -11,6 +11,7 @@ import {
   type SteeringOptions,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
+import { handedOnBy } from "#execution/session/handed-on.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
@@ -346,8 +347,13 @@ export class ActiveTurn {
         continue;
       }
       this.routedToChildren.add(sequence);
-      const routed = await this.input.cursor.advance((state) =>
-        routeDeliverToChildren({ delivery, ...state }),
+      const routed = await this.input.cursor.advance(
+        (state) => routeDeliverToChildren({ delivery, ...state }),
+        {
+          // Recorded with the step, so a restore hands no share on again.
+          handedOn: (result) =>
+            result.kind === "cancel-turn" ? [] : handedOnBy(delivery, result.remainder),
+        },
       );
       if (routed.kind === "cancel-turn") {
         this.input.queue.replaceDelivery(sequence, undefined);
