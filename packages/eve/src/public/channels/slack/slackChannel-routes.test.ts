@@ -972,7 +972,7 @@ describe("slackChannel message status and guidance", () => {
       if (String(request).endsWith("assistant.threads.setStatus")) await slack.promise;
       return answer(request, init);
     });
-    const background: PromiseLike<unknown>[] = [];
+    const background: Promise<unknown>[] = [];
     const harness = slackRenderingHarness(
       slackChannel({ credentials: { botToken: "xoxb-test" } }),
       { channelId: "C01", teamId: "T01", threadTs: "1700000000.000001" },
