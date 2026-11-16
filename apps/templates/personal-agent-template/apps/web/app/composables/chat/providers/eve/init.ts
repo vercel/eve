@@ -1,8 +1,7 @@
-import { shallowRef, watch } from "vue";
+import { effectScope, shallowRef, watch } from "vue";
 import type { ShallowRef } from "vue";
 import type { ThreadState } from "#eve/types/thread";
 import { type UseEveAgentReturn, useEveAgent } from "eve/vue";
-import { conversationOf } from "eve/client";
 import type { UIMessage } from "ai";
 import type { ChatSessionOptions, EveStreamEvent } from "~/composables/chat/types";
 import { toUIMessages } from "./adapter";
@@ -26,11 +25,19 @@ const agentsByChatId = new Map<string, ChatBinding>();
 let activeChatId: string | undefined;
 
 function retiredMessages(sessionId: string, events: readonly EveStreamEvent[]) {
-  return toUIMessages(conversationOf(events).messages).map((message) => ({
-    ...message,
-    id: `${sessionId}:${message.id}`,
-    metadata: { retired: true },
-  }));
+  // Project archives through the bundled Vue API without retaining a live binding or transport.
+  const scope = effectScope();
+  try {
+    return scope.run(() =>
+      toUIMessages(useEveAgent({ initialEvents: events }).messages.value).map((message) => ({
+        ...message,
+        id: `${sessionId}:${message.id}`,
+        metadata: { retired: true },
+      })),
+    )!;
+  } finally {
+    scope.stop();
+  }
 }
 
 export function getOrCreateEveAgent(chatId: string, options?: ChatSessionOptions) {
