@@ -40,8 +40,9 @@ The name and shape follow `waitUntil` in Vercel Functions and service workers, a
 `waitUntil` eve already hands route handlers: the caller has already started the work and only
 asks the host to keep its scope alive until it settles.
 
-The member is required, so code that builds a `ChannelEventContext` by hand, such as a test
-fixture, must add it. That makes this a breaking type change, released as `major`.
+The member is required. Under the stability policy, values eve passes into authored code can
+gain members in a minor release, so this ships as `minor`; a test fixture that builds a
+`ChannelEventContext` by hand needs to add it.
 
 ## Semantics
 
