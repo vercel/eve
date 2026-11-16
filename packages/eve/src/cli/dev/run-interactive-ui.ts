@@ -11,7 +11,9 @@ import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/teleme
 
 import type { DevelopmentCliOptions } from "./command-options.js";
 import { resolveTuiDisplayOptions } from "./ui-options.js";
-import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "./tui/tui.js";
+import type { DevelopmentTuiStartup } from "./tui/startup.js";
+import type { RunDevelopmentTuiInput } from "./tui/tui.js";
+import type { StartupOnboardingResult } from "./tui/startup-onboarding.js";
 import { resolveTuiTitle } from "./tui/target.js";
 import type { DevelopmentUrlTarget } from "./url-target.js";
 import type { CommandLifecycle } from "../shutdown.js";
@@ -27,6 +29,8 @@ export async function runInteractiveDevelopmentUi(input: {
   readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   readonly server: { readonly appRoot?: string; readonly serverUrl: string };
   readonly startup?: DevelopmentTuiStartup;
+  /** Onboarding that already ran on the startup screen while the server booted. */
+  readonly startupOnboarding?: StartupOnboardingResult | undefined;
 }): Promise<void> {
   const runDevelopmentTui = await devBootPhase(
     "loading interactive UI",
@@ -49,7 +53,7 @@ export async function runInteractiveDevelopmentUi(input: {
   const tuiInput: RunDevelopmentTuiInput = {
     target,
     initialInput: input.options.input,
-    onboard: input.options.onboard,
+    onboard: input.options.onboard === true || input.options.onboarded === true,
     onBootProgress: input.report,
     onOnboardingStep: input.onOnboardingStep,
     onOnboardingTerminal: input.onOnboardingTerminal,
@@ -58,47 +62,44 @@ export async function runInteractiveDevelopmentUi(input: {
   };
   if (input.startup !== undefined) tuiInput.startup = input.startup;
   if (target.kind === "local") {
-    tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-      const leaseId = randomUUID();
-      if (
-        !(await suspendDevelopmentRuntimeArtifacts({
-          leaseId,
-          serverUrl: input.server.serverUrl,
-        }))
-      ) {
-        throw new Error("Could not pause the development server for setup.");
-      }
-      let outcome:
-        | { readonly error: unknown; readonly ok: false }
-        | { readonly ok: true; value: T };
-      try {
-        outcome = { ok: true, value: await task() };
-      } catch (error) {
-        outcome = { error, ok: false };
-      }
-
-      const release = {
-        leaseId,
-        serverUrl: input.server.serverUrl,
-        silent: true,
-      } as const;
-      if (
-        (await resumeDevelopmentRuntimeArtifacts(release)) === undefined &&
-        (await resumeDevelopmentRuntimeArtifacts(release)) === undefined
-      ) {
-        throw new Error(
-          "Could not resume the eve development server after setup. Restart eve dev before making further source changes.",
-          outcome.ok ? undefined : { cause: outcome.error },
-        );
-      }
-      if (!outcome.ok) throw outcome.error;
-      return outcome.value;
-    };
+    tuiInput.withExclusiveTerminal = (task) =>
+      withDevelopmentServerPaused(input.server.serverUrl, task);
   }
+  if (input.startupOnboarding !== undefined) tuiInput.startupOnboarding = input.startupOnboarding;
 
   if (input.remoteTarget?.headers === undefined) {
     await runDevelopmentTui(tuiInput);
   } else {
     await runDevelopmentTui({ ...tuiInput, headers: input.remoteTarget.headers });
   }
+}
+
+/** Runs `task` while the local development server holds off reloading, so setup writes land together. */
+export async function withDevelopmentServerPaused<T>(
+  serverUrl: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const leaseId = randomUUID();
+  if (!(await suspendDevelopmentRuntimeArtifacts({ leaseId, serverUrl }))) {
+    throw new Error("Could not pause the development server for setup.");
+  }
+  let outcome: { readonly error: unknown; readonly ok: false } | { readonly ok: true; value: T };
+  try {
+    outcome = { ok: true, value: await task() };
+  } catch (error) {
+    outcome = { error, ok: false };
+  }
+
+  const release = { leaseId, serverUrl, silent: true } as const;
+  if (
+    (await resumeDevelopmentRuntimeArtifacts(release)) === undefined &&
+    (await resumeDevelopmentRuntimeArtifacts(release)) === undefined
+  ) {
+    throw new Error(
+      "Could not resume the eve development server after setup. Restart eve dev before making further source changes.",
+      outcome.ok ? undefined : { cause: outcome.error },
+    );
+  }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
 }

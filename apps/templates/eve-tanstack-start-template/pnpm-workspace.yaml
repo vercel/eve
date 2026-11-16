@@ -1,0 +1,16 @@
+packages:
+  - apps/web
+overrides:
+  "zod@>=4.0.0 <4.6.6": 4.6.7
+  "dompurify@>=3.0.0 <3.4.17": 3.4.17
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - ai
+  - eve
+  - "@eve/*"
+  - "@vercel/*"
+  - "@json-render/*"
+  - eslint-plugin-jsdoc@65.3.0
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - node-liblzma

@@ -279,7 +279,14 @@ export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowServeToolDefinition<TInput, TOutput>;
 
 type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
-type WorkflowReturn<T> = T extends AsyncIterable<infer Output> ? Output : Awaited<T>;
+// A generator body's output is its return value, or its last yield when it returns `null` or
+// nothing, so its output type is both.
+type WorkflowReturn<T> =
+  T extends AsyncGenerator<infer Yield, infer Return>
+    ? Yield | Exclude<Return, null | undefined | void>
+    : T extends AsyncIterable<infer Output>
+      ? Output
+      : Awaited<T>;
 type Schema = StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>;
 type EntryPointReturn<TOutput> = Promise<TOutput> | AsyncIterable<TOutput>;
 type InferOutput<TSchema extends StandardJSONSchemaV1<unknown, unknown>> =
@@ -290,13 +297,21 @@ type DefinitionFields<TInput, TOutput> = Omit<
   WorkflowToolDefinitionBase<TInput, TOutput>,
   typeof WORKFLOW_TOOL_BRAND
 >;
-type ExecuteDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<TReturn>> & {
-  endsTurn?: ToolDefinition<unknown, WorkflowReturn<TReturn>>["endsTurn"];
+// `TOutput` is the call's output: the `outputSchema`'s output when the definition has one, as the
+// definition `defineWorkflowTool` returns reports it, or else what the body returns.
+type ExecuteDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = DefinitionFields<
+  TInput,
+  TOutput
+> & {
+  endsTurn?: ToolDefinition<unknown, TOutput>["endsTurn"];
   execute(input: TInput, ctx: WorkflowToolContext): TReturn;
   task?: never;
   serve?: never;
 };
-type TaskDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<TReturn>> & {
+type TaskDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = DefinitionFields<
+  TInput,
+  TOutput
+> & {
   task(input: TInput, ctx: WorkflowToolContext): TReturn;
   execute?: never;
   serve?: never;
@@ -332,7 +347,7 @@ export function defineWorkflowTool<
   TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
 >(
   definition: WithSchemas<
-    ExecuteDefinition<InferInput<TInputSchema>, TReturn>,
+    ExecuteDefinition<InferInput<TInputSchema>, TReturn, InferOutput<TOutputSchema>>,
     TInputSchema,
     TOutputSchema
   >,
@@ -343,7 +358,7 @@ export function defineWorkflowTool<
   TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
 >(
   definition: WithSchemas<
-    TaskDefinition<InferInput<TInputSchema>, TReturn>,
+    TaskDefinition<InferInput<TInputSchema>, TReturn, InferOutput<TOutputSchema>>,
     TInputSchema,
     TOutputSchema
   >,

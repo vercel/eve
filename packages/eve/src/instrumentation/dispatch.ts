@@ -14,6 +14,8 @@ import {
   withoutInstrumentationContent,
 } from "#instrumentation/content.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { traceContentCeilingToDecision } from "#shared/forwarded-trace-policy.js";
+import { intersectInstrumentationDecisions } from "#shared/instrumentation-decision.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
@@ -25,6 +27,7 @@ import type {
   InstrumentationHooks,
   InstrumentationHooksInput,
   InstrumentationProviderDefinition,
+  InstrumentationTraceBindingOptions,
 } from "#instrumentation/lifecycle.js";
 
 const log = createLogger("harness.instrumentation-dispatch");
@@ -39,20 +42,28 @@ export function createInstrumentationDispatcher(
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
-  function forTrace(trace: TraceCaptureContext): InstrumentationHooks {
+  function forTrace(
+    trace: TraceCaptureContext,
+    options?: InstrumentationTraceBindingOptions,
+  ): InstrumentationHooks {
     const snapshots = new WeakMap<object, unknown>();
+    const ceiling =
+      options?.ceiling === undefined ? undefined : traceContentCeilingToDecision(options.ceiling);
     const decisions = new Map(
-      providers.map((provider) => [
-        provider,
-        resolveTracePolicy(provider.tracePolicy, trace, (error) => {
+      providers.map((provider) => {
+        const decision = resolveTracePolicy(provider.tracePolicy, trace, (error) => {
           if (warnedPolicyFailures.has(provider)) return;
           warnedPolicyFailures.add(provider);
           log.warn("instrumentation provider trace policy failed", {
             error: formatError(error),
             provider: provider.name,
           });
-        }),
-      ]),
+        });
+        return [
+          provider,
+          ceiling === undefined ? decision : intersectInstrumentationDecisions(decision, ceiling),
+        ] as const;
+      }),
     );
     const capturesInputs = [...decisions.values()].some(
       (decision) => decision.action === "record" && decision.recordInputs,

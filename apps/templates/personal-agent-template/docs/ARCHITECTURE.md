@@ -57,7 +57,7 @@ personal-agent-template/
 │   ├── skills/               # e.g. daily-summary.md
 │   ├── connections/          # Linear MCP
 │   ├── lib/                  # base-instructions, memory-internal, slack-internal
-│   └── instructions.ts       # session.started hooks (memory injection)
+│   └── instructions.ts       # defineDynamic instructions (memory injection)
 ├── apps/web/                 # Nuxt frontend, Nitro API, and shared code
 │   ├── app/                  # pages, components, composables
 │   ├── server/               # API, database, and server utilities
@@ -75,10 +75,24 @@ personal-agent-template/
 3. Tool calls render in [`MessageContentEve.vue`](../apps/web/app/components/chat/message/MessageContentEve.vue)
 4. `save_memory` shows approval UI ([`ToolSaveMemory.vue`](../apps/web/app/components/chat/tool/ToolSaveMemory.vue))
 
+#### Continuing a conversation
+
+The web chat saves the session's events and opaque `inbox` handle with the thread. Reopening a thread restores its messages and pending sign-ins.
+
+When a session has expired, is stranded, or is not active, sending or retrying starts a replacement session in the same thread. The old messages remain visible and saved, but are not sent as context to the replacement session. Old approval and question cards are read-only. If saving the old events fails, recovery stops without clearing them.
+
+Recovery stays busy through saving the old stream and accepting the replacement message, so repeated retry clicks cannot retire or send twice. Archived messages come only from recorded events, never rejected optimistic submissions.
+
+Retry reconnects a dropped stream when its turn is still busy. After an ambiguous send failure, retry only catches up the stream, even if the last observed state is idle: neither an empty catch-up nor a missing receipt proves the message was rejected. It never automatically resends that indeterminate delivery. If session creation lost its receipt, there is no session identity to reconnect; start a new chat deliberately rather than assuming the work was not accepted. Other transport errors do not automatically start replacement sessions.
+
+Sign-in cards show the provider's name and match both connection and tool-scoped connector names. Shared sign-in attempts use one card. Withdrawn or interrupted sign-ins disappear; failed sign-ins disappear when the next turn starts.
+
+Linked images show a preview; other attachments show their filename. The UI only loads or links HTTP(S) attachment URLs. Inline uploads without a public URL remain visible by name.
+
 ### Session memory injection
 
-1. Eve fires `session.started` ([`agent/instructions.ts`](../agent/instructions.ts))
-2. Agent calls `GET /api/internal/memory?userId=...` with bearer token
+1. Eve resolves the dynamic instructions in [`agent/instructions.ts`](../agent/instructions.ts) (`defineDynamic`) before each model call
+2. On first use in a session, the agent calls `GET /api/internal/memory?userId=...` with bearer token; `ctx.memo` caches the result per user for the rest of the session
 3. [`agent/lib/memory-internal.ts`](../agent/lib/memory-internal.ts) builds prompt section
 4. Appended to agent instructions for the session
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createChannelAddress } from "#channel/channel-address.js";
+import { createChannelAddress, startsNewAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 
@@ -199,6 +199,51 @@ describe("createChannelAddress", () => {
       command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_2",
     });
+  });
+
+  it("starts a session at once for a send marked as opening a new address", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.createSession).mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "sess_started",
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    const delivery = await address.send("hello", { auth: null, [startsNewAddress]: true });
+
+    expect(delivery.sessionId).toBe("sess_started");
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    // The start carries the send, so a start that finds the address taken delivers it to the owner.
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuationConflictCommand: expect.objectContaining({ kind: "send" }),
+        continuationToken: "slack:C1:T1",
+      }),
+    );
+  });
+
+  it("delivers answers marked as opening a new address to the session that asked", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    const delivery = await address.deliver(
+      { answers: [{ optionId: "yes", interactionId: "input-1" }] },
+      { auth: null, [startsNewAddress]: true },
+    );
+
+    expect(delivery.sessionId).toBe("sess_1");
+    expect(runtime.dispatchContinuation).toHaveBeenCalledOnce();
+    expect(runtime.createSession).not.toHaveBeenCalled();
   });
 
   it("reports whether create() started the session that owns the address", async () => {

@@ -1,5 +1,6 @@
 import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { describe, expect, it } from "vitest";
+import { dataAgentTemplateUrl } from "../templates/links";
 import {
   createDocsRedirects,
   createIntegrationRedirects,
@@ -215,8 +216,7 @@ describe("compatibilityRedirects", () => {
     ["eve-slack-agent", "eve-slack-agent"],
     ["eve-voice-template", "eve-voice-template"],
     ["eve-discord-agent", "eve-discord-agent"],
-    ["eve-company-brain-template", "eve-data-agent-template"],
-    ["eve-data-agent-template", "eve-data-agent-template"],
+    ["eve-company-brain-template", "eve-company-brain-template"],
     ["eve-coding-agent-template", "eve-coding-agent-template"],
     ["bell-stack", "bell-stack"],
     ["eve-design-template", "eve-design-template"],
@@ -245,6 +245,21 @@ describe("compatibilityRedirects", () => {
         expect(response.headers.get("location")).toBe(
           `https://vercel.com/templates/eve/${destination}`,
         );
+      }
+    }
+  });
+
+  it("redirects the data agent template to its source", async () => {
+    for (const prefix of ["", "/en"]) {
+      for (const extension of ["", ".md", ".mdx"]) {
+        const response = await unstable_getResponseFromNextConfig({
+          url: `https://eve.dev${prefix}/templates/eve-data-agent-template${extension}`,
+          nextConfig: {
+            redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
+          },
+        });
+        expect(response.status).toBe(307);
+        expect(response.headers.get("location")).toBe(dataAgentTemplateUrl);
       }
     }
   });

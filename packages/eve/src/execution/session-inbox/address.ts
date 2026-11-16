@@ -31,6 +31,11 @@ export function sessionCommandHookToken(sessionId: string): string {
   return `eve:session:${sessionId}:inbox`;
 }
 
+/** Whether `token` is a session's logical stable command inbox token. */
+export function isSessionCommandHookToken(token: string): boolean {
+  return /^eve:session:[^:]+:inbox$/.test(token);
+}
+
 const SESSION_INBOX_HOOK_TOKEN_PREFIX = "eve:inbox:v1:";
 
 /**

@@ -82,6 +82,14 @@ function initialInput(overrides: Record<string, unknown> = {}) {
   } as Parameters<typeof bootInitialOwner>[0];
 }
 
+/** A subagent node's session, which `createSessionStep` creates after checking its compiled node. */
+function subagentInput(overrides: Record<string, unknown> = {}) {
+  return initialInput({
+    ...overrides,
+    serializedContext: { "eve.bundle": { nodeId: "child", source: { kind: "bundled" } } },
+  });
+}
+
 function createInbox() {
   return {
     claimSessionHook: vi.fn(async () => {}),
@@ -131,7 +139,7 @@ describe("bootInitialOwner", () => {
     vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
 
     const bootPromise = bootInitialOwner(
-      initialInput(),
+      subagentInput(),
       "session-1",
       workflowOwnerPorts("session-1"),
     );
@@ -149,6 +157,25 @@ describe("bootInitialOwner", () => {
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     await boot!.session.sessionTimeoutControl!.start();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
+  });
+
+  it("creates a root session in the workflow body, without a step", async () => {
+    const inbox = createInbox();
+    vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
+
+    const boot = await bootInitialOwner(
+      initialInput({ input: { message: "hello", outputSchema: { type: "object" } } }),
+      "session-1",
+      workflowOwnerPorts("session-1"),
+    );
+
+    expect(createSessionStep).not.toHaveBeenCalled();
+    expect(boot?.session.history).toEqual([]);
+    expect(boot?.session.sessionState).toMatchObject({
+      hasProxyInputRequests: false,
+      sessionId: "session-1",
+      snapshot: { session: { outputSchema: { type: "object" }, sessionId: "session-1" } },
+    });
   });
 
   it("waits for stable and alias ownership before returning", async () => {
@@ -231,7 +258,7 @@ describe("bootInitialOwner", () => {
     fail(failure);
 
     await expect(
-      bootInitialOwner(initialInput(), "session-1", workflowOwnerPorts("session-1")),
+      bootInitialOwner(subagentInput(), "session-1", workflowOwnerPorts("session-1")),
     ).rejects.toBe(failure);
     expect(mocks.failSession).toHaveBeenCalledOnce();
     expect(inbox.dispose).toHaveBeenCalledOnce();

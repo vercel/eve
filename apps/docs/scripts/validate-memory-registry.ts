@@ -81,7 +81,12 @@ for (const item of items) {
       );
     }
   } else if (slug === "arcana") {
-    if (!item.dependencies?.includes("@kybernesis/arcana")) {
+    if (
+      !item.dependencies?.some(
+        (dependency) =>
+          dependency === "@kybernesis/arcana" || dependency.startsWith("@kybernesis/arcana@"),
+      )
+    ) {
       throw new Error('Registry item "memory/arcana" must depend on @kybernesis/arcana.');
     }
     if (
@@ -93,7 +98,12 @@ for (const item of items) {
       );
     }
   } else if (slug === "supermemory") {
-    if (!item.dependencies?.includes("@supermemory/eve")) {
+    if (
+      !item.dependencies?.some(
+        (dependency) =>
+          dependency === "@supermemory/eve" || dependency.startsWith("@supermemory/eve@"),
+      )
+    ) {
       throw new Error('Registry item "memory/supermemory" must depend on @supermemory/eve.');
     }
     if (!("SUPERMEMORY_API_KEY" in (item.envVars ?? {}))) {
@@ -105,8 +115,8 @@ for (const item of items) {
     if (!item.dependencies?.includes("@memco/eve")) {
       throw new Error('Registry item "memory/memco" must depend on @memco/eve.');
     }
-    if (item.meta?.eve?.requires !== ">=1.0.0-rc.10 <2.0.0") {
-      throw new Error('Registry item "memory/memco" must require eve >=1.0.0-rc.10 <2.0.0.');
+    if (item.meta?.eve?.requires !== ">=1.0.0 <2.0.0") {
+      throw new Error('Registry item "memory/memco" must require eve >=1.0.0 <2.0.0.');
     }
     if (!("MEMCO_API_TOKEN" in (item.envVars ?? {}))) {
       throw new Error(

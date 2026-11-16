@@ -36,7 +36,7 @@ import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
-import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
+import { isOtelDeclaration, type TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 
 /**
@@ -52,6 +52,7 @@ function session(
   >,
   audience: ChannelAudience = "public",
   authored: readonly InstrumentationProviderDefinition[] = [],
+  environment: "production" | "preview" | "development" = "production",
 ) {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -60,7 +61,7 @@ function session(
     spanProcessors: [new SimpleSpanProcessor(exporter)],
   });
   const otel = createAgentOtelInstrumentation({
-    environment: "production",
+    environment,
     frameworkVersion: "test",
     idGenerator,
     recordInputs: true,
@@ -79,7 +80,7 @@ function session(
     agentName: "weather",
     audience,
     channel: { kind: "http" },
-    environment: "production",
+    environment,
     principalType: "anonymous",
   });
   const ctx = new ContextContainer();
@@ -90,7 +91,7 @@ function session(
       agentName: "weather",
       channelAudience: audience,
       channelKind: "http",
-      environment: "production",
+      environment,
       functionId: "weather",
       handleEvent: async (publication) => {
         const facts = cascade(currentView(ctx), eventsOf(publication));
@@ -749,6 +750,47 @@ describe("a session's spans, from its committed lines", () => {
     expect(invocation?.attributes["agent.turn.outcome"]).toBe("failed");
     expect(invocation?.status).toMatchObject({ code: 2 });
   });
+
+  it.each(["production", "preview"] as const)(
+    "openinstinct exports metadata, not private profile or conversation bodies in %s",
+    async (environment) => {
+      // Widen only for TypeScript: the standalone template is outside this package's rootDir.
+      // Vite sees a literal import after stripping the type assertion.
+      const authored: { default: unknown } = await import(
+        "../../../../../apps/templates/openinstinct/agent/instrumentation/otel.ts" as string
+      );
+      if (!isOtelDeclaration(authored.default)) throw new Error("Expected OTel settings");
+      const { commit, spans } = session(
+        authored.default.options.tracePolicy,
+        undefined,
+        undefined,
+        "private",
+        [],
+        environment,
+      );
+      const privateBody = "Alice's private profile: birth date 1990-01-23; conversation with Bob";
+      await commit(...opening);
+      await commit({
+        data: {
+          callId: "call_profile",
+          capability: { kind: "tool", name: "profile" },
+          input: { profile: privateBody },
+          owner: run,
+        },
+        scope: run,
+        type: "call.requested",
+      } as SessionEvent);
+      await commit(settled("call_profile", { outcome: "completed", output: privateBody }));
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const exported = await spans();
+      expect(exported.find((span) => span.name === "execute_tool profile")).toBeDefined();
+      expect(exported.find((span) => span.name === "invoke_agent weather")).toBeDefined();
+      expect(
+        JSON.stringify(exported.map(({ attributes, events }) => ({ attributes, events }))),
+      ).not.toContain(privateBody);
+    },
+  );
 
   it("keeps a call's input and output off its span unless the trace policy records them", async () => {
     for (const records of [false, true]) {

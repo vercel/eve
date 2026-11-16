@@ -244,7 +244,7 @@ function createVendoredZodPlugin() {
 
 /**
  * The code extension imports `@vercel/connect`, whose `@vercel/oidc` tree is
- * CommonJS. Resolve it to the standalone vendored bundle instead of inlining
+ * CommonJS. Resolve it to the vendored bundle instead of inlining
  * that CommonJS into `dist/src/node_modules`, where `polyfillRequire: false`
  * would leave its `require` calls undefined.
  */

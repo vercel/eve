@@ -39,6 +39,7 @@ import {
   verifyHttpBasic,
   verifyJwtEcdsa,
   verifyJwtHmac,
+  verifyOidc,
   verifyVercelOidc,
   withAuthChallenges,
 } from "#public/channels/auth.js";
@@ -1408,6 +1409,52 @@ describe("verifyVercelOidc", () => {
       );
 
       await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    } finally {
+      issuer.restore();
+    }
+  });
+});
+
+describe("verifyOidc", () => {
+  it("authenticates a token from its issuer through discovery", async () => {
+    const issuer = await installMockedVercelIssuer("same-issuer");
+    try {
+      const result = await verifyOidc(
+        await issuer.signToken({}, { audience: "agent-framework-bench" }),
+        { audiences: ["agent-framework-bench"], issuer: issuer.issuer },
+      );
+      expect(result.ok).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${issuer.issuer}/.well-known/openid-configuration`,
+        expect.anything(),
+      );
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  // A route that accepts GitHub Actions and Vercel tokens tries both; a token GitHub did not
+  // issue must not wait on GitHub's discovery document before the next strategy gets it.
+  it.each([
+    [
+      "another issuer's token",
+      (sign: (claims: Record<string, unknown>) => Promise<string>) => sign({}),
+    ],
+    ["a malformed token", async () => "not-a-jwt"],
+    [
+      "a token with no issuer",
+      () => new SignJWT({}).setProtectedHeader({ alg: "HS256" }).sign(new Uint8Array(32)),
+    ],
+  ])("refuses %s without fetching this issuer's keys", async (_, createToken) => {
+    const issuer = await installMockedVercelIssuer("another-issuer");
+    try {
+      await expect(
+        verifyOidc(await createToken(issuer.signToken), {
+          audiences: ["agent-framework-bench"],
+          issuer: "https://token.actions.githubusercontent.com",
+        }),
+      ).resolves.toEqual({ ok: false });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     } finally {
       issuer.restore();
     }

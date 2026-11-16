@@ -1,0 +1,117 @@
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
+
+/** Fresh-agent onboarding that `eve init` shows while it installs dependencies. */
+export interface InitOnboarding {
+  /** Resolves when the person finishes or cancels onboarding. */
+  readonly finished: Promise<{ readonly cancelled: boolean }>;
+  /**
+   * Aborts when the person presses Ctrl-C on the onboarding screen. The
+   * renderer holds the terminal in raw mode, so no SIGINT reaches init or its
+   * install; init stops both through this signal instead.
+   */
+  readonly interrupted: AbortSignal;
+  /** Shows whether init is still installing once onboarding no longer owns the status line. */
+  setInstalling(installing: boolean): void;
+  /**
+   * Restores the terminal and returns any prompt the person typed, for `eve dev` to pre-fill.
+   * Cancels onboarding first if it is still open.
+   */
+  close(): Promise<string | undefined>;
+}
+
+export interface InitOnboardingTelemetry {
+  trackSetupStep(input: EveCliSetupStepEvent): void;
+  trackSetupTerminal(input: EveCliSetupTerminalEvent): void;
+}
+
+/**
+ * Opens the terminal UI's startup screen and runs model onboarding on it
+ * while `eve init` installs the project. Signing in needs only the project
+ * files, so there's no dev server to wait for; `eve dev` starts afterwards
+ * and picks up the saved connection.
+ */
+export async function startInitOnboarding(input: {
+  readonly projectPath: string;
+  readonly telemetry?: InitOnboardingTelemetry;
+}): Promise<InitOnboarding> {
+  const [{ startDevelopmentTuiStartup }, { runStartupOnboarding }, { resolveTuiDisplayOptions }] =
+    await Promise.all([
+      import("#cli/dev/tui/startup.js"),
+      import("#cli/dev/tui/startup-onboarding.js"),
+      import("#cli/dev/ui-options.js"),
+    ]);
+  const interrupt = new AbortController();
+  let closing = false;
+  const startup = await startDevelopmentTuiStartup({
+    ...resolveTuiDisplayOptions({}),
+    appRoot: input.projectPath,
+    // `close()` cancels onboarding with a synthetic Ctrl-C; only a real one interrupts init.
+    onExitRequest: () => {
+      if (!closing) interrupt.abort();
+    },
+  });
+  const { renderer } = startup;
+  let installing = true;
+  let onboarding = true;
+  const { telemetry } = input;
+  const finished = runStartupOnboarding({
+    startup,
+    workspaceRoot: input.projectPath,
+    agentRoot: undefined,
+    signal: interrupt.signal,
+    withExclusiveTerminal: (task) => task(),
+    onOnboardingStep: telemetry && ((event) => telemetry.trackSetupStep(event)),
+  }).then(
+    ({ outcome }) => {
+      // Nothing settles after init: `eve dev` starts later and reads the saved connection.
+      const result = outcome?.cancelled
+        ? "cancelled"
+        : outcome?.failed === true
+          ? "error"
+          : "completed";
+      if (result === "completed")
+        telemetry?.trackSetupStep({ flow: "onboarding", step: "connection_ready" });
+      telemetry?.trackSetupTerminal({ flow: "onboarding", step: "model_provider", result });
+      return { cancelled: result !== "completed" };
+    },
+    () => {
+      telemetry?.trackSetupTerminal({
+        flow: "onboarding",
+        step: "model_provider",
+        result: "error",
+      });
+      return { cancelled: true };
+    },
+  );
+  // Onboarding opens on "Reading saved connection…"; the install is what's actually running.
+  renderer.setStartupPhase("installing");
+  void finished.then(() => {
+    onboarding = false;
+    renderer.setStartupPhase(installing ? "installing" : "starting");
+  });
+
+  let closed: Promise<string | undefined> | undefined;
+  return {
+    finished,
+    interrupted: interrupt.signal,
+    setInstalling(next) {
+      installing = next;
+      renderer.setStartupPhase(next ? "installing" : "starting");
+    },
+    close() {
+      closed ??= (async () => {
+        closing = true;
+        if (onboarding) {
+          renderer.requestInterrupt();
+          await finished;
+        }
+        const { draft, queuedPrompt } = startup.finish();
+        await startup.shutdown();
+        const carried = [queuedPrompt, draft].filter((text) => text !== undefined && text !== "");
+        // The prompt is single-line: eve dev strips newlines from pre-filled input.
+        return carried.length === 0 ? undefined : carried.join(" ");
+      })();
+      return closed;
+    },
+  };
+}

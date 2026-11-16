@@ -15,12 +15,14 @@ import {
   aiSdkCapture,
   getRegisteredTelemetryIntegrations,
 } from "#instrumentation/ai-sdk-telemetry.js";
-import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
-import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  defaultContentCapture,
+} from "#shared/forwarded-trace-policy.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
@@ -37,13 +39,14 @@ export async function decideWithTracing<
   const ctx = contextStorage.getStore() ?? new ContextContainer();
   const session = readInstrumentationSessionContext(ctx);
   const agentName = ctx.get(SessionAgentKey)?.name ?? "eve";
-  const hooks = runtime.hooks.forTrace?.({ agentName, ...session.conversation }) ?? runtime.hooks;
+  const ceiling = session.forwardedTracePolicy?.ceiling;
+  const hooks =
+    runtime.hooks.forTrace?.({ agentName, ...session.conversation }, { ceiling }) ?? runtime.hooks;
   const settings = runtime.otelSettings;
   const traceDecision = runtime.decision;
   if (settings === undefined || traceDecision === undefined) {
-    const content = shouldCaptureInstrumentationContent(session.conversation);
     return decideWithMetadata(options, {
-      telemetry: aiSdkCapture({ recordInputs: content, recordOutputs: content }, hooks),
+      telemetry: aiSdkCapture(defaultContentCapture(session.conversation, ceiling), hooks),
     });
   }
   const sessionId = ctx.get(SessionIdKey);

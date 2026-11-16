@@ -18,7 +18,11 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { SessionInputQueue, type ControlOrigin } from "#execution/session/input-queue.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
-import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
+import {
+  createTurnControl,
+  nextTurnControl,
+  type TurnControl,
+} from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
 import { workingTasks } from "#execution/tasks/table.js";
@@ -375,6 +379,7 @@ async function runSessionLoop(
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
         : undefined;
     const outcome = await execution.runTurn(payload, { caller, control });
+    if (control !== undefined) turnControl ??= nextTurnControl(control);
     progress.turnId = undefined;
     sessionTimeout?.recordActivity();
     if (outcome.caller !== undefined) progress.caller = outcome.caller;

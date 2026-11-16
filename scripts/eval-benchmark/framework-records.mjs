@@ -16,9 +16,25 @@
 //   start        `eve start` → first `/eve/v1/health` 200 on the same legs
 //                (leg probes/start.json: { readyMs }), and on the
 //                dev-startup job's builds of its benchmark agents
-//   dev-startup  `eve dev` ready, then a first turn accepted and completed, from
-//                packages/eve/scripts/benchmark-startup.mjs
+//   dev-startup  `eve dev` ready, then a first turn accepted and completed, and
+//                `eve dev` with its terminal UI to the first frame showing the
+//                prompt (input is taken and queued before the agent is ready),
+//                from packages/eve/scripts/benchmark-startup.mjs
 //                (<dev-startup-dir>/<subject>.jsonl: its stdout)
+//   package      eve's tarball and unpacked size, and a cold `npm install` of
+//                it into an empty project: time, size, and package count,
+//                from packages/eve/scripts/benchmark-package.mjs in the same
+//                job (<dev-startup-dir>/package.jsonl: its stdout); subject
+//                `eve`, every run cold (empty npm cache)
+//   init         `npx eve init my-agent` (the getting-started command) on the
+//                packed eve, in a pseudo-terminal from an empty directory,
+//                npm cache, and home directory: to eve running (npx's download), the project's
+//                dependency install, the project created, the terminal UI's
+//                prompt, and the dev server ready, from
+//                packages/eve/scripts/benchmark-init.mjs in the same job
+//                (<dev-startup-dir>/init.jsonl: its stdout, with each run's
+//                terminal output beside it as init-<run>.log); subject
+//                `scaffold` (init's default project), every run cold
 //
 // A planned probe without data is a `missing` record, as in records.jsonl.
 //
@@ -43,10 +59,28 @@ export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   // dominates cold builds; this is the rest of the build.
   "build.without_sandbox_prewarm_ms": framework("ms"),
   "start.ready_ms": framework("ms"),
+  "dev_startup.prompt_visible_ms": framework("ms"),
   "dev_startup.ready_ms": framework("ms"),
   "dev_startup.session_accepted_ms": framework("ms"),
   "dev_startup.first_turn_ms": framework("ms"),
+  "package.packed_bytes": framework("bytes"),
+  "package.unpacked_bytes": framework("bytes"),
+  "package.install_bytes": framework("bytes"),
+  "package.install_packages": framework("count"),
+  "package.install_ms": framework("ms"),
+  "init.download_ms": framework("ms"),
+  "init.install_ms": framework("ms"),
+  "init.created_ms": framework("ms"),
+  "init.prompt_visible_ms": framework("ms"),
+  "init.ready_ms": framework("ms"),
 });
+
+/** The package probe's file in the dev-startup directory, and its subject. */
+export const PACKAGE_RESULTS_FILE = "package.jsonl";
+const PACKAGE_SUBJECT = "eve";
+/** The init probe's file in the dev-startup directory, and its subject. */
+export const INIT_RESULTS_FILE = "init.jsonl";
+const INIT_SUBJECT = "scaffold";
 
 /** Legs that build and start a local production server, and so carry build and start probes. */
 export function probedLegs(legs) {
@@ -138,10 +172,15 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
   }
 
   const devStartup = plan.registry.dev_startup;
+  const packageProbe = plan.registry.package;
+  const initProbe = plan.registry.init;
+  const meta =
+    devStartup || packageProbe || initProbe
+      ? readOptionalJson(devStartupDir && join(devStartupDir, "meta.json"))
+      : undefined;
+  if (meta !== undefined && meta.sha !== plan.sha)
+    throw new Error(`dev-startup ran at ${meta.sha}, but the plan is for ${plan.sha}.`);
   if (devStartup) {
-    const meta = readOptionalJson(devStartupDir && join(devStartupDir, "meta.json"));
-    if (meta !== undefined && meta.sha !== plan.sha)
-      throw new Error(`dev-startup ran at ${meta.sha}, but the plan is for ${plan.sha}.`);
     for (const { name, digest } of devStartup.subjects) {
       const lines = readJsonLines(devStartupDir && join(devStartupDir, `${name}.jsonl`));
       for (let run = 1; run <= devStartup.runs; run += 1) {
@@ -160,6 +199,9 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
               ? "probe-missing"
               : "run-missing";
         const dev = lines?.find((line) => line.mode === "dev" && line.run === run);
+        // A separate `eve dev` process with the TUI; runs before its release
+        // (or without a terminal) have none, so the metric is unavailable.
+        const devTui = lines?.find((line) => line.mode === "dev-tui" && line.run === run);
         records.push(
           dev === undefined
             ? record({ ...base, probe: "dev-startup", missing: missingReason })
@@ -168,6 +210,7 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
                 probe: "dev-startup",
                 path: DEV_STARTUP_ARTIFACT_PATH,
                 metrics: {
+                  "dev_startup.prompt_visible_ms": duration(devTui?.promptVisibleMs),
                   "dev_startup.ready_ms": duration(dev.wallMs),
                   "dev_startup.session_accepted_ms": duration(dev.sessionAcceptedMs),
                   "dev_startup.first_turn_ms": duration(dev.firstTurnMs),
@@ -201,6 +244,83 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
       }
     }
   }
+
+  if (packageProbe) {
+    const lines = readJsonLines(devStartupDir && join(devStartupDir, PACKAGE_RESULTS_FILE));
+    for (let run = 1; run <= packageProbe.runs; run += 1) {
+      const base = {
+        probe: "package",
+        subject: PACKAGE_SUBJECT,
+        subjectDigest: packageProbe.digest,
+        world: "local",
+        attempt: run,
+        cold: true,
+        runnerOs: meta?.runner_os,
+      };
+      const line = lines?.find((entry) => entry.mode === "package" && entry.run === run);
+      records.push(
+        line === undefined
+          ? record({
+              ...base,
+              missing:
+                meta === undefined
+                  ? "job-missing"
+                  : lines === undefined
+                    ? "probe-missing"
+                    : "run-missing",
+            })
+          : record({
+              ...base,
+              path: DEV_STARTUP_ARTIFACT_PATH,
+              metrics: {
+                "package.packed_bytes": amount(line.packedBytes, "missing-size"),
+                "package.unpacked_bytes": amount(line.unpackedBytes, "missing-size"),
+                "package.install_bytes": amount(line.installBytes, "missing-size"),
+                "package.install_packages": amount(line.installPackages, "missing-count"),
+                "package.install_ms": duration(line.installMs),
+              },
+            }),
+      );
+    }
+  }
+  if (initProbe) {
+    const lines = readJsonLines(devStartupDir && join(devStartupDir, INIT_RESULTS_FILE));
+    for (let run = 1; run <= initProbe.runs; run += 1) {
+      const base = {
+        probe: "init",
+        subject: INIT_SUBJECT,
+        subjectDigest: initProbe.digest,
+        world: "local",
+        attempt: run,
+        cold: true,
+        runnerOs: meta?.runner_os,
+      };
+      const line = lines?.find((entry) => entry.mode === "init" && entry.run === run);
+      records.push(
+        line === undefined
+          ? record({
+              ...base,
+              missing:
+                meta === undefined
+                  ? "job-missing"
+                  : lines === undefined
+                    ? "probe-missing"
+                    : "run-missing",
+            })
+          : record({
+              ...base,
+              path: DEV_STARTUP_ARTIFACT_PATH,
+              metrics: {
+                "init.download_ms": duration(line.downloadMs),
+                "init.install_ms": duration(line.installMs),
+                "init.created_ms": duration(line.createdMs),
+                "init.prompt_visible_ms": duration(line.promptVisibleMs),
+                "init.ready_ms": duration(line.readyMs),
+              },
+            }),
+      );
+    }
+  }
   return records;
 }
 
@@ -223,9 +343,13 @@ function buildMetrics(value) {
 }
 
 function duration(value) {
+  return amount(value, "missing-duration");
+}
+
+function amount(value, reason) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? { status: "measured", value }
-    : { status: "unavailable", reason: "missing-duration" };
+    : { status: "unavailable", reason };
 }
 
 function readOptionalJson(path) {

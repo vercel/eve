@@ -45,6 +45,13 @@ export interface AgentSessionLineage {
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
   readonly dynamicSelections: DynamicSubagentSelections;
+  /**
+   * The agents the call can open that are remote, by name. A message to one names its reply hook
+   * in a step of its own, before the step that opens the session resolves the name. Absent when
+   * an eve from before this list dispatched the call: a session moves to whichever deployment
+   * takes its next delivery, an older one after a rollback, and keeps calling its tasks' runs.
+   */
+  readonly remoteAgents?: readonly string[];
   /** Whether a parent, local or remote, delegated the calling session. */
   readonly delegated?: boolean;
   readonly localDevRequest?: LocalDevRequestProvenance;
@@ -95,6 +102,7 @@ export function captureAgentSessionContext(
     continuationToken: caller.serializedContext[ContinuationTokenKey.name] as string | undefined,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
+    remoteAgents: caller.owner.roster(caller.dynamicSubagentSelections).remoteAgentNames(),
     delegated: hasDelegatedSessionContext(caller.serializedContext),
     localDevRequest: caller.localDevRequest,
     parent: {

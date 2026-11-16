@@ -3,6 +3,7 @@ import { ownerReference } from "#execution/agent-sessions/owner.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import {
   type DynamicSubagentSelections,
+  remoteAgentNames,
   resolveAgentAction,
   resolveAgentStartTarget,
   type AgentActionInput,
@@ -37,6 +38,8 @@ export type LocalStartTarget = Extract<SubagentStartTarget, { readonly kind: "lo
 export interface AgentRoster {
   /** The dispatch request a call to `input.target` makes. Throws for a name it doesn't have. */
   resolveAction(callId: string, input: AgentActionInput): RuntimeAgentDispatchRequest;
+  /** The names {@link resolveAction} resolves to a remote agent. */
+  remoteAgentNames(): readonly string[];
   /** Where a fresh child for `action` starts. Throws when it can't start from this session. */
   startTarget(action: RuntimeAgentDispatchRequest, isRootSession: boolean): SubagentStartTarget;
   /** What the child's runtime runs, with `overrides` of its model. */
@@ -78,6 +81,7 @@ export function compiledAgentRoster(
     }),
     graph: bundle.graph,
     remote: bundle.subagentRegistry,
+    remoteAgentNames: () => remoteAgentNames(bundle, dynamicSelections),
     resolveAction: (callId, input) =>
       resolveAgentAction({ bundle, callId, dynamicSelections, input }),
     async runtimeOverrides(name, model, toolName) {

@@ -220,6 +220,7 @@ export function createCliProgram(
           (step, result, failureCode) => {
             telemetry.trackSetupTerminal({ flow: "init", step, result, failureCode });
           },
+          telemetry,
         );
       },
     );

@@ -1,0 +1,29 @@
+# JS
+node_modules
+.next
+next-env.d.ts
+*.tsbuildinfo
+dist
+.output
+.nitro
+
+# eve / Vercel
+.eve
+.vercel
+.workflow-data
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Local SQLite database for the FastAPI service
+apps/api/.data/
+
+# Env
+.env*
+!.env.example
+
+.DS_Store

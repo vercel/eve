@@ -17,6 +17,10 @@
 //                same deployment backend
 //   dev_startup  `eve dev` startup probe settings (runs and named agents) for
 //                the dev-startup job, or null when the registry has none
+//   package      package-size probe settings (runs) for the dev-startup job,
+//                or null when the registry has none
+//   init         `npx eve init` probe settings (runs) for the dev-startup job,
+//                or null when the registry has none
 //   plan.json    the resolved registry snapshot (models pinned to their AI
 //                Gateway release, fixture digests, expected eval ids) plus
 //                every leg,
@@ -59,6 +63,12 @@ const MAX_STARTUP_RUNS = 10;
 // Agents packages/eve/scripts/benchmark-startup.mjs generates, by registry name.
 const STARTUP_SCRIPT = "packages/eve/scripts/benchmark-startup.mjs";
 const STARTUP_SUBJECTS = { minimal: { tools: 0 } };
+// Packs and installs eve; its blob id is the package probe's digest.
+const PACKAGE_SCRIPT = "packages/eve/scripts/benchmark-package.mjs";
+const MAX_PACKAGE_RUNS = 10;
+// Runs `npx eve init` on the packed eve; its blob id is the init probe's digest.
+const INIT_SCRIPT = "packages/eve/scripts/benchmark-init.mjs";
+const MAX_INIT_RUNS = 10;
 
 /**
  * Validate the registry and apply dispatch narrowing. Pure apart from the
@@ -83,6 +93,8 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {}, ba
   );
   const devStartup =
     registry?.devStartup === undefined ? null : readDevStartup(registry.devStartup);
+  const packageProbe = registry?.package === undefined ? null : readPackage(registry.package);
+  const initProbe = registry?.init === undefined ? null : readInit(registry.init);
   const concurrency = {
     legs: boundedInteger(
       registry?.concurrency?.legs,
@@ -140,6 +152,8 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {}, ba
     attempts: selectedAttempts,
     mockAttempts,
     devStartup,
+    package: packageProbe,
+    init: initProbe,
     // Model-innermost leg order spreads the cap across models, so more legs
     // than models would load each model harder than a full-registry run does
     // and skew latency against it. GitHub cannot cap legs per model, so a
@@ -280,6 +294,20 @@ function readDevStartup(value) {
       `e2e/benchmark.json: unknown "devStartup.subjects" ${unknown.join(", ")}; choose from ${Object.keys(STARTUP_SUBJECTS).join(", ")}.`,
     );
   return { runs, subjects: subjects.map((name) => ({ name, ...STARTUP_SUBJECTS[name] })) };
+}
+
+/** Each package run installs from an empty npm cache, so every run is cold. */
+function readPackage(value) {
+  return {
+    runs: boundedInteger(value?.runs, MAX_PACKAGE_RUNS, 'e2e/benchmark.json: "package.runs"'),
+  };
+}
+
+/** Each init run starts from an empty directory and npm cache, so every run is cold. */
+function readInit(value) {
+  return {
+    runs: boundedInteger(value?.runs, MAX_INIT_RUNS, 'e2e/benchmark.json: "init.runs"'),
+  };
 }
 
 function namedEntries(entries, key) {
@@ -431,6 +459,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
                 digest: gitBlobId(join(HARNESS_ROOT, STARTUP_SCRIPT)),
               })),
             },
+      // The script decides how eve is packed and installed, so its blob id is
+      // the digest; the package itself is the commit's.
+      package:
+        selection.package === null
+          ? null
+          : { ...selection.package, digest: gitBlobId(join(HARNESS_ROOT, PACKAGE_SCRIPT)) },
+      // Likewise: the script decides how init runs; the package is the commit's.
+      init:
+        selection.init === null
+          ? null
+          : { ...selection.init, digest: gitBlobId(join(HARNESS_ROOT, INIT_SCRIPT)) },
       // Concurrency changes measured latency, so every manifest records it.
       concurrency: {
         legs: selection.concurrency.legs,
@@ -462,6 +501,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     `mock_matrix=${JSON.stringify(mock.filter((leg) => !leg.hosted))}`,
     `hosted_matrix=${JSON.stringify(mock.filter((leg) => leg.hosted))}`,
     `dev_startup=${JSON.stringify(selection.devStartup)}`,
+    `package=${JSON.stringify(selection.package)}`,
+    `init=${JSON.stringify(selection.init)}`,
     `max_parallel=${selection.concurrency.legs}`,
     `evals_per_leg=${selection.concurrency.evalsPerLeg}`,
     `keep_state=${flags.keepState}`,

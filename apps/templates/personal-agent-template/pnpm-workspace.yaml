@@ -5,6 +5,7 @@ minimumReleaseAgeExclude:
   - eve
   - "@vercel/connect"
   - ai
+  - "@ai-sdk/*"
   - "@comark/nuxt@0.9.1"
   - "@comark/vue@0.9.1"
   - comark@0.9.1

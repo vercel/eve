@@ -16,6 +16,7 @@ import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { TraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
 
@@ -605,8 +606,20 @@ export interface InstrumentationHooks {
   readonly authoredCapturesInputs?: boolean;
   /** Output content an authored provider's trace policy admits. */
   readonly authoredCapturesOutputs?: boolean;
-  readonly forTrace?: (trace: TraceCaptureContext) => InstrumentationHooks;
+  readonly forTrace?: (
+    trace: TraceCaptureContext,
+    options?: InstrumentationTraceBindingOptions,
+  ) => InstrumentationHooks;
   publish(event: InstrumentationEvent): Promise<void>;
+}
+
+export interface InstrumentationTraceBindingOptions {
+  /**
+   * A content ceiling forwarded by an upstream agent. Every provider's
+   * decision is narrowed to it, so no file's trace policy can restore content
+   * an earlier hop removed.
+   */
+  readonly ceiling?: TraceContentCeiling;
 }
 
 export interface CreateInstrumentationHooksOptions {

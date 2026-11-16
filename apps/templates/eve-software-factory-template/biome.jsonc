@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "extends": ["ultracite/biome/core"],
+  "linter": {
+    "rules": {
+      "style": {
+        // eve derives tool/connection/skill names from filenames, and this project
+        // uses snake_case (e.g. agent/tools/get_user_preferences.ts). Disable the
+        // kebab-case filename rule so those names aren't flagged.
+        "useFilenamingConvention": "off"
+      }
+    }
+  }
+}

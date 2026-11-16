@@ -61,6 +61,8 @@ export interface TuiSetupCommandInput {
   chatGptAccountLabel?: string;
   /** Groups setup writes under one runtime update. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
+  /** Cancels the flow from outside the keyboard, as Ctrl-C on the working indicator does. */
+  signal?: AbortSignal;
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
   flows?: Partial<TuiSetupFlows>;
@@ -166,6 +168,13 @@ export async function runTuiSetupCommand(
     warnings,
   );
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
+  // Mutes further questions so retry loops unwind instead of reopening the terminal.
+  const stopFromOutside = () => {
+    interrupted = true;
+    controller.abort(new WizardCancelledError());
+  };
+  if (input.signal?.aborted === true) stopFromOutside();
+  input.signal?.addEventListener("abort", stopFromOutside, { once: true });
 
   let cancelActiveRegistryItem: (() => void) | undefined;
   const runRegistryItem = async <T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T> => {
@@ -223,6 +232,7 @@ export async function runTuiSetupCommand(
       if (rearm) interrupt = input.renderer.waitForInterrupt();
     }
   } finally {
+    input.signal?.removeEventListener("abort", stopFromOutside);
     // A flow that threw or was abandoned mid-wait must not leave the footer spinning.
     input.renderer.setStatus(undefined);
   }

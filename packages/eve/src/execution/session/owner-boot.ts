@@ -9,6 +9,7 @@ import { readSerializedSessionSchedule } from "#context/session-schedule.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { createSessionStep } from "#execution/create-session-step.js";
+import { createInitialSessionValues } from "#execution/initial-session-values.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
@@ -145,22 +146,37 @@ export async function bootInitialOwner<Hook extends InboxHook>(
     nodeId?: string;
   };
   try {
-    const sessionCreationPromise = createSessionStep({
-      agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
-        | AgentSessionRuntimeOverrides
-        | undefined,
-      compiledArtifactsSource: serializedBundle.source,
-      continuationToken,
-      dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
-        | DynamicSubagentAgentConfig
-        | undefined,
-      // With a first message, its delivery carries the history instead.
-      history: input.input.message === undefined ? input.input.history : undefined,
-      nodeId: serializedBundle.nodeId,
-      outputSchema: input.input.outputSchema,
-      rootSessionId: readRootSessionId(serializedContext),
-      sessionId,
-    });
+    const history = input.input.message === undefined ? input.input.history : undefined;
+    // A root session's creation is pure, so the body computes it instead of a step, which would
+    // add a step's round trips before the first turn. A subagent node's step first checks its
+    // compiled config.
+    const sessionCreationPromise =
+      serializedBundle.nodeId === undefined
+        ? Promise.resolve(
+            createInitialSessionValues({
+              continuationToken,
+              history,
+              outputSchema: input.input.outputSchema,
+              rootSessionId: readRootSessionId(serializedContext),
+              sessionId,
+            }),
+          )
+        : createSessionStep({
+            agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
+              | AgentSessionRuntimeOverrides
+              | undefined,
+            compiledArtifactsSource: serializedBundle.source,
+            continuationToken,
+            dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
+              | DynamicSubagentAgentConfig
+              | undefined,
+            // With a first message, its delivery carries the history instead.
+            history,
+            nodeId: serializedBundle.nodeId,
+            outputSchema: input.input.outputSchema,
+            rootSessionId: readRootSessionId(serializedContext),
+            sessionId,
+          });
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
       continuationToken,
       sessionCreation: sessionCreationPromise,
