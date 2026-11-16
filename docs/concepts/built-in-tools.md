@@ -87,7 +87,7 @@ export default disableTool();
 
 `read_file` reads sandbox text files with line-numbered output. It also shows the model images and PDFs as files:
 
-- PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side
+- PNG, JPEG, GIF, and WebP images up to 3 MiB and 3000 pixels per side
 - PDFs up to 20 MiB
 
 It detects images and PDFs from their bytes, so the filename extension doesn't matter.

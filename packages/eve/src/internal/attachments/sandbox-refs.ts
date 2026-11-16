@@ -31,8 +31,12 @@ const METADATA_QUERY_KEYS = ["width", "height", "pages"] as const;
  */
 const INLINE_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
 
-/** Providers reject an image wider or taller than this, failing the whole request. */
-const INLINE_IMAGE_MAX_SIDE_PX = 8000;
+/**
+ * Anthropic rejects every image over 3000 px per side once a request carries
+ * more than 20 images, counting images resent from history. Since history
+ * resends every inline image, a larger one would fail every later call.
+ */
+const INLINE_IMAGE_MAX_SIDE_PX = 3000;
 
 /** Upper bound, in bytes, on inbound PDFs that hydrate as inline bytes. */
 const INLINE_PDF_MAX_BYTES = 20 * 1024 * 1024;
@@ -124,7 +128,7 @@ export function decodeSandboxRef(value: URL | string): SandboxRef {
 /**
  * Whether an attachment ref reaches the model as bytes as well as its label.
  * Only shapes every major provider reads natively qualify: PNG, JPEG, GIF,
- * and WebP images up to 3 MiB and 8000 px per side, and PDFs up to 20 MiB.
+ * and WebP images up to 3 MiB and 3000 px per side, and PDFs up to 20 MiB.
  * Staging verifies these media types from the bytes. Pure in the ref, so a
  * message renders the same way on every model call.
  */

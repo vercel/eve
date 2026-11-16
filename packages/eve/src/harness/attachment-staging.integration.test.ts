@@ -863,7 +863,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
           mediaType: "image/heic",
           type: "file",
         },
-        { data: pngBytes(8001, 10), filename: "wide.png", mediaType: "image/png", type: "file" },
+        { data: pngBytes(3001, 10), filename: "wide.png", mediaType: "image/png", type: "file" },
         { data: pngBytes(4, 4), filename: "real.jpg", mediaType: "image/jpeg", type: "file" },
       ] as UserContent),
     )) as FilePart[];

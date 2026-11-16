@@ -101,7 +101,7 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
       "- To read later sections, call this tool again with a larger offset.",
       '- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents "foo\\n", you will receive "1: foo\\n".',
       "- Any line longer than 2000 characters is truncated.",
-      "- PNG, JPEG, GIF, and WebP images up to 3 MiB and PDFs up to 20 MiB are shown to you as files, including files named in `Attached file <path>` references.",
+      "- PNG, JPEG, GIF, and WebP images up to 3 MiB and 3000 pixels per side, and PDFs up to 20 MiB, are shown to you as files, including files named in `Attached file <path>` references.",
       "- Call this tool in parallel when you know there are multiple files you want to read.",
       "- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.",
     ].join("\n"),
