@@ -1,10 +1,22 @@
-import { renderInteractionBlocks } from "eve/channels/slack";
-import type { SlackInteractionCard } from "eve/channels/slack";
-import { emptySessionView } from "eve/events";
-import type { Interaction } from "eve/events";
+import {
+  ANSWER_ACTION_PREFIX,
+  renderInteractionBlocks,
+} from "eve/channels/slack";
+import type { SlackInteractionCard, SlackThread } from "eve/channels/slack";
+import { emptySessionView, foldEvents } from "eve/events";
+import type { Interaction, InteractionOpened } from "eve/events";
+import type { HookEvent } from "eve/hooks";
 import { beforeEach, expect, it, vi } from "vitest";
 
+// Exercise eve's actual swallowing dispatcher, renderer chain, and native cards.
+import { callAdapterEventHandler } from "../../../../node_modules/eve/dist/src/channel/adapter.js";
+import { defaultInteractionEvents } from "../../../../node_modules/eve/dist/src/public/channels/slack/defaults.js";
 import {
+  composeInteractionCards,
+  composeSlackRenderers,
+} from "../../../../node_modules/eve/dist/src/public/channels/slack/renderers.js";
+import {
+  channelEventContext,
   interactionOpenedHarness,
   slackEventContext,
 } from "../../testing/slack";
@@ -15,7 +27,14 @@ import type { SlackInteractionsConfig } from "./interactions";
 const request: Interaction = {
   call: { callId: "call-1", input: {}, name: "guarded" },
   interactionId: "approval-1",
-  request: { kind: "approval", prompt: "Approve this action?" },
+  request: {
+    kind: "approval",
+    options: [
+      { id: "approve", label: "Approve" },
+      { id: "deny", label: "Deny" },
+    ],
+    prompt: "Approve this action?",
+  },
   status: "open",
   stepIndex: 0,
   turnId: "turn-1",
@@ -56,41 +75,160 @@ it("leaves sign-in delivery private and never builds a preview", async () => {
   expect(harness.next).toHaveBeenCalledOnce();
 });
 
-it("checkpoints confirmed preview delivery after controls and reuses it on replay", async () => {
-  const onPosted = vi.fn();
-  const harness = interactionOpenedHarness(request);
-  const opened = handler({
-    details: () => ({ blocks: [], onPosted, text: "Frozen scope" }),
-  });
-  await harness.run(opened);
-  await harness.run(opened);
-  expect(harness.channel.thread.post).toHaveBeenCalledOnce();
-  expect(harness.next).toHaveBeenCalledTimes(2);
-  expect(onPosted).toHaveBeenCalledWith("posted-ts");
-  expect(harness.next.mock.invocationCallOrder[0]).toBeLessThan(
-    onPosted.mock.invocationCallOrder[0] ?? 0
-  );
-});
-
-it("does not unlock publication if native rendering fails, and reuses the delivered preview on retry", async () => {
-  const onPosted = vi.fn();
-  const harness = interactionOpenedHarness(request);
-  const opened = handler({
-    details: () => ({ blocks: [], onPosted, text: "Frozen scope" }),
-  });
-  harness.next.mockRejectedValueOnce(new Error("Controls delivery failed"));
-  await expect(harness.run(opened)).rejects.toThrow("Controls delivery failed");
-  expect(onPosted).not.toHaveBeenCalled();
-  await harness.run(opened);
-  expect(harness.channel.thread.post).toHaveBeenCalledOnce();
-  expect(onPosted).toHaveBeenCalledExactlyOnceWith("posted-ts");
-});
-
 const later: Interaction = {
   ...request,
   call: { callId: "call-2", input: {}, name: "publish_contentful_entry" },
   interactionId: "approval-2",
 };
+const unavailable = (): never => {
+  throw new Error("Unexpected adapter context access");
+};
+
+const batchDispatcher = (failure?: "preview" | "controls") => {
+  const timeline: string[] = [];
+  let pendingFailure = failure;
+  let sequence = 0;
+  const post = vi.fn<SlackThread["post"]>((message) => {
+    const json = JSON.stringify(message);
+    let kind = "details";
+    if (json.includes(ANSWER_ACTION_PREFIX)) {
+      kind = "controls";
+    } else if (json.includes("Publication scope")) {
+      kind = "preview";
+    }
+    if (kind === pendingFailure) {
+      pendingFailure = undefined;
+      throw new Error(`Failed ${kind}`);
+    }
+    timeline.push(kind);
+    sequence += 1;
+    return Promise.resolve({ id: `posted-${sequence}`, raw: { ok: true } });
+  });
+  const channel = slackEventContext({ thread: { post } });
+  const onPosted = vi.fn(() => timeline.push("checkpoint"));
+  const renderer = createInteractionRenderer({
+    details: (item) =>
+      item.interactionId === later.interactionId
+        ? { blocks: [], onPosted, text: "Publication scope" }
+        : undefined,
+  });
+  const native = defaultInteractionEvents(
+    undefined,
+    composeInteractionCards([renderer])
+  );
+  const chain = composeSlackRenderers([renderer], {
+    events: native,
+    received: () => Promise.resolve(),
+    taskCard: () => null,
+  });
+  const opened: InteractionOpened[] = [request, later].map((item) => ({
+    data: {
+      interactionId: item.interactionId,
+      request: item.request,
+      subject: { callId: item.call?.callId ?? "call-1" },
+    },
+    type: "interaction.opened",
+  }));
+  const facts: HookEvent[] = [
+    {
+      data: {
+        cause: { deliveryId: "delivery-1" },
+        follows: null,
+        turnId: request.turnId,
+      },
+      type: "turn.started",
+    },
+    ...[request, later].map((item) => ({
+      data: {
+        callId: item.call?.callId ?? "call-1",
+        capability: {
+          kind: "tool" as const,
+          name: item.call?.name ?? "guarded",
+        },
+        input: {},
+        owner: { turnId: item.turnId },
+      },
+      type: "call.requested" as const,
+    })),
+    ...opened,
+  ];
+  const view = foldEvents(
+    emptySessionView(),
+    facts.map((event, index) => ({
+      ...event,
+      meta: {
+        at: "2026-10-10T00:00:00.000Z",
+        endOfLine: index === facts.length - 1,
+        position: { index, line: 0 },
+      },
+    }))
+  );
+  const ctx = { ...channelEventContext(channel), view };
+  const adapter = {
+    "interaction.opened": (event: InteractionOpened) =>
+      chain.events["interaction.opened"]?.(event, ctx),
+    kind: "slack-test",
+  };
+  const dispatch = async (index: number) => {
+    const event = opened[index];
+    if (!event) {
+      throw new Error("Missing interaction event");
+    }
+    await callAdapterEventHandler(adapter, event, {
+      ctx: {
+        ensure: unavailable,
+        get: unavailable,
+        has: unavailable,
+        require: unavailable,
+        set: unavailable,
+      },
+      session: ctx.session,
+      state: {},
+    });
+  };
+  return { dispatch, onPosted, post, timeline };
+};
+
+it("checkpoints native control delivery only on the leader and reuses previews on leader replay", async () => {
+  const harness = batchDispatcher();
+  await harness.dispatch(0);
+  await harness.dispatch(1);
+  expect(harness.timeline).toEqual(["preview", "controls", "checkpoint"]);
+  expect(harness.onPosted).toHaveBeenCalledExactlyOnceWith("posted-1");
+  const controls = JSON.stringify(
+    harness.post.mock.calls.find(([message]) =>
+      JSON.stringify(message).includes(ANSWER_ACTION_PREFIX)
+    )
+  );
+  expect(controls).toContain(request.interactionId);
+  expect(controls).toContain(later.interactionId);
+  await harness.dispatch(0);
+  expect(harness.timeline.filter((kind) => kind === "preview")).toHaveLength(1);
+  expect(harness.onPosted).toHaveBeenCalledTimes(2);
+});
+
+it.each(["preview", "controls"] as const)(
+  "fails closed when the dispatcher swallows a leader %s failure and continues to the nonleader",
+  async (failure) => {
+    const harness = batchDispatcher(failure);
+    await harness.dispatch(0);
+    await harness.dispatch(1);
+    expect(harness.timeline.filter((kind) => kind === "preview")).toHaveLength(
+      1
+    );
+    expect(harness.timeline).not.toContain("controls");
+    expect(harness.onPosted).not.toHaveBeenCalled();
+    await harness.dispatch(1);
+    expect(harness.onPosted).not.toHaveBeenCalled();
+    await harness.dispatch(0);
+    expect(harness.timeline.filter((kind) => kind === "preview")).toHaveLength(
+      1
+    );
+    expect(harness.timeline.slice(-2)).toEqual(["controls", "checkpoint"]);
+    expect(harness.onPosted).toHaveBeenCalledOnce();
+  }
+);
+
 const publicationDetails: SlackInteractionsConfig["details"] = (item) =>
   item.call?.name === "publish_contentful_entry"
     ? { blocks: [], text: "Publication scope" }

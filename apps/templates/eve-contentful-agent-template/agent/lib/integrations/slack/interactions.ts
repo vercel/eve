@@ -18,7 +18,7 @@ import { isObject, isString } from "../../values";
 interface InteractionDetails {
   /** Block Kit blocks for the message, at most 50. */
   blocks: unknown[];
-  /** Runs after Slack confirms the preview and eve renders the group's controls, including on replay. */
+  /** Runs after Slack confirms the preview and eve successfully renders this request's controls, including on leader replay. */
   onPosted?: (messageId: string) => void;
   /** Notification and accessibility text for the message. */
   text: string;
@@ -130,7 +130,7 @@ const batchOf = (view: SessionView, request: Interaction): Interaction[] => {
  * @param request - Open approval or question whose details to deliver.
  * @param details - Hook that returns the details, or undefined when the request has none.
  * @param thread - Slack thread the details post to.
- * @returns A checkpoint to run after native controls render, or undefined when no details apply.
+ * @returns A checkpoint to run after this request's native controls render, or undefined when no details apply.
  * @throws {@link Error} When the details exceed Slack's block limit or Slack doesn't confirm delivery.
  */
 const deliverDetails = async (
@@ -174,60 +174,72 @@ const deliverDetails = async (
  *
  * @param config - Optional details and labels for requests such as Contentful publication plans.
  * @returns A renderer that wraps eve's default interaction rendering.
- * @remarks eve posts the controls for every request opened in the same step while it handles the first of them, so each event delivers the details of every open request from its step before handing on, and a failed delivery stops eve's controls for that group. Saved deliveries keep each details message to one post. eve remains responsible for signed responder authentication, answer admission, and updating its cards once a request is answered or ends. Details messages stay in the thread as a record of what was asked.
+ * @remarks Each event delivers the details of every open request from its step before handing on. Only successful native rendering of a request's controls checkpoints its preview; eve's nonleader events are no-ops, not retries of failed controls. Recovery requires replaying the batch leader, reusing saved preview deliveries, or cancelling and asking for approval again. eve remains responsible for signed responder authentication, answer admission, and updating its cards once a request is answered or ends. Details messages stay in the thread as a record of what was asked.
  */
 export const createInteractionRenderer = (
   config: SlackInteractionsConfig = {}
-): SlackRenderer => ({
-  events: {
-    async "interaction.opened"(event, ctx, renderNext) {
-      const { details } = config;
-      if (
-        !details ||
-        event.data.request.kind === "sign-in" ||
-        !("thread" in ctx.channel)
-      ) {
-        return renderNext();
-      }
-      const current = interaction(ctx.view, event.data.interactionId);
-      if (!current) {
-        throw new Error("Could not read the pending Slack interaction.");
-      }
-      const confirmations: (() => void)[] = [];
-      for await (const request of batchOf(ctx.view, current)) {
-        const confirm = await deliverDetails(
-          request,
-          details,
-          ctx.channel.thread
-        );
-        if (confirm) {
-          confirmations.push(confirm);
+): SlackRenderer => {
+  const rendering = new WeakMap<SessionView, Set<string>>();
+  return {
+    events: {
+      async "interaction.opened"(event, ctx, renderNext) {
+        const { details } = config;
+        if (
+          !details ||
+          event.data.request.kind === "sign-in" ||
+          !("thread" in ctx.channel)
+        ) {
+          return renderNext();
         }
-      }
-      await renderNext();
-      for (const confirm of confirmations) {
-        confirm();
-      }
-    },
-  },
-  interactionCard(card, renderDefault) {
-    const labels = config.labels?.(card.interaction);
-    if (!labels) {
-      return renderDefault(card);
-    }
-    const parts = renderDefault({
-      ...card,
-      interaction: relabelRequest(card.interaction, labels),
-    });
-    if (card.interaction.status !== "open") {
-      return parts;
-    }
-    return {
-      ...parts,
-      controls: {
-        ...parts.controls,
-        blocks: relabelBlocks(parts.controls.blocks, labels),
+        const current = interaction(ctx.view, event.data.interactionId);
+        if (!current) {
+          throw new Error("Could not read the pending Slack interaction.");
+        }
+        const confirmations = new Map<string, () => void>();
+        for await (const request of batchOf(ctx.view, current)) {
+          const confirm = await deliverDetails(
+            request,
+            details,
+            ctx.channel.thread
+          );
+          if (confirm) {
+            confirmations.set(request.interactionId, confirm);
+          }
+        }
+        // A nonleader's next() is a no-op. Native interactionCard visits identify
+        // the requests this invocation actually renders, without reading private state.
+        const rendered = new Set<string>();
+        rendering.set(ctx.view, rendered);
+        try {
+          await renderNext();
+          for (const id of rendered) {
+            confirmations.get(id)?.();
+          }
+        } finally {
+          rendering.delete(ctx.view);
+        }
       },
-    };
-  },
-});
+    },
+    interactionCard(card, renderDefault) {
+      rendering.get(card.view)?.add(card.interaction.interactionId);
+      const labels = config.labels?.(card.interaction);
+      if (!labels) {
+        return renderDefault(card);
+      }
+      const parts = renderDefault({
+        ...card,
+        interaction: relabelRequest(card.interaction, labels),
+      });
+      if (card.interaction.status !== "open") {
+        return parts;
+      }
+      return {
+        ...parts,
+        controls: {
+          ...parts.controls,
+          blocks: relabelBlocks(parts.controls.blocks, labels),
+        },
+      };
+    },
+  };
+};
