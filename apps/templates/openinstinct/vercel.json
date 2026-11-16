@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm turbo run build:vercel",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "routes": [
+    {
+      "src": "^/internal/scheduled-run/(report|respond)$",
+      "destination": {
+        "type": "service",
+        "service": "eve"
+      }
+    }
+  ]
+}

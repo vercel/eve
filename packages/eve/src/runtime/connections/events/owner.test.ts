@@ -38,9 +38,11 @@ vi.mock("#internal/workflow/runtime.js", () => ({
     };
   },
 }));
-vi.mock("#execution/workflow-runtime.js", () => ({
+vi.mock("#execution/workflow-references.js", () => ({
   connectionEventWorkflowReference: { workflowId: "watch" },
   connectionEventDeliveryWorkflowReference: { workflowId: "delivery" },
+}));
+vi.mock("#execution/workflow-runtime.js", () => ({
   startWorkflowOnCurrentDeployment: started,
 }));
 

@@ -1,4 +1,6 @@
+import { validateScheduleTimezone } from "#shared/schedule-timezone.js";
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
+import { normalizeAgentApproval } from "#internal/authored-definition/approval.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -54,6 +56,7 @@ export function normalizeAgentDefinition(
   expectOnlyKnownKeys(
     record,
     [
+      "approval",
       "build",
       "compaction",
       "defaultTools",
@@ -125,6 +128,10 @@ export function normalizeAgentDefinition(
 
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
+  }
+
+  if (record.approval !== undefined) {
+    definition.approval = normalizeAgentApproval(record.approval, message);
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;
@@ -457,7 +464,7 @@ function normalizeSkillFiles(
  */
 export function normalizeScheduleDefinition(value: unknown, message: string): ScheduleDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["cron", "content", "run"], message);
+  expectOnlyKnownKeys(record, ["cron", "timezone", "content", "run"], message);
 
   const cron = expectString(record.cron, message);
   const hasContent = record.content !== undefined;
@@ -474,7 +481,22 @@ export function normalizeScheduleDefinition(value: unknown, message: string): Sc
     );
   }
 
-  const definition: { cron: string; content?: string; run?: ScheduleRunHandler } = { cron };
+  const definition: {
+    cron: string;
+    timezone?: string;
+    content?: string;
+    run?: ScheduleRunHandler;
+  } = { cron };
+  if (record.timezone !== undefined) {
+    try {
+      if (typeof record.timezone !== "string") {
+        throw new Error('Expected "timezone" to be an IANA timezone string.');
+      }
+      definition.timezone = validateScheduleTimezone(record.timezone);
+    } catch (error) {
+      throw new Error(`${message} ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   if (hasContent) {
     definition.content = expectString(record.content, message);

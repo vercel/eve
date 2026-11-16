@@ -1,3 +1,4 @@
+// @linux-only: dispatch credential binding
 import { expect, it } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
@@ -6,19 +7,23 @@ import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.j
 import { hydrateDurableSession } from "#execution/session.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { withPublished } from "#internal/testing/session-machine.js";
-import { ReactionsStateKey } from "#reactions/state.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { DefinitionsStateKey } from "#definitions/state.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { ChannelKey, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 it("binds dynamic remote credentials to the dispatch checkpoint's parent view", async () => {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, "parent-session");
   ctx.set(ChannelKey, { kind: "http", state: {} } as never);
-  ctx.set(BundleKey, {
-    resolvedAgent: { config: {} },
-    turnAgent: { id: "parent", tools: [], system: "Help Alice.", model: { id: "test/model" } },
-    subagentRegistry: { subagentsByName: new Map() },
-  } as never);
-  ctx.set(ReactionsStateKey, {
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      resolvedAgent: { config: {} },
+      turnAgent: { id: "parent", tools: [], system: "Help Alice.", model: { id: "test/model" } },
+      subagentRegistry: { subagentsByName: new Map() },
+    } as never),
+  );
+  ctx.set(DefinitionsStateKey, {
     latest: {},
     slots: {
       "subagent:subagents/reviewer": {
@@ -37,10 +42,7 @@ it("binds dynamic remote credentials to the dispatch checkpoint's parent view", 
     { sequence: 0, turnId: "turn_0" },
   );
   const scope = { runId: "model_0", turnId: "turn_0" };
-  const session = hydrateDurableSession({
-    durable: readDurableSession(checkpoint),
-    turnAgent: ctx.require(BundleKey).turnAgent,
-  });
+  const session = hydrateDurableSession(readDurableSession(checkpoint));
   const requested = withPublished({ ...session, history: [] }, [
     { type: "model.requested", data: { runId: "model_0", owner: { turnId: "turn_0" } }, scope },
   ]);

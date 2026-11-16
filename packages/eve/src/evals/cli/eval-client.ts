@@ -11,7 +11,8 @@ import type { EveEvalTargetHandle } from "#evals/types.js";
 
 /**
  * Synchronous {@link ClientOptions} for an eval target: local needs no auth,
- * remote stays anonymous unless `EVE_EVAL_AUTH_TOKEN` sets a static bearer.
+ * remote stays anonymous unless `EVE_EVAL_AUTH_TOKEN` sets a static bearer or
+ * `EVE_EVAL_OIDC_TOKEN` sets a token for Vercel Trusted Sources.
  * Ambient Vercel credentials need the async {@link createEvalClient}.
  */
 export function resolveEvalClientOptions(
@@ -23,8 +24,17 @@ export function resolveEvalClientOptions(
 
   const options = resolveDevelopmentClientOptions(target.url);
   const explicitToken = process.env.EVE_EVAL_AUTH_TOKEN?.trim();
+  const oidcToken = process.env.EVE_EVAL_OIDC_TOKEN?.trim();
+  if (explicitToken && oidcToken) {
+    throw new Error(
+      "Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both: each one replaces the remote target's authorization.",
+    );
+  }
   if (explicitToken) {
     return { ...options, auth: { bearer: explicitToken }, redirect: "manual" };
+  }
+  if (oidcToken) {
+    return { ...options, auth: { vercelOidc: { token: oidcToken } }, redirect: "manual" };
   }
 
   return options;

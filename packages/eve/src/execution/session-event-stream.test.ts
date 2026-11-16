@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
 import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
@@ -11,6 +12,9 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getRun: (...args: unknown[]) => getRunMock(...args),
   getWorld: async () => ({ runs: { get: getRunMetadataMock } }),
 }));
+
+// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
+installWorkflowHost();
 
 const encoder = new TextEncoder();
 

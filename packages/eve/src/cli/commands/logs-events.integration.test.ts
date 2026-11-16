@@ -12,6 +12,7 @@ import { encodeLine } from "#protocol/session-events/envelope.js";
 
 import { readDevSessionEvents } from "./logs-events.js";
 
+// It reads the runs `eve dev`'s local Workflow world stores, so it stays on Workflow.
 describe("readDevSessionEvents", () => {
   const roots: string[] = [];
 

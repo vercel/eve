@@ -10,14 +10,13 @@ import { idle } from "#protocol/session-projection/selectors.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createAttachSessionFn, type Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ConversationSpace } from "#shared/conversation-context.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
 import type { ApprovalPrompt, ApprovalResponsePolicy } from "#approval/definition.js";
@@ -29,7 +28,7 @@ import {
   askDayAndTimeWorkflow,
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
-import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { conformanceHost, type ConformanceHost, type ConformanceHostKind } from "./hosts.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationRequiredError,
@@ -78,6 +77,11 @@ export interface ShownMessage {
    * Slack's ephemeral messages.
    */
   readonly onlyPerson?: boolean;
+  /**
+   * The call took the message `id` away, such as Slack deleting an ephemeral
+   * message through its `response_url`. A person no longer sees it at all.
+   */
+  readonly removed?: true;
 }
 
 /** What a client shows a person, and whether anyone else in the conversation sees it too. */
@@ -108,6 +112,8 @@ export type ChannelCapability =
   | "another-person"
   /** A person can press a rendered choice. */
   | "buttons"
+  /** The sign-in prompt offers a Cancel a person can press to give up on the held request. */
+  | "sign-in-cancel"
   /** A person can send a plain-text message to the conversation. */
   | "text-replies";
 
@@ -179,6 +185,12 @@ export interface ChannelDriver {
   /** How the person driving the conversation appears in the platform's text, in any form. */
   readonly personShownAs?: readonly string[];
   /**
+   * Where the driver's conversation happens on the platform, as its channel
+   * must report it in `ctx.conversation.space`. Omit for a channel that
+   * reports no space, so a channel that starts reporting one updates its driver.
+   */
+  readonly space?: ConversationSpace;
+  /**
    * The address a person's next message continues, when it continues one the
    * bot claimed, such as the Telegram message it replies to. The harness waits
    * for the session to claim it before sending.
@@ -243,6 +255,12 @@ export interface ChannelConversation {
   shownTexts(): Promise<readonly string[]>;
   /** Every choice the bot's messages let a person press now, newest message first. */
   shownOptions(): Promise<readonly RenderedOption[]>;
+  /**
+   * What a person sees now: each message at its latest edit, without the ones
+   * the bot removed. Unlike {@link shownTexts}, a message that once showed
+   * something but no longer does isn't counted.
+   */
+  visible(): Promise<readonly ShownText[]>;
   /** Waits for the turn to hold for a sign-in, however the channel shows it. */
   waitForSignIn(): Promise<void>;
   /**
@@ -278,6 +296,13 @@ export interface ChannelConversation {
    * that begins with the principal id.
    */
   callersOf(tool: typeof PLAIN_TOOL): readonly (string | null)[];
+  /**
+   * The space each run of `tool` saw in `ctx.conversation.space`, in order,
+   * or `null` for none.
+   */
+  spacesOf(tool: typeof PLAIN_TOOL): readonly (ConversationSpace | null)[];
+  /** Where the conversation happens, as the driver says the channel must report it; `undefined` for none. */
+  readonly space: ConversationSpace | undefined;
 }
 
 /**
@@ -294,6 +319,8 @@ export interface ClientDriver {
    * that origin from the eve channel's routes until the client closes.
    */
   open(host: string, wait: Wait): Promise<ClientView>;
+  /** Releases what the client keeps between cells, once the file's last cell is done. */
+  dispose?(): Promise<void>;
 }
 
 /** A running client, as a person sees and uses it. */
@@ -315,10 +342,17 @@ export interface ClientView {
   readonly personShownAs?: readonly string[];
   /** Alice's id on the platform; a client authenticates her as {@link CLIENT_PERSON}. */
   readonly personId?: string;
+  /** See {@link ChannelDriver.space}. */
+  readonly space?: ConversationSpace;
   /** See {@link ChannelDriver.nextAddress}. */
   nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
   shown(): readonly ShownText[] | Promise<readonly ShownText[]>;
+  /**
+   * What the client shows now, each message at its latest edit and without
+   * removed ones; {@link shown} when unset, for clients that render only the present.
+   */
+  visible?(): readonly ShownText[] | Promise<readonly ShownText[]>;
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -422,6 +456,8 @@ const CLIENT_PERSON = {
 export interface ConversationOptions {
   /** The test agent's session usage limits. */
   readonly limits?: AgentLimitsDefinition;
+  /** The host the conversation's sessions run on; Workflow when omitted. */
+  readonly host?: ConformanceHostKind;
   readonly waitTimeoutMs?: number;
 }
 
@@ -590,16 +626,42 @@ function webhookView(
     },
     personShownAs: driver.personShownAs ?? [],
     personId: driver.personId,
+    ...(driver.space !== undefined && { space: driver.space }),
     nextAddress: driver.nextAddress?.bind(driver),
     shown: () => [
       ...calls.flatMap((call) => {
         const shown = driver.shownMessage?.(call);
+        if (shown?.removed === true) return [];
         if (shown !== undefined) return [shownText(shown)];
         const text = driver.postedText(call);
         return text === undefined ? [] : [{ onlyPerson: false, options: [], text }];
       }),
       ...answered.map(shownText),
     ],
+    visible() {
+      // One slot per message, holding its latest edit. Without `shownMessage` a driver can't tie
+      // an edit to the message it rewrites, so each of its posts and edits is its own message.
+      const latest = new Map<string, ShownMessage>();
+      const order: (string | ShownText)[] = [];
+      for (const call of calls) {
+        const shown = driver.shownMessage?.(call);
+        if (shown === undefined) {
+          const text = driver.postedText(call);
+          if (text !== undefined) order.push({ onlyPerson: false, options: [], text });
+          continue;
+        }
+        if (!latest.has(shown.id)) order.push(shown.id);
+        latest.set(shown.id, shown);
+      }
+      return [
+        ...order.flatMap((slot) => {
+          if (typeof slot !== "string") return [slot];
+          const shown = latest.get(slot)!;
+          return shown.removed === true ? [] : [shownText(shown)];
+        }),
+        ...answered.map(shownText),
+      ];
+    },
     describe,
     close: async () => {},
   };
@@ -653,6 +715,7 @@ async function converse(
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
   const callers: (string | null)[] = [];
+  const spaces: (ConversationSpace | null)[] = [];
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [REQUESTER_GATED_TOOL]: 0,
@@ -709,6 +772,7 @@ async function converse(
             execute: async (_input, ctx) => {
               runs[PLAIN_TOOL] += 1;
               callers.push(callerKey(ctx.session.auth.current));
+              spaces.push(ctx.conversation?.space ?? null);
               return { notes: "Bob's review notes" };
             },
             inputSchema: z.object({}),
@@ -790,15 +854,16 @@ async function converse(
     const entry = bundle.graph.root.channels.find((candidate) => candidate.name === channelName);
     if (entry?.adapter === undefined) throw new Error(`Expected the ${channelName} adapter.`);
     const { adapter, turnPolicy } = entry;
-    const workflowRuntime = createWorkflowRuntime({ compiledArtifactsSource });
+    const host = conformanceHost(options.host ?? "workflow", compiledArtifactsSource);
+    const sessionRuntime = host.runtime;
     // Mirrors the route arguments production channel dispatch builds for each request.
     const operations = createChannelOperations({
       adapter,
       channelName,
-      runtime: workflowRuntime,
+      runtime: sessionRuntime,
       turnPolicy,
     });
-    const attachSession = createAttachSessionFn(workflowRuntime, {
+    const attachSession = createAttachSessionFn(sessionRuntime, {
       channelKind: adapter.kind,
       channelName,
       turnPolicy,
@@ -813,7 +878,11 @@ async function converse(
       return delivery;
     }
 
-    const dispatch: Dispatch = async (request) => {
+    // A client's origin can outlive this conversation and serve its requests from the async
+    // context it started in, another conversation's runtime session. Each request runs in this
+    // one's, so the deliveries it starts resolve this agent's compiled modules.
+    const dispatch: Dispatch = (request) => runtime.run(() => serve(request));
+    const serve: Dispatch = async (request) => {
       const { params, route } = findRoute(channel, request);
       const pending: Promise<unknown>[] = [];
       const args = attachRouteSessionCreator<RouteHandlerArgs>(
@@ -849,7 +918,7 @@ async function converse(
             input.deliveryId === undefined
               ? generated
               : { ...generated, deliveryId: input.deliveryId };
-          const handle = await workflowRuntime.createSession({
+          const handle = await sessionRuntime.createSession({
             ...input,
             delivery,
             adapter,
@@ -869,7 +938,12 @@ async function converse(
       return { response, settled };
     };
 
-    const view = await open(dispatch);
+    // Until the conversation's own cleanup below takes over, a failed open still releases the
+    // host, which an in-process one registers process-wide.
+    const view = await open(dispatch).catch(async (error: unknown) => {
+      await host.dispose().catch(() => {});
+      throw error;
+    });
     const replyWait = <T>(label: string, select: (reply: string) => T | undefined) =>
       wait(
         label,
@@ -890,7 +964,7 @@ async function converse(
 
     const conversation: ChannelConversation = {
       async say(text, person = "alice", files) {
-        await waitForStepsToFinish([...sessions.values()], wait);
+        await waitForStepsToFinish(host, [...sessions.values()], wait);
         // A step can be done before its aliases are claimed; see waitForAddress.
         const address = view.nextAddress?.();
         if (address !== undefined) await waitForAddress(address);
@@ -960,6 +1034,7 @@ async function converse(
         ),
       shownOptions: async () => (await view.shown()).toReversed().flatMap(({ options }) => options),
       shownTexts: async () => (await view.shown()).map(({ text }) => text),
+      visible: async () => await (view.visible ?? view.shown).call(view),
       sharedText: async () =>
         (await view.shown())
           .filter((shown) => !shown.onlyPerson)
@@ -987,10 +1062,11 @@ async function converse(
       },
       runsOf: (tool) => runs[tool],
       callersOf: () => callers,
-      waitForRest: () => waitForRest([...sessions.values()], wait),
+      spacesOf: () => spaces,
+      waitForRest: () => waitForRest(host, [...sessions.values()], wait),
       async cancelRunsInWorld() {
-        await waitForStepsToFinish([...sessions.values()], wait);
-        await Promise.all([...sessions.keys()].map((runId) => getRun(runId).cancel()));
+        await waitForStepsToFinish(host, [...sessions.values()], wait);
+        await Promise.all([...sessions.keys()].map((runId) => host.cancelRunOutsideEve(runId)));
         runsCancelledInWorld = true;
         // A cancelled run never rests, so there is nothing left to settle.
         sessions.clear();
@@ -1001,6 +1077,7 @@ async function converse(
       },
       personShownAs: view.personShownAs ?? [],
       personId: view.personId ?? CLIENT_PERSON.principalId,
+      space: view.space,
     };
 
     /**
@@ -1010,15 +1087,10 @@ async function converse(
      * finds no session.
      */
     async function waitForAddress(address: string): Promise<void> {
-      const world = await getWorld();
-      const token = sessionInboxHookToken(`${channelName}:${address}`);
+      const token = `${channelName}:${address}`;
       await wait(
         `the channel to claim the address "${address}"`,
-        () =>
-          world.hooks.getByToken(token).then(
-            () => true,
-            () => undefined,
-          ),
+        async () => ((await host.addressClaimed(token)) ? true : undefined),
         () => "",
       );
     }
@@ -1058,7 +1130,7 @@ async function converse(
     // The test file's workflow world closes after its last test, so a session
     // still writing then fails with an unhandled rejection.
     const settle = async () => {
-      await Promise.all([...sessions.values()].map(cancelUntilResting));
+      await Promise.all([...sessions.values()].map((session) => cancelUntilResting(host, session)));
       await Promise.all(background);
     };
     try {
@@ -1066,28 +1138,28 @@ async function converse(
     } catch (error) {
       await view.close().catch(() => {});
       await settle().catch(() => {});
+      await host.dispose().catch(() => {});
       throw error;
     }
     await view.close();
     await settle();
+    await host.dispose();
   });
 }
-
-const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /**
  * Cancels `session` until it rests: idle, as the shared fold reads its stream, with none of its
  * steps still running. A turn that starts after the first cancel needs another. A cancel is a
  * delivery the stream records, so a resting session isn't cancelled again.
  */
-async function cancelUntilResting(session: Session): Promise<void> {
+async function cancelUntilResting(host: ConformanceHost, session: Session): Promise<void> {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   let last: string | undefined;
   let running: string[] = [];
   while (Date.now() < deadline) {
     const events = await readThroughTail(session);
     last = events.at(-1)?.type;
-    running = await runningSteps(session);
+    running = await host.runningSteps(session.id);
     if (idle(viewOfEvents(events).view) && running.length === 0) return;
     await session.cancel();
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -1126,68 +1198,76 @@ async function readThroughTail(session: Session, startIndex = 0): Promise<Sessio
   return events;
 }
 
-/** The names of `session`'s steps that haven't finished. */
-async function runningSteps(session: Session): Promise<string[]> {
-  const world = await getWorld();
-  const steps = await world.steps.list({ resolveData: "none", runId: session.id });
-  return steps.data
-    .filter((step) => !TERMINAL_STEP_STATUSES.has(step.status))
-    .map((step) => `${step.stepName} (${step.status})`);
-}
-
 /**
  * Waits until no session has a step running. A person writes once the bot has
  * finished, and a channel claims the address of a message it posted, such as
  * the Telegram message a person replies to, only once the step that posted it
  * commits. Writing sooner starts a second session instead of continuing this one.
  */
-async function waitForStepsToFinish(sessions: readonly Session[], wait: Wait): Promise<void> {
+async function waitForStepsToFinish(
+  host: ConformanceHost,
+  sessions: readonly Session[],
+  wait: Wait,
+): Promise<void> {
   await wait(
     "every session's steps to finish",
     async () => {
-      const running = await Promise.all(sessions.map(runningSteps));
+      const running = await Promise.all(sessions.map((session) => host.runningSteps(session.id)));
       return running.every((steps) => steps.length === 0) ? true : undefined;
     },
     () => "",
   );
 }
 
-/** How long a session's stream must stay unchanged to count as resting. */
-const REST_QUIET_MS = 250;
-
 /**
  * Waits until each session's stream ends waiting on its next message or on a
- * person, with no step running, and stays that way. A response just delivered
- * may not have reached the stream yet, so one quiet read is not enough.
+ * person, with nothing in its host still working: a response just delivered is
+ * in flight until its session has read it, so a resting host has written what
+ * it does with it.
  */
-async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<void> {
-  const world = await getWorld();
-  let quietSince: number | undefined;
-  let lastTails = "";
+async function waitForRest(
+  host: ConformanceHost,
+  sessions: readonly Session[],
+  wait: Wait,
+): Promise<void> {
   await wait(
     "every session to rest",
     async () => {
-      const states = await Promise.all(
+      if (!(await settledWithin(host, REST_POLL_MS))) return undefined;
+      const resting = await Promise.all(
         sessions.map(async (session) => {
           const tail = await internalSession(session).getStreamTailIndex();
-          const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
-          const steps = await world.steps.list({ resolveData: "none", runId: session.id });
-          const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
-          return { resting: waiting && idle, tail };
+          const tailEvents = await readThroughTail(session, Math.max(tail, 0));
+          // A delivery the channel ignored settles alone, behind the turn it left waiting.
+          const waiting =
+            tailEvents.some(endsTurn) ||
+            (tailEvents.length > 0 &&
+              tailEvents.every(({ type }) => type.startsWith("delivery.")) &&
+              idle(viewOfEvents(await readThroughTail(session)).view));
+          return waiting && (await host.runningSteps(session.id)).length === 0;
         }),
       );
-      const tails = states.map((state) => state.tail).join(",");
-      const quiet = states.every((state) => state.resting) && tails === lastTails;
-      lastTails = tails;
-      if (!quiet) {
-        quietSince = undefined;
-        return undefined;
-      }
-      quietSince ??= Date.now();
-      return Date.now() - quietSince >= REST_QUIET_MS ? true : undefined;
+      return resting.every(Boolean) ? true : undefined;
     },
     () => "",
   );
+}
+
+/** How long one look at a host waits for it to settle, so a host that never does times out. */
+const REST_POLL_MS = 1_000;
+
+async function settledWithin(host: ConformanceHost, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      host.settled().then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Whether an event asks the person `prompt`. */

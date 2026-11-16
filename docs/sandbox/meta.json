@@ -1,13 +1,5 @@
 {
   "title": "Sandbox",
   "defaultOpen": false,
-  "pages": [
-    "index",
-    "default",
-    "vercel",
-    "docker",
-    "just-bash",
-    "custom-providers",
-    "troubleshooting"
-  ]
+  "pages": ["default", "vercel", "docker", "just-bash", "custom-providers", "troubleshooting"]
 }

@@ -6,7 +6,7 @@ import {
   isAuthoredTestPath,
   SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
 } from "#discover/filesystem.js";
-import type { AgentSourceManifest } from "#discover/manifest.js";
+import { type AgentSourceManifest, sourcesOf } from "#discover/manifest.js";
 import {
   bundleExtensionDistributionGraph,
   type ExtensionDistributionGraphEntry,
@@ -83,7 +83,7 @@ export async function emitExtensionDistribution(input: {
 function collectExtensionResourceRoots(manifest: AgentSourceManifest): string[] {
   return [
     ...manifest.sandboxWorkspaces.map((workspace) => workspace.sourcePath),
-    ...manifest.skills.flatMap((skill) =>
+    ...sourcesOf(manifest, "skill").flatMap((skill) =>
       skill.sourceKind === "skill-package" ? [skill.rootPath] : [],
     ),
     ...manifest.subagents.flatMap((subagent) => collectExtensionResourceRoots(subagent.manifest)),
@@ -236,7 +236,7 @@ async function createDistributionEntries(input: {
     await stageRuntimeBarrel({
       barrelPath: join(barrelRoot, "tools.mjs"),
       name: "tools/index",
-      reexports: input.manifest.tools.map((tool) => ({
+      reexports: sourcesOf(input.manifest, "tool").map((tool) => ({
         name: toolExportName(tool.logicalPath),
         path: join(input.sourceRoot, tool.logicalPath),
       })),
@@ -279,7 +279,7 @@ async function emitDeclarationBarrels(input: {
   });
   await writeDeclarationBarrel({
     path: join(input.stagedOutDir, "tools", "index.d.ts"),
-    reexports: input.manifest.tools.map((tool) => ({
+    reexports: sourcesOf(input.manifest, "tool").map((tool) => ({
       name: toolExportName(tool.logicalPath),
       specifier: relativeImport(
         join(input.stagedOutDir, "tools"),

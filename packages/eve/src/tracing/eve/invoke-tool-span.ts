@@ -162,11 +162,7 @@ async function traced(
     return await telemetry.suppressed!(() => events.run(run, undefined));
   }
   const content = applyLiveDeliveryAudienceCeiling(
-    {
-      ...decision,
-      recordInputs: settings.recordInputs && decision.recordInputs,
-      recordOutputs: settings.recordOutputs && decision.recordOutputs,
-    },
+    decision,
     conversation.audience,
     undefined,
     conversation.environment,

@@ -62,7 +62,7 @@ export function defaultInteractionCard(
 
 /**
  * How an answered or settled request reads: the answer's label, or how it ended without one,
- * and the notification text. The card and a direct-message request's thread note share it.
+ * and the notification text.
  */
 export function endingOf(interaction: Interaction): {
   readonly label: string;
@@ -77,6 +77,21 @@ export function endingOf(interaction: Interaction): {
   const label =
     outcome === "accepted" ? "Accepted" : outcome === "declined" ? "Declined" : "No longer needed";
   return { label, text: label };
+}
+
+/**
+ * How a private request's note in the shared thread reads once the request settles. The answer
+ * stays private: the note names an approval's decision, but for any other request only that it
+ * was answered.
+ */
+export function threadNoteEndingOf(interaction: Interaction): string {
+  const { answer, request } = interaction;
+  if (answer === undefined) return endingOf(interaction).text;
+  const option =
+    request.kind === "approval"
+      ? request.options?.find((candidate) => candidate.id === answer.optionId)
+      : undefined;
+  return option === undefined ? "Answered" : `Answered: ${escapeSlackText(option.label)}`;
 }
 
 function answeredSection(prompt: string, label: string, userId?: string): BlockKitBlock {

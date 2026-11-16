@@ -1,25 +1,3 @@
-import TurndownService from "#compiled/turndown/index.js";
-
-/**
- * Converts an HTML string to Markdown using Turndown.
- *
- * Removes `<script>`, `<style>`, `<meta>`, and `<link>` elements before
- * conversion to keep the output focused on document content.
- */
-export function convertHtmlToMarkdown(html: string): string {
-  const service = new TurndownService({
-    bulletListMarker: "-",
-    codeBlockStyle: "fenced",
-    emDelimiter: "*",
-    headingStyle: "atx",
-    hr: "---",
-  });
-
-  service.remove(["script", "style", "meta", "link"]);
-
-  return service.turndown(html);
-}
-
 /**
  * Strips HTML tags and extracts readable text content.
  *

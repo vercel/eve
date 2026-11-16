@@ -1,12 +1,15 @@
+// @linux-only: stranded-session recovery on Workflow
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import type { Runtime } from "#channel/types.js";
 import {
   EVE_SESSION_ATTRIBUTE,
+  EVE_TYPE_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { signalSessionTimeoutStep } from "#execution/session/timeout-steps.js";
@@ -14,7 +17,6 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
@@ -73,6 +75,33 @@ async function parkStrandedSuccessor(continuationToken: string) {
   );
   await waitForHook(owner, { token: sessionInboxHookToken(continuationToken) });
   return { anchor, owner };
+}
+
+/**
+ * Makes the World answer the way Vercel does once the deployment that started
+ * `runId` is deleted: looking up the run's payload key fails with a 404.
+ * Returns a function that restores the World.
+ */
+async function deleteOwnerDeployment(runId: string): Promise<() => void> {
+  const world = await getWorld();
+  const original = world.getEncryptionKeyForRun;
+  const getKey = async (run: string | { readonly runId: string }, context?: object) => {
+    if ((typeof run === "string" ? run : run.runId) === runId) {
+      const error = new Error(
+        `Failed to fetch run key for ${runId} (deployment dpl_deleted): HTTP 404 Not Found — {"error":{"code":"not_found","message":"Deployment not found."}}`,
+      );
+      error.name = "RunKeyFetchError";
+      throw Object.assign(error, { status: 404 });
+    }
+    return await (
+      original as ((...args: unknown[]) => Promise<Uint8Array | undefined>) | undefined
+    )?.call(world, run, context);
+  };
+  world.getEncryptionKeyForRun = getKey as NonNullable<typeof original>;
+  return () => {
+    if (original === undefined) delete world.getEncryptionKeyForRun;
+    else world.getEncryptionKeyForRun = original;
+  };
 }
 
 async function listEventIds(runId: string): Promise<string[]> {
@@ -216,7 +245,12 @@ describe("stranded sessions", () => {
         );
         freshSessionId = fresh.sessionId;
 
+        // A stream that never recorded its start starts in the commit that ends it.
         await expect(waiting).resolves.toMatchObject({
+          done: false,
+          value: { type: "session.started" },
+        });
+        await expect(reader.read()).resolves.toMatchObject({
           done: false,
           value: {
             type: "session.ended",
@@ -246,30 +280,16 @@ describe("stranded sessions", () => {
         // The successor names the session it replaced.
         const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
-        // A remote job can finish after replacement. Its fixed parent inbox
-        // must not route the result into the new conversation.
-        const callback = await handleSessionCallbackRequest(
-          new Request("https://eve.test/callback", {
-            method: "POST",
-            body: JSON.stringify({
-              kind: "turn.completed",
-              callId: "old-call",
-              subagentName: "research",
-              outcome: {
-                kind: "parked",
-                result: { kind: "succeeded", output: "Alice's report" },
-                usageDelta: {
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  cacheReadTokens: 0,
-                  cacheWriteTokens: 0,
-                },
-              },
-              output: "Alice's report",
-            }),
-          }),
+        // A sign-in can finish after replacement. The replaced session's fixed inbox must not
+        // route its callback into the new conversation.
+        const callback = await handleConnectionCallbackRequest(
+          new Request("https://eve.test/callback?code=late"),
           {
-            params: { token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)) },
+            params: {
+              attemptId: "old-attempt",
+              name: "linear",
+              token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+            },
             requestIp: null,
             waitUntil() {},
           },
@@ -410,14 +430,16 @@ describe("stranded sessions", () => {
         await expect(stranded.status).resolves.toBe("running");
 
         const reader = readSessionEventStream(stranded.runId).getReader();
-        const admitted = reader.read();
+        const started = reader.read();
         await expect(
           runtime.dispatchSession({
             command: { deliveryId: "reset-delivery", kind: "reset" },
             sessionId: stranded.runId,
           }),
         ).resolves.toEqual({ previousSessionId: stranded.runId, status: "reset" });
-        await expect(admitted).resolves.toMatchObject({
+        // A stream that never recorded its start starts in the commit that ends it.
+        await expect(started).resolves.toMatchObject({ value: { type: "session.started" } });
+        await expect(reader.read()).resolves.toMatchObject({
           value: {
             type: "delivery.admitted",
             data: { deliveryId: "reset-delivery", source: { control: "reset" } },
@@ -613,6 +635,54 @@ describe("stranded sessions", () => {
         await expect(owner.status).resolves.toBe("running");
       } finally {
         await cancelIfActive(owner);
+      }
+    });
+  });
+
+  it("replaces a session whose deployment was deleted on a channel delivery", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-deleted" } });
+    await test.run(async () => {
+      const continuationToken = "http:stranded-session-deleted";
+      // The running eve version built it, so only its deleted deployment strands it.
+      const owner = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }], {
+        allowReservedAttributes: true,
+        attributes: {
+          [EVE_TYPE_ATTRIBUTE]: "session",
+          [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+        },
+      });
+      await waitForHook(owner, { token: sessionInboxHookToken(continuationToken) });
+      const restoreWorld = await deleteOwnerDeployment(owner.runId);
+      const runtime = channelRuntime();
+      let freshSessionId: string | undefined;
+      try {
+        // A channel checking the thread still finds its session; only a new message replaces it.
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
+          sessionId: owner.runId,
+        });
+        await expect(
+          runtime.resolveContinuation(continuationToken, { runnable: true }),
+        ).rejects.toBeInstanceOf(SessionStrandedError);
+
+        const fresh = await httpAddress(runtime, "stranded-session-deleted").send(
+          "Alice asks for the deploy checklist again.",
+          { auth: null },
+        );
+        freshSessionId = fresh.sessionId;
+
+        expect(fresh.sessionId).not.toBe(owner.runId);
+        expect(runtime.createSession).not.toHaveBeenCalled();
+        await expect(owner.status).resolves.toBe("cancelled");
+        await expect(
+          waitForReceivedMessages(fresh.sessionId, ["Alice asks for the deploy checklist again."]),
+        ).resolves.toEqual([]);
+        await expect(readSessionStarted(fresh.sessionId)).resolves.toMatchObject({
+          data: { predecessor: { sessionId: owner.runId } },
+        });
+      } finally {
+        restoreWorld();
+        await cancelIfActive(owner);
+        await resetSession(runtime, freshSessionId);
       }
     });
   });

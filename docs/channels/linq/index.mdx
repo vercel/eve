@@ -1,0 +1,119 @@
+---
+title: "Linq"
+description: "Reach your agent over iMessage and SMS through Linq, with tapbacks."
+type: integration
+---
+
+A Linq agent answers iMessage and SMS conversations on your Linq phone numbers. Each conversation is one session. The agent marks messages as read, can react with tapbacks, and can let people approve a request with a tapback. [Set up](#set-up) creates or connects a Linq account through Vercel Connect.
+
+For information on all configuration and customization options, see the [Linq reference](/docs/channels/linq/reference).
+
+## Set up
+
+<TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
+<TabContent order={1}>
+
+Run the guided setup from your agent project, then deploy:
+
+```bash
+eve add channel/linq
+eve deploy
+```
+
+Setup signs you in to Vercel and links a project. It then creates a managed Linq account and line, or connects an existing account with its partner API token, and asks which phone numbers the agent should use. It configures the connector and webhook through Connect and writes the channel file:
+
+```ts title="agent/channels/linq.ts"
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+});
+```
+
+</TabContent>
+<TabContent order={2}>
+
+Run `eve add channel/linq` and choose **Use portable credentials**. eve writes `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` to `.env.local`, and the channel passes them in:
+
+```ts title="agent/channels/linq.ts"
+import { linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: {
+    apiKey: process.env.LINQ_API_KEY!,
+    signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+  },
+});
+```
+
+After deploying, create a Linq webhook for `https://your-agent.example/eve/v1/linq` with the `message.received`, `reaction.added`, and `reaction.removed` events, and set both variables in your host's environment.
+
+</TabContent>
+</TabsWithChildren>
+
+## Default channel behavior
+
+By default, the agent answers every message, as the person who sent it, and marks it as read. Messages in a conversation share one session, so the agent keeps the context of earlier messages. Images and other files people send reach the agent as files.
+
+- To customize which messages start a turn, override `onMessage`. See [Filter messages](#filter-messages).
+- To react with tapbacks or answer approvals with them, see [Send tapbacks](#send-tapbacks) and [Approve requests with tapbacks](#approve-requests-with-tapbacks).
+- For how messages that arrive mid-turn are handled, see [Inbound messages](/docs/channels/linq/reference#inbound-messages).
+
+## Filter messages
+
+Return `null` from `onMessage` to ignore a message. Return `{ auth }` to start a turn, with optional `context` the agent sees alongside the message:
+
+```ts title="agent/channels/linq.ts"
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+  onMessage(_ctx, message) {
+    if (message.author.isBot) return null;
+    return {
+      auth: null,
+      context: [`The sender is ${message.author.fullName}.`],
+    };
+  },
+});
+```
+
+## Send tapbacks
+
+Export the channel's tapback tool from `agent/tools/`. The agent can then react to the latest message with a standard tapback, such as `love`, or any single emoji:
+
+```ts title="agent/tools/tapback.ts"
+import linq from "../channels/linq";
+
+export default linq.tapbackTool();
+```
+
+To let a tapback be the agent's whole answer, also add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+
+## Approve requests with tapbacks
+
+eve ignores tapbacks people send until you add `onTapback`. Return `answer` to answer the approval in the message the tapback is on, so a like approves and a dislike denies:
+
+```ts title="agent/channels/linq.ts"
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { defaultLinqAuth, linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+  onTapback(_ctx, tapback) {
+    if (!tapback.added) return null;
+    const auth = defaultLinqAuth(tapback);
+    if (tapback.tapback === "like") return { auth, answer: "approve" };
+    if (tapback.tapback === "dislike") return { auth, answer: "deny" };
+    return { auth };
+  },
+});
+```
+
+Any other tapback reaches the agent as text, such as `Tapback: Loved “See you at 7”`. `onTapback` runs instead of `onMessage`, so repeat any sender checks there.
+
+## Reference
+
+The [Linq reference](/docs/channels/linq/reference) covers options, webhook verification, attachments, tapback fields, approval answers, and portable credentials.

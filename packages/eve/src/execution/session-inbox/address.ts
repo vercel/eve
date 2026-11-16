@@ -31,6 +31,11 @@ export function sessionCommandHookToken(sessionId: string): string {
   return `eve:session:${sessionId}:inbox`;
 }
 
+/** Whether `token` is a session's logical stable command inbox token. */
+export function isSessionCommandHookToken(token: string): boolean {
+  return /^eve:session:[^:]+:inbox$/.test(token);
+}
+
 const SESSION_INBOX_HOOK_TOKEN_PREFIX = "eve:inbox:v1:";
 
 /**
@@ -54,10 +59,10 @@ export function logicalSessionInboxToken(token: string): string | undefined {
     : undefined;
 }
 
-/**
- * Marker an owner older than handoff version 3 leaves while it releases its
- * hooks, so ingress can tell "handoff in progress" from "no session".
- */
-export function sessionHandoffMarkerToken(token: string): string {
-  return `eve:inbox:handoff:${token}`;
+/** Logical token behind an address: the address itself, or the session's stable command token. */
+export function logicalSessionToken(address: string | SessionInboxAddress): string {
+  if (typeof address === "string") return address;
+  if (!isSessionInboxAddress(address))
+    throw new Error("Session inbox target has an invalid address.");
+  return sessionCommandHookToken(address.sessionId);
 }

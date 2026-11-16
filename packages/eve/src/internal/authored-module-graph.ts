@@ -15,7 +15,7 @@ import {
   normalizeExternalDependencies,
   resolveAuthoredPackageRoot,
 } from "#internal/authored-package-boundary.js";
-import { buildWithNitroRolldown } from "#internal/bundler/nitro-rolldown.js";
+import { buildWithRolldown } from "#internal/bundler/rolldown.js";
 
 /**
  * Bundles a compile's application modules as one code-split graph per set of
@@ -72,7 +72,7 @@ async function writeAuthoredModuleGraph(
   const sourcemap = evaluatedBundleSourcemap();
   // The content hash ignores inline maps, so cached chunks with and without one need distinct names.
   const fileName = sourcemap === false ? "[name]-[hash].mjs" : "[name]-[hash]-mapped.mjs";
-  const result = await buildWithNitroRolldown({
+  const result = await buildWithRolldown({
     ...createAuthoredModuleBuildOptions({
       packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
         externalDependencies: [...externalDependencies],

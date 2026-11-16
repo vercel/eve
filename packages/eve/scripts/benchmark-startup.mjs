@@ -10,9 +10,12 @@ import { pathToFileURL } from "node:url";
 // Each process is fresh. Run 1 starts from an empty project (cold); later runs
 // retain its caches and build output (warm).
 // Per run: `eve dev` to /eve/v1/info, then a first turn through `eve/client`
-// (accepted, then completed), `eve build --profile`, then `eve start` on that
-// build to /eve/v1/health. One JSON result per line. The agent's model is a
-// mock, so the first turn makes no model calls.
+// (accepted, then completed); `eve dev` with its terminal UI in a
+// pseudo-terminal, to the first frame that shows the prompt (the TUI takes
+// and queues input before the agent is ready), then to /eve/v1/info;
+// `eve build --profile`; then `eve start` on that build to /eve/v1/health.
+// One JSON result per line. The agent's model is a mock, so the first turn
+// makes no model calls.
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 5);
 const toolCount = Number(process.argv[4] ?? 0);
@@ -78,26 +81,49 @@ console.log(
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_INTERVAL_MS = 20;
 
+// The TUI needs a terminal. util-linux `script` (Linux) and BSD `script`
+// (macOS) both give the command one; elsewhere the TUI probe is skipped.
+const ptyAvailable = process.platform === "linux" || process.platform === "darwin";
+// The prompt glyph the TUI draws in front of the input line.
+const PROMPT_GLYPH = "❯";
+
 for (let run = 1; run <= runs; run++) {
+  // `dev-tui` follows `dev`, so run 1's cold start stays with `dev`.
   // `start` serves the output `build` just wrote, so it runs after it.
-  for (const mode of ["dev", "build", "start"]) {
+  for (const mode of ["dev", "dev-tui", "build", "start"]) {
+    if (mode === "dev-tui" && !ptyAvailable) continue;
     const port = await availablePort();
     const profilePath = join(root, `build-${run}.json`);
     const args =
       mode === "dev"
         ? ["dev", "--no-ui", "--host", "127.0.0.1", "--port", String(port)]
-        : mode === "start"
-          ? ["start", "--host", "127.0.0.1", "--port", String(port)]
-          : ["build", "--profile", profilePath];
+        : mode === "dev-tui"
+          ? ["dev", "--host", "127.0.0.1", "--port", String(port)]
+          : mode === "start"
+            ? ["start", "--host", "127.0.0.1", "--port", String(port)]
+            : ["build", "--profile", profilePath];
     let log = "";
-    const start = performance.now();
-    const child = spawn(process.execPath, [join(packageRoot, "bin", "eve.js"), ...args], {
-      cwd: root,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
+    let promptVisibleMs;
+    let promptSeen;
+    const promptVisible = new Promise((resolvePrompt) => {
+      promptSeen = resolvePrompt;
     });
+    const start = performance.now();
+    const eveArgv = [process.execPath, join(packageRoot, "bin", "eve.js"), ...args];
+    const child =
+      mode === "dev-tui"
+        ? spawnInTerminal(eveArgv, { cwd: root, env: { ...env, TERM: "xterm-256color" } })
+        : spawn(eveArgv[0], eveArgv.slice(1), {
+            cwd: root,
+            env,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
     child.stdout.on("data", (data) => {
       log += data;
+      if (mode === "dev-tui" && promptVisibleMs === undefined && log.includes(PROMPT_GLYPH)) {
+        promptVisibleMs = Math.round(performance.now() - start);
+        promptSeen();
+      }
     });
     child.stderr.on("data", (data) => {
       log += data;
@@ -125,6 +151,15 @@ for (let run = 1; run <= runs; run++) {
         if (reply !== "ready")
           throw new Error(`First turn ended without the mock reply: ${JSON.stringify(reply)}`);
         results.push({ run, mode, wallMs, sessionAcceptedMs, firstTurnMs, probes });
+      } else if (mode === "dev-tui") {
+        // Wait for the server too, so the next mode never starts beside a
+        // half-started one.
+        const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
+        const wallMs = Math.round(performance.now() - start);
+        await Promise.race([promptVisible, exited]);
+        if (promptVisibleMs === undefined)
+          throw new Error(`The terminal UI never showed its prompt; see dev-tui-${run}.log.`);
+        results.push({ run, mode, wallMs, promptVisibleMs, probes });
       } else if (mode === "start") {
         const probes = await waitReady(child, port, "/eve/v1/health", start, () => log);
         results.push({ run, mode, wallMs: Math.round(performance.now() - start), probes });
@@ -139,9 +174,18 @@ for (let run = 1; run <= runs; run++) {
         });
       }
       console.log(JSON.stringify(results.at(-1)));
+    } catch (error) {
+      // The TUI probe is extra: a release whose TUI can't run here (a
+      // backfill, say) loses only this measurement, not the run's others.
+      if (mode !== "dev-tui") throw error;
+      console.error(`dev-tui run ${run} failed: ${error?.message ?? error}`);
     } finally {
       clearTimeout(timeout);
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGINT");
+      if (child.exitCode === null && child.signalCode === null) {
+        // Ctrl+C in the terminal stops the TUI the way a person would.
+        if (mode === "dev-tui") child.stdin.write("\x03\x03");
+        else child.kill("SIGINT");
+      }
       const killer = setTimeout(() => child.kill("SIGKILL"), 10000);
       await exited;
       clearTimeout(killer);
@@ -150,11 +194,12 @@ for (let run = 1; run <= runs; run++) {
   }
 }
 await writeFile(join(root, "results.json"), JSON.stringify(results, null, 2));
-for (const mode of ["dev", "build", "start"]) {
+for (const mode of ["dev", "dev-tui", "build", "start"]) {
   const times = results
     .filter((result) => result.mode === mode)
     .map((result) => result.wallMs)
     .sort((a, b) => a - b);
+  if (times.length === 0) continue;
   console.log(
     JSON.stringify({
       mode,
@@ -208,6 +253,21 @@ function waitReady(child, port, path, start, readLog) {
     timer = setInterval(probe, PROBE_INTERVAL_MS);
     void probe();
   });
+}
+
+/**
+ * Spawns `argv` attached to a pseudo-terminal of a fixed size through
+ * `script`, which relays the terminal's output to the child's stdout and its
+ * stdin to the terminal.
+ */
+function spawnInTerminal(argv, options) {
+  const quote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
+  const command = `stty cols 120 rows 40; exec ${argv.map(quote).join(" ")}`;
+  const scriptArgs =
+    process.platform === "darwin"
+      ? ["-q", "/dev/null", "sh", "-c", command]
+      : ["-qfec", `sh -c ${quote(command)}`, "/dev/null"];
+  return spawn("script", scriptArgs, { ...options, stdio: ["pipe", "pipe", "pipe"] });
 }
 
 async function availablePort() {

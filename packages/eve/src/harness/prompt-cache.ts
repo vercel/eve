@@ -43,24 +43,49 @@ type AnthropicCache = NonNullable<ModelProfile["anthropicCache"]>;
  * explicit author override on `gateway.caching` untouched so callers can
  * opt out by setting `providerOptions.gateway.caching` to `false` or
  * another value.
+ *
+ * For Anthropic models under automatic caching it also anchors a breakpoint
+ * on the system prompt (`gateway.cacheAnchorMessageIndex: 0`). Gateway's
+ * automatic breakpoints sit on the latest messages, and Anthropic looks back
+ * only 20 blocks from a breakpoint, so in a session with history they never
+ * reach the system prompt: a resumed session whose cache expired rewrites the
+ * whole prefix even when another session just cached the same one.
  */
 export function mergeGatewayAutoCaching(
   base: Readonly<Record<string, unknown>> | undefined,
+  provider: string,
 ): Record<string, unknown> {
   const baseGateway =
     base?.gateway !== undefined && typeof base.gateway === "object" && base.gateway !== null
       ? (base.gateway as Record<string, unknown>)
       : undefined;
 
-  const mergedGateway: Record<string, unknown> = {
-    ...baseGateway,
-    caching: baseGateway?.caching ?? "auto",
-  };
+  const caching = baseGateway?.caching ?? "auto";
+  const mergedGateway: Record<string, unknown> = { ...baseGateway, caching };
+  if (caching === "auto" && provider === "anthropic") {
+    mergedGateway.cacheAnchorMessageIndex = baseGateway?.cacheAnchorMessageIndex ?? 0;
+  }
 
   return {
     ...base,
     gateway: mergedGateway,
   };
+}
+
+/**
+ * Returns `providerOptions` without an authored `gateway.caching: "auto"`. Under automatic caching
+ * Gateway ignores a 1-hour TTL, so a model that carries eve's own breakpoints must not send it.
+ * Any other `gateway.caching` value, such as `false`, stays.
+ */
+export function omitGatewayAutoCaching(
+  providerOptions: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const gateway = providerOptions.gateway;
+  if (gateway === null || typeof gateway !== "object" || Array.isArray(gateway)) {
+    return { ...providerOptions };
+  }
+  const { caching, ...rest } = gateway as Record<string, unknown>;
+  return { ...providerOptions, gateway: caching === "auto" ? rest : gateway };
 }
 
 /**

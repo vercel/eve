@@ -8,7 +8,7 @@ import { announceWaiting } from "#harness/session-machine/waiting.js";
 
 const turnId = "turn_0";
 
-function viewOf(...lines: SessionEvent[][]): SessionView {
+function viewOf(...lines: (readonly SessionEvent[])[]): SessionView {
   const view = emptySessionView();
   for (const facts of lines)
     foldLine(view, { at: "2026-01-01T00:00:00.000Z", facts }, view.position);
@@ -117,6 +117,59 @@ describe("waiting", () => {
       ],
     );
     expect(waiting(calledBack, turnId)).toEqual({ on: "session" });
+  });
+
+  it("waits on its tasks once the card another task's sign-in waited on settles", () => {
+    const task = (n: number): SessionEvent[] => [
+      {
+        data: {
+          callId: `c_${n}`,
+          capability: { kind: "agent", name: "weather" },
+          owner: { runId: "run_0" },
+        },
+        scope: { runId: "run_0", turnId },
+        type: "call.requested",
+      },
+      {
+        data: { kind: "agent", name: "weather", startedBy: { callId: `c_${n}` }, taskId: `t_${n}` },
+        type: "task.started",
+      },
+      { data: { callId: `c_${n}`, taskId: `t_${n}` }, scope: { turnId }, type: "call.started" },
+    ];
+    const relayed = (n: number, waitsOn?: string): SessionEvent => ({
+      data: {
+        interactionId: `i_${n}`,
+        origin: {
+          call: { callId: `c_${n}`, name: "weather" },
+          interactionId: `i_child_${n}`,
+          sessionId: `wrun_${n}`,
+        },
+        request: {
+          kind: "sign-in",
+          prompt: "Sign in to Weather",
+          signIn: { name: "weather", ...(waitsOn !== undefined && { waitsOn }) },
+        },
+        subject: { callId: `c_${n}` },
+      },
+      scope: { taskId: `t_${n}` },
+      type: "interaction.opened",
+    });
+    const asked = [...task(1), ...task(2), modelSettled, relayed(1), relayed(2, "i_1")];
+    expect(waiting(viewOf(started, asked), turnId)).toMatchObject({
+      interactions: [{ interactionId: "i_1" }, { interactionId: "i_2" }],
+      on: "interaction",
+    });
+    const accepted = viewOf(started, asked, [
+      {
+        data: { interactionId: "i_1", outcome: "accepted" },
+        scope: { taskId: "t_1" },
+        type: "interaction.settled",
+      },
+    ]);
+    expect(waiting(accepted, turnId)).toMatchObject({
+      calls: [{ callId: "c_1" }, { callId: "c_2" }],
+      on: "work",
+    });
   });
 
   it("waits on the session for a task cancel, though the task asked for input", () => {

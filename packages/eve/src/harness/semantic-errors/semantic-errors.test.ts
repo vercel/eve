@@ -145,6 +145,33 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "gateway-upstream-unavailable",
     },
     {
+      title: "gateway stream timeout",
+      error: new Error("Stream exceeded maximum duration before function timeout", {
+        cause: {
+          code: "gateway_stream_timeout",
+          message: "Stream exceeded maximum duration before function timeout",
+          origin: "gateway",
+        },
+      }),
+      id: "gateway-stream-timeout",
+    },
+    {
+      title: "gateway stream terminated before its finish",
+      error: new Error("Upstream stream ended before terminal chunk", {
+        cause: {
+          code: "gateway_stream_terminated",
+          message: "Upstream stream ended before terminal chunk",
+          origin: "gateway",
+        },
+      }),
+      id: "gateway-stream-terminated",
+    },
+    {
+      title: "gateway stream terminated without its code",
+      error: new Error("Upstream stream ended before terminal chunk"),
+      id: "gateway-stream-terminated",
+    },
+    {
       title: "provider api key missing",
       error: named("LoadAPIKeyError", "OpenAI API key is missing."),
       id: "model-provider-api-key-missing",
@@ -164,6 +191,32 @@ describe("summarizeKnownError (catalog table)", () => {
         "The model provider filtered this response.",
       ),
       id: "model-response-content-filtered",
+    },
+    {
+      title: "cybersecurity policy refusal",
+      error: named(
+        "AI_StreamProviderError",
+        "This content was flagged for possible cybersecurity risk.",
+        {
+          code: "cyber_policy",
+          statusCode: 400,
+          type: "invalid_request",
+        },
+      ),
+      id: "model-request-cyber-policy-refused",
+    },
+    {
+      title: "biological policy refusal",
+      error: named(
+        "AI_StreamProviderError",
+        "This content was flagged for possible biological risk.",
+        {
+          code: "bio_policy",
+          statusCode: 400,
+          type: "invalid_request",
+        },
+      ),
+      id: "model-request-bio-policy-refused",
     },
     {
       title: "unsupported model capability",

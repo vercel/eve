@@ -160,10 +160,11 @@ results reach the model without it.
 
 The call pauses the turn until any task has a result, a new message arrives, or `timeoutSeconds`
 (a whole number of at least 1) pass. It returns at once when a result is already waiting, and it
-never stops a task. The model reads which tasks finished and which are still working:
+never stops a task. The model reads which tasks finished and which are still working, and, while
+a task works, that it should wait again if its reply needs the rest:
 
 ```text
-deploy-4hd8sa completed; its result follows. 1 task is still working: researcher-7k2m9q.
+deploy-4hd8sa completed; its result follows. 1 task is still working: researcher-7k2m9q. If your reply needs its result, call eve__task_wait again before replying.
 ```
 
 **`eve__task_cancel({ taskId })`** stops a task's current work and says so. The task stops
@@ -215,7 +216,7 @@ question is answered or sign-in completes.
 `send(...).result()` waits through task work for the final reply, but stops at a question or sign-in
 with `status: "awaiting-input"`. Answer through `respond()`; see
 [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
-[Slack](/docs/channels/slack#task-card) also shows task activity.
+[Slack](/docs/channels/slack/reference#task-card) also shows task activity.
 
 A steering message from the turn's own caller, sent with `turnPolicy: "steer"` (the default),
 ends an `eve__task_wait`. It also aborts the `abortSignal` of any `execute` call the turn waits on,

@@ -1,3 +1,4 @@
+// @linux-only: logger-to-span policy
 import { context, trace } from "@opentelemetry/api";
 import {
   BasicTracerProvider,

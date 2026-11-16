@@ -1,4 +1,3 @@
-import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
@@ -13,13 +12,13 @@ import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { resolveAgent } from "#runtime/resolve-agent.js";
-import { resolveDynamicDefinition } from "#runtime/resolve-dynamic.js";
+import { disabledToolNames, resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveDynamicDefinition } from "#runtime/resolve-definition.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
+import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type {
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
@@ -144,14 +143,7 @@ async function resolveRuntimeAgentNode(
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
-    disabledToolNames: input.manifest.sourceComposition.entries.flatMap((entry) => {
-      if (entry.kind !== "disabled" || !entry.source.logicalPath.startsWith("tools/")) return [];
-      return [
-        stripLogicalPathExtension(entry.source.logicalPath)
-          .replace(/^tools\//, "")
-          .replaceAll("/", "-"),
-      ];
-    }),
+    disabledToolNames: disabledToolNames(input.manifest),
     reservedToolNames: toolRegistry.preparedTools.map((tool) => tool.name),
     subagents: await resolveRuntimeSubagents({
       childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
@@ -397,7 +389,7 @@ function attachInheritedSandboxWorkspaceResources(input: {
 
   for (const [nodeId, node] of input.nodesByNodeId) {
     if (node.sandboxRegistry.sandbox.definition.kind !== "parent") continue;
-    if (node.agent.dynamicSkillResolvers.length > 0) {
+    if (node.agent.definitions.some(({ kind }) => kind === "skill")) {
       throw new ResolveRuntimeAgentGraphError(
         `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" defines dynamic skills. Remove the child dynamic skills or give the child its own sandbox.`,
         { nodeId },
@@ -422,13 +414,9 @@ function attachInheritedSandboxWorkspaceResources(input: {
       nodeId: owner.nodeId,
       workspaceResourceRoot: owner.sandboxRegistry.sandbox.workspaceResourceRoot,
     };
-    const workspacePrompt = createWorkspacePromptSection(owner.agent.workspaceSpec);
-    if (workspacePrompt !== undefined) {
-      (node.turnAgent as { instructions: readonly string[] }).instructions = [
-        ...node.turnAgent.instructions,
-        workspacePrompt,
-      ];
-    }
+    // The subagent works in its owner's sandbox, so its prompt describes that workspace.
+    (node.turnAgent as { workspaceSpec: WorkspaceRuntimeSpec }).workspaceSpec =
+      owner.agent.workspaceSpec;
   }
 }
 

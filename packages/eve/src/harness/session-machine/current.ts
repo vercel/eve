@@ -8,6 +8,8 @@ import { eventsOf } from "#harness/publication.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
+import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { checksSessionEvents } from "#shared/dev-checks.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "./view.js";
 
@@ -97,6 +99,33 @@ export function recordPublishedLine(
 }
 
 /**
+ * Checks a line a step folds itself, where no publisher checked it: a detached step's, or a test
+ * sink's. Under the same switch as the publisher's checks, a violation fails the fold.
+ */
+export function checkFoldedLine(view: PublicSessionView, line: StoredLine, position: number): void {
+  // Progress rules need what earlier records announced, which a checker seeded per line lacks.
+  if (!checksSessionEvents() || !("facts" in line)) return;
+  // A projection with no start is a fragment's, such as a test session's: the session's creation
+  // wrote its start, before any step.
+  const starts =
+    "facts" in line && (line.facts[0] as SessionEvent | undefined)?.type === "session.started";
+  const seed =
+    view.session.status === "new" && !starts
+      ? { ...view, session: { ...view.session, status: "open" as const } }
+      : view;
+  const violations = createStreamChecker({ seed }).check(line, position);
+  if (violations.length === 0) return;
+  throw new Error(
+    `Session event contract: ${violations
+      .map(
+        (violation) =>
+          `${violation.rule} at ${violation.position}:${violation.index ?? "progress"}: ${violation.message}`,
+      )
+      .join("; ")}`,
+  );
+}
+
+/**
  * The public view after one line. A commit folds into a copy, so earlier holders keep theirs; a
  * progress record changes no table, so only the position moves.
  */
@@ -177,37 +206,24 @@ export interface StepProjection {
   record(publication: SessionPublication): void;
 }
 
-/**
- * A step's projection: the context's live one, which the publish sink folds, or, for a step
- * that runs without a context, a detached one the step folds itself.
- */
+/** A step's projection: the context's live one, which the publish sink folds. */
 export function stepProjection(
-  ctx: ContextReader | undefined,
+  ctx: ContextReader,
   state: SessionStateMap | undefined,
 ): StepProjection {
-  if (ctx !== undefined) {
-    ensureSessionProjection(ctx, state);
-    return {
-      read: () => currentProjection(ctx),
-      record: (publication) => {
-        const events = cascade(currentProjection(ctx).view, eventsOf(publication));
-        for (const line of linesOf(events, new Date().toISOString())) {
-          const events = "facts" in line ? line.facts : [line.progress];
-          recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
-        }
-      },
-    };
-  }
-  let projection = storedProjection(state);
+  ensureSessionProjection(ctx, state);
   return {
-    read: () => projection,
-    record(publication) {
-      // No publisher writes this step's lines, so the detached step is its own writer.
-      const events = cascade(projection.view, eventsOf(publication));
-      for (const line of linesOf(events, new Date().toISOString())) {
-        const events = "facts" in line ? line.facts : [line.progress];
-        projection = advance(projection, line, projection.view.position, events);
-      }
-    },
+    read: () => currentProjection(ctx),
+    record: (publication) => foldPublication(ctx, publication),
   };
+}
+
+/** Folds a publication into the step's live projection, as the publish sink does. */
+export function foldPublication(ctx: ContextReader, publication: SessionPublication): void {
+  const events = cascade(currentProjection(ctx).view, eventsOf(publication));
+  for (const line of linesOf(events, new Date().toISOString())) {
+    const events = "facts" in line ? line.facts : [line.progress];
+    checkFoldedLine(currentView(ctx), line, nextLinePosition(ctx));
+    recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
+  }
 }

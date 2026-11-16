@@ -71,6 +71,15 @@ describe("buildAuthCompletedText", () => {
       }),
     ).toBe("Linear sign-in cancelled");
   });
+
+  it.each(["withdrawn", "interrupted", "abandoned"] as const)(
+    "reports a %s sign-in as cancelled, without the runtime's reason code",
+    (outcome) => {
+      expect(
+        buildAuthCompletedText({ displayName: "GitHub", outcome, reason: "turn-cancelled" }),
+      ).toBe("GitHub sign-in cancelled");
+    },
+  );
 });
 
 describe("buildAuthEphemeralBlocks", () => {
@@ -85,7 +94,7 @@ describe("buildAuthEphemeralBlocks", () => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "*Connect Linear*\nTo continue, I need access to your Linear account. Only you can see this message.",
+          text: "*Connect Linear*\nTo continue, I need access to your Linear account.",
         },
       },
       {
@@ -110,7 +119,7 @@ describe("buildAuthEphemeralBlocks", () => {
       url: "https://connect.example.com/authorize/sca_abc",
     });
     expect((blocks[0] as { text: { text: string } }).text.text).toBe(
-      "*Connect Linear*\nI've paused until you connect your Linear account or cancel. Only you can see this message.",
+      "*Connect Linear*\nI've paused until you connect your Linear account or cancel.",
     );
     const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[1];
     expect(cancel).toMatchObject({

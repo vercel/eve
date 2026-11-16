@@ -1,4 +1,5 @@
 [
+  "DEFAULT_EVE_GIT_SANDBOX_IMAGE",
   "DockerSandbox",
   "DockerSandboxEnvironmentOptions",
   "DockerSandboxNetworkPolicy",

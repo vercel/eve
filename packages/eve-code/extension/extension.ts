@@ -9,12 +9,22 @@ export type CredentialPolicyBroker = (
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 const delivery = z.enum(["firewall", "command"]).default("firewall");
-const reasoning = z.enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"]);
-const openaiReasoningEffort = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+// Point mounts that still pass the removed `worker` option at the replacement
+// instead of the generic unrecognized-key error.
+function removedWorkerMessage(keys: readonly string[]): string | undefined {
+  if (!keys.includes("worker")) return undefined;
+  const others = keys.filter((key) => key !== "worker");
+  const also =
+    others.length === 0
+      ? ""
+      : ` Also unrecognized: ${others.map((key) => JSON.stringify(key)).join(", ")}.`;
+  return `eve-code no longer ships a worker subagent; delegate with the built-in \`agent\` tool and remove the \`worker\` option.${also}`;
+}
 
 export default defineExtension({
-  config: z
-    .object({
+  config: z.strictObject(
+    {
       vercel: z
         .object({
           connector: z.string().min(1),
@@ -22,13 +32,10 @@ export default defineExtension({
         })
         .optional(),
       broker: fn<CredentialPolicyBroker>().optional(),
-      worker: z
-        .object({
-          model: z.string().min(1),
-          reasoning,
-          openaiReasoningEffort: openaiReasoningEffort.optional(),
-        })
-        .optional(),
-    })
-    .strict(),
+    },
+    {
+      error: (issue) =>
+        issue.code === "unrecognized_keys" ? removedWorkerMessage(issue.keys) : undefined,
+    },
+  ),
 });

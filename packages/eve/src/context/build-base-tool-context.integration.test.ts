@@ -1,3 +1,4 @@
+// @linux-only: tool context abort binding
 import { describe, expect, it } from "vitest";
 
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";

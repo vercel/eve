@@ -57,6 +57,7 @@ export type {
   SlackEventEnvelope,
   SlackInboundContext,
   SlackMessage,
+  SlackMessageEdit,
 } from "#public/channels/slack/inbound.js";
 
 export {

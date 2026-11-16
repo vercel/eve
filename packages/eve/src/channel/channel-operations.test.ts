@@ -4,6 +4,7 @@ import { createChannelOperations, type ChannelSource } from "#channel/channel-op
 import type { Runtime } from "#channel/types.js";
 import { createSession } from "#channel/session.js";
 import { type Answer, parseAnswers } from "#shared/input.js";
+import { readInputText } from "#internal/input-text.js";
 
 function authoredChannelRespondTypeChecks(source: ChannelSource): void {
   const responseWithMetadata = {
@@ -78,6 +79,21 @@ describe("createChannelOperations", () => {
       command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
+  });
+
+  it("carries the person's answer text beside a wrapped message", async () => {
+    const runtime = createRuntime();
+    const { from } = createChannelOperations({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+
+    await from("C1:T1").send("Alice: approve", { answerText: "approve", auth: null });
+
+    const [{ command }] = vi.mocked(runtime.dispatchContinuation).mock.calls[0]!;
+    expect(command).toMatchObject({ payload: { message: "Alice: approve" } });
+    expect(readInputText((command as { payload: object }).payload)).toBe("approve");
   });
 
   it("carries send and input-response state through the durable delivery", async () => {

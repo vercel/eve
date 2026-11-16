@@ -8,7 +8,7 @@ import {
   type ScenarioAppDescriptor,
   useScenarioApp,
 } from "../../src/internal/testing/scenario-app.js";
-import { startEveDev } from "./dev-server-harness.js";
+import { startEveDev } from "#internal/testing/dev-server-harness.js";
 
 /**
  * Locks the remote-agent principal-forwarding hop over a real HTTP boundary: the

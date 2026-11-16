@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import * as workflowRuntime from "#internal/workflow/runtime.js";
+import { HookSchema } from "#compiled/@workflow/world/index.js";
 import type { Hook } from "#internal/workflow/runtime.js";
 
 const DOMAIN = "eve:inbox:v1:";
@@ -7,12 +7,13 @@ const MAX_HANDLE_LENGTH = 8_192;
 
 type InboxHook = Omit<Hook, "metadata">;
 
+// Match resumeHook's descriptor validation without reading lazy user metadata
+// or retaining capabilities that only a fresh backend lookup can attest.
+const InboxHookSchema = HookSchema.omit({ metadata: true, resumeCapabilities: true });
+
 function parseInboxHook(value: unknown): InboxHook | undefined {
-  // Older SDKs accept cached hooks without the guarded write contract.
-  // Require the new SDK entry point before issuing or using a handle.
-  const parser: unknown = Reflect.get(workflowRuntime, "parseHookResumeHandle");
-  if (typeof parser !== "function") return undefined;
-  return parser(value) as InboxHook;
+  const result = InboxHookSchema.safeParse(value);
+  return result.success ? result.data : undefined;
 }
 
 /** A shared server-only key authenticates hints carried by an untrusted client. */

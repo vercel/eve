@@ -4,8 +4,8 @@ import { SessionStrandedError } from "#channel/session-stranded-error.js";
 /**
  * A session could not accept a command. No delivery was accepted.
  *
- * `code` is the HTTP channel's `409` code: `session_not_ready` (with `retryable: true`) while an
- * accepted session is still starting, otherwise `session_not_active`.
+ * `code` is the HTTP channel's `409` code: `session_not_ready` (with `retryable: true`) when a
+ * new session's address kept changing owners, otherwise `session_not_active`.
  */
 export class SessionNotActiveError extends EveError {
   static override readonly errorName = "SessionNotActiveError";

@@ -41,6 +41,9 @@ describe("hostless agent workspace", () => {
     await runPnpmCommand({
       args: ["exec", "vercel", "build", "--yes"],
       cwd: app.appRoot,
+      // Otherwise the CLI detaches a second `vc.js telemetry flush` process
+      // that loads the whole CLI again and outlives the test.
+      env: { ...process.env, VERCEL_TELEMETRY_DISABLED: "1" },
     });
 
     const outputRoot = join(app.appRoot, ".vercel", "output");

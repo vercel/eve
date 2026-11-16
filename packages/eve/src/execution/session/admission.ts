@@ -1,4 +1,3 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { settleDuplicateDeliveryStep } from "#execution/session/settle-duplicate-delivery-step.js";
 
@@ -14,7 +13,11 @@ import type {
   DeliveryAdmission,
   SessionInputQueue,
 } from "#execution/session/input-queue.js";
-import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import {
+  isWorkflowMessage,
+  type SessionInbox,
+  type SessionInboxPayload,
+} from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
@@ -42,6 +45,7 @@ export async function admitSessionInboxPayload(
   input: {
     readonly queue: SessionInputQueue;
     readonly cursor: SessionStateCursor;
+    readonly inbox: Pick<SessionInbox, "ownerRunId">;
   },
 ): Promise<SessionAdmission> {
   if (value.kind === "session-failure") throw new Error(value.error);
@@ -69,7 +73,7 @@ export async function admitSessionInboxPayload(
 
   switch (command.kind) {
     case "session-prewarm":
-      if (command.expectedOwnerRunId === getWorkflowMetadata().workflowRunId)
+      if (command.expectedOwnerRunId === input.inbox.ownerRunId())
         input.queue.prepareOnDeployment(command.targetDeploymentId);
       return { kind: "consumed" };
     case "deliver": {
@@ -92,7 +96,7 @@ export async function admitSessionInboxPayload(
       return { kind: "consumed" };
     case "session-timeout":
       // A previous owner's timer may fire after handoff; only this owner's deadline counts.
-      if (command.ownerRunId === getWorkflowMetadata().workflowRunId) {
+      if (command.ownerRunId === input.inbox.ownerRunId()) {
         input.queue.enqueueControl("expired");
       }
       return { kind: "consumed" };

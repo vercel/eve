@@ -38,15 +38,10 @@ export interface DurableSessionState {
  * Durable projection of {@link HarnessSession} embedded in state
  * snapshots.
  *
- * Omits `agent.modelReference`, `agent.tools`,
- * `agent.compactionModelReference`, and the `compaction` thresholds —
- * those are rebuilt every turn from `bundle.turnAgent` by
- * {@link import("#execution/session.js").hydrateDurableSession}.
- * Omits `history` too: the session workflow carries it as its own value, so
+ * Omits `history`: the session workflow carries it as its own value, so
  * only the steps that read or change it receive it as input.
- * `agent.system` is the last applied prompt snapshot. Before each model step,
- * the execution layer replaces it from the current deployment's
- * `bundle.turnAgent`.
+ * The system prompt isn't stored: each model step renders it from the
+ * current deployment's bundle.
  */
 export interface DurableSession {
   readonly sessionId: string;
@@ -61,13 +56,10 @@ export interface DurableSession {
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
-  readonly agent: {
-    readonly system: string;
-  };
   readonly compaction?: CompactionState;
 }
 
-/** Session program memory persisted atomically with Workflow step results. */
+/** Session state persisted atomically with Workflow step results. */
 export interface DurableSessionSnapshot {
   readonly session: DurableSession;
 }
@@ -90,7 +82,7 @@ export function createDurableSessionValues(session: HarnessSession): {
   return { history: session.history, sessionState: createDurableSessionState({ session }) };
 }
 
-/** Replaces session program memory and refreshes its workflow projections. */
+/** Replaces the persisted session state and refreshes its workflow projections. */
 export function replaceDurableSessionSnapshot(input: {
   readonly session: DurableSession;
   readonly state: DurableSessionState;

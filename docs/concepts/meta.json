@@ -5,7 +5,7 @@
     "project-structure",
     "execution-model-and-durability",
     "sessions-runs-and-streaming",
-    "upgrade-to-v27-events",
+    "session-views-and-selectors",
     "state",
     "default-harness",
     "built-in-tools",

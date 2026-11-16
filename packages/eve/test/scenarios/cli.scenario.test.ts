@@ -354,13 +354,28 @@ describe("runCli", () => {
     }
   });
 
-  it("preserves imported tool schema composition in the built server", async () => {
+  // One build and one start cover both the built server's behavior and where
+  // `eve start` keeps local Workflow data.
+  it("starts an existing built app with local Workflow data under .eve and composed tool schemas", async () => {
     const { buildApplication } = await import("../../src/internal/nitro/host.js");
     const { appRoot } = await scenarioApp(COMPOSED_TOOL_SCHEMAS_DESCRIPTOR);
-    await buildApplication(appRoot, { skipSandboxPrewarm: true });
+    await buildApplication(appRoot, { skipSandboxPrewarm: false });
     const server = await startPackagedEveStart(appRoot);
 
     try {
+      const health = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url));
+      const healthJson = (await health.json()) as { ok?: unknown; status?: unknown };
+
+      expect(health.status).toBe(200);
+      expect(healthJson).toMatchObject({ ok: true, status: "ready" });
+      expect(server.stdout()).toContain("[START] server listening at");
+      await expect(
+        access(join(resolveLocalWorkflowWorldDataDirectory(appRoot), "version.txt")),
+      ).resolves.toBeUndefined();
+      await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+
       const response = await fetch(new URL("/schema-composition", server.url), {
         signal: AbortSignal.timeout(10_000),
       });
@@ -370,34 +385,6 @@ describe("runCli", () => {
         parsed: { action: "echo", input: { value: "hello" } },
         invalidAccepted: false,
         output: { result: { value: "hello" } },
-      });
-    } finally {
-      await server.stop();
-    }
-  }, 120_000);
-
-  it("starts an existing built app with local Workflow data under .eve", async () => {
-    const { buildApplication } = await import("../../src/internal/nitro/host.js");
-    const appRoot = await createMinimalAppRoot("eve-cli-start-health-");
-
-    await buildApplication(appRoot, {
-      skipSandboxPrewarm: false,
-    });
-
-    const server = await startPackagedEveStart(appRoot);
-
-    try {
-      const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url));
-      const responseJson = (await response.json()) as { ok?: unknown; status?: unknown };
-
-      expect(response.status).toBe(200);
-      expect(responseJson).toMatchObject({ ok: true, status: "ready" });
-      expect(server.stdout()).toContain("[START] server listening at");
-      await expect(
-        access(join(resolveLocalWorkflowWorldDataDirectory(appRoot), "version.txt")),
-      ).resolves.toBeUndefined();
-      await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
-        code: "ENOENT",
       });
     } finally {
       await server.stop();

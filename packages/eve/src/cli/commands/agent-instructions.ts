@@ -126,7 +126,7 @@ export function initExtensionHandoff(options: {
     "",
     "Next:",
     "  - Add tools, skills, hooks, or connections under extension/",
-    "    (see AGENTS.md and node_modules/eve/docs/extensions.md)",
+    "    (see AGENTS.md and node_modules/eve/docs/extensions/index.md)",
     `  - ${buildCommand}   # builds dist/extension and package exports`,
     "  - Mount from a consumer agent:",
     `      // agent/extensions/${options.packageName}.ts`,

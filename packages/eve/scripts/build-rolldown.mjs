@@ -17,7 +17,7 @@ import { readdir } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import { join, parse, relative } from "node:path";
 
-import { buildWithNitroRolldown } from "./nitro-rolldown.mjs";
+import { buildWithRolldown } from "./rolldown.mjs";
 import vendoredZod from "./vendor-compiled/zod.mjs";
 import { onVendoredDependencyLog } from "../src/internal/bundler/vendored-dependency-log.ts";
 
@@ -137,12 +137,18 @@ const EXCLUDED_FILE_PATTERNS = [
   // On-demand web-template generator, not shipped runtime. Mirrors the
   // src/setup/build.ts entry in tsconfig.build.json's exclude.
   /\/setup\/build\.ts$/,
+  // The in-process test host's Workflow serializer boundary; only tests load it. Mirrors
+  // tsconfig.build.json's exclude.
+  /\/execution\/workflow-host\/step-boundary\.ts$/,
 ];
 
-// Subtrees of `src/` that are pure test infrastructure. Mirrors the
-// `exclude` list in `tsconfig.build.json` so the dist tree contains
-// exactly the same set of compilation units the declaration emit covers.
-const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
+// Subtrees of `src/` that are pure test infrastructure, the in-process test host among them.
+// Mirrors the `exclude` list in `tsconfig.build.json` so the dist tree contains exactly the same
+// set of compilation units the declaration emit covers.
+const EXCLUDED_DIRECTORIES = new Set([
+  join("internal", "testing"),
+  join("execution", "in-process"),
+]);
 
 /**
  * Packages externalized at bundle time so rolldown never inlines them
@@ -150,8 +156,8 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  *
  *   - Peer dependencies (`ai`, `next`, `react`, `@opentelemetry/api`,
  *     `braintrust`) — consumers provide the install.
- *   - Runtime dependencies (`nitro`, `undici`) — resolved at
- *     runtime against the eve installation.
+ *   - Runtime dependencies (`nitro`, `rolldown`, `undici`) — resolved
+ *     at runtime against the eve installation.
  *   - Optional peer dependency (`just-bash`) — the opt-in local sandbox
  *     engine; resolved lazily against the consumer's install and never
  *     bundled with eve.
@@ -169,6 +175,7 @@ const EXTERNAL_PACKAGES = new Set([
   "next",
   "nitro",
   "react",
+  "rolldown",
   "svelte",
   "undici",
   "vite",
@@ -237,7 +244,7 @@ function createVendoredZodPlugin() {
 
 /**
  * The code extension imports `@vercel/connect`, whose `@vercel/oidc` tree is
- * CommonJS. Resolve it to the standalone vendored bundle instead of inlining
+ * CommonJS. Resolve it to the vendored bundle instead of inlining
  * that CommonJS into `dist/src/node_modules`, where `polyfillRequire: false`
  * would leave its `require` calls undefined.
  */
@@ -320,7 +327,7 @@ const input = Object.fromEntries(
   }),
 );
 
-await buildWithNitroRolldown({
+await buildWithRolldown({
   input,
   external: isExternalPackageSpecifier,
   platform: "node",
@@ -346,6 +353,11 @@ await buildWithNitroRolldown({
     entryFileNames: "[name].js",
     format: "esm",
     minify: {
+      // App bundlers re-bundle `eve/client` and `eve/react` from these files.
+      // webpack before 5.90 drops import bindings used after
+      // `var a = class {}, b = f()` (#5037), so keep each declaration in its
+      // own statement.
+      compress: { joinVars: false },
       mangle: {
         keepNames: { class: true, function: true },
         // Disable top-level renaming so the workflow bundler's scope-
@@ -432,7 +444,7 @@ if (vueSourceFiles.length > 0) {
     return false;
   }
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     input: vueInput,
     external: isVueBuildExternal,
     platform: "node",
@@ -489,7 +501,7 @@ if (svelteSourceFiles.length > 0) {
     return false;
   }
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     input: svelteInput,
     external: isSvelteBuildExternal,
     platform: "node",

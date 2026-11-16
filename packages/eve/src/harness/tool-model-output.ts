@@ -16,6 +16,7 @@ import { withToolOutputSerializationError } from "#harness/tool-output-serializa
 export type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string }
+  | { readonly type: "error-text"; readonly value: string }
   | { readonly type: "content"; readonly value: ToolModelOutputValuePart[] };
 
 type ToolModelOutputValuePart =
@@ -57,6 +58,7 @@ const toolModelOutputPartSchema = z.discriminatedUnion("type", [
 
 const toolModelOutputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), value: z.string() }),
+  z.object({ type: z.literal("error-text"), value: z.string() }),
   z.object({ type: z.literal("json"), value: z.unknown() }),
   z.object({ type: z.literal("content"), value: z.array(toolModelOutputPartSchema).min(1) }),
 ]);

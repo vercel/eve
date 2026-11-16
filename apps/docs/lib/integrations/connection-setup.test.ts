@@ -59,6 +59,30 @@ describe("Firecrawl connection setup", () => {
   });
 });
 
+describe("Context7 connection setup", () => {
+  it("shows the installed connection file with its tool allowlist in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/context7.ts", import.meta.url),
+      "utf8",
+    );
+    const quickStart = getIntegration("context7")!.quickStart!;
+
+    expect(quickStart).toContain(source.trim());
+    expect(quickStart).toContain('tools: { allow: ["resolve-library-id", "query-docs"] }');
+  });
+});
+
+describe("Stacktree connection setup", () => {
+  it("keeps the installed approval and Bearer authorization policy in the gallery", () => {
+    const integration = getIntegration("stacktree")!;
+    const quickStart = integration.quickStart!;
+
+    expect(quickStart).toContain("authorization: `Bearer ${process.env.STACKTREE_API_KEY!}`");
+    expect(quickStart).toContain('import { always } from "eve/tools/approval"');
+    expect(quickStart).toContain("approval: always()");
+  });
+});
+
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;
@@ -161,6 +185,20 @@ describe("Sanity connection setup", () => {
     expect(setup.variants["mcp:user"]).toContain('auth: connect("sanity/sanity")');
     expect(integrationMarkdown(integration)).toContain(
       "vercel connect create sanity --name sanity --connection-method mcp",
+    );
+  });
+});
+
+describe("Tavily connection setup", () => {
+  it("pins the MCP connection method for Tavily", () => {
+    const integration = getIntegration("tavily")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/tavily");
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.tavily.com/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("tavily")');
+    expect(integrationMarkdown(integration)).toContain(
+      "vercel connect create tavily --name tavily --connection-method mcp",
     );
   });
 });

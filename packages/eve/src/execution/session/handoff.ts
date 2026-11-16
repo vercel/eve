@@ -5,10 +5,7 @@ import {
   type Hook,
 } from "#compiled/@workflow/core/index.js";
 
-import type { SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/session/accepted-deployment.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { HarnessModelMessage } from "#harness/messages.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type {
   SessionHandoverPayload,
@@ -31,40 +28,18 @@ import {
   type RunWatch,
 } from "#execution/session/run-watch.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
-import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+  type SessionTransferState,
+} from "#execution/session/checkpoint.js";
 import { isObject } from "#shared/guards.js";
 
-/**
- * Cross-deployment checkpoint contract. The successor may run a different eve
- * build than the owner that produced it; bump when any field changes shape so
- * an older successor rejects the handoff instead of misreading state.
- *
- * A successor accepts checkpoints back to `MIN_SESSION_CHECKPOINT_VERSION` and
- * refuses older ones; a bump that keeps its predecessor readable adds the upgrade
- * in `checkpoint-migrations.ts`.
- */
-export const SESSION_CHECKPOINT_VERSION = 18;
-
-/** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
-export interface SessionCheckpoint {
-  readonly admittedDeliveryKeys: readonly string[];
-  readonly version: typeof SESSION_CHECKPOINT_VERSION;
-  readonly capabilities?: SessionCapabilities;
-  readonly history: HarnessModelMessage[];
-  readonly retention?: AgentWorkflowRetentionDefinition;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-  readonly sessionTimeoutMs: number | false;
-}
-
 export type SessionOwnerActivation =
-  | { readonly kind: "active" }
   | {
-      // Owners running older eve builds read every non-`active` result as a
-      // failure, so this variant carries `payloads` in the same shape.
       readonly kind: "incompatible";
       readonly reason: "checkpoint-version";
-      /** Version 3: the successor run that gave this verdict. */
+      /** The successor run that gave this verdict. */
       readonly runId?: string;
       /** Commands accepted by partial successor claims before it rejected the checkpoint. */
       readonly payloads: readonly SessionInboxPayload[];
@@ -72,12 +47,12 @@ export type SessionOwnerActivation =
   | {
       readonly kind: "failed";
       /**
-       * Version 3: the successor took some of the session's hooks before it
-       * failed. The owner takes them back and waits for their handover.
+       * The successor took some of the session's hooks before it failed. The
+       * owner takes them back and waits for their handover.
        */
       readonly claimedHooks?: boolean;
       readonly error: unknown;
-      /** Version 3: the successor run that gave this verdict. */
+      /** The successor run that gave this verdict. */
       readonly runId?: string;
       /** Commands accepted by partial successor claims before startup failed. */
       readonly payloads: readonly SessionInboxPayload[];
@@ -124,11 +99,6 @@ type SessionRetainedReason =
   | "known-incompatible"
   | "unsupported-world";
 
-type SessionTransferState = Pick<
-  SessionCheckpoint,
-  "admittedDeliveryKeys" | "history" | "serializedContext" | "sessionState"
->;
-
 type AttemptSettlement =
   | { readonly kind: "taken-over" }
   | { readonly kind: "candidate-ended" }
@@ -147,9 +117,7 @@ type AttemptFence =
 
 /** The successor run that gave a verdict, if the outcome is one. */
 function verdictRunId(settled: AttemptSettlement): string | undefined {
-  return settled.kind === "verdict" && settled.verdict.kind !== "active"
-    ? settled.verdict.runId
-    : undefined;
+  return settled.kind === "verdict" ? settled.verdict.runId : undefined;
 }
 
 /**
@@ -486,13 +454,6 @@ export class SessionHandoff {
   ): Promise<RetainedAttempt> {
     const { inbox } = this.input;
     switch (verdict.kind) {
-      case "active":
-        // Only a successor that claims ordinarily signals `active`, and it
-        // cannot while this owner holds the hooks.
-        return {
-          error: new Error("Successor reported active without a takeover."),
-          reason: "activation-failed",
-        };
       case "incompatible":
         this.incompatibleTargetDeploymentIds.add(attempt.targetDeploymentId);
         if (verdict.payloads.length > 0) inbox.restore(verdict.payloads);
@@ -509,10 +470,6 @@ export class SessionHandoff {
             attemptKey: attempt.attemptKey,
             sourceRunId: verdict.runId ?? attempt.candidateRunId,
           });
-        } else if (isHookConflictError(verdict.error)) {
-          // A successor older than this protocol claims ordinarily and so can
-          // never take over from an owner that keeps its hooks.
-          this.incompatibleTargetDeploymentIds.add(attempt.targetDeploymentId);
         }
         if (verdict.payloads.length > 0) inbox.restore(verdict.payloads);
         return { error: verdict.error, reason: "activation-failed" };

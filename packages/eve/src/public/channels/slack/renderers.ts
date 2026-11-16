@@ -16,6 +16,7 @@ import type {
 
 /** The session events a Slack renderer can handle, in no particular order. */
 const SLACK_RENDERED_EVENTS = [
+  "call.input",
   "call.progress",
   "call.requested",
   "call.started",
@@ -95,8 +96,8 @@ export interface SlackInteractionCard {
    */
   readonly destination: SlackApprovalChannel;
   /**
-   * Who reads the message. A direct message is always `private`; a thread request has the
-   * thread's audience. Same meaning as `TaskCard.audience`.
+   * Who reads the message. A direct-message or ephemeral request is always `private`; a thread
+   * request has the thread's audience. Same meaning as `TaskCard.audience`.
    */
   readonly audience: ChannelAudience;
   /** The Slack user whose answer stands or decided the request, when known. */

@@ -21,12 +21,7 @@ export const AGENT_SOURCE_MANIFEST_KIND = "eve-agent-discovery-manifest";
 /**
  * Current manifest schema version.
  */
-export const AGENT_SOURCE_MANIFEST_VERSION = 15;
-
-/**
- * Channel source reference preserved by the discovery manifest.
- */
-export type ChannelSourceRef = ModuleSourceRef;
+export const AGENT_SOURCE_MANIFEST_VERSION = 16;
 
 /**
  * Connection source reference preserved by the discovery manifest.
@@ -44,11 +39,6 @@ export interface ConnectionSourceRef extends ModuleSourceRef {
 }
 
 /**
- * Hook source reference preserved by the discovery manifest.
- */
-export type HookSourceRef = ModuleSourceRef;
-
-/**
  * Instructions source reference preserved by discovery for compiler
  * normalization.
  */
@@ -62,13 +52,56 @@ export type SkillSourceRef =
   | ModuleSourceRef
   | (NamedSkillDefinition & SkillPackageSourceRef);
 
-/**
- * Tool source reference preserved by the discovery manifest.
- */
-export type ToolSourceRef = ModuleSourceRef;
-
+/** A memory module, with the slot it fills: `memory.ts` is `"memory"`, `memory/notes.ts` is `"notes"`. */
 export interface MemorySourceRef extends ModuleSourceRef {
   readonly slot: string;
+}
+
+/** Every authored file the agent's slots hold, other than its config module. */
+export type AgentSourceRef = InstructionsSourceRef | ScheduleSourceRef | SkillSourceRef;
+
+/** What an authored source declares, which its slot — the first segment of its logical path — names. */
+export type AgentSourceKind = keyof AgentSourceRefs;
+
+interface AgentSourceRefs {
+  readonly channel: ModuleSourceRef;
+  readonly connection: ConnectionSourceRef;
+  readonly hook: ModuleSourceRef;
+  readonly instructions: InstructionsSourceRef;
+  readonly memory: MemorySourceRef;
+  readonly sandbox: ModuleSourceRef;
+  readonly schedule: ScheduleSourceRef;
+  readonly skill: SkillSourceRef;
+  readonly tool: ModuleSourceRef;
+}
+
+const SOURCE_KIND_BY_SLOT_ROOT: Readonly<Record<string, AgentSourceKind>> = {
+  channels: "channel",
+  connections: "connection",
+  hooks: "hook",
+  instructions: "instructions",
+  memory: "memory",
+  sandbox: "sandbox",
+  schedules: "schedule",
+  skills: "skill",
+  system: "instructions",
+  tools: "tool",
+};
+
+/** The kind of source at `logicalPath`, or `undefined` for a path outside the agent's slots. */
+export function sourceKindOf(logicalPath: string): AgentSourceKind | undefined {
+  const root = logicalPath.split("/", 1)[0]!;
+  return SOURCE_KIND_BY_SLOT_ROOT[root.includes(".") ? root.slice(0, root.indexOf(".")) : root];
+}
+
+/** The manifest's sources of one kind, in discovery order. */
+export function sourcesOf<K extends AgentSourceKind>(
+  manifest: Pick<AgentSourceManifest, "sources">,
+  kind: K,
+): readonly AgentSourceRefs[K][] {
+  return manifest.sources.filter(
+    (source): source is AgentSourceRefs[K] => sourceKindOf(source.logicalPath) === kind,
+  );
 }
 
 /**
@@ -90,15 +123,6 @@ export interface LocalSubagentSourceRef {
  * (`schedules/<name>.md`).
  */
 export type ScheduleSourceRef = MarkdownSourceRef<ScheduleDefinition> | ModuleSourceRef;
-
-/**
- * Sandbox source reference preserved by the discovery manifest.
- *
- * Every agent owns exactly one sandbox; the source ref is just a
- * module reference identifying the authored `sandbox.<ext>` (or
- * `sandbox/sandbox.<ext>`) override.
- */
-export type SandboxSourceRef = ModuleSourceRef;
 
 /**
  * Sandbox workspace folder reference preserved by the discovery
@@ -198,8 +222,7 @@ export interface AgentSourceManifest {
   agentId: string;
   agentRoot: string;
   appRoot: string;
-  channels: ChannelSourceRef[];
-  connections: ConnectionSourceRef[];
+  /** The agent's config module: `agent.<ext>`, or a single-file subagent's own file. */
   configModule?: ModuleSourceRef;
   diagnosticsSummary: DiscoverDiagnosticsSummary;
   /**
@@ -214,36 +237,20 @@ export interface AgentSourceManifest {
    * extensions (transitive mounting is a non-goal).
    */
   resolvedExtensions: ResolvedExtensionMount[];
-  hooks: ModuleSourceRef[];
-  memories: MemorySourceRef[];
   lib: LibSourceRef[];
   kind: typeof AGENT_SOURCE_MANIFEST_KIND;
   /**
-   * Authored instructions prompt sources discovered at the agent root.
-   *
-   * Supports three forms:
-   * 1. Flat file: `instructions.md` or `instructions.{ts,...}` → single element.
-   * 2. Directory: `instructions/` with `.md` and `.ts` files → multiple elements.
-   * 3. Legacy: `system.{md,ts,...}` → single element with deprecation warning.
-   *
-   * Empty when no instructions are authored.
+   * Every authored module and resource the agent's slots hold, other than its config module: its
+   * channels, connections, hooks, memory, sandbox, tools, instructions, schedules, and skills, in
+   * that order. A source's slot names its kind; see {@link sourcesOf}.
    */
-  instructions: InstructionsSourceRef[];
-  /**
-   * Authored sandbox module discovered for this agent, or `null` when
-   * the agent does not declare one. Every agent owns at most one
-   * sandbox.
-   */
-  sandbox: SandboxSourceRef | null;
+  sources: AgentSourceRef[];
   /**
    * Authored sandbox workspace folder discovered under
    * `agent/sandbox/workspace/`. At most one entry per agent; mounted
    * into the live sandbox cwd at session bootstrap.
    */
   sandboxWorkspaces: SandboxWorkspaceFolderSourceRef[];
-  schedules: ScheduleSourceRef[];
-  skills: SkillSourceRef[];
-  tools: ModuleSourceRef[];
   version: typeof AGENT_SOURCE_MANIFEST_VERSION;
   subagents: SubagentSourceRef[];
 }
@@ -255,14 +262,10 @@ export interface CreateAgentSourceManifestInput {
   agentId?: string;
   agentRoot: string;
   appRoot: string;
-  channels?: readonly ChannelSourceRef[];
-  connections?: readonly ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
   diagnostics?: readonly DiscoverDiagnostic[];
   extensions?: readonly ExtensionSourceRef[];
   resolvedExtensions?: readonly ResolvedExtensionMount[];
-  hooks?: readonly ModuleSourceRef[];
-  memories?: readonly MemorySourceRef[];
   lib?: readonly LibSourceRef[];
   /**
    * Optional package name read from the app root's package.json.
@@ -271,12 +274,8 @@ export interface CreateAgentSourceManifestInput {
    * `/vercel/path0`) produce a meaningful agent id.
    */
   packageName?: string;
-  instructions?: readonly InstructionsSourceRef[];
-  sandbox?: SandboxSourceRef | null;
   sandboxWorkspaces?: readonly SandboxWorkspaceFolderSourceRef[];
-  schedules?: readonly ScheduleSourceRef[];
-  skills?: readonly SkillSourceRef[];
-  tools?: readonly ModuleSourceRef[];
+  sources?: readonly AgentSourceRef[];
   subagents?: readonly SubagentSourceRef[];
 }
 
@@ -333,21 +332,13 @@ export function createAgentSourceManifest(
     agentId: input.agentId ?? deriveAgentIdFromRoots(appRoot, agentRoot, input.packageName),
     agentRoot,
     appRoot,
-    channels: [...(input.channels ?? [])],
-    connections: [...(input.connections ?? [])],
     diagnosticsSummary: summarizeDiscoverDiagnostics(input.diagnostics ?? []),
     extensions: [...(input.extensions ?? [])],
     resolvedExtensions: [...(input.resolvedExtensions ?? [])],
-    hooks: [...(input.hooks ?? [])],
-    memories: [...(input.memories ?? [])],
-    instructions: [...(input.instructions ?? [])],
     lib: [...(input.lib ?? [])],
     kind: AGENT_SOURCE_MANIFEST_KIND,
-    sandbox: input.sandbox ?? null,
     sandboxWorkspaces: [...(input.sandboxWorkspaces ?? [])],
-    schedules: [...(input.schedules ?? [])],
-    skills: [...(input.skills ?? [])],
-    tools: [...(input.tools ?? [])],
+    sources: [...(input.sources ?? [])],
     version: AGENT_SOURCE_MANIFEST_VERSION,
     subagents: [...(input.subagents ?? [])],
   };

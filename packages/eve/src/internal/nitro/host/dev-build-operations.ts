@@ -1,4 +1,5 @@
-import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
+import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import type {
   DevelopmentHostBuild,
   DevelopmentPrepareInput,
@@ -23,6 +24,12 @@ export async function prepareDevelopmentBuild(
 export async function buildDevelopmentHost(
   host: PreparedDevelopmentApplicationHost,
 ): Promise<DevelopmentHostBuild> {
-  const nitro = await createDevelopmentApplicationNitro(host);
+  const nitro = await createHostNitro(
+    createHostSpec(
+      host,
+      { kind: "development" },
+      { buildDir: host.workspace.nitroBuildDir, outputDir: host.workspace.nitroOutputDir },
+    ),
+  );
   return await buildDevelopmentHostCandidate({ host, nitro });
 }

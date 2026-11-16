@@ -223,6 +223,7 @@ export function createDiscordGatewayRoute(input: {
         hasMessageAnchor: true,
         initialResponseSent: true,
         interactionToken: null,
+        triggeringUserId: message.author.id,
       };
       // Bots receive only 1:1 DMs over the Gateway, never group DMs.
       if (isDirectMessage) {

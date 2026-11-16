@@ -52,6 +52,7 @@ export function toolCallsStreamResult(
     readonly toolCallId: string;
     readonly toolName: string;
   }[],
+  finishReason: "length" | "other" | "tool-calls" = "tool-calls",
 ): StreamResult {
   return {
     stream: simulateReadableStream({
@@ -59,7 +60,7 @@ export function toolCallsStreamResult(
         { type: "stream-start", warnings: [] },
         ...calls.map((call) => ({ ...call, type: "tool-call" as const })),
         {
-          finishReason: { raw: undefined, unified: "tool-calls" },
+          finishReason: { raw: undefined, unified: finishReason },
           type: "finish",
           usage,
         },

@@ -106,8 +106,7 @@ it("keeps a relay answerable until its asker settles the interaction", () => {
   );
   const session = writeHitlState(
     {
-      agent: { modelReference: { id: "test" }, system: "", tools: [] },
-      compaction: { recentWindowSize: 10, threshold: 0.8 },
+      compaction: {},
       continuationToken: "parent",
       sessionId: "session-1",
       state: undefined,

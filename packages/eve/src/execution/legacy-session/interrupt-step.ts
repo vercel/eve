@@ -1,4 +1,5 @@
 import { readDurableSession } from "#execution/durable-session-store.js";
+import { enterSessionStep } from "#execution/publish-session-events.js";
 import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import {
   EntityConflictError,
@@ -80,11 +81,12 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
       sessionState: prepared.sessionState,
       serializedContext: prepared.serializedContext,
     };
-  return await settleCancelledTurn({
+  const settle = {
     history: prepared.history,
     reportUsage: false,
     sessionWritable: prepared.input.sessionWritable,
     serializedContext: prepared.serializedContext,
     sessionState: prepared.sessionState,
-  });
+  };
+  return await settleCancelledTurn(enterSessionStep(settle));
 }

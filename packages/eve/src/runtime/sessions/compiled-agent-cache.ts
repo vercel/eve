@@ -31,7 +31,7 @@ export interface CompiledRuntimeAgentBundle {
   readonly moduleMap: CompiledModuleMap;
   /**
    * Id of the active node in the graph. `undefined` for root bundles.
-   * Persisted by the BundleKey codec so per-node bundles survive
+   * Persisted in the session agent's `bundle` reference so per-node bundles survive
    * serialization across workflow step boundaries.
    */
   readonly nodeId?: string;

@@ -19,10 +19,8 @@ type ModuleBacking =
     }
   | {
       readonly kind: "programmatic";
-      readonly dependencies?: Readonly<Record<string, string>>;
       readonly mountId?: string;
       readonly moduleId: string;
-      readonly parameters?: Readonly<Record<string, unknown>>;
       readonly registryId: string;
       readonly revision: string;
       readonly semanticRevision?: string;
@@ -78,6 +76,7 @@ export interface AgentInfoInstructionsEntry extends AgentInfoEntry {
 /** An inspected schedule. */
 export interface AgentInfoScheduleEntry extends AgentInfoEntry {
   readonly cron: string;
+  readonly timezone?: string;
   readonly hasRun: boolean;
   readonly markdown?: string;
 }

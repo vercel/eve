@@ -363,7 +363,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #initialPromptPlaceholder = "Send a message…";
   /** The agent's local subagents, whose tools render as delegations. */
   #subagentNames?: readonly string[];
-  #startupPhase?: "starting" | "connecting" | "updating";
+  #startupPhase?: "installing" | "starting" | "connecting" | "updating";
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
   #startupStartedAt = 0;
@@ -629,7 +629,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       : [];
   }
 
-  setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
+  setStartupPhase(phase: "installing" | "starting" | "connecting" | "updating" | undefined): void {
     this.#startupPhase = phase;
     if (phase === undefined) this.#stopTicker();
     else this.#startTicker();
@@ -1210,7 +1210,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // prompt, and the server records the still-parked request as `ignored`
     // when the user's next message resumes the turn.
     let mode: "select" | "text" = hasOptions ? "select" : "text";
-    let cursorIndex = 0;
+    let cursorIndex = Math.max(
+      0,
+      optionList.findIndex((option) => option.id === question.initialOptionId),
+    );
     let editor = EMPTY_LINE;
 
     const isOnFreeformRow = () => hasFreeformRow && cursorIndex === optionList.length;
@@ -3557,6 +3560,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const elapsedMs = Date.now() - startedAtMs;
         const elapsed = elapsedMs >= 5_000 ? ` ${formatTurnDuration(elapsedMs)}` : "";
         status = { ...flowStatus, text: `${flowStatus.text}${elapsed}`, indicator };
+      } else if (this.#startupPhase === "installing") {
+        // `eve init` runs onboarding while it installs; the panel hides the status line.
+        status = { text: "Installing dependencies…", indicator };
       }
       let content: FlowPanelContent;
       // A live status indicator rides alongside an open question only when one is
@@ -3788,6 +3794,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushStatusLine(rows: string[], width: number): void {
     if (this.#startupPhase !== undefined) {
       const labels = {
+        installing: "Installing dependencies…",
         starting: "Starting agent…",
         connecting: "Reading saved connection…",
         updating: "Loading selected model…",

@@ -6,6 +6,8 @@
  * terminal needs.
  */
 
+import { diffLines } from "#shared/line-diff.js";
+
 /** One rail row under a tool header. `kind` is unset for plain/context text. */
 export interface ToolDetailLine {
   readonly text: string;
@@ -14,12 +16,6 @@ export interface ToolDetailLine {
 
 /** Unchanged lines kept around each hunk so a change reads in place. */
 const HUNK_CONTEXT_LINES = 2;
-
-/**
- * The LCS table is quadratic; past this many cells the diff is abandoned and
- * the caller falls back to plain content.
- */
-const MAX_DIFF_CELLS = 250_000;
 
 /**
  * Builds the write rail for `content` against what it replaced.
@@ -45,12 +41,8 @@ export function diffWriteDetail(
     return nextLines.map((text) => ({ text }));
   }
 
-  const previousLines = splitContentLines(previous);
-  if ((previousLines.length + 1) * (nextLines.length + 1) > MAX_DIFF_CELLS) {
-    return nextLines.map((text) => ({ text }));
-  }
-
-  return windowHunks(lcsDiff(previousLines, nextLines));
+  const diff = diffLines(splitContentLines(previous), nextLines);
+  return diff === undefined ? nextLines.map((text) => ({ text })) : windowHunks(diff);
 }
 
 /**
@@ -60,40 +52,6 @@ export function diffWriteDetail(
 function splitContentLines(content: string): string[] {
   const lines = content.split(/\r?\n/u);
   while (lines.length > 0 && lines.at(-1)?.trim() === "") lines.pop();
-  return lines;
-}
-
-/** Classic LCS backtrack producing removed-before-added hunks. */
-function lcsDiff(a: readonly string[], b: readonly string[]): ToolDetailLine[] {
-  const width = b.length + 1;
-  const table = new Uint32Array((a.length + 1) * width);
-  for (let i = a.length - 1; i >= 0; i -= 1) {
-    for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i * width + j] =
-        a[i] === b[j]
-          ? table[(i + 1) * width + j + 1]! + 1
-          : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
-    }
-  }
-
-  const lines: ToolDetailLine[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) {
-      lines.push({ text: a[i]! });
-      i += 1;
-      j += 1;
-    } else if (table[(i + 1) * width + j]! >= table[i * width + j + 1]!) {
-      lines.push({ text: a[i]!, kind: "removed" });
-      i += 1;
-    } else {
-      lines.push({ text: b[j]!, kind: "added" });
-      j += 1;
-    }
-  }
-  for (; i < a.length; i += 1) lines.push({ text: a[i]!, kind: "removed" });
-  for (; j < b.length; j += 1) lines.push({ text: b[j]!, kind: "added" });
   return lines;
 }
 

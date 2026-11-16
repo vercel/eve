@@ -2,6 +2,8 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 interface SlackAuthContextInput {
+  /** Slack's per-message `action_token`, when the message carried one. */
+  readonly actionToken?: string;
   readonly channelId: string;
   readonly email?: string;
   readonly fullName?: string;
@@ -58,6 +60,7 @@ export function buildSlackAuthContext(input: SlackAuthContextInput): SessionAuth
   if (input.fullName) attributes.full_name = input.fullName;
   if (input.email) attributes.email = input.email;
   if (input.teamId) attributes.team_id = input.teamId;
+  if (input.actionToken) attributes.action_token = input.actionToken;
 
   return {
     attributes,

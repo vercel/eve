@@ -1,3 +1,4 @@
+import { commitOf } from "#harness/session-machine/commit.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -77,7 +78,7 @@ function session(audience: "public" | "private") {
     prepare: runtime.prepareDelivery,
     content,
     metadata,
-    commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => publish()(facts)),
+    commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => publish()(commitOf(facts))),
   };
 }
 const consumed = (deliveryId: string): SessionEvent => ({

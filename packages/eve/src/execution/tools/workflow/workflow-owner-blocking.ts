@@ -1,5 +1,4 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
-import { isHookConflictError } from "#execution/hook-ownership.js";
+import type { RunHost } from "#execution/run-host.js";
 import {
   createChannelReader,
   type ChannelReader,
@@ -9,7 +8,6 @@ import type {
   WorkflowToolRunMessageBatch,
   WorkflowToolRunControlMessage,
 } from "#execution/tools/workflow/messages.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 
 export interface BlockingWorkflowOwner {
@@ -31,24 +29,20 @@ export interface BlockingWorkflowOwner {
 }
 
 /** The run's link to its session: commands arrive on its control hook, and its messages go to the session's inbox. */
-export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWorkflowOwner {
-  const hook = createHook<WorkflowToolRunControlMessage>({ token: input.hookToken });
+export function createBlockingWorkflow(
+  input: WorkflowToolRunInput,
+  host: RunHost,
+): BlockingWorkflowOwner {
+  const hook = host.createHook<WorkflowToolRunControlMessage>(input.hookToken);
   let registered: Promise<boolean> | undefined;
   const handleMessage = (message: WorkflowToolRunMessage): Promise<void> =>
-    resumeHookStep(input.owner.inbox, message, {
+    host.resumeHook(input.owner.inbox, message, {
       ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
     });
   return {
     commands: createChannelReader("control", hook),
     register() {
-      registered ??= hook.getConflict().then(
-        (conflict) => conflict === null,
-        // A World that can't name the holder rejects instead.
-        (error: unknown) => {
-          if (isHookConflictError(error)) return false;
-          throw error;
-        },
-      );
+      registered ??= hook.claim();
       return registered;
     },
     handleMessage,
@@ -56,7 +50,7 @@ export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWor
       // A lone message keeps the shape every session reads.
       if (messages.length === 1) return handleMessage(messages[0]!);
       const batch: WorkflowToolRunMessageBatch = { kind: "workflow-batch", messages };
-      return resumeHookStep(input.owner.inbox, batch);
+      return host.resumeHook(input.owner.inbox, batch);
     },
   };
 }

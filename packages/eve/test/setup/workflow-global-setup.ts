@@ -37,7 +37,6 @@ export default async function setupWorkflowTests(): Promise<void> {
     includeTestFixtures: true,
     outDir,
     rootDir: packageRoot,
-    watch: false,
   });
 
   await builder.build();

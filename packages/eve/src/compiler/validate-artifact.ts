@@ -140,46 +140,20 @@ export function validateCompiledAgentResources(
     "tool name",
   );
   validateUniqueIdentities(
-    node.dynamicTools.map((entry) => ({ identity: entry.slug, kind: "dynamic tool" })),
-    "dynamic tool slug",
-  );
-  validateUniqueIdentities(
     node.skills.map((entry) => ({ identity: entry.name, kind: "skill" })),
     "skill name",
-  );
-  validateUniqueIdentities(
-    node.dynamicSkills.map((entry) => ({ identity: entry.slug, kind: "dynamic skill" })),
-    "dynamic skill slug",
   );
   validateUniqueIdentities(
     node.instructions.map((entry) => ({ identity: entry.name, kind: "instructions" })),
     "instructions name",
   );
   validateUniqueIdentities(
-    node.dynamicInstructions.map((entry) => ({
-      identity: entry.slug,
-      kind: "dynamic instructions",
-    })),
-    "dynamic instructions slug",
-  );
-  validateUniqueIdentities(
     node.connections.map((entry) => ({ identity: entry.connectionName, kind: "connection" })),
     "connection name",
   );
   validateUniqueIdentities(
-    node.dynamicConnections.map((entry) => ({
-      identity: entry.slug,
-      kind: "dynamic connection",
-    })),
-    "dynamic connection slug",
-  );
-  validateUniqueIdentities(
-    node.hooks.map((entry) => ({ identity: entry.slug, kind: "hook" })),
-    "hook slug",
-  );
-  validateUniqueIdentities(
-    node.memories.map((entry) => ({ identity: entry.slot, kind: "memory" })),
-    "memory slot",
+    node.definitions.map(({ kind, slug }) => ({ identity: `${kind} ${slug}`, kind })),
+    "definition",
   );
   validateUniqueIdentities(
     node.schedules.map((entry) => ({ identity: entry.name, kind: "schedule" })),
@@ -206,7 +180,6 @@ export function validateCompiledAgentResources(
       fail(`compiled binding "${sourceId}" is not referenced by its node manifest`);
     }
   }
-  validateProgrammaticBindingDependencies(node.bindings);
 
   const activeSourceIds = new Set([
     ...referencedModuleSources.keys(),
@@ -284,48 +257,6 @@ function validateBinding(
   }
 }
 
-function validateProgrammaticBindingDependencies(
-  bindings: Readonly<Record<string, CompiledModuleBinding>>,
-): void {
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const visit = (sourceId: string): void => {
-    if (visited.has(sourceId)) return;
-    if (visiting.has(sourceId)) {
-      fail(`programmatic binding dependency cycle includes "${sourceId}"`);
-    }
-    const binding = bindings[sourceId];
-    if (binding === undefined) fail(`programmatic binding dependency "${sourceId}" is missing`);
-    visiting.add(sourceId);
-    if (binding.backing.kind === "programmatic") {
-      for (const [alias, dependencySourceId] of Object.entries(
-        binding.backing.dependencies ?? {},
-      )) {
-        if (alias.trim().length === 0) {
-          fail(`programmatic binding "${sourceId}" has an empty dependency alias`);
-        }
-        if (bindings[dependencySourceId] === undefined) {
-          fail(
-            `programmatic binding "${sourceId}" depends on missing binding "${dependencySourceId}"`,
-          );
-        }
-        if (
-          binding.usage.runtimeEntry &&
-          bindings[dependencySourceId]?.usage.runtimeEntry !== true
-        ) {
-          fail(
-            `runtime binding "${sourceId}" depends on non-runtime binding "${dependencySourceId}"`,
-          );
-        }
-        visit(dependencySourceId);
-      }
-    }
-    visiting.delete(sourceId);
-    visited.add(sourceId);
-  };
-  for (const sourceId of Object.keys(bindings)) visit(sourceId);
-}
-
 function collectReferencedModuleSources(
   node: CompiledNode,
 ): Map<string, { readonly logicalPath: string }> {
@@ -347,13 +278,8 @@ function collectReferencedModuleSources(
     if (route.source.backing.kind !== "resource") add(route.source);
   }
   for (const value of node.connections) add(value);
-  for (const value of node.dynamicConnections) add(value);
+  for (const value of node.definitions) add(value);
   for (const value of node.tools) add(value);
-  for (const value of node.dynamicInstructions) add(value);
-  for (const value of node.dynamicSkills) add(value);
-  for (const value of node.dynamicTools) add(value);
-  for (const value of node.hooks) add(value);
-  for (const value of node.memories) add(value);
   for (const value of node.instructions) if (value.sourceKind === "module") add(value);
   for (const value of node.skills) if (value.sourceKind === "module") add(value);
   for (const value of node.schedules) if (value.sourceKind === "module") add(value);

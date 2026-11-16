@@ -3,7 +3,8 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
   publishFromSessionStep,
   restoreSessionStep,
-  type SessionHistoryStepState,
+  type Entered,
+  type SessionHistoryStepInput,
 } from "#execution/publish-session-events.js";
 import { type WithSessionStateDelta } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
@@ -25,7 +26,7 @@ export interface CancelledTurnSettleResult {
 }
 
 /** Takes the history because the steps the cancel stopped commit to it. */
-interface CancelledTurnSettleInput extends SessionHistoryStepState {
+interface CancelledTurnSettleInput extends SessionHistoryStepInput {
   /**
    * Whether a caller receives the turn's usage. Only then is it marked
    * reported; otherwise the next settled turn reports it.
@@ -49,7 +50,7 @@ export async function settleCancelledTurnStep(
 
 /** {@link settleCancelledTurnStep} for a caller that is already a step and adopts the whole state. */
 export async function settleCancelledTurn(
-  input: CancelledTurnSettleInput,
+  input: Entered<CancelledTurnSettleInput>,
 ): Promise<CancelledTurnSettleResult> {
   const step = { ...(await restoreSessionStep(input)), history: input.history };
   const durableState = step.durableSession.state;

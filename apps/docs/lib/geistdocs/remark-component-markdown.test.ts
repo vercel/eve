@@ -71,6 +71,28 @@ describe("component Markdown export", () => {
     );
   });
 
+  it("exports the ambient listening checks and their continuation paths in order", async () => {
+    const processor = await configuredProcessor();
+    const tree = processor.parse("<AmbientListeningFlow />");
+    const markdown = toMarkdown(tree, {
+      extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
+    });
+
+    expect(markdown).toContain(
+      "1. **Route the message** (`onMessage`): Followed thread or watched channel?",
+    );
+    expect(markdown).toContain("- No: Ignore. No model call.");
+    expect(markdown).toContain(
+      "2. **Screen for relevance** (`decide`): Clearly not for the agent?",
+    );
+    expect(markdown).toContain("- Yes: Skip. No agent turn.");
+    expect(markdown).toContain("- No, unsure, or filter error: continue.");
+    expect(markdown).toContain('3. **Let the agent decide** (`status: "deferred"`)');
+    expect(markdown).toContain("- Reply warranted: Answer in the thread. Visible reply.");
+    expect(markdown).toContain("- Otherwise: `no_reply`. Silent end to the turn.");
+    expect(markdown).not.toContain("<AmbientListeningFlow");
+  });
+
   it("renders use case cards as Markdown lists with their titles and links", async () => {
     const processor = await configuredProcessor();
     const source = [

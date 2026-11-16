@@ -62,6 +62,13 @@ export function connectUserAuthorization(
           callbackUrl,
           deviceCode: true,
         });
+        if (!response.url && !response.deviceCode) {
+          throw new ConnectionAuthorizationFailedError("connect", {
+            message: `Vercel Connect started an authorization for ${connector} without a sign-in URL or device code.`,
+            reason: "missing_challenge",
+            retryable: false,
+          });
+        }
         // Name the destination service, as Connect's eve helper does.
         const displayName = response.connector?.serviceName ?? response.connector?.name;
         return {
@@ -92,9 +99,10 @@ export function connectUserAuthorization(
 function translate(error: unknown, phase: Phase): Error {
   if (error instanceof UserAuthorizationRequiredError || error instanceof NoValidTokenError) {
     if (phase === "completeAuthorization") {
+      // The person reads this on the sign-in card, so it says what to do next.
       return new ConnectionAuthorizationFailedError("connect", {
         message:
-          "Authorization did not complete. Vercel Connect still reports the user as unauthorized.",
+          "The sign-in didn't finish, so you do not have access yet. Ask again for a new sign-in link and complete all steps to gain access.",
       });
     }
     return new ConnectionAuthorizationRequiredError("connect", { message: error.message });

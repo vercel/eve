@@ -28,13 +28,20 @@ export interface SessionTimeoutControl {
   start(): Promise<void>;
 }
 
-/** Creates the idle timeout for one owner run, or `undefined` when timeouts are disabled. */
-export function createSessionTimeoutControl(input: {
+export interface SessionTimeoutInput {
   /** Preserve the idle window when proactively moving an existing session. */
   readonly deadline?: Date;
   readonly sessionId: string;
   readonly timeoutMs: number | false;
-}): SessionTimeoutControl | undefined {
+}
+
+/** How a host keeps one owner's idle timeout; `undefined` when timeouts are disabled. */
+export type SessionTimeouts = (input: SessionTimeoutInput) => SessionTimeoutControl | undefined;
+
+/** Creates the idle timeout for one owner run, or `undefined` when timeouts are disabled. */
+export function createSessionTimeoutControl(
+  input: SessionTimeoutInput,
+): SessionTimeoutControl | undefined {
   const { sessionId, timeoutMs } = input;
   if (timeoutMs === false) return undefined;
   // Workflow's clock is replay-stable. An owner boots right after activity:

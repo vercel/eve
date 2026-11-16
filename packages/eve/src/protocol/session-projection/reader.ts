@@ -37,6 +37,17 @@ export function runPlace(view: SessionView, runId: string | undefined): RunPlace
   return { stepIndex: row.step, turnId: row.owner.turnId };
 }
 
+/** Where a part goes: its run's place, or its turn's latest step for a part no run wrote. */
+export function partPlace(
+  view: SessionView,
+  row: { readonly runId?: string; readonly turnId?: string; readonly introducedAt?: number },
+): RunPlace | undefined {
+  if (row.runId !== undefined) return runPlace(view, row.runId);
+  return row.turnId === undefined
+    ? undefined
+    : { stepIndex: turnStepAt(view, row.turnId, row.introducedAt), turnId: row.turnId };
+}
+
 /** A turn's latest step as of a position: the place of its last run introduced by then. */
 export function turnStepAt(view: SessionView, turnId: string, position = Infinity): number {
   let step = 0;

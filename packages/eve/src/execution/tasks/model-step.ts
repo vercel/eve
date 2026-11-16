@@ -26,7 +26,7 @@ import { splitTaskIdInput } from "#execution/tasks/task-id-input.js";
 import { entryPointOf, isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessSession, HarnessToolLookup, HarnessToolMap } from "#harness/types.js";
 import type { WorkflowToolCallEntry } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
 import { taskCancelTool } from "#tools/provided/task-cancel.js";
@@ -138,7 +138,7 @@ export function workingTaskIds(session: HarnessSession): readonly string[] {
 export async function appendTaskContext(input: {
   readonly messages: readonly HarnessModelMessage[];
   readonly session: HarnessSession;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
 }): Promise<{
   readonly messages: readonly HarnessModelMessage[];
   readonly session: HarnessSession;
@@ -162,7 +162,7 @@ export async function appendTaskContext(input: {
  */
 async function deliverTaskResults(input: {
   readonly session: HarnessSession;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
 }): Promise<{ readonly message?: string; readonly session: HarnessSession }> {
   const { table, taken } = takeTaskResults(readTaskTable(input.session.state));
   if (taken.length === 0) return { session: input.session };

@@ -5,18 +5,46 @@ import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
   createEveVercelOptions,
   EVE_WORKFLOW_FLOW_ROUTE_PATH,
+  VERCEL_SCHEDULES_FUNCTION_ROUTE,
 } from "#internal/nitro/host/vercel-build-output-config.js";
 import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
+const FLOW_ROUTE = {
+  kind: "workflow",
+  method: "ALL",
+  path: EVE_WORKFLOW_FLOW_ROUTE_PATH,
+  vercelFunction: "workflow-queue",
+} as const;
+const CONSUMER_ROUTE = {
+  kind: "schedule-consumer",
+  method: "POST",
+  path: EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+  vercelFunction: "schedule-queue",
+} as const;
+const DAILY_TASK = {
+  cron: "0 0 * * *",
+  description: "Run daily.",
+  logicalPath: "schedules/daily.md",
+  nitroTaskName: "eve.daily",
+  scheduleId: "daily",
+  sourceId: "app:daily",
+  taskName: "eve.schedule.daily",
+};
+const routeTable = { routes: [FLOW_ROUTE], scheduleTasks: [] };
+
 describe("createEveVercelOptions", () => {
   it("returns undefined when the Vercel build output is disabled", () => {
-    expect(createEveVercelOptions({ agentName: "test-agent", enabled: false })).toBeUndefined();
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: false, routeTable }),
+    ).toBeUndefined();
   });
 
   it("emits both framework slug and version so the proxy keeps the framework object", () => {
-    expect(createEveVercelOptions({ agentName: "test-agent", enabled: true })?.config).toEqual({
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable })?.config,
+    ).toEqual({
       version: 3,
       framework: {
         slug: EVE_PACKAGE_NAME,
@@ -26,7 +54,7 @@ describe("createEveVercelOptions", () => {
   });
 
   it("declares the queue-triggered workflow flow function through functionRules", () => {
-    const options = createEveVercelOptions({ agentName: "test-agent", enabled: true });
+    const options = createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable });
 
     expect(options?.functionRules).toEqual({
       [EVE_WORKFLOW_FLOW_ROUTE_PATH]: {
@@ -47,15 +75,16 @@ describe("createEveVercelOptions", () => {
     });
   });
 
-  it("conditionally declares the private schedule collection consumer", () => {
+  it("declares a queue function for each route the table assigns one", () => {
     const withoutCollections = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
     });
     const withCollections = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
-      hasVercelScheduleCollections: true,
+      routeTable: { routes: [CONSUMER_ROUTE, FLOW_ROUTE], scheduleTasks: [] },
     });
 
     expect(withoutCollections?.functionRules).not.toHaveProperty(
@@ -74,6 +103,10 @@ describe("createEveVercelOptions", () => {
       ],
       environment: { WORKFLOW_PRECONDITION_GUARD: "1" },
     });
+    expect(Object.keys(withCollections?.functionRules ?? {})).toEqual([
+      EVE_WORKFLOW_FLOW_ROUTE_PATH,
+      EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+    ]);
   });
 
   it("omits the public route prefix from the flow environment when none is set", () => {
@@ -81,6 +114,7 @@ describe("createEveVercelOptions", () => {
       const options = createEveVercelOptions({
         agentName: "test-agent",
         enabled: true,
+        routeTable,
         publicRoutePrefix,
       });
       expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]!.environment).not.toHaveProperty(
@@ -93,6 +127,7 @@ describe("createEveVercelOptions", () => {
     const options = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
       publicRoutePrefix: "eve/support/",
     });
 
@@ -106,11 +141,13 @@ describe("createEveVercelOptions", () => {
     const standalone = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
       publicRoutePrefix: "/support",
     });
     const workspaceMember = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
       publicRoutePrefix: "/support",
       workspaceMember: true,
     });
@@ -123,5 +160,28 @@ describe("createEveVercelOptions", () => {
         EVE_INTERNAL_AGENT_WORKSPACE_MEMBER: "1",
       },
     );
+  });
+
+  it("runs schedules through Nitro's private Vercel Schedules function", () => {
+    const withoutTasks = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      routeTable,
+    });
+    const withTasks = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      publicRoutePrefix: "/eve/billing",
+      routeTable: { ...routeTable, scheduleTasks: [DAILY_TASK] },
+    });
+
+    expect(withoutTasks?.schedules).toBe("private");
+    expect(withoutTasks?.functionRules).not.toHaveProperty(VERCEL_SCHEDULES_FUNCTION_ROUTE);
+    expect(withTasks?.functionRules[VERCEL_SCHEDULES_FUNCTION_ROUTE]).toEqual({
+      environment: {
+        EVE_PUBLIC_ROUTE_PREFIX: "/eve/billing",
+        WORKFLOW_PRECONDITION_GUARD: "1",
+      },
+    });
   });
 });

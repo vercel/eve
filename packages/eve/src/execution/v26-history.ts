@@ -24,6 +24,8 @@ import {
 } from "#protocol/session-events/envelope.js";
 import type { Fact } from "#protocol/session-events/facts.js";
 import type { Capability, CallOutcome } from "#protocol/session-events/families/call.js";
+import type { InteractionOrigin } from "#protocol/session-events/families/interaction.js";
+import { traceContext } from "#protocol/session-events/families/session.js";
 import {
   v26InteractionOutcome,
   v26InteractionRequest,
@@ -177,6 +179,11 @@ class Translator {
   /** The approval that cleared or rejected each call. */
   private readonly approvals = new Map<string, string>();
   private readonly interactionCalls = new Map<string, string>();
+  /**
+   * The child session each agent call and agent task opened, keyed `call:` or `task:`. A call
+   * that continues a task opens no child, and the view drops a child's row once it closes.
+   */
+  private readonly children = new Map<string, string>();
   /** The context change a compaction runs as, until it completes. */
   private compaction: string | undefined;
   /** History v26 imported for the turn, for the `delivery.consumed` it records next. */
@@ -214,7 +221,7 @@ class Translator {
       case "session.started":
         return [{ data: sessionStarted(data), type: "session.started" }];
       case "turn.started":
-        return this.startTurn(str(data.turnId), context);
+        return this.startTurn(str(data.turnId), context, data);
       case "history.imported":
         // Folded into the turn's `delivery.consumed`, which v26 records next.
         this.pendingHistory = Array.isArray(data.messages)
@@ -306,13 +313,19 @@ class Translator {
     }
   }
 
-  private startTurn(turnId: string | undefined, context: Context): Fact[] {
+  /** `recorded` is the v26 `turn.started` data, when that line opens the turn. */
+  private startTurn(turnId: string | undefined, context: Context, recorded: Data = {}): Fact[] {
     if (turnId === undefined || this.isIntroduced("turn", turnId)) return [];
     const facts: Fact[] = [];
     const deliveryId = this.unadmitted(context, `v26_${String(context.position)}`);
     facts.push(...this.admit(deliveryId));
     facts.push({
-      data: { cause: { deliveryId }, follows: this.follows, turnId },
+      data: {
+        cause: { deliveryId },
+        follows: this.follows,
+        trace: traceContext.safeParse(recorded.trace).data,
+        turnId,
+      },
       type: "turn.started",
     });
     this.turnId = turnId;
@@ -578,18 +591,21 @@ class Translator {
   }
 
   private agentStarted(data: Data): Fact[] {
-    const sessionId = str(data.sessionId);
-    const callId = str(data.callId);
-    if (sessionId === undefined || callId === undefined || this.view.calls[callId] === undefined)
-      return [];
+    const started = childStarted(data);
+    const call = started === undefined ? undefined : this.view.calls[started.callId];
+    if (started === undefined || call === undefined) return [];
+    const { callId, name, sessionId, stream } = started;
+    this.children.set(`call:${callId}`, sessionId);
+    const taskId = str(data.taskId);
+    if (taskId !== undefined) this.children.set(`task:${taskId}`, sessionId);
     if (this.isIntroduced("child", sessionId)) return [];
     return [
       {
         data: {
-          name: str(data.name) ?? this.view.calls[callId].capability.name,
+          name: name ?? call.capability.name,
           owner: { callId },
           sessionId,
-          stream: str(data.streamPath) ?? `/eve/v1/session/${sessionId}/stream`,
+          stream,
         },
         type: "child.opened",
       },
@@ -599,29 +615,71 @@ class Translator {
   private inputRequested(data: Data): Fact[] {
     if (!Array.isArray(data.requests)) return [];
     const relayedBy = str(data.callId);
+    const taskId = str(data.taskId);
+    const turnId = str(data.turnId);
     return data.requests.flatMap((request): Fact[] => {
       if (!isRecord(request)) return [];
       const interactionId = str(request.requestId);
       if (interactionId === undefined || this.isIntroduced("interaction", interactionId)) return [];
       const action = isRecord(request.action) ? request.action : {};
       const callId = relayedBy ?? str(action.callId);
-      const turnId = str(data.turnId);
+      // As `authorizationRequired` places a task's sign-in. A task's own question keeps the task
+      // as its subject, so only its explicit resolution closes it, not the task's call.
       const subject =
         callId !== undefined && this.view.calls[callId] !== undefined
           ? { callId }
-          : turnId !== undefined
-            ? { turnId }
-            : undefined;
+          : taskId !== undefined && this.view.tasks[taskId] !== undefined
+            ? { taskId }
+            : turnId !== undefined
+              ? { turnId }
+              : undefined;
       if (subject === undefined) return [];
-      if (callId !== undefined && request.kind === "tool-approval")
+      const origin = this.originOf(interactionId, action, relayedBy, taskId);
+      // A relayed approval clears the child's call, never the call that serves the child here.
+      if (callId !== undefined && request.kind === "tool-approval" && origin === undefined)
         this.interactionCalls.set(interactionId, callId);
       return [
         {
-          data: { interactionId, request: v26InteractionRequest(request), subject },
+          data: {
+            interactionId,
+            origin,
+            request: v26InteractionRequest(request),
+            subject,
+          },
           type: "interaction.opened",
         },
       ];
     });
+  }
+
+  /**
+   * Where a child asked a request about one of its own calls, as a v27 relay records it: the call
+   * that serves the child here differs from the call the child asks about.
+   */
+  private originOf(
+    interactionId: string,
+    action: Data,
+    relayedBy: string | undefined,
+    taskId: string | undefined,
+  ): InteractionOrigin | undefined {
+    const asked = str(action.callId);
+    const serving =
+      relayedBy ?? (taskId === undefined ? undefined : this.view.tasks[taskId]?.startedBy.callId);
+    if (asked === undefined || serving === undefined || asked === serving) return undefined;
+    const servedTask = taskId ?? this.view.calls[serving]?.taskId;
+    const sessionId =
+      this.children.get(`call:${serving}`) ??
+      (servedTask === undefined ? undefined : this.children.get(`task:${servedTask}`));
+    if (sessionId === undefined) return undefined;
+    return {
+      call: {
+        callId: asked,
+        input: action.input === undefined ? undefined : (action.input as JsonValue),
+        name: str(action.toolName) ?? str(action.name) ?? "tool",
+      },
+      interactionId,
+      sessionId,
+    };
   }
 
   private turnWaiting(data: Data): Fact[] {
@@ -791,6 +849,37 @@ class Translator {
   }
 }
 
+/** The child a v26 line opened, as the `child.opened` it reads as names it. */
+export interface V26ChildStarted {
+  readonly sessionId: string;
+  readonly callId: string;
+  readonly name?: string;
+  readonly stream: string;
+}
+
+/**
+ * The child a stored v26 `agent.started` line records opening, read from that line alone, so a
+ * reader can check one position without converting the lines before it.
+ */
+export function v26ChildStarted(record: unknown): V26ChildStarted | undefined {
+  if (!isV26Line(record)) return undefined;
+  const event = record as { readonly type: string; readonly data?: unknown };
+  if (event.type !== "agent.started" || !isRecord(event.data)) return undefined;
+  return childStarted(event.data);
+}
+
+function childStarted(data: Data): V26ChildStarted | undefined {
+  const sessionId = str(data.sessionId);
+  const callId = str(data.callId);
+  if (sessionId === undefined || callId === undefined) return undefined;
+  return {
+    callId,
+    name: str(data.name),
+    sessionId,
+    stream: str(data.streamPath) ?? `/eve/v1/session/${sessionId}/stream`,
+  };
+}
+
 function sessionStarted(data: Data) {
   const invocation = isRecord(data.invocation) ? data.invocation : undefined;
   const parentSessionId = str(invocation?.parentSessionId);
@@ -806,7 +895,7 @@ function sessionStarted(data: Data) {
       isRecord(data.runtime) && typeof data.runtime.agentId === "string"
         ? (data.runtime as never)
         : undefined,
-    trace: isRecord(data.trace) ? (data.trace as never) : undefined,
+    trace: traceContext.safeParse(data.trace).data,
   };
 }
 

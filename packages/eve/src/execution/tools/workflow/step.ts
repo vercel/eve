@@ -7,8 +7,11 @@ import {
   findWorkflowToolRunContext,
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
+import { ownerFieldsOf } from "#execution/agent-sessions/owner.js";
+import { signInHookToken } from "#execution/callback-hook-tokens.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { signInInteractionId, signInOpened } from "#harness/interaction-facts.js";
+import { signInInteractionId, signInRequest } from "#harness/interaction-facts.js";
+import { relayEvent } from "#channel/relay-event.js";
 import type { RelayedInteractionEvent } from "#channel/types.js";
 import type {
   WorkflowStepAuthorizationResult,
@@ -65,7 +68,9 @@ async function executeAuthorizedStep(
   const pending = new Map<string, IdentifiedAuthorizationChallenge>();
 
   for (;;) {
-    const callback = createHook<unknown>();
+    // Named so the callback route can tell it takes sign-ins. A body's `crypto` is seeded, which
+    // is enough here: a replay names the same hook, and the name is an address, not a credential.
+    const callback = createHook<unknown>({ token: signInHookToken(crypto.randomUUID()) });
     try {
       let result: WorkflowStepResult;
       try {
@@ -101,7 +106,7 @@ async function executeAuthorizedStep(
       await collectAuthorizationCallbacks({
         authorizationResults,
         callback,
-        challenges: result.signal.challenges,
+        challenges: result.challenges,
         ctx,
         pending,
         run,
@@ -133,7 +138,7 @@ async function invokeAuthorizedStep(input: {
     delegated: run.agentContext.delegated === true,
     channel: workflowToolChannel(run.agentContext),
     sandbox: {
-      bundle: run.agentContext.bundle,
+      ...ownerFieldsOf(run.agentContext),
       sessionId: run.agentContext.sandbox.sessionId,
       state: run.agentContext.sandbox.state,
     },
@@ -344,16 +349,16 @@ function runSignIn(
   outcome?: "accepted" | "failed",
 ): RelayedInteractionEvent {
   if (outcome === undefined) {
-    return {
-      data: signInOpened(challenge, {
+    return relayEvent(
+      "interaction.opened",
+      signInRequest(challenge, {
         prompt: `Sign in to ${challenge.name} to continue.`,
         subject: from.taskId === undefined ? { turnId: from.turnId } : { taskId: from.taskId },
-      }).data,
-      type: "interaction.opened",
-    };
+      }),
+    );
   }
-  return {
-    data: { interactionId: signInInteractionId(challenge), outcome },
-    type: "interaction.settled",
-  };
+  return relayEvent("interaction.settled", {
+    interactionId: signInInteractionId(challenge),
+    outcome,
+  });
 }

@@ -9,6 +9,7 @@ export const invocationName = (name?: string) =>
   name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
 const modelName = (name: string) => `chat ${name}`;
 const toolName = (name: string) => `execute_tool ${name}`;
+const decisionName = (modelId: string) => `decision ${modelId}`;
 const SPAN_NAMES = {
   approval: "agent.approval",
   step: "agent.step",
@@ -19,6 +20,7 @@ const CONTENT_FIELDS = {
   approvalRequest: "agent.approval.request",
   approvalResponse: "agent.approval.response",
   memoryRecords: "gen_ai.memory.records",
+  decisionResults: "gen_ai.decision.results",
 } as const;
 export function applyAttributes(
   span: { setAttribute(key: string, value: Exclude<Attributes[string], undefined>): unknown },
@@ -151,7 +153,8 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   model: {
-    parents: ["step"],
+    // A turn makes model calls outside its steps, such as a context compaction's summary request.
+    parents: ["step", "activation"],
     prepare({ options }, context) {
       const inputMessages =
         context.capture.recordInputs && options.messages !== undefined
@@ -165,6 +168,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           ...namingAttributes(modelName(options.modelId), "chat"),
           "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "chat",
+          "agent.turn.id": context.identity.turnId,
           "gen_ai.provider.name": options.provider,
           "gen_ai.request.model": options.modelId,
           ...runtimeContextAttributes(options.runtimeContext),
@@ -238,19 +242,25 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   approval: {
-    parents: ["tool"],
+    parents: ["tool", "activation"],
     prepare({ options }, context) {
       return {
         name: SPAN_NAMES.approval,
         attributes: {
           ...context.attributes,
           ...frameworkAttributes(context.identity.framework),
-          ...attemptAttributes(context),
+          // A wait the turn holds belongs to no step.
+          ...(options.callId === undefined
+            ? { "agent.turn.id": context.attempt.turnId }
+            : attemptAttributes(context)),
           ...namingAttributes(SPAN_NAMES.approval, "workflow"),
+          "agent.name": context.identity.agentName,
+          "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "workflow",
           "gen_ai.tool.call.id": options.callId,
           "agent.action.name": options.toolName,
-          "agent.approval.kind": "tool-approval",
+          "agent.approval.kind": options.kind ?? "tool-approval",
+          "agent.connection.name": options.connectionName,
           "agent.approval.request_id": options.requestId,
           [CONTENT_FIELDS.approvalRequest]: context.capture.recordInputs
             ? context.serializer.json(options.request)
@@ -268,6 +278,37 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
       return capture.recordInputs
         ? data
         : { ...data, options: { ...data.options, request: undefined } };
+    },
+  },
+  decision: {
+    parents: ["activation", "step", "tool"],
+    prepare({ options }, context) {
+      // A decision made outside any run has no run identity to record.
+      const inRun = context.identity.runId !== "";
+      return {
+        name: decisionName(options.modelId),
+        kind: "CLIENT",
+        attributes: {
+          ...(inRun ? context.attributes : undefined),
+          ...namingAttributes(decisionName(options.modelId), "decision"),
+          // The turn's own span is written when the turn ends; the turn ID lets a running turn
+          // claim a decision made before its first step.
+          "agent.turn.id": inRun ? context.identity.turnId || undefined : undefined,
+          "agent.decision.purpose": options.purpose,
+          "gen_ai.agent.name": context.identity.agentName,
+          "gen_ai.operation.name": "decision",
+          "gen_ai.provider.name": options.provider,
+          "gen_ai.request.model": options.modelId,
+        },
+      };
+    },
+    complete(span, _data, result, context) {
+      // Per-question results, refusals included, are opt-in output content.
+      if (!context.capture.recordOutputs || !Array.isArray(result.output) || !result.output.length)
+        return;
+      applyAttributes(span, {
+        [CONTENT_FIELDS.decisionResults]: context.serializer.json(result.output),
+      });
     },
   },
   memory: {
@@ -347,7 +388,10 @@ export function completeScope(
   if (result.usage !== undefined)
     applyAttributes(
       span,
-      usageAttributes(result.usage, data.type === "activation" || data.type === "model"),
+      usageAttributes(
+        result.usage,
+        data.type === "activation" || data.type === "model" || data.type === "decision",
+      ),
     );
   kind(data).complete?.(span, data, result, { capture, startTimeMs, serializer, outcome });
   if (result.failed) span.fail(result.error, result.errorCode);

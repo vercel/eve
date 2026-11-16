@@ -1,3 +1,4 @@
+// @linux-only: tool result media; mock sandbox
 import { jsonSchema } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -5,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { foldingHandler, withOpenTurn } from "#internal/testing/session-machine.js";
 
@@ -25,7 +26,8 @@ describe("tool-result media staging", () => {
         { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage },
       ]),
     }));
-    const step = createToolLoopHarness({
+    const step = createTestKernel({
+      agent: { model: { id: "media-test" } },
       handleEvent: foldingHandler(),
       resolveModel: async () => new MockLanguageModelV4({ doStream }),
       tools: new Map([
@@ -64,8 +66,7 @@ describe("tool-result media staging", () => {
     });
     const session = withOpenTurn(
       {
-        agent: { modelReference: { id: "media-test" }, system: "Test assistant", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        compaction: {},
         continuationToken: "http:media-test",
         sessionId: "media-test",
         history: [],

@@ -6,7 +6,12 @@ import { ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { defineMountedState, defineState } from "#public/definitions/state.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import {
+  ChannelKey,
+  compiledBundleOf,
+  SessionAgentKey,
+} from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import * as manifestLoader from "#runtime/loaders/manifest.js";
 
@@ -37,7 +42,9 @@ describe("deserializeContext", () => {
 describe("state layout admission", () => {
   it("rejects reserved mount names in an unmarked legacy context", async () => {
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
-    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockResolvedValue(bundle);
+    const deserialize = vi
+      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .mockResolvedValue(fromCompiledBundle(bundle));
     try {
       // Registration in a previous graph must not turn a reserved legacy authored name
       // into proof that it belongs to the new layout.
@@ -59,10 +66,12 @@ describe("state layout admission", () => {
     const mount = (mountId: string) =>
       ({ mountId, packageName: "@acme/crm" }) as (typeof manifest.extensionMounts)[number];
     let mounts = [mount("extensions/crm")];
-    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockImplementation(async () => {
-      for (const { mountId } of mounts) defineMountedState(mountId, "requests", () => 0);
-      return bundle;
-    });
+    const deserialize = vi
+      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .mockImplementation(async () => {
+        for (const { mountId } of mounts) defineMountedState(mountId, "requests", () => 0);
+        return fromCompiledBundle(bundle);
+      });
     const loadManifest = vi
       .spyOn(manifestLoader, "loadCompiledManifest")
       .mockImplementation(async () => ({ ...manifest, extensionMounts: mounts }));
@@ -75,7 +84,7 @@ describe("state layout admission", () => {
       });
       // The extension no longer defines `history`, so that value is dropped.
       expect([...restored.entries()].map(([key, value]) => [key.name, value])).toEqual([
-        ["eve.bundle", bundle],
+        ["eve.bundle", fromCompiledBundle(bundle)],
         ["eve:mount.v1:extensions%2Fcrm:requests", 4],
       ]);
       expect(warn).toHaveBeenCalledWith(
@@ -98,10 +107,12 @@ describe("state layout admission", () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
     const name = "test.legacy.app-owned";
-    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockImplementation(async () => {
-      defineState(name, () => 0);
-      return bundle;
-    });
+    const deserialize = vi
+      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .mockImplementation(async () => {
+        defineState(name, () => 0);
+        return fromCompiledBundle(bundle);
+      });
     const loadManifest = vi
       .spyOn(manifestLoader, "loadCompiledManifest")
       .mockResolvedValue(manifest);
@@ -112,7 +123,7 @@ describe("state layout admission", () => {
         [name]: 4,
         "test.legacy.removed": { phase: "none" },
       });
-      expect(restored.get(BundleKey)).toBe(bundle);
+      expect(compiledBundleOf(restored)).toBe(bundle);
       expect([...restored.entries()].map(([key]) => key.name)).toEqual(["eve.bundle", name]);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("dropping unknown context key"),
@@ -130,7 +141,9 @@ describe("state layout admission", () => {
 
   it("drops an unknown application key in a current-layout checkpoint", async () => {
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
-    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockResolvedValue(bundle);
+    const deserialize = vi
+      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .mockResolvedValue(fromCompiledBundle(bundle));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const restored = await deserializeContext({
@@ -138,7 +151,7 @@ describe("state layout admission", () => {
         "eve.stateLayout": 1,
         "test.renamed.app-owned": 4,
       });
-      expect(restored.get(BundleKey)).toBe(bundle);
+      expect(compiledBundleOf(restored)).toBe(bundle);
       expect([...restored.entries()]).toHaveLength(1);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("dropping unknown context key"),
@@ -176,8 +189,31 @@ describe("state layout admission", () => {
 
   it("stamps bundle-backed context snapshots with the current layout", () => {
     const ctx = new ContextContainer();
-    ctx.set(BundleKey, { compiledArtifactsSource: {} } as CompiledBundle);
+    ctx.set(SessionAgentKey, fromCompiledBundle({ compiledArtifactsSource: {} } as CompiledBundle));
     expect(serializeContext(ctx)["eve.stateLayout"]).toBe(1);
+  });
+
+  it("stores a compiled agent's reference under eve.bundle, as compiled sessions always have", () => {
+    const source = { kind: "bundled" } as const;
+    const node = new ContextContainer();
+    node.set(
+      SessionAgentKey,
+      fromCompiledBundle({
+        compiledArtifactsSource: source,
+        nodeId: "subagents/a",
+      } as CompiledBundle),
+    );
+    expect(JSON.stringify(serializeContext(node))).toBe(
+      '{"eve.bundle":{"nodeId":"subagents/a","source":{"kind":"bundled"}},"eve.stateLayout":1}',
+    );
+    const root = new ContextContainer();
+    root.set(
+      SessionAgentKey,
+      fromCompiledBundle({ compiledArtifactsSource: source } as CompiledBundle),
+    );
+    expect(JSON.stringify(serializeContext(root))).toBe(
+      '{"eve.bundle":{"source":{"kind":"bundled"}},"eve.stateLayout":1}',
+    );
   });
 });
 
@@ -225,11 +261,14 @@ describe("serialize/deserialize error logging", () => {
 });
 
 describe("ChannelKey codec", () => {
-  it("deserializes adapters when the bundle registry is present in context", async () => {
+  it("deserializes adapters from the session agent's registry", async () => {
     const ctx = new ContextContainer();
-    ctx.set(BundleKey, {
-      adapterRegistry: createRuntimeAdapterRegistry({ channels: [] }),
-    } as CompiledBundle);
+    ctx.set(
+      SessionAgentKey,
+      fromCompiledBundle({
+        adapterRegistry: createRuntimeAdapterRegistry({ channels: [] }),
+      } as CompiledBundle),
+    );
 
     const codec = ChannelKey.codec;
     if (codec === undefined) {

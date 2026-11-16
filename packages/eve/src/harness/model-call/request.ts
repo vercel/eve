@@ -1,82 +1,77 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import { HistoryStateKey } from "#context/keys.js";
-import { dynamicInstructionMessages } from "#reactions/kinds/instructions.js";
-import { memoryRecallContents } from "#reactions/kinds/memory.js";
-import { dynamicSkillManifest } from "#reactions/kinds/skill.js";
-import { catalogAnnouncements } from "#execution/catalog/listing.js";
-import type { StepCatalog } from "#execution/catalog/step-catalog.js";
-import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
-import { taskSystemMessages } from "#execution/tasks/model-step.js";
-import { createCurrentMessages } from "#harness/current-messages.js";
+import type { HistoryState } from "#context/keys.js";
 import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
-import type { Step } from "#harness/step/context.js";
-import type { HarnessSession } from "#harness/types.js";
 
-export type RequestMessages = ReturnType<typeof createCurrentMessages>;
-
-/**
- * The messages one model call sends: the durable prompt, then the step's system instructions and
- * announcements. Announcements persist ahead of the new input, or after earlier tool results on a
- * continuation, or ahead of the turn's surviving input after a compaction, so later requests keep
- * the full prefix.
- */
-export function requestMessages(
-  step: Step,
-  input: {
-    readonly messages: readonly HarnessModelMessage[];
-    readonly projectedMessages: readonly HarnessModelMessage[];
-    readonly turnMessages: readonly HarnessModelMessage[];
-    readonly catalog: StepCatalog;
-    readonly pendingApprovalsNote: string | undefined;
-  },
-): RequestMessages {
-  const { ctx } = step;
-  const messages = createCurrentMessages(input.messages, {
-    historyState: ctx?.get(HistoryStateKey),
-    currentTurnMessages: input.turnMessages,
-    projectedMessages: input.projectedMessages,
-  });
-  messages.addSystem(dynamicInstructionMessages(ctx));
-  messages.addSystem(taskSystemMessages(input.catalog.offersTasks, step.finalReplyOnly));
-  const announced = ctx?.get(HistoryStateKey)?.announcements;
-  messages.addAnnouncements({
-    ...catalogAnnouncements(input.catalog, announced),
-    ...dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced),
-  });
-  if (input.pendingApprovalsNote !== undefined) {
-    messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });
-  }
-  // Last, so nothing lands between a turn's recall and that turn's input.
-  messages.addAnchored(memoryRecallContents(ctx), "memory.load");
-  return messages;
+/** One model call's messages: what the step commits, and what the model reads. */
+export interface RequestMessages {
+  readonly history: readonly HarnessModelMessage[];
+  readonly historyState: HistoryState;
+  readonly nonSystemMessages: readonly HarnessModelMessage[];
 }
 
-/** The call's system instructions: a retry's note, the agent's system prompt, then the step's. */
+/**
+ * The system prompt as the model receives it, as one message or as two.
+ *
+ * `instructions` has two kinds of content. The base is the same for every session of an agent.
+ * The own parts differ by session: channel, user, tasks and approvals. A retry's `extraSystemNote`
+ * differs by call. A string is a prompt with a base and no own parts.
+ *
+ * Anthropic reads a cached prefix up to a breakpoint, and a later request reuses it only when its
+ * prefix is identical. Joined into one message, the base and a session's own parts end at one
+ * breakpoint, so session B, whose own parts differ, never matches the prefix session A cached:
+ *
+ *   one message:   [ base + own A ]|        session B's [ base + own B ] shares nothing
+ *   two messages:  [ base ]|  [ own A ]     session B's [ base ]| shares the cached base
+ *
+ * So a model that caches by message prefix gets the base as a message of its own, with the
+ * breakpoint, then the note and the own parts as a second message with none. Sessions share the
+ * base, and a request keeps within Anthropic's 4 breakpoints. Two cases do this:
+ *
+ * - eve places its own breakpoints (`anthropicCache`), which a 1-hour cache needs and a direct
+ *   Anthropic model uses. The breakpoint goes on the base message.
+ * - Anthropic through Gateway's automatic caching. Gateway anchors a breakpoint on the first
+ *   message (`cacheAnchorMessageIndex: 0`), which is the base.
+ *
+ * Any other model gets one system message, and a string alone is passed as it is.
+ */
 export function modelInstructions(input: {
-  readonly session: HarnessSession;
-  readonly systemMessages: readonly SystemModelMessage[];
-  readonly anthropicCache: ModelProfile["anthropicCache"];
+  readonly instructions: string | readonly string[];
+  readonly profile: Pick<ModelProfile, "anthropicCache" | "gateway" | "provider">;
   readonly extraSystemNote?: string;
-}): SystemModelMessage | string | undefined {
-  const { session } = input;
-  const extra: SystemModelMessage[] = input.extraSystemNote
-    ? [{ role: "system", content: input.extraSystemNote }]
-    : [];
-  if (input.systemMessages.length === 0 && extra.length === 0) {
-    return session.agent.system ?? undefined;
+}): SystemModelMessage | SystemModelMessage[] | string | undefined {
+  const { anthropicCache, gateway, provider } = input.profile;
+  const [base = "", ...own] =
+    typeof input.instructions === "string" ? [input.instructions] : input.instructions;
+  const note = input.extraSystemNote ?? "";
+
+  const gatewayAnchorsFirstMessage = gateway && provider === "anthropic";
+  if (anthropicCache === undefined && typeof input.instructions === "string" && note === "") {
+    return input.instructions;
   }
-  const base: SystemModelMessage[] = session.agent.system
-    ? [{ role: "system", content: session.agent.system }]
-    : [];
-  const instructions = [...extra, ...base, ...input.systemMessages];
-  return mergeSystemInstructions(
-    input.anthropicCache
-      ? applySystemCacheBreakpoint(instructions, input.anthropicCache)
-      : instructions,
-  );
+  if (anthropicCache === undefined && !gatewayAnchorsFirstMessage) {
+    return systemMessage([note, base, ...own]);
+  }
+
+  const baseMessage = systemMessage([base]);
+  const ownMessage = systemMessage([note, ...own]);
+  const messages = [
+    ...(baseMessage === undefined
+      ? []
+      : anthropicCache
+        ? applySystemCacheBreakpoint([baseMessage], anthropicCache)
+        : [baseMessage]),
+    ...(ownMessage === undefined ? [] : [ownMessage]),
+  ];
+  return messages.length > 1 ? messages : messages[0];
+}
+
+/** The parts joined into one system message, empty ones skipped, or nothing if none is left. */
+function systemMessage(parts: readonly string[]): SystemModelMessage | undefined {
+  const content = parts.filter((part) => part !== "").join("\n\n");
+  return content === "" ? undefined : { role: "system", content };
 }
 
 /** A retry's note, trailing the call's messages. */
@@ -85,35 +80,4 @@ export function withTrailingUserNote(
   note?: string,
 ): ModelMessage[] {
   return note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
-}
-
-export function mergeSystemInstructions(
-  instructions: readonly SystemModelMessage[],
-): SystemModelMessage | undefined {
-  if (instructions.length === 0) {
-    return undefined;
-  }
-
-  if (instructions.length === 1) {
-    return { ...instructions[0]! };
-  }
-
-  let providerOptions: SystemModelMessage["providerOptions"] | undefined;
-  for (const instruction of instructions) {
-    if (instruction.providerOptions !== undefined) {
-      providerOptions = {
-        ...providerOptions,
-        ...instruction.providerOptions,
-      };
-    }
-  }
-
-  const merged: SystemModelMessage = {
-    role: "system",
-    content: instructions.map((instruction) => instruction.content).join("\n\n"),
-  };
-  if (providerOptions !== undefined) {
-    merged.providerOptions = providerOptions;
-  }
-  return merged;
 }

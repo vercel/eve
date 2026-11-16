@@ -1,3 +1,4 @@
+// @linux-only: login flow; key store mocked
 import { afterEach, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 const state = vi.hoisted(() => ({

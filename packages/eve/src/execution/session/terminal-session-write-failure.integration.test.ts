@@ -1,3 +1,4 @@
+// @linux-only: terminal stream close failure on Workflow
 import { afterEach, expect, it, vi } from "vitest";
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import { getWorld } from "#internal/workflow/runtime.js";

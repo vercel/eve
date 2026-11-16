@@ -55,12 +55,16 @@ async function formatChangelog(
   )
     return false;
   // A version that never got a tag, such as one whose publish failed, falls
-  // back to the newest older release that did.
+  // back to the newest older release that did. A stable release's notes
+  // collect every prerelease since the last stable release, so it compares
+  // with that release.
   const olderVersions = [...content.slice(end).matchAll(/^## (\S+)[ \t]*$/gmu)].map(
     (match) => match[1],
   );
+  const stable = !version.includes("-");
   const previous = [previousVersion, ...olderVersions].find(
-    (candidate) => candidate && tags.has(`${name}@${candidate}`),
+    (candidate) =>
+      candidate && (!stable || !candidate.includes("-")) && tags.has(`${name}@${candidate}`),
   );
   const currentTag = encodeURIComponent(`${name}@${version}`);
   const changes = previous

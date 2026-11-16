@@ -637,6 +637,11 @@ export class ConversationTranscript {
     } = {},
   ): ToolPresentationContext | undefined {
     if (state.output !== undefined) this.#fileContents.observeRead(state.output);
+    if (toolBaseName(part.name) === "edit_file") {
+      for (const path of [pathField(part.input), pathField(state.output)]) {
+        if (path !== undefined) this.#fileContents.forget(path);
+      }
+    }
     const context: {
       previousContent?: string;
       existed?: boolean;
@@ -661,6 +666,13 @@ export class ConversationTranscript {
     }
     return Object.keys(context).length > 0 ? context : undefined;
   }
+}
+
+/** The `path` an `edit_file` input names, or the resolved one its output reports. */
+function pathField(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const path = (value as Record<string, unknown>)["path"];
+  return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
 /**

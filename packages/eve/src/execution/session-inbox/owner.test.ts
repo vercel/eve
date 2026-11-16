@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HookSchema } from "@workflow/world";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { issueInboxHandle, readInboxHandle } from "#execution/session-inbox/handle.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
@@ -7,15 +6,10 @@ import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 const runtime = vi.hoisted(() => ({
   resumeHook: vi.fn(),
   getWorld: vi.fn(),
-  parseHookResumeHandle: vi.fn(),
-  supportsHandles: true,
 }));
 vi.mock("#internal/workflow/runtime.js", async (importActual) => ({
   ...(await importActual<typeof import("#internal/workflow/runtime.js")>()),
   ...runtime,
-  get parseHookResumeHandle() {
-    return runtime.supportsHandles ? runtime.parseHookResumeHandle : undefined;
-  },
 }));
 
 const hook = {
@@ -36,10 +30,6 @@ const payload = { kind: "message", message: "How do preview deployments work?" }
 
 beforeEach(() => {
   vi.stubEnv("EVE_INBOX_HANDLE_SECRET", "test-inbox-key-with-at-least-32-characters");
-  runtime.supportsHandles = true;
-  runtime.parseHookResumeHandle.mockImplementation((value: unknown) =>
-    HookSchema.omit({ metadata: true, resumeCapabilities: true }).parse(value),
-  );
 });
 afterEach(() => {
   vi.resetAllMocks();
@@ -50,7 +40,9 @@ describe("reusing a session inbox handle", () => {
   it("does not expose user metadata, cached capabilities, or server trace baggage", () => {
     const handle = issueInboxHandle({
       ...hook,
-      metadata: { private: "server metadata" },
+      get metadata() {
+        throw new Error("User metadata must not be hydrated to issue a handle");
+      },
       resumeCapabilities: { hookResumeDedupVersion: 1 },
       resumeContext: {
         ...hook.resumeContext,
@@ -64,22 +56,27 @@ describe("reusing a session inbox handle", () => {
     expect(readInboxHandle(handle)).toEqual(hook);
   });
 
-  it("does not reuse a handle through an adapter without the guarded write contract", async () => {
-    const handle = issueInboxHandle(hook)!;
-    runtime.getWorld.mockResolvedValue({ capabilities: { deploymentAffinity: true } });
-    runtime.resumeHook.mockResolvedValue(hook);
-    await resumeRunnableHook(hook.token, payload, handle);
-    expect(runtime.resumeHook).toHaveBeenCalledExactlyOnceWith(hook.token, payload);
+  it.each([
+    { ...hook, hookId: undefined },
+    { ...hook, createdAt: "invalid" },
+    { ...hook, resumeContext: { ...hook.resumeContext, deploymentId: 123 } },
+    { ...hook, resumeContext: { ...hook.resumeContext, encryptionPublicKey: undefined } },
+  ])("does not issue a handle for an invalid or unencrypted descriptor: %j", (descriptor) => {
+    expect(issueInboxHandle(descriptor)).toBeUndefined();
   });
 
-  it("uses ordinary token resolution when the SDK lacks guarded handle support", async () => {
-    const handle = issueInboxHandle(hook)!;
-    runtime.supportsHandles = false;
-    expect(issueInboxHandle(hook)).toBeUndefined();
-    expect(readInboxHandle(handle)).toBeUndefined();
+  it("does not reuse a signed handle for another token", async () => {
     runtime.getWorld.mockResolvedValue({
       capabilities: { deploymentAffinity: true, resolvedHookResume: true },
     });
+    runtime.resumeHook.mockResolvedValue(hook);
+    await resumeRunnableHook("another-token", payload, issueInboxHandle(hook));
+    expect(runtime.resumeHook).toHaveBeenCalledExactlyOnceWith("another-token", payload);
+  });
+
+  it("does not reuse a handle through an adapter without the guarded write contract", async () => {
+    const handle = issueInboxHandle(hook)!;
+    runtime.getWorld.mockResolvedValue({ capabilities: { deploymentAffinity: true } });
     runtime.resumeHook.mockResolvedValue(hook);
     await resumeRunnableHook(hook.token, payload, handle);
     expect(runtime.resumeHook).toHaveBeenCalledExactlyOnceWith(hook.token, payload);

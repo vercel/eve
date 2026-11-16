@@ -10,6 +10,7 @@ import {
 } from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -24,6 +25,8 @@ import type {
 import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
 import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
+import { contextStorage } from "#context/container.js";
+import { readSessionSchedule } from "#context/session-schedule.js";
 import { validateSessionHistory } from "#shared/session-history.js";
 
 interface BaseChannelAddressCreateOptions {
@@ -112,7 +115,12 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
+      // A send a schedule makes carries its provenance, so the turn it starts knows no person
+      // asked for it.
+      const store = contextStorage.getStore();
+      const schedule = store === undefined ? undefined : readSessionSchedule(store);
       const commandWithoutCaller = {
+        ...(schedule !== undefined && { schedule }),
         idempotencyKey: options.idempotencyKey,
         auth: options.auth,
         delivery,
@@ -145,13 +153,16 @@ export function createChannelAddress<TState = undefined>(input: {
         continuationToken: namespacedToken,
         delivery,
         initiatorAuth: options.initiatorAuth,
-        input: {
-          context: payload.context,
-          history: payload.history,
-          message: serializeFilePartsInMessage(payload.message) ?? "",
-          outputSchema: payload.outputSchema,
-          state: payload.state,
-        },
+        input: attachInputText(
+          {
+            context: payload.context,
+            history: payload.history,
+            message: serializeFilePartsInMessage(payload.message) ?? "",
+            outputSchema: payload.outputSchema,
+            state: payload.state,
+          },
+          readInputText(payload),
+        ),
         requestId: metadata.requestId,
         title: options.title,
       };
@@ -162,7 +173,6 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       if (result.status === "accepted")
         return commandDelivery(input.runtime, result, delivery.deliveryId);
-      if (result.retryable === true) throw new SessionNotActiveError({ retryable: true });
       if (payload.answers && payload.answers.length > 0) {
         throw new SessionNotActiveError();
       }
@@ -210,17 +220,11 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       });
-      // The new run claims the address asynchronously, and a concurrent `create()` or `send()`
-      // may claim it first. Waiting for the owner lets an immediate `send()` find it, and tells
-      // the caller whether its history landed: a losing run exits without forwarding anything.
-      const claimed = await waitForContinuationOwner(
-        input.runtime,
-        namespacedToken,
-        started.sessionId,
-      );
+      // The start claims the address, so a concurrent `create()` or `send()` that took it first
+      // comes back as the owner, without this call's history.
       return {
-        created: claimed.sessionId === started.sessionId,
-        session: toSession(claimed.sessionId),
+        created: started.claimedContinuation !== false,
+        session: toSession(started.sessionId),
       };
     },
     async send(message, options) {
@@ -291,26 +295,4 @@ function withValidatedHistory(payload: SendPayload): SendPayload {
   const { history, ...rest } = payload;
   const validated = validateSessionHistory(history);
   return validated === undefined ? rest : { ...rest, history: validated };
-}
-
-const CREATE_CLAIM_TIMEOUT_MS = 15_000;
-
-async function waitForContinuationOwner(
-  runtime: Runtime,
-  continuationToken: string,
-  startedSessionId: string,
-): Promise<{ readonly sessionId: string }> {
-  const deadline = Date.now() + CREATE_CLAIM_TIMEOUT_MS;
-  for (let delayMs = 25; ; delayMs = Math.min(delayMs * 2, 500)) {
-    const owner = await runtime.resolveContinuation(continuationToken);
-    if (owner !== undefined) return owner;
-    if (Date.now() + delayMs > deadline) {
-      // Unclaimed, the address may still go to this run or to a concurrent one, so neither
-      // `created` value would be true yet.
-      throw new Error(
-        `create() started session "${startedSessionId}" for "${continuationToken}", but no session claimed the address within ${CREATE_CLAIM_TIMEOUT_MS / 1000}s. Call resolveSession() on the address to find its owner once one does.`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
 }

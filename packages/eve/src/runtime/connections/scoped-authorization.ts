@@ -24,7 +24,9 @@ import {
   consumeAuthorizationResult,
   createAuthorizationAttempt,
   requestAuthorization,
+  SignInCompletedKey,
 } from "#harness/authorization.js";
+import { toError } from "#shared/errors.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   evictCachedToken,
@@ -37,8 +39,9 @@ import {
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
 import { liveProjection } from "#harness/session-machine/current.js";
-import { terminalSignInFailure } from "#harness/hitl/sign-ins.js";
+import { SIGN_IN_DECLINED, terminalSignInFailure } from "#harness/hitl/sign-ins.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
+import { readSessionSchedule } from "#context/session-schedule.js";
 import {
   type AuthorizationDefinition,
   type ConnectionAuthorizationContext,
@@ -181,7 +184,22 @@ export async function handleAuthorizationError(
     });
   }
 
-  // A sign-in this turn already failed terminally is reported, not started again.
+  // A turn a schedule started is no request from the person: asking there posts a prompt on
+  // every firing, whether or not anyone is there to answer it.
+  const store = contextStorage.getStore();
+  if (
+    store !== undefined &&
+    readSessionSchedule(store) !== undefined &&
+    supportsInteractiveAuthorization(scoped.authorization)
+  ) {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Sign-in to "${scoped.scope}" isn't asked for in a scheduled run. Tell the user this action needs ${scoped.scope} access, and that they can sign in by asking for it in a conversation.`,
+      reason: "sign_in_unavailable",
+      retryable: false,
+    });
+  }
+
+  // A sign-in this turn already ended without completing is reported, not started again.
   const projection = liveProjection();
   const refused =
     projection === undefined
@@ -191,6 +209,13 @@ export async function handleAuthorizationError(
           name: scoped.scope,
           principal: resolveScopedPrincipal(scoped),
         });
+  if (refused !== undefined && refused.outcome !== "failed") {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Sign-in to "${scoped.scope}" ended without being completed in this turn, so it won't be asked for again. Tell the user this action needs ${scoped.scope} access, and that they can ask for it again to sign in.`,
+      reason: "sign_in_cancelled",
+      retryable: false,
+    });
+  }
   if (refused !== undefined) {
     throw new ConnectionAuthorizationFailedError(scoped.scope, {
       message: `Authorization for "${scoped.scope}" already failed in this turn and can't be retried${refused.reason === undefined ? "." : `: ${refused.reason}`}`,
@@ -336,17 +361,32 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   const result = consumeAuthorizationResult(scope, input.instanceId);
   if (result === undefined) return false;
 
-  const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const ctx: AlsContext = loadContext();
-  const principal = result.principal ?? resolveScopedPrincipal(input, ctx);
-  const token = await interactive.completeAuthorization({
-    callbackUrl: result.hookUrl,
-    connection,
-    principal,
-    resume: result.resume,
-    callback: result.callback,
-  });
-  writeCachedToken(ctx, input.instanceId ?? scope, principalKey(principal), token);
+  // The sign-in is reported as it completes, not when the call that completes it returns.
+  const report = ctx.get(SignInCompletedKey);
+  try {
+    // RFC 6749 section 4.1.2.1: the person refused consent, so there is nothing to complete.
+    if (result.callback.params.error === SIGN_IN_DECLINED)
+      throw new ConnectionAuthorizationFailedError(scope, {
+        message: `Sign-in to "${scope}" was declined.`,
+        reason: SIGN_IN_DECLINED,
+        retryable: false,
+      });
+    const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
+    const principal = result.principal ?? resolveScopedPrincipal(input, ctx);
+    const token = await interactive.completeAuthorization({
+      callbackUrl: result.hookUrl,
+      connection,
+      principal,
+      resume: result.resume,
+      callback: result.callback,
+    });
+    writeCachedToken(ctx, input.instanceId ?? scope, principalKey(principal), token);
+  } catch (error) {
+    await report?.(result, toError(error));
+    throw error;
+  }
+  await report?.(result);
   return true;
 }
 
@@ -412,16 +452,20 @@ export function resolveAuthorizationCallbackUrl(input: {
   readonly callbackUrl: string;
 }): string {
   if (input.authorization.vercelConnect === undefined) return input.callbackUrl;
+  return vercelConnectCallbackUrl(input.callbackUrl);
+}
 
+/** A callback URL as Vercel Connect accepts it: a loopback HTTP host is named `localhost`. */
+export function vercelConnectCallbackUrl(callbackUrl: string): string {
   let url: URL;
   try {
-    url = new URL(input.callbackUrl);
+    url = new URL(callbackUrl);
   } catch {
-    return input.callbackUrl;
+    return callbackUrl;
   }
 
   if (url.protocol !== "http:" || !LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES.has(url.hostname)) {
-    return input.callbackUrl;
+    return callbackUrl;
   }
 
   url.hostname = "localhost";

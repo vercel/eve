@@ -19,7 +19,10 @@
       "label": "Extensions declare a broad eve peer range",
       "dependencies": ["eve"],
       "packages": [
+        "@eve/recall",
         "eve-code",
+        "@eve/agent-desktop",
+        "@eve/agent-browser",
         "gadget-extension",
         "gizmo-extension",
         "js-only-extension",
@@ -31,7 +34,7 @@
     {
       "label": "Blooio is an externally published integration",
       "dependencies": ["eve-channel-blooio"],
-      "packages": ["eve-docs"],
+      "packages": ["docs-registry"],
       "dependencyTypes": ["dev"],
       "isIgnored": true
     },
@@ -66,7 +69,7 @@
       "dependencies": ["zod"],
       "packages": ["gadget-extension", "gizmo-extension"],
       "dependencyTypes": ["prod"],
-      "pinVersion": "4.5.4"
+      "pinVersion": "4.6.7"
     },
     {
       "label": "Shared third-party deps must use the catalog: protocol",

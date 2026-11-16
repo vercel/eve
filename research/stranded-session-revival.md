@@ -11,8 +11,8 @@ last_updated: "2026-10-05"
 A session is **stranded** when the code that started its Workflow run is no longer available to
 execute it. A Workflow run can only be replayed by the exact code that started it, and eve's step
 ids include the eve version, so after any eve upgrade older runs can't be replayed. On Vercel this
-is rare: old deployments keep running, and sessions [hand off](./atomic-session-handoff.md)
-to the new one. On self-hosted Worlds, every eve upgrade strands every parked session (#2866,
+is rare: old deployments keep running, and sessions hand off
+to the new one (#5035). On self-hosted Worlds, every eve upgrade strands every parked session (#2866,
 #3022).
 
 Today eve fails stranded runs eagerly. At startup the World re-enqueues every active run, and each

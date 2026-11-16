@@ -1,0 +1,78 @@
+---
+title: "Vite"
+description: "Run eve agents alongside any Vite app with the eveVite plugin."
+---
+
+`eve/vite` runs eve agents next to any Vite app. The `eveVite()` plugin proxies the agent routes on the Vite dev and preview servers, and adds the agents as Vercel services when the app deploys to Vercel. [`useEveAgent`](/docs/guides/frontend) from `eve/react` finds the mounted routes on its own, so you configure no CORS or URL env vars.
+
+Use the framework integration when there is one: [Next.js](./nextjs), [Nuxt](./nuxt), [SvelteKit](./sveltekit), or [TanStack Start](./tanstack). Use `eveVite()` for other Vite apps.
+
+## Prerequisites
+
+- The `eve` package installed in your project (`npm install eve@latest`).
+- An existing eve agent directory, or an `agents/` workspace. If you don't have one, start from [Getting started](../../getting-started).
+- Vite 8.3 or later.
+
+## Register the Vite plugin
+
+Add `eveVite()` to the plugins in `vite.config.ts`:
+
+```ts title="vite.config.ts"
+import react from "@vitejs/plugin-react";
+import { eveVite } from "eve/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [react(), eveVite()],
+});
+```
+
+The plugin looks for an eve project in the Vite root:
+
+- An `agent/` folder mounts one agent at `/eve/v1/*`.
+- An `agents/` workspace mounts each member at `/eve/<name>/v1/*`. Call a member with `useEveAgent({ agent: "<name>" })`.
+
+Pass `eveRoot` when the project lives elsewhere:
+
+```ts
+eveVite({ eveRoot: "../my-agent" });
+```
+
+### `eveVite` options
+
+All fields are optional.
+
+| Option               | Type     | Default   | Purpose                                                                                                            |
+| -------------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `eveRoot`            | `string` | Vite root | eve project root, relative to the Vite root unless absolute.                                                       |
+| `eveBuildCommand`    | `string` | generated | Build command for each generated eve Vercel service.                                                               |
+| `devServerTimeoutMs` | `number` | `180000`  | Maximum time to wait for each eve development server to start, including when another Vite process is starting it. |
+
+## Dev vs deploy topology
+
+- **Local dev and `vite preview`.** The plugin starts an eve dev server for each agent and proxies its routes to it, so the browser talks only to the Vite origin. A workspace member's route drops its name on the way, because each server serves `/eve/v1/*`. The plugin uses the server named by `EVE_BASE_URL` when set. A server the plugin starts stops when the Vite server closes. Any tool that loads `vite.config.ts` in serve mode, such as Vitest, starts or reuses these servers, so keep `eveVite()` out of a separate test config. Apps that Nitro serves in development get the same proxies as Nitro route rules. Nitro's preview server answers every request itself, so `vite preview` on a Nitro-served app adds no eve proxy and starts no eve dev server. Preview an agent with your own eve server and `EVE_BASE_URL`, or run the app in development.
+- **Vercel.** The app and its agents deploy as a single project. After the build, the plugin adds each agent as an eve [service](https://vercel.com/docs/services) in the `.vercel/output` that the app's framework or adapter wrote, and routes its transport requests to it before filesystem routing. The app serves everything else, and no `vercel.json` is required. A plain Vite app has no adapter that writes `.vercel/output` during `vite build`, so in that case the build fails until you compose the agents in `vercel.ts` with `withEve`. By default, each generated service runs the installed eve binary from the agent root. When the agents need their own build step, set `eveBuildCommand`:
+
+  ```ts
+  eveVite({ eveBuildCommand: "npm run build:eve" });
+  ```
+
+- **Other hosts.** A self-hosted production server doesn't mount the eve routes. Run the eve service on its own origin, and either forward `/eve/` and `/.well-known/workflow/` to it or pass `baseUrl` directly to `useEveAgent`:
+
+  ```ts
+  const agent = useEveAgent({
+    baseUrl: "https://agent.example.com",
+  });
+  ```
+
+  See [Self-host eve](../deployment/self-hosting) for running the eve service.
+
+## Managing Vercel services yourself
+
+When `vercel.json` declares [`services`](https://vercel.com/docs/services), the plugin generates nothing, and your configuration controls routing. It must include an eve service (`framework: "eve"`) per agent and a rewrite that sends its requests to it, or the build fails. An `agents/` workspace needs one service per member, and a rewrite for `/eve/<name>/v1/*`. The plugin also generates nothing when a `vercel.ts` composes the agents with [`withEve` from `eve/vercel`](../deployment/vercel#compose-agents-with-other-vercel-services), and keeps running the agents in development.
+
+## What to read next
+
+- [Frontend overview](/docs/guides/frontend): the `useEveAgent` API
+- [Auth & route protection](../auth-and-route-protection)
+- [Deployment](/docs/guides/deployment)

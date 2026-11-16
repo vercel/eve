@@ -1,6 +1,6 @@
 import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
@@ -40,7 +40,7 @@ import type {
   RemoteAgentCredentials,
 } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credentials.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { JsonValue } from "#shared/json.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
@@ -59,6 +59,14 @@ const DeliveryReceiptResponseSchema = z.object({
   ok: z.literal(true),
   sessionId: z.string().min(1),
   deliveryId: z.string().min(1),
+});
+
+/**
+ * The receipt a child gives forwarded answers. This session keeps it in its durable state until
+ * the request closes, so an id longer than any eve mints is not kept.
+ */
+const AnswerReceiptResponseSchema = DeliveryReceiptResponseSchema.extend({
+  deliveryId: z.string().min(1).max(256),
 });
 
 const ProtocolRejectionSchema = z.object({
@@ -229,7 +237,7 @@ export async function startRemoteAgentSession(input: {
 
   if (!response.ok) {
     if (rejected)
-      throw new FatalError(
+      throw new NonRetryableError(
         formatRemoteAgentProtocolMismatch({
           name: input.action.remoteAgentName,
           receiverVersion: rejected.version,
@@ -244,20 +252,20 @@ export async function startRemoteAgentSession(input: {
   try {
     body = await response.json();
   } catch {
-    throw new FatalError(
+    throw new NonRetryableError(
       `Remote agent "${input.action.remoteAgentName}" create-session response was not valid JSON. ${UNKNOWN_REMOTE_OUTCOME}`,
     );
   }
 
   const parsed = CreateSessionResponseSchema.safeParse(body);
   if (!parsed.success) {
-    throw new FatalError(
+    throw new NonRetryableError(
       `Remote agent "${input.action.remoteAgentName}" create-session response was invalid. ${UNKNOWN_REMOTE_OUTCOME}`,
     );
   }
   const receiverVersion = readRemoteAgentProtocolVersion(parsed.data.protocolVersion);
   if (!servesRemoteAgentCaller(receiverVersion)) {
-    throw new FatalError(
+    throw new NonRetryableError(
       `${formatRemoteAgentProtocolMismatch({ name: input.action.remoteAgentName, receiverVersion })} ${UNKNOWN_REMOTE_OUTCOME} Remote session: ${parsed.data.sessionId}.`,
     );
   }
@@ -313,7 +321,7 @@ export async function respondToRemoteAgentSession(input: {
    */
   readonly idempotencyKey?: string;
   readonly responses: readonly Answer[];
-}): Promise<void> {
+}): Promise<string | undefined> {
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
@@ -344,6 +352,14 @@ export async function respondToRemoteAgentSession(input: {
     throw new Error(
       `Remote agent "${input.remote.name}" input answer failed with HTTP ${response.status}.`,
     );
+  // A child on this protocol admits the answers as a delivery of its own and names it when it
+  // relays how they settled. The answers stand without it, so an unreadable receipt isn't fatal.
+  if (input.remote.earlierProtocol !== undefined) return undefined;
+  const receipt = AnswerReceiptResponseSchema.safeParse(await response.json().catch(() => null));
+  // A receipt from another session names none of this child's deliveries.
+  return receipt.success && receipt.data.sessionId === input.remote.sessionId
+    ? receipt.data.deliveryId
+    : undefined;
 }
 
 /** Continues one remote-agent session by its immutable session ID. */
@@ -532,7 +548,9 @@ export function resolveRemoteAgentForAction(input: {
   const definition = registered?.definition;
   if (input.dynamicRemoteAgent !== undefined) {
     if (definition === undefined) {
-      throw new FatalError(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
+      throw new NonRetryableError(
+        `Missing remote agent "${input.remoteAgentName}" in runtime registry.`,
+      );
     }
     const config = input.dynamicRemoteAgent;
     const remote: {
@@ -567,7 +585,9 @@ export function resolveRemoteAgentForAction(input: {
     return remote;
   }
   if (definition?.kind !== "remote") {
-    throw new FatalError(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
+    throw new NonRetryableError(
+      `Missing remote agent "${input.remoteAgentName}" in runtime registry.`,
+    );
   }
   return definition;
 }

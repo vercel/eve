@@ -1,10 +1,10 @@
+import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
-import { channelOf } from "#reactions/frame.js";
+import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
-import { traceSessionHandover } from "#execution/session/handover-tracing.js";
-import type { HandleEventFn } from "#harness/types.js";
+import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
-import { setEveAttributes } from "#runtime/attributes/emit.js";
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
@@ -28,17 +28,22 @@ import {
   ChannelInstrumentationKey,
   HandleEventKey,
   ToolChannelKey,
-  StaticModelReferenceKey,
+  ToolStubsKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { readPendingHistory, withoutPendingHistory } from "#execution/session/pending-history.js";
 import * as agentTraceState from "#tracing/eve/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
-import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import {
+  isTurnCancellation,
+  throwIfTurnAborted,
+  TurnCancelledError,
+} from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { isBetweenTurns, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import {
@@ -49,7 +54,12 @@ import {
   recordAppliedSession,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
-import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
+import {
+  commitTransitions,
+  saveTransition,
+  dropClosedRecords,
+  sessionView,
+} from "#harness/session-machine/commit.js";
 import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
@@ -64,10 +74,10 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
-  checksSessionEvents,
   foldOrphanedLines,
   openSessionEventPublisher,
   readOrphanedLines,
+  type Entered,
 } from "#execution/publish-session-events.js";
 import {
   readInterruptedAttempt,
@@ -75,37 +85,48 @@ import {
 } from "#execution/session/interrupted-step.js";
 import { stepDisagreement } from "#execution/session/step-decision-check.js";
 import { createLogger } from "#internal/logging.js";
-import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
+import { planAdmission, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import type { SessionEvent } from "#protocol/session-event.js";
-import { fact } from "#harness/facts.js";
+import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
-import { applyReactionEffects, restoreReactions } from "#reactions/runner.js";
-import { bindMemoryInstrumentation } from "#reactions/kinds/memory.js";
+import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
+import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { readHitlState } from "#harness/hitl/index.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import {
+  ownCallbacks,
+  readHitlState,
+  ResumeSignInKey,
+  settleSignIns,
+  signInsAnswered,
+  signInsEnded,
+  type SignInAnswer,
+} from "#harness/hitl/index.js";
 import {
   createDurableSessionValues,
   readDurableSession,
 } from "#execution/durable-session-store.js";
-import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import {
-  resolveEffectiveAgentRuntime,
-  resolveSessionUsageLimit,
-} from "#execution/effective-agent-config.js";
+  buildRuntimeIdentity,
+  createExecutionNodeStep,
+  type CreateRuntime,
+} from "#execution/node-step.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
-import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { hydrateDurableSession } from "#execution/session.js";
+import { toolStubPlayback, type ToolStubHost } from "#execution/tool-stub-host.js";
+import { ToolStubPlaybackKey } from "#context/providers/tool-stubs-key.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
   createCancelledModelCallBatchResult,
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { signInInteractionId } from "#harness/interaction-facts.js";
+import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
+import { signInDelivery, type DurableHost } from "#execution/hosts.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export type { TurnStepInput };
 
@@ -113,43 +134,65 @@ const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
+  /** Usage tags written behind the turn; the step waits for them before it returns. */
+  usage?: Promise<void>;
 }
 
-/** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
-export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
-  "use step";
-  if (input.handover !== undefined) {
-    traceSessionHandover(
-      "inbox_unblocked",
-      input.sessionState.sessionId,
-      input.handover.attemptKey,
-      {
-        "eve.handoff.buffered_payload_count": input.handover.payloadCount,
-        "eve.handoff.applied_at_ms": input.handover.appliedAtMs,
-        "eve.handoff.applied_at_clock": "workflow",
-      },
+/**
+ * What a session step needs from the host that runs it, beyond its input: where its callbacks
+ * reach it, where the session's attributes go, and the runtime its durable calls start in.
+ * Workflow is one host (`workflow-host/turn-step.ts`).
+ */
+export interface SessionStepHost {
+  /** The base URL sign-in and hook callbacks reach this session at, when the host serves them. */
+  readonly callbackBaseUrl?: string;
+  /** Records the session's attributes, such as its title. */
+  setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
+  /** The runtime a durable call, such as a workflow tool's, starts in. */
+  readonly createRuntime: CreateRuntime;
+  /** Answers a stubbed eval's tool calls; see {@link ToolStubHost}. */
+  readonly toolStubs?: ToolStubHost;
+  /**
+   * With `callbackBaseUrl`: the host's delivery, through which a sign-in callback reaches its
+   * asker's inbox, so the askers waiting on the same grant hear the session's own answer.
+   */
+  readonly deliver?: DurableHost["deliver"];
+}
+
+/** A turn step on `host`: Workflow runs it inside its `"use step"` boundary (`turnStep`). */
+export function turnStepOn(
+  host: SessionStepHost,
+): (input: TurnStepInput) => Promise<TurnStepResult> {
+  return async (input) =>
+    await withSessionStateDelta(input, (state) =>
+      runSessionStep(
+        {
+          ...state,
+          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+        },
+        host,
+      ),
     );
-  }
-  return await withSessionStateDelta(input, (state) =>
-    runSessionStep({
-      ...state,
-      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-    }),
-  );
 }
 
-async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+/** One session step, on whichever host runs it. */
+async function runSessionStep(
+  input: Entered<TurnStepInput>,
+  host: SessionStepHost,
+): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
   try {
-    return await runSessionStepBody(input, pendingAttributes);
+    return await runSessionStepBody(input, pendingAttributes, host);
   } finally {
     await pendingAttributes.title;
+    await pendingAttributes.usage;
   }
 }
 
 async function runSessionStepBody(
-  input: TurnStepInput,
+  input: Entered<TurnStepInput>,
   pendingAttributes: PendingStepAttributes,
+  host: SessionStepHost,
 ): Promise<DurableStepResult> {
   // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
@@ -165,7 +208,7 @@ async function runSessionStepBody(
     sessionId: durableSession.sessionId,
     position: nextLinePosition(ctx),
     sessionWritable: input.sessionWritable,
-    always: input.recover !== undefined,
+    rerun: input.recover !== undefined || input.rerun,
   });
   const interrupted =
     orphaned.length > 0 || input.recover !== undefined
@@ -175,20 +218,12 @@ async function runSessionStepBody(
     enterSessionProjectionAt(ctx, foldOrphanedLines(currentProjection(ctx), orphaned));
   }
   const adapter = ctx.require(ChannelKey);
-  const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const agent = sessionAgent(ctx);
+  // The compiled node whose `agent/tools/` and module scope the step runs.
+  const bundle = requireCompiledBundle(ctx);
 
-  // Populate the callback base URL so getHookUrl() works during tool
-  // execution, preferring eve's active local origin over metadata fallback.
-  try {
-    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-    const metadata = getWorkflowMetadata();
-    if (typeof metadata.url === "string") {
-      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
-    }
-  } catch {
-    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
-  }
+  // Populate the callback base URL so getHookUrl() works during tool execution.
+  if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
 
   const { signIns } = readHitlState(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
@@ -198,6 +233,27 @@ async function runSessionStepBody(
     if (matches.length > 0) {
       const matchedAttemptIds = matches.map((match) => match.result.attemptId);
       const authResults = matches.map((match) => match.result);
+      // The children waiting on the same grant hear this session's answer, as it hears theirs.
+      const baseUrl = ctx.get(CallbackBaseUrlKey);
+      if (baseUrl !== undefined && host.deliver !== undefined) {
+        const own = ownCallbacks(durableSession.sessionId, baseUrl);
+        const tables = storedProjection(durableSession.state).view;
+        await settleSignIns(
+          signInDelivery(host.deliver),
+          matches.flatMap(({ challenge, result }) => {
+            const answer = ownSignInAnswer(tables, challenge, result.callback);
+            if (answer !== undefined) return signInsAnswered(tables, answer, own);
+            const error = result.callback.params["error"];
+            return error === undefined
+              ? []
+              : signInsEnded(
+                  tables,
+                  { interactionId: signInInteractionId(challenge), reason: error },
+                  own,
+                );
+          }),
+        );
+      }
       ctx.set(PendingAuthorizationResultKey, authResults);
       // The session stops waiting on them; the turn they resume reports their completion.
       const view = sessionView(storedProjection(durableSession.state), durableSession.state);
@@ -242,17 +298,11 @@ async function runSessionStepBody(
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
   let initialSession: HarnessSession = {
-    ...hydrateDurableSession({
-      compactionOverrides: {
-        thresholdPercent: effectiveAgent.thresholdPercent,
-      },
-      durable: durableSession,
-      turnAgent: effectiveAgent.turnAgent,
-    }),
+    ...hydrateDurableSession(durableSession),
     history: validateHarnessModelMessages(input.history),
   };
   const instrumentation = bindSessionInstrumentation({
-    agentName: effectiveAgent.turnAgent.id,
+    agentName: agent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
@@ -269,7 +319,7 @@ async function runSessionStepBody(
     const title = deriveSessionTitle(rawDelivery?.title ?? message);
     if (title !== undefined) {
       ctx.set(SessionTitleKey, title);
-      pendingAttributes.title = setEveAttributes({ "$eve.title": title });
+      pendingAttributes.title = host.setAttributes({ "$eve.title": title });
     }
   }
 
@@ -300,8 +350,8 @@ async function runSessionStepBody(
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
-    const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
-    const sessionUsageLimit = resolveSessionUsageLimit(bundle);
+    const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
+    const sessionUsageLimit = agent.settings.limits?.sessionUsage;
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
@@ -357,7 +407,7 @@ async function runSessionStepBody(
         await instrumentation?.flush();
         throw error;
       }
-      admission = admitDeliveries({
+      admission = planAdmission({
         channelKind: ctx.get(ChannelInstrumentationKey)?.kind ?? getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
         status: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId]?.status,
@@ -437,25 +487,23 @@ async function runSessionStepBody(
 
     /** Whether the admission changed the session: its history or its sandbox. */
     let admissionChangedSession = false;
-    /** The admission's facts: the session's start if it hasn't, then each delivery admitted. */
-    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): SessionEvent[] => {
-      if (admission === undefined || admission.facts.length === 0) return [];
-      const facts: SessionEvent[] = [];
-      if (!turnPosition(currentProjection(ctx)).sessionStarted) {
-        const parent = ctx.get(ParentSessionKey);
-        const predecessor = ctx.get(SessionPredecessorKey);
-        facts.push(
-          fact("session.started", {
-            parent:
-              parent === undefined
-                ? undefined
-                : { callId: parent.callId, sessionId: parent.sessionId },
-            predecessor,
-            runtime,
-          }),
-        );
-      }
-      return [...facts, ...admission.facts];
+    /** The admission's commit: the session's start if it hasn't, then each delivery admitted. */
+    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): Commit => {
+      if (admission === undefined || admitDeliveries(admission.deliveries).length === 0)
+        return admitDeliveries([]);
+      const parent = ctx.get(ParentSessionKey);
+      return admitDeliveries(admission.deliveries, {
+        start: turnPosition(currentProjection(ctx)).sessionStarted
+          ? undefined
+          : {
+              parent:
+                parent === undefined
+                  ? undefined
+                  : { callId: parent.callId, sessionId: parent.sessionId },
+              predecessor: ctx.get(SessionPredecessorKey),
+              runtime,
+            },
+      });
     };
     /** The admission commit, with the session's providers its hooks read. */
     const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
@@ -502,9 +550,9 @@ async function runSessionStepBody(
         ({ deliveryId }) => projection.view.deliveries[deliveryId]?.status === "admitted",
       );
       if (waiting.length === 0) return;
-      const { events } = receive(sessionView(projection, initialSession.state), {
-        deliveries: waiting,
-      });
+      const received = commitTransitions([
+        receive(sessionView(projection, initialSession.state), { deliveries: waiting }),
+      ]);
       // The turn is already stopping, so this commit's hooks have nothing left to cancel.
       const emit = createTurnEventHandler({
         abortSignal,
@@ -514,12 +562,12 @@ async function runSessionStepBody(
         publisher,
       });
       const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
-      await contextStorage.run(ctx, () => publish(events));
+      await contextStorage.run(ctx, () => publish(received));
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
       // Nothing here starts a turn, so a cancel has nothing to stop.
-      await publishAdmission(buildRuntimeIdentity(effectiveNode)).catch(ignoreTurnCancellation);
+      await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -537,20 +585,14 @@ async function runSessionStepBody(
       });
     }
 
-    const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
+    const runtimeIdentity = buildRuntimeIdentity(agent);
     let restoration: Promise<void> | undefined;
-    const prepareReactions = (session: HarnessSession): Promise<void> => {
-      ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
+    const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
-          const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-          const revision = deploymentId
-            ? `deployment:${deploymentId}`
-            : await resolveRuntimeCompiledArtifactsVersionedCacheKey(
-                bundle.compiledArtifactsSource,
-              );
+          const revision = await agent.revision();
           await contextStorage.run(ctx, () =>
-            restoreReactions(ctx, { abortSignal, conversation: session.history, revision }),
+            restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
         } catch (error) {
           await instrumentation?.flush();
@@ -570,7 +612,7 @@ async function runSessionStepBody(
         failed: input.recover,
         publish: async (events, session) => {
           const scoped = await withContextScope(ctx, session, async (current) => {
-            await prepareReactions(current);
+            await prepareDefinitions(current);
             const emit = createTurnEventHandler({
               abortSignal,
               canCancelTurn: false,
@@ -599,7 +641,7 @@ async function runSessionStepBody(
       initialSession = recovered.session;
       resolved = recovered.stepInput;
     }
-    await prepareReactions(initialSession);
+    await prepareDefinitions(initialSession);
 
     try {
       await publishAdmission(runtimeIdentity);
@@ -611,8 +653,7 @@ async function runSessionStepBody(
       }
     }
 
-    const modelCallsPerStep =
-      bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
+    const modelCallsPerStep = agent.settings.modelCallsPerStep ?? 1;
     const capabilities = ctx.get(CapabilitiesKey);
 
     const runHarnessStep = async (
@@ -620,15 +661,6 @@ async function runSessionStepBody(
       stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
-      const refreshedSession = refreshSessionFromTurnAgent({
-        compactionOverrides: {
-          thresholdPercent: effectiveAgent.thresholdPercent,
-        },
-        session: lifecycleSession,
-        turnAgent: effectiveAgent.turnAgent,
-      });
-      const modelSession = refreshedSession;
-
       const step = createExecutionNodeStep({
         steeringSignal: input.steeringSignal,
         abortSignal,
@@ -636,7 +668,7 @@ async function runSessionStepBody(
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
         controlDelivery: input.input?.controlDelivery,
-        createRuntime: createWorkflowRuntime,
+        createRuntime: host.createRuntime,
         handleEvent,
         signInCompletions,
         typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
@@ -645,11 +677,21 @@ async function runSessionStepBody(
           moduleMap: bundle.moduleMap,
           nodeId: bundle.nodeId,
         },
+        agent,
         node: effectiveNode,
         sessionUsageLimit,
-        titleAttributeWrite: pendingAttributes.title,
+        // Usage tags are observability, not state: they're written behind the turn, in order
+        // and after the title's write, and the step waits for them only before it returns, so
+        // the turn settles without a run-attribute round trip.
+        setAttributes: async (attributes) => {
+          const previous = pendingAttributes.usage ?? pendingAttributes.title;
+          pendingAttributes.usage = (async () => {
+            await previous?.catch(() => {});
+            await host.setAttributes(attributes);
+          })().catch(() => {});
+        },
       });
-      return step(modelSession, stepInput);
+      return step(lifecycleSession, stepInput);
     };
 
     let completedModelCall: CompletedModelCallCheckpoint | undefined;
@@ -657,7 +699,9 @@ async function runSessionStepBody(
     try {
       // A signal already aborted at entry (cancellation during an in-line
       // runtime-action wait) must settle before the park-resume stages run,
-      // or the pending batch would re-park and later re-dispatch.
+      // or the pending batch would re-park and later re-dispatch. A turn stopped while its
+      // step kept failing settles too, whether or not its signal has reached this step yet.
+      if (input.recover?.stopped === true) throw new TurnCancelledError();
       throwIfTurnAborted(abortSignal);
       stepResult = await runModelCallBatch({
         steeringSignal: input.steeringSignal,
@@ -671,12 +715,17 @@ async function runSessionStepBody(
               startSessionPrewarmers(ctx, "turn");
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
-            ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
+            if (host.deliver !== undefined)
+              ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
+            const stubs = ctx.get(ToolStubsKey);
+            if (stubs !== undefined)
+              ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(host.toolStubs, stubs));
             ctx.setVirtualContext(ToolChannelKey, {
               channel: channelOf(ctx),
               to: createToolChannelTo({
+                createRuntime: host.createRuntime,
                 delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadBundle: () => ctx.require(BundleKey),
+                loadAgent: () => agent,
               }),
             });
             const schemaSession =
@@ -684,7 +733,7 @@ async function runSessionStepBody(
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
             // The scope's providers start empty; the slots fill what they own.
-            await applyReactionEffects(ctx);
+            await installDefinitions(ctx);
             // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined
@@ -758,4 +807,20 @@ function stoppedForPerson(result: StepResult): boolean {
 /** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */
 function ignoreTurnCancellation(error: unknown): void {
   if (!isTurnCancellation(error)) throw error;
+}
+
+/**
+ * How the person answered this session's own sign-in, read from its callback: a decline is RFC
+ * 6749 `access_denied`, any other error is a failure its asker retries, and none is an acceptance.
+ */
+function ownSignInAnswer(
+  tables: SessionView,
+  challenge: AuthorizationChallenge,
+  callback: AuthorizationCallback,
+): SignInAnswer | undefined {
+  const interactionId = signInInteractionId(challenge);
+  const signIn = tables.interactions[interactionId]?.request.signIn;
+  const error = callback.params["error"];
+  if (signIn === undefined || (error !== undefined && error !== SIGN_IN_DECLINED)) return undefined;
+  return { interactionId, outcome: error === undefined ? "accepted" : "declined", signIn };
 }

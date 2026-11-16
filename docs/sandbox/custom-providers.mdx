@@ -143,7 +143,7 @@ eve calls the provider's methods at these points:
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `eve build`, or the first sandbox access in `eve dev` | `prepare(ctx)`, and stores the artifact it returns with the deployment                                                                                       |
 | The first sandbox access in a session, or prewarming  | `start(ctx, options, artifact)` from `environment.open(options)` in the selector                                                                             |
-| A later workflow step or process, or a turn starting  | `resume(ctx, artifact, state)`                                                                                                                               |
+| The first access to a recorded sandbox in a step      | `resume(ctx, artifact, state)`                                                                                                                               |
 | The step that opened a connection ends                | `connection.close()`, for a turn's step, a `"use step"` function, or an `invokeTool` call                                                                    |
 | `sandbox.stop()`                                      | `connection.stop()`, then `connection.close()`                                                                                                               |
 | `sandbox.delete()`                                    | `connection.close()`, then `onSessionEnd(ctx, state, { reason: "deleted" })`                                                                                 |
@@ -151,7 +151,7 @@ eve calls the provider's methods at these points:
 | The session that owns the sandbox ends                | `connection.close()` on a connection the ending step still holds, then `onSessionEnd(ctx, state, { reason })` with `"completed"`, `"expired"`, or `"failed"` |
 
 - A prewarmed session calls `start()` before its first message, and its first turn can call it again at the same time.
-- Each turn of a session that recorded a sandbox calls `resume()` as the turn starts, whether or not the turn uses the sandbox.
+- A turn does not resume its recorded sandbox just by starting. The first tool or file operation that needs it calls `resume()`; a turn that never uses the sandbox leaves it alone. A turn that changes a dynamic skill's files also resumes it in the background to write or remove them.
 - Server shutdown always stops connections that are mid-step. eve logs shutdown failures and doesn't throw them.
 - eve calls `close()` at most once per connection, and calls it again only after a failure. A failed `close()` never prevents `onSessionEnd()` from deleting the sandbox.
 - `stop()` can run again after the session uses a stopped connection, so make it a no-op when the sandbox is already stopped.

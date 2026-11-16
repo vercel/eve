@@ -1,15 +1,17 @@
 ---
 name: investigate
-description: Investigate a specific issue report with strict, evidence-driven diagnosis.
+description: Investigate an issue report, or analyze the constraints of a proposed change, with strict, evidence-driven diagnosis.
 ---
 
 # Investigate
 
-Determine unambiguously what the report means from the system's perspective. First establish whether it is real and reproducible. If not, pause and report that result.
+Determine unambiguously what the report means from the system's perspective. Collect the available evidence for it, such as error output, logs, and failing inputs, and check what changed recently in the affected area. Then establish whether it is real with a precise reproduction. If not, pause and report that result.
 
 Start at the observed effect and identify the code paths directly responsible. Climb one layer at a time across call frames, processes, network hops, and persistence boundaries. Go only as wide and deep as the evidence requires.
 
 Keep an explicit hypothesis at every branch and try to disprove it. Prefer the simplest explanation that accounts for all observed evidence. Do not jump to solutions before diagnosis.
+
+Before proposing a change, name the fundamental constraints, including the relevant data flows and the entry points that reach the affected code paths.
 
 ## Standards
 

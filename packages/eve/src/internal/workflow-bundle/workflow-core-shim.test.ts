@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createWebhook, sleep } from "#internal/workflow-bundle/workflow-core-shim.js";
+import { HookConflictError } from "#compiled/@workflow/errors/index.js";
+import { createHook, createWebhook, sleep } from "#internal/workflow-bundle/workflow-core-shim.js";
 
 const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
@@ -67,5 +68,20 @@ describe("workflow core shim webhooks", () => {
     const { create } = installHook();
     expect(() => createWebhook({ token: "predictable" })).toThrow("does not accept a `token`");
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("workflow core shim hook failures", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    new HookConflictError("occupied"),
+    Object.assign(new Error("Registration failed"), { conflictingRunId: "wrun_other" }),
+  ])("preserves a registration failure without a known conflict owner: %s", async (error) => {
+    vi.stubGlobal(Symbol.for("WORKFLOW_CREATE_HOOK"), () => ({
+      getConflict: () => Promise.reject(error),
+    }));
+
+    await expect(createHook().getConflict()).rejects.toBe(error);
   });
 });

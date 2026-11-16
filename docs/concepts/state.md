@@ -5,6 +5,8 @@ description: "Durable per-session memory with defineState: get() and update(), p
 
 `defineState` declares a typed, named slot of per-session memory. Use it when the agent has to remember something between turns, such as a running budget, a glossary, or a checklist, without an external store. Values survive crashes, redeploys, and days-long sessions.
 
+Use state for facts your agent owns, such as budgets and counters. Don't use it to mirror facts eve already tracks, such as the active turn, call status, or open interactions; read those with [session views & selectors](/docs/concepts/session-views-and-selectors) wherever a view is available. A view is an operational snapshot with bounded retention, so store a historical record yourself when you need one.
+
 ```ts
 import { defineState } from "eve/context";
 
@@ -42,7 +44,51 @@ export default defineTool({
 });
 ```
 
-`get()` and `update()` require an active eve context. Calling them outside tools, hooks, or framework-managed code throws.
+`get()` and `update()` require an active eve context. They work in tools, hooks, channel handlers, dynamic functions, and OpenTelemetry [`runtimeContext`](../observability/otel#add-runtime-context) resolvers. Calling them outside code eve runs, such as at module scope, throws.
+
+## Update state from a workflow tool
+
+`get()` and `update()` throw inside a [workflow tool](../tools/workflows)'s `"use step"` function, because the step runs outside the session that owns the state. Return the value from the workflow tool instead:
+
+```ts title="agent/tools/compile_report.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Compile a report on a topic.",
+  inputSchema: z.object({ topic: z.string() }),
+  async execute({ topic }) {
+    "use workflow";
+    return await compile(topic);
+  },
+});
+
+async function compile(topic: string) {
+  "use step";
+  return `Report on ${topic}`; // a defineState get() or update() here throws
+}
+```
+
+Then save the output from a [hook](../guides/hooks) on `call.settled`, which runs in the session when the call finishes:
+
+```ts title="agent/hooks/save-report.ts"
+import { defineState } from "eve/context";
+import { call } from "eve/events";
+import { defineHook } from "eve/hooks";
+
+const reports = defineState<string[]>("my-agent.reports", () => []);
+
+export default defineHook({
+  events: {
+    "call.settled"(event, ctx) {
+      const finished = call(ctx.view, event.data.callId);
+      if (finished?.name === "compile_report" && finished.state === "completed") {
+        reports.update((saved) => [...saved, finished.output as string]);
+      }
+    },
+  },
+});
+```
 
 ## Reset state between turns
 
@@ -61,7 +107,7 @@ export default defineHook({
 });
 ```
 
-The hook imports the same module-scope `budget` handle as the tool, so both read and write the same slot.
+The hook imports the same module-scope `budget` handle as the tool, so both read and write the same slot. A `turn.started` hook finishes before the turn's first model call, so the reset is in place before any tool of that turn runs.
 
 ## State is never shared with subagents
 

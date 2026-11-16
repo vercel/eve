@@ -128,3 +128,52 @@ it("projects interactions without exposing callback URLs through waiting or acti
     ]),
   ).not.toContain("private.example");
 });
+
+it("leaves a call whose tool set label: false out of activity", () => {
+  const running = (callId: string, capability: { kind: "tool"; name: string; hidden?: true }) => [
+    { type: "call.requested", data: { callId, owner: { runId: "r" }, capability, input: {} } },
+    { type: "call.started", data: { callId } },
+  ];
+  const hidden = events.foldEvents(
+    events.emptySessionView(),
+    stampTestEvents([
+      ...opening.slice(0, 3),
+      ...running("react", { kind: "tool", name: "react", hidden: true }),
+    ] as SessionEvent[]),
+  );
+  expect(events.call(hidden, "react")).toMatchObject({ hidden: true, name: "react" });
+  expect(events.showsActivity(events.call(hidden, "react")!)).toBe(false);
+  expect(events.activity(hidden)).toEqual({ kind: "thinking" });
+
+  const shown = events.foldEvents(
+    hidden,
+    stampTestEvents([
+      ...opening.slice(0, 3),
+      ...running("react", { kind: "tool", name: "react", hidden: true }),
+      ...running("lookup", { kind: "tool", name: "lookup" }),
+    ] as SessionEvent[]),
+  );
+  expect(events.call(shown, "lookup")).not.toHaveProperty("hidden");
+  expect(events.activity(shown)).toEqual({ kind: "calling", names: ["Lookup"] });
+});
+
+it.each([
+  { hidden: true as const, activity: { kind: "thinking" } },
+  { hidden: undefined, activity: { kind: "waiting-on-tasks", tasks: [{ name: "react" }] } },
+])("reads a task its call started with hidden=$hidden", ({ hidden, activity }) => {
+  const capability = { kind: "tool", name: "react", ...(hidden && { hidden }) } as const;
+  const view = events.foldEvents(
+    events.emptySessionView(),
+    stampTestEvents([
+      ...opening.slice(0, 3),
+      { type: "call.requested", data: { callId: "c", owner: { runId: "r" }, capability } },
+      {
+        type: "task.started",
+        data: { taskId: "t", kind: "tool", name: "react", startedBy: { callId: "c" } },
+      },
+      { type: "call.started", data: { callId: "c", taskId: "t" } },
+      { type: "model.settled", data: { runId: "r", outcome: "completed" } },
+    ] as SessionEvent[]),
+  );
+  expect(events.activity(view)).toMatchObject(activity);
+});

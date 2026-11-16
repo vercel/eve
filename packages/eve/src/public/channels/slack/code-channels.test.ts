@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildAdapterContext } from "#channel/adapter-context.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
@@ -9,15 +10,18 @@ import {
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
+import {
+  slackRenderingHarness,
+  type SlackTurnStep,
+} from "#internal/testing/slack-rendering-harness.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
-import { slackChannel, type SlackChannelState } from "#public/channels/slack/slackChannel.js";
-import { buildAdapterContext } from "#channel/adapter-context.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import {
+  slackChannel,
+  type SlackChannelConfig,
+  type SlackChannelState,
+} from "#public/channels/slack/slackChannel.js";
 import { postCompletedSlackReply } from "#public/channels/slack/index.js";
-import { emptySessionView } from "#protocol/session-projection/fold.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 
 const SIGNING_SECRET = "test-signing-secret";
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -103,7 +107,7 @@ function buildMentionBody({
 async function firePost(
   channel: unknown,
   request: Request,
-  options: { cancelResult?: "ignored" | "completed" } = {},
+  options: { cancelResult?: "ignored" | "completed"; hasSession?: boolean } = {},
 ) {
   if (!isCompiledChannel(channel)) throw new Error("Expected compiled channel");
   const post = channel.routes.find((route) => route.method === "POST");
@@ -125,7 +129,7 @@ async function firePost(
   const response = await post.handler(request, {
     ...mockAgentRouteArgs(),
     from,
-    resolveSession: async () => undefined,
+    resolveSession: async () => (options.hasSession ? ({ sessionId: "s1" } as never) : undefined),
     waitUntil,
     attachSession: vi.fn() as never,
     to: vi.fn() as never,
@@ -141,39 +145,16 @@ async function firePost(
   return { send, cancel, response };
 }
 function renderingHarness() {
-  const definition = slackChannel({ credentials: { botToken: "xoxb-test" } });
-  if (!isCompiledChannel(definition)) throw new Error("Expected compiled channel");
-  const adapter = {
-    ...definition.adapter,
-    state: {
-      ...definition.adapter.state,
-      channelId: "C01",
-      threadTs: null,
-      teamId: "T01",
-      codeChannel: true,
-    },
-  };
-  const store = new ContextContainer();
-  store.setVirtualContext(SessionKey, {
-    sessionId: "s1",
-    auth: { current: null, initiator: null },
-    turn: { id: "t1", sequence: 0 },
+  const harness = slackRenderingHarness(slackChannel({ credentials: { botToken: "xoxb-test" } }), {
+    channelId: "C01",
+    threadTs: null,
+    teamId: "T01",
+    codeChannel: true,
   });
-  const ctx = {
-    ...buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as never),
-    view: emptySessionView(),
-  };
   return {
-    channel: ctx,
-    async event(fact: SessionEvent) {
-      const handler = adapter[fact.type] as
-        | ((event: SessionEvent, context: typeof ctx) => Promise<void>)
-        | undefined;
-      if (!handler) throw new Error(`No handler for ${fact.type}`);
-      await contextStorage.run(store, () => handler(fact, ctx));
-    },
-    async deliver(replyThreadTs: string) {
-      await adapter.deliver?.({ message: "hello", state: { replyThreadTs } } as never, ctx);
+    ...harness,
+    async deliver(replyThreadTs: string, options?: { readonly quiet?: boolean }) {
+      await harness.deliver({ message: "hello", state: { replyThreadTs, quiet: options?.quiet } });
     },
   };
 }
@@ -498,6 +479,65 @@ describe("slackChannel() code channels", () => {
     expect(alice.send.mock.calls.map(([address]) => address)).toEqual(["code:C_CODE_GATED"]);
   });
 
+  // Each row authors a hook the edit must skip, so the default can't just be "no hooks".
+  it.each<{
+    name: string;
+    channel: string;
+    hooks: readonly ("onAppMention" | "onDirectMessage" | "onMessage")[];
+    reached: "onAppMention" | "onMessage" | "default";
+  }>([
+    {
+      name: "code edit to onMessage",
+      channel: "C_CODE_EDIT_MESSAGE",
+      hooks: ["onAppMention", "onMessage"],
+      reached: "onMessage",
+    },
+    {
+      name: "code edit to onAppMention",
+      channel: "C_CODE_EDIT_MENTION",
+      hooks: ["onAppMention", "onDirectMessage"],
+      reached: "onAppMention",
+    },
+    {
+      name: "code edit to the default",
+      channel: "C_CODE_EDIT_DEFAULT",
+      hooks: ["onDirectMessage"],
+      reached: "default",
+    },
+  ])("$name", async ({ channel: channelId, hooks, reached }) => {
+    useCodeChannels([channelId]);
+    const calls: string[] = [];
+    const hook =
+      (name: string): NonNullable<SlackChannelConfig["onMessage"]> =>
+      (_ctx, message) => {
+        calls.push(`${name}: ${message.text}`);
+        return { auth: null };
+      };
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      ...Object.fromEntries(hooks.map((name) => [name, hook(name)])),
+    });
+    const message = { text: "keep going", ts: "1700000000.000300", user: "U_ALICE" };
+    const body = buildEventBody(
+      {
+        channel: channelId,
+        channel_type: "channel",
+        message: { ...message, text: "keep going, please", edited: { ts: "1700000000.000309" } },
+        previous_message: message,
+        subtype: "message_changed",
+        ts: "1700000000.000309",
+        type: "message",
+      },
+      { authorizations: BOT_AUTHORIZATIONS },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }), { hasSession: true });
+
+    expect(calls).toEqual(reached === "default" ? [] : [`${reached}: keep going, please`]);
+    expect(send.mock.calls.map(([address]) => address)).toEqual([`code:${channelId}`]);
+  });
+
   it("addresses a custom interaction in a code channel to the channel's session", async () => {
     useCodeChannels(["C_CODE_CARD"]);
     const channel = slackChannel({
@@ -726,6 +766,34 @@ describe("slackChannel() code channels", () => {
     ]);
     expect(statuses()).toContain("processing");
     expect(slackCalls("assistant.threads.setStatus")).toHaveLength(0);
+  });
+
+  // Each step is followed by the statuses it wrote. `quiet` and `plain` are deliveries: edits and
+  // deferred messages are delivered quiet.
+  it.each<{ name: string; trace: string }>([
+    { name: "ends with no_reply", trace: "quiet turn model no_reply end:active" },
+    {
+      name: "shows a real tool's work",
+      trace: "quiet turn model tool model:processing end:active",
+    },
+    { name: "quiet, then plain", trace: "quiet plain turn:processing" },
+    { name: "plain, then quiet", trace: "plain quiet turn:processing" },
+    { name: "steered plain message", trace: "quiet turn model plain model:processing end:active" },
+    { name: "next turn after a quiet one", trace: "quiet turn end:active plain turn:processing" },
+  ])("keeps a quiet turn quiet: $name", async ({ trace }) => {
+    useCodeChannels([]);
+    const { deliver, step } = renderingHarness();
+    const observed: string[] = [];
+    for (const name of trace.split(" ").map((entry) => entry.split(":")[0]!)) {
+      const before = statuses().length;
+      if (name === "quiet" || name === "plain") {
+        await deliver("1700000000.000100", { quiet: name === "quiet" });
+      } else {
+        await step(name as SlackTurnStep);
+      }
+      observed.push([name, ...statuses().slice(before)].join(":"));
+    }
+    expect(observed.join(" ")).toBe(trace);
   });
 
   it("sets the session back to active when a turn is cancelled", async () => {

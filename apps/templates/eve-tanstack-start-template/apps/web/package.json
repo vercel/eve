@@ -1,0 +1,5 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module"
+}

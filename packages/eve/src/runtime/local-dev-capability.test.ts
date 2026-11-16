@@ -7,7 +7,7 @@ import {
   withLocalDevRequestScope,
 } from "#runtime/local-dev-capability.js";
 import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 

@@ -31,18 +31,62 @@ Use `DockerSandbox.dockerfile()`, which takes no `image` option, to make the san
 
 ## eve's default image
 
-eve's default image runs Ubuntu with Node.js 24, npm, Python 3, git, ripgrep, jq, and curl. Commands run as the `vercel-sandbox` user in `/workspace`, with passwordless `sudo`. Docker pulls it from `ghcr.io/vercel/eve`, and [Vercel Sandbox](/docs/sandbox/vercel) uses the same image from `vcr.vercel.com/vercel/eve/base`.
+eve's default image runs Ubuntu with Node.js 26, npm, Python 3, git, ripgrep, jq, and curl. Commands run as the `vercel-sandbox` user in `/workspace`, with passwordless `sudo`. Docker pulls it from `ghcr.io/vercel/eve`, and [Vercel Sandbox](/docs/sandbox/vercel) uses the same image from `vcr.vercel.com/vercel/eve/base`.
 
 The default image doesn't include pnpm or pip, so install them in `prepare` when your agent needs them:
 
 - `npm install -g pnpm` installs pnpm for the `vercel-sandbox` user.
-- Ubuntu's system Python refuses `pip install`, so run `sudo apt-get install -y python3-venv` and use the pip inside a virtual environment. The [analysis tutorial](/docs/tutorial/run-analysis#install-the-chart-dependencies) shows the Python setup.
+- Ubuntu's system Python refuses `pip install`, so run `sudo apt-get install -y python3-venv` and use the pip inside a virtual environment.
+
+For example, this sandbox installs matplotlib once for every session:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+
+export const environment = DefaultSandbox.environment({
+  prepare: async (sandbox) => {
+    for (const command of [
+      "sudo apt-get update && sudo apt-get install -y python3-venv",
+      "python3 -m venv /workspace/.venv",
+      "/workspace/.venv/bin/pip install matplotlib==3.10.8",
+    ]) {
+      const result = await sandbox.run({ command });
+      if (result.exitCode !== 0) {
+        throw new Error(`Sandbox setup failed: ${result.stderr || result.stdout}`);
+      }
+    }
+  },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+Tools then run `/workspace/.venv/bin/python` through `ctx.getSandbox()`. `sandbox.run()` returns a non-zero `exitCode` instead of throwing, so check it before using a command's output.
 
 Preparation runs when eve builds the template, so it needs network access to the package registries.
 
 Each eve release pins one tag of the default image, and the tag is not the eve version. Prepared templates include the image reference, so a new eve release reuses them unless it pins a different image.
 
 To run a different published tag, set `EVE_SANDBOX_IMAGE_TAG` in both the build and runtime environments. eve applies the tag to both registries.
+
+## The eve-git image
+
+`ghcr.io/vercel/eve-git` is eve's default image plus the GitHub CLI (`gh`), for agents that clone repositories, push branches, or open pull requests. [Vercel Sandbox](/docs/sandbox/vercel) pulls the same image from `vcr.vercel.com/vercel/eve/git`. eve doesn't use it unless you select it.
+
+Each eve release pins one tag of the image, like the default image. `DEFAULT_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/docker` and from `eve/extensions/git/sandbox`, is the reference with that tag. Pass it as `image`:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { DEFAULT_EVE_GIT_SANDBOX_IMAGE, DockerSandbox } from "eve/sandbox/docker";
+
+const environment = DockerSandbox.environment({ image: DEFAULT_EVE_GIT_SANDBOX_IMAGE });
+
+export default defineSandbox(() => environment.open());
+```
+
+To add your own layers, start your `agent/sandbox/Dockerfile` from the image with `FROM ghcr.io/vercel/eve-git:latest`. Docker caches prepared templates by the Dockerfile text, so a template built from `latest` is reused after `latest` moves and never picks up the new image. Pin a tag in `FROM` to choose when the image changes.
+
+The default image doesn't include `gh`, so `installCodeTooling` from `eve/extensions/code/sandbox` installs it with `apt-get` during the first build unless you use this image. For Vercel Sandbox, see [the eve-git image on Vercel Sandbox](/docs/sandbox/vercel#the-eve-git-image).
 
 ## Environment options
 

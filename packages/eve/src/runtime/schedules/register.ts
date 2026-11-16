@@ -1,7 +1,8 @@
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 
 /**
- * Stable Nitro task-name prefix for framework-owned authored schedules.
+ * Prefix of eve's own task name for an authored schedule, which dispatch uses
+ * to find the compiled schedule. Nitro and Vercel name the task separately.
  */
 const EVE_SCHEDULE_TASK_NAME_PREFIX = "eve.schedule.";
 
@@ -10,6 +11,7 @@ const EVE_SCHEDULE_TASK_NAME_PREFIX = "eve.schedule.";
  */
 export interface ScheduleRegistration {
   readonly cron: string;
+  readonly timezone?: string;
   readonly description: string;
   readonly logicalPath: string;
   readonly scheduleId: string;
@@ -52,7 +54,7 @@ export class ScheduleRegistrationError extends Error {
 }
 
 /**
- * Creates stable registration inputs for Nitro's task and cron surfaces from
+ * Creates stable registrations for the Nitro host's scheduled tasks from
  * resolved authored schedules.
  */
 export function createScheduleRegistrations(
@@ -61,6 +63,7 @@ export function createScheduleRegistrations(
   const registrations = schedules
     .map((schedule) => ({
       cron: schedule.cron,
+      ...(schedule.timezone !== undefined && { timezone: schedule.timezone }),
       description: `Run eve schedule "${schedule.name}" from "${schedule.logicalPath}".`,
       logicalPath: schedule.logicalPath,
       scheduleId: schedule.name,

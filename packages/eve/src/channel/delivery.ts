@@ -12,9 +12,7 @@ export function commandDelivery(
   options: { readonly follow?: boolean } = {},
 ): Delivery {
   if (result.status !== "accepted" && result.status !== "reset") {
-    throw new SessionNotActiveError({
-      retryable: "retryable" in result && result.retryable === true,
-    });
+    throw new SessionNotActiveError();
   }
   const sessionId = result.status === "reset" ? result.previousSessionId : result.sessionId;
   return new StreamDelivery({

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
 import { EntityConflictError, HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
@@ -16,6 +17,9 @@ vi.mock("#internal/logging.js", () => ({
   createLogger: vi.fn(() => ({})),
   logError: vi.fn(),
 }));
+
+// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
+installWorkflowHost();
 
 const world = {} as Awaited<ReturnType<typeof getWorld>>;
 const address = { hookToken: "generated-control-token", runId: "tool-run" };

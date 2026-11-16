@@ -11,10 +11,7 @@ import {
 } from "#execution/stable-workflow-names.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
-import {
-  isInactiveWorkflowRunError,
-  isMissingWorkflowRunError,
-} from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { isRunInactive, isRunMissing } from "#shared/run-errors.js";
 import { cancelRun } from "#internal/workflow/runtime.js";
 
 const log = createLogger("execution.session-inbox.stranded-replay-guard");
@@ -101,7 +98,7 @@ async function readRetiredRun(world: World, runId: string): Promise<OwnerRun | u
     return await findRetiredOwnerRun(world, runId);
   } catch (error) {
     // A resilient start enqueues before its run is readable; such a run is new.
-    if (isMissingWorkflowRunError(error)) return undefined;
+    if (isRunMissing(error)) return undefined;
     // Anything else is retried by the queue: replaying a retired run would corrupt it.
     throw error;
   }
@@ -114,7 +111,7 @@ async function retireRun(world: World, run: OwnerRun): Promise<void> {
     });
   } catch (error) {
     // A concurrent cancellation or completion has already retired the run.
-    if (!isInactiveWorkflowRunError(error)) throw error;
+    if (!isRunInactive(error)) throw error;
   }
   log.warn("Retired stranded descendant run", {
     runId: run.runId,

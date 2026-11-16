@@ -1,29 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  PENDING_APPROVALS_LABEL,
-  renderPendingApprovalsInstruction,
-  renderPendingApprovalsSnippet,
-} from "#harness/hitl/approval-prompt.js";
+import { renderPendingApprovalsInstruction } from "#harness/hitl/approval-prompt.js";
 import type { ApprovalAsk } from "#harness/session-machine/state.js";
 
-describe("renderPendingApprovalsSnippet", () => {
-  it("projects approval identity without exposing tool input", () => {
-    const content = renderPendingApprovalsSnippet([
-      request("approval-1", "bash", { secret: "do-not-project" }),
-    ]);
-
-    expect(content).toBe(
-      [
-        PENDING_APPROVALS_LABEL,
-        "The following tool calls are awaiting approval and have not executed:",
-        '{"requestId":"approval-1","toolName":"bash"}',
-      ].join("\n"),
-    );
-    expect(content).not.toContain("do-not-project");
-  });
-
-  it("renders the same redacted identity as trusted runtime guidance", () => {
+describe("renderPendingApprovalsInstruction", () => {
+  it("projects approval identity as trusted runtime guidance, without tool input", () => {
     const content = renderPendingApprovalsInstruction([
       request("approval-1", "bash", { secret: "do-not-project" }),
     ]);
@@ -36,7 +17,7 @@ describe("renderPendingApprovalsSnippet", () => {
   });
 
   it("omits the notice when no approval is pending", () => {
-    expect(renderPendingApprovalsSnippet([])).toBeUndefined();
+    expect(renderPendingApprovalsInstruction([])).toBeUndefined();
   });
 });
 

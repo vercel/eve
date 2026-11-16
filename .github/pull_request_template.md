@@ -2,22 +2,20 @@
 
 <!--
 Keep this short. Start with the concrete problem, user need, or decision that
-prompted the change, then explain the solution and meaningful behavior or
-decisions—not changed files or commits. Link an existing issue or discussion
-when one exists (for example, "Closes #123" or "Related to #123"). Do not
-create an issue solely to accompany this pull request. Call out breaking
-changes, preserved behavior, scope boundaries, or stacked PRs when relevant.
+prompted the change, then state the approach in a sentence or two—not changed
+files or commits. Link an existing issue or discussion when one exists (for
+example, "Closes #123" or "Related to #123"). Do not create an issue solely to
+accompany this pull request.
 -->
 
-### Validation
+### Changes
 
 <!--
-List the exact commands you ran and useful manual coverage. Include relevant
-results or limitations. Explain when tests are not applicable.
+List the important changes a reviewer must know, public API first: new,
+changed, or removed exports, options, config fields, CLI commands and flags,
+events, defaults, and errors. One change per bullet; name the identifier and
+its entry point (for example, `eve/channels/slack`). Add a short reason only
+when it is not obvious. Prefix breaking changes with "Breaking:". End with
+preserved behavior or scope boundaries when they matter. Skip internal
+refactors, file lists, and tests.
 -->
-
-### Checklist
-
-- [ ] I added tests and documentation where relevant
-- [ ] I added a changeset if this touches the published `eve` package
-- [ ] DCO sign-off passes for every commit (`git commit --signoff`)

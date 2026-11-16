@@ -15,7 +15,10 @@ import {
   TraceRootKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationHooks,
+} from "#instrumentation/lifecycle.js";
 import { instrumentMemoryOperation } from "#instrumentation/memory.js";
 import {
   bindInstrumentationRuntime,
@@ -39,6 +42,12 @@ const boundSession = {
   sessionId: "session-1",
 };
 
+const allowsInputs: TraceCapturePolicy = () => ({
+  emit: true,
+  recordInputs: true,
+  recordOutputs: false,
+});
+
 function createRuntime(
   hooks: InstrumentationHooks,
   tracePolicy?: TraceCapturePolicy,
@@ -48,8 +57,6 @@ function createRuntime(
     idGenerator: new AgentSpanIdGenerator(),
     hooks,
     otelSettings: {
-      recordInputs: true,
-      recordOutputs: true,
       tracePolicy,
       traceChannelRequests: false,
     },
@@ -505,13 +512,16 @@ describe("bindInstrumentationRuntime", () => {
 
     await readTelemetry(instrumentation);
 
-    expect(forTrace).toHaveBeenCalledExactlyOnceWith({
-      agentName: "Weather Display Name",
-      audience: "private",
-      channel: { kind: "channel:test", name: "test" },
-      environment: "production",
-      principalType: "anonymous",
-    });
+    expect(forTrace).toHaveBeenCalledExactlyOnceWith(
+      {
+        agentName: "Weather Display Name",
+        audience: "private",
+        channel: { kind: "channel:test", name: "test" },
+        environment: "production",
+        principalType: "anonymous",
+      },
+      { ceiling: undefined },
+    );
   });
 
   it.each([
@@ -651,6 +661,121 @@ describe("bindInstrumentationRuntime", () => {
         ).toBe("private");
         return scope.telemetry();
       },
+    );
+
+    expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
+  });
+
+  // AI SDK integrations such as Sentry's read content from the call, not from an eve destination.
+  it.each([
+    ["public", true],
+    ["private", false],
+  ] as const)(
+    "gives AI SDK integrations the %s audience's content decision without OpenTelemetry",
+    async (audience, recordsContent) => {
+      const instrumentation = bindInstrumentationRuntime(
+        {
+          ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+          otelSettings: undefined,
+        },
+        createContext(audience),
+        boundSession,
+      );
+
+      const telemetry = await instrumentation?.prepareExecution().runStep(
+        {
+          environment: "test",
+          eveVersion: "0.0.0",
+          hasInput: true,
+          session: { sessionId: "session-1" },
+        },
+        async (scope) =>
+          scope.prepareAttempt({ runId: "run_0", attempt: 0, stepIndex: 0, turnId: "turn-1" })
+            .telemetry,
+      );
+
+      expect(telemetry).toMatchObject({
+        recordInputs: recordsContent,
+        recordOutputs: recordsContent,
+      });
+    },
+  );
+
+  it.each([
+    ["an authored file's", { parallel: [{ name: "sentry", tracePolicy: allowsInputs }] }, true],
+    ["eve's own", { serialBefore: [{ name: "internal:otel", tracePolicy: allowsInputs }] }, false],
+  ] as const)(
+    "lets %s policy open AI SDK inputs on a private call",
+    async (_label, groups, recordsInputs) => {
+      const instrumentation = bindInstrumentationRuntime(
+        {
+          ...createRuntime(createInstrumentationHooks(groups)),
+          ownsAgentSpans: true,
+        },
+        createContext("private"),
+        boundSession,
+      );
+
+      const telemetry = await instrumentation?.prepareExecution().runStep(
+        {
+          environment: "test",
+          eveVersion: "0.0.0",
+          hasInput: true,
+          session: { sessionId: "session-1" },
+        },
+        async (scope) =>
+          scope.prepareAttempt({ runId: "run_0", attempt: 0, stepIndex: 0, turnId: "turn-1" })
+            .telemetry,
+      );
+
+      expect(telemetry).toMatchObject({ recordInputs: recordsInputs, recordOutputs: false });
+    },
+  );
+
+  it.each([
+    ["without OpenTelemetry", { otelSettings: undefined }],
+    [
+      "under an authored file's content policy",
+      {
+        hooks: createInstrumentationHooks({
+          parallel: [
+            {
+              name: "sentry",
+              tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+            },
+          ],
+        }),
+        ownsAgentSpans: true,
+      },
+    ],
+  ] as const)("keeps a forwarded no-content ceiling %s", async (_label, overrides) => {
+    const ctx = createContext("public");
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: false, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: false },
+        originAudience: "public",
+      },
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      { ...createRuntime({ capturesContent: true, publish: vi.fn() }), ...overrides },
+      ctx,
+      boundSession,
+    );
+
+    const telemetry = await instrumentation?.prepareExecution().runStep(
+      {
+        environment: "test",
+        eveVersion: "0.0.0",
+        hasInput: true,
+        session: { sessionId: "session-1" },
+      },
+      async (scope) =>
+        scope.prepareAttempt({ runId: "run_0", attempt: 0, stepIndex: 0, turnId: "turn-1" })
+          .telemetry,
     );
 
     expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });

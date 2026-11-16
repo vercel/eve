@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 import { describe, expect, it } from "vitest";
 
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 describe("Node ESM compatibility banner bundling", () => {
@@ -24,7 +24,7 @@ export const value = [__filename.value, __dirname.value, require.value];`;
             load: () => source,
             renderChunk: () => source,
           },
-          createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+          createNodeEsmCompatBannerPlugin(),
         ],
         output: { format: "esm" },
       });
@@ -49,7 +49,7 @@ export const value = [logs, require(), __filename, __dirname];`;
           load: () => source,
           renderChunk: () => source,
         },
-        createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+        createNodeEsmCompatBannerPlugin(),
       ],
       output: { format: "esm" },
     });

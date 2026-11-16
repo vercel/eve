@@ -1,17 +1,17 @@
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { STRUCTURAL_RELOAD_LOG_LINE } from "../../src/internal/nitro/host/dev-watcher-log.js";
 import {
+  materializeScenarioApp,
   type ScenarioAppDescriptor,
   useScenarioApp,
 } from "../../src/internal/testing/scenario-app.js";
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
 import {
-  DEV_SERVER_AGENT_DESCRIPTOR,
   DEV_SERVER_SCENARIO_TIMEOUT_MS,
   TRANSACTIONAL_REBUILD_DESCRIPTOR,
   createInstrumentationSource,
@@ -22,11 +22,12 @@ import {
   forceDevelopmentRebuild,
   hasKnownDevServerFailure,
   readDevelopmentRevision,
+  type RunningEveDev,
   startEveDev,
   waitForCondition,
   waitForPath,
   withinDeadline,
-} from "./dev-server-harness.js";
+} from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
@@ -159,13 +160,63 @@ describe("eve dev server workflow generations", () => {
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
 
-  it.each(["tool", "workflow"] as const)(
-    "makes a newly added %s available to the next turn and allows session retirement",
-    async (kind) => {
-      const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
+  // These tests only add or remove their own files, so they share one server.
+  describe("on a shared server", () => {
+    let appRoot: string;
+    let cleanupSharedApp: (() => Promise<void>) | undefined;
+    let server: RunningEveDev;
 
+    beforeAll(async () => {
+      const app = await materializeScenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
+      appRoot = app.appRoot;
       try {
+        server = await startEveDev(appRoot);
+      } catch (error) {
+        await app.cleanup();
+        throw error;
+      }
+      cleanupSharedApp = app.cleanup;
+    }, DEV_SERVER_SCENARIO_TIMEOUT_MS);
+
+    afterAll(async () => {
+      await server?.stop();
+      await cleanupSharedApp?.();
+    }, DEV_SERVER_SCENARIO_TIMEOUT_MS);
+
+    /** Server output written from now on. */
+    function outputFromNow(): () => string {
+      const stdoutStart = server.stdout().length;
+      const stderrStart = server.stderr().length;
+      return () => `${server.stdout().slice(stdoutStart)}\n${server.stderr().slice(stderrStart)}`;
+    }
+
+    it(
+      "publishes authored tool removals on a fresh worker without rebuilding the host",
+      async () => {
+        const output = outputFromNow();
+        const initialRevision = await readDevelopmentRevision(server.url);
+        const initialWorkerId = await fetchText(server.url, "/worker-id");
+        expect((await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name)).toContain(
+          "get_weather",
+        );
+
+        await rm(join(appRoot, "agent", "tools", "get_weather.ts"));
+        await forceDevelopmentRebuild(server.url);
+
+        await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
+        await expect(fetchText(server.url, "/worker-id")).resolves.not.toBe(initialWorkerId);
+        expect(output()).not.toContain(STRUCTURAL_RELOAD_LOG_LINE);
+        expect(
+          (await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name),
+        ).not.toContain("get_weather");
+        expect(hasKnownDevServerFailure(output())).toBe(false);
+      },
+      DEV_SERVER_SCENARIO_TIMEOUT_MS,
+    );
+
+    it.each(["tool", "workflow"] as const)(
+      "makes a newly added %s available to the next turn and allows session retirement",
+      async (kind) => {
         const firstResult = await sendDevelopmentMessage({
           message: "Hello.",
           session: createDevelopmentSessionState(),
@@ -175,7 +226,7 @@ describe("eve dev server workflow generations", () => {
         expect(firstSessionId).toBeDefined();
 
         await writeFile(
-          join(app.appRoot, "agent", "tools", "get_added_marker.ts"),
+          join(appRoot, "agent", "tools", `get_added_${kind}.ts`),
           kind === "tool"
             ? createGenerationMarkerToolSource("added-tool", false)
             : [
@@ -186,7 +237,7 @@ describe("eve dev server workflow generations", () => {
                 "  inputSchema: z.object({ city: z.string().optional() }),",
                 "  async execute() {",
                 '    "use workflow";',
-                '    return { marker: "added-tool" };',
+                '    return { marker: "added-workflow" };',
                 "  },",
                 "});",
               ].join("\n"),
@@ -194,13 +245,13 @@ describe("eve dev server workflow generations", () => {
         await forceDevelopmentRebuild(server.url);
 
         const secondResult = await sendDevelopmentMessage({
-          message: "Use get_added_marker.",
+          message: `Use get_added_${kind}.`,
           session: firstResult.session,
           serverUrl: server.url,
         });
 
         expect(secondResult.sessionId).toBe(firstSessionId);
-        expect(readCompletedMessages(secondResult.events)).toContain("added-tool");
+        expect(readCompletedMessages(secondResult.events)).toContain(`added-${kind}`);
         const ended = await fetch(new URL(`/eve/v1/session/${firstSessionId}/end`, server.url), {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -208,60 +259,36 @@ describe("eve dev server workflow generations", () => {
           signal: AbortSignal.timeout(10_000),
         });
         expect(ended.status, await ended.text()).toBe(202);
-      } finally {
-        await server.stop();
-      }
-    },
-    DEV_SERVER_SCENARIO_TIMEOUT_MS,
-  );
+      },
+      DEV_SERVER_SCENARIO_TIMEOUT_MS,
+    );
 
-  it(
-    "publishes authored tool removals on a fresh worker without rebuilding the host",
-    async () => {
-      const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
+    it(
+      "fails a build that never settles, then builds with the current .env",
+      async () => {
+        const output = outputFromNow();
+        const stallPath = join(appRoot, "agent", "tools", "stall_probe.ts");
 
-      try {
         const initialRevision = await readDevelopmentRevision(server.url);
-        const initialWorkerId = await fetchText(server.url, "/worker-id");
-        expect((await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name)).toContain(
-          "get_weather",
+
+        await writeFile(
+          stallPath,
+          [
+            "await new Promise(() => {});",
+            'import { defineTool } from "eve/tools";',
+            'import { z } from "zod";',
+            "export default defineTool({",
+            '  description: "Never builds.",',
+            "  inputSchema: z.object({}),",
+            '  execute: async () => "ok",',
+            "});",
+            "",
+          ].join("\n"),
         );
-
-        await rm(join(app.appRoot, "agent", "tools", "get_weather.ts"));
-        await forceDevelopmentRebuild(server.url);
-
-        await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
-        await expect(fetchText(server.url, "/worker-id")).resolves.not.toBe(initialWorkerId);
-        expect(server.stdout()).not.toContain(STRUCTURAL_RELOAD_LOG_LINE);
-        expect(
-          (await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name),
-        ).not.toContain("get_weather");
-        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
-      } finally {
-        await server.stop();
-      }
-    },
-    DEV_SERVER_SCENARIO_TIMEOUT_MS,
-  );
-
-  it(
-    "fails a build that never settles, then builds with the current .env",
-    async () => {
-      const app = await scenarioApp(DEV_SERVER_AGENT_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-      const output = () => `${server.stdout()}\n${server.stderr()}`;
-      const toolPath = join(app.appRoot, "agent", "tools", "get_weather.ts");
-      const toolSource = await readFile(toolPath, "utf8");
-
-      try {
-        const initialRevision = await readDevelopmentRevision(server.url);
-
-        await writeFile(toolPath, `await new Promise(() => {});\n${toolSource}`);
         await forceDevelopmentRebuild(server.url);
         await waitForCondition(
           async () => output().includes("awaits a promise that never settles"),
-          `Timed out waiting for the stalled build to fail.\n\n${output()}`,
+          () => `Timed out waiting for the stalled build to fail.\n\n${output()}`,
         );
         await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
 
@@ -269,10 +296,10 @@ describe("eve dev server workflow generations", () => {
         const probeDescription = async () =>
           (await fetchAgentInfo(server.url)).tools.static.find((tool) => tool.name === "env_probe")
             ?.description;
-        await writeFile(toolPath, toolSource);
-        await writeFile(join(app.appRoot, ".env"), "EVE_SCENARIO_BUILD_VALUE=from-env\n");
+        await rm(stallPath);
+        await writeFile(join(appRoot, ".env"), "EVE_SCENARIO_BUILD_VALUE=from-env\n");
         await writeFile(
-          join(app.appRoot, "agent", "tools", "env_probe.ts"),
+          join(appRoot, "agent", "tools", "env_probe.ts"),
           [
             'import { defineTool } from "eve/tools";',
             'import { z } from "zod";',
@@ -290,18 +317,16 @@ describe("eve dev server workflow generations", () => {
           () => `Timed out waiting for the build to see .env.\n\n${output()}`,
         );
 
-        await rm(join(app.appRoot, ".env"));
+        await rm(join(appRoot, ".env"));
         await forceDevelopmentRebuild(server.url);
         await waitForCondition(
           async () => (await probeDescription()) === "build saw nothing",
           () => `Timed out waiting for the build without .env.\n\n${output()}`,
         );
-      } finally {
-        await server.stop();
-      }
-    },
-    DEV_SERVER_SCENARIO_TIMEOUT_MS,
-  );
+      },
+      DEV_SERVER_SCENARIO_TIMEOUT_MS,
+    );
+  });
 });
 
 function readCompletedMessages(

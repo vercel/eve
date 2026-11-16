@@ -115,7 +115,7 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it.each(["exa", "parallel", "browserbase", "native"] as const)(
+  it.each(["exa", "parallel", "browserbase", "tako", "native"] as const)(
     "normalizes the %s web search provider",
     (provider) => {
       expect(normalizeToolDefinition(webSearch({ provider }), FAILURE_MESSAGE)).toEqual({
@@ -137,7 +137,7 @@ describe("normalizeToolDefinition", () => {
         { fallback: "native", kind: "eve:web-search-tool", provider: "native" },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('Expected "fallback" to be one of: exa, parallel, browserbase');
+    ).toThrow('Expected "fallback" to be one of: exa, parallel, browserbase, tako');
   });
 
   it("rejects a fallback for a provider that serves every Gateway model", () => {
@@ -197,6 +197,28 @@ describe("normalizeToolDefinition", () => {
     });
 
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("accepts label: false, which hides a tool's calls from activity", () => {
+    const tool = defineTool({
+      label: false,
+      description: "React.",
+      inputSchema: z.object({}),
+      execute: () => null,
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: true,
+          description: "React.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects malformed label definitions", () => {

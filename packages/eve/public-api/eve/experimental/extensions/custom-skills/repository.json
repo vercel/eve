@@ -1,0 +1,9 @@
+[
+  "DocumentRepositoryOptions",
+  "SkillConflictError",
+  "SkillHead",
+  "SkillNotFoundError",
+  "SkillRepository",
+  "SkillVersionRecord",
+  "documentRepository"
+]

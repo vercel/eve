@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import { ensureScenarioEveTarballPath } from "#internal/testing/scenario-app.js";
 
 import { DEPLOYED_SELF_MODIFICATION_CONFIG_PATH, renderSelfModificationConfig } from "./setup.js";
 
@@ -36,26 +38,6 @@ async function run(
       { cause: error },
     );
   }
-}
-
-async function pack(
-  packageDirectory: string,
-  destination: string,
-  prefix: string,
-): Promise<string> {
-  await run(
-    "pnpm",
-    ["pack", "--config.ignore-scripts=true", "--pack-destination", destination],
-    packageDirectory,
-  );
-  const tarball = (await readdir(destination)).find(
-    (entry) => entry.startsWith(`${prefix}-`) && entry.endsWith(".tgz"),
-  );
-
-  if (tarball === undefined) {
-    throw new Error(`Expected a ${prefix}-*.tgz tarball in ${destination}.`);
-  }
-  return join(destination, tarball);
 }
 
 async function writeAppFile(
@@ -124,12 +106,11 @@ describe("packed package consumption", () => {
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));
     temporaryRoots.push(root);
-    const tarballsRoot = join(root, "tarballs");
     const appRoot = join(root, "app");
-    await mkdir(tarballsRoot, { recursive: true });
     await mkdir(appRoot, { recursive: true });
 
-    const eveTarball = await pack(packageRoot, tarballsRoot, "eve");
+    // The scenario setup packs eve the same way: lifecycle scripts off.
+    const eveTarball = await ensureScenarioEveTarballPath();
     await writeAppFile(
       appRoot,
       "package.json",
@@ -192,7 +173,7 @@ import { createAgentSourceManifest } from "./node_modules/eve/dist/src/discover/
 const manifest = createAgentSourceManifest({ agentId: "packed-dev", agentRoot: "/virtual/agent", appRoot: "/virtual" });
 const compiled = await compileAgentManifest(manifest, { developmentExtensions: defaultDevelopmentExtensions() });
 const subagent = compiled.subagents.find((entry) => entry.name === "self-modification__agent");
-if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent.tools.some((tool) => tool.name === "edit_file")) {
+if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent.tools.some((tool) => tool.name === "edit_file" && !tool.sourceId.startsWith("eve:defaults:"))) {
   throw new Error("Packed eve did not discover the bundled self-modification extension.");
 }
 `,
@@ -209,7 +190,7 @@ const discovered = await discoverAgent({ appRoot: process.cwd(), agentRoot: proc
 assert.deepEqual(discovered.diagnostics.filter((entry) => entry.severity === "error"), []);
 const compiled = await compileAgentManifest(discovered.manifest);
 assert.deepEqual(compiled.subagents.map((entry) => entry.name), ["self-modification-remote__agent"]);
-const slugs = compiled.subagents[0].agent.dynamicTools.map((tool) => tool.slug);
+const slugs = compiled.subagents[0].agent.definitions.filter((entry) => entry.kind === "tool").map((tool) => tool.slug);
 assert.ok(slugs.includes("publish") && slugs.includes("registry_add"));
 `,
     );

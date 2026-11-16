@@ -12,7 +12,7 @@
     "benchmark:timings": "node scripts/timings.mjs"
   },
   "dependencies": {
-    "@vercel/agent-eval": "2.2.1",
+    "@vercel/agent-eval": "3.0.0",
     "jiti": "2.7.0",
     "zod": "catalog:"
   },

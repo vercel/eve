@@ -15,25 +15,23 @@ import type {
   WorkflowToolRunInput,
 } from "#execution/tools/workflow/types.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import {
-  startWorkflowOnCurrentDeployment,
-  workflowToolRunWorkflowReference,
-} from "#execution/workflow-runtime.js";
 
 const log = createLogger("execution.workflow-tool-run");
 
-/** Starts a new run for each dispatch attempt. Call from a `"use step"` body. */
-export async function startWorkflowToolRun(
+/**
+ * Starts the durable run of one workflow tool call or task, and returns where it listens. A host
+ * without durable runs refuses, and the call fails with its error. Workflow's is
+ * `workflow-host/start-run.ts`.
+ */
+export type StartWorkflowToolRun = (
   input: Omit<WorkflowToolRunInput, "hookToken">,
-): Promise<WorkflowToolRunAddress> {
-  const hookToken =
-    input.entry.entryPoint === "execute"
-      ? crypto.randomUUID()
-      : taskRunHookToken(input.session.id, input.entry.taskId);
-  const run = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
-    { ...input, hookToken },
-  ]);
-  return { hookToken, runId: run.runId };
+) => Promise<WorkflowToolRunAddress>;
+
+/** The hook a new run takes its session's commands on, on any host. */
+export function workflowToolRunHookToken(input: Omit<WorkflowToolRunInput, "hookToken">): string {
+  return input.entry.entryPoint === "execute"
+    ? crypto.randomUUID()
+    : taskRunHookToken(input.session.id, input.entry.taskId);
 }
 
 /**
@@ -64,6 +62,8 @@ export interface StartWorkflowTaskInput {
    */
   readonly prestarted?: PrestartedWorkflowToolRun;
   readonly session: HarnessSessionBase;
+  /** How the host starts the call's run. */
+  readonly startRun: StartWorkflowToolRun;
   readonly task: RuntimeWorkflowTaskRequest;
 }
 
@@ -86,7 +86,7 @@ export async function startWorkflowToolCallRun(
     return await prestarted.run;
   }
   const { task, batchEvent, session } = input;
-  return await startWorkflowToolRun({
+  return await input.startRun({
     agentContext: input.agentContext,
     callId: task.callId,
     entry,

@@ -27,3 +27,11 @@ export function normalizeApproval(value: unknown, message: string): Approval {
       : expectFunction<ApprovalResponsePolicy>(approval.response, message);
   return { request, prompt, response };
 }
+
+/**
+ * Validates `defineAgent`'s `approval`: a request policy only. Prompts and response policies stay
+ * with the entries that ask, so the agent's policy adds a gate without changing who answers it.
+ */
+export function normalizeAgentApproval(value: unknown, message: string): ApprovalPolicy {
+  return expectFunction<ApprovalPolicy>(value, message);
+}

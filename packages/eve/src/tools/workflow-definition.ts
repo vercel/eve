@@ -14,6 +14,7 @@ import {
   stampToolDefinition,
   type PublicToolDefinition,
   type ToolContext,
+  type ToolDefinition,
   type ToolQuestion,
   type ToolAskOptions,
   type ToolAnswer,
@@ -225,6 +226,11 @@ export interface WorkflowExecuteToolDefinition<
   TOutput = unknown,
 > extends WorkflowToolDefinitionBase<TInput, TOutput> {
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
+  /**
+   * Ends the turn after this call succeeds, without another model call or a reply, as
+   * `defineTool()`'s `endsTurn` does.
+   */
+  endsTurn?: ToolDefinition<unknown, TOutput>["endsTurn"];
   task?: never;
   serve?: never;
 }
@@ -264,8 +270,8 @@ export interface WorkflowServeToolDefinition<
 }
 
 /**
- * A static tool whose entry point runs as a durable workflow and must start
- * with "use workflow". It defines exactly one entry point.
+ * A tool whose entry point runs as a durable workflow and must start with
+ * "use workflow". It defines exactly one entry point.
  */
 export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowExecuteToolDefinition<TInput, TOutput>
@@ -273,7 +279,14 @@ export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowServeToolDefinition<TInput, TOutput>;
 
 type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
-type WorkflowReturn<T> = T extends AsyncIterable<infer Output> ? Output : Awaited<T>;
+// A generator body's output is its return value, or its last yield when it returns `null` or
+// nothing, so its output type is both.
+type WorkflowReturn<T> =
+  T extends AsyncGenerator<infer Yield, infer Return>
+    ? Yield | Exclude<Return, null | undefined | void>
+    : T extends AsyncIterable<infer Output>
+      ? Output
+      : Awaited<T>;
 type Schema = StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>;
 type EntryPointReturn<TOutput> = Promise<TOutput> | AsyncIterable<TOutput>;
 type InferOutput<TSchema extends StandardJSONSchemaV1<unknown, unknown>> =
@@ -284,12 +297,21 @@ type DefinitionFields<TInput, TOutput> = Omit<
   WorkflowToolDefinitionBase<TInput, TOutput>,
   typeof WORKFLOW_TOOL_BRAND
 >;
-type ExecuteDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<TReturn>> & {
+// `TOutput` is the call's output: the `outputSchema`'s output when the definition has one, as the
+// definition `defineWorkflowTool` returns reports it, or else what the body returns.
+type ExecuteDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = DefinitionFields<
+  TInput,
+  TOutput
+> & {
+  endsTurn?: ToolDefinition<unknown, TOutput>["endsTurn"];
   execute(input: TInput, ctx: WorkflowToolContext): TReturn;
   task?: never;
   serve?: never;
 };
-type TaskDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<TReturn>> & {
+type TaskDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = DefinitionFields<
+  TInput,
+  TOutput
+> & {
   task(input: TInput, ctx: WorkflowToolContext): TReturn;
   execute?: never;
   serve?: never;
@@ -325,7 +347,7 @@ export function defineWorkflowTool<
   TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
 >(
   definition: WithSchemas<
-    ExecuteDefinition<InferInput<TInputSchema>, TReturn>,
+    ExecuteDefinition<InferInput<TInputSchema>, TReturn, InferOutput<TOutputSchema>>,
     TInputSchema,
     TOutputSchema
   >,
@@ -336,7 +358,7 @@ export function defineWorkflowTool<
   TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
 >(
   definition: WithSchemas<
-    TaskDefinition<InferInput<TInputSchema>, TReturn>,
+    TaskDefinition<InferInput<TInputSchema>, TReturn, InferOutput<TOutputSchema>>,
     TInputSchema,
     TOutputSchema
   >,
@@ -410,12 +432,14 @@ export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEnt
   );
 }
 
-const ENTRY_POINT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
-
 function assertOneEntryPoint(definition: object): void {
   const defined = readWorkflowToolEntryPoints(definition);
   if (defined.length === 1) return;
-  const found = defined.length === 0 ? "none" : ENTRY_POINT_LIST.format(defined);
+  // Built here rather than at module scope, so loading this module stays off the locale-data path.
+  const found =
+    defined.length === 0
+      ? "none"
+      : new Intl.ListFormat("en", { type: "conjunction" }).format(defined);
   throw new Error(
     `Define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx); this tool defines ${found}.`,
   );

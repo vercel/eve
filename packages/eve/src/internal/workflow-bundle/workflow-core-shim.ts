@@ -1,3 +1,9 @@
+import {
+  FatalError as SdkFatalError,
+  HookConflictError,
+  RetryableError as SdkRetryableError,
+} from "#compiled/@workflow/errors/index.js";
+
 const WORKFLOW_CONTEXT_SYMBOL = Symbol.for("WORKFLOW_CONTEXT");
 const WORKFLOW_CREATE_HOOK = Symbol.for("WORKFLOW_CREATE_HOOK");
 const WORKFLOW_GET_STREAM_ID = Symbol.for("WORKFLOW_GET_STREAM_ID");
@@ -6,22 +12,11 @@ const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
 
-// The SDK matches these by `name` and `fatal` when it serializes an error out of a body.
-export class RetryableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RetryableError";
-  }
-}
-
-export class FatalError extends Error {
-  readonly fatal = true;
-
-  constructor(message: string) {
-    super(message);
-    this.name = "FatalError";
-  }
-}
+// Driver layers bundle separate copies; hydration uses the SDK's first registration.
+export const FatalError = (workflowGlobal[Symbol.for("@workflow/errors//FatalError")] ??
+  SdkFatalError) as typeof SdkFatalError;
+export const RetryableError = (workflowGlobal[Symbol.for("@workflow/errors//RetryableError")] ??
+  SdkRetryableError) as typeof SdkRetryableError;
 
 interface WorkflowHook<T> extends AsyncIterable<T> {
   readonly token: string;
@@ -40,7 +35,21 @@ export function createHook<T = unknown>(options?: unknown): WorkflowHook<T> {
     throw new Error("`createHook()` can only be called inside a workflow function");
   }
 
-  return createHookFn(options);
+  const hook = createHookFn(options);
+  const getConflict = hook.getConflict.bind(hook);
+  hook.getConflict = async () => {
+    try {
+      return await getConflict();
+    } catch (error) {
+      // The SDK rejects when its full Run class is absent from the VM. eve only
+      // exposes the owner's runId, so it can honor that contract without Run.
+      if (HookConflictError.is(error) && typeof error.conflictingRunId === "string") {
+        return { runId: error.conflictingRunId };
+      }
+      throw error;
+    }
+  };
+  return hook;
 }
 
 /**

@@ -1,3 +1,4 @@
+// @linux-only: grep command in in-memory just-bash
 import { Bash } from "just-bash";
 import { describe, expect, it } from "vitest";
 

@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { callSettledFrom } from "#harness/call-facts.js";
+import { callSettledFrom, callStarted } from "#harness/call-facts.js";
 import {
   contextStarted,
   controlAdmitted,
@@ -39,7 +39,7 @@ import type {
 import type { ControlDelivery } from "#harness/types.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { Cause, Principal, UserPart } from "#protocol/session-events/envelope.js";
+import type { Cause, Principal, Usage, UserPart } from "#protocol/session-events/envelope.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import {
@@ -48,13 +48,22 @@ import {
   openRunOf,
   type SessionProjection,
 } from "#protocol/session-projection.js";
-import type { SessionView as PublicView } from "#protocol/session-projection/tables.js";
+import type {
+  InteractionRow,
+  SessionView as PublicView,
+} from "#protocol/session-projection/tables.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { Transition } from "./commit.js";
-import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
-import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
+import { transition, type Transition } from "./commit.js";
+import type { HistoryChange } from "./history.js";
+import {
+  SIGN_IN_DECLINED,
+  signInAttemptKey,
+  waitingSignIn,
+  type CallsBack,
+} from "#harness/hitl/sign-ins.js";
+import { forwardedFrom, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
 import { activeTurnId, answeredCallIds, turnPosition, type SessionView } from "./view.js";
@@ -80,10 +89,8 @@ import {
 // pure: what they need from effects (model responses, tool results, the requests a session
 // relays) arrives in their input.
 
-const unchanged = (view: SessionView, events: readonly SessionEvent[]) => ({
-  events,
-  turn: view.turn,
-});
+const unchanged = (view: SessionView, events: readonly SessionEvent[]) =>
+  transition({ events, turn: view.turn });
 
 /** A delivery a turn consumes, with what the person sent: nothing for an answer or context. */
 export interface ConsumedDelivery {
@@ -182,6 +189,24 @@ export function join(
   );
 }
 
+/** The turn completes: it settles with the reply its parts made. */
+export function complete(view: SessionView): Transition {
+  return unchanged(view, turnSettled(view.projection, { outcome: "completed" }));
+}
+
+/**
+ * An interrupted attempt that finished clearing the session: its history empties now, and nothing
+ * it suspended or a sign-in held stays. What it remembered of approvals does.
+ */
+export function clearedByAttempt(view: SessionView): Transition {
+  return transition({
+    events: [],
+    history: { rewrite: [] },
+    signIns: [],
+    turn: { remembered: view.turn.remembered, suspended: [] },
+  });
+}
+
 /**
  * The step failed. A recoverable failure leaves the session for the user to retry; a terminal
  * one ends it.
@@ -193,6 +218,8 @@ export function fail(
     readonly details?: JsonObject;
     readonly message: string;
     readonly terminal?: true;
+    /** What the open run's discarded answer spent. */
+    readonly usage?: Usage;
   },
 ): Transition {
   // The calls a sign-in stopped never run: the model reads that they stopped.
@@ -202,7 +229,9 @@ export function fail(
   // A terminal failure ends the session, which ends the turn with it, in one commit.
   const runId = turnId === undefined ? undefined : openRunOf(view.projection, turnId);
   const events = [
-    ...(runId === undefined ? [] : runSettledFacts({ runId, outcome: "failed", error })),
+    ...(runId === undefined
+      ? []
+      : runSettledFacts({ runId, outcome: "failed", error, usage: failure.usage })),
     ...(failure.terminal === undefined
       ? turnSettled(view.projection, { error, outcome: "failed" })
       : sessionEndedFacts(view.projection, {
@@ -211,7 +240,7 @@ export function fail(
           outcome: "failed",
         })),
   ];
-  return { ...commitSteps(view.turn, stopped, cancelledTranscript), events };
+  return transition({ ...commitSteps(view.turn, stopped, cancelledTranscript), events });
 }
 
 // ---------------------------------------------------------------------------
@@ -258,21 +287,21 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
     }
   }
   const complete = steps.filter(isComplete);
-  return { ...commitSteps({ ...view.turn, suspended: steps }, complete), events };
+  return transition({ ...commitSteps({ ...view.turn, suspended: steps }, complete), events });
 }
 
 /**
  * A model-call attempt ends without its response reaching history, in one commit with the calls
  * it announced. A retry replaces it: eve can't tell whether those calls ran, so they and the run
  * settle `abandoned`. Steering cut it off: the calls are interrupted, and the run completed what
- * it streamed, with what it spent.
+ * it streamed. Either way the run records what the provider billed for the attempt.
  */
 export function discardAttempt(
   view: SessionView,
   input: {
     readonly runId: string;
     readonly ending: "retried" | "steered";
-    readonly usage?: FactOf<"usage.recorded">["data"]["usage"];
+    readonly usage?: Usage;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -299,9 +328,9 @@ export function discardAttempt(
  */
 export function suspendStep(
   view: SessionView,
-  step: Pick<SuspendedStep, "event" | "messages" | "tasks">,
+  step: Pick<SuspendedStep, "endsTurn" | "event" | "messages" | "tasks">,
 ): Transition {
-  return { events: [], turn: suspend(view.turn, { ...step, requests: [] }) };
+  return transition({ events: [], turn: suspend(view.turn, { ...step, requests: [] }) });
 }
 
 /** The step without the approved calls in `callIds`, which have run or joined the runtime. */
@@ -336,6 +365,36 @@ export interface TaskCallStart {
   readonly turnId: string;
   readonly kind: "agent" | "tool";
   readonly name: string;
+}
+
+/** The calls a dispatch started or refused, recorded on the session but not yet published. */
+export interface PendingDispatch {
+  /** Calls the turn waits on, each running from now in a run of its own. */
+  readonly executing: readonly {
+    readonly callId: string;
+    readonly clearedBy?: import("#protocol/session-events/families/call.js").ClearedBy;
+  }[];
+  /** Tasks the dispatch started or sent a call to. */
+  readonly started: readonly TaskCallStart[];
+  /** Calls a dispatch admission refused before any run started, and the policy that refused. */
+  readonly refused: readonly { readonly result: RuntimeActionResult; readonly policy: string }[];
+}
+
+/**
+ * What a dispatch recorded, published as one commit: the calls the turn waits on started, the
+ * tasks it started or reached, and the calls it refused.
+ */
+export function startDispatchedCalls(view: SessionView, pending: PendingDispatch): Transition {
+  // One introduction per task in this commit, from the public table, not the private runtime
+  // address the dispatch already recorded.
+  const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
+  return unchanged(view, [
+    ...pending.executing.map(({ callId, clearedBy }) => callStarted(callId, { clearedBy })),
+    ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
+    ...pending.refused.map(({ policy, result }) =>
+      callSettledFrom(result, { cause: { policy }, rejected: true }),
+    ),
+  ]);
 }
 
 /** A task starts once; every call it serves starts against that task. */
@@ -467,7 +526,11 @@ function withdrawInteraction(
 export function relay(
   view: SessionView,
   input: {
+    /** The sign-ins this session can call back, when it runs in a workflow. */
+    readonly callsBack?: CallsBack;
     readonly payload: SubagentInteractionHookPayload;
+    /** The routes this session keeps for the requests it relays, by interaction id. */
+    readonly relays?: ReadonlyMap<string, Relay>;
     /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
     readonly runId?: string;
     readonly workflowAsk?: WorkflowAskRoute;
@@ -485,26 +548,42 @@ export function relay(
         };
   const events: SessionEvent[] = [];
   const upsert: Record<string, Relay> = {};
+  // A serving task can keep using a child after replying to the call that opened it, whether the
+  // task started with that call or took it later, and after later turns pruned the call.
+  const served = tables.calls[payload.callId];
+  const running = (taskId: string | undefined) =>
+    taskId !== undefined && tables.tasks[taskId]?.status === "running";
+  const serving =
+    (served !== undefined && (served.status !== "settled" || running(served.taskId))) ||
+    Object.values(tables.tasks).some(
+      (task) => task.status === "running" && task.startedBy.callId === payload.callId,
+    );
   for (const event of payload.events) {
     const interactionId = event.data.interactionId;
     const mirror = tables.interactions[interactionId];
+    // The route this session keeps for the request, else the one the asker relays it by.
+    const answersRoute = input.relays?.get(interactionId) ?? route;
+    if (event.type === "interaction.opened" && !serving) continue;
     if (
       event.type !== "interaction.opened" &&
-      (mirror?.origin === undefined ||
-        !("callId" in mirror.subject) ||
-        mirror.subject.callId !== payload.callId)
+      relayedMirror(tables, payload, interactionId) === undefined
     )
       continue;
     switch (event.type) {
       case "interaction.opened": {
         if (mirror !== undefined) break;
         events.push({
-          data: {
-            ...event.data,
-            // Every relayed request names its asker; one relayed from further down names its own.
-            origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
-            subject: { callId: payload.callId },
-          },
+          // A sign-in the person already has a card for waits on that card's answer.
+          data: waitingSignIn(
+            tables,
+            {
+              ...event.data,
+              // Every relayed request names its asker; one relayed from further down names its own.
+              origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
+              subject: { callId: payload.callId },
+            },
+            input.callsBack,
+          ),
           type: "interaction.opened",
         });
         // A person answers it here, and the answer goes back the way it came.
@@ -514,12 +593,15 @@ export function relay(
       }
       case "interaction.settled":
         if (mirror?.status !== "open") break;
-        events.push(...mirrorSettled(tables, event.data));
+        events.push(...mirrorSettled(tables, event.data, answersRoute));
         break;
       case "response.admitted": {
         // The asker admitted an answer this session forwarded: it stands here too, while the
         // rest of its batch waits.
-        const answer = mirror === undefined ? undefined : forwardedAnswer(tables, event.data);
+        const answer =
+          mirror === undefined
+            ? undefined
+            : forwardedAnswer(tables, interactionId, event.data.deliveryId, answersRoute);
         if (answer !== undefined && tables.responses[answer]?.status === "submitted")
           events.push(responseAdmitted(answer));
         break;
@@ -527,7 +609,10 @@ export function relay(
       case "response.settled": {
         // How the asker settled an answer this session forwarded; a deciding one settles with
         // its interaction.
-        const answer = mirror === undefined ? undefined : forwardedAnswer(tables, event.data);
+        const answer =
+          mirror === undefined
+            ? undefined
+            : forwardedAnswer(tables, interactionId, event.data.deliveryId, answersRoute);
         if (answer !== undefined && event.data.outcome !== "applied")
           events.push(responseSettled(answer, event.data.outcome, event.data.reason));
         break;
@@ -540,38 +625,80 @@ export function relay(
     : unchanged(view, events);
 }
 
-/** The asker settled what this session mirrors: the mirror settles the same way. */
+/** The row this session mirrors for the asker that relayed `payload`, about the call it serves. */
+export function relayedMirror(
+  tables: PublicView,
+  payload: SubagentInteractionHookPayload,
+  interactionId: string,
+): InteractionRow | undefined {
+  const mirror = tables.interactions[interactionId];
+  return mirror?.origin !== undefined &&
+    "callId" in mirror.subject &&
+    mirror.subject.callId === payload.callId
+    ? mirror
+    : undefined;
+}
+
+/**
+ * The asker settled what this session mirrors: the mirror settles the same way, crediting the
+ * answer the asker names as its decider (`relayedInteractionEvents`).
+ */
 function mirrorSettled(
   tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
+  route: Relay | undefined,
 ): SessionEvent[] {
-  const open = Object.values(tables.responses)
-    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
-    .sort((a, b) => a.introducedAt - b.introducedAt);
   const decided =
     settled.outcome === "accepted" ||
     settled.outcome === "declined" ||
     settled.outcome === "invalid";
+  const named =
+    settled.cause !== undefined && "deliveryId" in settled.cause
+      ? settled.cause.deliveryId
+      : undefined;
   // The writer withdraws the answers that didn't decide (`cascade`).
-  const decider = decided ? open.at(-1) : undefined;
+  const decider = decided
+    ? forwardedAnswer(tables, settled.interactionId, named, route)
+    : undefined;
   const events: SessionEvent[] =
-    decider === undefined ? [] : [responseSettled(decider.responseId, "applied", settled.reason)];
-  const cause = decider === undefined ? settled.cause : { responseId: decider.responseId };
+    decider === undefined ? [] : [responseSettled(decider, "applied", settled.reason)];
+  // Any id the asker names is its own, not one of this session's: only a policy or hook carries.
+  const cause =
+    decider !== undefined
+      ? { responseId: decider }
+      : settled.cause !== undefined && ("policy" in settled.cause || "hook" in settled.cause)
+        ? settled.cause
+        : undefined;
   events.push(fact("interaction.settled", { ...settled, cause }));
   return events;
 }
 
-/** The answer this session forwarded that an asker's settlement is about. */
+/**
+ * The open answer this session forwarded that an asker names by the delivery it received it in.
+ * An asker that names none, such as a protocol 2 remote, can mean only the one open answer;
+ * between several, or for a delivery this session didn't forward, there is none to credit.
+ */
 function forwardedAnswer(
   tables: PublicView,
-  settled: { readonly interactionId: string; readonly deliveryId?: string },
+  interactionId: string,
+  deliveryId: string | undefined,
+  route: Relay | undefined,
 ): string | undefined {
-  const open = Object.values(tables.responses)
-    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
-    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const open = Object.values(tables.responses).filter(
+    (row) => row.interactionId === interactionId && row.status !== "settled",
+  );
+  if (deliveryId === undefined) return open.length === 1 ? open[0]!.responseId : undefined;
+  // A remote never sees this session's delivery ids, so it can name an answer only by a receipt.
+  if (route?.remote !== undefined) {
+    const receipts = route.receipts ?? {};
+    const ours = Object.hasOwn(receipts, deliveryId) ? receipts[deliveryId] : undefined;
+    return open.find((row) => row.deliveryId === ours)?.responseId;
+  }
+  // A local child names the delivery, or a share of a payload by an id of its own.
+  const source = forwardedFrom(deliveryId);
   return (
-    open.find((row) => settled.deliveryId !== undefined && row.deliveryId === settled.deliveryId) ??
-    open.at(-1)
+    open.find((row) => row.deliveryId === deliveryId) ??
+    open.find((row) => row.deliveryId === source)
   )?.responseId;
 }
 
@@ -605,6 +732,8 @@ export function routeAnswer(
       readonly answer: Answer;
       readonly outcome: "accepted" | "declined";
     }[];
+    /** Routes that learned the receipt a remote asker gave the answers forwarded to it. */
+    readonly relays?: Readonly<Record<string, Relay>>;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -663,7 +792,9 @@ export function routeAnswer(
     events.push(deliveryApplied(delivery.deliveryId));
   }
   // The answered routes retire with the commit, so a later delivery can't route through them.
-  return unchanged(view, events);
+  return input.relays === undefined
+    ? unchanged(view, events)
+    : { ...unchanged(view, events), relays: input.relays };
 }
 
 // ---------------------------------------------------------------------------
@@ -740,7 +871,7 @@ function signInCallbackFacts(
   tables: PublicView,
   challenge: AuthorizationChallenge,
   settled: {
-    readonly outcome: "accepted" | "failed";
+    readonly outcome: "accepted" | "declined" | "failed";
     readonly reason?: string;
     readonly retryable?: boolean;
   },
@@ -768,9 +899,9 @@ function signInCallbackFacts(
 }
 
 /**
- * A call a sign-in stopped settled: the sign-ins it waited on end with it, accepted if it returned
- * and failed with the reason it didn't. A failure with `retryable: false` is terminal, recorded as
- * the settlement's `response.retryable`. Published before the call's own settlement.
+ * A call a sign-in stopped settled: the sign-ins it waited on end with it, accepted if it returned,
+ * declined if the person refused consent, and failed with the reason it didn't otherwise. A
+ * failure with `retryable: false` is terminal, recorded as the settlement's `response.retryable`. Published before the call's own settlement.
  */
 export function callSignInsSettled(
   view: Pick<SessionView, "projection">,
@@ -781,7 +912,11 @@ export function callSignInsSettled(
   const settled =
     failure === undefined
       ? { outcome: "accepted" as const }
-      : { ...failure, outcome: "failed" as const };
+      : {
+          ...failure,
+          outcome:
+            failure.reason === SIGN_IN_DECLINED ? ("declined" as const) : ("failed" as const),
+        };
   return (call.signIns ?? []).flatMap((challenge) =>
     signInCallbackFacts(tables, challenge, settled),
   );
@@ -882,11 +1017,11 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
     ...unreadSettled(view),
   );
   const { queued: _queued, ...turn } = view.turn;
-  return {
+  return transition({
     ...commitSteps(turn, stopped, cancelledTranscript),
     events,
     signIns: [],
-  };
+  });
 }
 
 function unreadSettled(view: SessionView): SessionEvent[] {
@@ -919,22 +1054,22 @@ export function stopInterruptedSteps(
       step.requests.some((request) => input.settledInteractions.has(request.interactionId)) ||
       [...stepCallIds(step)].some((callId) => input.calls.get(callId)?.started === true),
   );
-  return {
+  return transition({
     ...commitSteps(view.turn, stopped, (step) =>
       stoppedTranscript(step, (callId) => interruptedCallResult(input.calls.get(callId))),
     ),
     events: [],
-  };
+  });
 }
 
 function commitSteps(
   turn: TurnState,
   completed: readonly SuspendedStep[],
   messages: (step: SuspendedStep) => readonly ModelMessage[] = (step) => step.messages,
-): { readonly commit: readonly ModelMessage[]; readonly turn: TurnState } {
+): { readonly history: HistoryChange; readonly turn: TurnState } {
   const removed = new Set(completed);
   return {
-    commit: completed.flatMap(messages),
+    history: { append: completed.flatMap(messages) },
     turn: { ...turn, suspended: turn.suspended.filter((step) => !removed.has(step)) },
   };
 }
@@ -971,8 +1106,8 @@ function stoppedTranscript(
 export function clear(view: SessionView, input: { readonly cause?: Cause } = {}): Transition {
   const { projection } = view;
   const changeId = nextChangeId(projection);
-  return {
-    clearsHistory: true,
+  return transition({
+    history: { rewrite: [] },
     signIns: [],
     events: [
       ...clearedInteractions(view),
@@ -986,7 +1121,7 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
       fact("context.settled", { changeId, kind: "clear", outcome: "completed", selects: null }),
     ],
     turn: { remembered: view.turn.remembered, suspended: [] } satisfies TurnState,
-  };
+  });
 }
 
 /**

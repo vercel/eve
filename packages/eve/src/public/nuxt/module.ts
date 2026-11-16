@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 import {
   addImports,
@@ -9,21 +9,19 @@ import {
   extendRouteRules,
 } from "@nuxt/kit";
 
+import type { VercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
-  resolveDevServerTimeout,
-  resolveSharedEveDevServer,
-  type EveFrameworkHost,
-} from "#shared/framework-eve-server.js";
-import {
-  ensureEveVercelServicesConfig,
-  mergeEveVercelConfig,
-  type VercelBuildConfig,
-} from "#shared/vercel-services.js";
+  addEveVercelServices,
+  readEveBaseUrlOrigin,
+  resolveEveAgentDevServer,
+  resolveEveAgents,
+} from "#shared/framework-eve-integration.js";
+import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framework-eve-server.js";
 
-import { joinRoutePrefix, normalizeOrigin, resolveProductionTarget } from "./routing.js";
+import { resolveProductionTarget } from "./production-origin.js";
 
-const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 const EVE_NUXT_HOST: EveFrameworkHost = { label: "Nuxt", slug: "nuxt" };
 
 /**
@@ -31,23 +29,22 @@ const EVE_NUXT_HOST: EveFrameworkHost = { label: "Nuxt", slug: "nuxt" };
  */
 export interface EveNuxtModuleOptions {
   /**
-   * Maximum time in milliseconds to wait for the eve development server to
+   * Maximum time in milliseconds to wait for each eve development server to
    * start, including waiting for another Nuxt process to start it. Defaults
    * to 180000 (three minutes).
    */
   devServerTimeoutMs?: number;
   /**
-   * Path to the eve application root, resolved relative to the Nuxt project
-   * root unless absolute. Defaults to the Nuxt project root. The dev server is
-   * spawned here, and the generated Vercel service builds from this root.
-   * Managed non-Vercel production serves this root's existing eve build;
-   * use a separate directory so eve and Nuxt do not overwrite `.output/`.
+   * Path to the eve project root, resolved relative to the Nuxt project root
+   * unless absolute. Defaults to the Nuxt project root. The root may contain
+   * one `agent/` or an `agents/` workspace. Managed non-Vercel production
+   * serves each agent's existing build; keep eve and Nuxt outputs separate.
    */
   eveRoot?: string;
   /**
-   * Command that builds the eve app inside the generated Vercel eve service.
-   * Defaults to running the installed eve binary from the Nuxt app's
-   * dependencies (`node <path-to>/eve/bin/eve.js build`).
+   * Command that builds each eve agent inside its generated Vercel service.
+   * Defaults to running the installed eve binary from the agent root
+   * (`node <path-to>/eve/bin/eve.js build`).
    */
   eveBuildCommand?: string;
 }
@@ -57,78 +54,28 @@ export interface EveNuxtModule {
   (options: EveNuxtModuleOptions, nuxt: object): void;
 }
 
-function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): string {
-  if (appPath === undefined || appPath.length === 0) {
-    return nuxtRoot;
-  }
-  return isAbsolute(appPath) ? appPath : resolve(nuxtRoot, appPath);
-}
-
 /**
- * Minimal view of the Nitro config the module writes to. The full `nitro`
- * typing lives behind the nitropack/Nuxt augmentation, which is not loaded in
- * this package's build, so model only the surface we touch.
+ * Minimal view of the Nitro Vercel build-output config the module merges the
+ * eve service into. The full `nitro` typing lives behind the nitropack/Nuxt
+ * augmentation, which is not loaded in this package's build, so model only the
+ * surface we touch.
  */
 interface NitroConfigHost {
   preset?: string;
-  externals?: {
-    inline?: string[];
-    [key: string]: unknown;
-  };
+  externals?: { inline?: string[]; [key: string]: unknown };
   vercel?: {
-    config?: VercelBuildConfig;
+    config?: VercelServicesConfig;
     [key: string]: unknown;
   };
 }
 
-function readNitroConfig(nuxtOptions: object): NitroConfigHost {
-  return (nuxtOptions as { nitro: NitroConfigHost }).nitro;
-}
-
 /**
- * Resolve the destination eve routes proxy to. In dev this is an explicit
- * `EVE_BASE_URL` or a shared dev server spawned on demand; in non-Vercel
- * production it is a configured origin/port.
- *
- * When a dev server is spawned by this process, `onDevServerSpawned` is invoked
- * with the child handle so the caller can wire lifecycle-scoped cleanup.
- */
-async function resolveEveProxyTarget(input: {
-  readonly appRoot: string;
-  readonly dev: boolean;
-  readonly devServerTimeoutMs?: number;
-  readonly onDevServerSpawned?: (child: ChildProcess) => void;
-}): Promise<string> {
-  if (!input.dev) {
-    return resolveProductionTarget();
-  }
-
-  const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
-  if (configuredEveBaseUrl && configuredEveBaseUrl.length > 0) {
-    return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), EVE_ROUTE_PREFIX);
-  }
-
-  const handle = await resolveSharedEveDevServer({
-    appRoot: input.appRoot,
-    host: EVE_NUXT_HOST,
-    timeoutMs: input.devServerTimeoutMs,
-  });
-  if (handle.process !== undefined) {
-    input.onDevServerSpawned?.(handle.process);
-  }
-
-  return joinRoutePrefix(handle.origin, EVE_ROUTE_PREFIX);
-}
-
-/**
- * Nuxt module that wires an eve agent into a Nuxt app. Register under `modules`
+ * Nuxt module that wires eve agents into a Nuxt app. Register under `modules`
  * (configured via the `eve` config key). It auto-imports the `useEveAgent()`
- * composable and routes eve transport requests (`/eve/v1/**`) to the eve
- * service: a shared dev server spawned on demand in dev, a generated Vercel
- * service on Vercel deployments, and a loopback eve server the Nuxt server
- * process starts, or a configured origin, in non-Vercel production. Requires
- * Nuxt >= 4.0.0. Configure via
- * {@link EveNuxtModuleOptions}.
+ * composable and routes eve transport requests to the eve service: a shared
+ * dev server spawned on demand in dev, a generated Vercel service on Vercel
+ * deployments, and managed eve servers or a configured origin in non-Vercel production. Requires
+ * Nuxt >= 4.0.0. Configure via {@link EveNuxtModuleOptions}.
  */
 const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   meta: {
@@ -141,8 +88,8 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   defaults: {},
   async setup(options, nuxt) {
     const nuxtRoot = nuxt.options.rootDir;
-    const appRoot = resolveApplicationRoot(nuxtRoot, options.eveRoot);
     const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NUXT_HOST);
+    const eveProjectRoot = resolve(nuxtRoot, options.eveRoot ?? "");
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
     // without an explicit import, matching Nuxt's composable conventions.
@@ -156,97 +103,121 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
       include: [...(nuxt.options.vite.optimizeDeps?.include ?? []), "eve/vue"],
     };
 
-    // On Vercel the eve app deploys as a sibling service. A Nitro runtime
-    // `proxy` rule can't reach it — the proxied request loops back into the
-    // Nuxt function and 404s — so declare the service and route eve transport
-    // to it at the edge through the build output config, mirroring the Next.js
-    // integration.
+    // On Vercel the eve agents deploy as sibling services. A Nitro runtime
+    // `proxy` rule can't reach them — the proxied request loops back into the
+    // Nuxt function and 404s — so declare the services and route eve transport
+    // to them at the edge through the build output config.
     if (!nuxt.options.dev && process.env.VERCEL) {
-      const configured = await ensureEveVercelServicesConfig({
-        appRoot,
+      const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroConfigHost }).nitro;
+      const config = await addEveVercelServices(async () => nitro.vercel?.config ?? {}, {
+        agents: await resolveEveAgents(eveProjectRoot),
         eveBuildCommand: options.eveBuildCommand,
-        frameworkName: "Nuxt",
+        host: EVE_NUXT_HOST,
         hostRoot: nuxtRoot,
       });
+      if (config !== undefined) {
+        nitro.vercel = { ...nitro.vercel, config };
+      }
+      return;
+    }
 
-      if (configured.mode === "generated") {
-        const nitro = readNitroConfig(nuxt.options);
-        nitro.vercel = {
-          ...nitro.vercel,
-          config: mergeEveVercelConfig(nitro.vercel?.config, configured),
+    // Dev (and non-Vercel production, which proxies to an absolute origin):
+    // booting the shared eve dev server can take a while, so defer it out of
+    // module setup. `modules:done` still runs before Nitro is configured, so
+    // the proxy route rule is registered in time while other modules' setup
+    // isn't blocked behind the spawn.
+    nuxt.hook("modules:done", async () => {
+      // The proxy only needs the agent names, so a frontend that reaches an
+      // agent elsewhere needs no local agent files.
+      const agents =
+        nuxt.options.dev && readEveBaseUrlOrigin() !== undefined
+          ? [{ appRoot: eveProjectRoot, publicRoutePrefix: "" }]
+          : await resolveEveAgents(eveProjectRoot);
+      const children: ChildProcess[] = [];
+      const productionServers: {
+        origin: string;
+        relativeRoot: string;
+        agentRoot: string;
+        publicPrefix: string;
+      }[] = [];
+      const managed =
+        !nuxt.options.dev &&
+        !(nuxt.options as { _generate?: boolean })._generate &&
+        !process.env.EVE_NUXT_PRODUCTION_ORIGIN?.trim();
+      if (managed) {
+        const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroConfigHost }).nitro;
+        const preset = (
+          nitro.preset ||
+          process.env.NITRO_PRESET ||
+          process.env.SERVER_PRESET ||
+          "node-server"
+        )
+          .replace(/([a-z])([A-Z])/g, "$1-$2")
+          .toLowerCase();
+        if (preset !== "node-server") {
+          throw new Error(
+            `eve managed Nuxt startup requires the single-process node-server preset, not ${preset}. Set EVE_NUXT_PRODUCTION_ORIGIN to an externally managed eve service when building Nuxt.`,
+          );
+        }
+      }
+      await Promise.all(
+        agents.map(async (agent, index) => {
+          const publicPrefix = joinEveRoutePath(agent.publicRoutePrefix, EVE_ROUTE_PREFIX);
+          let target: string;
+          if (nuxt.options.dev) {
+            // Each dev server serves the agent at `/eve/v1`, whichever name the
+            // host mounts it under.
+            const handle = await resolveEveAgentDevServer(agent, EVE_NUXT_HOST, devServerTimeoutMs);
+            if (handle.process !== undefined) {
+              children.push(handle.process);
+            }
+            target = `${handle.origin}${EVE_ROUTE_PREFIX}`;
+          } else {
+            // An origin override mounts every agent under its public prefix;
+            // otherwise each member runs as its own server on the next port.
+            target = resolveProductionTarget({ portOffset: index, publicPrefix });
+            if (managed) {
+              productionServers.push({
+                origin: new URL(target).origin,
+                relativeRoot: relative(nuxtRoot, eveProjectRoot),
+                agentRoot: relative(eveProjectRoot, agent.appRoot),
+                publicPrefix,
+              });
+            }
+          }
+          extendRouteRules(`${publicPrefix}/**`, { proxy: `${target}/**` });
+        }),
+      );
+      if (managed) {
+        const plugin = addTemplate({
+          filename: "eve-production-server.mjs",
+          write: true,
+          getContents:
+            () => `import createEveProductionServerPlugin from "eve/nuxt/production-server";
+export default import.meta.prerender ? () => {} : createEveProductionServerPlugin(${JSON.stringify(productionServers)});
+`,
+        });
+        addServerPlugin(plugin.dst);
+        // Nitro's tracer cannot follow workspace symlinks or preserve eve's private aliases.
+        const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroConfigHost }).nitro;
+        nitro.externals = {
+          ...nitro.externals,
+          inline: [...(nitro.externals?.inline ?? []), "eve/nuxt/production-server"],
         };
       }
-    } else {
-      // Dev (and non-Vercel production, which proxies to an absolute origin):
-      // booting the shared eve dev server can take a while, so defer it out of
-      // module setup. `modules:done` still runs before Nitro is configured, so
-      // the proxy route rule is registered in time while other modules' setup
-      // isn't blocked behind the spawn.
-      nuxt.hook("modules:done", async () => {
-        const proxyTarget = await resolveEveProxyTarget({
-          appRoot,
-          dev: nuxt.options.dev,
-          devServerTimeoutMs,
-          onDevServerSpawned: (child) => {
-            // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
-            // down on graceful shutdown and dev restarts. The process-exit
-            // guard in framework-eve-server.ts remains as a fallback for non-graceful
-            // exits.
-            nuxt.hook("close", () => {
-              if (!child.killed) {
-                child.kill();
-              }
-            });
-          },
-        });
-
-        const configuredOrigin = process.env.EVE_NUXT_PRODUCTION_ORIGIN?.trim();
-        if (
-          !nuxt.options.dev &&
-          !(nuxt.options as { _generate?: boolean })._generate &&
-          !configuredOrigin
-        ) {
-          const preset = (
-            readNitroConfig(nuxt.options).preset ||
-            process.env.NITRO_PRESET ||
-            process.env.SERVER_PRESET ||
-            "node-server"
-          )
-            .replace(/([a-z])([A-Z])/g, "$1-$2")
-            .toLowerCase();
-          if (preset !== "node-server") {
-            throw new Error(
-              `eve managed Nuxt startup requires the single-process node-server preset, not ${preset}. Set EVE_NUXT_PRODUCTION_ORIGIN to an externally managed eve service when building Nuxt.`,
-            );
+      if (children.length > 0) {
+        // Prefer Nuxt's lifecycle for cleanup so the dev servers are torn down
+        // on graceful shutdown and dev restarts. The process-exit guard in
+        // framework-eve-server.ts remains as a fallback for non-graceful exits.
+        nuxt.hook("close", () => {
+          for (const child of children) {
+            if (!child.killed) {
+              child.kill();
+            }
           }
-          // Keep startup and the proxy tied to the same build-time destination.
-          const config = {
-            origin: new URL(proxyTarget).origin,
-            relativeRoot: relative(nuxtRoot, appRoot),
-          };
-          const plugin = addTemplate({
-            filename: "eve-production-server.mjs",
-            write: true,
-            getContents:
-              () => `import createEveProductionServerPlugin from "eve/nuxt/production-server";
-export default import.meta.prerender ? () => {} : createEveProductionServerPlugin(${JSON.stringify(config)});
-`,
-          });
-          addServerPlugin(plugin.dst);
-          // This entry is self-contained: Nitro cannot trace workspace symlinks,
-          // and resolving eve's private # aliases through Nuxt changes their meaning.
-          const nitro = readNitroConfig(nuxt.options);
-          nitro.externals = {
-            ...nitro.externals,
-            inline: [...(nitro.externals?.inline ?? []), "eve/nuxt/production-server"],
-          };
-        }
-
-        extendRouteRules(`${EVE_ROUTE_PREFIX}/**`, {
-          proxy: `${proxyTarget}/**`,
         });
-      });
-    }
+      }
+    });
   },
 }) as EveNuxtModule;
 

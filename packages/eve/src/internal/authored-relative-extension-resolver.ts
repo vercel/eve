@@ -1,7 +1,14 @@
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { isNodeModulesPath, isPathImport } from "#internal/authored-package-boundary.js";
+import type { Plugin } from "rolldown";
+
+import {
+  isAuthoredSourcePath,
+  isNodeModulesPath,
+  isPathImport,
+} from "#internal/authored-package-boundary.js";
+import { type FilterExpression, resolveIdFilter } from "#internal/bundler/filters.js";
 
 const PATH_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 
@@ -9,18 +16,29 @@ const PATH_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
  * Resolves extensionless path imports before Rolldown's default resolver.
  */
 export function createAuthoredRelativeExtensionResolverPlugin(input: {
+  /** Leaves imports from installed dependencies to the bundler. */
+  readonly authoredSourceOnly?: boolean;
   readonly extensions: readonly string[];
-}): Record<string, unknown> {
+  /** With `authoredSourceOnly`, installed importers to handle anyway. */
+  readonly handlesInstalledModule?: (path: string) => boolean;
+  /** With `authoredSourceOnly`, a hook filter that admits every importer the handler accepts. */
+  readonly importerFilter?: FilterExpression;
+}): Plugin {
   const isFile = createCachedFileProbe();
 
   return {
     name: "eve-authored-relative-extension-resolver",
     resolveId: {
-      filter: {
-        id: PATH_IMPORT_FILTER,
-      },
+      filter: resolveIdFilter(PATH_IMPORT_FILTER, input.importerFilter),
       handler(source: string, importer: string | undefined) {
-        if (importer === undefined || importer.startsWith("\0") || !isPathImport(source)) {
+        if (
+          importer === undefined ||
+          importer.startsWith("\0") ||
+          !isPathImport(source) ||
+          (input.authoredSourceOnly === true &&
+            !isAuthoredSourcePath(importer) &&
+            input.handlesInstalledModule?.(importer) !== true)
+        ) {
           return undefined;
         }
 
