@@ -326,7 +326,7 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
       if (event.data.phase === "narration") {
         const narration = firstNonEmptyLine(event.data.value);
         if (narration) {
-          channel.state.announcedRunId = event.data.runId;
+          channel.state.announcedRunId = event.data.runId ?? null;
           await postToThread(threadId, narration);
         }
         return;
