@@ -21,20 +21,24 @@ function lastUserMessageText(data: Pick<ConversationState, "messages">) {
   }
 }
 
+function isSessionGone(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "session_stranded" || code === "session_expired" || code === "session_not_active";
+}
+
 export function createEveChatSession(
   chatId: MaybeRefOrGetter<string>,
   options?: MaybeRefOrGetter<ChatSessionOptions | undefined>,
 ): ChatSession {
   const id = computed(() => toValue(chatId));
   const resolvedOptions = computed(() => toValue(options));
-  const agent = computed(() =>
-    getOrCreateEveAgent(id.value, {
-      initialSession: resolvedOptions.value?.initialSession,
-      initialEvents: resolvedOptions.value?.initialEvents,
-    }),
-  );
-
-  const messages = computed(() => toUIMessages(agent.value.messages.value));
+  const binding = computed(() => getOrCreateEveAgent(id.value, resolvedOptions.value));
+  const agent = computed(() => binding.value.agent);
+  const historyMessages = computed(() => binding.value.historyMessages.value);
+  const messages = computed(() => [
+    ...historyMessages.value,
+    ...toUIMessages(agent.value.messages.value),
+  ]);
 
   const status = computed(() =>
     agent.value.error.value !== undefined
@@ -50,7 +54,19 @@ export function createEveChatSession(
   async function sendMessage(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
-    await agent.value.send(trimmed);
+    await deliver(trimmed);
+  }
+
+  async function deliver(text: string) {
+    const current = binding.value;
+    try {
+      await current.agent.send(text);
+    } catch (error) {
+      // Only definitive rejection is safe to resend; a network failure may have been accepted.
+      if (!isSessionGone(error)) throw error;
+      await current.restart();
+      await current.agent.send(text);
+    }
   }
 
   async function sendInputResponses(responses: AgentInputResponse[]) {
@@ -68,10 +84,16 @@ export function createEveChatSession(
   async function retry() {
     if (isBusy.value) return;
 
+    // A lost stream is not a failed turn; reconnect rather than submit a duplicate.
+    if (agent.value.status.value === "busy" && !isSessionGone(agent.value.error.value)) {
+      await agent.value.resume();
+      return;
+    }
+
     const text = lastUserMessageText({ messages: agent.value.messages.value });
     if (!text) return;
 
-    await agent.value.send(text);
+    await deliver(text);
   }
 
   return {

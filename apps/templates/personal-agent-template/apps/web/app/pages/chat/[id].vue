@@ -49,6 +49,15 @@ const { pendingChallenges, failedChallenges, tryResumeConnectedChallenges } =
 
 const input = ref("");
 
+watch(
+  () => pendingChallenges.value.length,
+  (count, previous) => {
+    if (import.meta.client && count > (previous ?? 0)) {
+      void tryResumeConnectedChallenges({ skipIfBusy: isBusy.value });
+    }
+  },
+);
+
 onMounted(() => {
   void refreshThreadList();
   void tryResumeConnectedChallenges({ skipIfBusy: isBusy.value });
@@ -117,7 +126,9 @@ function handleInputResponses(responses: Parameters<typeof sendInputResponses>[0
                 :message="message"
                 :status="status"
                 :is-last="message.id === messages.at(-1)?.id"
-                :can-respond="!isBusy"
+                :can-respond="
+                  !isBusy && !(message.metadata as { retired?: boolean } | undefined)?.retired
+                "
                 @input-responses="handleInputResponses"
               />
             </template>

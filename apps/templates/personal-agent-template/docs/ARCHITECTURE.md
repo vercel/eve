@@ -75,6 +75,18 @@ personal-agent-template/
 3. Tool calls render in [`MessageContentEve.vue`](../apps/web/app/components/chat/message/MessageContentEve.vue)
 4. `save_memory` shows approval UI ([`ToolSaveMemory.vue`](../apps/web/app/components/chat/tool/ToolSaveMemory.vue))
 
+#### Continuing a conversation
+
+The web chat saves the session's events and opaque `inbox` handle with the thread. Reopening a thread restores its messages and pending sign-ins.
+
+When a session has expired, is stranded, or is not active, sending or retrying starts a replacement session in the same thread. The old messages remain visible and saved, but are not sent as context to the replacement session. Old approval and question cards are read-only. If saving the old events fails, recovery stops without clearing them.
+
+Retry reconnects a dropped stream when its turn is still busy; it does not resend an already accepted message. Other transport errors do not automatically start replacement sessions.
+
+Sign-in cards show the provider's name and match both connection and tool-scoped connector names. Shared sign-in attempts use one card. Withdrawn or interrupted sign-ins disappear; failed sign-ins disappear when the next turn starts.
+
+Linked images show a preview; other attachments show their filename. The UI only loads or links HTTP(S) attachment URLs. Inline uploads without a public URL remain visible by name.
+
 ### Session memory injection
 
 1. Eve resolves the dynamic instructions in [`agent/instructions.ts`](../agent/instructions.ts) (`defineDynamic`) before each model call

@@ -38,7 +38,7 @@ export function useConnector(connector: () => ConnectorSummary, onRefresh?: () =
     connecting.value = true;
     actionError.value = null;
     try {
-      const pending = getPendingChallenge(connector().connectionName);
+      const pending = getPendingChallenge(connector());
       const resumeUrl = pending?.webhookUrl;
       const query = resumeUrl ? `?resumeUrl=${encodeURIComponent(resumeUrl)}` : "";
 

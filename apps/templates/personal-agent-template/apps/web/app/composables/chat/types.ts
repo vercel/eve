@@ -1,6 +1,6 @@
 import type { ComputedRef, Ref } from "vue";
 import type { UseEveAgentOptions } from "eve/vue";
-import type { EveSessionCursor } from "#eve/types/thread";
+import type { EveSessionCursor, ThreadState } from "#eve/types/thread";
 import type { UIMessage } from "ai";
 import type { AgentInputResponse } from "~/components/AgentInputRequest.vue";
 
@@ -11,6 +11,7 @@ export type ChatStatus = "ready" | "submitted" | "streaming" | "error";
 export interface ChatSessionOptions {
   initialSession?: EveSessionCursor;
   initialEvents?: readonly EveStreamEvent[];
+  history?: ThreadState["history"];
 }
 
 export interface ChatSession {
