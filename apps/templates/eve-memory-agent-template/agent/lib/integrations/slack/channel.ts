@@ -25,7 +25,7 @@ type InboundHandler = NonNullable<SlackChannelConfig["onMessage"]>;
  * @param ctx - Verified inbound webhook context supplied by eve.
  * @param message - Slack message carrying user, workspace, channel, and thread identifiers.
  * @returns eve's authenticated Slack principal, or null to drop the message.
- * @remarks Bots, the agent itself, and messages without a verified author are dropped, so no message falls back to a shared principal.
+ * @remarks Empty history keeps earlier thread messages in eve's attributed transcript instead of replaying them as requests from the current sender. Bots, the agent itself, and messages without a verified author are dropped, so no message falls back to a shared principal.
  */
 export const handleExplicitInvocation = (
   ctx: SlackInboundMessageContext,
@@ -35,7 +35,7 @@ export const handleExplicitInvocation = (
     return null;
   }
   const auth = defaultSlackAuth(message, ctx);
-  return auth ? { auth } : null;
+  return auth ? { auth, history: [] } : null;
 };
 
 /**
@@ -94,13 +94,14 @@ export const withIdentityContext = (
  * @param config - Native channel overrides.
  * @returns A channel definition whose inbound turns carry Slack profile context.
  * @remarks Without SLACK_CONNECTOR, compilation uses slack/placeholder; Slack delivery still requires a configured connector.
- * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name. Thread history defaults to messages since the agent's last reply.
+ * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name. Thread context defaults to messages since the agent's last reply. Message edits are ignored unless the caller supplies `onMessageEdited`, which runs without identity enrichment.
  */
 export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
   const {
     onMessage,
     onAppMention,
     onDirectMessage,
+    onMessageEdited = () => null,
     threadContext = { since: "last-agent-reply" },
     ...channelConfig
   } = config;
@@ -122,6 +123,7 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
       resolveIdentities
     ),
     onMessage: withIdentityContext(handlers.onMessage, resolveIdentities),
+    onMessageEdited,
     threadContext,
   });
 };
