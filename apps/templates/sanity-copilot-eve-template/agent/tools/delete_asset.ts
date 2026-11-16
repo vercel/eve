@@ -2,7 +2,7 @@ import { del } from "@vercel/blob";
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
-import { isReservedUrl, RESERVED_PATH_ERROR } from "#lib/reserved-paths.js";
+import { checkBlobUrl } from "#lib/blob-url.js";
 
 /**
  * Tool that permanently deletes an asset from Vercel Blob storage.
@@ -24,16 +24,12 @@ export default defineTool({
    * @returns `success`/`deleted` flags and the `url`, or `success: false` with an `error`.
    */
   async execute({ url }) {
-    if (isReservedUrl(url)) {
-      return {
-        deleted: false,
-        error: RESERVED_PATH_ERROR,
-        success: false,
-        url,
-      };
+    const checked = checkBlobUrl(url);
+    if (!checked.ok) {
+      return { deleted: false, error: checked.error, success: false, url };
     }
     try {
-      await del(url);
+      await del(checked.url);
       return { deleted: true, success: true, url };
     } catch (error) {
       return {

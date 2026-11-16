@@ -19,7 +19,7 @@ importers:
         version: 4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7)
       '@github-tools/eve-extension':
         specifier: ^0.13.0
-        version: 0.13.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)
+        version: 0.13.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)
       '@resend/chat-sdk-adapter':
         specifier: ^0.5.0
         version: 0.5.0(@chat-adapter/shared@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(@react-email/render@2.1.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -27,8 +27,8 @@ importers:
         specifier: ^2.8.2
         version: 2.8.2
       '@vercel/connect':
-        specifier: 2.9.2
-        version: 2.9.2(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
+        specifier: 2.9.3
+        version: 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
       ai:
         specifier: ^7.0.173
         version: 7.0.173(zod@4.6.7)
@@ -37,7 +37,7 @@ importers:
         version: 4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7)
       eve:
         specifier: ^1.0.0
-        version: 1.0.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
+        version: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -895,8 +895,8 @@ packages:
     resolution: {integrity: sha512-g9XerViJ/paZujufXYcu5XYI2vU2rtB4sgdpjUHde5RnOkdmpu0ngH46LCFGHoPXO/C+qDPSczIHIRN+8Q2YKQ==}
     engines: {node: '>= 18'}
 
-  '@vercel/connect@2.9.2':
-    resolution: {integrity: sha512-DNIjkJQMQL6sWeQNaPwJWOML6Biejdjl84vEuFtM2Nn1ANeACFw/FgZLDl9Gf0gmhHuQCIvZ5rK3KKpreFUzjA==}
+  '@vercel/connect@2.9.3':
+    resolution: {integrity: sha512-YtYx964S3ZfEv+0Yu6yIQNh5VfOeq6JqJKRMnnuat01/vqf3Hp5/l9KTVkBDkOM4smzBAEgQgbtYiq4b48HTwQ==}
     peerDependencies:
       '@ai-sdk/mcp': ^1 || ^2
       '@auth/core': '>=0.41.3'
@@ -2410,13 +2410,13 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@github-tools/eve-extension@0.13.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)':
+  '@github-tools/eve-extension@0.13.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)':
     dependencies:
-      '@github-tools/sdk': 1.22.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)(zod@4.6.7)
-      eve: 1.0.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
+      '@github-tools/sdk': 1.22.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)(zod@4.6.7)
+      eve: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
       zod: 4.6.7
     optionalDependencies:
-      '@vercel/connect': 2.9.2(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
+      '@vercel/connect': 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
     transitivePeerDependencies:
       - '@ai-sdk/workflow'
       - '@nestjs/common'
@@ -2442,15 +2442,15 @@ snapshots:
       - vite
       - workflow
 
-  '@github-tools/sdk@1.22.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)(zod@4.6.7)':
+  '@github-tools/sdk@1.22.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)(zod@4.6.7)':
     dependencies:
       ai: 7.0.173(zod@4.6.7)
       evlog: 2.33.1(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1)
       octokit: 5.0.5
       zod: 4.6.7
     optionalDependencies:
-      '@vercel/connect': 2.9.2(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
-      eve: 1.0.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
+      '@vercel/connect': 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
+      eve: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
     transitivePeerDependencies:
       - '@nestjs/common'
       - '@nestjs/core'
@@ -2905,12 +2905,12 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@2.9.2(ai@7.0.173(zod@4.6.7))(eve@1.0.0)':
+  '@vercel/connect@2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)':
     dependencies:
       '@vercel/oidc': 4.0.9
     optionalDependencies:
       ai: 7.0.173(zod@4.6.7)
-      eve: 1.0.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
+      eve: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
 
   '@vercel/oidc@3.2.0': {}
 
@@ -3179,14 +3179,14 @@ snapshots:
 
   escape-string-regexp@5.0.0: {}
 
-  eve@1.0.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1):
+  eve@1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1):
     dependencies:
       ai: 7.0.173(zod@4.6.7)
       nitro: 3.0.261103-rc
       rolldown: 1.3.2
       undici: 8.12.4
     optionalDependencies:
-      '@vercel/connect': 2.9.2(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
+      '@vercel/connect': 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
       chat: 4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7)
       react: 19.3.1
 
@@ -3195,7 +3195,7 @@ snapshots:
   evlog@2.33.1(ai@7.0.173(zod@4.6.7))(eve@1.0.0)(react@19.3.1):
     optionalDependencies:
       ai: 7.0.173(zod@4.6.7)
-      eve: 1.0.0(@vercel/connect@2.9.2)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
+      eve: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(chat@4.43.0(ai@7.0.173(zod@4.6.7))(zod@4.6.7))(react@19.3.1)
       react: 19.3.1
 
   execa@10.2.0:

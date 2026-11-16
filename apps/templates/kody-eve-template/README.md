@@ -164,7 +164,7 @@ Then run the development server and link a model provider with `/model` in the T
 pnpm dev
 ```
 
-You can chat with the agent directly in the dev TUI to exercise the GitHub tools, the Linear and Resend connections, and the preference tools. The supported webhook surfaces (authorized GitHub mentions and Linear sessions) run against a deployment. Email replies are not processed.
+You can chat with the agent directly in the dev TUI to exercise the GitHub tools, the Linear and Resend connections, and the preference tools. The local auth shim presents callers accepted by `localDev()` as users and grants request-local access to `GET /eve/v1/info`. Production requests still require Vercel OIDC authentication; the shim grants nothing when `localDev()` rejects a request. The supported webhook surfaces (authorized GitHub mentions and Linear sessions) run against a deployment. Email replies are not processed.
 
 `eve dev` never fires schedules on their cron cadence. Trigger the digest by hand with the dev dispatch route:
 
