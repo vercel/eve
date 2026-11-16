@@ -24,6 +24,7 @@ function sessionOf(
   options: { readonly id?: string; readonly open?: boolean } = {},
 ) {
   const starts: number[] = [];
+  const cancels: number[] = [];
   const follows: (boolean | undefined)[] = [];
   let tailLookups = 0;
   sessionCount += 1;
@@ -43,6 +44,7 @@ function sessionOf(
           for (const stored of lines.slice(startIndex)) controller.enqueue(stored);
           if (options.open !== true) controller.close();
         },
+        cancel: () => void cancels.push(startIndex),
       });
     },
     async getStreamTailIndex() {
@@ -51,6 +53,7 @@ function sessionOf(
     },
   };
   return {
+    cancels,
     follows,
     session: session as Session,
     starts,
@@ -158,6 +161,76 @@ describe("createSessionStreamResponse", () => {
     await live.response.body?.cancel();
   });
 
+  it.each([0, 6_000])(
+    "stops a version check of an empty stream at its timeout, opened after %ims",
+    async (openDelayMs) => {
+      vi.useFakeTimers();
+      const { cancels, session } = sessionOf([], { open: true });
+      const slow = {
+        ...session,
+        getLineStream: async (options: {
+          readonly follow?: boolean;
+          readonly startIndex: number;
+        }) => {
+          if (options.startIndex === 0)
+            await new Promise((resolve) => setTimeout(resolve, openDelayMs));
+          return await session.getLineStream(options);
+        },
+      } as Session;
+      const response = createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=1"),
+        slow,
+      );
+      await vi.advanceTimersByTimeAsync(6_001);
+      await (await response).body?.cancel();
+      // The version check's read from the first line ends too, not only the response's own.
+      expect(cancels).toEqual(expect.arrayContaining([0, 1]));
+    },
+  );
+
+  it("checks the version of a stranded earlier eve's session resumed past its first line", async () => {
+    const v26 = { data: {}, meta: { at }, type: "session.started" };
+    const { session } = sessionOf([v26, v26, v26]);
+    // A stranded session refuses every follow, including the version check's.
+    const stranded = {
+      ...session,
+      getLineStream: (options: { readonly follow?: boolean; readonly startIndex: number }) =>
+        options.follow === false
+          ? session.getLineStream(options)
+          : Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
+      hasRunnableOwner: async () => false,
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      stranded,
+    );
+    expect(response.status).toBe(200);
+    expect((await records(response)).at(-1)).toEqual({ $eve: "stream.ended" });
+  });
+
+  it("answers a missing session resumed past its first line without a bounded version check", async () => {
+    const { follows, session } = sessionOf([]);
+    const missing = Object.assign(new Error("Run not found."), {
+      name: "WorkflowRunNotFoundError",
+    });
+    const gone = {
+      ...session,
+      getLineStream: async (options: {
+        readonly follow?: boolean;
+        readonly startIndex: number;
+      }) => {
+        await session.getLineStream(options);
+        throw missing;
+      },
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      gone,
+    );
+    expect(response.status).toBe(404);
+    expect(follows).toEqual([true, true]);
+  });
+
   // #5782: a followed v26 session reconnects every lease, so re-reading its history from the
   // first line on each reconnect costs CPU that grows with the session.
   it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {
@@ -204,7 +277,7 @@ describe("createSessionStreamResponse", () => {
   });
 
   it("checks a session's version once, after reading a current first line", async () => {
-    const { session, starts } = sessionOf([line("a"), line("b")]);
+    const { follows, session, starts } = sessionOf([line("a"), line("b")]);
     const read = async (startIndex: number) =>
       await records(
         await createSessionStreamResponse(
@@ -214,8 +287,10 @@ describe("createSessionStreamResponse", () => {
       );
 
     expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
-    // The live read, then the version check's read from the first line.
+    // The live read, then the version check's read from the first line. The cursor shows the
+    // first line exists, so the check follows to it without bounding the read at the tail.
     expect(starts).toEqual([1, 0]);
+    expect(follows).toEqual([true, true]);
     expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
     expect(starts).toEqual([1, 0, 1]);
   });
