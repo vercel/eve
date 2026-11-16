@@ -33,7 +33,7 @@ export type ProjectSourceEntryKind = "directory" | "file" | "missing" | "other";
  * Every read performed by `src/discover/**` goes through a `ProjectSource`
  * rather than `node:fs` directly. Production callers use
  * {@link createDiskProjectSource} — a one-line wrapper around `node:fs` that
- * preserves existing behaviour. Tests can swap in
+ * preserves existing behavior. Tests can swap in
  * {@link createMemoryProjectSource} to run discovery against an in-memory
  * tree without touching disk, `mkdtemp`, or any fixture copying.
  *

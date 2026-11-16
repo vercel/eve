@@ -40,7 +40,7 @@ interface DiscoverSkillsInput {
   agentRoot: string;
   /**
    * Optional {@link ProjectSource} used for all filesystem reads. Defaults to
-   * a disk-backed source so disk callers keep their current behaviour.
+   * a disk-backed source so disk callers keep their current behavior.
    */
   source?: ProjectSource;
   skillsDirectoryPath?: string;
