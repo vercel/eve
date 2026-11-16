@@ -1985,8 +1985,10 @@ async function dispatchSlackMessage(input: {
   }
   // An edit is always quiet; a deferred message shows nothing until its turn calls a tool.
   if (edit === undefined && result.status === "deferred") channelState.quiet = true;
-  if (acknowledged !== undefined) await acknowledged;
-  else if (channelState.quiet !== true) {
+  // A mention or DM's session starts while Slack is still confirming its acknowledgement; the
+  // dispatch waits for it at the end. Another message's acknowledgement lands first: a code
+  // channel's status never times out, so a late one would outlast its turn.
+  if (acknowledged === undefined && channelState.quiet !== true) {
     await acknowledgeMessage(input.received, input.message, { slack, thread });
   }
 
@@ -2022,6 +2024,7 @@ async function dispatchSlackMessage(input: {
     uploadPolicy: input.uploadPolicy,
     users: input.userResolver && { resolver: input.userResolver, ...userLookup },
   });
+  await acknowledged;
 }
 
 /** Opens a code channel from an inbound message and binds operations to its one session. */
