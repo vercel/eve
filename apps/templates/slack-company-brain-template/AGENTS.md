@@ -23,6 +23,11 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
   extensions, for running code in the Vercel Sandbox (`agent/sandbox.ts`) and,
   with the `github/company-brain` connector, GitHub access through `git__gh`. The `authorize`
   callback in `git.ts` is the only access check on GitHub commands.
+- `agent/extensions/skills.ts`: eve's experimental custom skills extension.
+  People save their own versioned skills by asking: personal ones follow them
+  everywhere, and channel ones apply to everyone in a Slack channel after
+  someone else approves them. Stored in memory's Blob store; scopes come from
+  the trusted session, never from model input.
 - `agent/memory/`: two file memory slots. `personal` is per person and only
   on in private conversations; `channel` is per Slack channel. Scopes come from
   `agent/lib/conversation.ts`, never from model input.
