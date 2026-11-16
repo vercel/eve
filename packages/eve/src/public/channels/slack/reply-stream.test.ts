@@ -291,6 +291,26 @@ describe("Slack reply streaming", () => {
     expect(operations().slice(-3)).toEqual(["chat.appendStream", "chat.stopStream", "chat.update"]);
   });
 
+  it("still posts the reply when Slack won't rewrite or remove the streamed message", async () => {
+    const { complete, start, write } = harness();
+    await start();
+
+    await write(LONG);
+    refused["chat.appendStream"] = "internal_error";
+    refused["chat.update"] = "internal_error";
+    refused["chat.delete"] = "internal_error";
+    now += 1_500;
+    await write(" More.");
+    await complete(`${LONG} More.`);
+
+    expect(operations().slice(-4)).toEqual([
+      "chat.stopStream",
+      "chat.update",
+      "chat.delete",
+      "chat.postMessage",
+    ]);
+  });
+
   it("leaves a reply someone stopped in Slack as it was", async () => {
     const { complete, start, write } = harness();
     await start();
