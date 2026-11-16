@@ -592,7 +592,7 @@ describe("eve dev --input", () => {
       });
       const startup = {
         renderer: {},
-        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        finish: vi.fn(() => ({ draft: "", queued: [] })),
         shutdown: vi.fn(async () => {}),
       };
       const startDevelopmentTuiStartup = vi.fn(async () => startup);
@@ -651,7 +651,7 @@ describe("eve dev --input", () => {
     const order: string[] = [];
     const startup = {
       renderer: {},
-      finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+      finish: vi.fn(() => ({ draft: "", queued: [] })),
       shutdown: vi.fn(async () => {
         order.push("shutdown");
       }),
@@ -696,7 +696,7 @@ describe("eve dev --input", () => {
       let requestExit!: () => void;
       const startup = {
         renderer: {},
-        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        finish: vi.fn(() => ({ draft: "", queued: [] })),
         shutdown: vi.fn(async () => {}),
       };
       const startDevelopmentTuiStartup = vi.fn(async (input: { onExitRequest: () => void }) => {
@@ -902,7 +902,7 @@ describe("eve dev --input", () => {
   it("keeps messages queued during eve init queued on the startup screen", async () => {
     const startup = {
       renderer: {},
-      finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+      finish: vi.fn(() => ({ draft: "", queued: [] })),
       shutdown: vi.fn(async () => {}),
     };
     const startDevelopmentTuiStartup = vi.fn(async () => startup);
@@ -916,13 +916,13 @@ describe("eve dev --input", () => {
       }),
       close: async () => {},
     }));
-    process.env.EVE_INIT_QUEUED_INPUT = "Help Alice plan her week";
+    process.env.EVE_INIT_QUEUED_INPUT = JSON.stringify(["Help Alice", "and Bob"]);
     try {
       await withInteractiveTerminal(async () => {
         await runCli(["dev", "--onboarded"], { error: () => {}, log: () => {} }, { startHost });
       });
       expect(startDevelopmentTuiStartup).toHaveBeenCalledWith(
-        expect.objectContaining({ queuedInput: "Help Alice plan her week" }),
+        expect.objectContaining({ queuedInput: ["Help Alice", "and Bob"] }),
       );
       expect(process.env.EVE_INIT_QUEUED_INPUT).toBeUndefined();
     } finally {

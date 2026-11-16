@@ -672,8 +672,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
   }
 
-  beginStartupDraft(options: { initialDraft?: string; queued?: string; title: string }): void {
-    if (options.queued !== undefined) this.#startupQueue.enqueue(options.queued);
+  beginStartupDraft(options: {
+    initialDraft?: string;
+    queued?: readonly string[];
+    title: string;
+  }): void {
+    for (const message of options.queued ?? []) this.#startupQueue.enqueue(message);
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
@@ -727,10 +731,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#attachInput();
   }
 
-  finishStartupDraft(): { draft: string; queuedPrompt: string | undefined } {
+  finishStartupDraft(): { draft: string; queued: readonly string[] } {
     const result = {
       draft: this.#startupEditor?.text ?? this.#inputText,
-      queuedPrompt: this.#startupQueue.takePrompt(),
+      queued: this.#startupQueue.take(),
     };
     this.#startupEditor = undefined;
     this.#startupConsumer = undefined;

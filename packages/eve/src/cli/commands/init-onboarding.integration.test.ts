@@ -112,11 +112,13 @@ describe("startInitOnboarding", () => {
     await expect(onboarding.finished).resolves.toEqual({ cancelled: false });
     input.type("Help Alice");
     input.enter();
-    input.type("plan her week");
+    input.type("and Bob");
+    input.enter();
+    input.type("plan their week");
 
     await expect(onboarding.close()).resolves.toEqual({
-      queued: "Help Alice",
-      draft: "plan her week",
+      queued: ["Help Alice", "and Bob"],
+      draft: "plan their week",
     });
     expect(onboarding.interrupted.aborted).toBe(false);
     // eve dev paints its own screen in place, so nothing of this one stays behind.

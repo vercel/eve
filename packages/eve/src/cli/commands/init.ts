@@ -711,7 +711,7 @@ export async function runInitCommand(
   ];
   if (carriedInput.draft !== undefined) process.env[EVE_INIT_INPUT_ENV] = carriedInput.draft;
   if (carriedInput.queued !== undefined) {
-    process.env[EVE_INIT_QUEUED_INPUT_ENV] = carriedInput.queued;
+    process.env[EVE_INIT_QUEUED_INPUT_ENV] = JSON.stringify(carriedInput.queued);
   }
   if (onboardingCancelled) logger.log(pc.dim("Connect a model with /login when you’re ready."));
   logger.log("");

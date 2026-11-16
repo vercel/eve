@@ -23,8 +23,8 @@ export interface InitOnboarding {
 export interface InitCarriedInput {
   /** The unsent prompt, for `eve dev` to pre-fill. */
   readonly draft?: string;
-  /** Messages queued with Enter, for `eve dev` to send once ready. */
-  readonly queued?: string;
+  /** Messages queued with Enter, oldest first, for `eve dev` to send once ready. */
+  readonly queued?: readonly string[];
 }
 
 export interface InitOnboardingTelemetry {
@@ -115,17 +115,17 @@ export async function startInitOnboarding(input: {
           renderer.requestInterrupt();
           await finished;
         }
-        const { draft, queuedPrompt } = startup.finish();
+        const { draft, queued } = startup.finish();
         await startup.shutdown();
         if ((await finished).cancelled) {
           // Without a model, queued messages would fail; return them to the prompt instead.
           // The prompt is single-line: eve dev strips newlines from pre-filled input.
-          const carried = [queuedPrompt, draft].filter((text) => text !== undefined && text !== "");
+          const carried = [...queued, draft].filter((text) => text !== "");
           return carried.length === 0 ? {} : { draft: carried.join(" ") };
         }
-        const carried: { draft?: string; queued?: string } = {};
+        const carried: { draft?: string; queued?: readonly string[] } = {};
         if (draft !== "") carried.draft = draft;
-        if (queuedPrompt !== undefined) carried.queued = queuedPrompt;
+        if (queued.length > 0) carried.queued = queued;
         return carried;
       })();
       return closed;

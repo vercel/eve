@@ -41,5 +41,8 @@ export interface ProductionCliOptions {
  */
 export const EVE_INIT_INPUT_ENV = "EVE_INIT_INPUT";
 
-/** Carries the messages queued during `eve init`'s onboarding, which `eve dev` sends once ready. */
+/**
+ * Carries the messages queued during `eve init`'s onboarding, as a JSON array of strings,
+ * which `eve dev` sends once ready.
+ */
 export const EVE_INIT_QUEUED_INPUT_ENV = "EVE_INIT_QUEUED_INPUT";

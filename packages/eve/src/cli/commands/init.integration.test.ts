@@ -1678,7 +1678,7 @@ describe("runInitCommand", () => {
     const deps = dependencies();
     const events: string[] = [];
     const onboarding = fakeOnboarding({
-      carriedInput: { queued: "Help Alice plan her week", draft: "and Bob's" },
+      carriedInput: { queued: ["Help Alice", "and Bob"], draft: "plan their week" },
     });
     onboarding.setInstalling.mockImplementation((installing: boolean) => {
       if (!installing) events.push("installed");
@@ -1719,7 +1719,10 @@ describe("runInitCommand", () => {
       "dev",
       "--onboarded",
     ]);
-    expect(handedInput).toEqual({ queued: "Help Alice plan her week", draft: "and Bob's" });
+    expect(handedInput).toEqual({
+      queued: JSON.stringify(["Help Alice", "and Bob"]),
+      draft: "plan their week",
+    });
   });
 
   it("points to /login when onboarding during the install was cancelled", async () => {

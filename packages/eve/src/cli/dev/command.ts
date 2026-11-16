@@ -276,7 +276,7 @@ export function registerDevelopmentCommand(input: {
     const interactive = hasInteractiveTerminal();
     const mode = resolveDevUiMode({ options, interactive });
     const initInput = process.env[EVE_INIT_INPUT_ENV];
-    const initQueuedInput = process.env[EVE_INIT_QUEUED_INPUT_ENV];
+    const initQueuedInput = parseInitQueuedInput(process.env[EVE_INIT_QUEUED_INPUT_ENV]);
     delete process.env[EVE_INIT_INPUT_ENV];
     delete process.env[EVE_INIT_QUEUED_INPUT_ENV];
     const carryInitInput = options.onboarded === true && mode !== "headless";
@@ -472,4 +472,17 @@ export function registerDevelopmentCommand(input: {
       lifecycle.dispose();
     }
   });
+}
+
+function parseInitQueuedInput(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.every((message) => typeof message === "string")) {
+      return parsed;
+    }
+  } catch {
+    // A malformed value came from outside `eve init`; there is nothing to queue.
+  }
+  return undefined;
 }
