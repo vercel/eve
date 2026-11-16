@@ -111,6 +111,8 @@ export default defineChannel({
 
 Event handlers receive `(event, ctx)`. The event has `type`, `data`, and `scope` (the turn or call it belongs to). Handlers run after eve records the event, so they can't change it.
 
+Handlers run in stream order, but behind the turn: the model, hooks, and stream readers don't wait for them. A hook can run before the handler for the same event, and a reader can see later events, such as `turn.settled`, before a handler finishes. Read the session from `ctx.view`, the snapshot at the event, not from state that may have moved on. eve waits for a step's handlers before it saves the channel's state. A handler that throws is logged and skipped, as before.
+
 - `ctx.session.id` identifies the session.
 - `ctx.position` locates the event on the stream, and `ctx.view` is a read-only snapshot of the session at that point.
 - `ctx.channel` is the channel's own context. `ctx.channel.continuation.token` is the address that `from()`, `resolveSession()`, and `alias()` accept, without eve's prefixes. `alias()` adds another address.

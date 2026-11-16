@@ -569,6 +569,7 @@ async function runSessionStepBody(
       // Nothing here starts a turn, so a cancel has nothing to stop.
       await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
+      await publisher.drain();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
         ctx,
@@ -622,6 +623,8 @@ async function runSessionStepBody(
             });
             const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
             await publish(events);
+            // Recovery may end the step and save right after, so its handlers run before that.
+            await publisher.drain();
             return { result: undefined, session: current };
           });
           return scoped.session;
@@ -761,6 +764,10 @@ async function runSessionStepBody(
         throw error;
       }
       if (completedModelCall === undefined) await consumeCancelledInput();
+      // A cancel settles the turn even when a channel handler failed on the way.
+      await publisher.drain().catch((error: unknown) => {
+        log.error("a channel event handler failed in a cancelled turn", { error });
+      });
       return createCancelledModelCallBatchResult({
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
@@ -770,6 +777,8 @@ async function runSessionStepBody(
       });
     }
 
+    // The channel's handlers ran behind the turn; the state they left is what the step saves.
+    await publisher.drain();
     // Re-stamp the current address after handlers add a continuation alias.
     const aliased = saveSessionProjection(
       dropClosedRecords(
@@ -791,7 +800,7 @@ async function runSessionStepBody(
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
-    publisher.writer.release();
+    await publisher.release();
   }
 }
 

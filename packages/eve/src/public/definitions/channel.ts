@@ -234,6 +234,10 @@ export type ChannelCommitHandler<TCtx = void> = (
  * event and a {@link ChannelEventContext} whose `channel` is the channel's own context. Handlers
  * run after the event is written, so they observe it and never shape it. `committed` runs once
  * per committed line, after them.
+ *
+ * Handlers run in stream order, behind the turn: the model, hooks, and stream readers don't wait
+ * for them, so read the session from `ctx.view`, the snapshot at the event. A step waits for its
+ * handlers before it saves the channel's state. A handler that throws is logged and skipped.
  */
 export type ChannelEvents<TCtx = void> = {
   readonly [T in AuthoringEventType]?: ChannelEventHandler<T, TCtx>;
