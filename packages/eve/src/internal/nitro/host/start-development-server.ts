@@ -365,10 +365,6 @@ async function startNitroDevelopmentServer(
     });
     const workflowTransportSecret = randomBytes(32).toString("base64url");
     devServer.setClientAddressSecret(workflowTransportSecret);
-    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
-      project.appRoot,
-      workflowTransportSecret,
-    );
     const workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,
@@ -378,6 +374,11 @@ async function startNitroDevelopmentServer(
     if (workflowWorld !== undefined) {
       cleanup.defer(async () => await workflowWorld.close());
     }
+    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment({
+      appRoot: project.appRoot,
+      eventFeed: workflowWorld?.eventFeed === true,
+      secret: workflowTransportSecret,
+    });
     const onRuntimePruned =
       workflowWorld === undefined ? undefined : () => workflowWorld.reconcileExpiredRuns();
     // Parent-owned control routes must answer before the World starts: queue

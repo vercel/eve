@@ -1,4 +1,6 @@
 import type {
+  Event,
+  EventsSubscribeOptions,
   MessageId,
   QueuePrefix,
   SpecVersion,
@@ -21,6 +23,7 @@ import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-d
 import { isRunMissing } from "#shared/run-errors.js";
 import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
 import {
+  DEVELOPMENT_WORKFLOW_EVENTS_ROUTE,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#protocol/routes.js";
@@ -31,6 +34,7 @@ import {
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
+  DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV,
   DEVELOPMENT_WORLD_OPERATIONS,
   type DevelopmentGenerationAdmission,
   type DevelopmentGenerationAvailabilityCall,
@@ -97,9 +101,13 @@ async function getGenerationAvailability(
  * cannot observe the difference, so `@workflow/core` needs no changes and
  * this file is deletable the day a multi-process local World ships upstream.
  *
- * Two members are not simple forwards. `streams.get` must return a live
+ * Three members are not simple forwards. `streams.get` must return a live
  * `ReadableStream`, so it uses a dedicated route and hands back the response
- * body. `createQueueHandler` points the other way entirely: it returns the
+ * body. `events.subscribe` follows the parent World's live event feed over
+ * its own route, and exists only when the parent's World has one; without
+ * it, the runtime polls the run's log, which wakes an inline step for a
+ * cancel or steer only every few seconds. `createQueueHandler` points the
+ * other way entirely: it returns the
  * HTTP handler that the parent's queue posts deliveries into, and is where a
  * delivery gets pinned to the generation its run started on.
  */
@@ -131,9 +139,12 @@ export function createDevelopmentWorkflowWorld(): World {
     createQueueHandler,
     runs: forwarded.groups.runs as World["runs"],
     steps: forwarded.groups.steps as World["steps"],
-    // `subscribe` is an optional synchronous callback API that cannot ride
-    // request/response forwarding; the runtime falls back to polling.
-    events: forwarded.groups.events as Omit<World["events"], "subscribe">,
+    events: {
+      ...(forwarded.groups.events as Omit<World["events"], "subscribe">),
+      ...(process.env[DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV] === "1" && {
+        subscribe: subscribeToEvents,
+      }),
+    },
     hooks: forwarded.groups.hooks as World["hooks"],
     streams: {
       ...forwarded.groups.streams,
@@ -159,6 +170,80 @@ export function createDevelopmentWorkflowWorld(): World {
   } satisfies World;
 
   return world;
+}
+
+/**
+ * `events.subscribe` over the parent's event feed route. Delivery is best
+ * effort, as the World contract allows: when the feed ends for any reason
+ * other than unsubscribing, `onError` is called once and the runtime goes back
+ * to polling the log.
+ */
+function subscribeToEvents(
+  runId: string,
+  afterSlot: number,
+  onEvent: (event: Event) => void,
+  options?: EventsSubscribeOptions,
+): () => void {
+  const connection = new AbortController();
+  let active = true;
+  void (async () => {
+    const url = new URL(resolveDevelopmentWorldBaseUrl());
+    url.pathname = DEVELOPMENT_WORKFLOW_EVENTS_ROUTE;
+    url.searchParams.set("runId", runId);
+    url.searchParams.set("afterSlot", String(afterSlot));
+    const response = await fetchDevelopmentWorld(url, {
+      method: "GET",
+      signal: connection.signal,
+    });
+    if (response.body === null) {
+      throw new Error("Development Workflow event feed response had no body.");
+    }
+    for await (const line of readLines(response.body)) {
+      const record = decodeDevelopmentWorldValue(line) as {
+        readonly error?: unknown;
+        readonly event?: Event;
+      };
+      if (record.error !== undefined) {
+        throw (
+          deserializeDevelopmentWorldError(record.error) ??
+          new Error("Development Workflow event feed failed.")
+        );
+      }
+      if (!active) return;
+      try {
+        onEvent(record.event!);
+      } catch {
+        // The subscriber's failure is its own; the feed keeps delivering.
+      }
+    }
+    throw new Error("Development Workflow event feed ended.");
+  })().catch((error: unknown) => {
+    if (!active) return;
+    active = false;
+    connection.abort();
+    try {
+      options?.onError?.(error);
+    } catch {
+      // The subscriber's own failure.
+    }
+  });
+  return () => {
+    active = false;
+    connection.abort();
+  };
+}
+
+async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const decoder = new TextDecoder();
+  let buffered = "";
+  for await (const chunk of body) {
+    buffered += decoder.decode(chunk, { stream: true });
+    let newline: number;
+    while ((newline = buffered.indexOf("\n")) !== -1) {
+      yield buffered.slice(0, newline);
+      buffered = buffered.slice(newline + 1);
+    }
+  }
 }
 
 type ForwardedOperation = (...args: unknown[]) => Promise<unknown>;

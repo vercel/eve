@@ -7,6 +7,7 @@ import {
 } from "#protocol/routes.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 import {
+  DEVELOPMENT_WORKFLOW_EVENTS_ROUTE,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#protocol/routes.js";
@@ -44,5 +45,6 @@ export const HOST_HTTP_INVENTORY: readonly HostHttpRegistration[] = Object.freez
   },
   { capability: "development", method: "ALL", path: DEVELOPMENT_WORKFLOW_WORLD_ROUTE },
   { capability: "development", method: "ALL", path: DEVELOPMENT_WORKFLOW_STREAM_ROUTE },
+  { capability: "development", method: "ALL", path: DEVELOPMENT_WORKFLOW_EVENTS_ROUTE },
   { capability: "schedule", method: "POST", path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN },
 ]);

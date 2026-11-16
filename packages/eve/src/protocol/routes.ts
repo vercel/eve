@@ -245,3 +245,6 @@ export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = `${EVE_ROUTE_PREFIX}/dev/interna
 
 /** The parent's route for a World stream an `eve dev` worker reads. */
 export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;
+
+/** The parent's route for the live feed of a run's events an `eve dev` worker follows. */
+export const DEVELOPMENT_WORKFLOW_EVENTS_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/events`;

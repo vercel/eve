@@ -17,7 +17,10 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
 import { createParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
-import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
+import {
+  DEVELOPMENT_WORKER_APP_ROOT_ENV,
+  DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV,
+} from "#internal/workflow/development-world-protocol.js";
 
 const ADDRESS = DEVELOPMENT_CLIENT_ADDRESS_HEADER;
 const SIGNATURE = DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER;
@@ -581,4 +584,65 @@ describe("dev host supervisor", () => {
       await world.close();
     }
   });
+
+  // world-local keeps at most 500 live feeds per process (half its default queue concurrency) and
+  // refuses the rest, so a feed the parent keeps after its worker hung up would leave later
+  // deliveries polling (vercel/eve#6496). Broken until eve vendors a world-local with
+  // `events.subscribe` (vercel/workflow#5436): the parent's World has no feed to forward.
+  it.fails("ends the parent World's event feed when the worker hangs up", async () => {
+    const appRoot = await createDirectory("eve-dev-world-event-feed-");
+    const secret = "scenario-workflow-transport-secret";
+    const world = createParentDevelopmentWorkflowWorld({
+      agentName: "dev-world-event-feed-test",
+      appRoot,
+      resolveActiveGenerationId: () => "generation-a",
+      transportSecret: secret,
+    });
+    const supervisor = new DevHostSupervisor({ error: () => undefined });
+    supervisor.setControlHandler(async (request) => await world.handleRequest(request));
+    const listener = supervisor.listen({ hostname: "127.0.0.1", port: 0 });
+    await listener.ready();
+    vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", listener.url);
+    vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, secret);
+    vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, appRoot);
+    if (world.eventFeed) vi.stubEnv(DEVELOPMENT_WORKFLOW_EVENT_FEED_ENV, "1");
+
+    try {
+      await world.start();
+      const worker = createDevelopmentWorkflowWorld();
+      const { subscribe } = worker.events;
+      if (subscribe === undefined) throw new Error("The worker client offers no event feed.");
+      const created = await worker.events.create(null, {
+        eventData: {
+          deploymentId: "generation-a",
+          executionContext: {},
+          input: new Uint8Array(),
+          workflowName: "workflow//eve//workflowEntry",
+        },
+        eventType: "run_created",
+        specVersion: 9,
+      });
+      const runId = created.run!.runId;
+      // Each feed replays the run's one event, then the worker hangs up.
+      const firstEvent = () =>
+        new Promise<void>((resolve, reject) => {
+          const unsubscribe = subscribe(
+            runId,
+            0,
+            () => {
+              unsubscribe();
+              resolve();
+            },
+            { onError: reject },
+          );
+        });
+      for (let feed = 0; feed < 600; feed += 1) {
+        await vi.waitFor(firstEvent, { timeout: 5_000 });
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      await supervisor.close();
+      await world.close();
+    }
+  }, 60_000);
 });
