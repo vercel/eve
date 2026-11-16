@@ -65,6 +65,15 @@ export default defineTool({
     if (!channelId || !teamId) {
       return failed("This session has no Slack conversation to post in.");
     }
+    // Without a thread, the upload would post as its own top-level message and
+    // the reply would start a separate thread. A scheduled run that posts a new
+    // thread gets its thread from eve's first reply, which this tool can't
+    // create. A code channel posts top-level by design.
+    if (!threadTs && ctx.channel.metadata.codeChannel !== true) {
+      return failed(
+        "This conversation has no thread yet, so the file would post apart from your reply. Give the sandbox path instead.",
+      );
+    }
 
     const sandbox = await ctx.getSandbox();
     const stream = await sandbox.readFile({ path });
