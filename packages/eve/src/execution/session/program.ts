@@ -402,7 +402,7 @@ async function runSessionLoop(
       }
     }
   };
-  // A session created without a message starts its idle timer with its first turn, or once its
+  // A session created without a message starts its idle timer with its first input, or once its
   // prewarm settles while it still waits, not beside the prewarm at boot: a timer step in flight
   // when the message arrives would hold the first turn's step until it finished.
   const defersTimer = boot.start.kind === "first-message";
