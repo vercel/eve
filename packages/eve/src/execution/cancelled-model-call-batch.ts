@@ -1,6 +1,12 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { createLogger } from "#internal/logging.js";
-import { AuthKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ChannelInstrumentationKey,
+  SandboxKey,
+  TurnDeliveryIdsKey,
+} from "#context/keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { DefinitionsStateKey } from "#definitions/state.js";
 import { withContextScope } from "#context/run-step.js";
 import { serializeContext } from "#context/serialize.js";
@@ -91,8 +97,12 @@ export async function createCancelledModelCallBatchResult(input: {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
-    // Reactions saw every commit the stream kept.
+    // Reactions and channel handlers saw every commit the stream kept.
     [DefinitionsStateKey.name]: interruptedContext[DefinitionsStateKey.name],
+    [ChannelKey.name]: interruptedContext[ChannelKey.name],
+    ...(ChannelInstrumentationKey.name in interruptedContext && {
+      [ChannelInstrumentationKey.name]: interruptedContext[ChannelInstrumentationKey.name],
+    }),
   };
 
   return {

@@ -206,6 +206,16 @@ export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends 
   readonly position: FactPosition;
   /** Immutable observation snapshot of the whole commit the event is in. */
   readonly view: SessionView;
+  /**
+   * Lets the turn go on while `promise` settles, instead of waiting for the handler. Use it for
+   * a platform call the turn doesn't depend on, such as a typing or status update.
+   *
+   * eve waits for the promise before the model call's scope ends and before it saves the
+   * session, so the work never outlives the step, and state it writes to `ctx.channel.state` is
+   * saved. A rejection is logged, not thrown. Later handlers, hooks, and the model don't wait
+   * for it, so work that must happen in order with them belongs in the handler itself.
+   */
+  waitUntil(promise: PromiseLike<unknown>): void;
 }
 
 /**
@@ -233,11 +243,8 @@ export type ChannelCommitHandler<TCtx = void> = (
  * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the
  * event and a {@link ChannelEventContext} whose `channel` is the channel's own context. Handlers
  * run after the event is written, so they observe it and never shape it. `committed` runs once
- * per committed line, after them.
- *
- * Handlers run in stream order, behind the turn: the model, hooks, and stream readers don't wait
- * for them, so read the session from `ctx.view`, the snapshot at the event. A step waits for its
- * handlers before it saves the channel's state. A handler that throws is logged and skipped.
+ * per committed line, after them. The turn waits for each handler; a handler hands work the turn
+ * doesn't depend on to {@link ChannelEventContext.waitUntil}.
  */
 export type ChannelEvents<TCtx = void> = {
   readonly [T in AuthoringEventType]?: ChannelEventHandler<T, TCtx>;
@@ -366,6 +373,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
           position,
           scope: _scope,
           view,
+          waitUntil: queue,
           ...platformContext
         } = adapterCtx;
         const channel = {
@@ -374,18 +382,33 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
             return adapterCtx.continuation;
           },
         };
+        // Without a publisher's queue, the handler waits for its background work itself.
+        const inline: Promise<unknown>[] = [];
         const ctx: ChannelEventContext<typeof channel> = {
           ...buildCallbackContext(),
           channel,
           position: position ?? { index: 0, line: 0 },
           view: snapshotOf(view ?? currentView()),
+          waitUntil:
+            queue ??
+            ((promise) => {
+              const settled = Promise.resolve(promise);
+              // Rejecting before the handler returns isn't unhandled; the handler's call throws it.
+              settled.catch(() => {});
+              inline.push(settled);
+            }),
         };
-        return (
+        const handled = (
           userHandler as (
             event: SessionEvent,
             ctx: ChannelEventContext<typeof channel>,
           ) => void | Promise<void>
         )(event, ctx);
+        if (queue !== undefined) return handled;
+        return (async () => {
+          await handled;
+          while (inline.length > 0) await Promise.all(inline.splice(0));
+        })();
       };
     }
   }

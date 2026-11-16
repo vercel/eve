@@ -421,12 +421,11 @@ The info route belongs to the selected `channels/eve.ts` source and checks its a
 Each new event line goes through these stages in order:
 
 1. **Write**: the line is written to the stream.
-2. **Hooks**: authored [hooks](../guides/hooks) subscribed to each event fire.
-3. **Intents**: eve acts on cancellation requests queued by `ctx.cancel()`.
+2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`. Work a handler passes to `ctx.waitUntil()` continues in the background, and eve waits for it before the model call ends and before it saves the session. See [Run platform calls in the background](../channels/custom#run-platform-calls-in-the-background).
+3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each event fire.
+4. **Intents**: eve acts on cancellation requests queued by `ctx.cancel()`.
 
-The channel's event handlers run for each event in stream order, but behind the turn: the model and hooks don't wait for them, so a hook can run before the handler for the same event. A handler can update adapter state, and eve then re-evaluates the channel's `metadata(state)`. A step waits for its handlers before it saves the channel's state.
-
-Before the next model call, eve evaluates [dynamic values](../guides/dynamic-capabilities) from `defineDynamic`. Hooks and dynamic values read the current `ctx.channel.metadata`, which reflects the handlers that have finished.
+Before the next model call, eve evaluates [dynamic values](../guides/dynamic-capabilities) from `defineDynamic`. Hooks and dynamic values read the current `ctx.channel.metadata`.
 
 Channels and hooks observe what was written and can't change it.
 
