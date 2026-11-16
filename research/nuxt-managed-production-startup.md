@@ -1,7 +1,7 @@
 ---
 issue: "https://github.com/vercel/eve/issues/4948"
 status: implemented
-last_updated: "2026-10-30"
+last_updated: "2026-11-16"
 ---
 
 # Nuxt managed production startup
@@ -12,7 +12,8 @@ Keep the existing `eve/nuxt` options. For non-Vercel server builds, start an
 already-built eve service per agent when no production origin is configured.
 Use the shared framework discovery for standalone `agent/` projects and
 `agents/` workspaces. Standalone builds need a separate output from Nuxt;
-workspace members already build into their own directories. Building eve remains
+workspace members need to be built from their own directories, not with a root
+`eve build`, which produces a Vercel workspace deployment. Building eve remains
 the deployment's responsibility.
 
 Resolve `EVE_NUXT_PRODUCTION_ORIGIN` and `EVE_NUXT_PRODUCTION_PORT` at build time.

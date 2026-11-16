@@ -106,7 +106,16 @@ The browser still needs a production authentication policy. See [Authenticate br
   node .output/server/index.mjs
   ```
 
-  For an `agents/` workspace, `eve build` builds every member into `agents/<name>/.output/`. Deploy every member's output, preserving its path relative to the workspace root. A workspace can share the Nuxt project root because member outputs do not overwrite Nuxt's output.
+  For an `agents/` workspace, build each member from its own directory; a root `eve build` produces a Vercel workspace deployment:
+
+  ```bash
+  (cd agents/support && npx eve build)
+  (cd agents/research && npx eve build)
+  npx nuxt build
+  node .output/server/index.mjs
+  ```
+
+  Deploy every member's output, preserving its path relative to the workspace root. A workspace can share the Nuxt project root because member outputs do not overwrite Nuxt's output. See [Run workspace members](../deployment/self-hosted-operations#run-workspace-members) for each member's authentication, Workflow world, and sandbox configuration.
 
   Run the Nuxt server from the deployed Nuxt project root. Preserve the relative location of `eveRoot`, or set `EVE_NUXT_PRODUCTION_ROOT` at startup to relocate the eve project root. Workspace member paths remain relative to that root. Relative values resolve from the Nuxt server's working directory:
 
