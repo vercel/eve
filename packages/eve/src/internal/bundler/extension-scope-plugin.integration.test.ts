@@ -145,6 +145,32 @@ describe("extension-scope plugin (bundled)", () => {
     ).rejects.toThrow(/multiple extension mounts/);
   });
 
+  // https://github.com/vercel/eve/issues/6503
+  it.fails("resolves a package helper outside the source root when the package is mounted twice", async () => {
+    const { sourceRoot } = scratchModule("export const value = 1;");
+    const packageRoot = join(sourceRoot, "..");
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "@acme/test" }));
+    const helper = join(packageRoot, "helper.ts");
+    writeFileSync(helper, 'export { value } from "./extension/tools/budget.ts";');
+    const code = await bundle(helper, [
+      createExtensionMountPlugin([
+        {
+          mountId: "extensions/test",
+          sourceRoot,
+          packageName: "@acme/test",
+          specifier: "@acme/test",
+        },
+        {
+          mountId: "subagents/helper/extensions/test",
+          sourceRoot,
+          packageName: "@acme/test",
+          specifier: "@acme/test",
+        },
+      ]),
+    ]);
+    expect((await import(`data:text/javascript,${encodeURIComponent(code)}`)).value).toBe(1);
+  });
+
   afterAll(() => {
     // Scratch dirs live under the OS temp root; leaving them is harmless and
     // avoids racing the bundler's async file handles on cleanup.
