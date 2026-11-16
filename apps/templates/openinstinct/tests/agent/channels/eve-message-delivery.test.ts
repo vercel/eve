@@ -2,7 +2,6 @@ import type { ChannelEventContext } from "eve/channels";
 import type { EveChannelConfig } from "eve/channels/eve";
 import type { SessionView } from "eve/events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { backgroundWork } from "@tests/helpers/channel-event-context";
 import { viewOf } from "@tests/helpers/session-view";
 import type {
   finalizeScheduledReport,
@@ -115,7 +114,6 @@ describe("Eve scheduled report delivery", () => {
 
 function scheduledReportContext(view: SessionView) {
   return {
-    ...backgroundWork,
     channel: {},
     async getSandbox() {
       throw new Error("Sandbox access is outside this focused test.");
