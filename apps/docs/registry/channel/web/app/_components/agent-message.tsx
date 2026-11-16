@@ -168,7 +168,7 @@ function Steps({
   const failed = states.filter((state) => state === "failed").length;
   const toolLines = (call: EveToolPart): ReactNode => {
     const nested = steps.filter(
-      (step): step is EveToolPart => step.type === "tool" && step.parentCallId === call.callId,
+      (step): step is EveToolPart => step.type === "tool" && parentCallIdOf(step) === call.callId,
     );
     return (
       <Fragment key={call.callId}>
@@ -240,10 +240,15 @@ function Steps({
  * `eve__execute` call of a program.
  */
 function isNested(step: Step, steps: readonly Step[]): boolean {
-  return (
-    step.type === "tool" &&
-    steps.some((other) => other.type === "tool" && other.callId === step.parentCallId)
-  );
+  if (step.type !== "tool") return false;
+  const parent = parentCallIdOf(step);
+  return steps.some((other) => other.type === "tool" && other.callId === parent);
+}
+
+/** The call a call was made inside. eve releases before code mode report none. */
+function parentCallIdOf(part: EveToolPart): string | undefined {
+  const parent = "parentCallId" in part ? part.parentCallId : undefined;
+  return typeof parent === "string" ? parent : undefined;
 }
 
 function stepState(step: Step, view: SessionView): "working" | "waiting" | "failed" | "done" {
