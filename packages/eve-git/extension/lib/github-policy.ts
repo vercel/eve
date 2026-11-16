@@ -188,19 +188,17 @@ export async function assertUserInstallation(options: {
       const { total_count, installations } = installationsSchema.parse(body);
       return { items: installations, total: total_count };
     });
-    if (access === "private-write") {
-      for (const installation of installations) {
-        const outside = installation.permissions
-          ? writesOutsideAllowlist(Object.entries(installation.permissions))
-          : undefined;
-        if (outside === undefined || outside.length > 0) {
-          const label = installation.account?.login ?? String(installation.id);
-          throw new Error(
-            outside === undefined
-              ? `access "private-write" refused: GitHub did not list the permissions of the App installation on ${label}.`
-              : `access "private-write" refused: the App installation on ${label} grants ${outside.join(", ")}, which can make a repository public or create one. Remove those permissions from the App.`,
-          );
-        }
+    for (const installation of installations) {
+      const outside = installation.permissions
+        ? writesOutsideAllowlist(Object.entries(installation.permissions))
+        : undefined;
+      if (outside === undefined || outside.length > 0) {
+        const label = installation.account?.login ?? String(installation.id);
+        throw new Error(
+          outside === undefined
+            ? `access ${JSON.stringify(access)} refused: GitHub did not list the permissions of the App installation on ${label}.`
+            : `access ${JSON.stringify(access)} refused: the App installation on ${label} grants ${outside.join(", ")}, which can change a repository's visibility or create one. Remove those permissions from the App.`,
+        );
       }
     }
     await Promise.all(

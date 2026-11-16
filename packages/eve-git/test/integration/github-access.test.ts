@@ -570,50 +570,42 @@ test("public-write user commands run on public-only installations and are refuse
   assert.deepEqual(refused, []);
 });
 
-test("private-write refuses an installation that grants a write outside the allowlist, or does not list its permissions", async () => {
-  for (const [installPermissions, message] of [
-    [{ ...SAFE_INSTALLATION, administration: "write" }, /grants administration:write/u],
-    [{ ...SAFE_INSTALLATION, repository_creation: "write" }, /grants repository_creation:write/u],
-    [{ ...SAFE_INSTALLATION, administration: "admin" }, /grants administration:admin/u],
-    [null, /did not list the permissions of the App installation on org-0/u],
-  ] as const) {
-    const github = fakeGitHub({ installs: { "user-a": [[PRIVATE]] }, installPermissions });
-    const runs: string[] = [];
-    await assert.rejects(runUser("private-write", "user-a", github, runs), message);
-    assert.deepEqual(runs, []);
-    assert.deepEqual(
-      github.requests.map((request) => request.url),
-      ["/user/installations?per_page=100&page=1"],
-    );
+test("user mode refuses an installation that grants a write outside the allowlist, or does not list its permissions, under each access value", async () => {
+  for (const access of ["private-write", "public-write"] as const) {
+    const reachable = access === "private-write" ? PRIVATE : PUBLIC;
+    for (const [installPermissions, message] of [
+      [{ ...SAFE_INSTALLATION, administration: "write" }, /grants administration:write/u],
+      [{ ...SAFE_INSTALLATION, repository_creation: "write" }, /grants repository_creation:write/u],
+      [{ ...SAFE_INSTALLATION, administration: "admin" }, /grants administration:admin/u],
+      [null, /did not list the permissions of the App installation on org-0/u],
+    ] as const) {
+      const github = fakeGitHub({ installs: { "user-a": [[reachable]] }, installPermissions });
+      const runs: string[] = [];
+      await assert.rejects(runUser(access, "user-a", github, runs), message);
+      assert.deepEqual(runs, [], access);
+      assert.deepEqual(
+        github.requests.map((request) => request.url),
+        ["/user/installations?per_page=100&page=1"],
+        access,
+      );
+    }
   }
 });
 
-test("private-write allows an installation with read-only administration", async () => {
-  const runs: string[] = [];
-  await runUser(
-    "private-write",
-    "user-a",
-    fakeGitHub({
-      installs: { "user-a": [[PRIVATE]] },
-      installPermissions: { ...SAFE_INSTALLATION, administration: "read" },
-    }),
-    runs,
-  );
-  assert.equal(runs.length, 1);
-});
-
-test("public-write does not judge installation permissions", async () => {
-  const runs: string[] = [];
-  await runUser(
-    "public-write",
-    "user-a",
-    fakeGitHub({
-      installs: { "user-a": [[PUBLIC]] },
-      installPermissions: { ...SAFE_INSTALLATION, administration: "write" },
-    }),
-    runs,
-  );
-  assert.equal(runs.length, 1);
+test("user mode allows an installation with read-only administration, under each access value", async () => {
+  for (const access of ["private-write", "public-write"] as const) {
+    const runs: string[] = [];
+    await runUser(
+      access,
+      "user-a",
+      fakeGitHub({
+        installs: { "user-a": [[access === "private-write" ? PRIVATE : PUBLIC]] },
+        installPermissions: { ...SAFE_INSTALLATION, administration: "read" },
+      }),
+      runs,
+    );
+    assert.equal(runs.length, 1, access);
+  }
 });
 
 test("user commands that name no repository are judged by the installation, under each access value", async () => {
