@@ -1416,8 +1416,8 @@ describe("verifyVercelOidc", () => {
 });
 
 describe("verifyOidc", () => {
-  // A route that accepts GitHub Actions and Vercel tokens tries both; a Vercel token must not
-  // wait on GitHub's discovery document before the Vercel strategy gets it.
+  // A route that accepts GitHub Actions and Vercel tokens tries both; a token GitHub did not
+  // issue must not wait on GitHub's discovery document before the next strategy gets it.
   it.each([
     [
       "another issuer's token",
