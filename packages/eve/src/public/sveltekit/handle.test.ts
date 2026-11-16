@@ -101,6 +101,49 @@ describe("createEveHandle", () => {
     ).rejects.toThrow(/EVE_SVELTEKIT_PRODUCTION_PORT/);
   });
 
+  it.each([
+    ["/eve/alice/v1/session?x=1", "http://127.0.0.1:5001/eve/v1/session?x=1"],
+    ["/eve/bob/v1", "http://127.0.0.1:5002/eve/v1"],
+  ])("routes workspace request %s to its agent server", async (path, target) => {
+    vi.stubEnv("EVE_SVELTEKIT_PRODUCTION_ORIGIN", "https://ignored.example.com");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("agent"));
+    const resolve = vi.fn(async () => new Response("app"));
+
+    await createEveHandle({
+      origin: "https://also-ignored.example.com",
+      agents: { alice: "http://127.0.0.1:5001", bob: "http://127.0.0.1:5002" },
+    })({ event: createEvent(`https://app.example.com${path}`), resolve });
+
+    expect(forwardedUrl(fetchMock)).toBe(target);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it.each(["/eve/v1/health", "/eve/unknown/v1/health", "/eve/alice/v1-docs"])(
+    "leaves unmounted workspace route %s to SvelteKit",
+    async (path) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("agent"));
+      const response = await createEveHandle({ agents: { alice: "http://127.0.0.1:5001" } })({
+        event: createEvent(`https://app.example.com${path}`),
+        resolve: async () => new Response("app"),
+      });
+
+      expect(await response.text()).toBe("app");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["option", "env"])("keeps named routes on a shared %s origin", async (source) => {
+    vi.stubEnv("EVE_SVELTEKIT_PRODUCTION_ORIGIN", "https://agents.example.com/root");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("agent"));
+
+    await createEveHandle(source === "option" ? { origin: "https://agents.example.com" } : {})({
+      event: createEvent("https://app.example.com/eve/alice/v1/session?x=1"),
+      resolve: async () => new Response("app"),
+    });
+
+    expect(forwardedUrl(fetchMock)).toBe("https://agents.example.com/eve/alice/v1/session?x=1");
+  });
+
   it("does not forward paths that only share the eve prefix", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
 

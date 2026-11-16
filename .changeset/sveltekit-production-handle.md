@@ -2,6 +2,8 @@
 "eve": patch
 ---
 
-`eve/sveltekit` now exports `createEveHandle()`, a SvelteKit `handle` hook that serves `/eve/v1/**` from the app's own origin in non-Vercel production.
+Add `createEveHandle()` to proxy eve requests through a SvelteKit app's own origin in non-Vercel production.
 
-It forwards to `EVE_SVELTEKIT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:${EVE_SVELTEKIT_PRODUCTION_PORT:-4274}`, while preserving streaming and removing hop-by-hop and stale decoded-response headers.
+The hook supports a single `agent/` at `/eve/v1/**` and named `agents/` workspace routes at `/eve/<name>/v1/**`. Configure `agents` to forward each named route to a separate server, or use `origin` or `EVE_SVELTEKIT_PRODUCTION_ORIGIN` for a shared upstream host. The default server is `http://127.0.0.1:4274`, configurable with `EVE_SVELTEKIT_PRODUCTION_PORT`.
+
+Streaming, cancellation, redirects, and cookies are preserved, while hop-by-hop and stale decoded-response headers are removed. Start and manage the eve servers separately; Vercel service routing does not need this hook.

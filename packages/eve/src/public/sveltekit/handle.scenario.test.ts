@@ -165,18 +165,22 @@ describe("createEveHandle HTTP transport", () => {
     "streams before completion and closes the upstream on %s",
     async (action) => {
       const closed = Promise.withResolvers<void>();
-      const origin = await serve((_request, response) => {
+      let upstreamPath: string | undefined;
+      const origin = await serve((request, response) => {
+        upstreamPath = request.url;
         response.on("close", () => closed.resolve());
         response.writeHead(200, { "content-type": "text/event-stream" });
         response.write("data: hello\n\n");
       });
       const controller = new AbortController();
-      const response = await forward(
-        origin,
-        new Request("https://app.example.com/eve/v1/session/alice/stream", {
-          signal: controller.signal,
-        }),
-      );
+      const request = new Request("https://app.example.com/eve/alice/v1/session/alice/stream", {
+        signal: controller.signal,
+      });
+      const response = await createEveHandle({ agents: { alice: origin } })({
+        event: { request, url: new URL(request.url) },
+        resolve: async () => new Response("not an eve route", { status: 404 }),
+      });
+      expect(upstreamPath).toBe("/eve/v1/session/alice/stream");
       expect(response.headers.get("transfer-encoding")).toBeNull();
       const reader = response.body!.getReader();
       const first = await reader.read();

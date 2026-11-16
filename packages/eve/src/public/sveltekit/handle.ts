@@ -1,4 +1,5 @@
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { joinEveRoutePath, normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
 
 import { resolveProductionOrigin } from "./production-origin.js";
 
@@ -19,15 +20,39 @@ export interface EveSvelteKitHandleInput<TEvent extends EveSvelteKitHandleEvent>
 
 export interface EveSvelteKitHandleOptions {
   /**
-   * Origin the eve service listens on. Defaults to
-   * `EVE_SVELTEKIT_PRODUCTION_ORIGIN`, then to
+   * Origin hosting eve under its public paths (`/eve/v1` or
+   * `/eve/<name>/v1`). Defaults to `EVE_SVELTEKIT_PRODUCTION_ORIGIN`, then to
    * `http://127.0.0.1:${EVE_SVELTEKIT_PRODUCTION_PORT ?? 4274}`.
+   * Ignored when `agents` is set.
    */
   readonly origin?: string;
+  /**
+   * Named agent servers for an `agents/` workspace. Each server serves
+   * `/eve/v1`; the hook mounts it at `/eve/<name>/v1`. Only these agents are
+   * forwarded when set. No agent files are needed in the deployed frontend.
+   * Omit this when `origin` hosts all agents under their public paths.
+   */
+  readonly agents?: Readonly<Record<string, string>>;
 }
 
-function isEveRoute(pathname: string): boolean {
-  return pathname === EVE_ROUTE_PREFIX || pathname.startsWith(`${EVE_ROUTE_PREFIX}/`);
+function matchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function resolveTarget(pathname: string, options: EveSvelteKitHandleOptions): URL | undefined {
+  if (options.agents !== undefined) {
+    for (const [name, origin] of Object.entries(options.agents)) {
+      const prefix = joinEveRoutePath(`/eve/${name}`, EVE_ROUTE_PREFIX);
+      if (matchesPrefix(pathname, prefix)) {
+        return new URL(`${EVE_ROUTE_PREFIX}${pathname.slice(prefix.length)}`, origin);
+      }
+    }
+    return undefined;
+  }
+  if (matchesPrefix(normalizePublicEveRoutePath(pathname), EVE_ROUTE_PREFIX)) {
+    return new URL(pathname, options.origin ?? resolveProductionOrigin());
+  }
+  return undefined;
 }
 
 function createProxyHeaders(source: Headers): Headers {
@@ -69,8 +94,9 @@ function createForwardedRequest(request: Request, target: URL): Request {
 }
 
 /**
- * SvelteKit `handle` hook that serves eve transport requests (`/eve/v1/**`)
- * from the same origin as the app in production.
+ * SvelteKit `handle` hook that forwards eve transport requests (`/eve/v1/**`
+ * or `/eve/<name>/v1/**`) from the app's origin in production.
+ * Start and manage the upstream eve servers separately.
  *
  * Use it when the SvelteKit app does not deploy to Vercel, where eve routes
  * are served by a sibling Vercel service instead. In development the Vite
@@ -87,14 +113,11 @@ export function createEveHandle(options: EveSvelteKitHandleOptions = {}) {
   return async <TEvent extends EveSvelteKitHandleEvent>(
     input: EveSvelteKitHandleInput<TEvent>,
   ): Promise<Response> => {
-    if (!isEveRoute(input.event.url.pathname)) {
+    const target = resolveTarget(input.event.url.pathname, options);
+    if (target === undefined) {
       return await input.resolve(input.event);
     }
-
-    const target = new URL(
-      `${input.event.url.pathname}${input.event.url.search}`,
-      options.origin ?? resolveProductionOrigin(),
-    );
+    target.search = input.event.url.search;
 
     const upstream = await fetch(createForwardedRequest(input.event.request, target));
     const headers = createProxyHeaders(upstream.headers);
