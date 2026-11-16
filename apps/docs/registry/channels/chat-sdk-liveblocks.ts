@@ -11,6 +11,8 @@ export const { bot, channel, send } = chatSdkChannel({
       webhookSecret: process.env.LIVEBLOCKS_WEBHOOK_SECRET!,
       botUserId: "my-agent",
       botUserName: "My Agent",
+      resolveUsers: async ({ userIds }) =>
+        userIds.map((id) => (id === "my-agent" ? { name: "My Agent" } : undefined)),
     }),
   },
   state: createMemoryState(),
