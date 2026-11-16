@@ -8,7 +8,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Blob from "@vercel/blob";
 import type * as EnvModule from "@shared/environment";
 import { sendMessageOutputSchema } from "@shared/chat/message-delivery";
-import { backgroundWork } from "@tests/helpers/channel-event-context";
 import { viewOf } from "@tests/helpers/session-view";
 import type { AccessScope } from "@shared/identity/access-scope";
 import type {
@@ -1258,7 +1257,6 @@ function sessionContext(
     attributes.linqReplyAnchorMessageId = replyAnchorMessageId;
   }
   return {
-    ...backgroundWork,
     async getSandbox() {
       throw new Error("Sandbox access is outside this focused test.");
     },

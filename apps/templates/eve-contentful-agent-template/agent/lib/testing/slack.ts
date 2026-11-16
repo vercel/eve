@@ -173,17 +173,6 @@ export const slackEventContext = ({
 });
 
 /**
- * Leaves a handler's `ctx.waitUntil` work running, so an unexpected rejection still fails the
- * test. Spread instead of written inline so the fixture type-checks against eve versions both
- * before and after `waitUntil` joined the event context.
- */
-const backgroundWork = {
-  waitUntil: (task: Promise<unknown>) => {
-    void task;
-  },
-};
-
-/**
  * Hydrates the public event context around a Slack transport fixture.
  * @param channel - Slack transport and state to expose.
  * @returns The public renderer context.
@@ -192,7 +181,6 @@ export const channelEventContext = (
   channel = slackEventContext()
 ): ChannelEventContext<SlackEventContext> => ({
   ...sessionContext(),
-  ...backgroundWork,
   channel,
   position: { index: 0, line: 0 },
   view: emptySessionView(),

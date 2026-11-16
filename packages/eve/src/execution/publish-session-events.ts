@@ -3,7 +3,6 @@ import { readSessionStreamTailIndex, streamSessionLines } from "#execution/sessi
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
-import { createBackgroundWork } from "#channel/background-work.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { runEffects, type RunEffectsInput } from "#definitions/kernel.js";
 import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
@@ -300,24 +299,19 @@ async function publishInSessionScope<T>(
     sessionWritable: step.sessionWritable,
   });
   try {
-    return await withContextScope(
-      ctx,
-      session,
-      async (enrichedSession) => {
-        const emit =
-          instrumentation?.createHandleEvent({
-            handleEvent: publisher.publish,
-            relayed: publication.origin === "relayed",
-          }) ?? publisher.publish;
-        const result = await publication.publish(emit, enrichedSession);
-        await publisher.finish();
-        return { result, session: enrichedSession };
-      },
-      { drain: publisher.drain },
-    );
+    return await withContextScope(ctx, session, async (enrichedSession) => {
+      const emit =
+        instrumentation?.createHandleEvent({
+          handleEvent: publisher.publish,
+          relayed: publication.origin === "relayed",
+        }) ?? publisher.publish;
+      const result = await publication.publish(emit, enrichedSession);
+      await publisher.finish();
+      return { result, session: enrichedSession };
+    });
   } finally {
     await instrumentation?.flush();
-    await publisher.release();
+    publisher.writer.release();
   }
 }
 
@@ -365,17 +359,12 @@ interface EventDispatcher extends SessionEventDispatcher {
    * context.
    */
   deliver(written: readonly WrittenEvent[]): Promise<void>;
-  /** Waits for the work handlers handed `waitUntil`, then saves the channel context it left. */
-  settle(): Promise<void>;
-  /** Ends the step's background work: later `waitUntil` calls are logged and never waited for. */
-  close(): void;
 }
 
 /** A session's stream held by one step, with the dispatch of the events that step publishes. */
 export interface SessionEventPublisher {
   readonly dispatcher: SessionEventDispatcher;
-  /** Closes the stream; `release` gives it up. */
-  readonly writer: Pick<SessionEventWriter, "close">;
+  readonly writer: SessionEventWriter;
   /**
    * Writes one publication (a commit's facts on one line, each progress record on its own),
    * folds each line into the step's projection, then runs the channel's handlers. Returns the
@@ -385,21 +374,12 @@ export interface SessionEventPublisher {
   /** `emit`, then the events' stream-event hooks. */
   publish(publication: SessionPublication): Promise<void>;
   /**
-   * Waits for everything emitted so far, and for the work its channel handlers handed
-   * `ctx.waitUntil`, then saves the channel state that work left. It never throws: that work's
-   * failures are logged. Every scope a handler can run in drains before it ends, so the work
-   * never outlives the sandbox, session, or checkpoint it belongs to.
-   */
-  drain(): Promise<void>;
-  /**
    * Ends a unit of the step's progress: publishes what the tables now say about the open
    * turn waiting on people (`announceWaiting`). Steps call it as they end. A turn step passes
    * whether it stopped for a person; a step that runs while the turn waits leaves it to the
    * tables.
    */
   finish(options?: { readonly announce?: boolean }): Promise<void>;
-  /** Drains, then releases the stream for the next step. Every step ends with it. */
-  release(): Promise<void>;
 }
 
 /** A line an interrupted attempt of the current step wrote after the step's checkpoint. */
@@ -596,10 +576,6 @@ export function openSessionEventPublisher(input: {
     await dispatcher.deliver(written);
     return written;
   };
-  const drain = async (): Promise<void> => {
-    await publicationTail;
-    await dispatcher.settle();
-  };
   // Local calls execute concurrently. Serialize publication through write, fold and channel
   // delivery so two calls cannot reserve the same position or overwrite channel state. A
   // failure rejects its caller but releases this lane for terminal cleanup.
@@ -624,21 +600,12 @@ export function openSessionEventPublisher(input: {
     writer,
     emit,
     publish,
-    drain,
     async finish(options) {
       if (before === undefined) return;
       const announced =
         options?.announce === false ? undefined : announceWaiting(before, currentView(ctx));
       before = undefined;
       if (announced !== undefined && announced.length > 0) await publish(announced);
-    },
-    async release() {
-      try {
-        await drain();
-      } finally {
-        dispatcher.close();
-        writer.release();
-      }
     },
   };
 }
@@ -654,11 +621,6 @@ function createSessionEventDispatcher(input: {
   // Commits react one at a time, in order. Inline tool calls publish concurrently, and a slow
   // effect of an earlier commit must not write its slot over a later commit's.
   let reacting: Promise<void> = Promise.resolve();
-  // Work a handler handed `waitUntil`: it runs behind the turn, and its failures are only logged.
-  const background = createBackgroundWork({ adapterKind: adapter.kind });
-  const waitUntilFor = background.waitUntilFor;
-  const saveChannelState = () =>
-    setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
   return {
     adapterCtx,
@@ -673,13 +635,7 @@ function createSessionEventDispatcher(input: {
         await callAdapterEventHandler(
           adapter,
           { facts, position: position.line },
-          {
-            ...deliveryCtx,
-            position,
-            scope: undefined,
-            view,
-            waitUntil: waitUntilFor("committed"),
-          },
+          { ...deliveryCtx, position, scope: undefined, view },
         );
       };
       for (const { event, position, progress, view } of written) {
@@ -687,22 +643,11 @@ function createSessionEventDispatcher(input: {
         if (await forwardSessionInput(ctx, event, inputSource)) continue;
         if (!progress) (line ??= { facts: [], position, view }).facts.push(event);
         const scope = "scope" in event ? event.scope : undefined;
-        const waitUntil = waitUntilFor(event.type);
-        await callAdapterEventHandler(adapter, event, {
-          ...deliveryCtx,
-          position,
-          scope,
-          view,
-          waitUntil,
-        });
+        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope, view });
       }
       await committed();
-      saveChannelState();
+      setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     },
-    async settle() {
-      if (await background.settle()) saveChannelState();
-    },
-    close: background.close,
     react(written, options) {
       if (written.length === 0) return Promise.resolve();
       const reacted = reacting.then(() => runEffects(ctx, { ...options, written }));
@@ -829,7 +774,7 @@ export async function publishTerminalSessionEvent(input: {
     } catch {
       // The terminal fact survived an earlier attempt that already closed the stream.
     } finally {
-      await publisher.release();
+      publisher.writer.release();
     }
     return;
   }
@@ -868,7 +813,7 @@ export async function publishTerminalSessionEvent(input: {
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
-    await publisher.release();
+    publisher.writer.release();
     try {
       await instrumentation?.flush();
     } catch (error) {
