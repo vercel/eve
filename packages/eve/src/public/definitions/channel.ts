@@ -16,6 +16,7 @@ import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
 export type { ChannelDelivery } from "#shared/channel-delivery.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
+import { createBackgroundWork } from "#channel/background-work.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import {
   CHANNEL_SENTINEL,
@@ -207,15 +208,23 @@ export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends 
   /** Immutable observation snapshot of the whole commit the event is in. */
   readonly view: SessionView;
   /**
-   * Lets the turn go on while `promise` settles, instead of waiting for the handler. Use it for
-   * a platform call the turn doesn't depend on, such as a typing or status update.
+   * Lets the turn go on while `task` settles, instead of waiting for the handler. Use it for a
+   * platform call the turn doesn't depend on, such as a typing or status update.
    *
-   * eve waits for the promise before the model call's scope ends and before it saves the
-   * session, so the work never outlives the step, and state it writes to `ctx.channel.state` is
-   * saved. A rejection is logged, not thrown. Later handlers, hooks, and the model don't wait
-   * for it, so work that must happen in order with them belongs in the handler itself.
+   * eve waits for the task before the step that ran the handler ends (inside a model call, before
+   * that call ends), so the work never outlives the sandbox or session it uses, and changes it
+   * makes to `ctx.channel.state` are saved with the step. `session.ended` is the exception: the
+   * session is over, so nothing is saved after it.
+   *
+   * - A rejection is logged, not thrown.
+   * - eve stops waiting after 30 seconds and logs a warning. Changes the task makes after that
+   *   aren't saved.
+   * - Later handlers, hooks, and the model don't wait for the task, so work that must happen in
+   *   order with them belongs in the handler itself.
+   * - Call it while the handler runs. A call after the step ended is logged, and eve doesn't wait
+   *   for that task.
    */
-  waitUntil(promise: PromiseLike<unknown>): void;
+  readonly waitUntil: (task: Promise<unknown>) => void;
 }
 
 /**
@@ -383,20 +392,13 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
           },
         };
         // Without a publisher's queue, the handler waits for its background work itself.
-        const inline: Promise<unknown>[] = [];
+        const inline = createBackgroundWork();
         const ctx: ChannelEventContext<typeof channel> = {
           ...buildCallbackContext(),
           channel,
           position: position ?? { index: 0, line: 0 },
           view: snapshotOf(view ?? currentView()),
-          waitUntil:
-            queue ??
-            ((promise) => {
-              const settled = Promise.resolve(promise);
-              // Rejecting before the handler returns isn't unhandled; the handler's call throws it.
-              settled.catch(() => {});
-              inline.push(settled);
-            }),
+          waitUntil: queue ?? inline.waitUntilFor(event.type),
         };
         const handled = (
           userHandler as (
@@ -406,8 +408,12 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
         )(event, ctx);
         if (queue !== undefined) return handled;
         return (async () => {
-          await handled;
-          while (inline.length > 0) await Promise.all(inline.splice(0));
+          try {
+            await handled;
+          } finally {
+            await inline.settle();
+            inline.close();
+          }
         })();
       };
     }

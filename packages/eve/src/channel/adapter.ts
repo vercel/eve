@@ -62,7 +62,7 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> extends
    * @internal The publisher's queue for an event handler's background work. Without one, the
    * handler waits for that work before it returns.
    */
-  readonly waitUntil?: (promise: PromiseLike<unknown>) => void;
+  readonly waitUntil?: (task: Promise<unknown>) => void;
 }
 
 /**

@@ -3,6 +3,7 @@ import { readSessionStreamTailIndex, streamSessionLines } from "#execution/sessi
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
+import { createBackgroundWork } from "#channel/background-work.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { runEffects, type RunEffectsInput } from "#definitions/kernel.js";
 import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
@@ -366,6 +367,8 @@ interface EventDispatcher extends SessionEventDispatcher {
   deliver(written: readonly WrittenEvent[]): Promise<void>;
   /** Waits for the work handlers handed `waitUntil`, then saves the channel context it left. */
   settle(): Promise<void>;
+  /** Ends the step's background work: later `waitUntil` calls are logged and never waited for. */
+  close(): void;
 }
 
 /** A session's stream held by one step, with the dispatch of the events that step publishes. */
@@ -633,6 +636,7 @@ export function openSessionEventPublisher(input: {
       try {
         await drain();
       } finally {
+        dispatcher.close();
         writer.release();
       }
     },
@@ -651,23 +655,8 @@ function createSessionEventDispatcher(input: {
   // effect of an earlier commit must not write its slot over a later commit's.
   let reacting: Promise<void> = Promise.resolve();
   // Work a handler handed `waitUntil`: it runs behind the turn, and its failures are only logged.
-  const background: Promise<void>[] = [];
-  const waitUntilFor =
-    (eventType: string) =>
-    (promise: PromiseLike<unknown>): void => {
-      background.push(
-        Promise.resolve(promise).then(
-          () => undefined,
-          (error: unknown) => {
-            log.error("a channel event handler's waitUntil work failed", {
-              adapterKind: adapter.kind,
-              eventType,
-              error,
-            });
-          },
-        ),
-      );
-    };
+  const background = createBackgroundWork({ adapterKind: adapter.kind });
+  const waitUntilFor = background.waitUntilFor;
   const saveChannelState = () =>
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
@@ -711,11 +700,9 @@ function createSessionEventDispatcher(input: {
       saveChannelState();
     },
     async settle() {
-      if (background.length === 0) return;
-      // Work can hand more work to `waitUntil` while it runs.
-      while (background.length > 0) await Promise.all(background.splice(0));
-      saveChannelState();
+      if (await background.settle()) saveChannelState();
     },
+    close: background.close,
     react(written, options) {
       if (written.length === 0) return Promise.resolve();
       const reacted = reacting.then(() => runEffects(ctx, { ...options, written }));
