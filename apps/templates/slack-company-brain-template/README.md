@@ -13,7 +13,7 @@ specialists (subagents).
 ```text
 agent/
   agent.ts                       # model selection
-  instructions.md                # grounding, source routing, and Slack style
+  instructions.md                # grounding, citations, source routing, and Slack style
   instructions/github.ts         # how to connect GitHub; delete once connected
   instructions/notion.ts         # how to connect Notion; delete once connected
   instructions/linear.ts         # how to connect Linear; delete once connected
@@ -22,6 +22,7 @@ agent/
   connections/linear.ts          # Linear issues and projects, on once its connector exists
   connections/pagerduty.ts       # on-call and incidents, on once its connector exists
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
+  channels/eve.ts                # HTTP API access, with tool stubs for local evals
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
   extensions/skills.ts           # skills people teach the agent, for themselves or a channel
@@ -37,11 +38,16 @@ agent/
   lib/connect.ts                 # connector detection and setup notes
   lib/github.ts                  # GitHub connector and firewall credential broker
   lib/conversation.ts            # tells private conversations from shared channels
+evals/                           # checks for answer length, citations, and thread replies
 ```
 
 - **Grounded answers.** The instructions tell the agent to answer
   company-specific questions only from sources it retrieved, link the source
-  inline, and say when nothing answers the question.
+  inline, and say when nothing answers the question or a source failed.
+- **Answer length.** A short answer for a simple question and 75–200 words for
+  a comparison, analysis, or multi-part question, unless the person asks for
+  something else. The instructions also cover what to tell a specialist and
+  how to combine what specialists return.
 - **Thread context.** Each mention also sees the replies posted since the agent
   last spoke, with sender names.
 - **Followed threads.** Once someone brings the agent into a thread, it sees
@@ -410,6 +416,24 @@ carries. The Slack docs cover common next steps:
   from a schedule, such as a weekly digest.
 - [Customize rendering](https://eve.dev/docs/channels/slack#customize-rendering)
   of replies and approval cards.
+
+## Evals
+
+`evals/` checks the reply behavior in `agent/instructions.md`: answer length,
+inline citations, sources that disagree or fail, and when to reply in a
+followed thread. The evals call the real model and replace the Slack tools with
+fixed results, so they need only AI Gateway access:
+
+```bash
+pnpm eval              # every eval
+pnpm eval grounding    # one directory
+pnpm eval --repeat 3   # results vary between runs; repeat before trusting a change
+```
+
+They run over eve's HTTP API, not Slack, so
+`evals/lib/slack.ts` builds messages in the format the Slack channel gives
+the model. When you change the instructions, add a case under `evals/` for the
+behavior you changed. See [Evals](https://eve.dev/docs/evals).
 
 ## Before you roll it out
 
