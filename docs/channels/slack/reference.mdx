@@ -638,11 +638,13 @@ export default slackChannel({
 });
 ```
 
-- A reply starts streaming once it passes 280 characters, and appends at most once a second. Shorter replies post whole.
+- A reply starts streaming once it passes 280 characters, and appends at most once a second. Shorter replies post whole, and so does a quiet turn's text until the turn shows its work.
 - Whether text is the reply or narration before a tool call is known only when it ends. Narration that passed 280 characters streams, and eve removes it once the model calls the tool.
-- The completed reply still runs through your [renderers](#customize-rendering). Delivering it with `next()` or `postCompletedSlackReply` closes the streamed message, and rewrites it with `chat.update` when a renderer changed the text or added blocks. A renderer that posts with `ctx.channel.thread.post` instead keeps its own message, and eve removes the streamed one.
+- What streams is the text that reaches eve's default `content.delta`, so your [renderers](#customize-rendering) decide it: a `content.delta` handler can pass a delta on with `next()`, change it, or drop it. A renderer that handles `content.completed`, such as one that redacts replies, must also handle `content.delta`. Until one does, replies post whole and eve logs a warning.
+- The completed reply still runs through your renderers. Delivering it with `next()` or `postCompletedSlackReply` closes the streamed message, and rewrites it with `chat.update` when a renderer changed the text or added blocks. A renderer that posts with `ctx.channel.thread.post` instead keeps its own message, and eve removes the streamed one.
+- Text the model run never completes, such as a failed attempt's or text a content filter cut off, is removed when the run ends. If the process dies mid-stream, the partial message stays, and Slack finalizes it after 10 minutes.
 - Streaming needs a thread, or a code channel, where it streams top-level. Outside a DM, it also needs the Slack user who triggered the turn. Without them, or when Slack refuses to start a stream, the reply posts whole.
-- When an append fails, the stream passes 12,000 characters, or Slack's 10-minute stream limit ends it, eve rewrites the message with the full reply when it finishes, or removes it and posts the reply with the usual fallbacks.
+- When Slack rate-limits an append, eve waits twice as long before the next one, up to 30 seconds. When an append fails otherwise, the stream passes 12,000 characters, or Slack's 10-minute stream limit ends it, eve rewrites the message with the full reply when it finishes, or removes it and posts the reply with the usual fallbacks.
 - When someone presses stop on a streaming reply, Slack keeps what streamed and eve doesn't post the rest.
 - Streaming uses only the `chat:write` scope.
 

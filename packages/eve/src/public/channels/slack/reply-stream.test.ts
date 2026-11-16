@@ -14,14 +14,19 @@ const LONG = "A reply that keeps going. ".repeat(12);
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let refused: Record<string, string>;
+let limited: Set<string>;
 let now: number;
 
 beforeEach(() => {
   refused = {};
+  limited = new Set();
   now = 1_000_000;
   vi.spyOn(Date, "now").mockImplementation(() => now);
   fetchMock = vi.fn(async (request: string | URL | Request) => {
     const operation = String(request).replace("https://slack.com/api/", "");
+    if (limited.has(operation)) {
+      return Response.json({ ok: false, error: "ratelimited" }, { status: 429 });
+    }
     const error = refused[operation];
     if (error !== undefined) return Response.json({ ok: false, error });
     return Response.json({ ok: true, ts: operation === "chat.startStream" ? STREAM_TS : "1.1" });
@@ -79,6 +84,13 @@ function harness(
         scope,
       });
       announced = true;
+    },
+    async settleRun(finishReason = "stop") {
+      await rendering.event({
+        type: "model.settled",
+        data: { finishReason, outcome: "completed", runId: "r1" },
+        scope,
+      });
     },
     async complete(value: string, phase: "reply" | "narration" = "reply", partId = "p1") {
       await rendering.event({
@@ -147,6 +159,7 @@ describe("Slack reply streaming", () => {
   it("rewrites the streamed message when a renderer changes the reply", async () => {
     const signed = defineSlackRenderer({
       events: {
+        "content.delta": (event, _ctx, next) => next(event),
         async "content.completed"(event, _ctx, next) {
           const { value } = event.data;
           await next({ ...event, data: { ...event.data, value: `${String(value)}\n\n— eve` } });
@@ -170,6 +183,99 @@ describe("Slack reply streaming", () => {
       ts: STREAM_TS,
     });
     expect(operations()).not.toContain("chat.postMessage");
+  });
+
+  it("posts replies whole while a renderer changes them only once completed", async () => {
+    const redacting = defineSlackRenderer({
+      events: {
+        async "content.completed"(event, _ctx, next) {
+          const value = String(event.data.value).replaceAll("keeps", "[redacted]");
+          await next({ ...event, data: { ...event.data, value } });
+        },
+      },
+    });
+    const { complete, start, write } = harness({
+      experimental: { streaming: true },
+      renderers: [redacting],
+    });
+    await start();
+
+    await write(LONG);
+    await complete(LONG);
+
+    expect(operations()).toEqual(["chat.getPermalink", "chat.postMessage"]);
+  });
+
+  it("streams what a renderer's content.delta passes on", async () => {
+    const redacting = defineSlackRenderer({
+      events: {
+        "content.delta": (event, _ctx, next) =>
+          next({
+            ...event,
+            data: { ...event.data, delta: event.data.delta.replaceAll("keeps", "[redacted]") },
+          }),
+        async "content.completed"(event, _ctx, next) {
+          const value = String(event.data.value).replaceAll("keeps", "[redacted]");
+          await next({ ...event, data: { ...event.data, value } });
+        },
+      },
+    });
+    const { complete, start, write } = harness({
+      experimental: { streaming: true },
+      renderers: [redacting],
+    });
+    await start();
+
+    await write(LONG);
+    await complete(LONG);
+
+    const redacted = LONG.replaceAll("keeps", "[redacted]");
+    expect(calls().slice(1)).toEqual([
+      ["chat.startStream", expect.objectContaining({ markdown_text: redacted })],
+      ["chat.stopStream", { channel: "C01", ts: STREAM_TS }],
+    ]);
+  });
+
+  it("removes a part its model run never completed", async () => {
+    const { settleRun, start, write } = harness();
+    await start();
+
+    await write(LONG);
+    await settleRun("content-filter");
+
+    expect(operations().slice(-3)).toEqual(["chat.startStream", "chat.stopStream", "chat.delete"]);
+  });
+
+  it("waits longer and keeps streaming when Slack rate-limits an append", async () => {
+    const { complete, start, write } = harness();
+    await start();
+
+    await write(LONG);
+    limited.add("chat.appendStream");
+    now += 1_500;
+    await write(" One.");
+    limited.delete("chat.appendStream");
+    now += 1_500;
+    await write(" Two.");
+    now += 1_000;
+    await write(" Three.");
+    await complete(`${LONG} One. Two. Three.`);
+
+    expect(calls().slice(2)).toEqual([
+      ["chat.appendStream", expect.objectContaining({ markdown_text: " One." })],
+      ["chat.appendStream", expect.objectContaining({ markdown_text: " One. Two. Three." })],
+      ["chat.stopStream", { channel: "C01", ts: STREAM_TS }],
+    ]);
+  });
+
+  it("doesn't stream a quiet turn's text", async () => {
+    const { complete, start, write } = harness(undefined, { pendingQuietTurn: true });
+    await start();
+
+    await write(LONG);
+    await complete(LONG);
+
+    expect(operations()).not.toContain("chat.startStream");
   });
 
   it("finishes a stream whose appends failed by rewriting the message", async () => {
@@ -196,6 +302,17 @@ describe("Slack reply streaming", () => {
     await complete(`${LONG} More.`);
 
     expect(operations().slice(-1)).toEqual(["chat.appendStream"]);
+  });
+
+  it("leaves a reply someone stopped after its last append as it was", async () => {
+    const { complete, start, write } = harness();
+    await start();
+
+    await write(LONG);
+    refused["chat.stopStream"] = "message_not_in_streaming_state";
+    await complete(`${LONG} More.`);
+
+    expect(operations().slice(-2)).toEqual(["chat.startStream", "chat.stopStream"]);
   });
 
   it("posts the reply whole when Slack won't start a stream", async () => {

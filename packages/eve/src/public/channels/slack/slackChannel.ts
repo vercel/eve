@@ -71,7 +71,11 @@ import {
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
 import { withFinalReplyDelivery } from "#public/channels/slack/reply-delivery.js";
-import { withReplyStreaming } from "#public/channels/slack/reply-stream.js";
+import {
+  renderersAllowStreaming,
+  withReplyStreaming,
+  withStreamedDeltas,
+} from "#public/channels/slack/reply-stream.js";
 import {
   composeInteractionCards,
   composeSlackRenderers,
@@ -1073,6 +1077,12 @@ export interface SlackChannelConfig {
      * tool call rarely shows; a streamed part that turns out to be narration
      * is removed. Shorter replies post whole, as without this option.
      *
+     * What streams is the text that reaches eve's default `content.delta`, so
+     * a renderer's `content.delta` handler decides it: pass a delta on, change
+     * it, or drop it. A renderer that handles `content.completed`, such as one
+     * that redacts replies, must also handle `content.delta`; until one does,
+     * replies post whole and eve logs a warning.
+     *
      * The completed reply still runs through `renderers`. Delivering it with
      * the default renderer or `postCompletedSlackReply` finalizes the streamed
      * message, and rewrites it with `chat.update` when a renderer changed the
@@ -1157,10 +1167,18 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     maxBytes: maxBytesOf(uploadPolicy),
   });
   const onAnswers = config.onAnswers ?? defaultOnAnswers;
-  const interactionCard = composeInteractionCards(config.renderers ?? []);
-  const rendering = composeSlackRenderers(config.renderers ?? [], {
+  const renderers = config.renderers ?? [];
+  const streaming = config.experimental?.streaming === true && renderersAllowStreaming(renderers);
+  if (config.experimental?.streaming === true && !streaming) {
+    log.warn(
+      "Slack reply streaming is off: a renderer handles content.completed but not content.delta. Add a content.delta handler that decides what streams, such as one that calls next().",
+    );
+  }
+  const interactionCard = composeInteractionCards(renderers);
+  const rendering = composeSlackRenderers(renderers, {
     events: {
       ...defaultEvents,
+      ...(streaming && { "content.delta": withStreamedDeltas(defaultEvents["content.delta"]) }),
       ...defaultInteractionEvents(config.approvalChannel, interactionCard),
     },
     received: defaultReceived,
@@ -1202,7 +1220,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     },
     rendering.taskCard,
   );
-  const events = config.experimental?.streaming === true ? withReplyStreaming(composed) : composed;
+  const events = streaming ? withReplyStreaming(composed) : composed;
 
   const handledEvents = new Set<string>();
 
