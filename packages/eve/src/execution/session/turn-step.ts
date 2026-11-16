@@ -150,19 +150,25 @@ export function turnStepOn(
   host: SessionStepHost,
 ): (input: TurnStepInput) => Promise<TurnStepResult> {
   return async (input) =>
-    await withSessionStateDelta(input, (state) =>
-      runSessionStep(
-        {
-          ...state,
-          // The turn carries one signal for both interruptions (see `TurnControl`).
-          ...(state.abortSignal !== undefined && state.steeringSignal === undefined
-            ? splitTurnSignal(state.abortSignal)
-            : {}),
-          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-        },
-        host,
-      ),
-    );
+    await withSessionStateDelta(input, async (state) => {
+      // The turn carries one signal for both interruptions (see `TurnControl`).
+      const split =
+        state.abortSignal !== undefined && state.steeringSignal === undefined
+          ? splitTurnSignal(state.abortSignal)
+          : undefined;
+      try {
+        return await runSessionStep(
+          {
+            ...state,
+            ...(split && { abortSignal: split.abortSignal, steeringSignal: split.steeringSignal }),
+            serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+          },
+          host,
+        );
+      } finally {
+        split?.release();
+      }
+    });
 }
 
 async function runSessionStep(

@@ -82,4 +82,17 @@ describe("splitTurnSignal", () => {
     expect(steeringSignal.aborted).toBe(true);
     expect(abortSignal.aborted).toBe(true);
   });
+
+  it("stops following when released, closing the Workflow readers of the replacements", () => {
+    const first = new AbortController();
+    const next = new AbortController();
+    const reader = new AbortController();
+    Object.assign(next.signal, { [Symbol.for("WORKFLOW_ABORT_READER_CANCEL")]: reader });
+    const { abortSignal, release } = splitTurnSignal(first.signal);
+    first.abort(turnSteeredReason(next.signal));
+    release();
+    expect(reader.signal.aborted).toBe(true);
+    next.abort(new Error("cancelled"));
+    expect(abortSignal.aborted).toBe(false);
+  });
 });
