@@ -12,7 +12,12 @@ import {
 } from "../lib/constants.js";
 import { mentionPattern, resolveBotName } from "../lib/github/bot-name.js";
 import { githubChannelCredentials } from "../lib/github/credentials.js";
-import { stampAutonomous, stampTrusted } from "../lib/trust.js";
+import {
+  isCiPull,
+  stampAutonomous,
+  stampCi,
+  stampTrusted,
+} from "../lib/trust.js";
 
 // Resolve the configured resource, not an association on an arbitrary event.
 async function isFactoryRepository(
@@ -173,9 +178,10 @@ const CI_FIX_TASK = [
  *   capability-limited agent; untrusted content must not start factory sessions.
  * - `onCheckSuite` is the red-CI fix loop, scoped to the factory's own work:
  *   it dispatches only when a suite completes with a failure conclusion on a
- *   pull request whose head branch carries the factory prefix, so a person's
- *   red PR never triggers an uninvited fix. The session runs unattended under
- *   the autonomous principal, anchored to the pull request, and the injected
+ *   API-verified open draft PR whose same-repository head matches the report
+ *   and carries the factory prefix, excluding the reserved ticket namespace.
+ *   The unattended CI authenticator binds pushes and comments to that PR;
+ *   revisions of ticket heads require explicit trusted intake. The injected
  *   task bounds the loop by counting earlier fix-attempt comments on the
  *   thread. Requires the connector to subscribe to the `check_suite` webhook
  *   event.
@@ -204,33 +210,38 @@ export default githubChannel({
     const raw = suite.raw as {
       head_branch?: unknown;
       check_suite?: { head_branch?: unknown };
-    };
-    const headBranch = raw.head_branch ?? raw.check_suite?.head_branch;
+    } | null;
+    const headBranch = raw?.head_branch ?? raw?.check_suite?.head_branch;
     const [pullNumber] = suite.pullRequests;
     if (
       suite.action !== "completed" ||
       suite.conclusion !== "failure" ||
+      !Number.isSafeInteger(pullNumber) ||
       pullNumber === undefined ||
+      pullNumber <= 0 ||
+      !Number.isSafeInteger(ctx.repository.id) ||
+      ctx.repository.id <= 0 ||
       typeof headBranch !== "string" ||
       !headBranch.startsWith(FACTORY_BRANCH_PREFIX)
     ) {
       return null;
     }
     const pull = await ctx.github
-      .request<{ head: { repo: { id: number } | null; ref: string } }>({
+      .request<unknown>({
         method: "GET",
         path: `/repos/${FACTORY_REPO}/pulls/${pullNumber}`,
       })
       .catch(() => null);
-    if (
-      !pull?.ok ||
-      pull.body.head.repo?.id !== ctx.repository.id ||
-      !pull.body.head.ref.startsWith(FACTORY_BRANCH_PREFIX)
-    ) {
+    const scope = {
+      branch: headBranch,
+      pullNumber,
+      repositoryId: ctx.repository.id,
+    };
+    if (!(pull?.ok && isCiPull(pull.body, scope))) {
       return null;
     }
     return {
-      auth: stampAutonomous(defaultGitHubAuth(ctx), pullNumber),
+      auth: stampCi(defaultGitHubAuth(ctx), scope),
       context: [CI_FIX_TASK],
     };
   },

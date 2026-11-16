@@ -1,5 +1,6 @@
 import type { SessionAuthContext } from "eve/context";
 import { FACTORY_BRANCH_PREFIX, FACTORY_REPO } from "./constants.js";
+import { validateBranch } from "./github/git-remote.js";
 
 const TICKET_BRANCH_DIGEST = /^[a-f0-9]{64}$/;
 
@@ -85,6 +86,96 @@ export function stampAutonomous(
   };
 }
 
+/** Reserved provenance namespace, including after the ticket session has ended. */
+export function isTicketBranch(branch: string): boolean {
+  return (
+    branch.startsWith(`${FACTORY_BRANCH_PREFIX}ticket-`) &&
+    TICKET_BRANCH_DIGEST.test(
+      branch.slice(`${FACTORY_BRANCH_PREFIX}ticket-`.length)
+    )
+  );
+}
+
+function isCiBranch(branch: string): boolean {
+  return (
+    branch.length <= 255 &&
+    validateBranch(branch) === null &&
+    branch.startsWith(FACTORY_BRANCH_PREFIX) &&
+    !isTicketBranch(branch)
+  );
+}
+
+export interface CiScope {
+  branch: string;
+  pullNumber: number;
+  repositoryId: number;
+}
+
+/** REST PR shape, not eve's normalized context or webhook-supplied branch. */
+export function isCiPull(pull: unknown, scope: CiScope): boolean {
+  const value = pull as {
+    number?: unknown;
+    state?: unknown;
+    draft?: unknown;
+    head?: { ref?: unknown; repo?: { id?: unknown } | null };
+    base?: { repo?: { id?: unknown } | null };
+  } | null;
+  return (
+    value?.number === scope.pullNumber &&
+    value.state === "open" &&
+    value.draft === true &&
+    value.head?.ref === scope.branch &&
+    value.head?.repo?.id === scope.repositoryId &&
+    value.base?.repo?.id === scope.repositoryId &&
+    isCiBranch(scope.branch)
+  );
+}
+
+export function isCiIntake(auth: SessionAuthContext | null): boolean {
+  return auth?.authenticator === "github-ci-webhook";
+}
+
+/** A distinct authenticator makes lost or malformed scope fail closed. */
+export function stampCi(
+  auth: SessionAuthContext,
+  scope: CiScope
+): SessionAuthContext {
+  return {
+    ...stampAutonomous(auth, scope.pullNumber),
+    attributes: {
+      ciBranch: scope.branch,
+      ciPullNumber: String(scope.pullNumber),
+      ciRepositoryId: String(scope.repositoryId),
+      factoryRepository: FACTORY_REPO.toLowerCase(),
+    },
+    authenticator: "github-ci-webhook",
+  };
+}
+
+export function ciScope(auth: SessionAuthContext | null): CiScope {
+  const attributes = auth?.attributes;
+  const branch = attributes?.ciBranch;
+  const pullNumber = Number(attributes?.ciPullNumber);
+  const repositoryId = Number(attributes?.ciRepositoryId);
+  if (
+    !isCiIntake(auth) ||
+    auth?.principalId !== AUTONOMOUS_PRINCIPAL ||
+    auth?.principalType !== "service" ||
+    attributes?.factoryRepository !== FACTORY_REPO.toLowerCase() ||
+    typeof branch !== "string" ||
+    !isCiBranch(branch) ||
+    !Number.isSafeInteger(pullNumber) ||
+    pullNumber <= 0 ||
+    String(pullNumber) !== attributes.ciPullNumber ||
+    !Number.isSafeInteger(repositoryId) ||
+    repositoryId <= 0 ||
+    String(repositoryId) !== attributes.ciRepositoryId
+  ) {
+    throw new Error("CI push authority is missing or invalid.");
+  }
+  return { branch, pullNumber, repositoryId };
+}
+
 /** Exact server-assigned branch authority; ticket sessions without it fail closed. */
 export function ticketBranch(auth: SessionAuthContext | null): string {
   const branch = auth?.attributes.ticketBranch;
@@ -93,10 +184,7 @@ export function ticketBranch(auth: SessionAuthContext | null): string {
     auth?.principalType !== "service" ||
     auth.attributes.factoryRepository !== FACTORY_REPO.toLowerCase() ||
     typeof branch !== "string" ||
-    !branch.startsWith(`${FACTORY_BRANCH_PREFIX}ticket-`) ||
-    !TICKET_BRANCH_DIGEST.test(
-      branch.slice(`${FACTORY_BRANCH_PREFIX}ticket-`.length)
-    )
+    !isTicketBranch(branch)
   ) {
     throw new Error("HTTP ticket push authority is missing or invalid.");
   }
@@ -110,6 +198,11 @@ export function assertPushAuthority(
 ): void {
   if (auth === undefined) {
     throw new Error("Push authentication context is required.");
+  }
+  if (isCiIntake(auth) && branch !== ciScope(auth).branch) {
+    throw new Error(
+      "CI fixes may push only their verified pull request branch."
+    );
   }
   if (isTicketIntake(auth) && branch !== ticketBranch(auth)) {
     throw new Error("HTTP tickets may push only their server-assigned branch.");
@@ -143,7 +236,10 @@ export function isTicketIntake(auth: SessionAuthContext | null): boolean {
  * Whether the session runs unattended under {@link AUTONOMOUS_PRINCIPAL}.
  */
 export function isAutonomous(auth: SessionAuthContext | null): boolean {
-  return auth !== null && auth.principalId === AUTONOMOUS_PRINCIPAL;
+  return (
+    auth !== null &&
+    (auth.principalId === AUTONOMOUS_PRINCIPAL || isCiIntake(auth))
+  );
 }
 
 /**
@@ -157,6 +253,7 @@ export function isAutonomous(auth: SessionAuthContext | null): boolean {
 export function isTrusted(auth: SessionAuthContext | null): boolean {
   return (
     auth !== null &&
+    !isCiIntake(auth) &&
     auth.attributes[TRUSTED_ATTRIBUTE] === "true" &&
     auth.attributes.factoryRepository === FACTORY_REPO.toLowerCase() &&
     (auth.authenticator !== "github-webhook" ||

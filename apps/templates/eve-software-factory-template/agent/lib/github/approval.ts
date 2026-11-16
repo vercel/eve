@@ -1,7 +1,9 @@
 import type { ApprovalContext, ApprovalStatus } from "eve/tools/approval";
 import {
+  ciScope,
   intakeIssueNumber,
   isAutonomous,
+  isCiIntake,
   isScheduleAppAuth,
   isTicketIntake,
   isTrusted,
@@ -24,8 +26,7 @@ export function writePolicy(ctx: ApprovalContext): ApprovalStatus {
   const auth = ctx.session.auth.current;
   if (isAutonomous(auth)) {
     return {
-      reason:
-        "Unattended factory runs may only apply labels, comment on their intake issue, and open draft pull requests.",
+      reason: "This write is outside the unattended run's intake authority.",
       type: "denied",
     };
   }
@@ -54,7 +55,14 @@ export function commentPolicy(ctx: ApprovalContext): ApprovalStatus {
   if (!isAutonomous(auth)) {
     return writePolicy(ctx);
   }
-  const intakeIssue = intakeIssueNumber(auth);
+  let intakeIssue: number | null;
+  try {
+    intakeIssue = isCiIntake(auth)
+      ? ciScope(auth).pullNumber
+      : intakeIssueNumber(auth);
+  } catch {
+    intakeIssue = null;
+  }
   const input = ctx.toolInput as { issueNumber?: unknown } | undefined;
   if (intakeIssue !== null && input?.issueNumber === intakeIssue) {
     return "not-applicable";
@@ -96,11 +104,11 @@ export function factoryBrainPolicy(ctx: ApprovalContext): ApprovalStatus {
 
 /**
  * Label writes let vetted unattended GitHub runs mark work as picked up.
- * HTTP tickets have no vetted issue and cannot mutate repository labels.
+ * Tickets and CI fixes cannot mutate repository labels.
  */
 export function labelPolicy(ctx: ApprovalContext): ApprovalStatus {
   const auth = ctx.session.auth.current;
-  return isAutonomous(auth) && !isTicketIntake(auth)
+  return isAutonomous(auth) && !isTicketIntake(auth) && !isCiIntake(auth)
     ? "not-applicable"
     : writePolicy(ctx);
 }
@@ -133,27 +141,30 @@ export function shipPolicy(ctx: ApprovalContext): ApprovalStatus {
  * The only sessions that reach the issue-lifecycle tools are trusted mentions,
  * autonomous label runs, and the local dev TUI; an untrusted public commenter
  * never gets a session (see the channel's `onComment`), so allowing this can't
- * hand issue control to an arbitrary account. HTTP ticket sessions are denied:
- * their bodies have not been vetted by a repository writer. Unlike
+ * hand issue control to an arbitrary account. HTTP tickets and automatic CI
+ * sessions are denied; neither grants issue-lifecycle authority. Unlike
  * {@link commentPolicy}, vetted GitHub runs are deliberately not scoped to one
  * issue, because deduplication closes the duplicates, not the intake issue.
  */
 export function closeIssuePolicy(ctx: ApprovalContext): ApprovalStatus {
   const auth = ctx.session.auth.current;
-  return isAutonomous(auth) && !isTicketIntake(auth)
+  return isAutonomous(auth) && !isTicketIntake(auth) && !isCiIntake(auth)
     ? "not-applicable"
     : writePolicy(ctx);
 }
 
 /**
- * `createPullRequest`: a draft runs for every caller, anything that can be
- * merged follows {@link shipPolicy}.
+ * `createPullRequest`: CI sessions cannot create new PRs. Other callers can
+ * create drafts; anything that can be merged follows {@link shipPolicy}.
  *
  * @remarks
  * A draft cannot merge, so an unattended run can deliver its finished work
  * without a card while marking the PR ready stays a human act.
  */
 export function createPullRequestPolicy(ctx: ApprovalContext): ApprovalStatus {
+  if (isCiIntake(ctx.session.auth.current)) {
+    return { reason: "CI fixes cannot create pull requests.", type: "denied" };
+  }
   const input = ctx.toolInput as { draft?: unknown } | undefined;
   if (input?.draft === true) {
     return "not-applicable";
