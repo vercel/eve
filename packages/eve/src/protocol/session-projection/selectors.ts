@@ -285,6 +285,15 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
       ),
     );
   const asked = about((row) => row.status === "open");
+  // A call that runs other calls, as a program does, waits with the calls it made: while
+  // someone is asked about one of them, it is asked too.
+  for (const callId of asked) {
+    let owner = view.calls[callId]?.owner;
+    while (owner !== undefined && "callId" in owner && !asked.has(owner.callId)) {
+      asked.add(owner.callId);
+      owner = view.calls[owner.callId]?.owner;
+    }
+  }
   const approved = about((row) => row.status === "settled" && row.outcome === "accepted");
   const turnCalls = Object.values(view.calls).filter(
     (entry) => entry.status !== "settled" && callTurn(view, entry) === turnId,

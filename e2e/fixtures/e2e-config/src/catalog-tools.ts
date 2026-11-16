@@ -10,5 +10,8 @@ export const CALL_TOOL = "eve__tool";
 /** Loads a skill by name. */
 export const SKILL_TOOL = "eve__skill";
 
+/** Runs a JavaScript program that calls the agent's tools, for an agent with code mode on. */
+export const EXECUTE_TOOL = "eve__execute";
+
 /** Waits for running tasks. */
 export const TASK_WAIT_TOOL = "eve__task_wait";

@@ -10,7 +10,7 @@ import type {
   EveToolPart,
 } from "eve/react";
 import { signInEnding } from "eve/events";
-import { useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent, type ReactNode } from "react";
 import {
   BotIcon,
   BrainIcon,
@@ -166,13 +166,28 @@ function Steps({
   const working = states.some((state) => state === "working");
   const waiting = states.some((state) => state === "waiting");
   const failed = states.filter((state) => state === "failed").length;
+  const toolLines = (call: EveToolPart): ReactNode => {
+    const nested = steps.filter(
+      (step): step is EveToolPart => step.type === "tool" && step.parentCallId === call.callId,
+    );
+    return (
+      <Fragment key={call.callId}>
+        <ToolLine part={call} state={callState(view, call.callId)} />
+        {nested.length > 0 ? (
+          <div className="ml-[calc(--spacing(2)-1px)] border-l pl-4">
+            <Trace>{nested.map(toolLines)}</Trace>
+          </div>
+        ) : null}
+      </Fragment>
+    );
+  };
   const lines = (
     <Trace>
       {steps.map((step, index) =>
         step.type === "reasoning" ? (
           <ReasoningLine key={partKey(step, index)} part={step} />
-        ) : (
-          <ToolLine key={step.callId} part={step} state={callState(view, step.callId)} />
+        ) : isNested(step, steps) ? null : (
+          toolLines(step)
         ),
       )}
     </Trace>
@@ -217,6 +232,17 @@ function Steps({
         />
       ))}
     </>
+  );
+}
+
+/**
+ * Whether a call shows under another call of its run: the one it was made inside, such as the
+ * `eve__execute` call of a program.
+ */
+function isNested(step: Step, steps: readonly Step[]): boolean {
+  return (
+    step.type === "tool" &&
+    steps.some((other) => other.type === "tool" && other.callId === step.parentCallId)
   );
 }
 

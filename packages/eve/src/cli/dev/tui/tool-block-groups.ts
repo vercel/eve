@@ -131,6 +131,8 @@ function sameRun(first: Block, candidate: Block): boolean {
     candidate.depth === first.depth &&
     candidate.live === first.live &&
     candidate.subagentCallId === first.subagentCallId &&
+    // Calls a program made stay with their program, apart from the model's own and another's.
+    candidate.parentCallId === first.parentCallId &&
     // Copy derives from the tool name, so name equality implies equal copy.
     candidate.toolName === first.toolName
   );

@@ -26,6 +26,7 @@ afterEach(async () => {
 
 interface HostVariant {
   readonly channel?: { readonly path: string };
+  readonly codeMode?: boolean;
   readonly connection?: { readonly events: boolean };
   readonly extensionSpecifier?: string;
   readonly extensionConfig?: { readonly region: string };
@@ -108,9 +109,7 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
               return {
                 default:
                   variant.tool === "workflow-program"
-                    ? attachWorkflowProgramOptions(definition, {
-                        maxSubagents: 4,
-                      })
+                    ? attachWorkflowProgramOptions(definition, { maxSubagents: 4 })
                     : definition,
               };
             },
@@ -122,6 +121,7 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     appRoot,
     agent: {
       model: "openai/gpt-5.4",
+      ...(variant.codeMode !== undefined && { codeMode: variant.codeMode }),
       ...(variant.workflowWorld === undefined
         ? {}
         : { experimental: { workflow: { world: variant.workflowWorld } } }),
@@ -352,7 +352,7 @@ describe("computeDevelopmentHostFingerprint", () => {
     expect(edited).not.toBe(withWorkflows);
   });
 
-  it("treats only generated-program tool availability as structural", async () => {
+  it("treats only what runs model-written programs as structural: code mode and a workflow() tool", async () => {
     const base = await computeDevelopmentHostFingerprint(await createHost());
     const ordinary = await computeDevelopmentHostFingerprint(
       await createHost({ tool: "ordinary" }),
@@ -363,10 +363,12 @@ describe("computeDevelopmentHostFingerprint", () => {
     const workflowProgram = await computeDevelopmentHostFingerprint(
       await createHost({ tool: "workflow-program" }),
     );
+    const codeMode = await computeDevelopmentHostFingerprint(await createHost({ codeMode: true }));
 
     expect(ordinary).toBe(base);
     expect(workflow).toBe(base);
     expect(workflowProgram).not.toBe(base);
+    expect(codeMode).not.toBe(base);
   });
 
   it("leaves schedule definitions runtime-only", async () => {

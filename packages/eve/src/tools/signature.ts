@@ -21,6 +21,8 @@ const MAX_DEPTH = 6;
 const MAX_NODES = 1_000;
 /** Bounds what one remote schema can add to model context. */
 const MAX_SIGNATURE_LENGTH = 4_000;
+/** Bounds what one tool's output type adds to its description. */
+const MAX_OUTPUT_TYPE_LENGTH = 1_000;
 const MAX_DESCRIPTION_LENGTH = 120;
 const CONSTRAINT_KEYS = [
   "format",
@@ -53,28 +55,56 @@ interface SignatureInput {
 }
 
 export function renderToolSignature(input: SignatureInput): string {
-  const signature = renderSignature(input, true);
-  if (signature.length <= MAX_SIGNATURE_LENGTH) return signature;
-  // A field missing from the signature reads as a field the tool doesn't have,
-  // so property names outrank their descriptions.
-  const compact = renderSignature(input, false);
-  return compact.length > MAX_SIGNATURE_LENGTH
-    ? `${compact.slice(0, MAX_SIGNATURE_LENGTH - 3)}...`
-    : compact;
+  return capped((descriptions) => renderSignature(input, descriptions), MAX_SIGNATURE_LENGTH);
+}
+
+/**
+ * Renders an output JSON Schema as the TypeScript type a call resolves to, e.g.
+ * `{ content: string; truncated: boolean }`. `undefined` when there is no
+ * schema or it says nothing about the value.
+ */
+export function renderOutputType(outputSchema: Schema | undefined): string | undefined {
+  if (outputSchema === undefined) return undefined;
+  const type = capped(
+    (descriptions) => renderSchema(outputSchema, descriptions),
+    MAX_OUTPUT_TYPE_LENGTH,
+  );
+  return type === "unknown" ? undefined : type;
+}
+
+/** Whether `name` can follow a dot, as in `tools.name`. */
+export function isIdentifier(name: string): boolean {
+  return IDENTIFIER.test(name);
+}
+
+/**
+ * A field missing from the text reads as a field the tool doesn't have, so
+ * property names outrank their descriptions: text over `max` drops the
+ * descriptions before it is cut.
+ */
+function capped(render: (descriptions: boolean) => string, max: number): string {
+  const full = render(true);
+  if (full.length <= max) return full;
+  const compact = render(false);
+  return compact.length > max ? `${compact.slice(0, max - 3)}...` : compact;
 }
 
 function renderSignature(input: SignatureInput, descriptions: boolean): string {
-  const render = (schema: Schema) =>
-    renderType(schema, {
-      budget: { remaining: MAX_NODES },
-      depth: 0,
-      descriptions,
-      refs: new Set(),
-      root: schema,
-    });
-  const inputType = input.inputSchema === undefined ? "{}" : render(input.inputSchema);
-  const outputType = input.outputSchema === undefined ? "unknown" : render(input.outputSchema);
+  const inputType =
+    input.inputSchema === undefined ? "{}" : renderSchema(input.inputSchema, descriptions);
+  const outputType =
+    input.outputSchema === undefined ? "unknown" : renderSchema(input.outputSchema, descriptions);
   return `${input.name}(input: ${inputType}): Promise<${outputType}>`;
+}
+
+function renderSchema(schema: Schema, descriptions: boolean): string {
+  return renderType(schema, {
+    budget: { remaining: MAX_NODES },
+    depth: 0,
+    descriptions,
+    refs: new Set(),
+    root: schema,
+  });
 }
 
 function renderType(schema: unknown, context: RenderContext): string {

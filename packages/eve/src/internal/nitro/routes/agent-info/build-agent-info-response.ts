@@ -46,6 +46,7 @@ export function buildAgentInfoResponse(
     agent: {
       agentRoot: manifest.agentRoot,
       appRoot: manifest.appRoot,
+      codeMode: manifest.config.codeMode,
       config: { ...configSource, binding: configSource.binding },
       description: manifest.config.description,
       model:

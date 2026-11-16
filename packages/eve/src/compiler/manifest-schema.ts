@@ -315,6 +315,7 @@ export const compiledAgentLimitsDefinitionSchema = z
 export const compiledAgentConfigBaseFields = {
   approval: z.boolean().optional(),
   build: compiledAgentBuildDefinitionSchema.optional(),
+  codeMode: z.boolean().optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
   defaultTools: z.boolean().optional(),
   description: z.string().optional(),

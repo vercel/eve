@@ -25,7 +25,7 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
-import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
+import { serializeInputSchema, toOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import type { StepCatalog } from "./step-catalog.js";
 import { labelCallbacks } from "#internal/testing/tool-labels.js";
@@ -243,6 +243,77 @@ describe("buildStepCatalog", () => {
         SKILL_TOOL_NAME,
       ]);
       expect(catalogTools(later)).toEqual(catalogTools(reachingEverything));
+    });
+  });
+
+  describe("what a program's call resolves to", () => {
+    const SUM = toOutputSchema({
+      type: "object",
+      properties: { sum: { type: "number" } },
+      required: ["sum"],
+    });
+    /** A tool's description as the model reads it. */
+    const described = async (tool: HarnessToolDefinition, codeMode = true) => {
+      const { catalog } = await catalogContext({ codeMode, tools: [tool] });
+      return catalog.describe(catalog.entries.get(tool.name)!);
+    };
+
+    it("tells a model with code mode on what a direct tool's call resolves to", async () => {
+      expect(await described(inlineTool("add", { outputSchema: SUM }))).toBe(
+        "add description\n\nIn eve__execute, tools.add(input) resolves to: { sum: number }",
+      );
+      expect(await described(inlineTool("add-all", { outputSchema: SUM }))).toBe(
+        'add-all description\n\nIn eve__execute, tools["add-all"](input) resolves to: { sum: number }',
+      );
+    });
+
+    it.each([
+      ["declares no output schema", inlineTool("add"), true],
+      [
+        "declares an output schema that says nothing",
+        inlineTool("add", { outputSchema: toOutputSchema({}) }),
+        true,
+      ],
+      [
+        "is deferred, since search returns its signature",
+        inlineTool("add", { deferred: true, outputSchema: SUM }),
+        true,
+      ],
+      [
+        "ends the turn, which a program can't do",
+        inlineTool("add", { endsTurn: true, outputSchema: SUM }),
+        true,
+      ],
+      ["belongs to an agent with code mode off", inlineTool("add", { outputSchema: SUM }), false],
+    ])("says nothing about programs for a tool that %s", async (_reason, tool, codeMode) => {
+      expect(await described(tool, codeMode)).not.toContain("eve__execute");
+    });
+  });
+
+  it("adds eve__execute last for an agent with code mode on, the same whatever the session reaches", async () => {
+    const bare = (await catalogContext({ codeMode: true, tools: [inlineTool("add")] })).catalog;
+    const full = (
+      await catalogContext({
+        codeMode: true,
+        connections: [fakeConnection({ name: "crm", tools: [connectionTool("search")] })],
+        tools: [inlineTool("add"), inlineTool("archive", { deferred: true })],
+      })
+    ).catalog;
+
+    expect(names(bare.advertised)).toEqual(["add", "eve__execute"]);
+    expect(names(full.advertised).at(-1)).toBe("eve__execute");
+    expect(
+      names((await catalogContext({ tools: [inlineTool("add")] })).catalog.advertised),
+    ).toEqual(["add"]);
+    // The cache invariant: its definition names no other tool, so no session's catalog changes it.
+    const execute = full.advertised.get("eve__execute")!;
+    expect(full.describe(execute)).toBe(bare.describe(bare.advertised.get("eve__execute")!));
+    expect(full.describe(execute)).not.toMatch(/eve__(?:search|tool|skill)/u);
+    expect(serializeInputSchema(execute.inputSchema as ToolSchemaSource)).toEqual({
+      additionalProperties: false,
+      properties: { code: { description: expect.any(String), type: "string" } },
+      required: ["code"],
+      type: "object",
     });
   });
 

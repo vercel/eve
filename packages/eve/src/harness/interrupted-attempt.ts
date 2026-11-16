@@ -14,6 +14,10 @@ export interface InterruptedCall {
   readonly input?: JsonValue;
   readonly started: boolean;
   readonly outcome?: CallOutcome;
+  /** The output it settled with, which only a program's call replays. */
+  readonly output?: JsonValue;
+  /** Why it didn't complete, when the attempt said. */
+  readonly error?: string;
 }
 
 /** What the model reads of a call an interrupted attempt published, by what it published. */
@@ -32,7 +36,8 @@ export function interruptedCallResult(call: InterruptedCall | undefined): string
   }
 }
 
-const MAX_NOTED_CALLS = 20;
+/** How many calls a note lists, here and in a program's result. */
+export const MAX_NOTED_CALLS = 20;
 const MAX_NOTED_INPUT_LENGTH = 500;
 
 /** Which calls the attempt started, so the model decides what to run again. None: no note. */
@@ -42,7 +47,8 @@ export function interruptedAttemptNote(
   const started = [...calls.values()].filter((call) => call.started && call.name !== "");
   if (started.length === 0) return undefined;
   const lines = started.slice(0, MAX_NOTED_CALLS).map((call) => {
-    const input = call.input === undefined ? "" : ` ${truncate(JSON.stringify(call.input))}`;
+    const input =
+      call.input === undefined ? "" : ` ${truncateNotedInput(JSON.stringify(call.input))}`;
     return `- ${call.name}${input}: ${interruptedCallResult(call)}`;
   });
   if (started.length > MAX_NOTED_CALLS) {
@@ -58,7 +64,8 @@ export function interruptedAttemptNote(
   );
 }
 
-function truncate(text: string): string {
+/** A call's input as a note shows it: enough to tell calls apart. */
+export function truncateNotedInput(text: string): string {
   return text.length <= MAX_NOTED_INPUT_LENGTH
     ? text
     : `${text.slice(0, MAX_NOTED_INPUT_LENGTH)}… (truncated)`;

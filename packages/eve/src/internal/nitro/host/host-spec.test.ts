@@ -11,7 +11,6 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
-import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { z } from "zod";
@@ -24,9 +23,11 @@ const VERCEL: HostMode = { kind: "production", preset: "vercel" };
 type Modules = Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]>;
 
 interface AgentVariant {
+  readonly codeMode?: boolean;
   readonly externalDependencies?: readonly string[];
+  /** A workflow tool: an authored one, or one marked as `workflow()` marks its own. */
+  readonly tool?: "workflow" | "workflow-program";
   readonly sandbox?: "just-bash" | "vercel";
-  readonly tool?: "ordinary" | "workflow" | "workflow-program";
   readonly websocket?: boolean;
   /** A dynamic schedule collection on Vercel's provider. */
   readonly dynamicSchedules?: boolean;
@@ -66,25 +67,13 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
       }),
     });
   }
-  if (variant.tool === "ordinary") {
-    modules.push({
-      logicalPath: "tools/weather.ts",
-      loadNamespace: async () => ({
-        default: defineTool({
-          description: "Check the weather.",
-          execute: async () => null,
-          inputSchema: {},
-        }),
-      }),
-    });
-  }
-  if (variant.tool === "workflow" || variant.tool === "workflow-program") {
+  if (variant.tool !== undefined) {
     const definition = defineWorkflowTool({
       description: "Run a workflow.",
-      execute: Object.assign(async () => null, {
-        workflowId: "workflow//agent/tools/run-program//execute",
-      }),
       inputSchema: {},
+      task: Object.assign(async () => null, {
+        workflowId: "workflow//agent/tools/run-program//task",
+      }),
     });
     const tool =
       variant.tool === "workflow-program"
@@ -100,6 +89,7 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
     appRoot: APP_ROOT,
     agent: {
       model: "openai/gpt-5.4",
+      ...(variant.codeMode !== undefined && { codeMode: variant.codeMode }),
       ...(variant.externalDependencies && {
         build: { externalDependencies: [...variant.externalDependencies] },
       }),
@@ -216,24 +206,31 @@ describe("createHostSpec", () => {
   });
 
   it.each([
-    ["an ordinary tool", "ordinary", false],
-    ["a workflow tool", "workflow", false],
-    ["a generated-program tool", "workflow-program", true],
+    ["code mode on", { codeMode: true }, true],
+    ["code mode off", { codeMode: false }, false],
+    ["an authored workflow tool", { tool: "workflow" }, false],
+    ["a workflow() tool", { tool: "workflow-program" }, true],
   ] as const)(
-    "installs the workflow sandbox runtime for %s: %s",
-    async (_label, tool, expected) => {
-      const { runtime } = spec(await compileAgent({ tool }), PRODUCTION);
+    "installs the workflow sandbox runtime for an agent with %s: %s",
+    async (_label, variant, expected) => {
+      const { runtime } = spec(await compileAgent(variant), PRODUCTION);
       expect(runtime.workflowSandbox).toBe(expected);
     },
   );
 
-  it("installs the workflow sandbox runtime for a subagent's generated-program tool", async () => {
-    const manifest = withSubagent(
-      await compileAgent(),
-      await compileAgent({ tool: "workflow-program" }, "researcher"),
-    );
-    expect(spec(manifest, PRODUCTION).runtime.workflowSandbox).toBe(true);
-  });
+  it.each([
+    ["code mode on", { codeMode: true }],
+    ["a workflow() tool", { tool: "workflow-program" }],
+  ] as const)(
+    "installs the workflow sandbox runtime for a subagent with %s",
+    async (_label, variant) => {
+      const manifest = withSubagent(
+        await compileAgent(),
+        await compileAgent(variant, "researcher"),
+      );
+      expect(spec(manifest, PRODUCTION).runtime.workflowSandbox).toBe(true);
+    },
+  );
 
   it.each([
     ["Vercel without a sandbox", VERCEL, undefined, true],

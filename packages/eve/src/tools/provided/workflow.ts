@@ -1,48 +1,59 @@
+import { PROGRAM_MAX_AGENT_CALLS } from "#execution/code-mode/limits.js";
+import { PROGRAM_CODE_INPUT_DESCRIPTION } from "#execution/code-mode/sandbox.js";
 import {
-  DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   parseWorkflowProgramOptions,
-} from "#execution/dynamic-workflow/schema.js";
-import { runWorkflowProgramTask } from "#execution/dynamic-workflow/tool.js";
+  runWorkflowProgramTask,
+} from "#execution/code-mode/workflow-program.js";
 import type { JsonValue } from "#shared/json.js";
 import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+import { frameworkTool } from "./framework-tool.js";
+
 export interface WorkflowToolOptions {
-  /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
+  /** Maximum agent calls per program, from 1 to 128. Defaults to 128. */
   readonly maxSubagents?: number;
 }
 
 export interface WorkflowToolInput {
-  readonly js: string;
+  /** The body of an async function, in the language `eve__execute` runs. */
+  readonly code: string;
 }
 
 export type WorkflowTool = WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
 
-const workflowProgramAgentContract =
-  "Call ctx.agent(name, { message: string, outputSchema?: object }). Each call starts a new agent that does not see this conversation, so put everything it needs in message. It resolves directly to the agent's reply; when outputSchema is provided, the reply matches that schema. It does not return an agent metadata wrapper. The owning agent resolves the target and applies its existing availability and authorization checks.";
-
 const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
   type: "object",
   properties: {
-    js: {
-      type: "string",
-      description: `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
-    },
+    code: { type: "string", description: PROGRAM_CODE_INPUT_DESCRIPTION },
   },
-  required: ["js"],
+  required: ["code"],
   additionalProperties: false,
 });
 
-/** Defines a model-facing workflow tool backed by isolated runtime JavaScript. */
+/**
+ * Defines a tool that runs a program the model writes in the background, as a task. The program
+ * is written like one for code mode's `eve__execute`, and its `tools` holds agents only.
+ */
 export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
-  const normalized = normalizeWorkflowToolOptions(options);
+  if (typeof options !== "object" || options === null) {
+    throw new TypeError("workflow options must be an object.");
+  }
+  const normalized = parseWorkflowProgramOptions({
+    maxSubagents: options.maxSubagents ?? PROGRAM_MAX_AGENT_CALLS,
+  });
   const description = [
-    "Run an async JavaScript function body that invokes agents and returns one JSON-serializable value.",
-    workflowProgramAgentContract,
-    'Supply the body directly, for example: return await ctx.agent("researcher", { message: "Describe the task" });',
-    "Await every ctx.agent call before returning.",
-    `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
+    "Run a JavaScript program in the background that calls agents and returns one JSON value.",
+    "It runs as a task: you get a receipt now and the result later, so you can keep working while it runs, and a new message doesn't stop it.",
+    "Use it for agent work you don't need the result of in this step.",
+    'Call an agent as `await tools.<name>({ message, outputSchema? })`, using its exact name (`tools["name"]` when the name isn\'t an identifier).',
+    "Each call starts a new agent session that does not see this conversation, so put everything the agent needs in `message`.",
+    "A call resolves to the agent's reply, or to a value matching `outputSchema` when you pass one; a failed call throws.",
+    "Start calls that don't depend on each other together with `Promise.all`, and await every call before returning.",
+    "`tools` holds agents only: there are no other tools, and no search, fetch, file system, timers, or imports.",
+    "`console.log` output is returned with the result.",
+    `A program may call agents at most ${String(normalized.maxSubagents)} times.`,
   ].join(" ");
   return attachWorkflowProgramOptions(
     frameworkTool(
@@ -55,15 +66,3 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
     normalized,
   );
 }
-
-function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
-  readonly maxSubagents: number;
-} {
-  if (typeof options !== "object" || options === null) {
-    throw new TypeError("workflow options must be an object.");
-  }
-  return parseWorkflowProgramOptions({
-    maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-  });
-}
-import { frameworkTool } from "./framework-tool.js";

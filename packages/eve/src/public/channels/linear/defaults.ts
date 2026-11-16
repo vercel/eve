@@ -97,6 +97,9 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "call.requested"({ data }, { channel }) {
+      // Calls made inside another call, such as a program's, belong to their parent: a program
+      // can make a thousand, and each activity is a request to Linear.
+      if ("callId" in data.owner) return;
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {

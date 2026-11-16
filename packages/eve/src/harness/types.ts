@@ -217,6 +217,11 @@ export interface StepResult {
    * settles, or when the person answers, steers, or cancels.
    */
   readonly held?: TurnHold;
+  /**
+   * Present when the step ran a program: what it did is saved before anything else runs, so a
+   * later failure never runs the program's step again.
+   */
+  readonly checkpoint?: true;
 }
 
 export type TurnHold =

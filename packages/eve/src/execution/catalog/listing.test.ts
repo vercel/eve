@@ -146,6 +146,34 @@ describe("catalogAnnouncements", () => {
     expect((await baseline(state))?.split("\n")[0]).toBe(header);
   });
 
+  it("adds calling several tools from a program when the agent has code mode on", async () => {
+    /** The listing's first line, where it says how to call what it lists. */
+    const first = async (state: Pick<CatalogState, "skills" | "tools">) => {
+      const { catalog } = await catalogContext({ codeMode: true, ...state });
+      const listing = catalogAnnouncements(catalog, { codeMode: true }).catalog?.render(undefined);
+      return listing?.split("\n")[0];
+    };
+    const several = "or call several from eve__execute as `tools.<name>(input)`";
+
+    expect(await first({ tools: [deferred("summarize_usage")] })).toBe(
+      `You have more tools ${HEADER_GUIDANCE} Call them with eve__tool({ name, input }), ${several}.`,
+    );
+    expect(
+      await first({
+        skills: [{ deferred: true, name: "refund-policy" }],
+        tools: [deferred("summarize_usage")],
+      }),
+    ).toBe(
+      `You have more tools and skills ${HEADER_GUIDANCE} Call tools with eve__tool({ name, input }), ${several}, and load skills with eve__skill({ name }).`,
+    );
+    // Code mode is fixed for a deployment: it changes the words, never what is recorded.
+    const off = await catalogContext({ tools: [deferred("summarize_usage")] });
+    const on = await catalogContext({ codeMode: true, tools: [deferred("summarize_usage")] });
+    expect(catalogAnnouncements(on.catalog, { codeMode: true }).catalog!.value).toBe(
+      catalogAnnouncements(off.catalog).catalog!.value,
+    );
+  });
+
   it("lists the 20 largest namespaces by name, then 'and more', and a connection's namespace only as the connection", async () => {
     const large = Array.from(
       { length: 20 },

@@ -1,5 +1,10 @@
-import type { OpenApiParameter, OpenApiRequestBody } from "#runtime/connections/openapi-schema.js";
+import {
+  deref,
+  type OpenApiParameter,
+  type OpenApiRequestBody,
+} from "#runtime/connections/openapi-schema.js";
 import type { SecurityPlacement } from "#runtime/connections/openapi-security.js";
+import { isObject } from "#shared/guards.js";
 
 /** HTTP methods OpenAPI defines operations for. */
 export const HTTP_METHODS = ["get", "put", "post", "delete", "patch", "head", "options"] as const;
@@ -16,7 +21,48 @@ export interface OpenApiOperation {
   readonly parameters: readonly OpenApiParameter[];
   readonly requestBody: OpenApiRequestBody | undefined;
   readonly inputSchema: Record<string, unknown>;
+  /** The schema of the operation's result, when its success response declares a JSON schema. */
+  readonly outputSchema: Record<string, unknown> | undefined;
   readonly security: SecurityPlacement | undefined;
+}
+
+/**
+ * The JSON schema of an operation's success response, unconverted: that of its first 2xx
+ * response to declare one, or of its `default` response when it declares no 2xx response, since
+ * `default` beside a 2xx response describes errors.
+ */
+export function successResponseSchema(
+  document: Record<string, unknown>,
+  operation: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const { responses } = operation;
+  if (!isObject(responses)) {
+    return undefined;
+  }
+  const success = Object.keys(responses).filter((status) => /^2(\d\d|XX)$/iu.test(status));
+  for (const status of success.length > 0 ? success : ["default"]) {
+    const schema = jsonResponseSchema(document, responses[status]);
+    if (schema !== undefined) {
+      return schema;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * An OpenAPI 3 response keeps its schema under `content`, by media type, and a Swagger 2.0
+ * response holds it directly. Only a JSON body is parsed, so only its schema types the body.
+ */
+function jsonResponseSchema(
+  document: Record<string, unknown>,
+  raw: unknown,
+): Record<string, unknown> | undefined {
+  const response = isObject(raw) ? deref(document, raw) : undefined;
+  if (!isObject(response)) {
+    return undefined;
+  }
+  const media = isObject(response.content) ? response.content["application/json"] : response;
+  return isObject(media) && isObject(media.schema) ? media.schema : undefined;
 }
 
 /**

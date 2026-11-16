@@ -1,4 +1,5 @@
 import { sessionView } from "#harness/session-machine/commit.js";
+import { programsOf } from "#harness/session-machine/programs.js";
 import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -61,11 +62,16 @@ export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
   };
 }
 
-/** Whether the turn waits on a sign-in, an answer, or a call, which ends a batch of model calls. */
+/**
+ * Whether the turn waits on a sign-in, an answer, a call, or a program that hasn't finished,
+ * which ends a batch of model calls: a program's step follows the one that saved it.
+ */
 export function waitsOnAnything(session: HarnessSession, projection: SessionProjection): boolean {
+  const view = sessionView(projection, session.state);
   return (
     openSignIns(projection.view).length > 0 ||
-    ownOpenRequestIds(sessionView(projection, session.state)).size > 0 ||
-    (runtimeWait(session.state)?.callIds.length ?? 0) > 0
+    ownOpenRequestIds(view).size > 0 ||
+    (runtimeWait(session.state)?.callIds.length ?? 0) > 0 ||
+    programsOf(view.turn).length > 0
   );
 }

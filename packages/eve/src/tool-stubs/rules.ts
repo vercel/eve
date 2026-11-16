@@ -1,5 +1,10 @@
 import { z } from "#compiled/zod/index.js";
-import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import {
+  CALL_TOOL_NAME,
+  EXECUTE_TOOL_NAME,
+  SEARCH_TOOL_NAME,
+  SKILL_TOOL_NAME,
+} from "#protocol/catalog-tools.js";
 import { parseJsonValue } from "#shared/json.js";
 import { createStubValidator, validateStubConstraint } from "#tool-stubs/schema.js";
 import type { ToolStub } from "#tool-stubs/types.js";
@@ -26,6 +31,14 @@ const toolStubsSchema = z
   )
   .max(100);
 
+/** eve's catalog tools run no tool of their own: a stub goes on the entry a call reaches. */
+const UNSTUBBABLE_TOOL_NAMES = [
+  SEARCH_TOOL_NAME,
+  CALL_TOOL_NAME,
+  SKILL_TOOL_NAME,
+  EXECUTE_TOOL_NAME,
+];
+
 /** Validates stubs before creating the session. */
 export function parseToolStubs(value: unknown): readonly ToolStub[] {
   boundStubConfiguration(value);
@@ -34,11 +47,9 @@ export function parseToolStubs(value: unknown): readonly ToolStub[] {
   for (const rule of rules) {
     if (ids.has(rule.id)) throw new Error(`Duplicate tool stub id "${rule.id}".`);
     ids.add(rule.id);
-    if (
-      [SEARCH_TOOL_NAME, CALL_TOOL_NAME, SKILL_TOOL_NAME].includes(rule.tool.split("/").at(-1)!)
-    ) {
+    if (UNSTUBBABLE_TOOL_NAMES.includes(rule.tool.split("/").at(-1)!)) {
       throw new Error(
-        `Cannot stub ${SEARCH_TOOL_NAME}, ${CALL_TOOL_NAME}, or ${SKILL_TOOL_NAME}. Stub the tool an ${CALL_TOOL_NAME} call reaches, such as linear__list_issues.`,
+        `Cannot stub ${SEARCH_TOOL_NAME}, ${CALL_TOOL_NAME}, ${SKILL_TOOL_NAME}, or ${EXECUTE_TOOL_NAME}. Stub the tool a call reaches, such as linear__list_issues.`,
       );
     }
     for (const [property, schema] of Object.entries(rule.match ?? {})) {

@@ -1,7 +1,7 @@
-import type { WorkflowProgramOptions } from "#execution/dynamic-workflow/schema.js";
+import type { WorkflowProgramOptions } from "#execution/code-mode/workflow-program.js";
 import type { JsonObject } from "#shared/json.js";
 
-export type { WorkflowProgramOptions } from "#execution/dynamic-workflow/schema.js";
+export type { WorkflowProgramOptions } from "#execution/code-mode/workflow-program.js";
 
 const WORKFLOW_PROGRAM_OPTIONS = Symbol.for("eve.workflow-program-options");
 
@@ -27,14 +27,12 @@ export function readWorkflowProgramOptions(value: unknown): WorkflowProgramOptio
   return (value as WorkflowProgramOptionsCarrier)[WORKFLOW_PROGRAM_OPTIONS];
 }
 
+/** The input a `workflow()` call's run starts with: the model's code and the author's limit. */
 export function createWorkflowProgramExecuteInput(
   options: WorkflowProgramOptions,
   input: unknown,
 ): JsonObject {
-  const js = (input as { readonly js?: unknown } | null)?.js;
-  if (typeof js !== "string") throw new TypeError('workflow requires a "js" string.');
-  return {
-    js,
-    maxSubagents: options.maxSubagents,
-  };
+  const code = (input as { readonly code?: unknown } | null)?.code;
+  if (typeof code !== "string") throw new TypeError('workflow requires a "code" string.');
+  return { code, maxSubagents: options.maxSubagents };
 }

@@ -1,7 +1,8 @@
 import { e2eSubagentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 
-const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
+/** What a parent's program sends to make this agent ask a question; shared with the parent. */
+const CHILD_QUESTION_REQUEST = "PROGRAM-CHILD-QUESTION";
 
 export default defineAgent({
   description: "Waits until its delegated turn is cancelled.",
@@ -15,7 +16,7 @@ export default defineAgent({
           userMessages.some((entry) => entry.includes("Please wait for cancellation.")),
         )}`;
       }
-      if (lastUserMessage?.includes(HITL_REQUEST) === true) {
+      if (lastUserMessage?.includes(CHILD_QUESTION_REQUEST) === true) {
         const answer = toolResults.find((result) => result.id === "child-question");
         return answer === undefined
           ? {
@@ -27,7 +28,7 @@ export default defineAgent({
                 },
               ],
             }
-          : `CHILD_HITL_RESULT=${JSON.stringify(answer.output)}`;
+          : `CHILD_ANSWER=${JSON.stringify(answer.output)}`;
       }
       return {
         toolCalls: [

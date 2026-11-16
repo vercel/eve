@@ -46,6 +46,8 @@ import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
+import { agentRouter } from "#tools/provided/agent-router.js";
+import { noReply } from "#tools/provided/no-reply.js";
 import { webSearch, type WebSearchToolInput } from "#tools/provided/web-search.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
 
@@ -286,6 +288,29 @@ describe("compileAgentManifest source graph", () => {
         )
         .map((entry) => entry.source.logicalPath),
     ).toEqual(["tools/bash.ts"]);
+  });
+
+  it("carries codeMode from agent.ts into the compiled and the resolved agent config", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ codeMode: true, model: "openai/gpt-5.4" }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    expect(compiled.config.codeMode).toBe(true);
+
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({ manifest: compiled, moduleMap });
+    expect(resolved.config?.codeMode).toBe(true);
   });
 
   it("allows disableTool for the root agent tool", async () => {
@@ -1478,6 +1503,116 @@ describe("compileAgentManifest source graph", () => {
       expect.objectContaining({ code: "compile/channel-route-shadowed", severity: "warning" }),
     );
     expect(compiled.diagnosticsSummary.warnings).toBe(1);
+  });
+
+  describe("code mode's untyped tools", () => {
+    const lookup =
+      (options: { readonly endsTurn?: true; readonly outputSchema?: { type: "object" } } = {}) =>
+      async () => ({
+        default: defineTool({
+          description: "Looks something up.",
+          execute: () => ({ ok: true }),
+          inputSchema: { type: "object" },
+          ...options,
+        }),
+      });
+    // Stand-ins for the workflow functions the build compiles.
+    const serve = async () => {};
+    Reflect.set(serve, "workflowId", "workflow//example/tool//serve");
+    const task = async () => null;
+    Reflect.set(task, "workflowId", "workflow//example/tool//task");
+
+    /** The warnings from compiling an agent with one tool file. */
+    async function untypedToolWarnings(
+      tool: ProgrammaticAgentModule,
+      options: { readonly codeMode?: boolean } = {},
+    ) {
+      const diagnostics: CompilerDiagnostic[] = [];
+      const compiled = await compileAgentManifest(manifest(), {
+        diagnostics,
+        sourceRegistries: [
+          registry([
+            {
+              logicalPath: "agent.ts",
+              loadNamespace: async () => ({
+                default: defineAgent({
+                  codeMode: options.codeMode ?? true,
+                  model: "openai/gpt-5.4",
+                }),
+              }),
+            },
+            tool,
+          ]),
+        ],
+      });
+      return {
+        summary: compiled.diagnosticsSummary,
+        warnings: diagnostics.filter(({ code }) => code === "compile/code-mode-untyped-tool"),
+      };
+    }
+
+    it("warns about an authored tool a program calls without an output schema, naming its file", async () => {
+      const { summary, warnings } = await untypedToolWarnings({
+        logicalPath: "tools/lookup.ts",
+        loadNamespace: lookup(),
+      });
+
+      expect(warnings).toEqual([
+        {
+          code: "compile/code-mode-untyped-tool",
+          message:
+            'Tool "lookup" has no outputSchema, so programs run by eve__execute read its result as unknown. Add an outputSchema to type it.',
+          severity: "warning",
+          sources: [
+            expect.objectContaining({ logicalPath: "tools/lookup.ts", nodeId: "__root__" }),
+          ],
+        },
+      ]);
+      expect(summary.warnings).toBe(1);
+    });
+
+    it.each<[string, string, ProgrammaticAgentModule["loadNamespace"]]>([
+      [
+        "declares an output schema",
+        "tools/lookup.ts",
+        lookup({ outputSchema: { type: "object" } }),
+      ],
+      ["ends the turn, which a program can't do", "tools/lookup.ts", lookup({ endsTurn: true })],
+      [
+        "keeps a task open between calls, which a program can't hold",
+        "tools/lookup.ts",
+        async () => ({
+          default: defineWorkflowTool({
+            description: "Looks things up, one question at a time.",
+            inputSchema: { type: "object" },
+            serve,
+          }),
+        }),
+      ],
+      [
+        "a provider runs",
+        "tools/web_search.ts",
+        async () => ({ default: webSearch({ provider: "parallel" }) }),
+      ],
+      ["re-exports eve's no_reply", "tools/no_reply.ts", async () => ({ default: noReply })],
+      ["re-exports eve's agent tool", "tools/agent.ts", async () => ({ default: agentTool })],
+      [
+        "is eve's agent router",
+        "tools/route.ts",
+        async () => ({ default: { ...agentRouter(), task } }),
+      ],
+    ])("stays quiet about a tool that %s", async (_reason, logicalPath, loadNamespace) => {
+      expect((await untypedToolWarnings({ logicalPath, loadNamespace })).warnings).toEqual([]);
+    });
+
+    it("stays quiet for an agent with code mode off", async () => {
+      const { warnings } = await untypedToolWarnings(
+        { logicalPath: "tools/lookup.ts", loadNamespace: lookup() },
+        { codeMode: false },
+      );
+
+      expect(warnings).toEqual([]);
+    });
   });
 
   it("rejects duplicate routes emitted by one selected channel", async () => {

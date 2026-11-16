@@ -35,6 +35,8 @@ import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
+import { isExecuteTool } from "#execution/catalog/catalog-tools.js";
+import { newProgram, savePrograms } from "#harness/session-machine/programs.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -115,6 +117,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => isWorkflowTool(input.catalog.get(toolCall.toolName)));
+  // An `eve__execute` call runs nothing here: the step saves its program, and later steps run it.
+  const programCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
+    .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
+    .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
+    .filter((toolCall) => isExecuteTool(input.catalog.get(toolCall.toolName)));
 
   const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
     signIns: result.signIns ?? [],
@@ -122,7 +129,12 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
   // --- Park on approvals or runtime calls ----------------------------------
 
-  if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
+  if (
+    workflowToolCalls.length > 0 ||
+    programCalls.length > 0 ||
+    approvalRequests.length > 0 ||
+    authorizationInterrupt
+  ) {
     const { sequence, stepIndex, turnId } = step.position();
     const dispatched = collectWorkflowCalls({
       clearances: result.policyApprovals ?? {},
@@ -150,6 +162,14 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
     } else {
       await step.apply(suspendStep(step.view(), parked));
+    }
+    if (programCalls.length > 0) {
+      // Saved with the step, before any of the program's calls runs: a step that runs the
+      // program again runs this code, under this call id.
+      const programs = programCalls.map((toolCall) =>
+        newProgram(toolCall.toolCallId, toolCall.input, { sequence, stepIndex, turnId }),
+      );
+      await step.apply(savePrograms(step.view(), programs));
     }
     // Approval only precedes sign-in for the same call, not an executing sibling.
     if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);

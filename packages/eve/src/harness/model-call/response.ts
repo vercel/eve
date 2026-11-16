@@ -4,6 +4,7 @@ import {
 } from "#harness/tool-call-input-errors.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolResult } from "ai";
 
+import { isExecuteTool } from "#execution/catalog/catalog-tools.js";
 import { isWorkflowTool } from "#execution/tasks/model-step.js";
 import { historyCallNames } from "#harness/execute-call.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -147,12 +148,13 @@ export function extractToolResultCallIds(messages: readonly ModelMessage[]): Rea
 }
 
 function isLocalOrWorkflowTool(definition: HarnessToolDefinition | undefined): boolean {
-  return isRunnableTool(definition) || isWorkflowTool(definition);
+  return isRunnableTool(definition) || isWorkflowTool(definition) || isExecuteTool(definition);
 }
 
 /**
  * Answers the calls of a response that ended early: eve runs none of them. That includes workflow
- * calls, which would otherwise dispatch after the step without their approval ever being decided.
+ * calls, which would otherwise dispatch after the step without their approval ever being decided,
+ * and programs.
  */
 export function answerSkippedToolCalls(
   step: HarnessStepResult,

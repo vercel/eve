@@ -61,6 +61,8 @@ export async function askStepApprovals(
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
     /** A call the step ran already ended the turn. */
     readonly endsTurn?: true;
+    /** The program whose calls these are, when a program made them instead of a response. */
+    readonly program?: { readonly callId: string };
     /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
   },
@@ -69,6 +71,7 @@ export async function askStepApprovals(
     endsTurn: input.endsTurn,
     event: input.event,
     messages: input.messages,
+    program: input.program,
     requests: input.requests,
     requester: currentRequester(step),
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),

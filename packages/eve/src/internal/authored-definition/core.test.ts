@@ -19,6 +19,16 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("accepts codeMode only as a boolean", () => {
+    expect(
+      normalizeAgentDefinition({ codeMode: true, model: "openai/gpt-5.5" }, FAILURE_MESSAGE)
+        .codeMode,
+    ).toBe(true);
+    expect(() =>
+      normalizeAgentDefinition({ codeMode: "on", model: "openai/gpt-5.5" }, FAILURE_MESSAGE),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

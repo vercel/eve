@@ -90,6 +90,7 @@ export async function compileAgentConfig(
   const compiledConfig: {
     approval?: boolean;
     build?: CompiledAgentDefinition["build"];
+    codeMode?: boolean;
     compaction: {
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
@@ -110,6 +111,10 @@ export async function compileAgentConfig(
 
   if (definition.defaultTools !== undefined) {
     compiledConfig.defaultTools = definition.defaultTools;
+  }
+
+  if (definition.codeMode !== undefined) {
+    compiledConfig.codeMode = definition.codeMode;
   }
 
   if (definition.description !== undefined) {

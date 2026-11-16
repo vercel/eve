@@ -720,7 +720,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
 
         const parentSessionId = args.params.parentSessionId;
-        const callId = args.params.callId;
+        // A program's call is named `<callId>/<n>`, and route params keep an encoded `/` encoded.
+        const callId = args.params.callId?.replace(/%2F/giu, "/");
         const childSessionId = args.params.childSessionId;
         if (!parentSessionId || !callId || !childSessionId) {
           return Response.json(

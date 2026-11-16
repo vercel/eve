@@ -119,6 +119,8 @@ export interface Block {
   keepDetailWhenDone?: boolean;
   /** The agent call an agent's own row belongs to. */
   subagentCallId?: string;
+  /** The call a tool row's call runs inside, such as a program's `eve__execute` call. */
+  parentCallId?: string;
   /** The agent an agent's own row belongs to, named above its first row. */
   agentName?: string;
   /** Task lines only: whether an agent or a tool does the work. */

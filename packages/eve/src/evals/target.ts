@@ -45,14 +45,19 @@ export async function resolveEvalTargetHandle(input: {
     url: input.url,
   });
   toolsByTarget.set(target, {
+    codeMode: info.agent.codeMode === true,
     dynamic: info.tools.dynamic.length > 0,
     static: info.tools.static.map((tool) => tool.name),
   });
   return target;
 }
 
-/** The root agent's static tool names, and whether it has a dynamic tool resolver. */
+/**
+ * The root agent's static tool names, whether it has a dynamic tool resolver, and whether it has
+ * code mode on, which adds `eve__execute`.
+ */
 export interface TargetTools {
+  readonly codeMode?: boolean;
   readonly dynamic: boolean;
   readonly static: readonly string[];
 }

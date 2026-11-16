@@ -629,8 +629,8 @@ export async function publishDenial(
  * What a person answers to approve or cancel a call the model made. The prompt is the one the
  * tool's approval writes for the call, or names the call by the label its entry gives it.
  */
-function approvalRequest(
-  call: TypedToolCall<ToolSet>,
+export function approvalRequest(
+  call: Pick<TypedToolCall<ToolSet>, "input" | "toolCallId" | "toolName">,
   definition: HarnessToolDefinition | undefined,
 ): ApprovalAsk {
   const { toolCallId: callId, toolName } = call;
@@ -660,7 +660,7 @@ function approvalRequest(
 
 /** The prompt a tool's approval configuration writes for `call`, when it has one. */
 function authoredApprovalPrompt(
-  call: TypedToolCall<ToolSet>,
+  call: Pick<TypedToolCall<ToolSet>, "input" | "toolCallId" | "toolName">,
   definition: HarnessToolDefinition | undefined,
 ): string | undefined {
   const approval = definition?.approval;

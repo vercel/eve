@@ -159,7 +159,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`                                                              |
 | `eve/tools/ask_question`                                                          | Opt-in `askQuestion` tool definition                                                                              |
 | `eve/tools/web_search`                                                            | Provider-managed `webSearch` configuration                                                                        |
-| `eve/tools/workflow`                                                              | Runtime-generated `workflow` tool factory                                                                         |
+| `eve/tools/workflow`                                                              | `workflow` factory for a tool that runs a model-written program in the background                                 |
 | `eve/tools/sleep`                                                                 | Opt-in durable `sleep` tool                                                                                       |
 | `eve/tools/no_reply`                                                              | Opt-in `noReply` tool definition                                                                                  |
 | [`eve/workflow`](../tools/workflows#workflow-imports)                             | Durable `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, `getWorkflowMetadata`, hook types |

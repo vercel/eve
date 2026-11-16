@@ -6,25 +6,30 @@ const DOUBLE_SUBAGENT_TOKEN = new RegExp(`${SUBAGENT_TOKEN}.*${SUBAGENT_TOKEN}`,
 
 function isFanOutProgram(input: unknown): boolean {
   if (typeof input !== "object" || input === null) return false;
-  const js = (input as { js?: unknown }).js;
+  const code = (input as { readonly code?: unknown }).code;
   return (
-    typeof js === "string" &&
-    js.includes("Promise.all") &&
-    js.includes("echo-marker") &&
-    js.includes("workflow alpha") &&
-    js.includes("workflow beta")
+    typeof code === "string" &&
+    code.includes("Promise.all") &&
+    code.includes("echo-marker") &&
+    code.includes("workflow alpha") &&
+    code.includes("workflow beta")
   );
 }
 
-/** Generated workflow-program smoke: sandboxed JavaScript fans out durable children. */
+/** A model writes one background program that asks two agents at once and combines their replies. */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Generated workflow-program smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
+    "A model-written workflow program fans out to two echo-marker sessions at once in the background and returns both replies as its task's result.",
   async test(t) {
     const session = await t.session();
     const parent = await session.start(
-      "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through ctx.agent calls to echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
+      [
+        "Alice is confirming that two echo-marker assistants can answer at the same time while a job runs in the background.",
+        "Please call the workflow tool exactly once, with a program that sends the messages 'workflow alpha' and 'workflow beta' to the echo-marker agent through `tools` calls inside Promise.all and returns the two replies as an array.",
+        "Ask echo-marker only from that workflow program, not directly and not from eve__execute.",
+        "Wait for the task, then reply with the array the program returned, which is the `result` field of the task's result, as JSON.",
+      ].join(" "),
     );
     const firstStarted = await parent.waitForEvent("child.opened", {
       data: { name: "echo-marker" },
@@ -53,29 +58,30 @@ export default defineEval({
     ]
       .sort()
       .at(-1)!;
+    const completesAfterBothStart = (events: readonly SessionStreamEvent[]) =>
+      events.some(
+        (event) =>
+          event.type === "turn.settled" &&
+          event.data.outcome === "completed" &&
+          event.meta.at > latestCallAt,
+      );
 
     t.succeeded();
     t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
-    turn.event("child.opened", { count: 2, data: { name: "echo-marker" } });
+    // The program runs as a task, and both child sessions belong to the call that started it.
+    const workflowCall = turn.requireToolCall("workflow");
+    turn.event("task.started", { count: 1, data: { name: "workflow" } });
+    turn.event("child.opened", {
+      count: 2,
+      data: { name: "echo-marker", owner: { callId: workflowCall.callId } },
+    });
     firstChildTurn.eventsSatisfy(
       "first child does not complete before both children start",
-      (events) =>
-        events.some(
-          (event) =>
-            event.type === "turn.settled" &&
-            event.data.outcome === "completed" &&
-            event.meta.at > latestCallAt,
-        ),
+      completesAfterBothStart,
     );
     secondChildTurn.eventsSatisfy(
       "second child does not complete before both children start",
-      (events) =>
-        events.some(
-          (event) =>
-            event.type === "turn.settled" &&
-            event.data.outcome === "completed" &&
-            event.meta.at > latestCallAt,
-        ),
+      completesAfterBothStart,
     );
     firstChildTurn.messageIncludes(SUBAGENT_TOKEN);
     secondChildTurn.messageIncludes(SUBAGENT_TOKEN);

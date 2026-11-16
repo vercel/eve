@@ -8,32 +8,37 @@ const TRIAGE = "ticket-triage";
 const REVIEW = "ticket-review";
 const REPRODUCE = "ticket-reproducer";
 
-/** A workflow fans out ticket analysis and feeds both derived results into reproduction. */
+/** One background program fans out ticket analysis and feeds both structured results into reproduction. */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "The root agent runs parallel triage and review over 200 tickets, then passes both derived outputs into reproduction.",
+    "One workflow program runs triage and review over 200 tickets at once with outputSchema, then passes both structured results to reproduction, and returns them as its task's result.",
   async test(t) {
     const token = randomUUID();
     const expected = expectedFactoryOutput(token);
     const turn = await t.send(
       [
         `Alice's QA batch id is ${token}.`,
-        "Alice is preparing a QA summary for a sample software backlog. Use the workflow tool exactly once, and call its subagents only from that program.",
-        `Create a minimal array of exactly 200 tickets with ids \`T-000\` through \`T-199\`. Each ticket must contain only \`id\`, except \`T-000\` also has \`triageLabel\` set to \`TRIAGE-${token}\` and \`T-199\` also has \`reviewLabel\` set to \`REVIEW-${token}\`.`,
-        "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls. Use `outputSchema` to request exactly `{ ticketCount: integer, priorityTicket: string, summaryLabel: string }` from ticket-triage and `{ ticketCount: integer, accepted: boolean, summaryLabel: string }` from ticket-review.",
-        "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects as JSON. The reproducer already has its output rules; pass the objects without adding formatting instructions. Use `outputSchema` to request exactly `{ combinedLabel: string, sampleTicket: string, verificationNote: string }`. Make every listed output field required and allow no additional output fields.",
-        "Return `{ reproduction, review, triage }` and reply with only that returned JSON object.",
+        "Alice is preparing a QA summary for a sample software backlog, and wants the pipeline to run in the background. Please call the workflow tool exactly once with one program for the whole pipeline, and ask the ticket agents only from that workflow program, not directly and not from eve__execute.",
+        `In the program, build an array of exactly 200 tickets with ids \`T-000\` through \`T-199\`. Each ticket contains only \`id\`, except \`T-000\` also has \`triageLabel\` set to \`TRIAGE-${token}\` and \`T-199\` also has \`reviewLabel\` set to \`REVIEW-${token}\`.`,
+        "Ask ticket-triage and ticket-review together with Promise.all, giving each the complete tickets array as JSON in its message. Pass `outputSchema` beside `message` to request exactly `{ ticketCount: integer, priorityTicket: string, summaryLabel: string }` from ticket-triage and `{ ticketCount: integer, accepted: boolean, summaryLabel: string }` from ticket-review.",
+        "After both answer, ask ticket-reproducer with the returned `{ triage, review }` objects as JSON. The reproducer already has its output rules, so pass the objects without adding formatting instructions. Request exactly `{ combinedLabel: string, sampleTicket: string, verificationNote: string }` with `outputSchema`. Make every listed output field required and allow no additional output fields.",
+        "Return `{ reproduction, review, triage }` from the program. Wait for the task, then reply with only the JSON object the program returned, which is the `result` field of the task's result.",
       ].join(" "),
     );
 
     turn.expectOk();
     t.succeeded();
     t.calledTool("workflow", { count: 1 });
-    // The workflow tool runs as a task: its result settles the task, not the call.
+    // The workflow tool runs as a task: the program's value settles the task, not the call.
+    t.event("task.started", { count: 1, data: { name: "workflow" } });
     t.event("call.settled", {
       count: 1,
-      data: { output: (observed) => isDeepStrictEqual(observed, expected), outcome: "completed" },
+      data: {
+        outcome: "completed",
+        output: (observed) =>
+          isDeepStrictEqual((observed as { readonly result?: unknown } | null)?.result, expected),
+      },
     });
     t.event("child.opened", { count: 1, data: { name: TRIAGE } });
     t.event("child.opened", { count: 1, data: { name: REVIEW } });

@@ -27,6 +27,8 @@ export async function runModelCallBatch(input: {
     if (
       input.steeringSignal?.aborted === true ||
       result.steered === true ||
+      // What a program's step did is saved before another model call can fail.
+      result.checkpoint === true ||
       !shouldRunAnotherModelCall({
         completedModelCalls,
         modelCallsPerStep: input.modelCallsPerStep,

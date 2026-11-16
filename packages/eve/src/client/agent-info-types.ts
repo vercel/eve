@@ -251,6 +251,8 @@ export interface AgentInfoResult {
   readonly agent: {
     readonly agentRoot: string;
     readonly appRoot: string;
+    /** The agent's `codeMode` setting: with `true`, its model has `eve__execute`. */
+    readonly codeMode?: boolean;
     readonly config: AgentInfoSource & { readonly binding: Binding };
     readonly description?: string;
     readonly model: AgentModel;

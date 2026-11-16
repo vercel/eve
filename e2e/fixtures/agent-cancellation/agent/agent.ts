@@ -1,8 +1,17 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { TASK_WAIT_TOOL } from "@eve-e2e/config/catalog-tools";
+import { playScript, programResultOf, runProgram } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
-const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
+/** Starts the evals whose scripted parent asks the sleeper agent from an `eve__execute` program. */
+const PROGRAM_SLEEPER_REQUEST = "ask the sleeper agent from one program";
+/** Starts the evals whose scripted parent asks the sleeper agent from a `workflow` program. */
+const WORKFLOW_SLEEPER_REQUEST = "call the sleeper subagent";
+/** What either program sends the sleeper to make it ask a question; shared with the sleeper. */
+const CHILD_QUESTION_REQUEST = "PROGRAM-CHILD-QUESTION";
+const WAIT_FOR_CANCELLATION_REQUEST =
+  "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.";
 const AGENT_TASK_CANCEL = "AGENT-TASK-CANCEL";
 const SLEEPER_FOLLOW_UP = "SLEEPER-FOLLOW-UP";
 const CANCELLED_TURN_FOLLOW_UP = "CANCELLATION-SUBAGENT-FOLLOW-UP-OK";
@@ -53,8 +62,19 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
           )
           .join("\n");
   }
-  if (message.includes("call the sleeper subagent")) {
-    const hitl = message.includes(HITL_REQUEST);
+  // Both dialects run the same program; only the tool that runs it differs.
+  const question = message.includes(CHILD_QUESTION_REQUEST);
+  const sleeperProgram = `return await tools.sleeper({ message: ${JSON.stringify(
+    question ? CHILD_QUESTION_REQUEST : WAIT_FOR_CANCELLATION_REQUEST,
+  )} });`;
+  if (message.includes(PROGRAM_SLEEPER_REQUEST)) {
+    const id = question ? "question-sleeper" : "cancel-sleeper";
+    // The program's call holds the turn until the sleeper replies, so its result is the call's own.
+    return playScript(request, [runProgram(id, sleeperProgram)], (finished) =>
+      String(programResultOf(finished, id)),
+    );
+  }
+  if (message.includes(WORKFLOW_SLEEPER_REQUEST)) {
     // The workflow tool runs as a task: its call returns a receipt, and the
     // program's result arrives in a <task_result> message after eve__task_wait.
     const taskResult = request.messages.find(
@@ -62,17 +82,13 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     );
     if (taskResult !== undefined) return taskResult.text;
     if (request.toolResults.some((entry) => entry.name === "workflow")) {
-      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: "eve__task_wait" }] };
+      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: TASK_WAIT_TOOL }] };
     }
     return {
       toolCalls: [
         {
-          id: hitl ? "hitl-sleeper" : "cancel-sleeper",
-          input: {
-            js: hitl
-              ? `return await ctx.agent("sleeper", { message: ${JSON.stringify(HITL_REQUEST)} });`
-              : 'return await ctx.agent("sleeper", { message: "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled." });',
-          },
+          id: question ? "question-sleeper" : "cancel-sleeper",
+          input: { code: sleeperProgram },
           name: "workflow",
         },
       ],
@@ -93,8 +109,10 @@ function recallCodeWord(request: MockModelRequest): string {
 
 /**
  * Answers the follow-up to a cancelled sleeper turn only when history keeps
- * what that turn did: the sleeper call, and the calls the cancel stopped
- * answered as cancelled. Without them the sleeper request would look unanswered.
+ * what that turn did: the call that ran the sleeper's program, and the call the
+ * cancel stopped answered as cancelled. That is the `eve__execute` call itself,
+ * or the `eve__task_wait` after a `workflow` call. Without them the sleeper
+ * request would look unanswered.
  */
 function replyAfterCancelledTurn(request: MockModelRequest): string {
   const calledSleeper = request.toolResults.some((entry) => entry.id === "cancel-sleeper");
@@ -139,4 +157,7 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
+  // `eve__execute` programs ask the sleeper agent as `tools.sleeper({ message })` in the turn;
+  // `agent/tools/workflow.ts` runs the same program in the background.
+  codeMode: true,
 });

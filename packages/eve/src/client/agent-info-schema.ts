@@ -252,6 +252,7 @@ export const AgentInfoResultSchema = z
     agent: z.object({
       agentRoot: z.string(),
       appRoot: z.string(),
+      codeMode: z.boolean().optional(),
       config: source.extend({ binding }),
       description: z.string().optional(),
       model: agentModel,

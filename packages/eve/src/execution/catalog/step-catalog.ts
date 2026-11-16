@@ -26,14 +26,16 @@ import type {
   HarnessToolMap,
   ToolCallLike,
 } from "#harness/types.js";
-import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
+import { EXECUTE_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
+import { programEntry } from "./catalog-tools.js";
 import { connectionEntry, connectionSignInEntry } from "./connection-entry.js";
+import { programOutputNote } from "./signatures.js";
 import { createSkillLoader, type CatalogSkill } from "./skills.js";
 
 /** Appended to the model-facing description of every tool with `endsTurn: true`. */
@@ -63,6 +65,8 @@ export interface Callable {
 export interface StepCatalog extends HarnessToolLookup {
   /** The model's tool list: every entry that isn't deferred, routes among them. */
   readonly advertised: HarnessToolMap;
+  /** What the step can run, which a program's calls and searches read. */
+  readonly callable: Callable;
   readonly connections: readonly ResolvedConnectionDefinition[];
   /** Entries reached only through a route, connection tools aside. */
   readonly deferred: HarnessToolMap;
@@ -107,12 +111,20 @@ export function callableOf(input: CatalogInput): Callable {
     ),
     agentApproval,
   );
+  // A program is gated call by call, under each entry's policy, never as a whole.
+  const execute = input.table.entries.get(EXECUTE_TOOL_NAME);
+  if (execute?.route === undefined && execute?.definition.frameworkTool === true) {
+    if (entries.has(EXECUTE_TOOL_NAME)) entries.set(EXECUTE_TOOL_NAME, execute.definition);
+  }
   const registry = input.ctx.get(ConnectionRegistryKey);
   const versions = dynamicConnectionVersions(input.ctx);
-  return {
+  // The agent's static setting, so a tool's description is the same in every step.
+  const codeMode = bundle?.resolvedAgent.config?.codeMode === true;
+  const callable: Callable = {
     connections,
     deferred: new Map([...entries].filter(([, definition]) => definition.deferred === true)),
-    describe: (definition) => describeEntry(definition, input.endsTurn),
+    describe: (definition) =>
+      describeEntry(definition, input.endsTurn, codeMode ? callable : undefined),
     entries,
     get: (name) =>
       entries.get(name) ??
@@ -122,6 +134,7 @@ export function callableOf(input: CatalogInput): Callable {
     registry,
     skills,
   };
+  return callable;
 }
 
 /** The step's catalog: what its tools can run, and the model's tool list. */
@@ -137,6 +150,7 @@ export function buildStepCatalog(input: CatalogInput): StepCatalog {
   const advertised: Map<string, HarnessToolDefinition> = new Map();
   const catalog: StepCatalog = {
     advertised,
+    callable,
     connections: callable.connections,
     deferred: callable.deferred,
     describe: callable.describe,
@@ -242,10 +256,27 @@ function runResolved(
   return runEntryCall(resolved, options);
 }
 
-function describeEntry(definition: HarnessToolDefinition, endsTurn: boolean): string {
-  return endsTurn && definition.endsTurn === true
-    ? `${definition.description}\n\n${ENDS_TURN_TOOL_NOTE}`.trimStart()
-    : definition.description;
+/**
+ * `programs` is what a program can call, for an agent with code mode on. A tool in the model's
+ * tool list that a program can call then says what the call resolves to, since its provider
+ * definition carries no output type. A deferred entry's signature, from search, already says it.
+ */
+function describeEntry(
+  definition: HarnessToolDefinition,
+  endsTurn: boolean,
+  programs: Callable | undefined,
+): string {
+  const note =
+    endsTurn && definition.endsTurn === true
+      ? ENDS_TURN_TOOL_NOTE
+      : programs !== undefined &&
+          definition.deferred !== true &&
+          "entry" in programEntry(programs, definition.name)
+        ? programOutputNote(definition)
+        : undefined;
+  return note === undefined
+    ? definition.description
+    : `${definition.description}\n\n${note}`.trimStart();
 }
 
 /** Root-only tools and tools unavailable in subagents are hidden from delegated sessions. */

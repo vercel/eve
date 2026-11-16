@@ -8,6 +8,7 @@ import {
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
+import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 import { WEB_SEARCH_TOOL_DESCRIPTION } from "#tools/provided/web-search.js";
 
 /**
@@ -18,7 +19,16 @@ import { WEB_SEARCH_TOOL_DESCRIPTION } from "#tools/provided/web-search.js";
  * resolver that produces tools at runtime.
  */
 export type CompiledToolEntry =
-  | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
+  | {
+      readonly kind: "tool";
+      readonly definition: CompiledToolDefinition;
+      /**
+       * Whether a program run by `eve__execute` can call the tool and reads its result as
+       * `unknown`, for want of an `outputSchema` its author could add. Read from the authored
+       * definition while it is loaded; the manifest doesn't carry it.
+       */
+      readonly untypedForPrograms: boolean;
+    }
   | { readonly kind: "disabled"; readonly name: string }
   | {
       readonly definition: CompiledToolDefinition;
@@ -43,13 +53,14 @@ export async function compileToolEntry(
   source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledToolEntry> {
+  const authored = await loadModuleBackedDefinition({
+    binding: options.binding,
+    kind: "tool",
+    loadNamespace: options.loadNamespace,
+    source,
+  });
   const entry = normalizeToolDefinition(
-    await loadModuleBackedDefinition({
-      binding: options.binding,
-      kind: "tool",
-      loadNamespace: options.loadNamespace,
-      source,
-    }),
+    authored,
     `Expected the tool export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
   const toolName = stripLogicalPathExtension(source.logicalPath)
@@ -99,12 +110,19 @@ export async function compileToolEntry(
     return { definition: compiledDefinition("tool", source, toolName), kind: "dynamic" };
   }
 
-  const { workflow } = entry.definition;
+  const { endsTurn, workflow } = entry.definition;
   const shape = {
     suspend: workflow === undefined ? ("none" as const) : ("workflow" as const),
   };
   return {
     kind: "tool",
+    // Only the model ends the turn or holds a `serve` task open, and eve's own tools, such as
+    // `no_reply` and `agentRouter()`, aren't the author's to type.
+    untypedForPrograms:
+      entry.definition.outputSchema === undefined &&
+      (endsTurn === undefined || endsTurn === false) &&
+      workflow?.entryPoint !== "serve" &&
+      !(typeof authored === "object" && authored !== null && isFrameworkTool(authored)),
     definition: {
       availableInSubagents: entry.definition.availableInSubagents,
       deferred: entry.definition.deferred,

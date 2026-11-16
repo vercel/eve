@@ -30,7 +30,7 @@ The filename is the connection name, so this file registers as `"linear"`.
 
 Define every connection with `defineMcpClientConnection` or `defineOpenAPIConnection` from `eve/connections`. eve rejects a plain object export because it does not name a protocol.
 
-- The model finds tools with the built-in [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and calls them with `eve__tool`. A query such as `linear__` searches one connection's tools.
+- The model finds tools with the built-in [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and calls them with `eve__tool`, or [from a program](#call-connection-tools-from-a-program) when code mode is on. A query such as `linear__` searches one connection's tools.
 - Stream events, approval policies, and hooks name each call `<connection>__<tool>`, such as `linear__list_issues`.
 - The model never sees a connection's URL or credentials, and tokens never enter the conversation history.
 - A connection reserves its name and every name that starts with `<name>__`. No tool, subagent, or other connection can use them.
@@ -369,6 +369,16 @@ export default defineTool({
 ### Authorization and approval together
 
 A tool can require both sign-in (`auth`) and human approval. Approval runs before `execute`, so the user sees **approve, then sign in**. eve keeps a granted approval, so the turn doesn't ask for approval again after sign-in.
+
+## Call connection tools from a program
+
+With [`codeMode`](/docs/concepts/built-in-tools#eve__execute) on, the model can call connection tools from an `eve__execute` program. The program uses the same names: `tools.linear__list_issues(input)` calls a tool, and `search({ query: "linear__" })` lists the connection's tools.
+
+- A call resolves to the tool's result as data. An MCP tool returns its `structuredContent` or its text, and an OpenAPI operation returns `{ status, statusText, body }`.
+- Each call runs the connection's `approval` with its own input. See [Approve calls from a program](/docs/human-in-the-loop#approve-calls-from-a-program).
+- When a call needs the user to sign in, the program pauses and eve asks for the sign-in, as it does for a direct call. After the sign-in completes, the call runs and the program resumes with its result. The model doesn't write the program again.
+- `await tools.linear()`, with the connection's own name, asks for sign-in the way `eve__tool({ name: "linear" })` does.
+- A steering message that arrives while the sign-in is open stops the program.
 
 ## Dynamic connections
 

@@ -8,8 +8,11 @@ import type { OfferedCatalogTools } from "#context/keys.js";
 import type { Route, RouteMiss, ToolEntry } from "#definitions/definition.js";
 import type { Announcement } from "#harness/announcements.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { PROGRAM_CODE_INPUT_DESCRIPTION } from "#execution/code-mode/sandbox.js";
+import { programCallKind } from "#harness/program-calls.js";
 import {
   CALL_TOOL_NAME,
+  EXECUTE_TOOL_NAME,
   SEARCH_TOOL_NAME,
   SKILL_ENTRY_NAME,
   SKILL_TOOL_NAME,
@@ -20,7 +23,7 @@ import { isObject } from "#shared/guards.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
-import { createSearchTool } from "./search.js";
+import { createSearchTool, type SearchOutput } from "./search.js";
 import { entrySignature } from "./signatures.js";
 import { unknownSkillMessage } from "./skills.js";
 import type { Callable } from "./step-catalog.js";
@@ -31,6 +34,129 @@ const CONNECTIONS_CLAUSE =
 const LISTED_SKILL_DESCRIPTION =
   "Load a skill's instructions when the request clearly matches one of your listed skills or the user asks for it, then follow them.";
 const SEARCHABLE_SKILL_DESCRIPTION = `Load a skill's instructions when the request clearly matches a listed skill or one ${SEARCH_TOOL_NAME} found, or the user asks for it, then follow them.`;
+
+/**
+ * Fixed for each deployment: it states the runtime's rules and names no other tool, so no
+ * session's tools or catalog can change it.
+ */
+const EXECUTE_TOOL_DESCRIPTION = [
+  "Run a JavaScript program that calls your tools and returns one JSON value.",
+  "Use it to chain, loop over, filter, or combine tool calls so intermediate data stays out of the conversation.",
+  'Call any tool you can use as `await tools.<name>(input)`, using its exact name (`tools["name"]` when the name isn\'t an identifier).',
+  "`await search({ query })` finds tools that aren't in your tool list.",
+  "Calls resolve to the tool's output; a failed or rejected call throws.",
+  "An agent resolves to its reply, or to a value matching `outputSchema` when you pass one beside `message`.",
+  "A tool with no declared output type resolves to `unknown`: check its shape in the program, or return it and read it in your next step.",
+  "Start calls that don't depend on each other together with `Promise.all`, so any that need approval are asked at once.",
+  "There is no fetch, file system, timers, or imports.",
+  "`console.log` output is returned with the result.",
+].join(" ");
+
+const EXECUTE_LABEL = {
+  start: () => "Run code",
+  complete: (_input: unknown, output: unknown) => {
+    const counts = Object.values((output as { readonly calls?: object } | null)?.calls ?? {});
+    const calls = counts.reduce((sum, count) => sum + (typeof count === "number" ? count : 0), 0);
+    return `Ran code, ${String(calls)} ${calls === 1 ? "call" : "calls"}`;
+  },
+};
+
+/**
+ * `eve__execute({ code })`, for an agent with code mode on. It has no executor: the step that
+ * reads the call saves the program, and the steps that follow run it.
+ */
+export function executeTool(): ToolEntry {
+  return {
+    definition: {
+      description: EXECUTE_TOOL_DESCRIPTION,
+      frameworkTool: true,
+      inputSchema: defineJsonSchema({
+        type: "object",
+        properties: {
+          code: {
+            type: "string",
+            description: PROGRAM_CODE_INPUT_DESCRIPTION,
+          },
+        },
+        required: ["code"],
+        additionalProperties: false,
+      }),
+      label: EXECUTE_LABEL,
+      name: EXECUTE_TOOL_NAME,
+    },
+  };
+}
+
+/** Whether a call to `definition` runs a program. */
+export function isExecuteTool(definition: HarnessToolDefinition | undefined): boolean {
+  return definition?.name === EXECUTE_TOOL_NAME && definition.frameworkTool === true;
+}
+
+/**
+ * The entry a program's `tools.<name>(input)` runs: whatever `eve__tool` runs, except a tool that
+ * ends the turn, which only the model may do, a `serve` tool, whose task only the model can hold
+ * open, and a `workflow()` tool, whose program only the model starts. Otherwise, what the program
+ * reads instead.
+ */
+export function programEntry(
+  callable: Callable,
+  name: string,
+): { readonly entry: HarnessToolDefinition } | { readonly issue: string } {
+  if (name === SEARCH_TOOL_NAME) {
+    return { issue: `"${name}" can't be called from a program; use search({ query }).` };
+  }
+  const direct = { issue: `"${name}" is in your tool list; call it directly.` };
+  if (eveNamespaceReservation(name) !== undefined) return direct;
+  const entry = callable.get(name);
+  if (entry === undefined) {
+    return { issue: unknownEntryMessage(name, callable, "search({ query })") };
+  }
+  if (!callableByName(entry)) return direct;
+  if (entry.endsTurn !== undefined && entry.endsTurn !== false) {
+    return { issue: `"${name}" ends your turn, so a program can't call it; call it directly.` };
+  }
+  const kind = programCallKind(entry);
+  if (kind === "serve") {
+    return {
+      issue: `"${name}" keeps a task open between calls, which a program can't hold; call it directly.`,
+    };
+  }
+  if (kind === "program") {
+    return {
+      issue: `"${name}" runs a program in the background, which a program can't start. Call the agents from this program as tools.<agent>({ message }), or call "${name}" directly.`,
+    };
+  }
+  return { entry };
+}
+
+/** What a program reads when an entry's schema rejects its input: the issue, and the signature. */
+export function programInputIssue(
+  callable: Callable,
+  entry: HarnessToolDefinition,
+  message: string,
+): string {
+  // A connection tool's validation reports its own signature; every other entry gets one here.
+  return isConnectionTool(entry.name, callable.connections)
+    ? message
+    : `${message}\nSignature: ${entrySignature(entry)}`;
+}
+
+/** A program's `search(input)`: what `eve__search` returns for the same input. */
+export async function programSearch(callable: Callable, input: unknown): Promise<SearchOutput> {
+  const skills = [...callable.skills.values()].filter((skill) => skill.deferred);
+  const tool = createSearchTool({
+    deferred: [...callable.deferred.values()],
+    describe: callable.describe,
+    reach: {
+      connections: callable.connections.length > 0,
+      skills: skills.length > 0,
+      tools: callable.connections.length > 0 || callable.deferred.size > 0,
+    },
+    registry: callable.registry,
+    skills,
+  });
+  return (await tool.execute!(input ?? {}, undefined as never)) as SearchOutput;
+}
 
 /**
  * The catalog tools what the step can run reaches: `eve__tool` a deferred tool or agent, or a
@@ -225,7 +351,11 @@ function isConnectionTool(
   );
 }
 
-function unknownEntryMessage(name: string, callable: Callable): string {
+function unknownEntryMessage(
+  name: string,
+  callable: Callable,
+  search: string = SEARCH_TOOL_NAME,
+): string {
   if (callable.skills.has(name)) {
     return `"${name}" is a skill; load it with ${SKILL_TOOL_NAME}({ name: "${name}" }).`;
   }
@@ -237,6 +367,6 @@ function unknownEntryMessage(name: string, callable: Callable): string {
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`
-      : ` Find tools with ${SEARCH_TOOL_NAME}.`;
+      : ` Find tools with ${search}.`;
   return `No tool named "${name}".${hint}`;
 }

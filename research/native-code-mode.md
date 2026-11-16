@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-11-13"
+last_updated: "2026-11-16"
 ---
 
 # Native code mode
@@ -66,8 +66,9 @@ return stale.map((issue, i) => ({ id: issue.identifier, review: reviews[i] }));
 - **Agents are awaited, not tasked.** Inside a program, an agent call resolves
   to the agent's reply. The `eve__execute` call owns the child sessions, so they
   never appear in the model's task table.
-- **`workflow()` is removed.** `eve__execute` does everything the `workflow`
-  program tool does and more.
+- **`workflow()` is the same program, in the background.** `eve__execute`
+  runs a program in the turn; `workflow()` runs one as a task, in the same
+  language. See [Programs in the background](#programs-in-the-background-workflow).
 - **Cache stable.** The `eve__execute` definition depends only on `codeMode`
   and the eve version, and names no other tool. A program never adds a
   definition.
@@ -251,8 +252,8 @@ export default defineAgent({
   [Output types](#output-types).
 - **Hidden agents.** Programs reach what `eve__tool` reaches, so an agent with
   `tool: false` can't be called from code. Set `tool: "deferred"` to keep an
-  agent out of the tool list while letting programs call it. This replaces
-  `workflow()`'s ability to call hidden agents.
+  agent out of the tool list while letting programs call it. A `workflow()`
+  program still calls hidden agents by name.
 
 ### Model surface
 
@@ -628,26 +629,48 @@ Code mode adds:
    resume, or retry never adds a definition or a system message.
 4. **Listing unchanged.** The only difference is the fixed code-mode clause.
 
-## Removing `workflow()`
+## Programs in the background: `workflow()`
 
-`eve__execute` covers everything `workflow()` does: fan-out and fan-in over
-agents, structured output, catchable failures, and durable parking. It also
-calls tools and connections. Keeping both would give models two JavaScript
-tools. How the removal is released is decided separately.
+`workflow()` stays, as the second layer of the same feature. A program in
+`eve__execute` replaces a batch of the model's tool calls: it runs in the
+session's turn, reaches every tool, and holds the turn. A program in
+`workflow()` replaces a workflow tool a developer would have authored: it runs
+as a task in a durable run of its own, so the model keeps working and a new
+message doesn't stop it.
 
-- **Removed.** `workflow()`, `eve/tools/workflow`, and
-  `execution/dynamic-workflow/tool.ts`. An agent that imports it fails to
-  compile with: `workflow() was removed. Set codeMode: true in agent.ts; programs call agents as tools.<name>({ message }).`
-- **Survives, generalized.** The program step and the continuation security
-  step move behind `eve__execute`. The agent interrupt becomes the interrupt for
-  every waiting call kind.
-- **Behavior differences for the migration notes:**
-  - `agent/tools/workflow.ts` goes away, and `agent.ts` sets `codeMode: true`.
+A run outside the session has no sandbox, auth, or approval memory, so the one
+thing a `workflow()` program can call is an agent, which opens a child
+session. That is the only difference in the language.
+
+|                    | `eve__execute`                         | `workflow()`                                           |
+| ------------------ | -------------------------------------- | ------------------------------------------------------ |
+| Enabled by         | `codeMode: true`                       | `agent/tools/<name>.ts` exporting `workflow()`         |
+| Input              | `{ code }`                             | `{ code }`                                             |
+| `tools.<name>()`   | Every entry `eve__tool` reaches        | Agents, including hidden ones                          |
+| Runs               | In the turn, as program steps          | As a task, in its own run                              |
+| A new message      | Stops the program                      | Nothing                                                |
+| Result             | The call's result                      | The task's result, the same `{ result, logs?, calls }` |
+| Agent calls        | 128, each gated like the model's calls | `maxSubagents`, 1 to 128 (default 128), not gated      |
+| Sandbox and limits | One module: `execution/code-mode/`     | The same module and limits                             |
+
+- **They compose.** A `workflow()` program fans out to agents, and each child
+  session uses code mode for its own tool work. A program in the turn calls
+  agents itself when the model needs the answers now.
+- **No nesting.** A program can't call a `workflow()` tool; it gets a
+  catchable error that tells it to call the agents itself.
+- **A failed program fails its task.** The message carries the error, the
+  line that threw, and the console output.
+- **One implementation.** `execution/dynamic-workflow/` is gone. The task's
+  workflow and steps live beside the sandbox in `execution/code-mode/`, and
+  the result shape and the agent-limit error are shared.
+- **Behavior differences for the migration notes.** The authored file is
+  unchanged. What the model writes changes:
   - The program's input is `code`, not `js`.
   - Programs call `tools.<name>({ message })`, not `ctx.agent(name, { message })`.
-  - The call holds the turn instead of running as a task.
-  - Hidden agents need `tool: "deferred"`.
-  - `maxSubagents` is gone. The limits are 128 agent calls and 1,024 calls.
+  - The task result is `{ result, logs?, calls }`, not the bare return value.
+  - `maxSubagents` defaults to 128, not 100.
+  - `WorkflowProgramAgentError` is `ToolError`, and
+    `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED` is `EXECUTE_AGENT_LIMIT_REACHED`.
 
 ## Rollout
 
@@ -669,11 +692,11 @@ One spike settles what the recovery design assumes, before [1/3]:
 
 Stacked, following the #4400 shape.
 
-| PR            | Scope                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [1/3] Runtime | `codeMode` on `defineAgent`; `eve__execute` and its description; the program step after the model step; nested resolution through the step catalog; inline runs, interrupts, and the continuation in session state; nested approval, sign-in, workflow, and agent dispatch; crash recovery; steering and cancellation; `owner` on nested calls; labels and client grouping; removal of `workflow()` |
-| [2/3] Types   | Output-type notes on direct tools; output validation for program calls; OpenAPI output schemas; the build warning                                                                                                                                                                                                                                                                                   |
-| [3/3] Tests   | Every new test, below                                                                                                                                                                                                                                                                                                                                                                               |
+| PR            | Scope                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [1/3] Runtime | `codeMode` on `defineAgent`; `eve__execute` and its description; the program step after the model step; nested resolution through the step catalog; inline runs, interrupts, and the continuation in session state; nested approval, sign-in, workflow, and agent dispatch; crash recovery; steering and cancellation; `owner` on nested calls; labels and client grouping; `workflow()` on the shared runtime |
+| [2/3] Types   | Output-type notes on direct tools; output validation for program calls; OpenAPI output schemas; the build warning                                                                                                                                                                                                                                                                                              |
+| [3/3] Tests   | Every new test, below                                                                                                                                                                                                                                                                                                                                                                                          |
 
 Docs and the changeset for the new tool go with [1/3]. [2/3] carries a
 `patch`.
@@ -708,8 +731,8 @@ Docs and the changeset for the new tool go with [1/3]. [2/3] carries a
     to the nested entry, the workflow tool parking and resuming, an agent
     fan-out, and `t.calledTool` on nested calls.
   - Its real-model suite covers cache reads after programs.
-  - Move the `workflow()` evals in `agent-subagents` and `agent-cancellation`
-    to `eve__execute`, written fresh against the new surface.
+  - Port the `workflow()` evals in `agent-subagents` and `agent-cancellation`
+    to the shared language, and add `eve__execute` evals beside them.
 - **New real-model evals**, written as process narratives:
   - Alice reconciles orders against payments and support tickets across two
     connections.
@@ -780,7 +803,7 @@ Migration steps go in the changeset, not in `docs/`.
 | Catalog presentation          | Existing listing plus one fixed clause; output types on direct tools; signatures from search      | Budgeted inline signatures (overrides `deferred`); catalog in the tool description (pi); a description that names `eve__search` (changes when a session gains it)                                                                                                       |
 | Untyped outputs               | `Promise<unknown>`; build warning when code mode is on                                            | Requiring output schemas; `string` (pi)                                                                                                                                                                                                                                 |
 | Input form                    | JSON `{ code }` at ship                                                                           | Lark grammar at ship (provider-specific declaration, history normalization, and unverified on AI Gateway); see open questions                                                                                                                                           |
-| `workflow()`                  | Removed                                                                                           | Keeping a second JavaScript tool                                                                                                                                                                                                                                        |
+| `workflow()`                  | Kept as the background layer: the same program as a task, calling agents                          | Removing it (no background programs); keeping its separate `{ js }` and `ctx.agent()` dialect; a background flag on `eve__execute` (a task can't run session tools)                                                                                                     |
 | Network                       | None in programs                                                                                  | `fetch` (opencode has no SSRF guard or permission check)                                                                                                                                                                                                                |
 | Limits                        | Fixed: 1,024 calls, 128 agent calls, plus compute, wall-clock, continuation, and result-size caps | One 256-call limit (too low for a two-call loop over 150 items); settings on `codeMode` at ship                                                                                                                                                                         |
 
@@ -799,9 +822,12 @@ Migration steps go in the changeset, not in `docs/`.
 - **Continuing an agent from code.** `workflow()` can't, and neither can this
   design at ship. If evals show programs re-briefing the same agent, add a
   returned handle, not a raw `taskId`.
-- **Background programs.** `workflow()` ran as a task. Programs here hold the
-  turn. If long fan-outs need the conversation to continue, a later option can
-  run an `eve__execute` call as a task.
+- **Tools in background programs.** `workflow()` is the background program,
+  and it reaches agents only. Letting it call session tools means a task
+  handing calls back to the session's steps, which needs its own design.
+- **Other workflow primitives.** `workflow()` programs could gain what an
+  authored workflow tool has and a turn doesn't, such as `sleep` and
+  `ctx.ask`.
 - **Media out of programs.** Images from `read_file` or MCP content can't
   reach the model through a program at ship. opencode attaches them, and pi
   has `image()`.

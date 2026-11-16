@@ -16,15 +16,15 @@ export function installWorkflowSandboxModule(module: WorkflowSandboxModule): voi
 }
 
 /**
- * Returns the vendored `run` runtime that executes generated workflow
- * programs. eve's host installs it for agents with a generated-program tool,
- * so hosts without one never bundle it.
+ * Returns the vendored `run` runtime that executes generated programs. eve's
+ * host installs it for agents with code mode on, so hosts without one never
+ * bundle it.
  */
 export async function loadWorkflowSandboxModule(): Promise<WorkflowSandboxModule> {
   const installed = (globalThis as WorkflowSandboxGlobal)[WORKFLOW_SANDBOX_MODULE_KEY];
   if (installed === undefined) {
     throw new Error(
-      "The workflow program runtime is not installed in this server. eve installs it only for agents whose manifest declares a generated-program tool; rebuild with `eve build` after adding one.",
+      "The program runtime is not installed in this server. eve installs it only for agents whose manifest sets `codeMode: true`; rebuild with `eve build` after setting it.",
     );
   }
   return installed;

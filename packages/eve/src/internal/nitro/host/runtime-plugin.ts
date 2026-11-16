@@ -9,7 +9,7 @@ export const EVE_RUNTIME_PLUGIN_ID = "#eve/runtime";
 export interface HostRuntime {
   /** Captures traces locally in a dev host without authored instrumentation. */
   readonly localTracing: boolean;
-  /** Installs the `run` runtime for agents with a generated-program tool. */
+  /** Installs the `run` runtime for agents with code mode on. */
   readonly workflowSandbox: boolean;
 }
 

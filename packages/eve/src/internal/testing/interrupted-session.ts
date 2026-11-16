@@ -54,6 +54,8 @@ export interface InterruptedSession {
 }
 
 export interface InterruptedSessionOptions {
+  /** The agent has code mode on, so the model can run programs with `eve__execute`. */
+  readonly codeMode?: true;
   readonly tools: readonly {
     readonly name: string;
     readonly approval?: boolean;
@@ -117,6 +119,7 @@ export async function withInterruptedSession(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
+        ...(options.codeMode === true && { codeMode: true }),
         model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
       }),
       name,

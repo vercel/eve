@@ -258,7 +258,7 @@ Use the qualified operation name, such as `linear__list_issues` or `researcher/l
 
 A stubbed connection must still be reachable, because eve lists the connection's tools to validate the operation and its arguments.
 
-A rule names the tool itself, whether the model calls it directly or through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill). The model uses `eve__tool` for deferred tools and connection operations. A call through `eve__tool` matches by the name and `input` of the tool it reaches. `eve__search`, `eve__tool`, and `eve__skill` can't be stubbed.
+A rule names the tool itself, whether the model calls it directly or through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill). The model uses `eve__tool` for deferred tools and connection operations. A call through `eve__tool`, or from an [`eve__execute`](/docs/concepts/built-in-tools#eve__execute) program, matches by the name and `input` of the tool it reaches. `eve__search`, `eve__tool`, `eve__skill`, and `eve__execute` can't be stubbed.
 
 Tools the model provider runs, such as provider-hosted web search, can't be stubbed. A search tool in your own agent can.
 

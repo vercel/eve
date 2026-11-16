@@ -178,10 +178,49 @@ in it is tagged `real-model`. Deterministic task coverage lives with the
 surfaces it exercises, in `agent-workflow-tools` and `agent-subagents`.
 
 `agent-deferred-tools` owns the catalog: about 40 deferred tools (20 of them
-under the `ledger` namespace), agents, skills, and a connection, reached only
-through `search` and `execute`. Its mock-model evals cover dispatch through
-`execute`; its `real-model` evals gate prompt-cache reuse after discovery and
-that web questions go to `web_search`.
+under the `ledger` namespace), agents, skills, and a connection, reached
+through `eve__search` and `eve__tool`. Its root agent has code mode on, so the
+same entries are also reached from `eve__execute` programs. Its mock-model
+evals cover dispatch through `eve__tool` and through programs: nested calls,
+approvals keyed to a nested call, a workflow tool a program waits on, and an
+agent fan-out. Its `real-model` evals gate prompt-cache reuse after discovery
+and after programs, model-written programs, and that web questions go to
+`web_search`.
+
+`agent-subagents` and `agent-cancellation` cover the two ways a model runs a
+program it writes. Both root agents set `codeMode: true` and define
+`agent/tools/workflow.ts` with `workflow()`:
+
+|             | `eve__execute` (code mode)                        | `workflow` tool                                                |
+| ----------- | ------------------------------------------------- | -------------------------------------------------------------- |
+| Input       | `{ code }`                                        | `{ code }`, in the same language                               |
+| Calls       | `await tools.<name>(input)`, every tool and agent | `await tools.<agent>({ message, outputSchema? })`, agents only |
+| Runs        | In the turn, which waits for the program          | In the background, as a task                                   |
+| Result      | The call's own result                             | The task's result                                              |
+| Agent calls | At most 128                                       | At most `maxSubagents`, which `agent-subagents` sets to 3      |
+
+A program that returns gives the model `{ result, logs?, calls }` either way,
+so an eval finds its return value in `output.result` of the program call's
+`call.settled`. A program that throws settles its `eve__execute` call with
+`{ error, logs?, calls }`, and fails its `workflow` task.
+
+`program-agent-calls`, `program-fan-out`, `software-factory-program`,
+`program-child-question`, and `program-cancel-subagent` cover `eve__execute`:
+the program starts no task, and its nested calls (`<callId>/<n>`) own the
+child sessions they open. `workflow-subagent-limit`, `dynamic-workflow`,
+`software-factory-workflow`, `generated-program-child-hitl`, and
+`cancel-subagent` cover `workflow`: the program starts one task, and its call
+owns the child sessions. `workflow-code-mode-agent` runs one inside the other:
+a `workflow` program asks a copy of the root agent, which runs an
+`eve__execute` program in its own turn.
+
+The mock-model evals carry their program in a `js` fence. In
+`agent-subagents`, the marker `E2E_PROGRAM_AGENT_CALLS` selects a scripted
+model that runs the fence unchanged with `eve__execute`, and
+`E2E_WORKFLOW_PROGRAM` selects one that runs it with `workflow` and waits for
+the task. In `agent-cancellation`, "ask the sleeper agent from one program"
+scripts the `eve__execute` call and "call the sleeper subagent" scripts the
+`workflow` call.
 
 `agent-tool-discovery` is the real-model gate for how models use the catalog
 tools: a catalog of 70 deferred tools (60 in the `sre`, `d0`, `index`, and

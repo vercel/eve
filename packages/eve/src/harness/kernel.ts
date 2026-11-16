@@ -22,6 +22,8 @@ import {
   withoutTurnInput,
 } from "#harness/hitl/index.js";
 import { blocked, hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { runProgramStep, stopProgram } from "#harness/program-step.js";
+import { runnableProgram } from "#harness/session-machine/programs.js";
 import {
   clear,
   controlDeliveryFor,
@@ -150,6 +152,15 @@ export function createKernel(config: KernelConfig): StepFn {
     if (hookFailure !== undefined) return hookFailure;
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
+    // A program whose calls all have results runs before anything else the turn holds: it is the
+    // step's whole work. A new message stops it instead, and the model reads what it did.
+    const steered = turn.messages.length > 0 || step.view().turn.queued?.message !== undefined;
+    for (;;) {
+      const program = runnableProgram(step.view().turn, activeTurnIdOf(step.view().projection));
+      if (program === undefined) break;
+      if (!steered) return runProgramStep(step, program);
+      await stopProgram(step, program);
+    }
     if (blocked(step.view(), step.session.state)) return park(step);
     // Read input held behind approved calls before the model can ask for more work. The step's
     // own input waits as this step prepared it, its attachments already staged. A provider tool's
@@ -225,7 +236,13 @@ async function answers(
     input = withoutTurnInput(input);
     message = undefined;
   }
-  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+  // A program that can run doesn't wait behind what its turn still asks a person.
+  const program = runnableProgram(step.view().turn, activeTurnIdOf(step.view().projection));
+  if (
+    decided.approved.length === 0 &&
+    program === undefined &&
+    blocked(step.view(), step.session.state)
+  ) {
     await step.apply(queueInput(step.view(), compactInput(input)));
     return { ended: await park(step) } as Ended;
   }

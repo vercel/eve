@@ -20,7 +20,8 @@ describe("resolveEvalTargetHandle", () => {
       }
 
       if (url.endsWith("/eve/v1/info")) {
-        return Response.json(infoPayload({ name: "agent-basic-runtime" }));
+        const info = infoPayload({ name: "agent-basic-runtime" });
+        return Response.json({ ...info, agent: { ...info.agent, codeMode: true } });
       }
 
       if (url.endsWith("/eve/v1/dev/schedules/heartbeat")) {
@@ -40,7 +41,7 @@ describe("resolveEvalTargetHandle", () => {
 
     expect(target.url).toBe("http://127.0.0.1:3000");
     expect(target.capabilities).toEqual({ devRoutes: true });
-    expect(targetTools(target)).toEqual({ dynamic: false, static: [] });
+    expect(targetTools(target)).toEqual({ codeMode: true, dynamic: false, static: [] });
     expect(
       targetTools(
         createEvalTargetHandle({

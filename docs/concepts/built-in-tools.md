@@ -22,7 +22,7 @@ export default defineAgent({
 });
 ```
 
-Add back only the tools the agent needs with the command in each tool's section. Files under `agent/tools/` stay available, including same-name replacements such as `agent/tools/bash.ts`. `defaultTools` doesn't affect [the catalog tools](#eve__search-eve__tool-and-eve__skill), which eve adds from what the session can reach.
+Add back only the tools the agent needs with the command in each tool's section. Files under `agent/tools/` stay available, including same-name replacements such as `agent/tools/bash.ts`. `defaultTools` doesn't affect [the catalog tools](#eve__search-eve__tool-and-eve__skill), which eve adds from what the session can reach, or [`eve__execute`](#eve__execute), which `codeMode` adds.
 
 ### `bash`
 
@@ -453,15 +453,197 @@ eve lists what the model can reach in an append-only context message, not the sy
 - up to 20 namespaces, the first `__` segment of deferred names, such as `sre` for `sre__list_alerts`
 - up to 20 connections with their descriptions
 
-It never names a deferred entry, so deferred entries stay out of context until `eve__search` finds them. A later step appends the listing again only when it changes.
+It never names a deferred entry, so deferred entries stay out of context until `eve__search` finds them. A later step appends the listing again only when it changes. With [`codeMode`](#eve__execute) on, the message also tells the model to call several tools from `eve__execute` as `tools.<name>(input)`.
 
 #### Reserved `eve` names
 
-The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool`, `eve__skill`, `eve__task_wait`, `eve__task_cancel`, and `eve__reply`. No tool, subagent, skill, connection, or extension mount, static or dynamic, may be named `eve` or start with `eve__`. The compiler rejects an authored tool, skill, connection, or mount with such a name, such as `agent/tools/eve__search.ts`. eve rejects an authored subagent when the agent loads, and a dynamic entry when its resolver returns it. Any other name is free, including `search` and `execute`.
+The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool`, `eve__skill`, `eve__execute`, `eve__task_wait`, `eve__task_cancel`, and `eve__reply`. No tool, subagent, skill, connection, or extension mount, static or dynamic, may be named `eve` or start with `eve__`. The compiler rejects an authored tool, skill, connection, or mount with such a name, such as `agent/tools/eve__search.ts`. eve rejects an authored subagent when the agent loads, and a dynamic entry when its resolver returns it. Any other name is free, including `search` and `execute`.
+
+### `eve__execute`
+
+`eve__execute` is code mode. The model writes a JavaScript program that calls the agent's tools and returns one value. Only that value and a summary of the calls enter the conversation, so the data the program reads along the way stays out of context. Turn it on for an agent that chains, loops over, filters, or combines many tool calls.
+
+There is no add command. Set `codeMode: true` in `agent.ts`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "openai/gpt-5.4",
+  codeMode: true, // omit to leave eve__execute out
+});
+```
+
+- `codeMode` applies to the agent that sets it, root or subagent. A copy of the root from the `agent` tool follows the root.
+- The setting is fixed at build time. A [dynamic subagent configuration](/docs/subagents#conditional-availability) that returns it fails with `The "codeMode" field cannot be selected at runtime.`
+- `defaultTools: false` doesn't remove `eve__execute`.
+- Activity shows the call as `Run code`, then `Ran code, <n> calls`.
+
+The model calls `eve__execute({ code })`. `code` is the body of an async function, so `await` and `return` work at the top level. This program emails each new lead through a tool that asks for approval:
+
+```js
+const { leads } = await tools.crm__list_leads({ status: "new" });
+// Start the sends together, so every approval is asked at once.
+const sends = await Promise.allSettled(
+  leads.map((lead) => tools.send_email({ to: lead.email, template: "welcome" })),
+);
+console.log(`${leads.length} new leads`);
+return leads.map((lead, i) => ({ email: lead.email, sent: sends[i].status === "fulfilled" }));
+```
+
+A program has three globals:
+
+| Global                      | What it does                                                                                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools.<name>(input)`       | Calls a tool, agent, or connection tool by its exact name and resolves to its output. `input` defaults to `{}`. Write `tools["name"]` when the name isn't a JavaScript identifier. |
+| `search({ query, limit? })` | Returns what [`eve__search`](#eve__search) returns for the same input.                                                                                                             |
+| `console`                   | Lines from `log`, `info`, `warn`, `error`, and `debug` go back to the model as `logs`.                                                                                             |
+
+- A program has no `fetch`, file system, timers, or imports. It runs in an isolated JavaScript runtime in your app, not in the agent's [sandbox](../sandbox).
+- A call resolves to the tool's own return value, not its [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput) version. Give tools an `outputSchema` so the model [knows each result's type](/docs/tools#declare-output-types-for-code-mode).
+- A failed or denied call throws at its `await`, so the program can catch the error and continue.
+- A program that returns while a call is still pending fails, so await every call, including ones passed to `Promise.race`.
+- Each input and the return value pass through `JSON.stringify`. A program that returns nothing returns `null`.
+
+#### What a program can call
+
+A program calls entries by the same names the model uses, whether they are in the tool list or deferred:
+
+| Entry                                                                                            | From a program                                            |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| Deferred tools, connection tools, and a connection's sign-in entry                               | Yes                                                       |
+| Tools in the model's tool list that eve runs, such as `bash` and `read_file`                     | Yes                                                       |
+| `execute` and `task` [workflow tools](/docs/tools/workflows), such as `ask_question` and `sleep` | Yes. A `task` tool resolves to its result, not a receipt. |
+| Agents with `tool` omitted or `"deferred"`                                                       | Yes. See [Agents in programs](#agents-in-programs).       |
+| `eve__*` tools                                                                                   | No. `search()` takes the place of `eve__search`.          |
+| Tools eve doesn't run, such as provider-managed `web_search`                                     | No                                                        |
+| Tools with [`endsTurn`](/docs/tools#end-the-turn-after-a-tool-call)                              | No                                                        |
+| `serve` workflow tools that aren't agents                                                        | No                                                        |
+| A [`workflow()`](#workflow) tool                                                                 | No. The program calls the agents itself.                  |
+| Agents with `tool: false`                                                                        | No                                                        |
+
+A call the program can't make throws one of these errors. An unknown name lists the closest tool names when it has any:
+
+```text
+No tool named "<name>". Find tools with search({ query }).
+"eve__search" can't be called from a program; use search({ query }).
+"<name>" is in your tool list; call it directly.
+"<name>" ends your turn, so a program can't call it; call it directly.
+"<name>" keeps a task open between calls, which a program can't hold; call it directly.
+"<name>" runs a program in the background, which a program can't start. Call the agents from this program as tools.<agent>({ message }), or call "<name>" directly.
+```
+
+A call whose input fails the tool's schema throws the issue and the tool's signature.
+
+#### Agents in programs
+
+A program awaits an agent's answer. The call doesn't start a [task](/docs/tools/tasks):
+
+```js
+const review = await tools.reviewer({
+  message: `Review this deployment plan:\n\n${plan}`, // everything the agent needs
+  // optional JSON Schema: the call then resolves to a matching value
+  outputSchema: {
+    type: "object",
+    properties: { approved: { type: "boolean" }, reason: { type: "string" } },
+    required: ["approved", "reason"],
+  },
+});
+```
+
+- Without `outputSchema`, the call resolves to the agent's reply text.
+- Each call starts a new child session. A call with `taskId` throws, so a program can't continue an earlier child.
+- An [`agent({ models })`](#agent) tool also accepts `model`.
+- The child sessions belong to the `eve__execute` call. They aren't tasks, so `eve__task_wait` and `eve__task_cancel` don't see them.
+- A failed child turn throws at its call.
+- A program can't call an agent with `tool: false`. Set [`tool: "deferred"`](/docs/subagents#declared-subagents) to keep an agent out of the tool list while programs call it.
+
+#### What the model reads back
+
+When the program returns, the model reads `{ result, logs?, calls, notCompleted? }`. When the program fails, the tool result is an error with `error` in place of `result`. The lead program above returns this when a person approves Alice's email and denies Bob's:
+
+```json
+{
+  "result": [
+    { "email": "alice@example.com", "sent": true },
+    { "email": "bob@example.com", "sent": false }
+  ],
+  "logs": ["2 new leads"],
+  "calls": { "completed": 2, "rejected": 1 },
+  "notCompleted": [
+    {
+      "tool": "send_email",
+      "outcome": "rejected",
+      "input": "{\"to\":\"bob@example.com\",\"template\":\"welcome\"}"
+    }
+  ]
+}
+```
+
+| Field          | What it holds                                                                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `result`       | The program's return value.                                                                                                                                         |
+| `error`        | The uncaught error's message, with the line that threw. When a call completed first, it ends with `Calls that completed before this are not undone.`                |
+| `logs`         | The program's console lines, when it wrote any.                                                                                                                     |
+| `calls`        | How many `tools` calls ended each way: `completed`, `failed`, `rejected`, `interrupted`, or `abandoned`. `search()` calls aren't counted.                           |
+| `notCompleted` | The first 20 calls that didn't complete, whether or not the program caught them. Each has its `tool`, its `outcome`, and its `input` as JSON cut to 500 characters. |
+
+A `rejected` call was denied by a policy or a person, or its approval was withdrawn. An `interrupted` call didn't finish because the program stopped. An `abandoned` call was cut off by a [crash](./execution-model-and-durability#programs-after-a-crash).
+
+A result over 10,000 estimated tokens reaches the model as its head and tail, with a note to return less. Model history holds only the `eve__execute` call and this result. The stream reports [each call the program makes](./sessions-runs-and-streaming#streamed-output) under its own name.
+
+#### Calls that wait
+
+Calls that can finish right away run as the program makes them, up to 32 at a time. A call that has to wait pauses the program: a person's approval, a sign-in, a workflow tool, an agent, or a question. A paused program holds no compute and survives restarts. It resumes when every call it paused on has a result, and calls that already finished don't run again.
+
+- **Approvals.** Each call goes through its own tool's `approval` and the agent-wide policy, and `eve__execute` itself never asks. See [Approve calls from a program](/docs/human-in-the-loop#approve-calls-from-a-program).
+- **New messages.** A steering message, the default for a new message, stops a running or paused program. Finished calls keep their results, and no new call starts. The model reads `{ error: "Stopped early because a new message arrived.", calls, notCompleted? }`, then the message.
+- **Cancellation.** Cancelling the turn cancels the `eve__execute` call and everything it started.
+- **Crashes.** The program runs again as the same call, and finished calls return their recorded results. See [Programs after a crash](./execution-model-and-durability#programs-after-a-crash).
+
+#### Program limits
+
+The limits are fixed. An error over a limit names it, such as `EXECUTE_CALL_LIMIT_REACHED: a program may make at most 1024 calls; "linear__get_issue" was not called.`
+
+| Limit                                                    | Value                   | Over the limit                                                                      |
+| -------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| Calls per program, `tools` calls and searches together   | 1,024                   | The call throws `EXECUTE_CALL_LIMIT_REACHED`.                                       |
+| Agent calls per program                                  | 128                     | The call throws `EXECUTE_AGENT_LIMIT_REACHED`.                                      |
+| Calls running at once                                    | 32                      | Later calls wait their turn. Calls the program paused on don't count.               |
+| JavaScript time, each time the program starts or resumes | 30 seconds              | The program fails with `EXECUTE_CPU_LIMIT_REACHED`. Waiting on calls isn't counted. |
+| Total time, each time the program starts or resumes      | 5 minutes               | The program fails with `EXECUTE_TIME_LIMIT_REACHED`. Paused time isn't counted.     |
+| Program source                                           | 256 KiB                 | The program fails with `EXECUTE_SOURCE_TOO_LARGE`.                                  |
+| One call's input, or the return value, as JSON           | 1 MiB                   | The call throws, or the program fails, with `EXECUTE_VALUE_TOO_LARGE`.              |
+| One call's output as JSON                                | 4 MiB                   | The call throws `EXECUTE_OUTPUT_TOO_LARGE`.                                         |
+| Results a paused program holds                           | 8 MiB                   | The program fails with `EXECUTE_CONTINUATION_LIMIT_REACHED`.                        |
+| Memory and stack                                         | 64 MiB and 2 MiB        | The program fails.                                                                  |
+| Console output                                           | 64 KiB                  | Later lines are dropped.                                                            |
+| Result the model reads                                   | 10,000 estimated tokens | The model reads the head and tail.                                                  |
+
+#### Run a program in the background
+
+An `eve__execute` program holds the turn until it returns. To let the model keep working while agents run, add the [`workflow()` tool](#workflow). It runs the same kind of program in the background, as a [task](/docs/tools/tasks). The two differ in where the program runs and what follows from that:
+
+|                         | `eve__execute`                                                                                                              | `workflow()` tool                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| How you add it          | `codeMode: true` in `agent.ts`                                                                                              | A tool file that exports `workflow()`              |
+| What `tools` reaches    | The agent's tools, connection tools, and agents. See [What a program can call](#what-a-program-can-call).                   | Agents only, including agents with `tool: false`   |
+| How it runs             | Inside the turn, as one tool call                                                                                           | Outside the session, as a task in a run of its own |
+| A new message           | Stops the program                                                                                                           | Doesn't stop it                                    |
+| Where the result goes   | The `eve__execute` tool result                                                                                              | A receipt at once, then a `task.result` message    |
+| Agent calls per program | 128                                                                                                                         | `maxSubagents`, which is 128 unless you lower it   |
+| Approval of agent calls | Gated by the agent-wide [approval policy](/docs/human-in-the-loop#approve-calls-from-a-program), like the model's own calls | Not gated. A local child's own tool calls are.     |
+
+A `workflow()` program runs outside the session, so its `tools` holds agents only. It has no session sandbox, sign-ins, or remembered approvals to run other tools with.
+
+Use `eve__execute` when the model needs the result in this turn. Use the `workflow()` tool when the model should keep working while agents run. The two combine:
+
+- A `workflow()` program fans out to agents, and an agent with `codeMode` on can use `eve__execute` for its own tool calls.
+- An `eve__execute` program calls agents itself when the model needs their answers in this turn. It can't start a `workflow()` program.
 
 ### `eve__task_wait` and `eve__task_cancel`
 
-eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks). These are the built-in `agent` tool, declared subagents, remote agents, `agentRouter()`, the `workflow` tool, and authored workflow tools that define `task(input, ctx)` or `serve(receive, ctx)`. There is no add command.
+eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks). These are the built-in `agent` tool, declared subagents, remote agents, `agentRouter()`, the [`workflow()` tool](#workflow), and authored workflow tools that define `task(input, ctx)` or `serve(receive, ctx)`. There is no add command.
 
 - `eve__task_wait({ timeoutSeconds? })` waits until any task has a result, a new message arrives, or `timeoutSeconds` pass. It returns at once when a result is already waiting. The turn stays running, not paused, because `turn.paused` only reports approvals, questions, and other requests for input. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `eve__task_cancel({ taskId })` stops a task's current work and says so. When the task already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve), it says the task had no work to stop. An id that names no task fails with `UNKNOWN_TASK`. Cancelling an agent task ends it; other resumable tasks stay available after a cancel.
@@ -583,6 +765,65 @@ export default defineWorkflowTool({
   description: "Pause before checking an external operation again.",
 });
 ```
+
+### `workflow`
+
+The `workflow()` tool runs a JavaScript program the model writes, in the background. The program calls agents and returns one value. It runs as a [task](/docs/tools/tasks): the model gets a receipt, keeps working, and reads the result later in a `task.result` message. It is the background counterpart of code mode. See [Run a program in the background](#run-a-program-in-the-background) for how the two differ.
+
+There is no add command. Create the file:
+
+```ts title="agent/tools/workflow.ts"
+import { workflow } from "eve/tools/workflow";
+
+// maxSubagents: agent calls per program, from 1 through 128. Omit it for 128.
+export default workflow({ maxSubagents: 20 });
+```
+
+- The file name is the tool's name. The tool works with or without `codeMode`.
+- A `workflow()` tool isn't an authored [workflow tool](/docs/tools/workflows). `defineWorkflowTool` runs a workflow you write, and `workflow()` runs a program the model writes.
+
+The model calls `workflow({ code })`. `code` is the body of an async function, as it is for [`eve__execute`](#eve__execute). This program starts three `researcher` sessions side by side, then gives their findings to a second agent:
+
+```js
+const areas = ["billing", "auth", "search"];
+// Start the calls together, so the agents work side by side.
+const findings = await Promise.all(
+  areas.map((area) => tools.researcher({ message: `List the open incidents in ${area}.` })),
+);
+console.log(`researched ${areas.length} areas`);
+return await tools["incident-writer"]({
+  message: `Summarize these findings:\n\n${findings.join("\n\n")}`,
+  // optional JSON Schema: the call then resolves to a matching value
+  outputSchema: {
+    type: "object",
+    properties: { title: { type: "string" }, urgent: { type: "number" } },
+    required: ["title", "urgent"],
+  },
+});
+```
+
+- `tools.<name>({ message, outputSchema? })` sends `message` to a new session with that agent. The call resolves to the agent's reply text, or to the structured value when `outputSchema` is set.
+- `<name>` is a name [`ctx.agent`](/docs/tools/workflows#delegate-work-ctxagent) accepts, such as a subagent's path-derived name. Write `tools["name"]` when the name isn't a JavaScript identifier.
+- A program can call an agent hidden with `tool: false` or a same-named `disableTool()` file. Name those agents in the agent's instructions, because the model's tool list doesn't show them.
+- Each call starts a new child session, which doesn't see the conversation. A call with any property other than `message` and `outputSchema`, such as `taskId`, throws.
+- `tools` holds agents only. `search()` throws, and a program has no other tools, `fetch`, file system, timers, or imports.
+- A failed child turn, an invalid call, or a call over `maxSubagents` throws a `ToolError` at that call, which the program can catch. A call over the limit reads `EXECUTE_AGENT_LIMIT_REACHED: a program may call agents at most 20 times; "researcher" was not called.`
+
+When the program returns, the task's result is `{ result, logs?, calls }`: the return value, the console lines, and how many agent calls ended as `completed` or `failed`. An [`eve__execute` result](#what-the-model-reads-back) has the same three fields.
+
+A program that throws, or that returns while a call is still pending, fails its task. The failure message holds the error, the program line that threw, and the console output. When a call completed first, the message says so:
+
+```text
+Error: no recipients left (line 3) Calls that completed before this are not undone.
+console output:
+sent one
+```
+
+A `workflow()` program has the source, time, size, memory, and console limits of an `eve__execute` program; see [Program limits](#program-limits). Only `maxSubagents` is a setting.
+
+The program's task follows the [task rules](/docs/tools/tasks). The model waits for it with `eve__task_wait` and stops it with `eve__task_cancel`, and the turn can't end while it works.
+
+In the child sessions, agent authorization, questions, approvals, and cancellation work as they do for a session an authored workflow tool opens with [`ctx.agent`](/docs/tools/workflows#delegate-work-ctxagent). The parent stream announces each child session with `child.opened`. Its `owner` is `{ callId }` naming the `workflow` call, so a client can show the children under that call.
 
 ## What to read next
 

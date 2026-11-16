@@ -1,65 +1,40 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-const mocks = vi.hoisted(() => ({ runJsProgram: vi.fn() }));
-vi.mock("#execution/dynamic-workflow/workflow.js", async (importOriginal) => ({
-  ...(await importOriginal()),
-  runJsProgram: mocks.runJsProgram,
-}));
-
-import { runWorkflowProgramTask } from "#execution/dynamic-workflow/tool.js";
+import { runWorkflowProgramTask } from "#execution/code-mode/workflow-program.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 import { workflow } from "#tools/provided/workflow.js";
-import { readWorkflowProgramOptions } from "#tools/workflow-program-input.js";
+import {
+  createWorkflowProgramExecuteInput,
+  readWorkflowProgramOptions,
+} from "#tools/workflow-program-input.js";
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 import { serializeInputSchema } from "#tools/schema.js";
 
 describe("workflow", () => {
-  beforeEach(() => vi.resetAllMocks());
-
-  it("defines a branded tool with detailed function-body and agent result guidance", () => {
+  it("defines a task tool that takes a program in the language eve__execute runs", () => {
     const definition = workflow({ maxSubagents: 7 });
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
-    expect(definition.description).toContain(
-      "ctx.agent(name, { message: string, outputSchema?: object })",
-    );
-    expect(definition.description).toContain("Each call starts a new agent");
-    expect(definition.description).toContain("resolves directly to the agent's reply");
-    expect(definition.description).toContain("does not return an agent metadata wrapper");
-    expect(definition.description).toContain("owning agent resolves the target");
-    expect(definition.description).toContain(
-      'return await ctx.agent("researcher", { message: "Describe the task" })',
-    );
-    expect(definition.description).toContain("Await every ctx.agent call before returning.");
-    expect(definition.description).not.toContain("Available agents");
-    expect(definition.description).toContain("at most 7 agents");
     expect(definition.task).toBe(runWorkflowProgramTask);
-
-    const inputSchema = serializeInputSchema(definition.inputSchema);
-    expect(inputSchema).toMatchObject({
+    expect(serializeInputSchema(definition.inputSchema)).toEqual({
       additionalProperties: false,
       properties: {
-        js: {
-          description: expect.stringContaining(
-            "Supply only the body, without a surrounding function declaration or arrow function",
-          ),
+        code: {
+          description: "The body of an async function: use `await` and `return` at the top level.",
           type: "string",
         },
       },
-      required: ["js"],
+      required: ["code"],
       type: "object",
     });
-    expect(inputSchema).toMatchObject({
-      properties: {
-        js: {
-          description: expect.stringContaining("resolves directly to the agent's reply"),
-        },
-      },
-    });
-    expect(readWorkflowProgramOptions(definition)).toEqual({ maxSubagents: 7 });
+    // What sets it apart from a program in the turn: it is a task, and it reaches agents only.
+    expect(definition.description).toContain("in the background");
+    expect(definition.description).toContain("await tools.<name>({ message, outputSchema? })");
+    expect(definition.description).toContain("`tools` holds agents only");
+    expect(definition.description).toContain("A program may call agents at most 7 times.");
   });
 
-  it("preserves the trusted budget in the compiled definition", () => {
+  it("carries the author's agent limit through the compiled definition into each run's input", () => {
     const previousWorkflowId = Reflect.get(runWorkflowProgramTask, "workflowId");
     Reflect.set(runWorkflowProgramTask, "workflowId", "workflow//test//runWorkflowProgramTask");
     try {
@@ -68,10 +43,8 @@ describe("workflow", () => {
         "Invalid workflow.",
       );
       expect(normalized).toMatchObject({
+        definition: { workflowProgram: { maxSubagents: 4 } },
         kind: "tool",
-        definition: {
-          workflowProgram: { maxSubagents: 4 },
-        },
       });
     } finally {
       if (previousWorkflowId === undefined) {
@@ -80,23 +53,19 @@ describe("workflow", () => {
         Reflect.set(runWorkflowProgramTask, "workflowId", previousWorkflowId);
       }
     }
+
+    expect(createWorkflowProgramExecuteInput({ maxSubagents: 4 }, { code: "return 1" })).toEqual({
+      code: "return 1",
+      maxSubagents: 4,
+    });
+    expect(() =>
+      createWorkflowProgramExecuteInput({ maxSubagents: 4 }, { js: "return 1" }),
+    ).toThrow('workflow requires a "code" string.');
   });
 
-  it("defaults and validates the trusted call budget", () => {
-    expect(readWorkflowProgramOptions(workflow())).toEqual({ maxSubagents: 100 });
+  it("allows as many agent calls as any program unless the author lowers the limit", () => {
+    expect(readWorkflowProgramOptions(workflow())).toEqual({ maxSubagents: 128 });
     expect(() => workflow({ maxSubagents: 0 })).toThrow("between 1 and 128");
     expect(() => workflow({ maxSubagents: 129 })).toThrow("between 1 and 128");
-  });
-
-  it("routes pinned executor input to the private JavaScript adapter", async () => {
-    mocks.runJsProgram.mockResolvedValue({ ok: true });
-    const ctx = { callId: "call" } as never;
-
-    await expect(runWorkflowProgramTask({ js: "return 1", maxSubagents: 3 }, ctx)).resolves.toEqual(
-      { ok: true },
-    );
-    expect(mocks.runJsProgram).toHaveBeenCalledWith("return 1", ctx, {
-      maxSubagents: 3,
-    });
   });
 });

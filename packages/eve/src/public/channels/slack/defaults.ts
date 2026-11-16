@@ -1,4 +1,4 @@
-import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 import { errorHintOf } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
@@ -108,6 +108,15 @@ function deltaStream(
 
 function heldWithin(atMs: number | null | undefined, now: number): boolean {
   return atMs != null && now - atMs >= 0 && now - atMs < STATUS_HOLD_MS;
+}
+
+/**
+ * Whether a call was made inside another call, such as a program's. It belongs to its parent, so
+ * its request, progress, and result change no status: a program can make a thousand calls.
+ */
+function madeInsideCall(view: SessionView, callId: string): boolean {
+  const owner = sessionTables(view).calls[callId]?.owner;
+  return owner !== undefined && "callId" in owner;
 }
 
 async function showReasoning(
@@ -624,9 +633,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "call.progress"({ data }, { channel }) {
+  async "call.progress"({ data }, ctx) {
+    const { channel } = ctx;
     const label = data.label;
-    if (!label || heldWithin(channel.state.threadStatus?.atMs, Date.now())) return;
+    if (!label || madeInsideCall(ctx.view, data.callId)) return;
+    if (heldWithin(channel.state.threadStatus?.atMs, Date.now())) return;
     await showStatus(channel, label);
   },
 
@@ -642,7 +653,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
       const name = task?.kind === "agent" ? task.name : null;
       channel.state.pendingTaskResults = { names: [...names, name], turnId };
     }
-    if (data.label) await showStatus(channel, data.label);
+    if (data.label && !madeInsideCall(ctx.view, data.callId)) {
+      await showStatus(channel, data.label);
+    }
   },
 
   async "content.completed"({ data }, ctx) {
