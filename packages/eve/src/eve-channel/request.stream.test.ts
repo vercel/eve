@@ -161,7 +161,7 @@ describe("createSessionStreamResponse", () => {
   it("checks the version of a stranded earlier eve's session resumed past its first line", async () => {
     const v26 = { data: {}, meta: { at }, type: "session.started" };
     const { session } = sessionOf([v26, v26, v26]);
-    // A stranded session refuses every follow, the version check's included.
+    // A stranded session refuses every follow, including the version check's.
     const stranded = {
       ...session,
       getLineStream: (options: { readonly follow?: boolean; readonly startIndex: number }) =>
