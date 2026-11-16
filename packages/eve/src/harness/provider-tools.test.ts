@@ -91,9 +91,9 @@ describe("resolveWebSearchBackend", () => {
   });
 
   it.each<[string, WebSearchSelection | undefined, string | null]>([
-    ["openai/gpt-5.4", undefined, "exa"],
-    ["openai/gpt-5.4", { provider: "parallel" }, "parallel"],
-    ["anthropic/claude-opus-4.6", undefined, "exa"],
+    ["openai/gpt-5.4", undefined, "parallel"],
+    ["openai/gpt-5.4", { provider: "exa" }, "exa"],
+    ["anthropic/claude-opus-4.6", undefined, "parallel"],
     ["openai/gpt-5.4", { provider: "native" }, "openai"],
     ["anthropic/claude-opus-4.6", { provider: "native" }, "anthropic"],
     ["google/gemini-3-flash", { provider: "native" }, "google"],
