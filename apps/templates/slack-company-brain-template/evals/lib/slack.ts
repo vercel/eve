@@ -141,6 +141,7 @@ export const REPORT_FORMATTING = /^\s*#{1,6}\s|\*\*[^*]+\*\*|^\s*\|.*\|\s*$|^\s*
 export function scheduledRun(task: string): string {
   return [
     `Run this scheduled task for <@${alice.userId}> now and post the result.`,
+    "If the task says to stay quiet when there's nothing to report and there isn't, call `no_reply` instead.",
     "No one is present to answer questions or approve actions. If you can't finish, say what's missing.",
     "Schedule: Morning incident check",
     "Scheduled for: 2026-01-02T17:00:00.000Z",

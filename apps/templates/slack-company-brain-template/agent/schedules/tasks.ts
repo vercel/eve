@@ -131,6 +131,7 @@ export default defineDynamicSchedules({
     await to(slack, target).send(
       [
         `Run this scheduled task for <@${payload.userId}> now and post the result.`,
+        "If the task says to stay quiet when there's nothing to report and there isn't, call `no_reply` instead.",
         "No one is present to answer questions or approve actions. If you can't finish, say what's missing.",
         `Schedule: ${occurrence.displayName ?? occurrence.name}`,
         `Scheduled for: ${occurrence.scheduledAt}`,
