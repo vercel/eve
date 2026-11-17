@@ -3,6 +3,7 @@
   "SandboxConnection",
   "SandboxDeleteOptions",
   "SandboxIdentity",
+  "SandboxIdleTimeoutOption",
   "SandboxJson",
   "SandboxPrepareContext",
   "SandboxPrepareOption",

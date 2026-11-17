@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxProviderRuntime, SandboxSessionContext } from "#sandbox/provider.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
@@ -12,8 +14,33 @@ export interface SandboxSessionState {
   readonly stateProtocolVersion: number;
 }
 
+export interface SandboxRunning {
+  readonly generation: string;
+  readonly idleTimeoutMs: number;
+}
+
 export interface SandboxState {
   readonly session: SandboxSessionState | null;
+  readonly running?: SandboxRunning;
+}
+
+export function clearSandboxRunning(state: SandboxState | undefined): SandboxState | undefined {
+  return state?.running === undefined ? state : { session: state.session };
+}
+
+export function markSandboxRunning<Session extends { readonly sandboxState?: SandboxState }>(
+  session: Session,
+  idleTimeoutMs: number | undefined,
+): Session {
+  if (idleTimeoutMs === undefined) return session;
+  const generation = session.sandboxState?.running?.generation ?? randomUUID();
+  return {
+    ...session,
+    sandboxState: {
+      session: session.sandboxState?.session ?? null,
+      running: { generation, idleTimeoutMs },
+    },
+  };
 }
 
 export function isRetiredSandboxSessionState(state: SandboxSessionState): boolean {
@@ -51,29 +78,37 @@ export function resolvePersistedSandboxSessionState(
       };
 }
 
-type SandboxSessionEndWithArtifact = (
-  context: SandboxSessionContext,
-  state: SandboxPreparedArtifact | null,
-  options: {
-    readonly artifact: SandboxPreparedArtifact | undefined;
-    readonly reason: SandboxSessionEndReason;
-  },
-) => Promise<void>;
+interface SandboxSessionArtifactLifecycle {
+  onSessionEnd(
+    context: SandboxSessionContext,
+    state: SandboxPreparedArtifact | null,
+    options: {
+      readonly artifact: SandboxPreparedArtifact | undefined;
+      readonly reason: SandboxSessionEndReason;
+    },
+  ): Promise<void>;
+  onSessionIdle(
+    context: SandboxSessionContext,
+    state: SandboxPreparedArtifact | null,
+    options: { readonly artifact: SandboxPreparedArtifact | undefined },
+  ): Promise<void>;
+  stopsIdle(state: SandboxPreparedArtifact): boolean;
+}
 
-const sessionEndsWithArtifact = new WeakMap<object, SandboxSessionEndWithArtifact>();
+const sessionArtifactLifecycles = new WeakMap<object, SandboxSessionArtifactLifecycle>();
 
-export function withSessionEndArtifact<Implementation extends object>(
+export function withSessionArtifact<Implementation extends object>(
   implementation: Implementation,
-  onSessionEnd: SandboxSessionEndWithArtifact,
+  lifecycle: SandboxSessionArtifactLifecycle,
 ): Implementation {
-  sessionEndsWithArtifact.set(implementation, onSessionEnd);
+  sessionArtifactLifecycles.set(implementation, lifecycle);
   return implementation;
 }
 
-export function getSessionEndWithArtifact(
+export function getSessionArtifactLifecycle(
   implementation: object,
-): SandboxSessionEndWithArtifact | undefined {
-  return sessionEndsWithArtifact.get(implementation);
+): SandboxSessionArtifactLifecycle | undefined {
+  return sessionArtifactLifecycles.get(implementation);
 }
 
 export type SandboxPreparation = (open: () => Promise<SandboxSession>) => Promise<void>;

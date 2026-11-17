@@ -2,6 +2,7 @@ export {
   defineSandboxProvider,
   type SandboxConnection,
   type SandboxIdentity,
+  type SandboxIdleTimeoutOption,
   type SandboxJson,
   type SandboxPrepareContext,
   type SandboxPrepareOption,

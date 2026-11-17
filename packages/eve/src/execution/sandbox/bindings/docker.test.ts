@@ -17,7 +17,7 @@ function createContainerStoreCli() {
       };
     }
     if (args[0] === "run") exists = true;
-    if (args[0] === "container" && !exists) {
+    if ((args[0] === "container" || args[0] === "stop") && !exists) {
       return {
         exitCode: 1,
         stderr: "Error: No such container: eve-sbx",
@@ -136,6 +136,32 @@ describe("Docker sandbox session identity", () => {
     await provider.endSession({ ...session, state: null });
     expect(vi.mocked(run).mock.calls.map(([args]) => args)).toEqual([
       ["rm", "-f", state.containerName],
+    ]);
+  });
+});
+
+describe("Docker sandbox idle stop", () => {
+  it("stops the session container by name without starting it, and succeeds once it is gone", async () => {
+    const { dockerCli, run } = createContainerStoreCli();
+    const provider = createDockerSandboxHarness({
+      cli: dockerCli,
+      preparedArtifact: () => ({ imageReference: "image-a" }),
+      runtimeOptions: {},
+    });
+    const session = { appRoot: "/tmp/eve-app", sandboxName: "session-key" };
+    const { state } = await provider.start(session);
+
+    vi.mocked(run).mockClear();
+    await provider.idleSession({ ...session, state });
+    await provider.idleSession({ ...session, state: null });
+    await provider.endSession({ ...session, state });
+    await expect(provider.idleSession({ ...session, state: null })).resolves.toBeUndefined();
+
+    expect(vi.mocked(run).mock.calls.map(([args]) => args)).toEqual([
+      ["stop", "-t", "0", state.containerName],
+      ["stop", "-t", "0", state.containerName],
+      ["rm", "-f", state.containerName],
+      ["stop", "-t", "0", state.containerName],
     ]);
   });
 });

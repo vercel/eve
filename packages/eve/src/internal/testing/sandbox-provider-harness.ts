@@ -17,6 +17,7 @@ import {
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
 } from "#shared/sandbox-environment.js";
+import { getSessionArtifactLifecycle } from "#sandbox/state.js";
 import type { SandboxProviderResourceFile } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
@@ -83,6 +84,19 @@ export function createSandboxEnvironmentHarness<
           reason: input.reason ?? "completed",
         },
       );
+    },
+    async idleSession(input: {
+      readonly appRoot: string;
+      readonly sandboxName: string;
+      readonly state: State | null;
+    }): Promise<void> {
+      const context = sessionContext(input.appRoot, input.sandboxName);
+      const lifecycle = getSessionArtifactLifecycle(implementation);
+      if (lifecycle === undefined) {
+        await implementation.onSessionIdle?.(context, input.state);
+        return;
+      }
+      await lifecycle.onSessionIdle(context, input.state, { artifact: preparedArtifact });
     },
     async prepare(input: {
       readonly appRoot: string;

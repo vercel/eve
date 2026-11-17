@@ -59,6 +59,8 @@ describe("sandboxProvider", () => {
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
+      idleTimeoutMs: undefined,
+      stopIdle: vi.fn(),
     });
   });
 
@@ -101,6 +103,8 @@ describe("sandboxProvider", () => {
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
+      idleTimeoutMs: undefined,
+      stopIdle: vi.fn(),
     });
     ctx.set(
       SessionAgentKey,
@@ -158,6 +162,8 @@ describe("sandboxProvider", () => {
       prepare: vi.fn(),
       settle: vi.fn(),
       stop: vi.fn(),
+      idleTimeoutMs: undefined,
+      stopIdle: vi.fn(),
     });
     const created = await sandboxProvider.create(ctx, createHarnessSession());
 

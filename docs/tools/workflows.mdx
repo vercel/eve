@@ -937,7 +937,8 @@ async function prepareInput(ctx: WorkflowStepToolContext, input: { value: string
 - The session removes the sandbox when it ends, even when only a step opened it. A step still
   running at that point can open the sandbox again, and nothing removes the new one.
 - When the eve server shuts down, it stops the sandboxes its sessions opened, but not one that only
-  a step opened. With Docker, that container keeps running until the session ends or you stop it.
+  a step opened. With Docker, that container keeps running until the session
+  [goes idle](/docs/sandbox#stop-an-idle-sandbox) or ends, or you stop it.
 - A step can use the sandbox while the session's turns use it, as subagents that share a sandbox
   do. Give each one its own files to write.
 - Steps run at least once and retry after a failure, so make sandbox writes safe to repeat. Write

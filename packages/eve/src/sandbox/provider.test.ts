@@ -7,6 +7,10 @@ import {
   type SandboxTemplateResources,
 } from "#execution/sandbox/prewarm.js";
 import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider.js";
+import { DefaultSandbox } from "#sandbox/providers/default.js";
+import { DockerSandbox } from "#sandbox/providers/docker.js";
+import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import {
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
@@ -99,6 +103,57 @@ describe("defineSandboxProvider", () => {
     provider.environment({ prepare: async () => {}, region: "iad1" });
 
     expect(received).toEqual([{}, {}, { region: "iad1" }]);
+  });
+
+  it("passes idleTimeoutMs to the provider, defaults it to five minutes, and rejects invalid values only when the provider stops idle sandboxes", () => {
+    const received: object[] = [];
+    const define = (stopsIdle: boolean) =>
+      defineSandboxProvider({
+        name: stopsIdle ? "stopping" : "keeping",
+        environment(options: { readonly idleTimeoutMs?: unknown }) {
+          received.push(options);
+          return {
+            prepare: async () => null,
+            start: async () => ({ connection: recordingConnection().connection, state: null }),
+            resume: async () => recordingConnection().connection,
+            onSessionEnd: async () => {},
+            ...(stopsIdle && { onSessionIdle: async () => {} }),
+          };
+        },
+      });
+    const stopping = define(true);
+    const windowOf = (environment: SandboxEnvironmentIdentity) =>
+      getSandboxEnvironmentRuntime(environment).idleTimeoutMs;
+
+    expect([
+      windowOf(stopping.environment()),
+      windowOf(stopping.environment({ idleTimeoutMs: 0 })),
+      windowOf(stopping.environment({ idleTimeoutMs: false })),
+      windowOf(stopping.environment({ idleTimeoutMs: 90_000, prepare: async () => {} })),
+    ]).toEqual([300_000, 0, false, 90_000]);
+    expect(received).toEqual([
+      {},
+      { idleTimeoutMs: 0 },
+      { idleTimeoutMs: false },
+      { idleTimeoutMs: 90_000 },
+    ]);
+    for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, "5m", true, null]) {
+      expect(() => stopping.environment({ idleTimeoutMs: invalid as never })).toThrow(
+        'Sandbox provider "stopping" received idleTimeoutMs',
+      );
+    }
+    expect(() => define(false).environment({ idleTimeoutMs: "custom" as never })).not.toThrow();
+  });
+
+  it("takes DefaultSandbox's idleTimeoutMs only at the top level", () => {
+    expect(
+      getSandboxEnvironmentRuntime(DefaultSandbox.environment({ idleTimeoutMs: 0 })),
+    ).toMatchObject({ idleTimeoutMs: 0 });
+    for (const nested of ["docker", "justBash", "vercel"] as const) {
+      expect(() => DefaultSandbox.environment({ [nested]: { idleTimeoutMs: 0 } } as never)).toThrow(
+        `DefaultSandbox takes idleTimeoutMs at the top level, not in its ${nested} options.`,
+      );
+    }
   });
 
   it("hashes template identities with the workspace, skills, and source revision", async () => {
@@ -218,6 +273,23 @@ describe("public sandbox types", () => {
       extensions: { run: async () => "mine" },
     };
     void colliding;
+  });
+
+  it("accepts idleTimeoutMs on every built-in environment constructor, and only at DefaultSandbox's top level", () => {
+    expectTypeOf(DefaultSandbox.environment).toBeCallableWith({ idleTimeoutMs: 0 });
+    expectTypeOf(VercelSandbox.environment).toBeCallableWith({ idleTimeoutMs: false });
+    expectTypeOf(JustBashSandbox.environment).toBeCallableWith({ idleTimeoutMs: 60_000 });
+    expectTypeOf(DockerSandbox.environment).toBeCallableWith({ idleTimeoutMs: 0 });
+    expectTypeOf(DockerSandbox.dockerfile).toBeCallableWith({ idleTimeoutMs: 0 });
+    expectTypeOf(DockerSandbox.image).toBeCallableWith("alpine:3.21", { idleTimeoutMs: 0 });
+    // @ts-expect-error idleTimeoutMs is a number of milliseconds or false.
+    void (() => VercelSandbox.environment({ idleTimeoutMs: true }));
+    // @ts-expect-error DefaultSandbox takes idleTimeoutMs at the top level.
+    void (() => DefaultSandbox.environment({ docker: { idleTimeoutMs: 0 } }));
+    // @ts-expect-error DefaultSandbox takes idleTimeoutMs at the top level.
+    void (() => DefaultSandbox.environment({ vercel: { idleTimeoutMs: 0 } }));
+    // @ts-expect-error DefaultSandbox takes idleTimeoutMs at the top level.
+    void (() => DefaultSandbox.environment({ justBash: { idleTimeoutMs: 0 } }));
   });
 
   it("keeps SandboxSession compatible with the AI SDK sandbox members it implements", () => {

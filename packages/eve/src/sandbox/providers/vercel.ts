@@ -3,6 +3,7 @@ import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import {
   defineSandboxProvider,
+  type SandboxIdleTimeoutOption,
   type SandboxProvider,
   type WithPrepareOption,
 } from "#public/sandbox/provider.js";
@@ -25,6 +26,9 @@ export const VercelSandbox: SandboxProvider<
   VercelSandboxSession
 > = defineSandboxProvider({
   name: "vercel",
-  environment: (options: VercelSandboxCreateOptions) =>
+  environment: ({
+    idleTimeoutMs: _idleTimeoutMs,
+    ...options
+  }: VercelSandboxCreateOptions & SandboxIdleTimeoutOption) =>
     createVercelSandbox({ createOptions: options as VercelCreateOptions }),
 });

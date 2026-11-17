@@ -173,6 +173,14 @@ export function createDockerSandboxProvider(
         expectDockerSuccess(removed, `delete sandbox session container "${containerName}"`);
       }
     },
+    async onSessionIdle(context, state) {
+      await ensureDaemon();
+      const containerName = state?.containerName ?? dockerSessionName(context);
+      const stopped = await cli.run(["stop", "-t", "0", containerName]);
+      if (stopped.exitCode !== 0 && !/no such container/iu.test(stopped.stderr)) {
+        expectDockerSuccess(stopped, `stop idle sandbox session container "${containerName}"`);
+      }
+    },
     async prepare(context) {
       context.log("checking Docker daemon");
       await ensureDaemon();

@@ -11,8 +11,9 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
+import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { storedProjection } from "#harness/session-machine/view.js";
+import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import { turnCoordinates } from "#protocol/session-projection.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
@@ -33,6 +34,8 @@ import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import type { SessionHandoff } from "#execution/session/handoff.js";
 import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
+import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import type { SandboxRunning } from "#sandbox/state.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
 function createSafeOuterWorkflowError(): Error {
@@ -260,6 +263,53 @@ async function runSessionLoop(
     ...(unstarted.length > 0 && { settles: unstarted.splice(0) }),
   });
 
+  let prewarmedSandbox: SandboxRunning | undefined;
+  let idleWindow: { readonly elapsed: Promise<void>; readonly generation: string } | undefined;
+  let idleStopFailed = false;
+  const sandboxMayBeRunning = (): SandboxRunning | undefined =>
+    readDurableSession(cursor.sessionState).sandboxState?.running ?? prewarmedSandbox;
+  const sessionBusy = (): boolean =>
+    queue.pendingCount > 0 ||
+    workingTasks(sessionTaskTable(cursor)).length > 0 ||
+    !isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state));
+  const beforeInbox = async (other: Promise<unknown>): Promise<boolean> =>
+    await Promise.race([inbox.whenPending().then(() => false), other.then(() => true)]);
+  const stopSandboxOnceIdle = async (): Promise<void> => {
+    while (!inbox.hasPending()) {
+      if (!prewarmSettled) {
+        if (!(await beforeInbox(prewarming))) return;
+        continue;
+      }
+      const running = sandboxMayBeRunning();
+      if (running === undefined || idleStopFailed || sessionBusy()) return;
+      if (inbox.awaitingHandover) {
+        if (!(await beforeInbox(inbox.whenHandoverSettled()))) return;
+        continue;
+      }
+      if (running.idleTimeoutMs > 0) {
+        if (idleWindow?.generation !== running.generation) {
+          idleWindow = {
+            elapsed: host.until(Date.now() + running.idleTimeoutMs),
+            generation: running.generation,
+          };
+        }
+        if (!(await beforeInbox(idleWindow.elapsed)) || inbox.hasPending()) return;
+      }
+      const stopped = await cursor
+        .advance(({ serializedContext, sessionState }) =>
+          stopIdleSessionSandboxStep({ serializedContext, sessionState }),
+        )
+        .then(
+          () => true,
+          () => false,
+        );
+      idleStopFailed = !stopped;
+      prewarmedSandbox = undefined;
+      idleWindow = undefined;
+      return;
+    }
+  };
+
   const nextParkedActivity = async (): Promise<
     | Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" | "prewarm" }>
     | { readonly kind: "transferred" }
@@ -271,6 +321,7 @@ async function runSessionLoop(
         ignore,
         inbox,
         queue,
+        whileWaiting: stopSandboxOnceIdle,
       });
       if (next.kind === "prewarm") {
         if (
@@ -322,6 +373,8 @@ async function runSessionLoop(
     const caller = progress.caller;
     const control = turnControl;
     turnControl = undefined;
+    idleWindow = undefined;
+    idleStopFailed = false;
     progress.turnId =
       payload?.control === undefined
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
@@ -408,8 +461,11 @@ async function runSessionLoop(
         prewarmSettled = false;
         prewarming = cursor
           .advanceBeside(
-            ({ serializedContext, sessionState }) =>
-              prewarmSessionStep({ serializedContext, sessionState }),
+            async ({ serializedContext, sessionState }) => {
+              const prewarmed = await prewarmSessionStep({ serializedContext, sessionState });
+              prewarmedSandbox = prewarmed.sandboxRunning;
+              return prewarmed;
+            },
             () => awaitingFirstInput,
           )
           .then(
