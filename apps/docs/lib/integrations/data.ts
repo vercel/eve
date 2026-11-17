@@ -1731,7 +1731,7 @@ Replace \`description\` with what the endpoint's content covers. The model reads
 - Dataset sources: \`groq_query\`, \`schema_explorer\`, and \`array_field_reader\`
 - Every endpoint: \`initial_context\`, which returns the Knowledge Base outline or dataset schema
 
-All tools are read-only. If Sanity Context rejects the token, eve tells the model the connection needs authorization and the run continues without Sanity content. Keep the token server-side, out of prompts and source control. Tool results contain your content, so anyone who can edit that content can influence what the agent does. See the [Sanity Context guide for eve](https://www.sanity.io/docs/context/connect-vercel-eve) for creating an endpoint and token, inlining the initial context into instructions, and troubleshooting.`,
+All tools are read-only. If Sanity Context rejects the token, the connection's tools fail to load and the run continues without Sanity content. A missing or invalid token returns \`401\`, which eve reports as a connection that requires authorization. A project token, or an organization token without the Context grant, returns \`403\`, which eve reports with the server's error. Keep the token server-side, out of prompts and source control. Tool results contain your content, so anyone who can edit that content can influence what the agent does. See the [Sanity Context guide for eve](https://www.sanity.io/docs/context/connect-vercel-eve) for creating an endpoint and token, inlining the initial context into instructions, and troubleshooting.`,
     relatedResources: [
       {
         title: "Sanity connection",
