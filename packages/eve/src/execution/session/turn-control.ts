@@ -29,16 +29,8 @@ export function nextTurnControl(used: TurnControl): TurnControl {
   return used.controller.signal.aborted ? createTurnControl() : used;
 }
 
-/** Workflow's handle on a signal it revived, which closes the signal's stream reader. */
 const ABORT_READER_CANCEL = Symbol.for("WORKFLOW_ABORT_READER_CANCEL");
 
-/**
- * A turn step's two interruptions, read from the signal its turn carries: a steer aborts
- * `steeringSignal` and the step goes on following the steer's replacement signal, and anything
- * else aborts `abortSignal` with the same reason. `release` stops following once the step ends:
- * Workflow closes the reader of the signal it passed the step, but not of a replacement inside its
- * abort reason.
- */
 export function splitTurnSignal(signal: AbortSignal): {
   readonly abortSignal: AbortSignal;
   readonly steeringSignal: AbortSignal;

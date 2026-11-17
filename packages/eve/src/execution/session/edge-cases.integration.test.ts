@@ -1048,8 +1048,6 @@ describe("calls in flight", () => {
     ]);
   });
 
-  // A steer the streaming reply can't take still replaces the turn's abort control, so a cancel
-  // that follows it has to reach the step through the replacement.
   it("cancels a streaming reply after a message steered it", async () => {
     const never = gate();
     const { events } = await withSession(

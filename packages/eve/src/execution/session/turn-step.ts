@@ -151,7 +151,6 @@ export function turnStepOn(
 ): (input: TurnStepInput) => Promise<TurnStepResult> {
   return async (input) =>
     await withSessionStateDelta(input, async (state) => {
-      // The turn carries one signal for both interruptions (see `TurnControl`).
       const split =
         state.abortSignal !== undefined && state.steeringSignal === undefined
           ? splitTurnSignal(state.abortSignal)

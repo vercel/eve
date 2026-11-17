@@ -113,12 +113,10 @@ export class ActiveTurn {
     this.#turnControl.controller = next;
   }
 
-  /** The signal the turn's steps run under: a cancel and a steer both abort it. */
   get signal(): AbortSignal {
     return this.#generation;
   }
 
-  /** The turn was cancelled. */
   get cancelled(): boolean {
     return this.#cancelled;
   }
@@ -331,7 +329,6 @@ export class ActiveTurn {
   abort(): void {
     if (this.#cancelled) return;
     this.#cancelled = true;
-    // A steer replaced the controller it aborted, and the running step follows the replacement.
     this.#turnControl.controller.abort(new TurnCancelledError());
   }
 }
