@@ -16,10 +16,15 @@ interface ContextScopeResult<T, S extends HarnessSessionBase> {
   readonly session: S;
 }
 
+interface ContextScopeOptions {
+  readonly drain?: () => Promise<void>;
+}
+
 export async function withContextScope<T, S extends HarnessSessionBase>(
   ctx: ContextContainer,
   session: S,
   callback: (session: S) => Promise<ContextScopeResult<T, S>>,
+  options: ContextScopeOptions = {},
 ): Promise<ContextScopeResult<T, S>> {
   const createdProviders: FrameworkContextProvider<any>[] = [];
 
@@ -34,7 +39,9 @@ export async function withContextScope<T, S extends HarnessSessionBase>(
       }
     }
 
-    const scopeResult = await contextStorage.run(ctx, () => callback(session));
+    const scopeResult = await contextStorage
+      .run(ctx, () => callback(session))
+      .finally(() => options.drain?.());
 
     let committed = scopeResult.session;
     for (const provider of createdProviders) {
@@ -77,10 +84,16 @@ export async function runStep(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<StepResult>,
+  options?: ContextScopeOptions,
 ): Promise<StepResult> {
-  const scoped = await withContextScope(ctx, harnessSession, async (enriched) => {
-    const result = await callback(enriched);
-    return { result, session: result.session };
-  });
+  const scoped = await withContextScope(
+    ctx,
+    harnessSession,
+    async (enriched) => {
+      const result = await callback(enriched);
+      return { result, session: result.session };
+    },
+    options,
+  );
   return { ...scoped.result, session: scoped.session };
 }
