@@ -15,8 +15,11 @@ export interface InitOnboarding {
   /**
    * Restores the terminal and returns what the person typed, for `eve dev` to carry on with.
    * Cancels onboarding first if it is still open.
+   *
+   * With `handOff`, eve dev starts next: the rows are printed above the screen, which stays
+   * up for eve dev to paint over in place. Otherwise the screen is erased.
    */
-  close(): Promise<InitCarriedInput>;
+  close(handOff?: { readonly rows: readonly string[] }): Promise<InitCarriedInput>;
 }
 
 /** What the person typed on the onboarding screen. */
@@ -40,6 +43,11 @@ export interface InitOnboardingTelemetry {
  */
 export async function startInitOnboarding(input: {
   readonly projectPath: string;
+  /**
+   * Rows above the screen until it closes. `close()` commits its handoff rows in their place,
+   * so the same number of rows keeps the screen from moving.
+   */
+  readonly preamble?: readonly string[];
   readonly telemetry?: InitOnboardingTelemetry;
 }): Promise<InitOnboarding> {
   const [{ startDevelopmentTuiStartup }, { runStartupOnboarding }, { resolveTuiDisplayOptions }] =
@@ -53,6 +61,8 @@ export async function startInitOnboarding(input: {
   const startup = await startDevelopmentTuiStartup({
     ...resolveTuiDisplayOptions({}),
     appRoot: input.projectPath,
+    phase: "installing",
+    preamble: input.preamble,
     // `close()` cancels onboarding with a synthetic Ctrl-C; only a real one interrupts init.
     onExitRequest: () => {
       if (!closing) interrupt.abort();
@@ -67,6 +77,7 @@ export async function startInitOnboarding(input: {
     workspaceRoot: input.projectPath,
     agentRoot: undefined,
     signal: interrupt.signal,
+    phase: "installing",
     withExclusiveTerminal: (task) => task(),
     onOnboardingStep: telemetry && ((event) => telemetry.trackSetupStep(event)),
   }).then(
@@ -91,8 +102,6 @@ export async function startInitOnboarding(input: {
       return { cancelled: true };
     },
   );
-  // Onboarding opens on "Reading saved connection…"; the install is what's actually running.
-  renderer.setStartupPhase("installing");
   void finished.then(() => {
     onboarding = false;
     renderer.setStartupPhase(installing ? "installing" : "starting");
@@ -106,11 +115,11 @@ export async function startInitOnboarding(input: {
       installing = next;
       renderer.setStartupPhase(next ? "installing" : "starting");
     },
-    close() {
+    close(handOff) {
       closed ??= (async () => {
         closing = true;
         // eve dev paints its startup screen where this one was.
-        renderer.handOff();
+        renderer.handOff(handOff?.rows);
         if (onboarding) {
           renderer.requestInterrupt();
           await finished;

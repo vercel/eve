@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MockScreen, MockUserInput } from "#cli/dev/tui/test/mock-terminal.js";
+import { LiveRegion } from "#cli/ui/live-region.js";
 import type * as Startup from "#cli/dev/tui/startup.js";
 import type * as StartupOnboarding from "#cli/dev/tui/startup-onboarding.js";
 
@@ -132,5 +133,49 @@ describe("startInitOnboarding", () => {
       step: "model_provider",
       result: "completed",
     });
+  });
+
+  it("keeps its screen up under init's summary when it hands the terminal to eve dev", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-onboarding-handoff-"));
+    const onboarding = await startInitOnboarding({
+      projectPath,
+      preamble: ["○ Creating an eve agent in /tmp/alice", ""],
+    });
+    await screen.waitForText("Connect a model");
+    input.enter();
+    await onboarding.finished;
+    onboarding.setInstalling(false);
+    input.type("Help Alice");
+    const headerRow = () =>
+      screen
+        .snapshot()
+        .split("\n")
+        .findIndex((row) => row.includes("☰eve"));
+    const openRow = headerRow();
+
+    await onboarding.close({ rows: ["✓ Created an eve agent in /tmp/alice", ""] });
+
+    const frames = screen.frames();
+    const firstPaint = frames.findIndex((frame) => frame.includes("☰eve"));
+    // The screen opens on the install, which is what's running, not on an agent starting.
+    expect(frames[firstPaint]).toContain("Installing dependencies…");
+    for (const frame of frames.slice(firstPaint)) {
+      // Never blanks, and never shows a prompt-less "Ready" as if the agent were up.
+      expect(frame).toContain("☰eve");
+      expect(frame).not.toMatch(/Ready|Reading saved connection/u);
+    }
+    const kept = screen.snapshot();
+    expect(kept.indexOf("✓ Created an eve agent in /tmp/alice")).toBeLessThan(
+      kept.indexOf("☰eve"),
+    );
+    expect(kept).toContain("Help Alice");
+    expect(kept).toContain("Starting agent…");
+    // The summary took the preamble's place, so the screen didn't move.
+    expect(kept).not.toContain("Creating an eve agent");
+    expect(headerRow()).toBe(openRow);
+
+    // eve dev's first paint lands on the kept screen's first row and replaces it in place.
+    new LiveRegion({ write: (chunk) => screen.write(chunk) }).update(["eve dev"]);
+    expect(screen.snapshot()).toBe(`${kept.slice(0, kept.indexOf("☰eve"))}eve dev`);
   });
 });

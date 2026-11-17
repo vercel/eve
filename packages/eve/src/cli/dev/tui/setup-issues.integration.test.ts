@@ -154,4 +154,44 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       result: "completed",
     });
   });
+
+  it.each([
+    ["points an unconnected model at /login", DISCONNECTED_GATEWAY_INFO, true],
+    ["stays quiet about a connected model", BASE_GATEWAY_INFO, false],
+  ] as const)("%s after onboarding that eve init ran", async (_name, info, warned) => {
+    const appRoot = await linkedAppRoot();
+    const client = new Client({ baseUrl: "http://localhost:3000" });
+    vi.spyOn(client, "info").mockResolvedValue(info);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ revision: "snapshot-a" })),
+    );
+    const handle = vi.fn(async () => ({ message: "" }));
+    const renderSetupWarning = vi.fn();
+    const runner = new EveTUIRunner({
+      appRoot,
+      client,
+      detectProjectIdentity: vi.fn(async () => undefined),
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+      promptCommandHandler: { handle },
+      renderer: {
+        readInput: vi.fn(async () => undefined),
+        renderSetupWarning,
+        clearSetupWarning: vi.fn(),
+        setupFlow: createFakeSetupFlowRenderer(),
+      },
+      serverUrl: "http://localhost:3000",
+      onboard: true,
+      startupOnboarding: { outcome: undefined, reported: true },
+    });
+
+    await runner.run();
+
+    expect(handle).not.toHaveBeenCalled();
+    if (warned) {
+      expect(renderSetupWarning).toHaveBeenCalledWith(expect.stringContaining("/login"));
+    } else {
+      expect(renderSetupWarning).not.toHaveBeenCalled();
+    }
+  });
 });

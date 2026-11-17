@@ -76,6 +76,10 @@ export async function startDevelopmentTuiStartup(
     readonly initialInput?: string;
     /** Messages to show queued, sent once the agent is ready. */
     readonly queuedInput?: readonly string[];
+    /** The first status shown; `eve init` opens the screen while it installs. */
+    readonly phase?: "installing";
+    /** Rows above the startup header, such as `eve init`'s progress line. */
+    readonly preamble?: readonly string[];
     readonly onExitRequest: () => void;
   },
 ): Promise<DevelopmentTuiStartup> {
@@ -90,6 +94,8 @@ export async function startDevelopmentTuiStartup(
     initialDraft: input.initialInput,
     queued: input.queuedInput,
     title: input.name ?? "eve",
+    phase: input.phase,
+    preamble: input.preamble,
   });
   return {
     diagnostics,

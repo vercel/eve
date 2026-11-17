@@ -286,7 +286,11 @@ export function registerDevelopmentCommand(input: {
     if (options.input !== undefined && mode === "headless") {
       throw new InvalidArgumentError("--input requires the interactive UI.");
     }
-    const buildProgress = mode === "tui" ? startCliLiveRow(logger, { elapsed: true }) : undefined;
+    // After `eve init`, its screen stays up until this one paints over it in place.
+    const buildProgress =
+      mode === "tui" && options.onboarded !== true
+        ? startCliLiveRow(logger, { elapsed: true })
+        : undefined;
     const onBootProgress = createDevBootProgressReporter(buildProgress);
     buildProgress?.update("Starting your agent");
 

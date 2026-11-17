@@ -448,6 +448,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #partingLinePrinted = false;
   /** Another process takes over the terminal after teardown; see {@link handOff}. */
   #handingOff = false;
+  /** The handed-off frame stays on screen for the next process; nothing repaints it. */
+  #frameKept = false;
+  /** Rows shown above the startup header; see {@link beginStartupDraft}. */
+  #startupPreamble: readonly string[] = [];
+  /** Rows the next paint commits above the live region, ahead of settled blocks. */
+  #pendingCommittedRows: string[] = [];
+  /**
+   * Holds paints between the startup draft and the chat composer the runner
+   * opens right after it; see {@link finishStartupDraft}.
+   */
+  #composerPending = false;
+  #paintDeferred = false;
   #exitRequested = false;
   /** True after the first consecutive Ctrl+C at the idle chat prompt. */
   #exitArmed = false;
@@ -669,19 +681,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#agentHeaderRendered = true;
     this.#agentHeaderBody = body;
     // Preserve the live presentation when the startup header enters scrollback.
-    this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
+    this.#pendingCommittedRows.push(...this.#renderAgentHeaderRows());
+    this.#paint();
   }
 
   beginStartupDraft(options: {
     initialDraft?: string;
     queued?: readonly string[];
     title: string;
+    /** The first status shown; `eve init` opens the screen while it installs. */
+    phase?: "installing" | "starting";
+    /**
+     * Rows above the startup header, such as `eve init`'s progress line. They
+     * hold the place of the rows {@link handOff} commits, so the header stays put.
+     */
+    preamble?: readonly string[];
   }): void {
     for (const message of options.queued ?? []) this.#startupQueue.enqueue(message);
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
-    this.#startupPhase = "starting";
+    this.#startupPhase = options.phase ?? "starting";
+    this.#startupPreamble = options.preamble ?? [];
     this.#startupHeader = { name: options.title };
     this.#startupStartedAt = Date.now();
     let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
@@ -742,7 +763,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#stopCaretBlink();
     this.#inputActive = false;
     this.#promptPlaceholderActive = false;
+    // The runner opens the chat composer (or starts the queued turn) in this
+    // same tick. Painting the steps in between would flash a prompt-less
+    // "Ready" frame between the startup screen and the composer.
+    if (this.#isInteractive) {
+      this.#composerPending = true;
+      queueMicrotask(() => this.#releaseComposerHold());
+    }
     return result;
+  }
+
+  #releaseComposerHold(): void {
+    if (!this.#composerPending) return;
+    this.#composerPending = false;
+    if (!this.#paintDeferred) return;
+    this.#paintDeferred = false;
+    this.#paint();
   }
 
   /**
@@ -752,6 +788,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * the next read, so other input surfaces can briefly take the keyboard.
    */
   async readInput(options?: AgentTUISessionOptions): Promise<AgentTUIInput | undefined> {
+    this.#composerPending = false;
+    this.#paintDeferred = false;
     this.#start(options);
     if (this.#view?.working !== true) this.#commitTurnStats();
     this.#inputActive = true;
@@ -2790,13 +2828,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * Makes teardown erase the screen without a parting line or trailing blank
-   * row, for when another process (`eve dev` after `eve init`) takes over the
-   * terminal and paints its own screen in the same place.
+   * Prepares teardown for another process (`eve dev` after `eve init`) that
+   * takes over the terminal and paints its own screen in the same place: no
+   * parting line or trailing blank row.
+   *
+   * Without `committedRows`, teardown erases the screen. With them, the rows
+   * are committed above the current frame and the frame is kept on screen,
+   * frozen, with the cursor hidden at its first row, so the next process
+   * paints over it without the screen going blank in between. That process
+   * owns the cursor from then on.
    */
-  handOff(): void {
+  handOff(committedRows?: readonly string[]): void {
     this.#handingOff = true;
     this.#partingLinePrinted = true;
+    if (committedRows === undefined) return;
+    this.#composerPending = false;
+    this.#startupPreamble = [];
+    this.#pendingCommittedRows.push(...committedRows);
+    this.#paint();
+    this.#frameKept = true;
   }
 
   requestInterrupt(): void {
@@ -2958,10 +3008,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
     for (const block of this.#blocks) {
       if (block.kind === "log" && block.id === undefined) block.live = false;
     }
+    this.#composerPending = false;
     this.#paint();
 
-    this.#live.clear();
-    this.#live.showCursor();
+    if (this.#frameKept) {
+      this.#live.release();
+    } else {
+      this.#live.clear();
+      this.#live.showCursor();
+    }
     // Restore the real `process.stdout` before the trailing newline so it is
     // not intercepted by the foreign-output capture.
     this.#removeLogCapture();
@@ -3305,7 +3360,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
   // ---------------------------------------------------------------------------
 
   #paint() {
-    if (!this.#isInteractive) return;
+    if (!this.#isInteractive || this.#frameKept) return;
+    if (this.#composerPending) {
+      this.#paintDeferred = true;
+      return;
+    }
 
     if (this.#painting) {
       this.#paintAgain = true;
@@ -3335,9 +3394,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
+    const startupHeader =
+      this.#startupHeader === undefined
+        ? []
+        : [
+            ...this.#startupPreamble.map((row) => clip(row, width)),
+            ...this.#renderAgentHeaderRows(),
+          ];
     const maxBlockRows = Math.max(0, this.#height() - startupHeader.length - footer.length);
-    const committed: string[] = [];
+    const committed: string[] = this.#pendingCommittedRows.splice(0);
     let previous = this.#lastCommitted;
 
     // Commit the leading run of finalized blocks to scrollback. Filtered log
