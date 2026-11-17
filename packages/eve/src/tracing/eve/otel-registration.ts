@@ -57,7 +57,6 @@ class RegistrationMarkerPropagator {
   }
 }
 
-/** Keeps eve's ownership check out of every authored destination. */
 class PrivateSpanFilteringProcessor implements SpanProcessor {
   private readonly endedSpans: Set<string>;
   private readonly forwardedSpans = new Set<string>();
@@ -128,11 +127,6 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
     await Promise.all(this.processors.map((processor) => processor.shutdown()));
   }
 
-  // A parent that never ends (lost worker, abandoned attempt) must not hold
-  // its ended children forever: flush and shutdown are the last chance to
-  // export them, and the cap bounds what one stuck parent can buffer. Spans
-  // released here precede their parent; an ordinary flush drains nothing
-  // because parents end before the per-step flush runs.
   private drainPendingSpans(): void {
     while (this.pendingByParent.size > 0) this.releaseOldestPendingParent();
   }
@@ -159,22 +153,11 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
   }
 }
 
-/**
- * Builds the process's one OpenTelemetry tracer provider from a merged
- * declaration, then proves it took the global slot.
- *
- * `registerOTel` reports a refused registration only through `diag`, which
- * goes nowhere unless `OTEL_LOG_LEVEL` is set, so a second caller would export
- * nothing and say nothing. eve primes its id generator and installs a private
- * propagator, then verifies both through the global APIs.
- */
 export function registerOtelPipeline(input: {
   readonly otel: OtelConfiguration;
   readonly serviceName: string;
 }): RegisteredOtelPipeline {
   const pipeline = input.otel;
-  // A tracer cached before registration retains this private proxy even after
-  // the vendored API takes the global slot. Delegate it only after ownership is proven.
   const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
   const idGenerator = new AgentSpanIdGenerator();
   const markerPropagator = new RegistrationMarkerPropagator();
@@ -190,8 +173,6 @@ export function registerOtelPipeline(input: {
     spanProcessors,
   };
   registerOTel(
-    // Absent means "let `@vercel/otel` decide", which is not the same as
-    // passing an explicit `undefined` sampler.
     pipeline.sampler === undefined
       ? configuration
       : { ...configuration, traceSampler: pipeline.sampler },
@@ -218,10 +199,6 @@ export function registerOtelPipeline(input: {
     throw new Error("The registered OpenTelemetry tracer provider has no lifecycle methods.");
   }
   optionalPeerTracerProxy?.setDelegate(provider);
-  // `registerOTel` also registers a global meter provider when metric readers
-  // are declared, but returns no handle to it. Capture it now so metrics get
-  // the same flush and shutdown coverage as spans; without metric readers the
-  // global is a no-op provider with no lifecycle methods.
   const meterProvider = runtimeMeterProvider();
   return {
     provider: trace.getTracerProvider() as TracerProvider,
@@ -231,8 +208,6 @@ export function registerOtelPipeline(input: {
     idGenerator,
     samplesTrace: (traceId, operation) => samplerAdmitsTrace(idGenerator, traceId, operation),
     shutdown: async () => {
-      // Stop auto-instrumentations first so nothing records into providers
-      // that are about to shut down.
       disableInstrumentations(pipeline.instrumentations);
       await Promise.all([provider.shutdown!(), meterProvider.shutdown?.()]);
     },
@@ -265,12 +240,10 @@ function replayDeduplicationRegistry(): Set<string> {
   return created;
 }
 
-/** Lifecycle retained from the providers that own every destination. */
 export interface RegisteredOtelPipeline {
   readonly provider: TracerProvider;
   readonly forceFlush: () => Promise<void>;
   readonly idGenerator: AgentSpanIdGenerator;
-  /** Whether the installed sampler would record a trace with this id. */
   readonly samplesTrace: (traceId: string, operation?: SamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
 }
@@ -359,8 +332,6 @@ function globalTracerUses(idGenerator: AgentSpanIdGenerator): boolean {
   const probe = idGenerator.withSpanId(spanId, () =>
     trace.getTracer("eve.registration").startSpan(REGISTRATION_SPAN_NAME),
   );
-  // Deliberately not ended: named processors are resolved inside @vercel/otel
-  // and cannot be wrapped, while an unended span is never exported.
   return probe.spanContext().spanId === spanId;
 }
 

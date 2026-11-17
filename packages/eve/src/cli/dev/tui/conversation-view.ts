@@ -12,25 +12,17 @@ export interface TokenUsage {
   readonly outputTokens: number;
 }
 
-/** What the terminal shows beyond the conversation's messages, read from the same tables. */
 export interface TuiSessionData {
   readonly view: SessionView;
-  /** Usage summed across the session; the renderer subtracts a turn baseline. */
   readonly usage: TokenUsage;
-  /** The latest step's usage, whose input restates the context size. */
   readonly lastStepUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
-  /** The model the latest turn ran. */
   readonly modelId?: string;
-  /** Each distinct turn or session failure, in order, with the turn it ended. */
   readonly failures: readonly TuiFailure[];
   readonly sessionFailed: boolean;
-  /** The tool's authored copy for a call, which the conversation's one `label` doesn't separate. */
   readonly toolLabels: (callId: string) => ToolLabels | undefined;
-  /** Calls the session refused for the model to retry; people only see the retry. */
   readonly withdrawn: (callId: string) => boolean;
 }
 
-/** A failure, and the turn it ended when it ended one. */
 export interface TuiFailure {
   readonly error: ErrorInfo;
   readonly turnId?: string;
@@ -53,7 +45,6 @@ export function tuiSessionData(conversation: ConversationState): TuiSessionData 
     view,
     failures: failuresOf(view),
     lastStepUsage: turnRuns.findLast((run) => run.usage !== undefined)?.usage,
-    // The model id is printed in the status line, so it must not carry terminal controls.
     modelId: modelId && (stripAnsi(modelId).replace(/\s+/gu, " ").trim() || undefined),
     sessionFailed: view.session.outcome === "failed",
     toolLabels: (callId) => toolLabels(view, previews, callId),
@@ -69,11 +60,6 @@ function runTurnId(run: SessionView["runs"][string]): string | undefined {
   return "turnId" in run.owner ? run.owner.turnId : undefined;
 }
 
-/**
- * Each failed turn's failure, then the session's. A failed session cancels the turn it ended, so
- * its failure is that turn's, unless the turn failed itself: then it is dropped when it repeats
- * the turn's, and otherwise belongs to no turn.
- */
 function failuresOf(view: SessionView): readonly TuiFailure[] {
   const failures = Object.values(view.turns).flatMap((turn): TuiFailure[] => {
     const error = turnFailure(turn);
@@ -110,20 +96,15 @@ function toolLabels(
   return { ...(start !== undefined && { start }), ...(complete !== undefined && { complete }) };
 }
 
-/** One rendered failure cascade. */
 export interface AgentTUIFailure {
   readonly message: string;
   readonly hint?: string;
-  /** Diagnostic dump for unrecognized failures. */
   readonly detail?: string;
-  /** The turn the failure ended; a failure of none renders after the conversation. */
   readonly turnId?: string;
 }
 
-/** Everything the renderer draws for the session, derived from one store snapshot. */
 export interface AgentTUIConversationView {
   readonly conversation: ConversationState;
-  /** A turn is being submitted or is running, including server-initiated turns. */
   readonly working: boolean;
   readonly data: TuiSessionData;
   readonly failures: readonly AgentTUIFailure[];
@@ -132,7 +113,6 @@ export interface AgentTUIConversationView {
 export function conversationView(
   snapshot: SessionStoreSnapshot,
   data: TuiSessionData,
-  /** Replaces a failure's harness hint with a surface-local fix. */
   failureHint?: (error: ErrorInfo) => string | undefined,
 ): AgentTUIConversationView {
   return {

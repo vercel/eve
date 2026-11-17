@@ -20,162 +20,56 @@ import { discoverNamedSourceDirectory } from "#discover/named-source-directory.j
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
 import { collectFlatSlotCandidates } from "#discover/slots.js";
 
-/**
- * Shared diagnostic emitted when a slot has multiple authored module sources.
- */
 export const DISCOVER_MODULE_SLOT_COLLISION = "discover/module-slot-collision";
 
-/**
- * Shared diagnostic emitted when the required instructions prompt source
- * is missing.
- */
 export const DISCOVER_REQUIRED_INSTRUCTIONS_MISSING = "discover/required-instructions-missing";
 
-/**
- * Shared diagnostic emitted when discovery falls back to the deprecated
- * `system.{md,ts,...}` slot because no `instructions.{md,ts,...}` source
- * was found. The fallback resolves successfully; the warning prompts the
- * author to rename the file.
- */
 export const DISCOVER_DEPRECATED_SYSTEM_SLOT = "discover/deprecated-system-slot";
 
-/**
- * Shared diagnostic emitted when a slot has both markdown and module sources.
- */
 export const DISCOVER_SLOT_COLLISION = "discover/slot-collision";
 
-/**
- * Shared diagnostic emitted when the authored `tools/` root is not a
- * directory.
- */
 export const DISCOVER_TOOLS_DIRECTORY_INVALID = "discover/tools-directory-invalid";
 
-/**
- * Shared diagnostic emitted when the authored `hooks/` root is not a
- * directory.
- */
 export const DISCOVER_HOOKS_DIRECTORY_INVALID = "discover/hooks-directory-invalid";
 
-/**
- * Shared diagnostic emitted when the authored `channels/` root is not a
- * directory.
- */
 export const DISCOVER_CHANNELS_DIRECTORY_INVALID = "discover/channels-directory-invalid";
 
-/**
- * Shared diagnostic emitted when the authored `extensions/` root is not a
- * directory.
- */
 export const DISCOVER_EXTENSIONS_DIRECTORY_INVALID = "discover/extensions-directory-invalid";
 
-/**
- * Shared diagnostic emitted when an authored `tools/*.{ts,…}` filename does
- * not satisfy the model tool-name charset rule.
- */
 export const DISCOVER_TOOL_NAME_INVALID = "discover/tool-name-invalid";
 
-/**
- * Shared diagnostic emitted when an authored `connections/*.{ts,…}` filename
- * does not satisfy the connection slug charset rule.
- */
 const DISCOVER_CONNECTION_NAME_INVALID = "discover/connection-name-invalid";
 
-/**
- * Shared diagnostic emitted when the authored `sandbox/` root is not a
- * directory. The diagnostic code string retains its plural suffix for
- * stability across manifest versions.
- */
 export const DISCOVER_SANDBOX_DIRECTORY_INVALID = "discover/sandbox-directory-invalid";
 
-/**
- * Shared diagnostic emitted when the authored `instructions/` root is not a
- * directory.
- */
 const DISCOVER_INSTRUCTIONS_DIRECTORY_INVALID = "discover/instructions-directory-invalid";
 
-/**
- * Shared diagnostic emitted when an authored `channels/**` filename or
- * directory segment does not satisfy the channel slug charset rule.
- */
 const DISCOVER_CHANNEL_NAME_INVALID = "discover/channel-name-invalid";
 
-/**
- * Shared diagnostic emitted when an authored `hooks/**` filename or
- * directory segment does not satisfy the hook slug charset rule.
- */
 export const DISCOVER_HOOK_NAME_INVALID = "discover/hook-name-invalid";
 
-/**
- * Shared diagnostic emitted when an authored `extensions/*.{ts,…}` mount
- * filename does not satisfy the extension namespace charset rule.
- */
 export const DISCOVER_EXTENSION_NAME_INVALID = "discover/extension-name-invalid";
 
-/**
- * Tool filename charset. The slug must start with an ASCII letter and may
- * contain ASCII letters, digits, underscores, and dashes. The 64-character
- * cap matches the most restrictive provider tool-name limit.
- *
- * The model-facing tool name is the filename slug verbatim — there is no
- * authored `name` override and no compile-time normalization. Authors who
- * want a snake_case identifier should name the file in snake_case.
- */
 export const TOOL_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
-/** {@link TOOL_SLUG_PATTERN} in words, for errors about a name that breaks it. */
 export const TOOL_SLUG_RULE =
   "Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.";
 
-/**
- * Skill name charset: {@link TOOL_SLUG_PATTERN}, except that a name may start
- * with a digit, so a skill such as `3d-modeling` from the Agent Skills
- * standard ports over as-is. A skill is loaded by name, never called as a
- * tool, so tool-name limits on the first character don't apply.
- */
 export const SKILL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
-/** {@link SKILL_NAME_PATTERN} in words, for errors about a name that breaks it. */
 export const SKILL_NAME_RULE =
   "Expected ASCII letters, digits, underscores, and dashes only, starting with a letter or digit, up to 64 characters.";
 
-/**
- * Connection filename charset. Connections use the same lowercase
- * kebab-case rule as sandbox since they are not directly exposed to
- * model APIs as identifiers.
- */
 export const CONNECTION_SLUG_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 
-/**
- * Channel filename / directory segment charset.
- */
 const CHANNEL_SLUG_PATTERN = /^(\.?[a-z][a-z0-9-]{0,63}|\[[a-zA-Z][a-zA-Z0-9_]{0,63}\])$/;
 
-/**
- * Hook filename / directory segment charset. Each segment of the
- * path-relative slug uses the same restrictive charset as tool slugs:
- * ASCII letters, digits, underscores, and dashes, starting with a
- * letter, up to 64 characters per segment. Bracketed parameter forms
- * are not allowed — hooks have no URL semantics.
- */
 const HOOK_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
-/**
- * Extension mount filename charset. The basename becomes the namespace the
- * consumer's build prefixes onto every contribution (`crm` → `crm__search`),
- * so it uses the same restrictive charset as tool slugs: ASCII letters,
- * digits, underscores, and dashes, starting with a letter, up to 64
- * characters.
- */
 const EXTENSION_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
-/**
- * Shared diagnostic emitted when discovery ignores one unsupported directory.
- */
 export const DISCOVER_UNSUPPORTED_DIRECTORY = "discover/unsupported-directory";
 
-/**
- * Reads sorted agent source entries, excluding colocated tests unless reading resources.
- */
 export async function readSortedDirectoryEntries(
   source: ProjectSource,
   directoryPath: string,
@@ -190,17 +84,6 @@ export async function readSortedDirectoryEntries(
   return entries;
 }
 
-/**
- * Discovers instructions sources from a root directory.
- *
- * Supports three forms:
- * 1. **Directory**: `agent/instructions/` with multiple `.md` and `.ts` files.
- * 2. **Flat file**: `agent/instructions.md` or `agent/instructions.{ts,...}`.
- * 3. **Legacy**: `agent/system.{md,ts,...}` with a deprecation warning.
- *
- * A flat file and a directory can coexist — the flat file appears first
- * in the returned array.
- */
 export async function discoverInstructionsSource(input: {
   required?: boolean;
   rootEntries: readonly ProjectSourceEntry[];
@@ -212,7 +95,6 @@ export async function discoverInstructionsSource(input: {
 }> {
   const hasDirectory = input.rootEntries.some((e) => e.name === "instructions" && e.isDirectory());
 
-  // Check for flat-file candidates alongside the directory.
   const flatResult = await discoverSlotSource({
     markdownFileName: "instructions.md",
     moduleBaseName: "instructions",
@@ -244,7 +126,6 @@ export async function discoverInstructionsSource(input: {
     };
   }
 
-  // Flat file path.
   if (flatResult.diagnostics.length > 0 || flatResult.source !== undefined) {
     return {
       diagnostics: flatResult.diagnostics,
@@ -252,7 +133,6 @@ export async function discoverInstructionsSource(input: {
     };
   }
 
-  // Legacy system.{md,ts,...} fallback.
   const legacyResult = await discoverSlotSource({
     markdownFileName: "system.md",
     moduleBaseName: "system",
@@ -370,9 +250,6 @@ async function discoverSlotSource(input: {
   return { diagnostics: [] };
 }
 
-/**
- * Discovers one flat module slot such as `agent.ts` or `subagent.cjs`.
- */
 export function discoverFlatModuleSource(input: {
   missingDiagnostic?: {
     code: string;
@@ -429,14 +306,6 @@ export function discoverFlatModuleSource(input: {
   };
 }
 
-/**
- * Returns a discovery diagnostic when a tool slot name violates
- * {@link TOOL_SLUG_PATTERN}, or `null` when it satisfies the rule.
- *
- * Wired in by {@link discoverNamedSourceDirectory} callers via
- * `validateSegment` so the discover layer rejects illegal filenames before
- * the compiler ever loads the module.
- */
 export function createToolNameDiagnostic(
   slotName: string,
   sourcePath: string,
@@ -452,10 +321,6 @@ export function createToolNameDiagnostic(
   });
 }
 
-/**
- * Returns a discovery diagnostic when a connection slot name violates
- * {@link CONNECTION_SLUG_PATTERN}, or `null` when it satisfies the rule.
- */
 export function createConnectionNameDiagnostic(
   slotName: string,
   sourcePath: string,
@@ -473,14 +338,6 @@ export function createConnectionNameDiagnostic(
   });
 }
 
-/**
- * Returns a discovery diagnostic when a channel filesystem segment violates
- * {@link CHANNEL_SLUG_PATTERN}, or `null` when it satisfies the rule.
- *
- * Each path segment under `agent/channels/` is validated independently —
- * file leaves and directory ancestors both go through this check so the
- * runtime never sees a malformed URL segment.
- */
 export function createChannelNameDiagnostic(
   segment: string,
   sourcePath: string,
@@ -498,13 +355,6 @@ export function createChannelNameDiagnostic(
   });
 }
 
-/**
- * Returns a discovery diagnostic when a hook filesystem segment violates
- * {@link HOOK_SLUG_PATTERN}, or `null` when it satisfies the rule.
- *
- * Each path segment under `agent/hooks/` is validated independently so
- * the runtime never sees a malformed slug.
- */
 export function createHookNameDiagnostic(
   segment: string,
   sourcePath: string,
@@ -522,14 +372,6 @@ export function createHookNameDiagnostic(
   });
 }
 
-/**
- * Returns a discovery diagnostic when an extension mount filename violates
- * {@link EXTENSION_SLUG_PATTERN}, or `null` when it satisfies the rule.
- *
- * The mount basename becomes the namespace prefixed onto every contribution
- * the extension composes into the consuming agent, so it must be a legal
- * identifier segment.
- */
 export function createExtensionNameDiagnostic(
   slotName: string,
   sourcePath: string,
@@ -561,9 +403,6 @@ export {
   type DiscoverNamedSourceDirectoryWithMarkdownInput,
 } from "#discover/named-source-directory.js";
 
-/**
- * Emits shared diagnostics for unsupported root-level directories.
- */
 export function createUnsupportedRootDirectoryDiagnostics(input: {
   classifyEntry: (name: string, entryType: DirectoryEntryType) => string;
   createUnsupportedDirectoryMessage: (directoryName: string) => string;
@@ -589,9 +428,6 @@ export function createUnsupportedRootDirectoryDiagnostics(input: {
   });
 }
 
-/**
- * Creates one slot-collision diagnostic with shared wording.
- */
 export function createSlotCollisionDiagnostic(
   directoryPath: string,
   slotLogicalPath: string,
@@ -604,9 +440,6 @@ export function createSlotCollisionDiagnostic(
   });
 }
 
-/**
- * Creates one module-slot collision diagnostic with shared wording.
- */
 export function createModuleSlotCollisionDiagnostic(
   directoryPath: string,
   slotLogicalPath: string,

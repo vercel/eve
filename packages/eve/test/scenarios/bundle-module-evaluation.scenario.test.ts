@@ -27,13 +27,6 @@ interface RolldownInputOptions {
   readonly outDir: string;
 }
 
-/**
- * Bundles one entry against the local eve dist into a single concatenated
- * chunk, mirroring the shape of Nitro's `_libs/eve.mjs`.
- * Externalizes non-eve specifiers so the test exercises eve's evaluation
- * order in isolation. Leaves `output.topLevelVar` at the rolldown default
- * (`false`) so any cycle surfaces as a loud TDZ ReferenceError at load.
- */
 async function bundleEveDistAsSingleChunk(input: RolldownInputOptions): Promise<string> {
   await buildWithRolldown({
     cwd: input.cwd,
@@ -61,14 +54,6 @@ async function bundleEveDistAsSingleChunk(input: RolldownInputOptions): Promise<
   return join(input.outDir, "bundle.mjs");
 }
 
-/**
- * Evaluates `probe` in a fresh Node process, the way a deployment loads the
- * chunk. Importing the bundle inside the vitest worker would transform it
- * through Vite first, which costs seconds and does not match production.
- *
- * The bundle leaves non-eve imports external, as Nitro's output does, so the
- * scratch root gets a `node_modules` link for the probe to resolve them from.
- */
 async function runBundleProbe(input: {
   readonly probe: string;
   readonly probeArgs: readonly string[];
@@ -112,15 +97,10 @@ const FRAMEWORK_NAMESPACES_PROBE = [
 
 describe("eve dist single-chunk module evaluation", () => {
   it("concatenates the eve dist for a Nitro-style step entry without leaving any imported binding in TDZ", async () => {
-    // Regression test for a module-evaluation cycle in the BundleKey
-    // codec that surfaced as a TDZ ReferenceError when the dist was
-    // concatenated into a single chunk.
     const scratch = await createScratchDirectory("eve-step-entry-eval-");
     const outDir = join(scratch, "out");
     await mkdir(outDir, { recursive: true });
 
-    // Mirror the imports `writeNitroStepEntrypoint` generates for a
-    // workflow's `steps.mjs`.
     const stepSources = [
       "src/internal/workflow/builtins.ts",
       "src/subagents/adapter.ts",

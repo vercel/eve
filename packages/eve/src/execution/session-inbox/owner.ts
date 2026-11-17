@@ -12,16 +12,7 @@ import { DevelopmentRunUnavailableError } from "#internal/workflow/development-r
 import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
 import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 
-/**
- * The session's owner can never execute again: another eve version built it,
- * or its Vercel deployment was deleted. Ingress refuses a command for an owner
- * another eve version built before committing it. A deleted deployment shows
- * only when a read fails, possibly after the owner accepted the command, but
- * that owner can never replay it. Internal: carries the owner run, which never
- * reaches a client.
- */
 export class StrandedSessionOwnerError extends Error {
-  /** The owner's hook, when ingress looked it up; its metadata names the session. */
   readonly hook: Hook | undefined;
   readonly ownerRun: OwnerRun;
 
@@ -36,19 +27,11 @@ export class StrandedSessionOwnerError extends Error {
     return this.ownerRun.runId;
   }
 
-  /** eve version that built the owner, when it recorded one. */
   get eveVersion(): string | undefined {
     return this.ownerRun.attributes[EVE_VERSION_ATTRIBUTE];
   }
 }
 
-/**
- * The single ingress path into a hook: refuses a session inbox whose owner
- * cannot execute before anything is committed. Vercel can reuse a validated
- * inbox handle, or the owner this process `remembered` resolving for the
- * token: Workflow requires its guarded, deduplicated write endpoint. Only a
- * definite refusal falls back to resolving the current token owner.
- */
 export async function resumeRunnableHook(
   token: string,
   payload: unknown,
@@ -71,7 +54,6 @@ export async function resumeRunnableHook(
       try {
         return await resumeHook(cached, payload);
       } catch (error) {
-        // Only a definite refusal may be retried against a freshly resolved owner.
         if (!HookNotFoundError.is(error)) throw error;
       }
     }
@@ -80,10 +62,6 @@ export async function resumeRunnableHook(
   return await resumeHook(token, payload);
 }
 
-/**
- * Delivers a sign-in callback to its asker's inbox. An asker whose session is gone has nothing
- * waiting on the sign-in anymore, so its missing hook is not an error.
- */
 export async function resumeSignInCallback(
   token: string,
   payload: AuthorizationCallbackPayload,
@@ -95,14 +73,6 @@ export async function resumeSignInCallback(
   }
 }
 
-/**
- * Throws {@link StrandedSessionOwnerError} when the run holding a physical
- * session inbox token cannot execute. An unheld token passes: resuming it
- * reports the absence. Where the World replays each run on its own
- * deployment, nothing is looked up: an owner whose deployment was deleted
- * shows only through {@link isOwnerDeploymentDeletedError} on a failed read,
- * so a healthy owner pays nothing for the check.
- */
 export async function assertRunnableSessionInbox(token: string): Promise<void> {
   const world = await getWorld();
   if (routesToOwnerDeployment(world)) return;
@@ -110,7 +80,6 @@ export async function assertRunnableSessionInbox(token: string): Promise<void> {
   if (holder !== undefined) await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
-/** {@link assertRunnableSessionInbox} for a holder the caller already looked up. */
 export async function assertRunnableSessionOwner(holder: {
   readonly runId: string;
   readonly hook?: Hook;
@@ -120,12 +89,6 @@ export async function assertRunnableSessionOwner(holder: {
   await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
-/**
- * The run holding a session hook token, or `undefined` when none does. The
- * `eve dev` World refuses to expose the hooks of a run it will not execute
- * (a dormant or ineligible generation) and names only the run, so `hook` is
- * then absent. This is the only place that refusal is interpreted.
- */
 export async function findSessionHookHolder(
   token: string,
 ): Promise<{ readonly runId: string; readonly hook?: Hook } | undefined> {
@@ -139,11 +102,6 @@ export async function findSessionHookHolder(
   }
 }
 
-/**
- * Looks up a session hook. A run the `eve dev` World refuses to expose is
- * stranded only when another eve version built it; otherwise a restart with
- * `--resume` may run it, so the refusal propagates and nothing is ended.
- */
 export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
   try {
     return await getHookByToken(token);
@@ -154,12 +112,6 @@ export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
   }
 }
 
-/**
- * `hook`'s owner as {@link StrandedSessionOwnerError} when `error` shows its
- * deployment was deleted; otherwise, or when the run cannot be read, `error`.
- * `error` must come from reading or resuming this exact hook: a token may have
- * moved to a live owner since.
- */
 export async function strandedIfDeploymentDeleted(error: unknown, hook: Hook): Promise<unknown> {
   if (!isOwnerDeploymentDeletedError(error)) return error;
   try {

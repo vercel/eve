@@ -1,14 +1,9 @@
-// The default tools every agent gets unless it says otherwise, by name, as one list: the compiler
-// adds their modules to each file agent's node (`registry.ts`).
-
-/** A default module: the agent file it stands in for, and its code. */
 export interface DefaultModule {
   readonly logicalPath: string;
   readonly semanticRevision?: string;
   readonly loadNamespace: () => Promise<Record<string, unknown>>;
 }
 
-/** The default tools, by name, in the order every agent lists them. */
 export const DEFAULT_TOOLS = [
   "bash",
   "read_file",
@@ -19,7 +14,6 @@ export const DEFAULT_TOOLS = [
 ] as const;
 export type DefaultToolName = (typeof DEFAULT_TOOLS)[number];
 
-/** Each default tool's module, typed by what it exports. */
 export const DEFAULT_TOOL_MODULES = {
   bash: { logicalPath: "tools/bash.ts", loadNamespace: () => import("#tools/provided/bash.js") },
   read_file: {

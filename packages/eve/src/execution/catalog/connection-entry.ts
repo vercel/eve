@@ -1,10 +1,3 @@
-/**
- * A connection's catalog entries. `<connection>__<tool>` calls one of its
- * tools: it applies the connection's approval under the entry's name and runs
- * an approved call only against the connection instance it was approved for.
- * The connection's own name signs the user in, so its tools become listable.
- */
-
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import {
   resolveApprovalPolicy,
@@ -50,32 +43,21 @@ import {
 import { closestNames } from "./rank.js";
 import { connectionToolSignature } from "./signatures.js";
 
-/** Bounds approval pins; an evicted pin rejects its call rather than letting it run. */
 const MAX_APPROVAL_PINS = 50;
 
 const CONNECTION_CHANGED_MESSAGE =
   "The connection for this tool call changed or is unavailable. Request a new tool call and approval.";
 
-/**
- * Connection instance each parked call was sent for approval against or
- * stopped for sign-in on, keyed by call id. When the call runs after a person
- * approves it or the sign-in completes, it runs only if its connection still
- * resolves to that instance; a changed instance or a missing pin (the map is
- * bounded) rejects it.
- */
 const ConnectionApprovalPinsKey = new ContextKey<Readonly<Record<string, string>>>(
   "eve.connectionApprovalPins",
 );
 
-/** The pin for a connection's instance; one without an id still gets a pin. */
 function instanceKey(connection: ResolvedConnectionDefinition): string {
   return connection.instanceId ?? "";
 }
 
-/** No instance id matches this, so the call fails when it runs. */
 const CHANGED_INSTANCE = "\u0000changed";
 
-/** The entry for one tool of one connection instance in `registry`. */
 export function connectionEntry(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
@@ -83,7 +65,6 @@ export function connectionEntry(
   agentApproval?: ApprovalPolicy,
 ): HarnessToolDefinition {
   const label = `${displayProperName(connection.connectionName)}: ${displayTitle(toolName)}`;
-  // Wrapped inside the pin, so a call the agent's policy holds is pinned to this instance too.
   const approval = withAgentApproval(agentApproval, connection.approval);
   return {
     approval: connectionApproval(registry, connection, toolName, approval),
@@ -91,7 +72,6 @@ export function connectionEntry(
     description: "",
     execute: (input: unknown, options: ToolExecuteOptions) =>
       callConnectionTool(registry, connection, toolName, input, options, approval !== undefined),
-    // Checked before approval, so no one is asked to approve a call that cannot run.
     inputSchema: refineJsonSchema({}, (input) => checkInput(registry, connection, toolName, input)),
     label: { start: () => label },
     name: connectionToolName(connection.connectionName, toolName),
@@ -99,10 +79,6 @@ export function connectionEntry(
   };
 }
 
-/**
- * The entry for a connection's own name: it signs the user in when listing the
- * connection's tools needs that, then points the model at `eve__search`.
- */
 export function connectionSignInEntry(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
@@ -120,10 +96,6 @@ export function connectionSignInEntry(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Execution
-// ---------------------------------------------------------------------------
-
 async function connect(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
@@ -136,7 +108,6 @@ async function connect(
   }
   const displayName = displayProperName(connection.connectionName);
   const search = `${SEARCH_TOOL_NAME}({ query: "${connection.connectionName}__" })`;
-  // A listable connection may not need sign-in at all, so only a sign-in this call completed counts.
   return session.scoped !== undefined && session.auth.isJustAuthorized(session.scoped)
     ? `Signed in to ${displayName}. Find the ${displayName} tools with ${search}.`
     : `The ${displayName} tools are available. Find them with ${search}.`;
@@ -152,7 +123,6 @@ async function callConnectionTool(
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
   const result = await runConnectionTool(registry, connection, toolName, rawInput, options);
-  // The call runs again after the sign-in, and its approval recheck expects a pin.
   if (gated && isAuthorizationSignal(result)) {
     pinApprovedInstance(options.toolCallId, connection);
   }
@@ -173,7 +143,6 @@ async function runConnectionTool(
   if ("authorization" in listing) {
     return await auth.handleError(listing.error, listing.authorization);
   }
-  // Validation may have run before a sign-in made the tools listable.
   const isEventAction = client.eventActions?.ownsName(toolName) === true;
   const modelInput = withoutProvidedArguments(connection, rawInput, !isEventAction);
   const checked = await checkCall(connection, listing.tools, toolName, modelInput);
@@ -182,7 +151,6 @@ async function runConnectionTool(
 
   let raw: unknown;
   try {
-    // Only the call itself sees the approver; the listing above stays the requester's.
     const approved = <T>(fn: () => T) =>
       withConnectionApproval(connection.connectionName, options.approval?.responder, fn);
     if (isEventAction)
@@ -205,14 +173,8 @@ async function runConnectionTool(
   return result.value;
 }
 
-/** How long a connection may take to answer a tool call before the call fails. */
 const CALL_TIMEOUT_MS = 5 * 60_000;
 
-/**
- * Runs a connection tool call under the turn's signal and a
- * {@link CALL_TIMEOUT_MS} deadline, so a server that never answers can't hold
- * the turn. The deadline aborts the client's request, which then rejects.
- */
 async function executeWithDeadline(
   connectionName: string,
   client: ConnectionClient,
@@ -250,16 +212,12 @@ async function checkInput(
   try {
     tools = await listToolMetadata(connection, client);
   } catch (error) {
-    // Only the call itself can start the sign-in that makes its tools listable.
     if (isConnectionAuthorizationRequiredError(error)) return { value: input };
     return { issues: [{ message: listingFailureMessage(connection.connectionName, error) }] };
   }
   const remote = client.eventActions?.ownsName(toolName) !== true;
   const modelInput = withoutProvidedArguments(connection, input, remote);
   const checked = await checkCall(connection, tools, toolName, modelInput);
-  // The call validates this value again when it runs. Defaults are filled only there,
-  // because a filled default its own schema rejects, such as Pydantic's `null` for
-  // `x: str = None`, would fail that second check.
   return "issues" in checked ? { issues: checked.issues } : { value: modelInput };
 }
 
@@ -267,7 +225,6 @@ type CallCheck =
   | { readonly input: JsonObject; readonly tool: ConnectionToolMetadata }
   | { readonly issues: readonly StandardSchemaV1.Issue[] };
 
-/** Provided values replace these keys at execution, so a model value for one is dropped, not rejected. */
 function withoutProvidedArguments(
   connection: ResolvedConnectionDefinition,
   input: unknown,
@@ -279,7 +236,6 @@ function withoutProvidedArguments(
   );
 }
 
-/** The tool a call runs and its input with schema defaults filled in, or why it cannot run. */
 async function checkCall(
   connection: ResolvedConnectionDefinition,
   tools: readonly ConnectionToolMetadata[],
@@ -302,7 +258,6 @@ async function checkCall(
   };
 }
 
-/** The issues as one error message, each led by the path it is about. */
 function issuesMessage(issues: readonly StandardSchemaV1.Issue[]): string {
   return issues
     .map(({ message, path = [] }) => {
@@ -330,15 +285,6 @@ function unknownToolMessage(
   return `Connection "${connectionName}" has no tool named "${toolName}".${hint}`;
 }
 
-// ---------------------------------------------------------------------------
-// Approval
-// ---------------------------------------------------------------------------
-
-/**
- * The connection's approval, pinned to this connection instance. The response
- * phase exists only when the connection defines one; without it, the pin is
- * checked when the approved call runs.
- */
 function connectionApproval(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
@@ -371,12 +317,9 @@ async function requestApproval(
   policy: ApprovalPolicy,
   context: ApprovalContext,
 ): Promise<ApprovalStatus> {
-  // Denying here would drop the call without a result, so the approved call
-  // runs and fails in execution instead, where the failure is reported.
   if (isApprovalRecheck(context) && !matchesApprovalPin(context.callId, connection)) {
     markApprovalPinChanged(context.callId);
   }
-  // Preserve result identity for the approval evaluator's private metadata.
   const status = await policy(context);
   if (!isApprovalRecheck(context) && approvalDecision(status).awaitsPerson === true) {
     pinApprovedInstance(context.callId, connection);
@@ -384,7 +327,6 @@ async function requestApproval(
   return status;
 }
 
-/** What the server declared about `toolName`, or nothing when it declared none or can't list. */
 async function toolAnnotations(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
@@ -394,7 +336,6 @@ async function toolAnnotations(
     const tools = await listToolMetadata(connection, registry.getClient(connection.connectionName));
     return tools.find((tool) => tool.name === toolName)?.annotations;
   } catch {
-    // Input validation already reported a listing failure; a sign-in the call needs comes later.
     return undefined;
   }
 }
@@ -418,7 +359,6 @@ async function authorizeApprovalResponse(
   return await response(context);
 }
 
-/** Records the instance a parked call was first sent for approval against or stopped on. */
 function pinApprovedInstance(callId: string, connection: ResolvedConnectionDefinition): void {
   const ctx = loadContext();
   if (ctx.get(ConnectionApprovalPinsKey)?.[callId] !== undefined) return;
@@ -430,7 +370,6 @@ function pinApprovedInstance(callId: string, connection: ResolvedConnectionDefin
   );
 }
 
-/** Fails closed: a parked call whose pin is missing counts as changed. */
 function matchesApprovalPin(callId: string, connection: ResolvedConnectionDefinition): boolean {
   const pinned = loadContext().get(ConnectionApprovalPinsKey)?.[callId];
   return pinned !== undefined && pinned === instanceKey(connection);
@@ -443,7 +382,6 @@ function markApprovalPinChanged(callId: string): void {
   }));
 }
 
-/** Consumes the call's approval pin, rejecting the call if its connection changed. */
 function releaseApprovalPin(callId: string, connection: ResolvedConnectionDefinition): void {
   const ctx = loadContext();
   const pins = ctx.get(ConnectionApprovalPinsKey);

@@ -1,4 +1,3 @@
-/** Maps independent work in order, draining every started task before rejecting. */
 export async function mapConcurrent<T, R>(
   values: readonly T[],
   operation: (value: T, index: number) => Promise<R>,

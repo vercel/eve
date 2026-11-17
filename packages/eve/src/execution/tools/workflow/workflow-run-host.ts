@@ -17,14 +17,10 @@ import type { RunHook, RunHost } from "#execution/run-host.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 
-// A workflow tool run on Workflow: the run is a durable workflow, its hooks are Workflow hooks on
-// that run, its sleeps are durable, and it opens agent sessions in steps.
-
 export const workflowRunHost: RunHost = {
   runId: () => getWorkflowMetadata().workflowRunId,
   createHook: <T>(token?: string) =>
     runHookOf(createHook<T>(token === undefined ? undefined : { token })),
-  // A body's own `crypto` is seeded from its run's ids, so a step draws the token.
   createRemoteReplyHook: async <T>() =>
     runHookOf(createHook<T>({ token: await createRemoteReplyTokenStep() })),
   sleep: (ms) => sleep(ms),
@@ -39,7 +35,6 @@ export const workflowRunHost: RunHost = {
   toolStubs: workflowToolStubs,
 };
 
-/** A Workflow hook as a run's hook: it claims its token by asking Workflow for a conflict. */
 function runHookOf<T>(hook: Hook<T>): RunHook<T> {
   return {
     token: hook.token,
@@ -48,7 +43,6 @@ function runHookOf<T>(hook: Hook<T>): RunHook<T> {
     claim: () =>
       hook.getConflict().then(
         (conflict) => conflict === null,
-        // A World that can't name the holder rejects instead.
         (error: unknown) => {
           if (isHookConflictError(error)) return false;
           throw error;

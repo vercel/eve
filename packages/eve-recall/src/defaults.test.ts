@@ -7,7 +7,6 @@ const approvalOptions = [
   { id: "cancel", label: "Cancel" },
 ];
 
-/** Event-handler context with a stubbed chat send that answers `sent` for each call in turn. */
 function handlerContext(state: Record<string, unknown>, sent: boolean[] = []) {
   const sendChatMessage = vi.fn(async () => sent.shift() ?? true);
   const recall = {

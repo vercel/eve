@@ -11,6 +11,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Statistical significance fluctuates. At any point during a test, you might see "significance" that disappears with more data. This is called the "peeking problem" or "repeated significance testing."
 
 **The fix:**
+
 - Pre-calculate required sample size
 - Commit to running until you reach it
 - If you must peek, use sequential testing methods that account for multiple looks
@@ -22,6 +23,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** You'll conclude "no difference" when there actually is one—you just couldn't detect it.
 
 **The fix:**
+
 - Calculate required sample size before starting
 - Be realistic about minimum detectable effect (can you act on a 0.5% improvement?)
 - If traffic is low, test bigger changes
@@ -33,6 +35,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** With 20 metrics, you expect 1 false positive at 95% confidence—by chance alone.
 
 **The fix:**
+
 - Define ONE primary metric before starting
 - Use Bonferroni correction or similar for multiple comparisons
 - Treat secondary metrics as directional, not conclusive
@@ -44,6 +47,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Simpson's Paradox—overall winner might be loser for your key segments.
 
 **The fix:**
+
 - Always segment by device, traffic source, user type
 - Check if results are consistent across segments
 - If segments differ dramatically, investigate why
@@ -57,6 +61,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** You won't know which change caused the result. And each variable multiplies required sample size.
 
 **The fix:**
+
 - Test one variable at a time (A/B testing)
 - If testing multiple, use proper multivariate testing with adequate sample size
 - Prioritize highest-impact changes first
@@ -68,6 +73,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Without a hypothesis, you can't learn WHY something worked (or didn't).
 
 **The fix:**
+
 - State: "We believe [change] will [impact metric] because [reasoning]"
 - Even if you're wrong, you learn something
 
@@ -78,6 +84,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** You need a stable baseline to compare against.
 
 **The fix:**
+
 - Never modify the control mid-test
 - If you must change it, start a new test
 - Document exactly what the control is
@@ -91,6 +98,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** External factors affect both variants differently, contaminating results.
 
 **The fix:**
+
 - Avoid tests during unusual periods
 - If unavoidable, note it and extend the test past the event
 - Compare to the same period historically
@@ -102,6 +110,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Results won't generalize to your full audience.
 
 **The fix:**
+
 - Test on representative traffic
 - Be explicit about who's included/excluded
 - Note limitations when reporting results
@@ -113,6 +122,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** You're not testing what you think you're testing.
 
 **The fix:**
+
 - QA both variants thoroughly before launch
 - Verify tracking events fire correctly
 - Check assignment distribution matches weights
@@ -126,6 +136,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Statistical significance ≠ practical significance. A 0.01% improvement isn't worth the complexity.
 
 **The fix:**
+
 - Define minimum meaningful effect before starting
 - Consider implementation cost vs. benefit
 - Don't over-optimize
@@ -137,6 +148,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** The true effect could be anywhere in the confidence interval.
 
 **The fix:**
+
 - Report confidence intervals: "5% improvement (95% CI: 2%-8%)"
 - Base decisions on the lower bound for conservative estimates
 - Wider intervals = more uncertainty
@@ -148,6 +160,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** You'll repeat mistakes, forget context, lose institutional knowledge.
 
 **The fix:**
+
 - Document every test: hypothesis, results, learnings
 - Include what surprised you
 - Build a searchable knowledge base
@@ -161,6 +174,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Defeats the purpose of data-driven decision making.
 
 **The fix:**
+
 - Get buy-in before testing that results will be honored
 - Present data clearly to stakeholders
 - Frame as "learning" not "winning/losing"
@@ -172,6 +186,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Wastes resources, creates testing fatigue, delays important experiments.
 
 **The fix:**
+
 - Prioritize tests by potential impact
 - Not everything needs a test—use judgment for low-risk changes
 - Focus experimentation resources on high-value decisions
@@ -183,6 +198,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** SRM is a strong signal of an implementation bug — broken randomization, bot contamination, or redirect issues. Results from experiments with SRM cannot be trusted.
 
 **The fix:**
+
 - Check the actual split ratio against expected before analyzing results
 - Use a chi-squared test to detect statistically significant mismatches
 - If SRM is detected, investigate the root cause before drawing any conclusions
@@ -195,6 +211,7 @@ Avoid these mistakes that invalidate results or lead to wrong conclusions.
 **Why it's wrong:** Short experiments may show inflated effects that don't persist. Returning users may click more simply because something looks new.
 
 **The fix:**
+
 - Run experiments for at least 2 full business cycles
 - Segment results by new vs. returning users
 - If possible, check whether the effect holds in the second week vs. the first

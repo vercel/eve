@@ -101,7 +101,6 @@ describe("invokeTool", () => {
   });
 
   it("takes a clearance to run at all", () => {
-    // Never called: the type is what's under test.
     const unchecked = () =>
       // @ts-expect-error A call runs only on what the gate decided.
       invokeTool(tool, {}, { messages: [], toolCallId: "c_0" });

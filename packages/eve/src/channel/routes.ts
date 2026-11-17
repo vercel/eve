@@ -68,20 +68,8 @@ export interface SendPayload {
   readonly message?: MessageContent;
   readonly [key: string]: unknown;
   readonly answers?: readonly Answer[];
-  /**
-   * Context strings contributed by the channel. eve appends each entry
-   * as a `role: "user"` message to `session.history` before the delivery
-   * message and persists it across the session.
-   */
   readonly context?: readonly string[];
-  /**
-   * Prior conversation added as user and assistant turns before this
-   * delivery's `context` and message.
-   */
   readonly history?: readonly SessionHistoryMessage[];
-  /**
-   * Run-scoped JSON schema the turn's result must match.
-   */
   readonly outputSchema?: JsonObject;
 }
 

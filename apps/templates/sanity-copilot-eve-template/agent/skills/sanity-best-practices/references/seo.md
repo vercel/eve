@@ -54,11 +54,12 @@ export const seoType = defineType({
 ```
 
 **Usage in document types:**
+
 ```typescript
 defineField({
   name: "seo",
   type: "seo",
-})
+});
 ```
 
 ## 3. GROQ Queries with Fallbacks
@@ -101,7 +102,9 @@ const getPage = async (params: RouteProps["params"]) =>
     stega: false, // Critical for SEO!
   });
 
-export async function generateMetadata({ params }: RouteProps): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: RouteProps): Promise<Metadata> {
   const { data: page } = await getPage(params);
 
   if (!page) return {};
@@ -143,6 +146,7 @@ export default async function Page({ params }: RouteProps) {
 Use Next.js `sitemap.ts` convention to auto-generate from Sanity content.
 
 ### GROQ Query
+
 ```groq
 *[_type in ["page", "post"] && defined(slug.current) && seo.noIndex != true] {
   "href": select(
@@ -155,6 +159,7 @@ Use Next.js `sitemap.ts` convention to auto-generate from Sanity content.
 ```
 
 ### Route Implementation
+
 ```typescript
 // app/sitemap.ts
 import { MetadataRoute } from "next";
@@ -190,6 +195,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 Create a redirect document type for content team management.
 
 ### Schema
+
 ```typescript
 // schemaTypes/redirectType.ts
 import { defineField, defineType, SanityDocumentLike } from "sanity";
@@ -241,6 +247,7 @@ export const redirectType = defineType({
 ```
 
 ### Next.js Config
+
 ```typescript
 // next.config.ts
 import { fetchRedirects } from "@/sanity/lib/fetchRedirects";
@@ -289,6 +296,7 @@ npm install schema-dts
 ```
 
 ### FAQ Example
+
 ```typescript
 import { FAQPage, WithContext } from "schema-dts";
 
@@ -313,6 +321,7 @@ const generateFaqData = (faqs: FAQ[]): WithContext<FAQPage> => ({
 ```
 
 ### GROQ for Plain Text
+
 ```groq
 faqs[]->{
   _id,

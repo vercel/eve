@@ -20,10 +20,6 @@ export interface ExtensionCompileMount {
   readonly entry?: NonNullable<AuthoredModuleLoadOptions["extension"]>["entry"];
 }
 
-/**
- * Filesystem mounts enclosing `mountId`, outermost first. Extension subagents live at
- * `<mountId>/subagents/<id>`, so a nested mount id extends its enclosing mount ids.
- */
 function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>, mountId: string) {
   return [...mounts.values()]
     .filter((mount) => mount.entry !== undefined && mountId.startsWith(`${mount.mountId}/`))
@@ -31,12 +27,7 @@ function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>
     .map((mount) => ({ ...mount.entry!, mountId: mount.mountId }));
 }
 
-/** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
-  /**
-   * Selected app root; application modules stamp Workflow ids relative to it. Required so
-   * no caller silently falls back to the package root, which differs in workspace members.
-   */
   readonly appRoot: string | undefined;
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
   readonly graph?: AuthoredModuleGraph;
@@ -126,7 +117,6 @@ async function loadCompiledBindingNamespace(input: {
   });
 }
 
-/** Derives the owning mount for state handles in an extension module. */
 export function resolveExtensionBindingMountId(binding: AgentModuleBinding): string | undefined {
   return binding.owner.kind === "extension" ? binding.owner.mountId : undefined;
 }

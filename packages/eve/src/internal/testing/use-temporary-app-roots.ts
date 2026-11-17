@@ -5,39 +5,17 @@ import { join } from "node:path";
 import { afterAll, afterEach } from "vitest";
 import { resolvePackageRoot } from "#internal/application/package.js";
 
-/**
- * Options accepted by the factory returned from
- * {@link useTemporaryAppRoots}.
- */
 interface CreateTemporaryAppRootOptions {
-  /** Value written into the synthetic `package.json#name`. */
   readonly packageName?: string;
-  /** Value written into the synthetic `package.json#type`. */
   readonly packageType?: "module" | "commonjs";
-  /**
-   * Extra files to write under the app root, keyed by POSIX-relative path.
-   * Parent directories are created automatically.
-   */
   readonly files?: Readonly<Record<string, string>>;
 }
 
-/**
- * Handle returned by the {@link useTemporaryAppRoots} factory.
- */
 interface TemporaryAppRoot {
-  /** Absolute path to the temporary app root. */
   readonly appRoot: string;
-  /**
-   * Absolute path to `${appRoot}/agent` (the nested layout agent root).
-   * Created empty unless the caller writes files into it.
-   */
   readonly agentRoot: string;
 }
 
-/**
- * Registers an `afterEach` hook and returns a factory that creates fresh
- * temporary app roots with an empty nested-layout `agent/` directory.
- */
 export function useTemporaryAppRoots(): (
   prefix: string,
   options?: CreateTemporaryAppRootOptions,
@@ -52,9 +30,7 @@ export function useTemporaryAppRoots(): (
             force: true,
             recursive: true,
           });
-        } catch {
-          // Best-effort cleanup; a leaked tmpdir must not fail the run.
-        }
+        } catch {}
       }),
     );
   });
@@ -97,11 +73,6 @@ export function useTemporaryAppRoots(): (
   };
 }
 
-/**
- * Returns a factory that creates fresh temporary scratch directories, removed
- * after each test, or after the file with `{ scope: "file" }` so a
- * `beforeAll` build can serve several tests.
- */
 export function useTemporaryDirectories(
   options: { readonly scope?: "file" | "test" } = {},
 ): (prefix: string) => Promise<string> {
@@ -115,9 +86,7 @@ export function useTemporaryDirectories(
             force: true,
             recursive: true,
           });
-        } catch {
-          // Best-effort cleanup.
-        }
+        } catch {}
       }),
     );
   });

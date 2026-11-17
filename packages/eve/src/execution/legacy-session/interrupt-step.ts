@@ -14,7 +14,6 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import { settleCancelledTurn } from "#execution/settle-cancelled-turn-step.js";
 import type { PreparedLegacySession } from "./prepare-step.js";
 
-/** Only the elected importer may stop work or append cancellation events. */
 export async function interruptLegacySessionStep(prepared: PreparedLegacySession) {
   "use step";
   const { history: _history, ...originalSession } = prepared.originalSession;
@@ -31,7 +30,6 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
   const world = await getWorld();
   const state = prepared.originalSession.state;
   const runIds = new Set<string>();
-  // Import cancels discoverable work even when the old registry cannot pass current validation.
   const waitingRuns = state?.["eve.runtime.workflowToolRuns"];
   if (Array.isArray(waitingRuns)) {
     for (const entry of waitingRuns) {

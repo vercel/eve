@@ -8,11 +8,6 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 import type { UserPart } from "#protocol/session-events/envelope.js";
 import type { MessageContent } from "#shared/message-content.js";
 
-// What a person sent, as `delivery.consumed` reports it: text, and files as metadata. Bytes
-// never reach the stream. A file keeps a URL only when a client can resolve it over http(s);
-// otherwise it's marked unavailable until an attachment store can serve it.
-
-/** The parts of one message. */
 export function userPartsOf(message: MessageContent): readonly UserPart[] {
   if (typeof message === "string") return [{ kind: "text", text: message }];
   const parts: UserPart[] = [];
@@ -85,12 +80,10 @@ function isTaggedFileData(
   return type === "data" || type === "reference" || type === "text" || type === "url";
 }
 
-/** What an inline payload weighs, read without decoding it: bytes, a `data:` URL, or base64. */
 function byteLengthOf(data: unknown): number | undefined {
   return getKnownByteLength(data) ?? undefined;
 }
 
-/** A URL a client can fetch over http(s); never a `data:` URL, which would put bytes on the stream. */
 function clientUrl(data: unknown): string | undefined {
   if (isSerializedUrlFilePart(data)) {
     try {

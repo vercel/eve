@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { EmptyModelResponseError } from "#harness/model-call/errors.js";
 import { recoverModelCall } from "#harness/model-call/recovery.js";
 
-/** Bedrock Mantle's response when a request carries OpenAI web search. */
 function includeRejection(): Error {
   const body = {
     error: {

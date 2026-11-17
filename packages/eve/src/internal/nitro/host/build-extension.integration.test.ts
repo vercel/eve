@@ -9,8 +9,6 @@ import {
   tryReadExtensionBuildConfig,
 } from "#internal/nitro/host/build-extension.js";
 
-// Reading build config and the pre-bundle validation are pure; the bundling
-// output is covered by build-extension.scenario.test.ts (it invokes rolldown).
 describe("extension build config", () => {
   it("reads eve.extension and derives the short name", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-ext-build-"));

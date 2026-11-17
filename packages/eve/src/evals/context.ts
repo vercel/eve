@@ -13,12 +13,6 @@ import type {
   EveEvalTargetHandle,
 } from "#evals/types.js";
 
-/**
- * Builds the `EveEvalContext` (`t`) for one eval run, wiring the session
- * manager (driving), the assertion collector (recording), and the judge
- * namespace. Returns the collector so the runner can {@link
- * AssertionCollector.finalize} it against the completed task result.
- */
 export function createEvalContext(deps: {
   readonly setupContext?: unknown;
   readonly manager: EvalSessionManager;
@@ -41,7 +35,6 @@ export function createEvalContext(deps: {
     session: (options) => deps.manager.session(options),
     send: (message, options) => deps.manager.send(message, options),
 
-    // Run context.
     context: deps.setupContext,
     abortSignal: deps.signal,
     target: deps.target,
@@ -52,7 +45,6 @@ export function createEvalContext(deps: {
       select: (result) => ({ ...result, output: outputOf(result) }),
     }),
 
-    // Value-level assertion over an explicit value.
     check: (value, assertion) => recordCheck(collector, value, assertion),
     score: (evaluation) => collector.recordScore(evaluation),
     require: (value, assertion) => requireCheck(collector, value, assertion),

@@ -7,7 +7,6 @@ export interface ScreenshotOutput extends Record<string, unknown> {
   readonly path?: string;
 }
 
-/** Structural subset of eve's sandbox handle; readBinaryFile ships in eve >= 0.22. */
 interface SandboxWithFiles {
   readBinaryFile?(options: { readonly path: string }): PromiseLike<Uint8Array | null>;
 }
@@ -39,7 +38,6 @@ async function inlineImage(
     }
     return `data:${mimeTypeFor(path)};base64,${Buffer.from(bytes).toString("base64")}`;
   } catch {
-    // Inline rendering is best-effort; the path in the output always works.
     return undefined;
   }
 }

@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// Client and ClientSession
-// ---------------------------------------------------------------------------
-
 export { SessionStore } from "#client/session-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
@@ -46,10 +42,6 @@ export type {
   CreatedClientSession,
   CreatedIdleClientSession,
 } from "#client/sessions.js";
-
-// ---------------------------------------------------------------------------
-// Client types
-// ---------------------------------------------------------------------------
 
 export type {
   SessionStoreCallbacks,

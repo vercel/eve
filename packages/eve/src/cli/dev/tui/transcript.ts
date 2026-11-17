@@ -52,41 +52,21 @@ export interface TranscriptOptions {
   readonly reasoning: TerminalPartDisplayMode;
   readonly subagents: SubagentDisplayMode;
   readonly connectionAuth: TerminalPartDisplayMode;
-  /** Names of the agent's local subagents, whose tools read as delegations. */
   readonly subagentNames?: readonly string[];
-  /** Where full failure detail is recorded, shown instead of the raw dump. */
   readonly diagnosticsPath?: string;
-  /** Separates a task end line's facts; the theme's `·`. */
   readonly dot?: string;
 }
 
-/**
- * A block written when it first appeared rather than where its part sits: a task's end line, or
- * an agent's own finished row. It stays after the blocks that preceded it then, as `main`'s
- * append-only transcript would have written it.
- */
 interface PlacedBlock {
   readonly block: Block;
-  /** The blocks it followed, newest last; the newest still projected anchors it. */
   readonly after: readonly string[];
 }
 
 const PLACEMENT_ANCHORS = 8;
 
-/**
- * Projects one session's conversation into transcript blocks. Each block's
- * `live` flag says whether its part can still change; the renderer commits a
- * settled prefix to scrollback. Built blocks are reused while their inputs are
- * unchanged, so file-diff bases observe each tool call once, in order.
- *
- * A task writes one line when it starts, at its call, and one when it ends, where the transcript
- * had reached by then; what it does in between is {@link ConversationTranscript.tasks}, which the
- * renderer shows in the task panel above the prompt.
- */
 export class ConversationTranscript {
   #memo = new Map<string, { readonly key: readonly unknown[]; readonly block: Block }>();
   readonly #fileContents = new FileContentCache();
-  /** Server user messages that confirmed an optimistic message keep its block. */
   readonly #tasks = new TaskRecords();
   readonly #nestedTasks = new Map<string, TaskRecord>();
   #placed: PlacedBlock[] = [];
@@ -103,12 +83,10 @@ export class ConversationTranscript {
     this.#working = [];
   }
 
-  /** The tasks between their start and end lines as of the last projection, in start order. */
   get tasks(): readonly TaskEntry[] {
     return this.#working;
   }
 
-  /** How input requests name the task that asked: as its task lines do. */
   taskLabel(conversation: ConversationState, taskId: string): string | undefined {
     const task = sessionTables(conversation.view).tasks[taskId];
     if (task === undefined) return undefined;
@@ -122,7 +100,6 @@ export class ConversationTranscript {
       : stripTerminalControls(task.name);
   }
 
-  /** End lines for the tasks still working when their session ends; they read as stopped. */
   stopWorking(options: TranscriptOptions): Block[] {
     const lines: Block[] = [];
     for (const record of this.#tasks.values()) {
@@ -147,7 +124,6 @@ export class ConversationTranscript {
     const blocks: Block[] = [];
     const taskCalls = taskCallsById(conversation);
     const { toolLabels: labels, withdrawn } = view.data;
-    // A turn's failure shows where the turn ended, after its last message.
     const turnFailures = new Map(
       view.failures.flatMap((failure) =>
         failure.turnId === undefined ? [] : [[failure.turnId, failure] as const],
@@ -178,7 +154,6 @@ export class ConversationTranscript {
       const tools = message.parts.filter(
         (part): part is EveToolPart =>
           isToolCallRow(part) &&
-          // A call still streaming its input shows a placeholder only while the turn runs.
           (part.state !== "streaming" || working) &&
           part.kind !== "control" &&
           !withdrawn(part.callId) &&
@@ -193,7 +168,6 @@ export class ConversationTranscript {
           const block = this.#contentBlock(message, index, options, working);
           if (block !== undefined) blocks.push(block);
         } else if (part.type === "interaction") {
-          // A sign-in shows where it was asked; the composer asks the rest.
           if (part.request.signIn !== undefined && options.connectionAuth !== "hidden")
             blocks.push(this.#signInBlock(part, part.request.signIn));
         } else if (part.type === "tool") {
@@ -235,7 +209,6 @@ export class ConversationTranscript {
         );
       }
     }
-    // Failures that ended no turn shown above, such as a session's own, go last.
     let unplaced = 0;
     for (const failure of view.failures) {
       if (failure.turnId !== undefined && shown.has(failure.turnId)) continue;
@@ -257,7 +230,6 @@ export class ConversationTranscript {
     return placed;
   }
 
-  /** Interleaves placed blocks after the blocks they first followed. */
   #placeBlocks(blocks: readonly Block[]): Block[] {
     const placed = [...blocks];
     for (const { block, after } of this.#placed) {
@@ -274,7 +246,6 @@ export class ConversationTranscript {
     return placed;
   }
 
-  /** A call became a task: its row is now the task's start line, or a message to a working one. */
   #taskStartLine(
     part: EveToolPart,
     task: TaskRow,
@@ -295,10 +266,6 @@ export class ConversationTranscript {
         );
   }
 
-  /**
-   * Updates the working tasks and returns the blocks that appeared since the last projection:
-   * `--show-subagents full` rows as an agent finishes each, and end lines as tasks end.
-   */
   #taskActivity(
     view: AgentTUIConversationView,
     taskCalls: ReadonlyMap<string, { task: TaskRow; call: CallRow }>,
@@ -307,7 +274,6 @@ export class ConversationTranscript {
   ): Block[] {
     const { conversation, working } = view;
     const lastTurn = Object.values(sessionTables(conversation.view).turns).at(-1);
-    // A cancelled or failed turn gets no end for the tasks still working; they read as stopped.
     const stopping =
       !working &&
       (view.data.sessionFailed ||
@@ -324,7 +290,6 @@ export class ConversationTranscript {
         const call = taskCalls.get(id)?.call;
         return call === undefined ? [] : [call];
       });
-      // The last call carries the task's latest outcome; one reply settles every call it answered.
       const call = calls.at(-1)!;
       const activity = this.#agentActivity(record, task, calls, conversation, options, traversal);
       if (options.subagents === "full") {
@@ -334,8 +299,6 @@ export class ConversationTranscript {
       }
       const settled = calls.every((candidate) => candidate.status === "settled");
       if (settled) record.settledAtMs ??= now;
-      // A settled agent task waits for its session to settle the call's delivery, while its turn
-      // runs, before writing its end line.
       const finishing = settled && activity.pending && working;
       if ((settled && !finishing) || (!settled && stopping)) {
         record.ended = true;
@@ -376,7 +339,6 @@ export class ConversationTranscript {
     return arrivals;
   }
 
-  /** What an agent task has done for these calls: its tool calls, latest words, and finished rows. */
   #agentActivity(
     record: TaskRecord,
     task: TaskRow,
@@ -392,7 +354,6 @@ export class ConversationTranscript {
         ? undefined
         : agent.observation.conversation;
     if (agent === undefined || child === undefined) return { tools: [], rows: [], pending: false };
-    // A settled call still waits for its deliveries' content while the child works on them.
     const sent = calls.flatMap((call) => {
       const activity = agentCallActivity(conversation, call.callId);
       return activity.status === "unlinked"
@@ -403,7 +364,6 @@ export class ConversationTranscript {
       agent.observation.status === "following" &&
       sent.some((session) => session.deliveries.some(({ status }) => status !== "settled"));
     const turnIds = new Set(sent.flatMap((session) => session.turns.map(({ turnId }) => turnId)));
-    // Without delivery links, show generic child activity rather than guessing which call caused it.
     const unlinked = !sessionTables(conversation.view).children[agent.sessionId]?.deliveries
       ?.length;
     const messages = child.messages.filter(
@@ -416,7 +376,6 @@ export class ConversationTranscript {
     const ordered: Array<{ order: number; block: Block; settled: boolean }> = [];
     const tools: Block[] = [];
     const children: TaskEntry[] = [];
-    // A child task's later calls join its first working call's entry.
     const shownChildTasks = new Set<string>();
     let omittedTasks = 0;
     let omittedAttention = false;
@@ -624,7 +583,6 @@ export class ConversationTranscript {
     });
   }
 
-  /** Feeds the file-content cache and derives the context a write needs for its diff. */
   #presentationContext(
     callId: string,
     part: EveToolPart,
@@ -668,17 +626,12 @@ export class ConversationTranscript {
   }
 }
 
-/** The `path` an `edit_file` input names, or the resolved one its output reports. */
 function pathField(value: unknown): string | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const path = (value as Record<string, unknown>)["path"];
   return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
-/**
- * Running tools and the live turn's model activity, for the turn bar. A session parked on a
- * sign-in names its connections, and a turn parked on its tasks names them.
- */
 export function turnActivity(view: AgentTUIConversationView, tasks: readonly TaskEntry[]): string {
   const current = activity(view.data.view);
   switch (current.kind) {

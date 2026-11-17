@@ -8,25 +8,15 @@ import type { CallRow } from "#protocol/session-projection/tables.js";
 import type { Capability } from "#protocol/session-events/families/call.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
-/** A turn event {@link SlackRenderingHarness.step} fires, in the order a real turn emits them. */
 export type SlackTurnStep = "turn" | "model" | "tool" | "hidden" | "no_reply" | "end";
 
 export interface SlackRenderingHarness {
-  /** The context the channel's handlers receive. */
   readonly channel: SlackEventContext;
-  /** Runs the channel's handler for one session event. */
   event(fact: SessionEvent): Promise<void>;
-  /** Runs the channel's `deliver` hook, as the runtime does when it admits a message. */
   deliver(payload: unknown): Promise<void>;
-  /**
-   * Fires one turn event: `turn` starts turn `t1`, `model` starts the next model run, `tool`,
-   * `hidden` (a tool with `label: false`), and `no_reply` call a tool from the current run and
-   * settle it, and `end` settles the turn.
-   */
   step(step: SlackTurnStep): Promise<void>;
 }
 
-/** Drives a compiled Slack channel's renderer and `deliver` hook outside a running session. */
 export function slackRenderingHarness(
   definition: unknown,
   state: Partial<SlackChannelState>,
@@ -39,7 +29,6 @@ export function slackRenderingHarness(
     auth: { current: null, initiator: null },
     turn: { id: "t1", sequence: 0 },
   });
-  // Handlers read the view with each event already folded in, as a running session's do.
   const tables = emptySessionView();
   const channel = {
     ...buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as never),

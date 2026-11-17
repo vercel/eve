@@ -15,15 +15,6 @@ import type { SessionView as SessionTables } from "#protocol/session-projection/
 import { ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 
-// How a delivery reaches `answer`: queued input joins it, stale answers turn into text, and a
-// plain-text answer becomes the response it stands for.
-
-/**
- * The delivery a step answers with: input queued behind earlier work joins it, unless the
- * runtime still runs calls (queued input waits for them). A stale answer, to a request that
- * already closed, never authorizes anything: a stale session-limit answer is dropped, and
- * any other becomes plain text the model reads.
- */
 export function deliver(
   view: SessionView,
   input: HarnessStepInput | undefined,
@@ -35,7 +26,6 @@ export function deliver(
 } {
   const queued = options.takeQueued ? view.turn.queued : undefined;
   const limit = openRequests(view.projection.view).find((row) => row.request.kind === "budget");
-  // Match the new typed answer before queued messages join it.
   const incoming =
     queued !== undefined && limit !== undefined && options.typedAnswers !== false
       ? resolveTextInput(view.projection.view, input)
@@ -46,10 +36,7 @@ export function deliver(
       : incoming === undefined
         ? queued
         : coalesceTurnInputs(queued, incoming);
-  // An approval settles on its own answer, before its batch resolves: the answer still counts
-  // while its batch waits for the rest.
   const tables = view.projection.view;
-  // An approval not asked yet, behind its step's tasks, still takes its answer.
   const pendingRequestIds = new Set([
     ...ownOpenRequestIds(view),
     ...view.turn.suspended.flatMap((step) =>
@@ -74,12 +61,6 @@ export function deliver(
 
 export type ResolvedStepInput = HarnessStepInput & { readonly messageConsumed?: boolean };
 
-/**
- * Plain text answers a budget prompt; `resolveTypedApproval` answers approvals. A channel
- * that wraps the typed text in an envelope for the model attaches the text itself to answer with.
- * The answer consumes the message, with the context and history the channel sent with it: the
- * model reads none of them.
- */
 export function resolveTextInput(
   view: SessionTables,
   stepInput: HarnessStepInput | undefined,
@@ -97,12 +78,6 @@ export function resolveTextInput(
   return compactInput(consumeTypedMessage(stepInput, answers));
 }
 
-/**
- * Turns a typed reply into a response to the first open request when that request is one of
- * this turn's approvals. The approval coordinator then settles it, or asks its response policy
- * about the person who typed, as it does for a press. A batch's other approvals stay open for
- * later replies.
- */
 export function resolveTypedApproval(
   view: Pick<SessionView, "projection" | "turn">,
   stepInput: HarnessStepInput | undefined,
@@ -138,18 +113,12 @@ function consumeTypedMessage(
   };
 }
 
-/** A message consumed as an answer imports nothing, so its deliveries record no history. */
 function withoutHistory(
   deliveries: HarnessStepInput["deliveries"],
 ): HarnessStepInput["deliveries"] {
   return deliveries?.map(({ history: _history, ...delivery }) => delivery);
 }
 
-/**
- * The answers a typed message stands for, submitted from the delivery that carried it, so they
- * keep one identity through coalescing and policy passes as a press does. Text that arrived in
- * no delivery answers nothing.
- */
 function typedAnswers(
   input: HarnessStepInput,
   answers: readonly Answer[],
@@ -179,7 +148,6 @@ export function withoutResponses(
   return rest;
 }
 
-/** The turn's own input: the message a plain-text answer didn't consume, and its context. */
 export function turnInputOnly(input: ResolvedStepInput | undefined): HarnessStepInput | undefined {
   if (input === undefined) return undefined;
   const result: {
@@ -194,7 +162,6 @@ export function turnInputOnly(input: ResolvedStepInput | undefined): HarnessStep
   return isEmptyInput(turnInput) ? undefined : turnInput;
 }
 
-/** What of the input isn't the turn's: answers, and the output the session asks for. */
 export function withoutTurnInput(input: ResolvedStepInput | undefined): ResolvedStepInput {
   const result: {
     answers?: HarnessStepInput["answers"];

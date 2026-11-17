@@ -18,47 +18,34 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 
-// The probe agent the host battery runs: a scripted model and the tools a case gives it, and the
-// conversation helpers that send it messages and read what its session recorded.
-
 type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 
 export interface ProbeTool {
   readonly name: string;
-  /** What the tool does; it returns what it ran by default. */
   readonly execute?: (input: unknown) => unknown;
   readonly approval?: true;
-  /** A `"use workflow"` tool's body, which runs as a run of its own. */
   readonly workflow?: (...args: never[]) => unknown;
-  /** Runs it as a task, which the turn doesn't wait on. */
   readonly task?: true;
 }
 
 export interface ProbeOptions {
-  /** The agent's name, which keeps each case's sessions apart. */
   readonly name: string;
-  /** What the model answers each call, from the prompt it reads, counted from 1. */
   readonly respond: (
     prompt: string,
     call: number,
     signal: AbortSignal | undefined,
   ) => StreamResult | Promise<StreamResult>;
   readonly tools?: readonly ProbeTool[];
-  /** Hooks on the session's events. */
   readonly events?: HookDefinition["events"];
-  /** More of the agent's modules. */
   readonly modules?: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
 }
 
 export interface Probe {
   readonly test: TestRuntime;
-  /** Every prompt the model read, in order. */
   readonly prompts: string[];
-  /** The tools that ran, in order. */
   readonly ran: string[];
 }
 
-/** Compiles the probe agent `options` describe. */
 export async function probe(options: ProbeOptions): Promise<Probe> {
   const prompts: string[] = [];
   const ran: string[] = [];
@@ -116,7 +103,6 @@ export async function probe(options: ProbeOptions): Promise<Probe> {
   return { prompts, ran, test };
 }
 
-/** A `"use workflow"` tool, run to completion or as a task. */
 function workflowTool(name: string, workflow: (...args: never[]) => unknown, task: boolean) {
   const definition: Record<string, unknown> = {
     description: `Run ${name} for Alice.`,
@@ -126,7 +112,6 @@ function workflowTool(name: string, workflow: (...args: never[]) => unknown, tas
   return defineWorkflowTool(definition as never);
 }
 
-/** Alice's address on `runtime`'s HTTP channel, under `token`. */
 export function alice(runtime: Runtime, token: string): ReturnType<typeof createChannelAddress> {
   return createChannelAddress({
     adapter: { kind: "http" },
@@ -136,7 +121,6 @@ export function alice(runtime: Runtime, token: string): ReturnType<typeof create
   });
 }
 
-/** The events of `sessionId`'s next turn, read from line `from` until it settles. */
 export async function turnFrom(
   runtime: Runtime,
   sessionId: string,
@@ -162,7 +146,6 @@ export async function turnFrom(
   }
 }
 
-/** Every event a session recorded so far. */
 export async function recorded(runtime: Runtime, sessionId: string): Promise<SessionStreamEvent[]> {
   const reader = (await runtime.getEventStream(sessionId, { follow: false })).getReader();
   const events: SessionStreamEvent[] = [];
@@ -171,7 +154,6 @@ export async function recorded(runtime: Runtime, sessionId: string): Promise<Ses
   return events;
 }
 
-/** What the protocol checker finds in a session's whole stream, read from its first line. */
 export async function violations(runtime: Runtime, sessionId: string): Promise<Violation[]> {
   const checker = createStreamChecker({ validate: schemaViolation });
   const found: Violation[] = [];
@@ -189,10 +171,6 @@ export const ofType = <T extends SessionStreamEvent["type"]>(
 ) =>
   events.filter((event): event is Extract<SessionStreamEvent, { type: T }> => event.type === type);
 
-/**
- * Checks what a retried step leaves in its session's stream: every line follows the one before
- * it, and no fact is written twice, as each attempt writes through a stream of its own.
- */
 export function expectEachFactOnce(events: readonly SessionStreamEvent[]): void {
   const lines = [...new Set(events.map(({ meta }) => meta.position.line))];
   expect(lines).toEqual(Array.from({ length: lines.length }, (_, index) => index + lines[0]!));

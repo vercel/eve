@@ -26,14 +26,6 @@ import { loadAgentRoster, type AgentRoster } from "#execution/agent-sessions/ros
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
-// A run's sessions on remote agents, over eve's remote agent protocol: plain HTTP, which any host
-// that serves eve's callback route can make. `agentSessionsOver` (`sessions-over.ts`) sends here
-// for a remote address.
-
-/**
- * Opens a session on a remote agent, which answers at eve's callback route under
- * `callbackBaseUrl`. `operationId` names the open, so a retry reaches the same session.
- */
 export async function startRemoteSession(
   input: SessionStart<RemoteStartTarget>,
   access: { readonly callbackBaseUrl: string; readonly operationId: string },
@@ -86,7 +78,6 @@ export async function startRemoteSession(
   return child.deliveryId === undefined ? { address } : { address, deliveryId: child.deliveryId };
 }
 
-/** Sends a later message to a remote session; `idempotencyKey` makes a retry repeat it. */
 export async function sendRemoteSessionMessage(
   input: AgentSessionMessage & RemoteAgentSession,
   idempotencyKey: string,
@@ -111,13 +102,6 @@ export async function sendRemoteSessionMessage(
   });
 }
 
-/**
- * The token `name`, a remote agent, replies with. Its reply reaches eve's callback route with
- * nothing else to vouch for it, so the agent is never handed a token that route refuses: one a
- * run named for a local agent's reply, which anyone who knew the run's ids could compute. A call
- * holds such a token when its context didn't list the agent as remote, as when `eve dev` reloads
- * the agent as a remote one after the call started.
- */
 function remoteReplyToken(replyTo: string, name: string): string {
   if (isRemoteReplyHookToken(replyTo)) return replyTo;
   throw new NonRetryableError(
@@ -125,7 +109,6 @@ function remoteReplyToken(replyTo: string, name: string): string {
   );
 }
 
-/** Cancels a remote session's running turn. */
 export async function cancelRemoteSessionTurn(
   context: AgentSessionContext,
   address: RemoteAgentSession["address"],
@@ -134,7 +117,6 @@ export async function cancelRemoteSessionTurn(
   await cancelRemoteAgentTurn({ remote, sessionId: address.sessionId });
 }
 
-/** Ends a remote session its run is done with. */
 export async function endRemoteSession(
   context: AgentSessionContext,
   address: RemoteAgentSession["address"],
@@ -147,7 +129,6 @@ export async function endRemoteSession(
   });
 }
 
-/** A remote session keeps running where it was opened, even after the registry moves on. */
 async function resolveSessionRemote(
   context: AgentSessionContext,
   address: RemoteAgentSession["address"],
@@ -155,7 +136,6 @@ async function resolveSessionRemote(
   const registry = remoteRegistryOf(await loadAgentRoster(context), address.name);
   const selection = context.dynamicSelections[address.nodeId];
   const resolved = resolveRemoteAgentForAction({
-    // Credentials come from the binding the child was opened with, and go only to its destination.
     credentials: await credentialsOf(registry, address.nodeId, address.dynamicBinding, address),
     dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
     nodeId: address.nodeId,
@@ -165,7 +145,6 @@ async function resolveSessionRemote(
   return { ...resolved, url: address.url };
 }
 
-/** The binding a dynamic remote agent with credentials keeps for a child opened now. */
 function bindingFor(
   context: AgentSessionContext,
   nodeId: string,
@@ -176,10 +155,6 @@ function bindingFor(
     : undefined;
 }
 
-/**
- * A dynamic remote agent's credentials, built from `binding` for `destination`. `undefined` for
- * one without credentials, which keeps no binding.
- */
 async function credentialsOf(
   registry: RemoteRegistry,
   nodeId: string,
@@ -197,7 +172,6 @@ async function credentialsOf(
 
 type RemoteRegistry = NonNullable<AgentRoster["remote"]>;
 
-/** The registry `name`, a remote agent, resolves from: a compiled agent's only. */
 function remoteRegistryOf(roster: AgentRoster, name: string): RemoteRegistry {
   if (roster.remote !== undefined) return roster.remote;
   throw new NonRetryableError(

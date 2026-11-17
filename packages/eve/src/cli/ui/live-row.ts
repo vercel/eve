@@ -12,11 +12,6 @@ import { isLogLevelEnabled } from "#internal/logging.js";
 
 interface CliLiveRow {
   update(message: string, detail?: string): void;
-  /**
-   * Stops the row and erases it. With `keepOnScreen`, the row stays, frozen,
-   * for whatever paints next (such as the terminal UI) to draw over in place,
-   * so the screen never goes blank in between.
-   */
   stop(options?: { readonly keepOnScreen?: boolean }): void;
 }
 
@@ -84,7 +79,6 @@ function renderProgressRow(
   return `${pc.green(glyph)}${prefix.slice(glyph.length)}${styledDetail}`;
 }
 
-/** Starts one transient row, falling back to phase logs when repainting is unavailable. */
 export function startCliLiveRow(
   logger: CliLiveRowLogger,
   options: CliLiveRowOptions = {},

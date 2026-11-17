@@ -13,7 +13,6 @@ import {
 } from "#client/session-event-stream.js";
 import type { ClientSession } from "#client/session.js";
 
-/** Owns one client session's conversation and its root and agent-session transports. */
 export class ConversationClient {
   #conversation = new Conversation();
   #follower?: AgentStreamFollower;
@@ -44,12 +43,10 @@ export class ConversationClient {
     return this.#stream !== undefined && !this.#stream.ended;
   }
 
-  /** Shows the messages this client sent that eve hasn't consumed. */
   showSubmissions(submissions: readonly LocalSubmission[]): void {
     this.#conversation.setSubmissions(submissions);
   }
 
-  /** Projects answers during the POST round trip, then hands ownership to the view. */
   projectAnswers(answers: readonly Answer[] | undefined) {
     if (!answers?.length) return undefined;
     const conversation = this.#conversation;
@@ -68,7 +65,6 @@ export class ConversationClient {
     return withdraw;
   }
 
-  /** Swaps shown answers for a prepared payload's, which must still be answerable. */
   replaceAnswers(
     retract: ReturnType<ConversationClient["projectAnswers"]>,
     input: SendTurnPayload,
@@ -78,15 +74,11 @@ export class ConversationClient {
     return this.projectAnswers(input.answers);
   }
 
-  /** Admits and folds a root event before the agent sessions it announces are followed. */
   observe(
     event: SessionStreamEvent,
     options: {
-      /** Reconciles the messages this client sent with the event. */
       reconcile?: (event: SessionStreamEvent) => void;
-      /** Records the accepted event before it folds or children hear of it. */
       onAccepted?: (event: SessionStreamEvent) => void;
-      /** The store publishes after updating its event log and status. */
       notify?: boolean;
     } = {},
   ): boolean {
@@ -100,12 +92,10 @@ export class ConversationClient {
     return true;
   }
 
-  /** Called after the store has published the root's matching event prefix and lifecycle. */
   reconcileFollowing(): void {
     this.#follower?.reconcile();
   }
 
-  /** Admits and folds a saved root event without notifying subscribers. */
   hydrate(event: SessionStreamEvent): boolean {
     assertCurrentSavedEvent(event);
     const covered = this.#conversation.view.position;
@@ -127,7 +117,6 @@ export class ConversationClient {
     return true;
   }
 
-  /** Starts following the agent sessions the root stream has announced so far. */
   follow(session: ClientSession, policy: FollowAgents): void {
     this.#follower ??= new AgentStreamFollower({
       session,
@@ -138,7 +127,6 @@ export class ConversationClient {
     this.#follower.start();
   }
 
-  /** Follows the root session continuously; operation readers subscribe to this one stream. */
   stream(session: ClientSession, options: SessionEventStreamOptions): SessionEventStream {
     if (this.#stream !== undefined && !this.#stream.ended) {
       this.#stream.setOptions(options);
@@ -151,7 +139,6 @@ export class ConversationClient {
     return this.#stream;
   }
 
-  /** Closes the root stream; the next read replays any partial line from the folded cursor. */
   closeStream(): void {
     this.#stream?.close();
     this.#stream = undefined;
@@ -170,10 +157,6 @@ export class ConversationClient {
   }
 }
 
-/**
- * Saved events without a stream position, or of a type this version doesn't know, were saved by
- * eve < 27; folding them would show an empty conversation and advance the cursor past it.
- */
 function assertCurrentSavedEvent(event: SessionStreamEvent): void {
   const { meta, type } = event as {
     readonly meta?: { readonly position?: unknown };

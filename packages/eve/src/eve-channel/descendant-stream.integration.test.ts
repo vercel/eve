@@ -1,4 +1,3 @@
-// @linux-only: descendant stream auth proxies
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import { StreamExpiredError } from "#compiled/@workflow/errors/index.js";
@@ -64,7 +63,6 @@ function deployment(origin: string, token: string) {
   const bindings = new Map<string, RemoteChildBinding>();
   const tokens = new Map<string, string>();
   const attached: string[] = [];
-  /** Every stored-line read, by session and start position. */
   const lineReads: { sessionId: string; startIndex: number }[] = [];
   const authorization = vi.fn((binding: RemoteAgentBinding) =>
     Promise.resolve({ authorization: `Bearer ${tokens.get(binding.url)}` }),
@@ -109,7 +107,6 @@ function deployment(origin: string, token: string) {
         },
         async *stream(options): AsyncIterable<SessionStreamEvent> {
           const records = legacy.get(sessionId);
-          // As in production, v26 history converts from its first line whatever the cursor.
           if (records !== undefined) lineReads.push({ sessionId, startIndex: 0 });
           const events =
             records === undefined
@@ -345,7 +342,6 @@ describe("authorized descendant readers", () => {
     home.lineReads.length = 0;
     const events = await collect(session.agent(child).stream({ follow: false, reconnect: false }));
     expect(events.map((event) => event.type)).toEqual(["session.started"]);
-    // Only the parent's line at the opening's position, not the v26 lines before it.
     expect(home.lineReads.filter((read) => read.sessionId === "root")).toEqual([
       { sessionId: "root", startIndex: child.meta.position.line },
     ]);

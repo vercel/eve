@@ -201,7 +201,6 @@ async function scaffoldProject(
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
-  // A fresh nested target such as `apps/my-agent` may name parents that do not exist yet.
   await mkdir(parentPath, { recursive: true });
   const stagingDirectory =
     createInPlace && overwriteExisting ? undefined : await mkdtemp(join(parentPath, ".eve-init-"));
@@ -283,7 +282,6 @@ async function runInitSteps(input: {
   interactive: boolean;
   trackStep?: (step: EveCliSetupStep) => void;
   trackTerminal?: InitTerminalTracker;
-  /** Opens onboarding once a fresh project exists, so it runs during the install. */
   startOnboarding?: (projectPath: string) => Promise<InitOnboarding | undefined>;
 }): Promise<InitResult> {
   const {
@@ -406,17 +404,14 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger, progressOptions);
     }
 
-    // Git setup doesn't read node_modules, so only the initial commit waits for the install.
     let git: GitInitialization | undefined;
     if (project.kind === "created") {
       initLog.debug("starting git repository setup");
       git = dependencies.startGitInitialization(project.projectPath);
     }
     if (project.kind === "created" && startOnboarding !== undefined) {
-      // The terminal UI paints over the row, so the screen never goes blank while it loads.
       progress.stop({ keepOnScreen: true });
       onboarding = await startOnboarding(project.projectPath);
-      // The terminal UI owns the screen and shows the install on its status line.
       progress =
         onboarding === undefined
           ? startCliLiveRow(logger, progressOptions)
@@ -443,16 +438,12 @@ async function runInitSteps(input: {
     };
     if (onboarding !== undefined) {
       installOptions.signal = onboarding.interrupted;
-      // The onboarding screen owns the keyboard; a prompt from the install would be invisible.
       installOptions.nonInteractive = true;
     }
     const installResult = await dependencies
       .runPackageManagerInstall(project.packageManager, project.projectPath, installOptions)
-      // A failed or cancelled project is removed next, so Git must not still be running in it. On
-      // success this costs nothing: the commit waits for the same setup.
       .finally(() => git?.settled());
     const installElapsedMs = dependencies.now() - installStartedAt;
-    // A Ctrl-C that lands after a finished install keeps the project; init stops before eve dev.
     if (
       onboarding?.interrupted.aborted === true &&
       !packageManagerInstallSucceeded(installResult)
@@ -525,10 +516,8 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
-      // Every created project starts Git setup above; this only narrows the type.
       if (git === undefined) throw new Error("Git setup was not started for the new project.");
       onboarding?.setInstalling(false);
-      // Onboarding can still rewrite agent.ts; waiting keeps the initial commit deterministic.
       await onboarding?.finished;
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
@@ -582,7 +571,6 @@ export async function runInitCommand(
   trackStep?.("resolve_target");
   let result: InitResult;
   let onboarding: InitOnboarding | undefined;
-  // A person signs in during the install instead of after it; `eve dev` then starts connected.
   const startOnboarding = startDevelopment
     ? async (projectPath: string) => {
         onboarding = await dependencies
@@ -629,7 +617,6 @@ export async function runInitCommand(
   } catch (error) {
     await onboarding?.close();
     if (error instanceof WizardCancelledError) {
-      // An interrupt during onboarding is tracked at the step it stopped, and exits like SIGINT.
       if (onboarding?.interrupted.aborted === true) process.exitCode = 130;
       else trackTerminal?.("resolve_target", "cancelled");
       return;
@@ -679,9 +666,6 @@ export async function runInitCommand(
     if (onboarding.interrupted.aborted) {
       carriedInput = await onboarding.close();
     } else {
-      // eve dev starts next and paints over the onboarding screen, which stays up meanwhile
-      // so the terminal never goes blank between the two. The summary replaces the screen's
-      // preamble, so the screen doesn't move; eve dev points to /login if no model is connected.
       summary.push({ text: "" });
       const rows = summary.flatMap(({ text }) => text.split("\n"));
       carriedInput = await onboarding.close({ rows });
@@ -727,8 +711,6 @@ export async function runInitCommand(
     return;
   }
 
-  // Strictly the eve binary, never the project's dev script, which in an
-  // existing app may start unrelated processes.
   const freshScaffold = result.kind === "created";
   const devArguments = [
     ...(result.packageManager === "pnpm" ? ["--reporter=silent"] : []),
@@ -748,8 +730,6 @@ export async function runInitCommand(
       devArguments,
     );
   } finally {
-    // The handed-off screen left the cursor hidden for eve dev, which restores it when it exits;
-    // this covers an eve dev that never got that far.
     if (handedOff) process.stdout.write(SHOW_CURSOR);
   }
   if (!resultSucceeded(devResult)) {
@@ -757,7 +737,6 @@ export async function runInitCommand(
   }
 }
 
-/** Holds the place of the "Created" summary above the onboarding screen until init finishes. */
 function initProgressLine(projectPath: string): string {
   return pc.dim(`○ Creating an eve agent in ${projectPath}`);
 }

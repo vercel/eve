@@ -33,32 +33,17 @@ interface WorkflowProgramStepInput {
 
 const WORKFLOW_PROGRAM_CONTINUATION_AUDIENCE = "eve.workflow-program/v1";
 const WORKFLOW_PROGRAM_HOST_NAMESPACE = "__eveWorkflowProgram";
-/** Size limit for the JSON text of a program's result and of each `ctx.agent()` call. */
 const WORKFLOW_PROGRAM_MAX_JSON_BYTES = 1024 * 1024;
 const WORKFLOW_PROGRAM_MAX_SOURCE_BYTES = 256 * 1024;
-/** Guest JavaScript time per run or resume; parked agent calls do not count. */
 const WORKFLOW_PROGRAM_CPU_TIMEOUT_MS = 30_000;
-/** Wall-clock time per run or resume; parked agent calls do not count. */
 const WORKFLOW_PROGRAM_TIMEOUT_MS = 300_000;
 
-/**
- * Converts the program's values to JSON inside the sandbox, where run's limits
- * bound the work. run transfers values with shared references intact, so a
- * small value can expand without limit if the host converts it. The prelude
- * shares the program's first line, so stack line numbers match its source.
- */
 function wrapWorkflowProgram(js: string): string {
   return `const ctx = Object.freeze({ agent: (target, input) => ${WORKFLOW_PROGRAM_HOST_NAMESPACE}.agent(JSON.stringify({ target, input })) }); return JSON.stringify(await (async () => {${js}\n})());`;
 }
 
-/**
- * run measures values in its own encoding, which can turn one byte of JSON
- * into six (`<` becomes `\u003C`), so run gets the worst-case budget and eve's
- * JSON size checks always fail first, with eve's message.
- */
 const runEncodingLimit = (jsonBytes: number) => jsonBytes * 6 + 1024;
 
-/** Gives programs holding the busy workers time to finish before the step retries. */
 const WORKFLOW_PROGRAM_BUSY_RETRY_MS = 5_000;
 
 const WORKFLOW_PROGRAM_LIMITS: RunLimits = {
@@ -69,14 +54,12 @@ const WORKFLOW_PROGRAM_LIMITS: RunLimits = {
   maxHostFunctionOutputBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES),
   maxInFlightBridgeRequests: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
   maxResultBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_JSON_BYTES),
-  // eve checks the program's own size; the ASCII wrapper's length is its byte count.
   maxSourceBytes: WORKFLOW_PROGRAM_MAX_SOURCE_BYTES + wrapWorkflowProgram("").length,
   maxStackSizeBytes: 2 * 1024 * 1024,
   memoryLimitBytes: 64 * 1024 * 1024,
   timeoutMs: WORKFLOW_PROGRAM_TIMEOUT_MS,
 };
 
-/** Runs or resumes the side-effect-free JavaScript sandbox for one durable workflow. */
 export async function runWorkflowProgramStep(
   input: WorkflowProgramStepInput,
 ): Promise<WorkflowProgramStepOutcome> {
@@ -85,9 +68,7 @@ export async function runWorkflowProgramStep(
   try {
     return await runWorkflowProgram(input);
   } catch (error) {
-    // The step has no side effects, so retrying a busy runtime is safe.
     if (RetryableError.is(error)) throw error;
-    // The sandbox is deterministic, so any other failure repeats on every retry.
     throw new FatalError(toErrorMessage(error));
   }
 }
@@ -109,10 +90,8 @@ async function runWorkflowProgram(
     continuationCodec: createSignedContinuationCodec({ maxAgeMs, secret: signingKey }),
   });
 
-  // run shows the program only RunError messages; other host errors read "Host function failed."
   const guestError = (message: string) => {
     const error = new RunError(message, "WORKFLOW_PROGRAM_AGENT_ERROR");
-    // RunError takes its name from its class, which the minified vendored bundle renames.
     error.name = "WorkflowProgramAgentError";
     return error;
   };
@@ -145,7 +124,6 @@ async function runWorkflowProgram(
   });
   const result = await running.catch((error: unknown) => {
     if (!RunError.isInstance(error)) throw error;
-    // run has no free worker or worker memory in this process; another attempt can succeed.
     if (error.code === "RUN_CONCURRENCY_LIMIT") {
       throw new RetryableError(error.message, { retryAfter: WORKFLOW_PROGRAM_BUSY_RETRY_MS });
     }
@@ -158,7 +136,6 @@ async function runWorkflowProgram(
   });
 
   if (result.status === "completed") {
-    // `JSON.stringify` returns undefined for values it drops, such as `undefined` itself.
     const output =
       result.value === undefined
         ? null
@@ -175,7 +152,6 @@ async function runWorkflowProgram(
   };
 }
 
-/** Parses JSON text from the prelude; code that bypasses the prelude can send any value. */
 function parseWorkflowProgramJson(value: unknown, label: string): unknown {
   if (typeof value !== "string") {
     throw new TypeError(`Workflow program ${label} must be JSON text.`);

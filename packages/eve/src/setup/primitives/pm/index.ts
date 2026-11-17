@@ -6,7 +6,6 @@ import { pnpmPackageManager } from "./pnpm.js";
 import type { PackageManagerStrategy } from "./types.js";
 import { yarnPackageManager } from "./yarn.js";
 
-/** Returns the strategy that owns command and project-file behavior for `kind`. */
 export function getPackageManagerStrategy(kind: PackageManagerKind): PackageManagerStrategy {
   switch (kind) {
     case "bun":

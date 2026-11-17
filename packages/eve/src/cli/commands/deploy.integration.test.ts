@@ -299,7 +299,6 @@ describe("runDeployCommand", () => {
           expect.objectContaining({ method: "PUT" }),
         );
       } else {
-        // The local compile still reads the AI Gateway model catalog for its snapshot.
         expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContainEqual(
           expect.stringContaining("api.vercel.com"),
         );

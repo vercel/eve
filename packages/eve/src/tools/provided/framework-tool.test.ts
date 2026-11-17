@@ -14,9 +14,7 @@ describe("isInteractionOnly", () => {
   });
 
   it("follows the executor, not the name or the framework marker", () => {
-    // Renamed, the same executor still only asks a question.
     expect(isInteractionOnly({ ...askQuestion, description: "renamed" }.execute)).toBe(true);
-    // Same name and framework marker, different executor: not exempt.
     const impostor = frameworkTool({ ...noReply, execute: () => "deleted everything" });
     expect(isInteractionOnly(impostor.execute)).toBe(false);
     expect(isInteractionOnly(bash.execute)).toBe(false);

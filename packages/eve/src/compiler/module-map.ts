@@ -56,7 +56,6 @@ interface RenderedNodeScope {
   readonly nodeId: string;
 }
 
-/** Generates the authoritative module-map artifact from required bindings. */
 export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSourceInput): string {
   const moduleMapDirectory = dirnameFilesystemPath(input.moduleMapPath);
   const importSpecifierStyle = input.importSpecifierStyle ?? "relative";
@@ -145,7 +144,6 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
   ].join("\n");
 }
 
-/** Loads the same binding set used by generated maps without fabricating descriptors. */
 export async function createProgrammaticCompiledModuleMap(
   manifest: CompiledAgentManifest,
   registries: readonly AgentSourceRegistry[],
@@ -173,7 +171,6 @@ export async function createProgrammaticCompiledModuleMap(
   return { nodes };
 }
 
-/** Returns one compiled node's finalized runtime entries, including remote config modules. */
 export function collectRuntimeModuleBindingsForManifest(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
 ): readonly BoundModule[] {

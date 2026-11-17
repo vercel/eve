@@ -15,10 +15,6 @@ const line = (deliveryId: string) => ({
 
 let sessionCount = 0;
 
-/**
- * A session whose stored lines are `lines`; `open` keeps the source open after them. Each has its
- * own id, since the route remembers which sessions it found current.
- */
 function sessionOf(
   lines: readonly unknown[],
   options: { readonly id?: string; readonly open?: boolean } = {},
@@ -76,7 +72,6 @@ describe("createSessionStreamResponse", () => {
       session,
     );
     expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBe("1");
-    // The second read is the bounded check of the first line's version.
     expect(follows).toEqual([false, false]);
     expect(await records(response)).toEqual([{ $eve: "heartbeat" }, line("a"), line("b")]);
   });
@@ -116,7 +111,6 @@ describe("createSessionStreamResponse", () => {
       session,
     );
     expect(response.status).toBe(200);
-    // Each v26 line reads in light of those before it, so the read starts at the first.
     expect(starts.at(-1)).toBe(0);
     expect(await records(response)).toEqual([
       { $eve: "heartbeat" },
@@ -134,7 +128,6 @@ describe("createSessionStreamResponse", () => {
           },
         ],
       },
-      // A streamed delta reads as no line; the marker keeps the reader's cursor on stored lines.
       { $eve: "position", next: 4 },
     ]);
   });
@@ -142,7 +135,6 @@ describe("createSessionStreamResponse", () => {
   it("ends a follow of an earlier eve's session at the tail once nothing owns it", async () => {
     const v26 = { data: {}, meta: { at }, type: "session.started" };
     const followed = async (hasRunnableOwner: boolean) => {
-      // A source read without following closes at the tail; a followed one stays open.
       const { follows, session } = sessionOf([v26], { open: hasRunnableOwner });
       const response = await createSessionStreamResponse(
         new Request("https://eve.test/eve/v1/session/session_1/stream"),
@@ -152,7 +144,6 @@ describe("createSessionStreamResponse", () => {
     };
 
     const ended = await followed(false);
-    // Read without following, so the source closes at the tail and readers stop.
     expect(ended.follows.at(-1)).toBe(false);
     expect((await records(ended.response)).at(-1)).toEqual({ $eve: "stream.ended" });
 
@@ -183,7 +174,6 @@ describe("createSessionStreamResponse", () => {
       );
       await vi.advanceTimersByTimeAsync(6_001);
       await (await response).body?.cancel();
-      // The version check's read from the first line ends too, not only the response's own.
       expect(cancels).toEqual(expect.arrayContaining([0, 1]));
     },
   );
@@ -191,7 +181,6 @@ describe("createSessionStreamResponse", () => {
   it("checks the version of a stranded earlier eve's session resumed past its first line", async () => {
     const v26 = { data: {}, meta: { at }, type: "session.started" };
     const { session } = sessionOf([v26, v26, v26]);
-    // A stranded session refuses every follow, including the version check's.
     const stranded = {
       ...session,
       getLineStream: (options: { readonly follow?: boolean; readonly startIndex: number }) =>
@@ -231,8 +220,6 @@ describe("createSessionStreamResponse", () => {
     expect(follows).toEqual([true, true]);
   });
 
-  // #5782: a followed v26 session reconnects every lease, so re-reading its history from the
-  // first line on each reconnect costs CPU that grows with the session.
   it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {
     vi.useFakeTimers();
     const v26 = (type: string, data: object) => ({
@@ -261,7 +248,6 @@ describe("createSessionStreamResponse", () => {
     stored.push(v26("turn.completed", {}));
     const reconnected = await followedLease(3);
 
-    // The same line as a read of the whole history converts it.
     const full = sessionOf(stored);
     const [, completed] = await records(
       await createSessionStreamResponse(
@@ -272,7 +258,6 @@ describe("createSessionStreamResponse", () => {
       ),
     );
     expect(reconnected).toEqual([completed, { $eve: "stream.lease-ended" }]);
-    // The reconnect reads only the line its reader has not seen.
     expect(starts.at(-1)).toBe(3);
   });
 
@@ -287,8 +272,6 @@ describe("createSessionStreamResponse", () => {
       );
 
     expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
-    // The live read, then the version check's read from the first line. The cursor shows the
-    // first line exists, so the check follows to it without bounding the read at the tail.
     expect(starts).toEqual([1, 0]);
     expect(follows).toEqual([true, true]);
     expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
@@ -331,8 +314,6 @@ describe("createSessionStreamResponse", () => {
     ]);
   });
 
-  // On the local world the tail lookup opens every chunk file, so a follow
-  // read that does not report the tail must not pay for it.
   it("follows a session without resolving a tail it does not report", async () => {
     const { session, tailLookups } = sessionOf([line("a")]);
     const response = await createSessionStreamResponse(
@@ -358,7 +339,6 @@ describe("createSessionStreamResponse", () => {
     );
     expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBe("2");
     expect(starts).toEqual([0, 1]);
-    // The bound ends the response after the tail line, without stream.ended.
     expect(await records(response)).toEqual([{ $eve: "heartbeat" }, line("b"), line("c")]);
   });
 

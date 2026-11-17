@@ -9,7 +9,6 @@ import {
 
 export function checkpointContent(value: string | undefined): unknown {
   if (value === undefined) return undefined;
-  // Historical checkpoints contain truncated JSON; omit payloads, not the operation.
   try {
     return JSON.parse(value);
   } catch {
@@ -17,7 +16,6 @@ export function checkpointContent(value: string | undefined): unknown {
   }
 }
 
-/** Identity of one eve turn within the shared tracing library. */
 export function eveTurnIdentity(input: {
   readonly sessionId: string;
   readonly rootSessionId?: string;
@@ -30,7 +28,6 @@ export function eveTurnIdentity(input: {
   };
 }
 
-/** eve's agent tracing, checkpointed in its workflow-context trace state. */
 export function createEveTracing(input: {
   readonly telemetry: AgentTelemetry;
   readonly stateStore: AgentTraceStateStore;

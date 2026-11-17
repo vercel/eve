@@ -28,7 +28,6 @@ export interface WorkspaceRootMutation {
 }
 
 interface WorkspaceRootPackageJsonPatchResult extends PackageJsonPatchResult {
-  /** Root package.json path when an ancestor workspace root was eligible for patching. */
   path?: string;
 }
 
@@ -59,9 +58,7 @@ function findAncestorPackageJsonWorkspaceRoot(projectRoot: string): string | und
     if (existsSync(packageJsonPath)) {
       try {
         if (readPackageJsonWorkspacePatterns(packageJsonPath) !== undefined) return dir;
-      } catch {
-        // Keep walking; an unreadable package.json is not a reliable workspace owner.
-      }
+      } catch {}
     }
 
     const parent = dirname(dir);
@@ -85,7 +82,6 @@ function findClaimingPackageJsonWorkspaceRoot(projectRoot: string): string | und
     : undefined;
 }
 
-/** Ancestor package-manager workspace root that owns root-only package.json fields. */
 function findPackageManagerWorkspaceRoot(
   packageManager: PackageManagerKind,
   projectRoot: string,
@@ -162,7 +158,6 @@ async function ensurePackageManagerWorkspaceIncludesProject(
   }
 }
 
-/** Applies root-only package.json fields to an ancestor workspace package.json. */
 export async function patchWorkspaceRootPackageJson(
   packageManager: PackageManagerKind,
   projectRoot: string,
@@ -193,7 +188,6 @@ export async function patchWorkspaceRootPackageJson(
   return { ...result, path };
 }
 
-/** Applies manager-owned project files and reports ancestor workspace mutations. */
 export async function applyPackageManagerWorkspaceConfiguration(input: {
   readonly packageManager: PackageManagerKind;
   readonly projectRoot: string;

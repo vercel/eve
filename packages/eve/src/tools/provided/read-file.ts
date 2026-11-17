@@ -9,12 +9,17 @@ import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Input to the provided `read_file` tool: the file to read and an optional line range. */
 export interface ReadFileToolInput {
   filePath: string;
   limit?: number;
   offset?: number;
 }
 
+/**
+ * Result of the provided `read_file` tool: the file's content with paging details, or file
+ * metadata for an image or PDF the model reads natively.
+ */
 export interface ReadFileToolOutput {
   content: string;
   /** Set when the file is a PNG, JPEG, GIF, or WebP image or a PDF that the model reads natively. */
@@ -112,9 +117,6 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
     outputSchema: READ_FILE_OUTPUT_SCHEMA,
     async toModelOutput(output) {
       if (output.file === undefined) return toolOutput.json(output);
-      // The bytes load here rather than in `execute`, so `call.settled` never
-      // carries them. The harness then stages this file part under its own name
-      // as a sandbox ref before it enters history.
       const sandbox = await contextStorage.getStore()?.get(SandboxKey)?.get();
       const bytes =
         sandbox === undefined || sandbox === null
@@ -123,7 +125,6 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
               path: await resolveAbsoluteFilePath(sandbox, output.path),
             });
       if (bytes === null) return toolOutput.text(`${output.content} The file could not be loaded.`);
-      // A file replaced after `execute` would otherwise skip its size cap.
       if (bytes.byteLength !== output.file.size) {
         return toolOutput.text(
           `${output.content} The file changed after it was read; read it again.`,

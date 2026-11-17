@@ -128,11 +128,6 @@ async function readDevelopmentTurnEvents(input: {
   }
 }
 
-/**
- * Sends one message to the configured eve server and collects its streamed
- * events, forwarding any caller-supplied eve route headers across the message
- * and stream requests for the current turn.
- */
 export async function sendDevelopmentMessage(input: {
   headers?: DevelopmentRequestHeaders;
   message: string;

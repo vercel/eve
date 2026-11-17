@@ -55,7 +55,6 @@ export interface TwilioInboundContext {
   readonly channel: "text" | "voice";
 }
 
-/** Parses Twilio's incoming-message webhook fields into Eve's text payload. */
 export function parseTwilioTextMessage(params: URLSearchParams): TwilioTextMessage | null {
   const payload = parseTwilioWebhookBody(params);
   if (payload.kind !== "text") {
@@ -73,11 +72,6 @@ export function parseTwilioTextMessage(params: URLSearchParams): TwilioTextMessa
   };
 }
 
-/**
- * The model-visible content of an inbound message: its body, plus one file part
- * per MMS media URL, which the channel's `fetchFile` downloads with the
- * account's credentials.
- */
 export function twilioMessageContent(message: TwilioTextMessage): MessageContent {
   const media = message.media ?? [];
   if (media.length === 0) return message.body;
@@ -91,7 +85,6 @@ export function twilioMessageContent(message: TwilioTextMessage): MessageContent
     : files;
 }
 
-/** Parses Twilio's incoming-call webhook fields into Eve's voice payload. */
 export function parseTwilioVoiceCall(params: URLSearchParams): TwilioVoiceCall | null {
   const call = parsePrimitiveVoiceCall(params);
   if (!call) {
@@ -107,12 +100,6 @@ export function parseTwilioVoiceCall(params: URLSearchParams): TwilioVoiceCall |
   };
 }
 
-/**
- * Parses Twilio speech callbacks.
- *
- * Supports `<Gather input="speech">`, recording transcription callbacks, and
- * real-time transcription callbacks. Real-time partial results are ignored.
- */
 export function parseTwilioVoiceTranscription(
   params: URLSearchParams,
 ): TwilioVoiceTranscription | null {
@@ -132,7 +119,6 @@ export function parseTwilioVoiceTranscription(
   };
 }
 
-/** Renders a deterministic `<twilio_context>` block for the model. */
 export function formatTwilioContextBlock(context: TwilioInboundContext): string {
   const lines = [
     "<twilio_context>",

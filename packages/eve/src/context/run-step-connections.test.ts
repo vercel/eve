@@ -29,7 +29,6 @@ const connection: ResolvedConnectionDefinition = {
   url: "http://127.0.0.1:8000/mcp",
 };
 
-/** A fresh step context whose agent has the one connection. */
 function stepContext(): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(
@@ -41,7 +40,6 @@ function stepContext(): ContextContainer {
   return ctx;
 }
 
-/** Runs one step whose body connects to the MCP server, then returns or throws. */
 async function runStepUsingConnection(outcome: "commit" | "fail"): Promise<void> {
   const ctx = stepContext();
   const scope = withContextScope(ctx, {} as HarnessSessionBase, async (session) => {
@@ -85,7 +83,6 @@ describe("withContextScope MCP session lifecycle", () => {
   it("a step returns within the termination deadline when the server never answers DELETE", async () => {
     const ctx = stepContext();
     vi.useFakeTimers({ toFake: ["setTimeout"] });
-    // A server that stopped answering: the DELETE arrives and never gets a response, but ends when aborted.
     let deleteArrived!: () => void;
     const terminationReached = new Promise<void>((resolve) => {
       deleteArrived = resolve;

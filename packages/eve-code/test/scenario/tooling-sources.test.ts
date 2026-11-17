@@ -134,7 +134,6 @@ test("signed commit advances HEAD without rewriting the worktree", async () => {
     });
     const oldHead = oldHeadOutput.trim();
 
-    // Larger than execFileSync's default 1 MiB maxBuffer, like a monorepo lockfile.
     const after = "after\n".repeat(400_000);
     await writeFile(join(worktree, "tracked.txt"), after);
     await writeFile(join(worktree, "untracked.txt"), "preserved\n");

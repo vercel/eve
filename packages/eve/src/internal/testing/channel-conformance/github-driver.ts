@@ -16,9 +16,7 @@ const PEOPLE = {
   bob: { id: 2, login: "hubot-bob", type: "User" },
 } as const;
 
-/** Drives GitHub issue comments through the signed App webhook route. */
 export function githubDriver(): ChannelDriver {
-  // Repository and issue identities are the continuation key, so isolate each driver instance.
   nextConversation += 1;
   const repositoryId = 10_000 + nextConversation;
   const issueNumber = 100 + nextConversation;

@@ -6,16 +6,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// Run against two separately built package directories, sequentially, on the same machine.
-// Each process is fresh. Run 1 starts from an empty project (cold); later runs
-// retain its caches and build output (warm).
-// Per run: `eve dev` to /eve/v1/info, then a first turn through `eve/client`
-// (accepted, then completed); `eve dev` with its terminal UI in a
-// pseudo-terminal, to the first frame that shows the prompt (the TUI takes
-// and queues input before the agent is ready), then to /eve/v1/info;
-// `eve build --profile`; then `eve start` on that build to /eve/v1/health.
-// One JSON result per line. The agent's model is a mock, so the first turn
-// makes no model calls.
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 5);
 const toolCount = Number(process.argv[4] ?? 0);
@@ -31,8 +21,6 @@ await writeFile(
   JSON.stringify({ private: true, type: "module", dependencies: { eve: "*" } }),
 );
 await writeFile(join(root, "agent", "instructions.md"), "You are a helpful assistant.\n");
-// A mock model has no catalog context window, and older releases (0.61.0, for
-// one) refuse to compile an agent without it. Release backfills run this agent.
 await writeFile(
   join(root, "agent", "agent.ts"),
   'import { defineAgent } from "eve";\nimport { mockModel } from "eve/evals";\nexport default defineAgent({ model: mockModel("ready"), modelContextWindowTokens: 1_000_000 });\n',
@@ -58,7 +46,6 @@ const env = {
 delete env.VERCEL;
 delete env.PORT;
 delete env.EVE_DEV;
-// The client of the package under test, through the project's own `eve` link.
 const { Client } = await import(
   pathToFileURL(createRequire(join(root, "package.json")).resolve("eve/client")).href
 );
@@ -74,22 +61,13 @@ console.log(
   }),
 );
 
-// Readiness probes overlap: a new one starts every interval without waiting
-// for the last. An early request can be accepted and never answered (the port
-// opens before the server serves), and waiting on it would be measured as
-// startup time. The deadline only bounds how many stay in flight.
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_INTERVAL_MS = 20;
 
-// The TUI needs a terminal. util-linux `script` (Linux) and BSD `script`
-// (macOS) both give the command one; elsewhere the TUI probe is skipped.
 const ptyAvailable = process.platform === "linux" || process.platform === "darwin";
-// The prompt glyph the TUI draws in front of the input line.
 const PROMPT_GLYPH = "❯";
 
 for (let run = 1; run <= runs; run++) {
-  // `dev-tui` follows `dev`, so run 1's cold start stays with `dev`.
-  // `start` serves the output `build` just wrote, so it runs after it.
   for (const mode of ["dev", "dev-tui", "build", "start"]) {
     if (mode === "dev-tui" && !ptyAvailable) continue;
     const port = await availablePort();
@@ -138,9 +116,6 @@ for (let run = 1; run <= runs; run++) {
         const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
         const wallMs = Math.round(performance.now() - start);
         const baseUrl = `http://127.0.0.1:${port}`;
-        // eve 0.84.0 renamed the client's `host` to `baseUrl`, `response` to
-        // `delivery`, and the turn's `message` to `reply`. Release backfills
-        // run this script against older clients, so it accepts both shapes.
         const client = new Client({ baseUrl, host: baseUrl });
         const signal = AbortSignal.timeout(30000);
         const created = await client.sessions.create({ message: "Hello", signal });
@@ -152,8 +127,6 @@ for (let run = 1; run <= runs; run++) {
           throw new Error(`First turn ended without the mock reply: ${JSON.stringify(reply)}`);
         results.push({ run, mode, wallMs, sessionAcceptedMs, firstTurnMs, probes });
       } else if (mode === "dev-tui") {
-        // Wait for the server too, so the next mode never starts beside a
-        // half-started one.
         const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
         const wallMs = Math.round(performance.now() - start);
         await Promise.race([promptVisible, exited]);
@@ -175,14 +148,11 @@ for (let run = 1; run <= runs; run++) {
       }
       console.log(JSON.stringify(results.at(-1)));
     } catch (error) {
-      // The TUI probe is extra: a release whose TUI can't run here (a
-      // backfill, say) loses only this measurement, not the run's others.
       if (mode !== "dev-tui") throw error;
       console.error(`dev-tui run ${run} failed: ${error?.message ?? error}`);
     } finally {
       clearTimeout(timeout);
       if (child.exitCode === null && child.signalCode === null) {
-        // Ctrl+C in the terminal stops the TUI the way a person would.
         if (mode === "dev-tui") child.stdin.write("\x03\x03");
         else child.kill("SIGINT");
       }
@@ -210,12 +180,6 @@ for (const mode of ["dev", "dev-tui", "build", "start"]) {
   );
 }
 
-/**
- * Resolves when any probe of `path` first answers 200 with JSON. Returns how
- * the probes went: `attempts` requests in all, `timedOut` that hit the
- * per-request deadline (accepted but unanswered), and `refused` that failed
- * to connect.
- */
 function waitReady(child, port, path, start, readLog) {
   const probes = { attempts: 0, timedOut: 0, refused: 0 };
   const outstanding = new AbortController();
@@ -255,11 +219,6 @@ function waitReady(child, port, path, start, readLog) {
   });
 }
 
-/**
- * Spawns `argv` attached to a pseudo-terminal of a fixed size through
- * `script`, which relays the terminal's output to the child's stdout and its
- * stdin to the terminal.
- */
 function spawnInTerminal(argv, options) {
   const quote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
   const command = `stty cols 120 rows 40; exec ${argv.map(quote).join(" ")}`;

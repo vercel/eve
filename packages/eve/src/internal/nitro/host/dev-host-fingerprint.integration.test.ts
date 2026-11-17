@@ -31,7 +31,6 @@ interface HostVariant {
   readonly extensionConfig?: { readonly region: string };
   readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
-  /** Where the app's package.json lives: its own root, or an enclosing workspace. */
   readonly packageJson?: "own" | "enclosing";
   readonly schedule?: { readonly cron: string; readonly content: string };
   readonly tool?: "ordinary" | "workflow" | "workflow-program";

@@ -27,7 +27,6 @@ describe("createEvalStateDirectory", () => {
   it("removes directories of dead eval runs and keeps live or still-starting ones", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-eval-state-"));
     temporaryRoots.push(appRoot);
-    // Above every platform's pid range, so no process can own it.
     const abandoned = await writeRunDirectory(appRoot, "abandoned", { pid: 2_147_483_646 });
     const live = await writeRunDirectory(appRoot, "live", { pid: process.pid });
     const starting = await writeRunDirectory(appRoot, "starting");

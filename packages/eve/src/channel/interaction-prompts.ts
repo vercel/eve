@@ -1,7 +1,3 @@
-// What channels render about requests, read from the facts and the line's tables: the batch of
-// requests a commit opened, how a request settled, and a responder an approval refused. Sign-ins
-// are `sign-in.ts`'s. Built-in channels render these; authored handlers can read the facts directly.
-
 import type { Principal } from "#protocol/session-events/envelope.js";
 import type {
   InteractionOpenedData,
@@ -29,13 +25,10 @@ export {
   type Interaction,
 } from "#protocol/session-projection/reader.js";
 
-/** One commit's requests: what a person is asked at once. */
 export interface RequestBatch {
   readonly requests: readonly Interaction[];
   readonly turnId: string;
-  /** The task whose run asks. */
   readonly taskId?: string;
-  /** The call a relayed request serves. */
   readonly callId?: string;
 }
 
@@ -50,7 +43,6 @@ export interface RequestSettlement {
   readonly responder?: Principal;
 }
 
-/** An answer a check or policy refused, for telling its responder privately. */
 export interface RefusedAnswer {
   readonly interactionId: string;
   readonly outcome: "refused" | "failed";
@@ -58,10 +50,6 @@ export interface RefusedAnswer {
   readonly responder?: Principal;
 }
 
-/**
- * The batch an `interaction.opened` begins: every request its commit opened. The batch's other
- * facts return `undefined`, so a channel renders it once.
- */
 export function requestBatchOf(
   view: SessionView,
   data: InteractionOpenedData,
@@ -80,7 +68,6 @@ export function requestBatchOf(
   return result;
 }
 
-/** How a request ended, from its `interaction.settled`. */
 export function requestSettlementOf(
   view: SessionView,
   data: InteractionSettledData,
@@ -103,7 +90,6 @@ export function requestSettlementOf(
   return settled;
 }
 
-/** An answer a check or policy refused, from its `response.settled`. */
 export function refusedAnswerOf(
   view: SessionView,
   data: ResponseSettledData,
@@ -121,7 +107,6 @@ export function refusedAnswerOf(
   return refused;
 }
 
-/** An option's style a channel can render: a style a newer eve added reads as none. */
 export function optionStyle(option: {
   readonly style?: string;
 }): "primary" | "danger" | "default" | undefined {

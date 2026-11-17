@@ -8,8 +8,6 @@ import { parseWorkflowSourceAst } from "#internal/workflow-bundle/workflow-sourc
 
 import type { WorkflowManifest } from "./workflow-builders.js";
 
-// Workflow dispatches builtins using bare names; version-stamped step ids
-// would break registry lookups for these functions.
 const BUILTIN_STEP_NAMES = new Set([
   "__builtin_response_array_buffer",
   "__builtin_response_json",
@@ -23,22 +21,7 @@ type DirectiveFunction = {
   directive: WorkflowDirective;
   directiveEnd: number;
   directiveStart: number;
-  /**
-   * `"export "` when the function was declared with `export async
-   * function foo()`. Empty otherwise — including when the function is
-   * re-exported via a trailing `export { foo }` aggregate. The inline
-   * replacement path preserves that aggregate, so the rewritten `var`
-   * binding becomes visible through it; emitting a second `export `
-   * keyword would produce a duplicate-export error.
-   */
   exportPrefix: string;
-  /**
-   * `true` when the function's binding is reachable from any consumer
-   * — either declared with `export ` or referenced from a trailing
-   * `export { name }` aggregate. The step-only proxy path drops the
-   * original source (and the aggregate with it), so the synthesized
-   * stub must carry its own `export ` keyword whenever this is set.
-   */
   exported: boolean;
   name: string;
   rangeEnd: number;
@@ -75,7 +58,6 @@ type AstNode = {
   readonly value?: unknown;
 };
 
-/** Reads the syntax tree, so a directive quoted in a string or comment never counts. */
 export async function findWorkflowDirectiveFunctions(
   filename: string,
   source: string,
@@ -86,26 +68,13 @@ export async function findWorkflowDirectiveFunctions(
 }
 
 export async function transformWorkflowDirectives(input: {
-  /** Authored modules retain their body but drop the eve-definer default export. */
   authored?: boolean;
-  /** Route context-bearing calls through an authorization twin for modules that define tools. */
   authorizeSteps?: boolean;
   filename: string;
   mode: WorkflowDirectiveMode;
   moduleSpecifier: string | undefined;
   source: string;
-  /**
-   * Package-qualified module specifier without the `@<pkg.version>`
-   * stamp. Used to mint workflow ids for functions named in
-   * {@link transformWorkflowDirectives.input.stableWorkflowNames} so
-   * the bundled id matches the runtime reference on every deployment.
-   */
   stableModuleSpecifier?: string | undefined;
-  /**
-   * Workflow function names whose bundled id should be emitted without
-   * the package version stamp. See `STABLE_WORKFLOW_NAMES` in
-   * `stable-workflow-names.ts` for the canonical set eve itself uses.
-   */
   stableWorkflowNames?: ReadonlySet<string>;
 }): Promise<{
   code: string;
@@ -126,17 +95,12 @@ export async function transformWorkflowDirectives(input: {
     return { code: input.source, workflowManifest: {} };
   }
 
-  // Step ids stay version-stamped — they are per-deployment internal
-  // identifiers, not cross-deployment routing keys. Only workflow
-  // functions whose name appears in `stableWorkflowNames` opt out of
-  // the version stamp.
   const defaultIdBase = input.moduleSpecifier ?? `./${stripJavaScriptExtension(input.filename)}`;
   const stableIdBase = input.stableModuleSpecifier ?? defaultIdBase;
   const manifest: WorkflowManifest = {};
   const replacements: { end: number; start: number; text: string }[] = [];
   const suffixes: string[] = [];
   let hasStepRegistration = false;
-  // The driver bundle resolves eve aliases itself; app-bundled step registrations need the export.
   const workflowStepImport = "#execution/tools/workflow/step.js";
   const stepExecutionImport = input.authored
     ? "eve/internal/workflow-step-execution"
@@ -258,10 +222,6 @@ function createWorkflowStepProxySource(
   const proxies = functions
     .filter((fn) => fn.directive === "use step")
     .map((fn) => {
-      // The original source (and any trailing `export { name }`
-      // aggregate) is discarded by this path, so the proxy itself must
-      // carry the `export ` keyword whenever the function was reachable
-      // to importers.
       const exportPrefix = fn.exported ? "export " : "";
       return `${exportPrefix}var ${fn.name} = ${createStepProxy(idBase, fn.name, authorizeSteps)};`;
     });
@@ -272,7 +232,6 @@ function createWorkflowStepProxySource(
 
 const AUTHORIZATION_STEP_SUFFIX = ":eve-authorization";
 
-/** Workflow invokes built-ins directly, with native arguments and a bound receiver. */
 function authorizationTwinId(idBase: string, name: string, enabled: boolean): string | undefined {
   if (!enabled || BUILTIN_STEP_NAMES.has(name)) return undefined;
   return createStepId(idBase, `${name}${AUTHORIZATION_STEP_SUFFIX}`);
@@ -288,14 +247,6 @@ function createStepProxy(idBase: string, name: string, authorizeSteps: boolean):
 
 function findDirectiveFunctions(ast: AstProgram): DirectiveFunction[] {
   const functions: DirectiveFunction[] = [];
-  // Rolldown collapses `export async function foo() {}` into a trailing
-  // `export { foo, ... }` aggregate when emitting ESM (especially under
-  // minify). The inline-replacement path keeps that aggregate intact,
-  // but the step-only proxy path discards the original source — so we
-  // need both signals: which declarations had inline `export ` keywords
-  // (for in-place rewrites that must not double-export) and which names
-  // are reachable to consumers (for proxy emission that must carry its
-  // own `export `).
   const namesReExportedAtModuleLevel = collectLocalNamesReExportedAtModuleLevel(ast);
 
   for (const node of ast.body ?? []) {
@@ -342,14 +293,10 @@ function collectLocalNamesReExportedAtModuleLevel(ast: AstProgram): Set<string> 
       continue;
     }
 
-    // `export { foo } from "./bar.js"` re-exports a binding from another
-    // module — `foo` is not a local declaration in this file.
     if (node.source !== undefined && node.source !== null) {
       continue;
     }
 
-    // `export function foo() {}` is already handled by
-    // `readTopLevelFunctionDeclaration`.
     if (node.declaration !== undefined && node.declaration !== null) {
       continue;
     }
@@ -413,7 +360,6 @@ function readBlockStatements(block: AstNode["body"]): readonly AstNode[] | undef
   return block.body;
 }
 
-// `Array.isArray` does not narrow a readonly array out of a union.
 function isAstNodeList(block: AstNode["body"]): block is readonly AstNode[] {
   return Array.isArray(block);
 }
@@ -444,8 +390,6 @@ function applySourceReplacements(
   return result + source.slice(cursor);
 }
 
-// The driver needs only the workflow and step functions; evaluating the
-// definition would pull the definer and the schema library into the bundle.
 function removeEveDefinerDefaultExport(
   ast: AstProgram,
 ): { end: number; start: number; text: string }[] {
@@ -501,7 +445,6 @@ function findExportedLiteralValueDeclarations(source: string, ast: AstProgram): 
   const reExportAliasesByLocalName = collectLocalReExportAliases(ast);
 
   for (const node of ast.body ?? []) {
-    // `export const FOO = "literal"` — inline-exported literal const.
     if (
       node.type === "ExportNamedDeclaration" &&
       node.declaration?.type === "VariableDeclaration" &&
@@ -514,18 +457,6 @@ function findExportedLiteralValueDeclarations(source: string, ast: AstProgram): 
       continue;
     }
 
-    // `const FOO = "literal"; export { FOO as PUBLIC_NAME };` —
-    // rolldown's preserve-modules ESM emit splits the declaration from
-    // the export and frequently renames the local binding under
-    // minification. The trailing aggregate is dropped along with the
-    // rest of the source, so we re-emit just the declaration plus a
-    // targeted `export { local as public }` clause for each alias. All
-    // three declaration kinds are accepted defensively in case
-    // rolldown's `topLevelVar` option is ever re-enabled. Combined
-    // `var a = …, b = "literal"` declarations are also handled — only
-    // the literal-valued declarator is re-emitted, since the
-    // non-literal initializers may reference imports the step-only
-    // proxy path has discarded.
     if (
       node.type === "VariableDeclaration" &&
       (node.kind === "const" || node.kind === "var" || node.kind === "let")
@@ -598,9 +529,6 @@ function isLiteralValueExpression(node: AstNode | null | undefined): boolean {
     );
   }
 
-  // Rolldown's minifier rewrites string literals into untagged template
-  // literals with no interpolations (e.g. `` `subagent` ``). Treat those
-  // as literal-valued so the step-only proxy path still preserves them.
   if (node.type === "TemplateLiteral" && (node.expressions ?? []).length === 0) {
     return true;
   }

@@ -7,6 +7,7 @@ import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import { formatAssertionFailureHeadline } from "#evals/runner/reporters/assertion-diagnostics.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
+/** Options for {@link junitReporter}: the XML file to write and an optional testsuite name. */
 export interface JUnitReporterConfig {
   readonly filePath: string;
   readonly suiteName?: string;
@@ -27,13 +28,9 @@ class JUnitReporter implements EvalReporter {
     this.#config = config;
   }
 
-  onRunStart(): void {
-    // Nothing to initialize.
-  }
+  onRunStart(): void {}
 
-  onEvalComplete(): void {
-    // The file is written once on completion so the suite has final counters.
-  }
+  onEvalComplete(): void {}
 
   async onRunComplete(summary: EveEvalRunSummary): Promise<void> {
     const xml = renderJUnit(summary, { suiteName: this.#config.suiteName });
@@ -77,10 +74,6 @@ function renderTestCase(result: EveEvalResult): string {
   ].join("\n");
 }
 
-/**
- * Compact failure payload for the XML body. Full event streams stay in the
- * `.eve/evals/` artifacts; CI annotations only need the verdict and why.
- */
 function buildFailureDetail(result: EveEvalResult): Record<string, unknown> {
   return {
     verdict: result.verdict,

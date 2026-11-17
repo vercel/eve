@@ -8,9 +8,6 @@ import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import { namedScopeCollectionName } from "#runtime/schedules/named-scope.js";
 
-/**
- * The collections one definition stores schedules in: itself, or one for each named scope.
- */
 export function compileScheduleCollectionDefinitions(
   source: ScheduleSourceRef,
   value: unknown,
@@ -51,7 +48,6 @@ export function compileScheduleCollectionDefinitions(
   }));
 }
 
-/** Throws when two collections would share stored schedules, tools, and deliveries. */
 export function assertScheduleCollectionNameAvailable(
   compiled: readonly CompiledScheduleCollectionDefinition[],
   collection: CompiledScheduleCollectionDefinition,
@@ -62,7 +58,6 @@ export function assertScheduleCollectionNameAvailable(
         `Schedule collections "${existing.logicalPath}" and "${collection.logicalPath}" both resolve to the name "${collection.name}". Set a different "id" on one of them, or rename its file.`,
       );
     }
-    // The named scopes of one definition share its tools; anything else may not.
     const toolSlot = scheduleCollectionToolSlot(collection);
     if (
       scheduleCollectionToolSlot(existing) === toolSlot &&
@@ -77,7 +72,6 @@ export function assertScheduleCollectionNameAvailable(
   }
 }
 
-/** Throws when a collection and a static schedule share a name, which `session.schedule.definition` reports for both. */
 export function assertScheduleCollectionNamesDistinctFromSchedules(
   collections: readonly CompiledScheduleCollectionDefinition[],
   schedules: readonly CompiledScheduleDefinition[],

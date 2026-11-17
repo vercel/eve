@@ -1,4 +1,3 @@
-/** Publish this agent as an A2A (Agent2Agent) v1.0 server over the JSON-RPC binding. */
 import { declaredAuthChallenges, readOAuthResourceOptions } from "#channel/auth/definitions.js";
 import { sessionAuthFromResult } from "#channel/auth/result.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
@@ -29,6 +28,7 @@ import { defineChannel, GET, OPTIONS, POST, type Channel } from "#public/definit
 export type { A2aAgentCardOptions, A2aAgentSkill } from "#internal/a2a/agent-card.js";
 export type { A2aFailure } from "#internal/a2a/task-projection.js";
 
+/** Options for {@link a2aChannel}: who may call the agent, its route, and what its Agent Card advertises. */
 export interface A2aChannelConfig {
   /**
    * Who may call the agent: an eve route-auth policy. Each A2A context belongs to the principal
@@ -85,6 +85,7 @@ export interface A2aChannelConfig {
   readonly plainHttp?: "loopback" | "forwarded-https" | "allow";
 }
 
+/** The channel {@link a2aChannel} returns, which serves the agent over the A2A protocol. */
 export type A2aChannel = Channel;
 
 /** Well-known discovery path (RFC 8615) for an A2A Agent Card. */
@@ -113,7 +114,6 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   const publicOrigin =
     input.publicOrigin === undefined ? undefined : parsePublicOrigin(input.publicOrigin);
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
-  // A disabled policy takes no files, so the body needs no room for one.
   const maxBodyBytes = a2aRequestBodyMaxBytes(
     uploadPolicy === "disabled" ? 0 : uploadPolicy.maxBytes,
   );
@@ -125,7 +125,6 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   const card = async (request: Request, args: RouteHandlerArgs) => {
     const failure = validateHttpMetadataRequest(request, "A2A", input.plainHttp);
     if (failure !== undefined) return failure;
-    // Public metadata by design: discovery happens before a client has credentials.
     const body = buildAgentCard({
       described: await args.describe(),
       endpointUrl: new URL(
@@ -174,8 +173,6 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
       }),
       POST(path, rpc),
     ],
-    // Intake checks declared sizes and types; staging enforces the same policy on the bytes a
-    // file URL actually downloads, which intake can't see.
     uploadPolicy: input.uploadPolicy,
   });
 }
@@ -185,7 +182,6 @@ const CARD_CORS = {
   "access-control-allow-origin": "*",
 };
 
-/** A bare `http(s)` origin: a path would be dropped, so it's refused rather than ignored. */
 function parsePublicOrigin(origin: string): string {
   let parsed: URL;
   try {
@@ -210,7 +206,6 @@ function parsePublicOrigin(origin: string): string {
   return parsed.origin;
 }
 
-/** The card's file input modes: what the upload policy admits. */
 function fileInputModes(policy: UploadPolicy): readonly string[] {
   if (policy === "disabled" || policy.maxBytes === 0) return [];
   return policy.allowedMediaTypes === "*" ? ["*/*"] : policy.allowedMediaTypes;

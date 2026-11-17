@@ -73,7 +73,6 @@ export interface RegistrySetupClient {
   fail(error: unknown): void;
 }
 
-/** Creates a prompter whose questions and output are rendered by the parent eve process. */
 export function createRegistrySetupClient(
   input: {
     process?: SetupProcess;
@@ -149,8 +148,6 @@ export function createRegistrySetupClient(
     options: SingleSelectOptions<T> | MultiSelectOptions<T>,
   ): Promise<T | T[]> {
     if (options.multiple === true) return await prompt<T[]>({ kind: "select", options });
-    // IPC serializes JSON, which drops the search action's functions. The label
-    // travels as a template and the parent answers with the encoded query.
     const { searchAction, ...rest } = options;
     if (searchAction === undefined) return await prompt<T>({ kind: "select", options: rest });
     const value = await prompt<T | string>({

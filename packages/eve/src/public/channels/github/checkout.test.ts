@@ -67,16 +67,13 @@ describe("GitHub checkout", () => {
     expect(sandbox.commandLog).toContain(
       `cd '/workspace' && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin '${baseSha}'`,
     );
-    // Clean remote — the token is never embedded in the URL.
     expect(sandbox.commandLog).toContain(
       `cd '/workspace' && git remote add origin 'https://github.com/vercel/eve.git'`,
     );
-    // No scrub step and no token anywhere in the command stream.
     expect(sandbox.commandLog.some((command) => command.includes("git remote set-url"))).toBe(
       false,
     );
     expect(sandbox.commandLog.some((command) => command.includes("ghs_checkout"))).toBe(false);
-    // Token brokered at the firewall via a github.com header transform.
     const authorization = `Basic ${Buffer.from("x-access-token:ghs_checkout").toString("base64")}`;
     expect(sandbox.networkPolicyUpdates).toEqual([
       {
@@ -115,7 +112,6 @@ describe("GitHub checkout", () => {
     expect(checkout).toEqual({ baseRef: "main", path: "/workspace", ref: headSha, sha: headSha });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(sandbox.commandLog.some((command) => command.includes("git fetch"))).toBe(false);
-    // Cheap path: no token minted, no firewall policy applied.
     expect(sandbox.networkPolicyUpdates).toEqual([]);
   });
 

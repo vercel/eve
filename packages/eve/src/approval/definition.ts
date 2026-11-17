@@ -151,7 +151,6 @@ export type Approval<TInput = Record<string, unknown>> =
   | ApprovalPolicy<TInput>
   | ApprovalConfiguration<TInput>;
 
-/** Returns the request-time policy from either approval authoring shape. */
 export function resolveApprovalPolicy<TInput>(approval: Approval<TInput>): ApprovalPolicy<TInput> {
   return typeof approval === "function" ? approval : approval.request;
 }

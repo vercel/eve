@@ -5,10 +5,6 @@ import type {
   SkillVersionRecord,
 } from "../../extension/lib/repository.ts";
 
-/**
- * A minimal repository keyed by scope key and skill ID, for exercising the
- * lifecycle. It assigns its own IDs, as a database might.
- */
 export function memoryRepository(
   hooks: { beforeWrite?: () => Promise<void> } = {},
 ): SkillRepository {
@@ -22,7 +18,6 @@ export function memoryRepository(
     const revision = revisions.get(scopeKey);
     return revision === undefined ? null : String(revision);
   };
-  /** Checks the scope revision and bumps it, as one atomic step. */
   const commit = (scopeKey: string, expected: string | null | undefined) => {
     if (expected !== undefined && revisionOf(scopeKey) !== expected) {
       throw new SkillConflictError("scope changed");

@@ -1,6 +1,3 @@
-// Sessions an eve before v27 recorded, as their stored lines: a v26 event per line. Captured from
-// a v26 deployment and trimmed: streamed deltas are dropped and long descriptions shortened.
-
 export const KITCHEN_SINK: readonly unknown[] = [
   {
     data: { runtime: { agentId: "v26-spike", agentName: "v26-spike", eveVersion: "0.82.0" } },

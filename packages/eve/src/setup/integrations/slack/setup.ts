@@ -31,7 +31,6 @@ import {
 const SLACK_REQUIRES_VERCEL = "Slack setup with Vercel Connect requires a linked Vercel project.";
 const SLACK_CHANNEL_PATH = "agent/channels/slack.ts";
 const SLACK_ENVIRONMENT_VARIABLES = ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"] as const;
-/** Above this many connectors the question offers a type-ahead filter. */
 const SEARCHABLE_CONNECTOR_COUNT = 7;
 
 type SlackbotFailure = Exclude<
@@ -117,7 +116,6 @@ export interface SlackSetupDeps {
   missingSlackEnvironment: (environmentRoot: string) => Promise<string[]>;
 }
 
-/** Slack variables unset in both the process and the local development env files. */
 async function missingSlackEnvironment(environmentRoot: string): Promise<string[]> {
   const defined = readDevelopmentEnvironmentValues(environmentRoot);
   return SLACK_ENVIRONMENT_VARIABLES.filter((name) => !process.env[name] && !defined.get(name));
@@ -135,7 +133,6 @@ const defaultDeps: SlackSetupDeps = {
 
 type SlackSetupPlan =
   | { credentials: "environment"; slug: SlackConnectorSlug }
-  /** The channel file already exists and isn't Connect-backed; setup leaves it alone. */
   | { credentials: "existing-file"; file: "environment"; missing: readonly string[] }
   | { credentials: "existing-file"; file: "custom" }
   | {
@@ -143,7 +140,6 @@ type SlackSetupPlan =
       slug: SlackConnectorSlug;
       inspection: SlackbotConnectorInspection;
       connector: SlackConnectorSelection;
-      /** UID the existing channel file names; patched when another connector is chosen. */
       channelConnectorUid: string | undefined;
     };
 
@@ -227,11 +223,6 @@ async function askCredentials(context: SetupPrepareContext) {
   );
 }
 
-/**
- * Reads what is already in place before asking anything, so a re-run only
- * asks the questions an earlier attempt left open. A channel file that names
- * a connector settles the credential and connector questions.
- */
 export async function prepareSlackSetup(
   context: SetupPrepareContext,
   deps: SlackSetupDeps = defaultDeps,

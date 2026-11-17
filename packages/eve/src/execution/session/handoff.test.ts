@@ -15,11 +15,8 @@ const createHookMock = vi.fn();
 const sleepMock = vi.fn();
 
 const abandonHandoverIfRunEndsMock = vi.fn();
-/** Resolving it ends the watched candidate run. */
 let candidateEnded = Promise.withResolvers<void>();
-/** Resolvers for the inbox's pending arrival waits; resolving one delivers a payload. */
 const arrivals: (() => void)[] = [];
-/** The workflow clock, in milliseconds since the attempt began. */
 let now = 0;
 const watchedRuns: string[] = [];
 const endedRuns = new Set<string>();
@@ -214,7 +211,6 @@ describe("SessionHandoff", () => {
     startSuccessorStepMock.mockResolvedValue(STARTED);
     const outcome = createHandoff(inbox).tryTransfer(selection("deployment-b"), state());
 
-    // Nothing waits, so no timer runs.
     await vi.waitFor(() => expect(arrivals).toHaveLength(1));
     expect(sleepMock).not.toHaveBeenCalled();
     now = 60_000;
@@ -223,7 +219,6 @@ describe("SessionHandoff", () => {
     await vi.waitFor(() => expect(sleepMock).toHaveBeenCalledWith(4 * 60_000));
     expect(created.map((hook) => hook.token)).not.toContain("eve:handoff:lease:owner-1:0");
 
-    // No further input arrives; the deadline alone fences the attempt.
     deadline.resolve();
     await vi.waitFor(() => expect(watchedRuns).toEqual(["candidate-1"]));
     expect(reportSessionHandoffRetainedStepMock).not.toHaveBeenCalled();
@@ -231,7 +226,6 @@ describe("SessionHandoff", () => {
     candidateEnded.resolve();
 
     await expect(outcome).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
-    // It may hold addresses this run's pumps have not seen it take yet.
     expect(inbox.claimSessionHooks).toHaveBeenCalledWith(TOKENS, { force: true });
   });
 
@@ -248,7 +242,6 @@ describe("SessionHandoff", () => {
     ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
     expect(sleepMock).toHaveBeenCalledWith(5 * 60_000 - 30_000);
     const lease = created.find((hook) => hook.token === "eve:handoff:lease:owner-1:0");
-    // Disposing it would free the token for a candidate that boots late.
     expect(lease?.dispose).not.toHaveBeenCalled();
     expect(watchedRuns).toEqual([]);
     expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
@@ -263,7 +256,6 @@ describe("SessionHandoff", () => {
       payloads: [],
       runId: "candidate-2",
     });
-    // The start step ran twice: it returned the duplicate, and the first run holds the lease.
     leaseHolder = "candidate-1";
     startSuccessorStepMock.mockResolvedValue({ kind: "started", runId: "candidate-2" });
     const outcome = createHandoff(inbox).tryTransfer(selection("deployment-b"), state());
@@ -292,7 +284,6 @@ describe("SessionHandoff", () => {
       createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
     ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
     expect(watchedRuns).toEqual([]);
-    // It reported holding no address.
     expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
   });
 
@@ -434,13 +425,8 @@ describe("SessionHandoff", () => {
 });
 
 const created: { token: string; dispose: ReturnType<typeof vi.fn> }[] = [];
-/** The run already holding the attempt lease, if any. */
 let leaseHolder: string | undefined;
 
-/**
- * Like a real hook, each await of an activation hook takes the next verdict;
- * once they run out it never answers.
- */
 function installActivation(...verdicts: SessionOwnerActivation[]): void {
   created.length = 0;
   leaseHolder = undefined;

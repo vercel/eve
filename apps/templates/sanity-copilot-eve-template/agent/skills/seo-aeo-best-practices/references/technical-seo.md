@@ -15,18 +15,21 @@ Essential technical SEO elements for modern web applications.
 ## Metadata
 
 ### Title Tags
+
 - Unique per page
 - 50-60 characters
 - Primary keyword near the beginning
 - Brand name at the end (optional)
 
 ### Meta Descriptions
+
 - Unique per page
 - 150-160 characters
 - Include call-to-action
 - Contain relevant keywords
 
 ### Open Graph
+
 ```html
 <meta property="og:title" content="Page Title" />
 <meta property="og:description" content="Description" />
@@ -41,21 +44,25 @@ Essential technical SEO elements for modern web applications.
 export async function generateMetadata({ params }): Promise<Metadata> {
   const { data } = await sanityFetch({
     query: PAGE_QUERY,
-    stega: false,  // Critical: no stega in metadata
-  })
-  
+    stega: false, // Critical: no stega in metadata
+  });
+
   return {
     title: data.seo?.title || data.title,
     description: data.seo?.description,
     openGraph: {
-      images: data.seo?.image ? [{
-        url: urlFor(data.seo.image).width(1200).height(630).url(),
-        width: 1200,
-        height: 630,
-      }] : [],
+      images: data.seo?.image
+        ? [
+            {
+              url: urlFor(data.seo.image).width(1200).height(630).url(),
+              width: 1200,
+              height: 630,
+            },
+          ]
+        : [],
     },
-    robots: data.seo?.noIndex ? 'noindex' : undefined,
-  }
+    robots: data.seo?.noIndex ? "noindex" : undefined,
+  };
 }
 ```
 
@@ -65,7 +72,7 @@ Dynamic sitemap from CMS content:
 
 ```typescript
 // app/sitemap.ts
-import { MetadataRoute } from 'next'
+import { MetadataRoute } from "next";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const pages = await client.fetch(`
@@ -76,14 +83,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ),
       _updatedAt
     }
-  `)
-  
-  return pages.map(page => ({
+  `);
+
+  return pages.map((page) => ({
     url: `https://example.com${page.url}`,
     lastModified: new Date(page._updatedAt),
     // Note: changeFrequency and priority are largely ignored by Google
     // but may be used by other search engines
-  }))
+  }));
 }
 ```
 
@@ -97,7 +104,7 @@ export async function generateMetadata({ params }): Promise<Metadata> {
     alternates: {
       canonical: `https://example.com/${params.slug}`,
     },
-  }
+  };
 }
 ```
 
@@ -128,16 +135,18 @@ async redirects() {
 - **CLS (Cumulative Layout Shift):** < 0.1
 
 ### Image Optimization (Next.js example)
+
 - Use `next/image` with Sanity URL builder
 - Serve WebP/AVIF formats
 - Implement LQIP blur placeholders
 - Set explicit dimensions
 
 ### Font Loading (Next.js example)
+
 ```typescript
 // Prevent layout shift
-import { Inter } from 'next/font/google'
-const inter = Inter({ subsets: ['latin'], display: 'swap' })
+import { Inter } from "next/font/google";
+const inter = Inter({ subsets: ["latin"], display: "swap" });
 ```
 
 ## Robots.txt
@@ -170,18 +179,22 @@ Sitemap: https://example.com/sitemap.xml
 For multi-language sites, implement hreflang tags to indicate language/region variants:
 
 ```typescript
-export async function generateMetadata({ params }: { params: Promise<{ lang: string; slug: string }> }): Promise<Metadata> {
-  const { lang, slug } = await params
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ lang: string; slug: string }>;
+}): Promise<Metadata> {
+  const { lang, slug } = await params;
   return {
     alternates: {
       canonical: `https://example.com/${lang}/${slug}`,
       languages: {
-        'en': `https://example.com/en/${slug}`,
-        'de': `https://example.com/de/${slug}`,
-        'x-default': `https://example.com/en/${slug}`,
+        en: `https://example.com/en/${slug}`,
+        de: `https://example.com/de/${slug}`,
+        "x-default": `https://example.com/en/${slug}`,
       },
     },
-  }
+  };
 }
 ```
 

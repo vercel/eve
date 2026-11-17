@@ -1,44 +1,15 @@
-/**
- * Ranking for `eve__search` and for `eve__tool`'s and `eve__skill`'s suggestions when a
- * name is unknown.
- * Query and text split into lowercase words (camelCase, acronyms, and
- * punctuation are boundaries), so `create issue`, `createIssue`, and
- * `create_issue` are the same words. Matches rank in tiers:
- *
- * 1. Exact: the query's words are the full name's words.
- * 2. Exact without namespace: they are the name after its last `__`, so
- *    `create_issue` finds `linear__create_issue` and `sre__create_issue`.
- * 3. Connection: they are the connection's name, or its first whole words,
- *    so `linear` lists the `linear` connection's tools, while `git` leaves
- *    `github`'s tools to the name prefix tier.
- * 4. Name prefix: the full name's words, or those after its last `__`, start
- *    with the query's words, the last of which may be partial, so
- *    `create_iss` finds `create_issue` and `status page incidents` finds
- *    `sre__status_page_incidents_list`.
- * 5. Keyword: any other match. A query word matches a word when either is a
- *    prefix of the other, so `repo` finds `repositories` and `issues` finds
- *    `issue`, and each query word adds the weight of every field it matches.
- *    One-letter and filler words such as `a` and `the` don't score when the
- *    query has other words, so `a` doesn't find `assign`.
- *
- * Within a tier, the keyword score orders matches, then connection, then name.
- */
-
 import { connectionToolName } from "#connections/ownership.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { followRefs } from "#tools/schema.js";
 
-/** What the ranker reads from one catalog entry. */
 export interface RankCandidate {
-  /** The entry's own name; a connection tool's name without its connection prefix. */
   readonly name: string;
   readonly description: string;
   readonly inputSchema?: Readonly<Record<string, unknown>>;
   readonly connection?: { readonly description: string; readonly name: string };
 }
 
-/** Candidates matching `query`, best first. */
 export function rankCandidates<T extends RankCandidate>(
   query: string,
   candidates: readonly T[],
@@ -58,14 +29,12 @@ export function rankCandidates<T extends RankCandidate>(
     .map((entry) => entry.candidate);
 }
 
-/** Whether `query` has no searchable words, such as `"^"` or `"  "`. */
 export function isEmptyQuery(query: string): boolean {
   return tokenize(query).length === 0;
 }
 
 const MAX_SUGGESTIONS = 5;
 
-/** Names of the candidates closest to an unknown `name`, best first. */
 export function closestNames(name: string, candidates: readonly RankCandidate[]): string[] {
   if (isEmptyQuery(name)) return [];
   return rankCandidates(name, candidates)
@@ -106,7 +75,6 @@ function rankCandidate(
   return { score: scoreFields(scored, candidateFields(candidate)), tier };
 }
 
-/** Words that say nothing about which tool a query wants. */
 const FILLER_WORDS = new Set([
   "a",
   "an",
@@ -124,10 +92,6 @@ const FILLER_WORDS = new Set([
   "with",
 ]);
 
-/**
- * The query words that score keyword matches: without one-letter and filler
- * words, which match nearly anything by prefix, unless they are all it has.
- */
 function scoringTerms(terms: readonly string[]): readonly string[] {
   const meaningful = terms.filter((term) => term.length > 1 && !FILLER_WORDS.has(term));
   return meaningful.length > 0 ? meaningful : terms;
@@ -141,7 +105,6 @@ function startsWithWholeWords(words: readonly string[], terms: readonly string[]
   return terms.length <= words.length && terms.every((term, index) => words[index] === term);
 }
 
-/** The last term may be a partial word. */
 function startsWithWords(words: readonly string[], terms: readonly string[]): boolean {
   return (
     terms.length <= words.length &&
@@ -158,7 +121,6 @@ function candidateFields(candidate: RankCandidate): Field[] {
     ? Object.entries(candidate.inputSchema.properties)
     : [];
   const root = (candidate.inputSchema ?? {}) as JsonObject;
-  // A referenced property is described by the first schema in its `$ref` chain that has one.
   const propertyDescriptions = properties.flatMap(([, schema]) => {
     for (const node of followRefs(root, schema)) {
       if (typeof node.description === "string") return [node.description];
@@ -189,7 +151,6 @@ function matchesWord(word: string, term: string): boolean {
   return word.startsWith(term) || (word.length >= 3 && term.startsWith(word));
 }
 
-/** Every word of a name or query, so a one-letter name can still be searched by name. */
 function tokenize(text: string): string[] {
   return text
     .replaceAll(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2")
@@ -199,12 +160,10 @@ function tokenize(text: string): string[] {
     .filter((word) => word !== "");
 }
 
-/** A description's words, without one-letter words such as `a`. */
 function proseWords(text: string): string[] {
   return tokenize(text).filter((word) => word.length > 1);
 }
 
-/** Orders by UTF-16 code unit, the same in every locale. */
 export function compareCodeUnits(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }

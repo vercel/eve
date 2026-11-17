@@ -1,13 +1,6 @@
 import type { ToolStubHost } from "#execution/tool-stub-host.js";
 import { StubPlayback } from "#tool-stubs/playback.js";
 
-/**
- * Tool stubs on the in-process host. A stubbed root session holds its playback for as long as
- * it runs, by its scope's token, and its calls (and its child sessions' and runs', whose scope
- * names the same token) read it directly. Workflow's serves the same playback on a hook, and
- * publishes results and failures to streams eval verification reads; an in-process session has
- * no such reader, so this keeps only the playback.
- */
 export function createInProcessToolStubs(): ToolStubHost {
   const playbacks = new Map<string, StubPlayback>();
   const playbackOf = (token: string): StubPlayback => {

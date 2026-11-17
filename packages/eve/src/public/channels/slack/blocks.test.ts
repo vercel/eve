@@ -52,8 +52,6 @@ describe("cardToBlocks", () => {
   });
 
   it("types each builder with only its data form", () => {
-    // Overloaded builders resolve `returns` to the last signature, so a leftover JSX-props
-    // overload would surface here as the SDK's untyped element union.
     expectTypeOf(Actions).returns.toEqualTypeOf<Owned.ActionsElement>();
     expectTypeOf(Button).returns.toEqualTypeOf<Owned.ButtonElement>();
     expectTypeOf(Card).returns.toEqualTypeOf<Owned.CardElement>();

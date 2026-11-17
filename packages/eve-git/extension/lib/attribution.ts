@@ -7,13 +7,10 @@ export interface GitHubCoAuthor {
   readonly name: string;
 }
 
-/** Pull request body flags accepted by `gh pr create`. */
 const BODY_FLAGS = new Set(["-b", "--body"]);
 const BODY_FILE_FLAGS = new Set(["-F", "--body-file"]);
-/** A `Key: value` line, the shape of every line in a git trailer block. */
 const TRAILER_LINE = /^[A-Za-z0-9][A-Za-z0-9-]*: \S/u;
 
-/** Format a validated `Co-authored-by` trailer. */
 export function coAuthorTrailer(coAuthor: GitHubCoAuthor): string {
   const name = coAuthor.name.trim();
   const email = coAuthor.email.trim();
@@ -26,11 +23,6 @@ export function coAuthorTrailer(coAuthor: GitHubCoAuthor): string {
   return `Co-authored-by: ${name} <${email}>`;
 }
 
-/**
- * Append a trailer unless the body already carries it. Git and GitHub read
- * only the last paragraph as trailers, so an existing trailer block is
- * extended rather than followed by a new paragraph.
- */
 export function withTrailer(body: string, trailer: string): string {
   const lines = body.split(/\r?\n/u).map((line) => line.trim().toLowerCase());
   if (lines.includes(trailer.toLowerCase())) return body;
@@ -42,18 +34,12 @@ export function withTrailer(body: string, trailer: string): string {
   return `${trimmed}${extendsTrailers ? "\n" : "\n\n"}${trailer}`;
 }
 
-/** True for the commands whose bodies carry attribution. */
 export function isAttributable(argv: readonly string[]): boolean {
   return (
     argv[0] === "gh-signed-commit" || (argv[0] === "gh" && argv[1] === "pr" && argv[2] === "create")
   );
 }
 
-/**
- * Add the trailer to the bodies eve publishes: `gh-signed-commit` commit
- * messages and `gh pr create` descriptions. Other commands are unchanged.
- * A `--body-file` is copied to `bodyFile`, so the model's file stays intact.
- */
 export async function attributeCommand(
   argv: readonly string[],
   trailer: string,
@@ -63,14 +49,12 @@ export async function attributeCommand(
 ): Promise<string[] | { readonly missingBodyFile: string }> {
   const result = [...argv];
   if (argv[0] === "gh-signed-commit") {
-    // gh-signed-commit keeps the last `-b`.
     const index = result.lastIndexOf("-b");
     if (index === -1) result.push("-b", trailer);
     else result[index + 1] = withTrailer(result[index + 1] ?? "", trailer);
     return result;
   }
   if (argv[0] !== "gh" || argv[1] !== "pr" || argv[2] !== "create") return result;
-  // gh keeps the last body flag, so attribute that one.
   for (let index = result.length - 1; index >= 3; index -= 1) {
     const value = result[index]!;
     const [flag, inline] = splitInline(value);
@@ -94,7 +78,6 @@ export async function attributeCommand(
   return result;
 }
 
-/** Split `--flag=value`, `-fvalue`, and `-f=value` the way gh's flag parser does. */
 function splitInline(value: string): [string, string | undefined] {
   if (!value.startsWith("--")) {
     if (!value.startsWith("-") || value.length <= 2) return [value, undefined];

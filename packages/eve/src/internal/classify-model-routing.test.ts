@@ -35,8 +35,6 @@ describe("classifyModelRouting", () => {
   });
 
   it("does NOT flip to external for non-byok providerOptions on a string id", () => {
-    // providerOptions never changes the routing endpoint — only the model value
-    // does. A string stays gateway-routed regardless of provider knobs.
     expect(
       classifyModelRouting("anthropic/claude-sonnet-5", {
         anthropic: { thinking: { budget_tokens: 1024 } },

@@ -1,4 +1,3 @@
-// @linux-only: attachment staging into in-memory just-bash/mock sandbox
 import type { FilePart, ModelMessage, ToolResultPart, UserContent } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
@@ -19,19 +18,6 @@ import { pngBytes } from "#internal/testing/media-fixtures.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 
 vi.mock("#execution/web-fetch/request.js", () => ({ requestPublicUrl: vi.fn() }));
-
-/**
- * Integration coverage for {@link stageAttachmentsToSandbox}.
- *
- * The staging helper is the single seam the tool loop uses to push
- * inbound attachments into the sandbox before the model call. This
- * suite exercises the full plumbing — `AlsContext` → `SandboxKey` →
- * `MockSandbox` — so regressions in the harness/context handoff fail
- * here rather than silently skipping the write at runtime.
- *
- * Unit coverage of `stageAttachmentsForAdapter(content, sandbox, ctx)`
- * (no ambient context involved) lives in `attachment-staging.test.ts`.
- */
 
 describe("stageAttachmentsToSandbox (integration)", () => {
   it("exposes the staged path to authored tools via getSandbox().readFile", async () => {
@@ -91,7 +77,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       },
     ];
 
-    // `runAsSession` without a sandbox argument leaves SandboxKey unbound.
     const staged = await runtime.runAsSession(undefined, async () =>
       stageAttachmentsToSandbox(content),
     );
@@ -106,7 +91,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
   it("replaces data that is not bytes, base64, or a URL with a note", async () => {
     const sandbox = mockSandbox({ id: "sbx_unreadable" });
     const runtime = await createTestRuntime();
-    // A Uint8Array that crossed a JSON boundary arrives as a plain object.
     const content: UserContent = [
       {
         data: { 0: 1, 1: 2 } as never,
@@ -159,7 +143,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     const adapter: ChannelAdapter<any> = {
       async fetchFile(url, context) {
         fetchFileCalls += 1;
-        // fetchFile receives the URL string from the FilePart.
         expect(url).toBe("https://example.com/file");
         expect(context?.state).toEqual({ installationTeamId: "T_INSTALLATION" });
         expect(context?.session.id).toEqual(expect.any(String));
@@ -191,9 +174,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(filePart.filename).toMatch(
       /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/report\.csv$/,
     );
-    // `data` is replaced with an eve-sandbox: ref — the bytes live in
-    // the sandbox and are rehydrated at the model call site. The
-    // URL is fully consumed here.
     expect(isSandboxRefUrl(filePart.data)).toBe(true);
     const sandboxRef = decodeSandboxRef(filePart.data as URL);
     expect(sandboxRef.size).toBe(resolvedBytes.byteLength);
@@ -280,7 +260,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     )) as UserContent;
 
     const filePart = staged[0] as FilePart;
-    // Resolver's mediaType wins over the ingestion-time guess.
     expect(filePart.mediaType).toBe("image/png");
   });
 
@@ -442,7 +421,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
         mediaType: "text/plain",
         type: "file",
       },
-      // Declared as an allowed PDF, but the bytes are a PNG.
       { data: pngBytes(1, 1), filename: "scan.pdf", mediaType: "application/pdf", type: "file" },
       { data: Buffer.alloc(65, 0x41), filename: "big.txt", mediaType: "text/plain", type: "file" },
     ];
@@ -558,7 +536,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       },
     ]);
     expect(sandbox.writes).toHaveLength(0);
-    // eve names the channel that ran the resolver in operator logs.
     expect(logs.records).toContainEqual(
       expect.objectContaining({
         fields: expect.objectContaining({ adapterKind: "custom-channel" }),
@@ -645,8 +622,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 });
 
 describe("hydrateSandboxAttachments (integration)", () => {
-  // A small PNG and PDF under the inline caps; the byte-equality assertions
-  // catch any corruption on the sandbox round trip.
   const smallImageBytes = pngBytes(32, 32, 1024);
   const smallPdfBytes = pdfBytes(1024);
 
@@ -667,15 +642,10 @@ describe("hydrateSandboxAttachments (integration)", () => {
       hydrateSandboxAttachments(messages),
     );
 
-    // Original ref-only messages are preserved — the staged FilePart
-    // still carries an eve-sandbox: URL, not bytes, so it remains
-    // safe to persist into session.history.
     const refPart = (stagedContent as FilePart[]).find((p) => p.type === "file");
     expect(refPart).toBeDefined();
     expect(isSandboxRefUrl(refPart?.data)).toBe(true);
 
-    // The hydrated copy carries the bytes — for one-shot handoff to
-    // the model.
     const hydratedContent = hydrated[0]?.content as Exclude<UserContent, string>;
     const hydratedFilePart = hydratedContent.find(
       (p) => (p as FilePart).type === "file",
@@ -686,7 +656,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
     expect(hydratedFilePart.filename).toMatch(
       /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/,
     );
-    // A label naming the sandbox path precedes the bytes.
     expect(hydratedContent).toEqual([
       { type: "text", text: "describe the image" },
       { text: `Attached file ${hydratedFilePart.filename} (image/png)`, type: "text" },
@@ -740,9 +709,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
       hydrateSandboxAttachments(messages),
     );
 
-    // The hydrated content swaps the FilePart for a TextPart that
-    // names the sandbox path — the agent's filesystem tools
-    // (`read_file`, `bash`, …) take it from here.
     const hydratedContent = hydrated[0]?.content as Exclude<UserContent, string>;
     expect(hydratedContent).toHaveLength(2);
     expect(hydratedContent[0]).toEqual({ type: "text", text: "summarize" });
@@ -750,7 +716,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
       text: `Attached file ${stagedPath} (text/csv)`,
       type: "text",
     });
-    // No file part survived hydration for the non-inlinable CSV.
     const fileParts = hydratedContent.filter((p) => (p as FilePart).type === "file");
     expect(fileParts).toHaveLength(0);
   });
@@ -758,8 +723,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
   it("treats oversized images (>3 MiB) as non-inlinable — renders a text reference instead of bytes", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_big_image" });
     const runtime = await createTestRuntime();
-    // One byte over the 3 MiB cap so the ref size fails the inline
-    // check without allocating two massive buffers in the test.
     const oversizedImage = pngBytes(32, 32, 3 * 1024 * 1024 + 1);
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
@@ -937,7 +900,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
           text: expect.stringMatching(/^Attached file .*\/mislabeled\.jpg \(image\/png\)$/),
           type: "text",
         },
-        // The bytes go to the provider under the type they prove.
         expect.objectContaining({ filename: "mislabeled.jpg", mediaType: "image/png" }),
       ],
     });
@@ -1006,22 +968,14 @@ describe("hydrateSandboxAttachments (integration)", () => {
       hydrateSandboxAttachments(messages),
     );
 
-    // No sandbox refs → pass-through.
     expect(hydrated).toBe(messages);
   });
 
   it("degrades to a text reference when an inlinable sandbox ref points at a missing file", async () => {
     const logs = captureLogRecords();
-    // Resuming a durable session whose staging sandbox was torn down
-    // leaves historical attachment refs pointing at bytes that are gone.
-    // Hydration must not fail the whole turn over it — it degrades to a
-    // text part so the run survives (#276).
     const sandbox = mockSandbox({ id: "sbx_missing" });
     const runtime = await createTestRuntime();
 
-    // Ref pointing at a path that was never written. Use an
-    // inlinable media type so the byte-read path fires —
-    // non-inlinable refs never touch the sandbox.
     const danglingRef = new URL(
       "eve-sandbox:?path=%2Fworkspace%2Fattachments%2Fdeadbeefdeadbeef%2Fghost.png&size=5&type=image%2Fpng",
     );
@@ -1045,8 +999,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
     );
 
     const hydratedContent = hydrated[0]?.content as Exclude<UserContent, string>;
-    // The leading text survives and the dangling file ref is replaced by
-    // an unavailability notice — no file part reaches the model.
     expect(hydratedContent[0]).toEqual({ type: "text", text: "what's in the image?" });
     expect(hydratedContent[1]).toEqual({
       text: "FileNotFound: Current snapshot may be newer and does not contain /workspace/attachments/deadbeefdeadbeef/ghost.png.",
@@ -1064,10 +1016,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("survives a resume after the staging sandbox was torn down (#276)", async () => {
     const logs = captureLogRecords();
-    // Stage an image into one sandbox, then hydrate the resulting
-    // ref-only message against a fresh sandbox — the same shape as
-    // resuming a durable session whose ephemeral sandbox is gone. The
-    // bytes are unreachable, but the turn must not fail.
     const stagingSandbox = mockSandbox({ id: "sbx_resume_stage" });
     const runtime = await createTestRuntime();
 
@@ -1136,8 +1084,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
     const stagedFile = (stagedResult!.output as { value: { data: { url: URL } }[] }).value[0]!;
     const stagedPath = decodeSandboxRef(stagedFile.data.url).path;
 
-    // A follow-up turn on another replica: the just-bash session root lives
-    // on the replica that staged the file, so resuming the sandbox throws.
     const lost = mockSandbox({ id: "sbx_lost" });
     const hydrated = await runtime.runAsSession(
       {
@@ -1183,7 +1129,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
     )) as UserContent;
     const stagedPath = (stagedContent[0] as FilePart).filename as string;
 
-    // Same size, different bytes: only the content address can tell them apart.
     await sandbox.session.writeBinaryFile({
       content: Buffer.alloc(smallImageBytes.byteLength, 0x41),
       path: stagedPath,
@@ -1203,11 +1148,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
   });
 
   it("does not touch the sandbox when every ref is non-inlinable — text references carry all the info", async () => {
-    // Regression guard: the non-inlinable path must render the text
-    // reference entirely from ref metadata (path, mediaType, size)
-    // without reading bytes. Otherwise large non-inlinable files
-    // would still cost a full sandbox read per turn just to be
-    // thrown away.
     const sandbox = mockSandbox({ id: "sbx_no_read" });
     const runtime = await createTestRuntime();
     const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");

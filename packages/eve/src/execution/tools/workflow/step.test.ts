@@ -8,7 +8,6 @@ import type { WorkflowStepInvocation } from "#execution/tools/workflow/step-cont
 import { workflowToolStep } from "#execution/tools/workflow/step.js";
 import type { ToolContext } from "#tools/definition.js";
 
-// A workflow body's hooks and metadata, outside a workflow: each hook under the token it asks for.
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   createHook: (options?: { readonly token?: string }) => ({
@@ -65,6 +64,5 @@ it("gives a step a sign-in hook under a token the connection callback route deli
 
   await expect(step("api", ctx)).resolves.toBe("deployed");
 
-  // The step puts this token in each sign-in's callback URL.
   expect(isSignInCallbackToken(execute.mock.calls[0]?.[0].context.token ?? "")).toBe(true);
 });

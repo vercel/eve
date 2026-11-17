@@ -2,7 +2,6 @@ import { Client } from "#client/index.js";
 import { resolveVerifiedRemoteDevelopmentClient } from "#setup/verified-remote-client.js";
 import { toErrorMessage } from "#shared/errors.js";
 
-/** Sends one remote turn without starting the terminal UI. */
 export async function runRemotePrint(input: {
   readonly headers?: Readonly<Record<string, string>>;
   readonly prompt: string;

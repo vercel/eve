@@ -11,7 +11,6 @@ describe("slackConversationSpace", () => {
 
   it("falls back to the event team, and reports none without a team", () => {
     expect(slackConversationSpace({ channelId: "C1", teamId: "T2" })?.id).toBe("slack:T2:C1");
-    // A proactive send that names no installation team can't match its channel's inbound space.
     expect(slackConversationSpace({ channelId: "C1", teamId: null })).toBeUndefined();
   });
 

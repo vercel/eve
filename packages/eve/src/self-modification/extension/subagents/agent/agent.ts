@@ -20,18 +20,11 @@ import {
   sourceDelegation,
 } from "../../../subagent-guidance.js";
 
-/** Fallback model when neither the self-modification agent nor its parent configures one. */
 export const FALLBACK_SELF_MODIFICATION_MODEL = DEFAULT_AGENT_MODEL_ID;
 
-/** Configuration for the self-modification subagent. */
 export interface SelfModificationAgentOptions {
-  /** Policy shared with the sandbox and extension mount. */
   readonly config?: SelfModificationConfig;
-  /** Model used by the self-modification subagent; defaults to the effective parent model. */
   readonly model?: AgentStaticModelDefinition;
-  /**
-   * Reasoning effort used by the self-modification subagent.
-   */
   readonly reasoning?: AgentReasoningDefinition;
 }
 
@@ -44,10 +37,6 @@ const localTraceDelegation =
 const localEffectiveEdits =
   "Source edits do not affect the caller’s current turn. After this subagent reports changes, do not invoke edited tools or attempt runtime verification until a new user turn.";
 
-/**
- * Defines the local development self-modification dynamic subagent, offered
- * only to the developer running `eve dev` (see {@link isLocalDeveloper}).
- */
 export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
   return defineDynamic((ctx) => {
     const bound = selfModification.config;

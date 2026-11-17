@@ -69,7 +69,6 @@ function approval(interactionId: string, origin?: InteractionOrigin): SessionEve
   };
 }
 
-/** Folds events as a client receives them, one line each. */
 function observe(events: readonly SessionEvent[], conversation = new Conversation()) {
   const start = conversation.view.position;
   events.forEach((event, index) => conversation.observe(stampTestEvent(event, start + index)));
@@ -404,7 +403,6 @@ describe("the conversation", () => {
   });
 
   it("shows an admitted answer from another client while its prompt stays open", () => {
-    // Another tab, or this one before a reload, approved; the batch still waits on the rest.
     const conversation = observe([
       ...started,
       requested,
@@ -469,7 +467,6 @@ describe("the conversation", () => {
       { data: { callId: "call_0", outcome: "completed" }, scope, type: "call.settled" },
     ]);
     const before = conversation.state.messages[1];
-    // Until eve consumes it, the message shows where it was sent: after what the turn has done.
     conversation.setSubmissions([{ id: "s_0", message: "Use staging.", turnId }]);
     const echoId = conversation.state.messages.at(-1)?.id;
     const shown = () =>
@@ -498,7 +495,6 @@ describe("the conversation", () => {
       ],
       conversation,
     );
-    // The turn goes on below the message, and what it did before keeps its place and identity.
     expect(shown()).toEqual([
       "user: Deploy it.",
       "assistant: call_0",
@@ -598,7 +594,6 @@ describe("the conversation", () => {
       "user: Use staging.",
       "assistant: Done.",
     ]);
-    // Imported messages name no turn, so the turn's reply never streams into one.
     expect(messages[0]?.metadata).toEqual({
       historyId: "app-1",
       imported: true,
@@ -606,7 +601,6 @@ describe("the conversation", () => {
     });
     expect(messages[1]?.metadata).toEqual({ imported: true, status: "complete" });
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
-    // The delivery's row keeps no copy of the history its fact carried.
     expect(conversation.view.deliveries.d_0).not.toHaveProperty("history");
   });
 
@@ -671,12 +665,10 @@ describe("the conversation", () => {
       );
 
     const conversation = observe([...exchange("1", null, "Q1"), ...exchange("2", "turn_1", "Q2")]);
-    // A change that selects an earlier turn hides the turns after it, which stay in the view.
     observe(contextChange("c_1", { turnId: "turn_1" }), conversation);
     expect(shown(conversation)).toEqual(["user: Q1", "assistant: Re: Q1"]);
     expect(conversation.view.turns).toHaveProperty("turn_2");
 
-    // The next turn continues from the selected one.
     observe(exchange("3", "turn_1", "Q2 again"), conversation);
     expect(shown(conversation)).toEqual([
       "user: Q1",
@@ -685,7 +677,6 @@ describe("the conversation", () => {
       "assistant: Re: Q2 again",
     ]);
 
-    // A clear hides everything before it; a message this client sent still shows.
     observe(contextChange("c_2", null), conversation);
     conversation.setSubmissions([{ id: "local_0", message: "Q4", turnId: "turn_3" }]);
     expect(shown(conversation)).toEqual(["user: Q4"]);

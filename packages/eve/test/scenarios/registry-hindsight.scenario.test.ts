@@ -18,7 +18,6 @@ interface RegistryItem {
   readonly files: readonly { readonly path: string; readonly target: string }[];
 }
 
-/** `eve add` installs a bare package name at its latest release. */
 function dependencyEntry(specifier: string): [string, string] {
   const separator = specifier.lastIndexOf("@");
   return separator > 0
@@ -27,7 +26,6 @@ function dependencyEntry(specifier: string): [string, string] {
 }
 
 describe("registry memory providers", () => {
-  // https://github.com/vercel/eve/issues/4961
   it.each(ITEMS)(
     "builds the agent installed by %s",
     async (itemName) => {
@@ -53,8 +51,6 @@ describe("registry memory providers", () => {
         name: `registry-${itemName.slice("memory/".length)}`,
       });
 
-      // The build evaluates authored modules without calling the remote memory services.
-      // Sandbox preparation is unrelated to the item and depends on the host.
       await runPnpmCommand({
         args: ["exec", "eve", "build", "--skip-sandbox-prewarm"],
         cwd: app.appRoot,

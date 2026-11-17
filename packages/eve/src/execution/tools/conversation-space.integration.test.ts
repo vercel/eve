@@ -1,4 +1,3 @@
-// @linux-only: ctx.conversation
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -25,7 +24,6 @@ const signingSecret = "conversation-space-signing-secret";
 describe("ctx.conversation in tools", () => {
   it.each([
     {
-      // Slack's app_mention events carry no channel_type, so eve reads conversations.info.
       conversation: { id: "C_TEAM", is_channel: true, is_private: false },
       expected: {
         id: "slack:T01:C_TEAM",
@@ -110,7 +108,6 @@ describe("ctx.conversation in tools", () => {
   );
 });
 
-/** Sends a signed Slack event through the Slack channel's own events route. */
 async function deliverSlackEvent(
   slack: ReturnType<typeof slackChannel>,
   event: Record<string, unknown>,
@@ -169,7 +166,6 @@ async function deliverSlackEvent(
   try {
     await Promise.all(pending);
   } finally {
-    // It holds a process-wide route and live sessions until it's disposed.
     await runtime.dispose();
   }
 }

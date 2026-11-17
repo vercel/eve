@@ -10,13 +10,10 @@ import {
   UNICODE_ROW_GLYPHS,
 } from "./option-row.js";
 
-/** Terminal lifecycle state accepted by the shared prompt renderer. */
 export type PromptState = "initial" | "active" | "submit" | "cancel" | "error";
 
-/** Scalar values supported by shared prompt options. */
 export type PromptValue = string | number | boolean;
 
-/** Coloring operations used by prompt rendering without coupling to a color library. */
 export interface PromptColors {
   blue(text: string): string;
   bold(text: string): string;
@@ -31,66 +28,31 @@ export interface PromptColors {
   yellow(text: string): string;
 }
 
-/** A selectable item rendered by the shared multi-select prompt. */
 export interface PromptOption<T extends PromptValue> {
   value: T;
   label: string;
-  /** Additional searchable text that is never rendered in the menu. */
   keywords?: readonly string[];
-  /** Completion action kept after searchable results instead of being filtered. */
   trailingAction?: boolean;
-  /** Supporting copy; stacked prompts render newline-separated text on separate rows. */
   hint?: string;
-  /** Short inline annotation shown dimmed only while the cursor is on this row. */
   focusHint?: string;
-  /**
-   * Longer, display-only explanation for the highlighted option. Its prompt
-   * chooses the placement; it is hidden once a choice is submitted.
-   */
   description?: string;
-  /** Row accent; "warning" stays yellow both at rest and under the cursor. */
   accent?: "warning";
   disabled?: boolean;
   disabledReason?: string;
-  /**
-   * "warning" renders the disabled reason in yellow with a dimmed (not struck)
-   * label — unavailable here but actionable elsewhere, unlike the default
-   * disabled styling, which marks a hard conflict.
-   */
   disabledReasonTone?: "warning";
-  /**
-   * Completed work: renders with a check and remains cursor-addressable for
-   * contextual feedback, but cannot be selected or toggled.
-   */
   completed?: boolean;
-  /**
-   * Marks a mandatory row that is always selected and cannot be toggled off: the
-   * cursor skips it and it renders a dimmed check. Mutually exclusive with
-   * `disabled`, which marks an unavailable row.
-   */
   locked?: boolean;
-  /** Parenthetical shown after a locked row's label, e.g. "always available". */
   lockedReason?: string;
-  /**
-   * A leading run of featured options forms a searchable picker's default
-   * viewport: with no filter typed, only they are in view, and scrolling or
-   * filtering reaches the rest of the list. Featured options must be sorted
-   * to the front. Meaningless without `search`.
-   */
   featured?: boolean;
-  /** Marks the currently-active value: renders a green check beside the row. */
   checked?: boolean;
 }
 
-/** Vertical rail glyph used by the onboarding-style terminal UI. */
 export const RAIL = "│";
-/** Closing corner glyph used by the onboarding-style terminal UI. */
 export const CORNER = "└";
 
 const BULLET_OPEN = "△";
 const BULLET_FILLED = "▲";
 
-/** Renders the lifecycle marker shown at the prompt header. */
 export function bulletFor(state: PromptState, colors: PromptColors): string {
   switch (state) {
     case "initial":
@@ -105,7 +67,6 @@ export function bulletFor(state: PromptState, colors: PromptColors): string {
   }
 }
 
-/** Renders a rail with color determined by the prompt lifecycle state. */
 export function railFor(state: PromptState, colors: PromptColors): string {
   switch (state) {
     case "initial":
@@ -120,7 +81,6 @@ export function railFor(state: PromptState, colors: PromptColors): string {
   }
 }
 
-/** Renders a closing corner with color determined by the prompt lifecycle state. */
 export function cornerFor(state: PromptState, colors: PromptColors): string {
   switch (state) {
     case "initial":
@@ -135,7 +95,6 @@ export function cornerFor(state: PromptState, colors: PromptColors): string {
   }
 }
 
-/** Formats the rail-and-title header common to onboarding prompts. */
 export function formatPromptHeader(
   state: PromptState,
   message: string,
@@ -149,14 +108,6 @@ export function formatPromptHeader(
   return `${leadingRail}\n${bulletFor(state, options.colors)}  ${message}\n`;
 }
 
-/**
- * Renders a resolved prompt as one line: the question dimmed and moved to the
- * front as a label, followed by the chosen answer. Replaces the two-line
- * "bullet + question" then "rail + answer" submit layout so completed steps
- * read compactly while keeping the bullet and leading rail that anchor the
- * step in the vertical chain. `answer` is expected to already carry its own
- * styling; the empty case drops the trailing space.
- */
 export function formatPromptSubmission(
   state: PromptState,
   message: string,
@@ -172,25 +123,21 @@ export function formatPromptSubmission(
   return `${leadingRail}\n${bulletFor(state, options.colors)}  ${options.colors.dim(message)}${tail}`;
 }
 
-/** Formats the banner that opens an onboarding-style interaction. */
 export function formatPromptOpener(title: string, subtitle: string, colors: PromptColors): string {
   const logo = colors.bold(colors.white("▲"));
   return `\n${logo}   ${colors.bold(title)}\n    ${colors.dim(subtitle)}\n${colors.white(RAIL)}\n`;
 }
 
-/** Formats the successful closing message for an onboarding-style interaction. */
 export function formatPromptOutro(message: string, colors: PromptColors): string {
   const indented = message.replace(/\n/g, "\n   ");
   return `${colors.green(RAIL)}\n${colors.green("●")}  ${indented}\n`;
 }
 
-/** Formats the cancellation closing message for an onboarding-style interaction. */
 export function formatPromptCancellation(message: string, colors: PromptColors): string {
   const indented = message.replace(/\n/g, "\n   ");
   return `${colors.red(RAIL)}\n${colors.red("●")}  ${colors.red(indented)}\n`;
 }
 
-/** Formats receipt text under the successful rail and wraps it to the active terminal width. */
 export function formatRailLine(
   text: string,
   colors: PromptColors,
@@ -206,12 +153,10 @@ export function formatRailLine(
     .join("\n")}\n`;
 }
 
-/** Renders the shared multi-select interaction used when adding channels. */
 export function renderMultiselectPrompt<T extends PromptValue>(input: {
   colors: PromptColors;
   cursor: number;
   error?: string;
-  /** Status note tucked onto the corner line while active (e.g. a quit hint). */
   footerNote?: string;
   leadingRail?: "white" | "green";
   message: string;
@@ -219,7 +164,6 @@ export function renderMultiselectPrompt<T extends PromptValue>(input: {
   options: readonly PromptOption<T>[];
   selectedValues: readonly T[];
   state: PromptState;
-  /** Submit-row label, e.g. "Skip" while an optional checklist is empty. */
   submitLabel?: string;
 }): string {
   const rail = railFor(input.state, input.colors);
@@ -228,8 +172,6 @@ export function renderMultiselectPrompt<T extends PromptValue>(input: {
     leadingRail: input.leadingRail,
   });
   const selectedSet = new Set(input.selectedValues);
-  // No key legend: the Submit row carries the confirm affordance. Only a list
-  // with nothing left to pick explains itself.
   const emptyNotice = input.options.some((option) => !option.disabled)
     ? ""
     : `\n${rail}\n${rail}  ${input.colors.dim("(no channels available to add)")}`;
@@ -263,7 +205,6 @@ export function renderMultiselectPrompt<T extends PromptValue>(input: {
   }
 }
 
-/** Keeps shared guidance separate from option rows and keyboard controls. */
 function selectHelpText(text: string | undefined, rail: string, colors: PromptColors): string {
   if (!text) return "";
   return `\n${rail}\n${text
@@ -272,16 +213,13 @@ function selectHelpText(text: string | undefined, rail: string, colors: PromptCo
     .join("\n")}\n${rail}`;
 }
 
-/** Appends a status note to the corner glyph, mirroring how errors trail the corner. */
 function cornerWithNote(corner: string, note: string | undefined): string {
   return note ? `${corner}  ${note}` : corner;
 }
 
-/** Renders the shared single-select interaction used by channel setup. */
 export function renderSelectPrompt<T extends PromptValue>(input: {
   colors: PromptColors;
   cursor: number;
-  /** Status note tucked onto the corner line while active (e.g. a quit hint). */
   footerNote?: string;
   leadingRail?: "white" | "green";
   message: string;
@@ -331,12 +269,10 @@ export function renderSelectPrompt<T extends PromptValue>(input: {
   }
 }
 
-/** Widest label among the options, for tab-aligning the inline hint column. */
 function labelColumnWidth<T extends PromptValue>(options: readonly PromptOption<T>[]): number {
   return options.reduce((width, option) => Math.max(width, option.label.length), 0);
 }
 
-/** Maps a `PromptOption` onto the shared single-column row painter. */
 function optionRow<T extends PromptValue>(
   option: PromptOption<T>,
   input: {
@@ -361,7 +297,6 @@ function optionRow<T extends PromptValue>(
   });
 }
 
-/** The dimmed description line shown beneath the cursor row, when it has one. */
 function descriptionLine<T extends PromptValue>(
   option: PromptOption<T>,
   isCursor: boolean,
@@ -373,15 +308,6 @@ function descriptionLine<T extends PromptValue>(
     : "";
 }
 
-/**
- * Renders the virtual Submit row that closes every multi-select list. It has
- * no checkbox — its bold label sits in the checkbox column, trails a green
- * check, and uses the shared cursor highlight; enter confirms the checklist only
- * from here. The label reads "Skip" while an optional checklist has nothing
- * picked (the caller computes that), so an empty confirm is honest about what
- * it does. Callers put a blank rail line above it to set it apart from the
- * options.
- */
 function renderSubmitRow(
   isCursor: boolean,
   colors: PromptColors,
@@ -426,14 +352,8 @@ function renderMultiselectRows<T extends PromptValue>(input: {
   return `${rows}\n${input.rail}\n${input.rail}  ${submit}`;
 }
 
-/** Default number of option rows shown at once by the searchable picker. */
 const SEARCHABLE_VIEW_SIZE = 8;
 
-/**
- * Mode-aware help line for the searchable picker, listing only relevant keys.
- * A multi-select keeps just the filter hint — its Submit row already carries
- * the confirm affordance.
- */
 function searchableHelpLine(rail: string, colors: PromptColors, multiple: boolean): string {
   const parts = multiple
     ? [[colors.cyan("type"), "to filter"]]
@@ -447,15 +367,6 @@ function searchableHelpLine(rail: string, colors: PromptColors, multiple: boolea
   return `\n${rail}  ${colors.dim("(")}${body}${colors.dim(")")}`;
 }
 
-/**
- * Renders the type-ahead select interaction: a filter line, a scrolling window
- * of options, and a mode-aware help line. Single-select marks the highlighted
- * row with the cursor arrow and submits it on enter; multi-select adds the
- * checkbox column, toggles rows with space or enter, and confirms from the
- * pinned Submit row (cursor index `options.length`). `options` is the
- * already-filtered visible list (with `cursor` indexing it); `submitDisplay`
- * is the precomputed answer shown once a choice is made.
- */
 export function renderSearchableSelect<T extends PromptValue>(input: {
   colors: PromptColors;
   state: PromptState;
@@ -472,7 +383,6 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
   footerNote?: string;
   error?: string;
   viewSize?: number;
-  /** Submit-row label, e.g. "Skip" while an optional checklist is empty. */
   submitLabel?: string;
 }): string {
   const { colors } = input;
@@ -495,17 +405,11 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
   }
 
   const selectedSet = new Set(input.selectedValues);
-  // With no filter, a leading run of `featured` options sizes the viewport so
-  // the default view shows just the curated shortlist; scrolling past it (or
-  // typing) moves the window into the full list. The "↑↓ N options" footer
-  // advertises the rest.
   let featuredLead = 0;
   while (input.options[featuredLead]?.featured) featuredLead += 1;
   const baseViewSize = input.viewSize ?? SEARCHABLE_VIEW_SIZE;
   const viewSize =
     input.filter === "" && featuredLead > 0 ? Math.min(featuredLead, baseViewSize) : baseViewSize;
-  // In a multi-select, the index one past the options is the Submit row; a
-  // single-select cursor past the end is stale and re-homes to the top.
   const onSubmitRow = input.multiple && input.cursor >= input.options.length;
   const cursor = !onSubmitRow && input.cursor >= input.options.length ? 0 : input.cursor;
 
@@ -534,7 +438,6 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
               colors,
               isCursor,
               isChecked: input.multiple && selectedSet.has(option.value),
-              // Search gates the placeholder dot off, matching the dev TUI.
               placeholder: false,
               hintPadding: width - option.label.length,
             });

@@ -1,10 +1,3 @@
-/**
- * Ordinary Discord messages, which Discord delivers only over its Gateway
- * WebSocket. A relay such as `runDiscordGatewayRelay` from
- * `eve/experimental/channels/discord/gateway` holds that connection and
- * forwards each dispatch, unchanged, to the route this module mounts.
- */
-
 import type { SessionAuthContext } from "#channel/types.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { readLimitedBytes } from "#internal/attachments/limited-read.js";
@@ -37,16 +30,12 @@ import { isNonEmptyString, isObject } from "#shared/guards.js";
 
 const log = createLogger("discord.gateway");
 
-/** Default path of the route that accepts forwarded Gateway dispatches. */
 const DEFAULT_GATEWAY_ROUTE = "/eve/v1/discord/gateway";
 
-/** Conversation key of a session that spans a whole channel: a DM or a thread. */
 const WHOLE_CHANNEL_CONVERSATION = "channel";
 
-// A MESSAGE_CREATE dispatch is a few kilobytes; the cap only bounds a misbehaving relay.
 const MAX_DISPATCH_BYTES = 1024 * 1024;
 
-// DEFAULT and REPLY. Other types are system notices such as joins and pins.
 const CONVERSATIONAL_MESSAGE_TYPES = new Set([0, 19]);
 const THREAD_CHANNEL_TYPES = new Set([10, 11, 12]);
 
@@ -155,7 +144,6 @@ export interface DiscordGatewayConfig {
   readonly startThread?: boolean | DiscordStartThreadOptions;
 }
 
-/** Mounts the route that turns forwarded `MESSAGE_CREATE` dispatches into turns. */
 export function createDiscordGatewayRoute(input: {
   readonly config: DiscordChannelConfig;
   readonly gateway: DiscordGatewayConfig;
@@ -219,13 +207,11 @@ export function createDiscordGatewayRoute(input: {
         channelId: message.channelId,
         conversationId: null,
         guildId: message.guildId ?? null,
-        // Replies post as channel messages, which alias the session without re-keying it.
         hasMessageAnchor: true,
         initialResponseSent: true,
         interactionToken: null,
         triggeringUserId: message.author.id,
       };
-      // Bots receive only 1:1 DMs over the Gateway, never group DMs.
       if (isDirectMessage) {
         state.audience = discordAudience(1);
         state.channelType = 1;
@@ -246,7 +232,6 @@ export function createDiscordGatewayRoute(input: {
       const startThread = result.startThread ?? gateway.startThread ?? true;
       state.conversationId = await routeMessage();
 
-      // Picks the session, and moves the message's replies into a new thread when asked.
       async function routeMessage(): Promise<string> {
         if (isDirectMessage || channelSession !== undefined) {
           return explicitConversation ?? WHOLE_CHANNEL_CONVERSATION;
@@ -335,13 +320,11 @@ function parseGatewayMessage(
 
 function referencedMessageId(raw: Record<string, unknown>): string | undefined {
   const reference = isObject(raw.message_reference) ? raw.message_reference : null;
-  // Type 1 is a forward, which quotes a message rather than replying to it.
   if (reference === null || (reference.type !== undefined && reference.type !== 0))
     return undefined;
   return isNonEmptyString(reference.message_id) ? reference.message_id : undefined;
 }
 
-// A bot user's id is its application's id.
 function mentions(raw: Record<string, unknown>, applicationId: string): boolean {
   return (
     Array.isArray(raw.mentions) &&
@@ -363,10 +346,6 @@ function stripMention(content: string, applicationId: string): string {
 
 const DISCORD_THREAD_NAME_MAX_LENGTH = 100;
 
-/**
- * Starts a public thread from `message` and adds its author, returning the
- * thread's channel id, or `undefined` when Discord refuses.
- */
 async function startThreadFrom(
   config: DiscordChannelConfig,
   message: DiscordGatewayMessage,
@@ -399,7 +378,6 @@ async function startThreadFrom(
       });
       return undefined;
     }
-    // Starting a thread adds only the bot, so its replies would not reach the author.
     const added = await callDiscordApi({
       ...api,
       method: "PUT",
@@ -418,7 +396,6 @@ async function startThreadFrom(
   }
 }
 
-/** Gateway messages omit the channel type, which tells a thread from a channel. */
 async function lookUpChannelType(
   config: DiscordChannelConfig,
   channelId: string,

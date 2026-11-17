@@ -10,64 +10,11 @@ import { startMcpStubServer } from "./lib/mcp-stub-server.ts";
 import { runEnvironment } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
-/**
- * End-to-end proof that a user-principal MCP connection drives a
- * real OAuth 2.1 + PKCE flow through eve's
- * `requestAuthorization` / `getAuthorizationResult` API, with an
- * actual token exchange against an external IdP and an authenticated
- * MCP request after the resume.
- *
- *
- * Pieces:
- *
- *   - Microsoft IdP emulator from `@emulators/microsoft` (via the
- *     `emulate` package), exposes a real OAuth 2.1 authorize+token
- *     surface with PKCE verification. The picker page is bypassed by
- *     POSTing the form fields directly to `/authorize/callback`,
- *     mirroring the package's own test pattern.
- *   - `packages/eve/test/tui-client/lib/mcp-stub-server.ts` started with
- *     `requireBearer: true`, proves the OAuth-issued token actually
- *     reaches MCP (otherwise the assistant's tool call would 401).
- *   - `apps/fixtures/agent-tui-client/agent/connections/stub-mcp-user.ts`, the
- *     `defineInteractiveAuthorization` fixture with real OAuth client
- *     logic (PKCE generation, state-as-CSRF, `/token` exchange).
- *   - `apps/fixtures/agent-tui-client/agent/channels/anchored.ts`, the user-principal
- *     channel that opens the session.
- *
- * Pass conditions:
- *
- *   1. `authorization.required` event lands for
- *      `stub-mcp-user` with a populated `webhookUrl` and a
- *      challenge URL pointing at the emulator's `/authorize`.
- *   2. `authorization.completed` carries
- *      `outcome: "authorized"`.
- *   3. After the resume, the marker token surfaces in the stream:
- *      either in the MCP tool's `call.settled`, or echoed verbatim in
- *      the assistant's reply `content.completed`. The marker is random per
- *      run and only ever produced by the bearer-gated MCP stub, so its
- *      presence proves the OAuth token reached MCP.
- *   4. A different user on the same anchored thread cannot reuse the
- *      first user's credential. Their connection call must produce a
- *      fresh `authorization.required` event in the original session.
- *      This distinguishes the active turn's `auth.current` from the
- *      session's original `auth.initiator`.
- *
- * Lifecycle note: `runEnvironment()` keeps the MCP stub and OAuth
- * emulator alive while the agent target runs.
- */
-
 const MARKER_TOKEN = `mcp-user-ok-${randomBytes(4).toString("hex")}`;
 const EXPECTED_TOOL_NAME = "connection__stub-mcp-user__echo_marker";
 const SEEDED_EMAIL = "alice@example.com";
 const THREAD_ID = `auth-user-${randomBytes(4).toString("hex")}`;
 
-/**
- * Asks the OS to pick a free port, then releases it. There is a small
- * race window between release and the emulator rebinding, but in
- * practice (single-host CI) it is enough to avoid the fixed-port
- * collision a hardcoded value would create when the smoke suite
- * eventually runs in parallel.
- */
 async function pickFreePort(): Promise<number> {
   return await new Promise((resolve, reject) => {
     const server = createServer();
@@ -85,13 +32,6 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   console.log(theme.muted(`[oauth-user] started stub MCP server at ${mcp.url}`));
   cleanup(() => mcp.stop());
 
-  // Seed only a user; deliberately omit `oauth_clients` so the
-  // emulator skips redirect-URI allowlisting and client_secret
-  // checks. (The framework callback URL embeds a per-hook token
-  // generated at runtime, so we can't pre-register it. Source check:
-  // both `/authorize/callback` and `/token` gate client validation on
-  // `ms.oauthClients.all().length > 0`.) PKCE verification still runs
-  // because the emulator stores the code-challenge regardless.
   const emulatorPort = await pickFreePort();
   const emulator: Emulator = await createEmulator({
     service: "microsoft",
@@ -199,8 +139,6 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     if (event.type === "call.requested" && event.data.capability.name.includes("echo_marker")) {
       markerCalls.add(event.data.callId);
     }
-    // Match on the marker as well as the stable tool-name suffix. The marker
-    // is random per run and only the bearer-gated MCP stub can emit it.
     if (
       event.type === "call.settled" &&
       markerCalls.has(event.data.callId) &&
@@ -213,9 +151,6 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
       }
     }
 
-    // Fallback proof: the prompt instructs the model to echo the tool's
-    // returned text verbatim, so the reply carries the marker even if the
-    // result event is unavailable.
     if (
       event.type === "content.completed" &&
       event.data.phase === "reply" &&
@@ -275,7 +210,6 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
 
   try {
     let replyResp: Response;
-    // A streamed terminal precedes the channel handler that claims its reply alias.
     while (true) {
       replyResp = await fetch(`${target.baseUrl}/anchor/reply`, {
         method: "POST",
@@ -334,7 +268,6 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
         );
       }
 
-      // The fresh sign-in pauses the second principal's turn on the person.
       if (
         event.type === "turn.settled" ||
         event.type === "session.ended" ||

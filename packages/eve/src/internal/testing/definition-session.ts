@@ -1,8 +1,3 @@
-/**
- * A session that declares dynamic definitions, for tests of how each kind installs what its
- * function returns. It holds only the bundle fields the reactions read.
- */
-
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { HistoryStateKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
@@ -20,7 +15,6 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
 type Evaluate = (ctx: DynamicContext) => unknown;
 
-/** What a build would bake for the model the fixture agents name. */
 const MODEL_METADATA = createModelMetadata({
   catalog: {
     models: [
@@ -53,11 +47,8 @@ function resolver<K extends DynamicDefinitionKind>(kind: K, source: DynamicSourc
   return { ...source, kind, logicalPath, sourceId: logicalPath, sourceKind: "module" as const };
 }
 
-/** A session with the given dynamic definitions, authored tool names, and static connections. */
 export function definitionSession(
   input: {
-    /** Authored skills, which a dynamic skill of the same name overrides. */
-    /** The agent's static user instructions. */
     readonly userInstructions?: readonly string[];
     readonly authoredSkills?: readonly {
       readonly content: string;
@@ -66,13 +57,11 @@ export function definitionSession(
     }[];
     readonly connections?: readonly DynamicSource[];
     readonly instructions?: readonly DynamicSource[];
-    /** The agent's static model. */
     readonly model?: { readonly id: string };
     readonly skills?: readonly DynamicSource[];
     readonly staticConnections?: readonly ResolvedConnectionDefinition[];
     readonly subagents?: readonly DynamicSubagentSource[];
     readonly tools?: readonly DynamicSource[];
-    /** Authored tools, by name; a value with `workflow` runs as a workflow tool. */
     readonly toolNames?: readonly (string | { readonly name: string; readonly workflow: true })[];
   } = {},
 ) {
@@ -140,15 +129,10 @@ export function definitionSession(
   return { ctx, registry };
 }
 
-/** Evaluates the session's dynamic values as eve does before a model call. */
 export async function beforeModelCall(ctx: ContextContainer): Promise<void> {
   await contextStorage.run(ctx, () => evaluateValues(ctx, { conversation: [] }));
 }
 
-/**
- * The messages the session's next model call announces, after evaluating its values as eve does
- * before one; records them as announced, as the call's commit would.
- */
 export async function announcedNext(ctx: ContextContainer): Promise<readonly string[]> {
   await beforeModelCall(ctx);
   return await contextStorage.run(ctx, async () => {
@@ -167,7 +151,6 @@ export async function announcedNext(ctx: ContextContainer): Promise<readonly str
   });
 }
 
-/** The message of the error the session's next evaluation fails with. */
 export async function evaluationError(ctx: ContextContainer): Promise<string> {
   try {
     await beforeModelCall(ctx);
@@ -177,7 +160,6 @@ export async function evaluationError(ctx: ContextContainer): Promise<string> {
   throw new Error("Expected the evaluation to fail.");
 }
 
-/** The skills the session's next model call can load, as its definitions contribute them. */
 export async function callSkills(
   ctx: ContextContainer,
 ): Promise<ReadonlyMap<string, CatalogSkill>> {
@@ -192,7 +174,6 @@ export async function callSkills(
   });
 }
 
-/** The dynamic tools the session's next model call offers, as its definitions kept them. */
 export async function dynamicTools(ctx: ContextContainer): Promise<HarnessToolDefinition[]> {
   const tools = await contextStorage.run(ctx, async () => {
     const draft = await stepDraft({

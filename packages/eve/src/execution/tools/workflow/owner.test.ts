@@ -49,7 +49,6 @@ it("relays what a fan-out sent between relays as one delivery, in order", async 
     { owner: { inbox: "session-inbox" } } as WorkflowToolRunInput,
     workflowRunHost,
   );
-  // Alice's triage opens three reviewers before the run reads its inbox.
   for (const sessionId of ["child-1", "child-2", "child-3"])
     await inbox.owner.send(opened(sessionId));
 
@@ -75,7 +74,6 @@ it("splits what queued up into deliveries of at most 64,000 characters, in order
     kind: "report",
     update: label.padEnd(size, "."),
   });
-  // Alice's reviewers report long findings faster than the run relays them.
   const sent = [
     report("first", 25_000),
     report("second", 25_000),

@@ -25,10 +25,6 @@ const tableColumnSeparator = " │ ";
 const tableBorderWidth = 3;
 const maxLinkUrlBytes = 2083;
 
-/**
- * Whether prose responses should be parsed and styled as Markdown.
- * `EVE_TUI_RENDER_MARKDOWN=0` bypasses Markdown parsing and styling.
- */
 export function detectMarkdownRendering(env?: {
   readonly EVE_TUI_RENDER_MARKDOWN?: string;
 }): boolean {
@@ -37,7 +33,6 @@ export function detectMarkdownRendering(env?: {
   return true;
 }
 
-/** Renders parsed GFM blocks for terminal presentation. */
 export function renderMarkdown(input: string, width = Number.POSITIVE_INFINITY): string {
   return trimTrailingBlankRows(renderBlocks(lexer(input), width, true)).join("\n");
 }
@@ -204,8 +199,6 @@ function renderInline(
 
   let rendered = "";
   for (const token of tokens) {
-    // Keep the introducing word with an image label so normal word wrapping
-    // cannot leave the image alone.
     if (token.type === "image" && rendered.endsWith(" ")) {
       rendered = `${rendered.slice(0, -1)}\u00a0`;
     }
@@ -255,10 +248,6 @@ function renderInlineToken(token: Token, options: InlineOptions): string {
   }
 }
 
-/**
- * Wraps `label` in an OSC 8 hyperlink to `href`, underlined. Terminals
- * without OSC 8 show the plain label. Unsafe hrefs return the label as-is.
- */
 export function renderHyperlink(label: string, href: string): string {
   return renderLink(label, href);
 }

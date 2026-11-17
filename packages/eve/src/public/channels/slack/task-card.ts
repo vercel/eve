@@ -37,16 +37,12 @@ import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 
 const log = createLogger("slack.task-card");
 
-/** A plan block holds at most 50 tasks. */
 const MAX_PLAN_ROWS = 50;
-/** A plan title names at most this many agents before it counts tasks instead. */
 const MAX_NAMED_AGENTS = 3;
-/** Shorter work says nothing useful about time, so rows leave it out. */
 const MIN_SHOWN_DURATION_MS = 1_000;
 const MAX_TITLE_LENGTH = 80;
 const MAX_LINE_LENGTH = 100;
 const MAX_BLOCKER_LABEL_LENGTH = 200;
-/** Unfinished turns whose cards eve keeps; the oldest drop first. */
 const MAX_TRACKED_TURNS = 20;
 const WRITE_RETRY_MS = 1_000;
 
@@ -60,13 +56,6 @@ interface SlackTaskObject {
   readonly title: string;
 }
 
-/**
- * eve's default task card: a `task_card` block for one task, or a `plan` block
- * for several, and no card for a turn that started none. A settled task shows
- * one line about how it ended and how long it took. A task the model cancelled
- * with `eve__task_cancel` shows as done, since it no longer needed the work; a
- * failed task, or one stopped any other way, shows as an error.
- */
 export function renderDefaultSlackTaskCard(snapshot: TaskCard): SlackCardMessage | null {
   const view = sessionTables(snapshot.view);
   const card: RenderCard = {
@@ -82,7 +71,6 @@ export function renderDefaultSlackTaskCard(snapshot: TaskCard): SlackCardMessage
     ...(earlier === undefined ? [] : [earlier]),
     ...rows.map((row) => toSlackTask(card, row)),
   ];
-  // Slack keeps the rows a reader expanded only while the block id stays the same.
   const block_id = slackBlockId(card.turnId);
   const blocks: BlockKitBlock[] =
     slackRows.length === 1
@@ -99,8 +87,6 @@ function planTitle(card: RenderCard, tasks: readonly CallRow[]): string {
     return waitingText(asked[0]?.request.kind);
   }
   const total = tasks.length;
-  // One task renders as a `task_card` without a plan title, so naming it there
-  // would only repeat its row title in the notification text.
   const names = (subset: readonly CallRow[]) => (total > 1 ? agentNames(view, subset) : undefined);
   if (card.state === "working") {
     const working = tasks.filter((row) => row.status !== "settled");
@@ -123,11 +109,6 @@ function planTitle(card: RenderCard, tasks: readonly CallRow[]): string {
   return outcomes.length === 0 ? finished : `${finished}: ${outcomes.join(", ")}`;
 }
 
-/**
- * `d0`, `d0 and sre`, or `d0, sre, and index` when every task is a call to a
- * named agent. A call to the agent's own copy, a tool task, or more than three
- * agents falls back to a count.
- */
 function agentNames(view: SessionView, tasks: readonly CallRow[]): string | undefined {
   const agent = (row: CallRow) =>
     (row.taskId === undefined ? undefined : view.tasks[row.taskId]?.kind) ?? row.capability.kind;
@@ -140,7 +121,6 @@ function agentNames(view: SessionView, tasks: readonly CallRow[]): string | unde
   return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)!}`;
 }
 
-/** From the first task's start to the last one's end. */
 function turnDuration(tasks: readonly CallRow[]): string | undefined {
   const ends = tasks.flatMap((row) => (row.endedAt === undefined ? [] : [Date.parse(row.endedAt)]));
   if (ends.length === 0) return undefined;
@@ -162,7 +142,6 @@ function failedTask(view: SessionView, row: CallRow): boolean {
   return state === "failed" || state === "rejected";
 }
 
-/** A task stopped before it finished for any reason but the model's own `eve__task_cancel`. */
 function isInterrupted(view: SessionView, row: CallRow): boolean {
   return callState(view, row.callId) === "cancelled" && row.reason !== "task-cancel";
 }
@@ -171,7 +150,6 @@ function countTasks(count: number): string {
   return count === 1 ? "1 task" : `${String(count)} tasks`;
 }
 
-/** Keeps a plan within Slack's cap by folding the oldest settled rows into one. */
 function collapseEarlierRows(
   view: SessionView,
   tasks: readonly CallRow[],
@@ -232,7 +210,6 @@ function outputLine(card: RenderCard, row: CallRow): string | undefined {
     case "failed":
     case "rejected": {
       const failed = took === undefined ? "Failed" : `Failed after ${took}`;
-      // An error can say what the task was working on: only a private conversation reads it.
       const summary = card.audience === "private" ? brief(row.error?.message) : undefined;
       return summary === undefined ? failed : `${failed}: ${summary}`;
     }
@@ -256,7 +233,6 @@ function stoppedLine(reason: CallRow["reason"]): string {
   }
 }
 
-/** What a request asks; its prompt or the connection's name only in a private conversation. */
 function blockerLine(card: RenderCard, asked: InteractionRow): string {
   const { request } = asked;
   const waitingOn = waitingText(request.kind);
@@ -280,7 +256,6 @@ function waitingText(kind: InteractionRow["request"]["kind"] | undefined): strin
   }
 }
 
-/** The text a result leads with: a string result, or an agent reply's message. */
 function resultText(output: JsonValue | undefined): unknown {
   if (typeof output === "string") return output;
   if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
@@ -304,7 +279,6 @@ function richText(line: string): BlockKitBlock {
   };
 }
 
-/** Cuts at a word boundary when one is near, so a row doesn't end mid-word. */
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   const cut = text.slice(0, max - 1);
@@ -312,7 +286,6 @@ function truncate(text: string, max: number): string {
   return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
-/** Slack task ids must be unique in a plan; call ids are, but can carry characters Slack rejects. */
 function slackTaskId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(-200);
 }
@@ -329,11 +302,6 @@ export interface SlackTaskCardState {
   readonly since?: number;
 }
 
-/**
- * Keeps each turn's task cards current from the session's tables, once per commit. It runs after
- * the renderer chain's own `committed`, so the card never depends on which handlers a renderer
- * keeps, and writes each card `taskCard` returns if it changed.
- */
 export function withTaskCards(
   events: SlackChannelInternalEvents,
   taskCard: (card: TaskCard) => SlackCardMessage | null,
@@ -357,13 +325,6 @@ export function withTaskCards(
   };
 }
 
-/**
- * Writes the turn's cards from the one its message shows on: that card as it now stands, then
- * each later one as a new message, so a turn the caller kept talking to doesn't add its next tasks
- * to a card far up the thread. A turn whose latest card finished is forgotten, since its cards
- * can't change again; one the tables no longer hold is left as last written. A schedule's session
- * posts only its final reply, and a session without a thread has nowhere to post.
- */
 async function writeTaskCards(
   channel: SlackEventContext,
   view: SessionView,
@@ -376,7 +337,6 @@ async function writeTaskCards(
   const since = channel.state.taskCards?.[turnId]?.since ?? 0;
   for (const card of cards) {
     if (card.since < since) continue;
-    // No `ts`: a later card posts a new message, even if the last write of the one before failed.
     if (card.since > (channel.state.taskCards?.[turnId]?.since ?? 0)) {
       rememberCard(channel.state, turnId, { since: card.since });
     }
@@ -385,7 +345,6 @@ async function writeTaskCards(
   if (cards.at(-1)?.state === "finished") forgetTurn(channel.state, turnId);
 }
 
-/** Posts or updates a card unless it reads as last written. */
 async function writeChangedCard(
   channel: SlackEventContext,
   turnId: string,
@@ -393,7 +352,6 @@ async function writeChangedCard(
   taskCard: (card: TaskCard) => SlackCardMessage | null,
 ): Promise<void> {
   const { channelId, codeChannel } = channel.state;
-  // A code channel's card posts in the thread its turn answers, else top-level.
   const threadTs = (codeChannel ? channel.state.replyThreadTs : channel.state.threadTs) ?? "";
   const scheduled = contextStorage.getStore()?.get(ScheduleIdKey) !== undefined;
   if (!channelId || !(threadTs || codeChannel) || scheduled) return;
@@ -403,10 +361,8 @@ async function writeChangedCard(
   const fingerprint = createHash("sha256").update(JSON.stringify(card)).digest("base64url");
   if (fingerprint === current.fingerprint) return;
   const ts = await writeCardWithRetry(channel.slack, { card, channelId, threadTs, ts: current.ts });
-  // A card that failed to land keeps its last fingerprint, so the turn's next change writes it.
   if (ts === undefined) return;
   rememberCard(channel.state, turnId, { ...current, fingerprint, ts });
-  // Slack clears the thread status when the app posts, but the turn works on.
   if (ts !== current.ts && view.state === "working") await restoreStatus(channel);
 }
 
@@ -424,7 +380,6 @@ function forgetTurn(state: SlackChannelState, turnId: string): void {
   state.taskCards = cards;
 }
 
-/** An authored card that throws leaves that turn's card as it was. */
 function renderCard(
   taskCard: (card: TaskCard) => SlackCardMessage | null,
   view: TaskCard,
@@ -444,11 +399,6 @@ interface CardWrite {
   readonly ts: string | undefined;
 }
 
-/**
- * Writes a card, trying once more after a second. A card that still fails
- * keeps its last fingerprint, so the next change writes it again. Never
- * throws: a card is never worth failing the turn over.
- */
 async function writeCardWithRetry(
   slack: SlackHandle,
   write: CardWrite,
@@ -464,7 +414,6 @@ async function writeCardWithRetry(
   return undefined;
 }
 
-/** Updates the card in place, or posts it again when someone deleted it. */
 async function writeCard(slack: SlackHandle, write: CardWrite): Promise<string> {
   const message = { blocks: write.card.blocks, channel: write.channelId, text: write.card.text };
   if (write.ts !== undefined) {

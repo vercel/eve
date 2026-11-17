@@ -1,11 +1,3 @@
-/**
- * Projects A2A tasks from an eve session's durable stream.
- *
- * One A2A task is the turn its starting delivery opened or joined. Follow-ups a client sends with
- * the task's `taskId` (refinements, typed answers) join that same turn, because an eve turn stays
- * running while it waits on interactions. Nothing here writes: every read folds the session's
- * lines, as the MCP channel's invocation reads do.
- */
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import { signInChallengeText, signInOf } from "#channel/sign-in.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
@@ -41,7 +33,6 @@ import {
   type TaskStatus,
 } from "./protocol.js";
 
-/** A session an eve before v27 recorded. A2A sessions never are, but a contextId can name one. */
 function legacySession(): A2aError {
   return new A2aError(
     A2A_JSON_RPC_ERRORS.unsupportedOperation,
@@ -49,7 +40,6 @@ function legacySession(): A2aError {
   );
 }
 
-/** The session folded to its current tail. */
 export async function readSessionView(sessionId: string): Promise<SessionView> {
   const view = emptySessionView();
   for await (const { line, position, record } of streamSessionLines(sessionId, {
@@ -64,10 +54,6 @@ export async function readSessionView(sessionId: string): Promise<SessionView> {
   return view;
 }
 
-/**
- * The session folded to its tail, then again after every later line, until `signal` aborts or the
- * session's stream ends. Yields the same view object each time; read it before resuming.
- */
 export async function* followSessionView(
   sessionId: string,
   signal: AbortSignal,
@@ -89,13 +75,9 @@ export async function* followSessionView(
 }
 
 export interface ProjectTaskOptions {
-  /** `historyLength`: unset is unlimited, 0 omits history. */
   readonly historyLength?: number;
-  /** Defaults to true; `ListTasks` omits artifacts unless asked. */
   readonly includeArtifacts?: boolean;
-  /** A working status names the tool the task is running. Defaults to true. */
   readonly toolActivity?: boolean;
-  /** The text a failed status carries. Defaults to {@link failureText}. */
   readonly failureText?: (failure: A2aFailure) => string;
 }
 
@@ -109,7 +91,6 @@ export interface A2aFailure {
   readonly id?: string;
 }
 
-/** The A2A task a delivery started. */
 export function projectTask(
   view: SessionView,
   ref: TaskRef,
@@ -137,7 +118,6 @@ export function projectTask(
   return task;
 }
 
-/** A task whose message the session hasn't admitted yet, as `projectTask` reads it then. */
 export function submittedTask(ref: TaskRef): Task {
   return {
     contextId: ref.sessionId,
@@ -158,7 +138,6 @@ function taskStatus(
   address: TaskAddress,
   options: ProjectTaskOptions,
 ): TaskStatus {
-  // Not yet visible on the stream: the session hasn't admitted the message.
   if (delivery === undefined) return { state: "TASK_STATE_SUBMITTED" };
   if (turn === undefined) {
     if (delivery.status !== "settled") {
@@ -166,8 +145,6 @@ function taskStatus(
         ? status("TASK_STATE_FAILED", address, view.session.endedAt, "The context ended.")
         : status("TASK_STATE_SUBMITTED", address, delivery.startedAt);
     }
-    // Settled without a turn: refused or ignored by the session, failed before it ran, or
-    // applied as control.
     const state: TaskState =
       delivery.outcome === "refused" || delivery.outcome === "ignored"
         ? "TASK_STATE_REJECTED"
@@ -184,7 +161,6 @@ function taskStatus(
     return status(state, address, delivery.endedAt, reason);
   }
 
-  // Open prompts outrank how the turn ended: a pending batch can outlive a settled turn.
   const prompts = openPromptsForTurn(view, turn.turnId);
   if (prompts.length > 0) {
     const asking = prompts.some((row) => row.request.kind !== "sign-in");
@@ -261,7 +237,6 @@ function agentMessage(address: TaskAddress, messageId: string, parts: readonly P
   };
 }
 
-/** When the turn last went back to work: its start, or the latest prompt it was answered on. */
 function resumedAt(view: SessionView, turn: TurnRow): string {
   const answered = indexOf(view).endedPromptsByTurn.get(turn.turnId) ?? [];
   return latest([turn.startedAt, ...answered]) ?? turn.startedAt;
@@ -274,16 +249,10 @@ function latest(times: readonly string[]): string | undefined {
   );
 }
 
-/** The turn's open prompts no admitted answer covers yet, oldest first. */
 export function openPromptsForTurn(view: SessionView, turnId: string): readonly InteractionRow[] {
   return indexOf(view).openPromptsByTurn.get(turnId) ?? [];
 }
 
-/**
- * A view's rows grouped by the turn they belong to, built once per view and position. Projecting
- * a task looks its turn up here instead of scanning the session, so projecting every task in a
- * context, as `ListTasks` does, costs time linear in the session rather than quadratic.
- */
 interface ViewIndex {
   readonly position: number;
   readonly deliveriesByTurn: ReadonlyMap<string, readonly DeliveryRow[]>;
@@ -296,7 +265,6 @@ const viewIndexes = new WeakMap<SessionView, ViewIndex>();
 
 function indexOf(view: SessionView): ViewIndex {
   const known = viewIndexes.get(view);
-  // A followed view folds more lines into the same object: rebuild once it has moved on.
   if (known !== undefined && known.position === view.position) return known;
   const push = <T>(map: Map<string, T[]>, key: string | undefined, value: T) => {
     if (key === undefined) return;
@@ -334,14 +302,6 @@ function indexOf(view: SessionView): ViewIndex {
   return index;
 }
 
-/**
- * The status message for an interrupted task: the prompts as text any client can answer by typing
- * (eve's typed-answer intake resolves option IDs, labels, and numbers). eve's interaction JSON
- * stays off the wire: it's an internal format, and text is what every A2A client can answer.
- *
- * A sign-in's link and code are credentials, but an A2A context has one principal, its owner, so
- * they go in the message as they would in a direct message.
- */
 function promptMessage(
   view: SessionView,
   rows: readonly InteractionRow[],
@@ -363,14 +323,8 @@ function promptMessage(
   );
 }
 
-/** Longest failure text a status carries. */
 const MAX_FAILURE_TEXT_LENGTH = 300;
 
-/**
- * What a failed status says: the error's first line, bounded, with its support id. An error's
- * message can carry an upstream HTML page or stack frames, which are internal to this agent and
- * don't help the caller; the server's logs keep the whole error under the same id.
- */
 export function failureText(message: string | undefined, id?: string): string {
   const firstLine = (message ?? "")
     .split(/\r?\n/u)[0]!
@@ -385,18 +339,12 @@ export function failureText(message: string | undefined, id?: string): string {
   return id === undefined ? brief : `${brief} (error id: ${id})`;
 }
 
-/**
- * A failure as the channel's `failureText` describes it. One that throws or returns no text gets
- * the default instead: a read of the task must not fail because describing its failure did.
- */
 function describeFailure(options: ProjectTaskOptions, failure: A2aFailure): string {
   if (options.failureText !== undefined) {
     try {
       const text = options.failureText(failure);
       if (typeof text === "string" && text.length > 0) return text;
-    } catch {
-      // Fall through to the default.
-    }
+    } catch {}
   }
   return failureText(failure.message, failure.id);
 }
@@ -408,7 +356,6 @@ function workingLabel(view: SessionView, turnId: string): string | undefined {
   return undefined;
 }
 
-/** The turn's reply as one artifact: its structured result when it has one, else its text. */
 function replyArtifacts(view: SessionView, turnId: string): readonly Artifact[] | undefined {
   const structured = reply(view, turnId).find((part) => part.kind === "result");
   if (structured?.value !== undefined) {
@@ -427,10 +374,6 @@ function replyArtifacts(view: SessionView, turnId: string): readonly Artifact[] 
   ];
 }
 
-/**
- * The task's user messages, newest last: the deliveries that joined its turn, and the answers
- * given to its prompts.
- */
 function taskHistory(
   view: SessionView,
   ref: TaskRef,
@@ -467,7 +410,6 @@ function taskHistory(
   }
   if (turnId !== undefined) {
     for (const response of index.responsesByTurn.get(turnId) ?? []) {
-      // A typed answer that arrived as a message is listed already, with what was typed.
       if (listed.has(response.deliveryId)) continue;
       const text = answerText(view, response.interactionId, response.value);
       if (text === undefined) continue;
@@ -481,7 +423,6 @@ function taskHistory(
   return historyLength === undefined ? messages : messages.slice(-historyLength);
 }
 
-/** An answer as the text a person would have typed: what they wrote, or the option's label. */
 function answerText(
   view: SessionView,
   interactionId: string,
@@ -495,26 +436,13 @@ function answerText(
   return option?.label ?? value.optionId;
 }
 
-/** One task of a context with its `ListTasks` sort key. */
 export interface ContextTask {
   readonly ref: TaskRef;
-  /** The task as `options` projected it; `ListTasks` re-projects the page it returns. */
   readonly task: Task;
-  /** Status time in epoch milliseconds; 0 when unknown. */
   readonly at: number;
-  /** Stream position of the delivery that started it: the tie-breaker. */
   readonly seq: number;
 }
 
-/**
- * The tasks of one context: one per turn, named by the first delivery that reached it, plus each
- * message the session has yet to start or refused outright. Deliveries that settled without a turn
- * otherwise (answers, controls) belong to another task. Newest status first, as `ListTasks` sorts.
- */
-/**
- * Whether the context has work a new task would collide with: a running turn, or a task not yet
- * terminal, such as one waiting on a question or still queued.
- */
 export function contextBusy(view: SessionView, sessionId: string): boolean {
   if (Object.values(view.turns).some((turn) => turn.status === "running")) return true;
   return contextTasks(view, sessionId, { historyLength: 0, includeArtifacts: false }).some(
@@ -550,7 +478,6 @@ export function contextTasks(
   return tasks.sort(compareContextTasks);
 }
 
-/** Newest status first; among equal times, the later-started task first. */
 export function compareContextTasks(
   a: Pick<ContextTask, "at" | "seq">,
   b: Pick<ContextTask, "at" | "seq">,
@@ -558,17 +485,12 @@ export function compareContextTasks(
   return b.at - a.at || b.seq - a.seq;
 }
 
-/** Whether the session has read `deliveryId`: consumed or settled it, or admitted it as answers. */
 export function hasRead(view: SessionView, deliveryId: string): boolean {
   const row = view.deliveries[deliveryId];
   if (row !== undefined) return row.status !== "admitted";
   return Object.values(view.responses).some((response) => response.deliveryId === deliveryId);
 }
 
-/**
- * Whether the session turned down an answer `deliveryId` carried (an approval's response policy
- * refused its responder, say): its prompt stays open, so waiting for the status to move is futile.
- */
 export function answerTurnedDown(view: SessionView, deliveryId: string): boolean {
   return Object.values(view.responses).some(
     (response) =>
@@ -579,10 +501,6 @@ export function answerTurnedDown(view: SessionView, deliveryId: string): boolean
   );
 }
 
-/**
- * The task a follow-up reached. A follow-up joins its task's turn, but one that arrives as that
- * turn ends starts a turn of its own: a new task, named by the follow-up itself.
- */
 export function reachedTask(view: SessionView, task: TaskRef, deliveryId: string): TaskRef {
   if (deliveryId === task.deliveryId) return task;
   const reached = view.deliveries[deliveryId]?.turnId;
@@ -592,7 +510,6 @@ export function reachedTask(view: SessionView, task: TaskRef, deliveryId: string
     : { deliveryId, sessionId: task.sessionId };
 }
 
-/** Whether `deliveryId` reached the session at all. */
 export function hasDelivery(view: SessionView, deliveryId: string): boolean {
   return (
     view.deliveries[deliveryId] !== undefined ||

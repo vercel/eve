@@ -14,20 +14,12 @@ import {
 import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
 
-/** Extension a client declares to join tool sessions with `_meta["dev.eve/tool-session"]`. */
 export const MCP_TOOL_SESSIONS_EXTENSION = "dev.eve/tool-sessions";
-/** `_meta` key carrying a `tools/call`'s tool session key. */
 export const MCP_TOOL_SESSION_META_KEY = "dev.eve/tool-session";
 
 const log = createLogger("mcp.tools");
 const warnedReserved = new Set<string>();
 
-/**
- * The agent's invocable tools as MCP tools. Each `tools/call` runs the tool
- * through `invokeTool` as `principals`: the route-authenticated caller, or the
- * user a trusted forwarder named. Tools named like one in `reserved` are
- * skipped, since the channel serves that name itself.
- */
 export function createPublishedTools(input: {
   readonly invokeTool: InvokeToolFn;
   readonly principals: McpRequestPrincipals;
@@ -59,8 +51,6 @@ export function createPublishedTools(input: {
           const key = toolSessionKey(context);
           const result = await input.invokeTool(tool.name, value, {
             auth: current,
-            // The verified forwarder scopes a keyed session, so two routers
-            // that name the same user do not share a sandbox.
             forwardedBy: forwarder,
             initiator,
             key,
@@ -72,12 +62,6 @@ export function createPublishedTools(input: {
     );
 }
 
-/**
- * The call's tool session key. It is honoured only from a client that
- * declared the extension in this request's capabilities; any other client,
- * including every 2025-era client, gets a one-off session whatever its
- * `_meta` carries. `invokeTool` checks the key's length.
- */
 function toolSessionKey(context: McpToolCallContext): string | undefined {
   const declared = context.clientCapabilities;
   const extensions = isObject(declared) ? declared.extensions : undefined;
@@ -105,15 +89,10 @@ function toCallToolResult(
       const text =
         modelOutput.type === "text" || isError ? modelOutput.value : JSON.stringify(output ?? null);
       const content = [{ text, type: "text" as const }];
-      // A declared outputSchema obliges structured content of any JSON type: the
-      // SDK rejects a result without it and wraps non-objects as `{ result }` on
-      // 2025 connections. Without a schema, only objects are structured.
       const structured =
         hasOutputSchema || isJsonObjectValue(output)
           ? { content, structuredContent: output ?? null }
           : { content };
-      // A tool that reports failure to the model, like `bash` on a non-zero
-      // exit, reports it to MCP clients too.
       return isError ? { ...structured, isError: true } : structured;
     }
     case "rejected":

@@ -7,7 +7,6 @@ class GenerationSteeredError extends Error {
   }
 }
 
-/** Interrupts generation without cancelling the turn or replaying local effects. */
 export class GenerationSteering {
   private readonly controller = new AbortController();
   private active = false;
@@ -42,7 +41,6 @@ export class GenerationSteering {
     this.check();
   }
 
-  /** Steering cut the generation; what the step still publishes settles it, so nothing stops it. */
   end(): void {
     this.active = false;
   }
@@ -55,16 +53,12 @@ export class GenerationSteering {
   beforeEvent(event: SessionEvent): void {
     if (!this.active) return;
     this.check();
-    // Published requests and terminal events must finish committing, even
-    // when the model produced no assistant text.
     if (
       event.type === "interaction.opened" ||
       (event.type === "model.settled" && event.data.outcome === "failed") ||
       event.type === "turn.settled"
     )
       this.effectsStarted = true;
-    // A tool call's streaming input keeps this call: a reader has shown it, and a cut would make
-    // the model write it again. The turn's output stays unstarted, so a later call can still be cut.
     if (
       event.type === "call.input" ||
       (event.type === "content.delta" &&

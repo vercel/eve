@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag } from "../lib/tool";
 
+/** Lets the agent list visible windows with their ids, titles, apps, bounds, and focus state. */
 export default desktopTool({
   description: "List visible windows with their ids, titles, apps, bounds, and focus state.",
   inputSchema: z.object({ app: z.string().optional().describe("Filter by exact app name.") }),

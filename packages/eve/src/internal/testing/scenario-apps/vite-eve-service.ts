@@ -1,11 +1,5 @@
 import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
-/**
- * A Vite host with a generated eve Vercel service. The agent lives in the
- * host root, and a stand-in for a framework adapter writes the Vercel Build
- * Output in `closeBundle`, as real adapters do, so `eveVite()` must run after
- * the environment builds.
- */
 export function createViteEveServiceDescriptor(): ScenarioAppDescriptor {
   return {
     dependencies: { vite: "^8.3.1" },

@@ -63,11 +63,9 @@ const { approval, execute } = skillChange<z.infer<typeof inputSchema>, SavePlan,
     };
   },
   async run(plan, { skills, scope, approved, ctx }) {
-    // Writes the plan the approval rule judged; a scope that changed since fails and is retried.
     const { skill, previous, replayed } = await skills.applySave(scope, plan, {
       savedBy: skillAuthor(ctx.session.auth.current),
       idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
-      // A first version that now needs approval nobody gave waits as a draft.
       draft: !approved,
     });
     const live = skill.status === "active";

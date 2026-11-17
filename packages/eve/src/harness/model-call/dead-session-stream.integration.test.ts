@@ -1,4 +1,3 @@
-// @linux-only: dead stream during model step
 import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,10 +8,6 @@ import type { HarnessSession } from "#harness/types.js";
 import { createTestKernel } from "#internal/testing/kernel.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-
-// Once a session stream write fails, the stream is errored and every later write fails too. The
-// step rethrows the write's error at once, so Workflow retries it with a fresh stream: no
-// further provider request and no further write.
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -51,7 +46,6 @@ const reply = (text: string): StreamPart[] => [
   finish("stop"),
 ];
 
-/** Reasoning first: steering can still cut a call that has shown no text. */
 const reasonedReply = (text: string): StreamPart[] => [
   { type: "stream-start", warnings: [] },
   { id: "r", type: "reasoning-start" },
@@ -60,7 +54,6 @@ const reasonedReply = (text: string): StreamPart[] => [
   ...reply(text).slice(1),
 ];
 
-/** A stream that closes without output or a finish, which eve reissues once. */
 const empty = (): StreamPart[] => [{ type: "stream-start", warnings: [] }];
 
 const lookupCall = (): StreamPart[] => [
@@ -69,18 +62,15 @@ const lookupCall = (): StreamPart[] => [
   finish("tool-calls"),
 ];
 
-/** What the stream rejects with: a workflow server error that would read as transient. */
 const unavailable = () =>
   Object.assign(new Error("Stream write failed: HTTP 503"), { statusCode: 503 });
 
 async function runDeadStep(options: {
   readonly doStream: MockLanguageModelV3["doStream"];
-  /** The write the stream dies at. */
   readonly diesAt: (event: SessionEvent) => boolean;
   readonly agent?: Parameters<typeof createTestKernel>[0]["agent"];
   readonly cause?: () => unknown;
   readonly history?: HarnessModelMessage[];
-  /** Runs as the stream dies, before the write rejects. */
   readonly onDeath?: () => void;
   readonly steeringSignal?: AbortSignal;
 }) {
@@ -219,7 +209,6 @@ describe("a session stream that dies during a model step", () => {
       },
       diesAt: (event) => event.type === "context.started",
       doStream,
-      // Long enough that it compacts before the turn's first model call.
       history: [
         { content: "Alice's weekly notes. ".repeat(2_000), kind: "user", role: "user" },
         { content: "Noted.", role: "assistant" },

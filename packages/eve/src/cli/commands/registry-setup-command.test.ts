@@ -135,7 +135,6 @@ describe("runRegistrySetupCommand", () => {
         id: 8,
         prompt: searchSelect({ labelTemplate: "Search for '\0query\0'" }),
       });
-      // A child that predates labelTemplate: JSON dropped its functions.
       running.emit("message", { type: "prompt", id: 9, prompt: searchSelect({}) });
       running.emit("message", { type: "result", outcome: { kind: "completed", facts: [] } });
     });

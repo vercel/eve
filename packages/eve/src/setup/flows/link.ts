@@ -25,11 +25,9 @@ import pc from "#compiled/picocolors/index.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
 
-/** Injected for tests; defaults to the real detection and box effects. */
 export interface LinkFlowDeps {
   detectProjectIdentity: typeof detectProjectIdentity;
   findEnvFileWithKey: typeof findEnvFileWithKey;
-  /** Shell environment probed for a gateway key that would shadow OIDC. */
   env: Record<string, string | undefined>;
   resolveProvisioning?: ResolveProvisioningDeps;
   linkProject?: LinkProjectDeps;
@@ -39,45 +37,14 @@ export interface LinkFlowDeps {
 type LinkFlowResult =
   | {
       kind: "done";
-      /**
-       * The credential the runtime will actually resolve, from the one
-       * precedence authority ({@link resolveGatewayCredential}): a gateway
-       * API key — env file or shell — outranks the pulled OIDC token.
-       */
       resolution?: GatewayCredentialResolution;
     }
   | { kind: "cancelled" };
 
-/**
- * THE LINK FLOW, shared by `eve link` and the dev TUI `/model` menu's provider row (its
- * "Connect via a project" branch): the same
- * team/project pickers onboarding uses, then the actual `vercel link`, then a
- * `vercel env pull` so the AI Gateway credential lands in `.env.local`.
- *
- * Re-link semantics: an already-linked directory shows its current link as a
- * gate — one "Link to another project" option; Esc keeps the link and folds
- * to cancelled — and only then runs the pickers. The new choice is
- * authoritative (the state seeds an unresolved project so no stale link leaks
- * into the boxes). Reaching this flow IS the "use Vercel" decision, so
- * resolve-provisioning's deploy gate is pre-answered.
- *
- * Ends by verifying a model credential actually landed (`VERCEL_OIDC_TOKEN`
- * or `AI_GATEWAY_API_KEY` in an env file) — an env pull can succeed without
- * granting gateway access, and the difference is what the user acts on next.
- * The reported credential mirrors runtime resolution — `AI_GATEWAY_API_KEY`
- * (env file or shell) outranks the OIDC token, exactly as the AI SDK gateway
- * provider resolves it — so the outcome message, the status bar, and the
- * actual authentication can never disagree.
- */
 export async function runLinkFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
-  /**
-   * Whether the caller may only link an existing project (`eve link`, the
-   * default) or may also create one (the `/model` "Connect via a project"
-   * branch, where a fresh agent has no project yet).
-   */
   projectSelection?: "create-or-link" | "existing-only";
   teamSelectMessage?: (currentTeam: string) => string;
   deps?: Partial<LinkFlowDeps>;
@@ -96,9 +63,6 @@ export async function runLinkFlow(input: {
     return detected;
   });
   if (identity === undefined) {
-    // A working model is NOT evidence of a link — credentials can come from
-    // an env file or the shell. Naming the source heads off "but it clearly
-    // works" confusion when the link detection correctly says unlinked.
     const [gatewayKey, oidc] = await Promise.all([
       deps.findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
       deps.findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
@@ -127,8 +91,6 @@ export async function runLinkFlow(input: {
       });
       if (choice === "dismiss") return { kind: "cancelled" };
     } catch (error) {
-      // Keeping the current link is a clean outcome, not a failure — fold the
-      // cancel here so the CLI command never paints it as an error.
       if (error instanceof WizardCancelledError) {
         return { kind: "cancelled" };
       }
@@ -143,20 +105,12 @@ export async function runLinkFlow(input: {
       prompter,
       targetDirectory: appRoot,
       mode: { headless: false },
-      // The gate above already showed the current link; adopting it here would
-      // skip the pickers that choosing "Link to another project" exists to reach.
       adoptExistingLink: false,
-      // `eve link` links an existing project (the default); the `/model`
-      // "Connect via a project" branch passes "create-or-link" so a fresh
-      // agent can create its first project here instead of dead-ending on an
-      // empty project list.
       projectSelection,
       teamSelectMessage: input.teamSelectMessage,
       deps: deps.resolveProvisioning,
     }),
     linkVercelProject({ prompter, deps: deps.linkProject }),
-    // The default `inherit` gateway plan makes the credential box pull the
-    // freshly linked project's env into .env.local.
     detectAiGateway(),
     applyAiGatewayCredential({ prompter, deps: deps.applyAiGatewayCredential }),
   ];
@@ -174,9 +128,6 @@ export async function runLinkFlow(input: {
     deps.findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
   ]);
   signal?.throwIfAborted();
-  // Success stays silent here: the caller owns the closing line (`eve link`'s
-  // outro, the /model menu's "Connected to AI Gateway" notice), so only the
-  // actionable failure earns output.
   if (oidcFile === undefined && gatewayKeyFile === undefined) {
     prompter.log.warning(
       "Linked, but no model credential landed in an env file (VERCEL_OIDC_TOKEN or " +
@@ -184,9 +135,6 @@ export async function runLinkFlow(input: {
     );
   }
   const done: LinkFlowResult = { kind: "done" };
-  // The link provisioned OIDC, but reporting it while a key shadows it
-  // would claim a credential that never authenticates a call — the one
-  // precedence authority decides what actually won.
   const evidence: {
     apiKeyInEnv: boolean;
     apiKeyFile?: string;

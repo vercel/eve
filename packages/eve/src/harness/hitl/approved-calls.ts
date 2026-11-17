@@ -30,16 +30,8 @@ import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 
 export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
 
-/**
- * How the sign-ins a batch of resumed calls waited on are reported. A call that completes a sign-in
- * reports it then (`completed`, read through `SignInCompletedKey`), so the other askers for the
- * same grant resume while the call still runs; the call's end reports what is left (`report`):
- * accepted if it returned, failed with the reason it didn't. Each attempt is reported once, by
- * whichever comes first, however many calls complete it at the same time.
- */
 export interface SignInReports {
   readonly report: (call: ApprovedCall, failure?: Error | string) => Promise<void>;
-  /** The reporter for `SignInCompletedKey` while `calls` run: each attempt with the call it stopped. */
   readonly completed: (calls: readonly ApprovedCall[]) => SignInCompleted;
 }
 
@@ -96,27 +88,16 @@ export function signInReports(input: {
   };
 }
 
-/**
- * Runs approved local calls before the model reads their results. Like the calls a model step
- * runs inline, each streams its progress and result as it goes. The lifecycle owner places the
- * results in the steps that made the calls.
- */
 export async function runApprovedCalls(input: {
   readonly approvals: readonly ApprovedCall[];
-  /** The entries of the step that asked, which the approved calls run. */
   readonly tools: HarnessToolLookup;
   readonly approvalMemory?: ApprovalMemory;
-  /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
-  /** The step attempt's telemetry, which hears each execution as the AI SDK reports it. */
   readonly telemetry?: TelemetryOptions;
-  /** Who approved each call, which it reads as `ctx.approval`; it still runs as the requester. */
   readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
-  /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
   readonly view: () => Pick<SessionView, "projection">;
-  /** The batch's sign-in reports, shared by every group of calls resumed together. */
   readonly signIns?: SignInReports;
 }): Promise<{
   readonly settled: readonly CallResult[];
@@ -148,7 +129,6 @@ export async function runApprovedCalls(input: {
           "recheck",
         );
       }
-      // A connection or dynamic tool can go away while its call waits for approval.
       const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;
       const message = unavailableToolMessage(toolName, searchable);
       const failed = failedCall({ callId, message, toolName });
@@ -158,9 +138,6 @@ export async function runApprovedCalls(input: {
     }),
   );
   const failed = executed.find((call) => call.status === "rejected");
-  // Only a cancellation rejects a call, and only one that hadn't started: it stays approved. The
-  // calls that settled keep their results, and the caller ends the cancelled turn after it
-  // records them.
   if (failed?.status === "rejected" && input.abortSignal?.aborted !== true) throw failed.reason;
   const completed = executed.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
   return {

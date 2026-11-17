@@ -19,7 +19,6 @@ vi.mock("#execution/publish-session-events.js", async (importOriginal) => ({
 }));
 
 it("records a dynamic remote child's opening binding for the parent's stream proxy", async () => {
-  // Alice opened the child as Acme; the proxy renders its credentials from this binding alone.
   const opening: DynamicRemoteBinding = {
     at: "2026-01-01T00:00:00.000Z",
     channel: { kind: "unknown", metadata: {} },

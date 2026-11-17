@@ -80,7 +80,6 @@ describe("recallChannel webhook", () => {
     expect(delivery.message).toBe("Alice: Eve, approve.");
     expect(delivery.answerText).toBe("approve");
     expect(delivery.auth.principalId).toBe("recall:bot_1:7");
-    // Recall retries with the same webhook id, so the session drops the repeat.
     expect(delivery.idempotencyKey).toBe("msg_1");
   });
 
@@ -127,7 +126,6 @@ describe("recallChannel webhook", () => {
       signed(speech("Eve hi"), { "content-length": String(1024 * 1024) }),
       413,
     ],
-    // Recall retries any non-2xx every second, so a signed body we can't read is acknowledged.
     ["a signed body that isn't JSON", signed("not json"), 204],
   ])("answers %s with %i and dispatches nothing", async (_name, request, status) => {
     const { response, send } = await post(request);
@@ -210,7 +208,6 @@ describe("recallChannel deliver", () => {
   });
 });
 
-/** A channel on a fake Recall API, driven the way a session step drives it. */
 function liveChannel(state: Record<string, unknown>) {
   const posts: { message: string; to?: string }[] = [];
   const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -230,7 +227,6 @@ function liveChannel(state: Record<string, unknown>) {
     webhookUrl: "https://agent.example.com/eve/v1/recall",
   });
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
-  // Durable context survives eve restoring channel state after an ignored delivery.
   const durable = new Map<string, unknown>();
   const ctx = {
     get: (key: { name: string }) => durable.get(key.name),
@@ -328,7 +324,6 @@ describe("recallChannel receive", () => {
     await meeting.send("On it.");
     expect(meeting.posts).toEqual([]);
 
-    // A line the bot doesn't answer still shows it's in the call.
     await meeting.hear(speech("the login page times out"));
     expect(meeting.posts).toEqual([{ message: "On it." }]);
   });
@@ -337,15 +332,12 @@ describe("recallChannel receive", () => {
     const { meeting, state } = await received();
     await meeting.send("Deploy release v2.4 to production?");
 
-    // eve ignores each overheard line while the turn waits on its approval,
-    // and restores the channel state it had before the line.
     for (const line of ["the staging numbers look fine", "let's wait for Bob"]) {
       const before = structuredClone(state);
       expect(await meeting.hear(speech(line))).toBeUndefined();
       for (const key of Object.keys(state)) delete state[key];
       Object.assign(state, before);
     }
-    // The restored state still holds chat, so the next reply queues behind the posted one.
     await meeting.send("Deployed.");
     await meeting.hear(speech("sounds good"));
 

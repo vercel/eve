@@ -27,11 +27,6 @@ const copyDeclarations = createDeclarationCopier({
   },
 });
 
-/**
- * Bundle the agent run library so the published eve package
- * stays self-contained. It shares the node chunk group with the vendored
- * `@opentelemetry/api`, so eve and the library use one OpenTelemetry copy.
- */
 export default {
   packageName: "@vercel/agent-runs",
   compiledPath: "@vercel/agent-runs",

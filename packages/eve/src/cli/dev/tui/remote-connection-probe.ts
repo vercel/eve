@@ -74,12 +74,6 @@ export function classifyRemoteError(error: unknown, phase: RemoteProbePhase): Re
   };
 }
 
-/**
- * Confirms the target is a live eve deployment via the always-public health
- * route. Used to corroborate a missing info route before declaring a connection
- * ready, so a host that simply 404s everything is not mistaken for a degraded
- * deployment whose `/eve/v1/info` is absent.
- */
 async function probeDeploymentHealth(client: Client): Promise<boolean> {
   try {
     const health: unknown = await client.health();
@@ -97,19 +91,12 @@ export async function probeRemoteInfo(input: {
   if (probe.kind === "ready") return { state: "ready", info: probe.info };
 
   const { error } = probe;
-  // Inspection is best-effort: an authorized response we cannot use must not
-  // block the connection, since the conversation transport does not depend on
-  // `/eve/v1/info`.
   if (
     error instanceof AgentInfoResponseError ||
     (error instanceof ClientError && error.status === 404)
   ) {
-    // The info route can be missing or use an older payload shape. Only call
-    // the target ready once the public health route confirms a live Eve server.
     if (await probeDeploymentHealth(input.client)) return { state: "ready" };
   }
-  // Chat works without inspection, so a credential the info route refuses
-  // still connects and only learns how to unlock the agent details.
   if (isAgentInfoForbidden(error) && (await probeDeploymentHealth(input.client))) {
     return { state: "ready", warning: formatAgentInfoForbiddenMessage("The remote agent") };
   }

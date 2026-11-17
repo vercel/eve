@@ -1,83 +1,25 @@
 import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
 
-/**
- * Slack API string-length guards.
- *
- * Slack rejects payloads where a string exceeds its surface-specific
- * limit (typing indicator, Block Kit `plain_text` fields, modal titles,
- * etc.). The chat SDK does not enforce these for us — anything that
- * overruns surfaces as a `chat.postMessage` / `assistant.threads.setStatus`
- * / `views.open` HTTP error. These helpers cap strings before they cross
- * the wire so a single long tool name or option label cannot fail the
- * whole event handler.
- */
-
-/**
- * Typing indicator (`assistant.threads.setStatus`) caps at roughly 100
- * characters; we use 50 to match the pre-existing UX (statuses longer
- * than a glance are hard to read in the chat UI anyway).
- */
 export const SLACK_TYPING_STATUS_MAX_LENGTH = 50;
 
-/**
- * Block Kit `plain_text` fields used in `static_select` / `radio_buttons`
- * options and button labels are capped at 75 characters by Slack.
- */
 export const SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH = 75;
 
-/**
- * Block Kit `section` blocks cap `text.text` at 3000 chars. Anything
- * longer fails the whole post with `invalid_blocks`.
- */
 export const SLACK_SECTION_TEXT_MAX_LENGTH = 3000;
 
-/**
- * Block Kit `card` blocks cap `body.text` at 200 chars.
- */
 export const SLACK_CARD_BODY_TEXT_MAX_LENGTH = 200;
 
-/**
- * Block Kit `card` blocks cap `subtext.text` at 200 chars.
- */
 export const SLACK_CARD_SUBTEXT_MAX_LENGTH = 200;
 
-/**
- * Top-level `text` field on `chat.postMessage` is capped at 40000 chars.
- */
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
 
-/**
- * Slack caps a message's Markdown at 12,000 characters: the `markdown_text`
- * field of `chat.postMessage`, and the combined text of every `markdown`
- * block in one message. eve's default replies use `markdown_text` so
- * headings, tables, and other Markdown render natively, and upload longer
- * replies as a snippet.
- */
 export const SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12000;
 
-/**
- * `chat.postMessage` rejects payloads with more than 50 blocks
- * (`invalid_blocks`).
- */
 export const SLACK_MAX_BLOCKS_PER_MESSAGE = 50;
 
-/**
- * A `container` block's `title` is capped at 150 characters.
- */
 export const SLACK_CONTAINER_TITLE_MAX_LENGTH = 150;
 
-/**
- * `views.open` modal title is capped at 24 characters.
- */
 export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;
 
-/**
- * Normalizes a typing status: strips lightweight Markdown that Slack
- * assistant-thread status does not render, trims, collapses runs of
- * whitespace into a single space, then truncates to
- * {@link SLACK_TYPING_STATUS_MAX_LENGTH} with a trailing ellipsis when
- * needed, at a word boundary when one is near.
- */
 export function truncateTypingStatus(status: string): string {
   const normalized = stripTypingStatusMarkdown(status).trim().replace(/\s+/gu, " ");
   if (normalized.length <= SLACK_TYPING_STATUS_MAX_LENGTH) return normalized;
@@ -87,11 +29,6 @@ export function truncateTypingStatus(status: string): string {
   return `${words.trimEnd()}...`;
 }
 
-/**
- * Caps a Block Kit `plain_text` label/description at the Slack limit
- * with a trailing ellipsis. Pass `undefined` to short-circuit (option
- * descriptions are optional).
- */
 export function truncatePlainText(value: string): string;
 export function truncatePlainText(value: string | undefined): string | undefined;
 export function truncatePlainText(value: string | undefined): string | undefined {
@@ -99,48 +36,26 @@ export function truncatePlainText(value: string | undefined): string | undefined
   return truncateWithEllipsis(value, SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH);
 }
 
-/**
- * Caps a section block's `text.text` at the Slack limit with a
- * trailing ellipsis.
- */
 export function truncateSectionText(value: string): string {
   return truncateWithEllipsis(value, SLACK_SECTION_TEXT_MAX_LENGTH);
 }
 
-/**
- * Caps a card block's `body.text` at the Slack limit with a trailing
- * ellipsis.
- */
 export function truncateCardBodyText(value: string): string {
   return truncateWithEllipsis(value, SLACK_CARD_BODY_TEXT_MAX_LENGTH);
 }
 
-/**
- * Caps a card block's `subtext.text` at the Slack limit with a trailing
- * ellipsis.
- */
 export function truncateCardSubtext(value: string): string {
   return truncateWithEllipsis(value, SLACK_CARD_SUBTEXT_MAX_LENGTH);
 }
 
-/**
- * Caps a `chat.postMessage` `text` field at the Slack limit with a
- * trailing ellipsis.
- */
 export function truncateMessageText(value: string): string {
   return truncateWithEllipsis(value, SLACK_MESSAGE_TEXT_MAX_LENGTH);
 }
 
-/**
- * Caps a `container` block's title at the Slack limit with a trailing ellipsis.
- */
 export function truncateContainerTitle(value: string): string {
   return truncateWithEllipsis(value, SLACK_CONTAINER_TITLE_MAX_LENGTH);
 }
 
-/**
- * Caps a modal title at the Slack limit with a trailing ellipsis.
- */
 export function truncateModalTitle(value: string): string {
   return truncateWithEllipsis(value, SLACK_MODAL_TITLE_MAX_LENGTH);
 }

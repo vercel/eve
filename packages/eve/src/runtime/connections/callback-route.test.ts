@@ -9,12 +9,10 @@ const resumeHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: async (token: string) => ({ runId: "owner", specVersion: 6, token }),
-  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
   getWorld: async () => ({ capabilities: { deploymentAffinity: true } }),
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
 }));
 
-/** A session's stable inbox, which its sign-in callback URLs name. */
 const INBOX = "eve:inbox:v1:eve:session:wrun_1:inbox";
 
 function buildRouteContext(params: Readonly<Record<string, string>>): RouteContext {
@@ -79,8 +77,6 @@ describe("handleConnectionCallbackRequest", () => {
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     const [token, payload] = resumeHookMock.mock.calls[0] ?? [];
     expect(token).toBe(INBOX);
-    // Exact match: only parsed params + method cross into the hook
-    // payload. The inbound `x-probe` header (and any `Cookie`) is dropped.
     expect(payload).toEqual({
       kind: "authorization-callback",
       payloads: [
@@ -137,7 +133,6 @@ describe("handleConnectionCallbackRequest", () => {
       buildRouteContext({ attemptId: "attempt-1", name: "linear", token: INBOX }),
     );
 
-    // The callback still resumes the workflow so it can fail the attempt.
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     expect(response.headers.get("content-type")).toContain("text/html");
     const body = await response.text();
@@ -146,9 +141,6 @@ describe("handleConnectionCallbackRequest", () => {
   });
 
   it("returns 404 when the workflow runtime reports no hook for the supplied token", async () => {
-    // `resumeHook` throws when no workflow run is currently waiting on
-    // the supplied token, e.g. the workflow already completed,
-    // disposed the hook, or the user replayed a stale callback URL.
     resumeHookMock.mockRejectedValueOnce(new Error("hook not found"));
     const response = await handleConnectionCallbackRequest(
       new Request(
@@ -237,9 +229,7 @@ describe("handleConnectionCallbackRequest", () => {
   });
 
   it.each([
-    // Alice's order workflow waits on a hook it named for the order.
     ["a hook authored code named", "order:1042"],
-    // A channel's address for a session is an inbox too, but no sign-in URL names it.
     ["a session inbox other than its stable one", "eve:inbox:v1:slack:C1:1700000000.000100"],
   ])(
     "answers not pending for %s, without reading the request or resuming the hook",

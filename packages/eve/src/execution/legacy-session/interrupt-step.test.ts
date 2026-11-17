@@ -87,7 +87,6 @@ describe("legacy pending work", () => {
     expect(mocks.settle).toHaveBeenCalledExactlyOnceWith({
       history: prepared.history,
       reportUsage: false,
-      // Decided at the step's entry: a first attempt.
       rerun: false,
       sessionWritable: prepared.input.sessionWritable,
       sessionState: prepared.sessionState,

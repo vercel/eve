@@ -126,10 +126,6 @@ describe("ContextContainer", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildRunContext
-// ---------------------------------------------------------------------------
-
 const testAuth: SessionAuthContext = {
   attributes: {},
   authenticator: "test",

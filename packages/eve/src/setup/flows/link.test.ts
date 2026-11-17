@@ -85,8 +85,6 @@ function flowDeps(args: {
 }
 
 beforeEach(() => {
-  // The flow reads the shell for a gateway key that would shadow the pulled
-  // OIDC token; a developer shell exporting one must not leak in.
   vi.stubEnv("AI_GATEWAY_API_KEY", "");
 });
 
@@ -176,7 +174,6 @@ describe("runLinkFlow", () => {
       "This directory is already linked to\nweather-app in Acme",
     );
     expect(deps.resolveProvisioning?.pickTeam).toHaveBeenCalled();
-    // Linking suggests the project a create would have named after the agent.
     expect(deps.resolveProvisioning?.pickProject).toHaveBeenCalledWith(
       expect.anything(),
       APP_ROOT,
@@ -190,8 +187,6 @@ describe("runLinkFlow", () => {
       expect.any(Function),
       undefined,
     );
-    // Success is silent — the caller owns the closing line; only the
-    // missing-credential warning earns output.
     expect(prompter.log.warning).not.toHaveBeenCalled();
   });
 
@@ -218,8 +213,6 @@ describe("runLinkFlow", () => {
       kind: "done",
       resolution: { credential: "oidc", file: ".env.local" },
     });
-    // The create path runs the new-project namer and never reaches the
-    // existing-project picker — the opposite of the existing-only default.
     expect(deps.resolveProvisioning?.pickNewProjectName).toHaveBeenCalled();
     expect(deps.resolveProvisioning?.pickProject).not.toHaveBeenCalled();
     expect(deps.resolveProvisioning?.pickTeam).toHaveBeenCalledWith(
@@ -244,9 +237,6 @@ describe("runLinkFlow", () => {
       },
     });
     const boxDeps = createBoxDeps();
-    // Prime every adoption precondition (link file present, resolvable,
-    // logged in): if detection ran, it would re-adopt the current link and
-    // the pickers below would never be reached.
     boxDeps.resolveProvisioning.pathExists.mockResolvedValue(true);
     boxDeps.resolveProvisioning.detectProjectResolution.mockResolvedValue({
       kind: "linked",

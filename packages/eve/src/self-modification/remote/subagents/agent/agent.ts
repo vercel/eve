@@ -32,14 +32,12 @@ const description = renderDescription([
   effectiveEdits,
 ]);
 
-/** Offers the deployed self-modification child only to authorized principals outside `eve dev`. */
 export default defineDynamic(async (ctx) => {
   if (!isDeployedRuntime()) return null;
   const bound = selfModification.config;
   const config = resolveDeployedSelfModificationConfig(bound);
   if (config.credentials.kind === "pat" && !hasGitHubCredential()) return null;
   const principal = ctx.session.auth.current;
-  // `authorize` reads the principal's attributes and the channel, so it's asked again each turn.
   const authorized = await ctx.memo(["authorize", principal, ctx.turn?.id ?? null], async () => {
     try {
       return (await config.authorize({ channel: ctx.channel, principal })) === true;

@@ -29,6 +29,10 @@ export interface ChannelCorsOptions {
   };
 }
 
+/**
+ * CORS setting for a channel's routes: `true` enables CORS with default options, `false` disables it,
+ * and a {@link ChannelCorsOptions} object configures it explicitly.
+ */
 export type ChannelCors = boolean | ChannelCorsOptions;
 
 export interface NormalizedChannelCorsOptions {
@@ -105,7 +109,6 @@ const RENAMED_CORS_KEYS: Readonly<Record<string, string>> = {
   preflightStatus: "preflight.statusCode",
 };
 
-// An ignored key would silently fall back to the defaults instead of the intended policy.
 function assertSupportedCorsKeys(cors: object): void {
   for (const key of Object.keys(cors)) {
     if (SUPPORTED_CORS_KEYS.has(key)) continue;

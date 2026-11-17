@@ -19,7 +19,6 @@ export interface LinkCommandDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal(): boolean;
   isEveProject?: typeof isEveProject;
-  /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<LinkFlowDeps>;
   nonInteractiveLinkDeps?: NonInteractiveLinkDependencies;
 }
@@ -29,14 +28,6 @@ const defaultDependencies: LinkCommandDependencies = {
   isEveProject,
 };
 
-/**
- * `eve link`: pick a Vercel team, then create or select a project (re-linking
- * when one is already linked), run `vercel link` for the resolved project,
- * then pull env so the AI Gateway credential lands in `.env.local`. The flow
- * itself is {@link runLinkFlow}, shared with the dev TUI `/model` menu's
- * provider row. Non-interactive callers name the Vercel project explicitly;
- * interactive callers use the eve-owned pickers.
- */
 export async function runLinkCommand(
   logger: LinkCliLogger,
   appRoot: string,

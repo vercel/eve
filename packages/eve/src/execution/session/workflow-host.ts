@@ -7,10 +7,6 @@ import type { SessionBoot, SessionHost } from "#execution/session/program.js";
 import { turnStep } from "#execution/workflow-host/turn-step.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 
-/**
- * The Workflow host for the session `boot` describes, from its owner run's workflow body: each
- * turn step is a durable `turnStep`, waits sleep durably until their deadline, and the session moves between runs.
- */
 export function workflowSessionHost(boot: SessionBoot, inbox: SessionInboxHandle): SessionHost {
   return {
     moves: new SessionHandoff({

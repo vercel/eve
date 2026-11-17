@@ -8,12 +8,6 @@ import {
 } from "#internal/invocation/metadata.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 
-/**
- * The session run behind an external invocation, when `auth` started it.
- *
- * Unknown, expired, non-invocation, and foreign-principal runs all read as `undefined`, so a
- * caller can't tell another caller's invocation from one that doesn't exist.
- */
 export async function readOwnedInvocationRun(sessionId: string, auth: SessionAuthContext | null) {
   const world = await getWorld();
   try {
@@ -28,7 +22,6 @@ export async function readOwnedInvocationRun(sessionId: string, auth: SessionAut
   }
 }
 
-/** The continuation token (channel-local address) an owned invocation run answers on. */
 export function invocationContinuationToken(
   run: NonNullable<Awaited<ReturnType<typeof readOwnedInvocationRun>>>,
 ): string | undefined {

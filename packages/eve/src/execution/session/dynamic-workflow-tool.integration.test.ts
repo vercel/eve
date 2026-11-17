@@ -1,4 +1,3 @@
-// @linux-only: dynamic workflow tools; in-process
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -47,26 +46,18 @@ const DEPLOY_INPUT = {
   type: "object",
 } as const;
 
-// A task that keeps running after the turn that started it.
 const holdDeploy = defineWorkflowTool({
   description: "Start a deploy that keeps running in the background.",
   inputSchema: DEPLOY_INPUT,
   task: waitingForCleanupWorkflow as WorkflowTaskToolDefinition["task"],
 });
 
-// Declared outside the dynamic function, so the same compiled workflow backs every evaluation.
 const confirmDeploy = defineWorkflowTool({
   description: "Deploy a service once someone confirms.",
   execute: returnAskAnswerWorkflow as WorkflowExecuteToolDefinition["execute"],
   inputSchema: DEPLOY_INPUT,
 });
 
-/**
- * Starts a session whose agent has a static `read_notes` tool and a `defineDynamic()` that
- * returns the `confirm_deploy` workflow tool while `isOffered()` says so. The scripted model
- * calls `confirm_deploy` when the latest message names it and the call offers it, and records
- * the tools each call offered.
- */
 async function withDynamicRun(
   name: string,
   isOffered: () => boolean,
@@ -76,7 +67,6 @@ async function withDynamicRun(
     readonly answer: (stage: Stage) => Promise<Stage>;
     readonly send: (message: string) => Promise<Stage>;
     readonly first: () => Promise<Stage>;
-    /** Delivers a message without waiting for a turn to settle, as steering joins an open one. */
     readonly deliver: (message: string) => Promise<void>;
   }) => Promise<void>,
 ) {
@@ -104,7 +94,6 @@ async function withDynamicRun(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
-        // Without the default `agent` tool, only the dynamic tool can start tasks.
         defaultTools: false,
         model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
       }),
@@ -257,7 +246,6 @@ describe("dynamic workflow tools", () => {
       () => offeredNow,
       holdDeploy,
       async ({ deliver, offered }) => {
-        // The turn stays open while its task runs, so wait for the call after the task started.
         await vi.waitFor(() => expect(offered.length).toBeGreaterThanOrEqual(2), {
           timeout: 20_000,
         });

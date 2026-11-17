@@ -1,7 +1,3 @@
-// A turn's task cards, read from the session's tables. A card shows the turn's own calls, eve's
-// task controls and calls a tool makes on the model's behalf left out; a renderer reads each
-// call's row with the same selectors every reader uses (`callState`, `callLabel`, `openInteractions`).
-
 import {
   callTurn,
   openInteractions,
@@ -12,7 +8,6 @@ import { snapshotOf, type SessionView } from "#protocol/session-projection/sessi
 import { call, type CallObservation } from "#protocol/session-projection/public-view.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
-/** The most calls one card holds; the oldest settled ones drop first. */
 const MAX_CALLS_PER_CARD = 100;
 
 /**
@@ -39,7 +34,6 @@ export interface TaskCard {
   readonly audience: ChannelAudience;
 }
 
-/** A turn's cards, oldest first; every card but the latest is finished. */
 export function taskCards(
   view: SessionTables,
   turnId: string,
@@ -58,7 +52,6 @@ export function taskCards(
     }
     open.push(row);
   }
-  // A task sits on the card it began on; any other call on the card open when it ended.
   const cardOf = (row: CallRow) => {
     const at = row.taskId !== undefined ? row.introducedAt : (row.closedAt ?? Infinity);
     return starts.findLastIndex((start) => start <= at);
@@ -87,7 +80,6 @@ export function taskCards(
   });
 }
 
-/** The names of a turn's working tasks, for a status such as `Waiting on researcher...`. */
 export function workingTaskNames(view: SessionTables, turnId: string): readonly string[] {
   return turnCalls(view, turnId)
     .filter((row) => row.taskId !== undefined && row.status !== "settled")

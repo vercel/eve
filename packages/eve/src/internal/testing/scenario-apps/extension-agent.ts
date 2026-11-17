@@ -1,10 +1,5 @@
 import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
-/**
- * Scenario-tier descriptor that exercises authored modules using mixed file
- * extensions (`.cjs`, `.cts`, `.mjs`, `.mts`, `.js`). The compile pipeline
- * must tolerate this variety without requiring a specific extension.
- */
 export const EXTENSION_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/agent.cjs": `const { defineAgent } = require("eve");

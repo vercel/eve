@@ -4,15 +4,6 @@ import { openai } from "@ai-sdk/openai";
 import { gateway } from "ai";
 import { describe, expect, it } from "vitest";
 
-/**
- * CANARY: pins the third-party AI SDK behavior that {@link classifyModelRouting}
- * depends on to decide gateway-vs-external routing. If an `@ai-sdk/*` upgrade
- * changes these provider identities, this fails loudly here rather than letting
- * routing classification silently flip downstream.
- *
- * Reading `.provider`/`.modelId` is pure — the SDK constructs models lazily and
- * only authenticates per request — so this is safe in the hermetic unit tier.
- */
 describe("ai-sdk provider identity contract (canary)", () => {
   it("gateway instances report provider 'gateway'", () => {
     expect(gateway("anthropic/claude-sonnet-5").provider).toBe("gateway");
@@ -20,7 +11,6 @@ describe("ai-sdk provider identity contract (canary)", () => {
   });
 
   it("a bare string resolves through the gateway global default provider", () => {
-    // The hermetic unit env installs no override, so the AI SDK default applies.
     expect(
       (globalThis as { AI_SDK_DEFAULT_PROVIDER?: unknown }).AI_SDK_DEFAULT_PROVIDER,
     ).toBeUndefined();

@@ -35,9 +35,6 @@ export function consoleReporter(config: ConsoleReporterConfig = {}): EvalReporte
   return new ConsoleReporter(config);
 }
 
-/**
- * Console reporter that prints eval progress and results to stdout.
- */
 class ConsoleReporter implements EvalReporter {
   readonly #log: (message: string) => void;
   readonly #colors: ReturnType<typeof picocolors.createColors>;
@@ -86,9 +83,6 @@ class ConsoleReporter implements EvalReporter {
       }
     }
 
-    // Braintrust and Datadog keep one score per exported name, the lowest. For
-    // gates that aggregate is exact and the failure line above already names
-    // the failing member, so warn only for soft groups whose scores differ.
     for (const group of groupAssertionScores(softs, exportedAssertionName).values()) {
       if (group.assertions.every((assertion) => assertion.score === group.score)) continue;
       const name = group.assertions[0]!.name;
@@ -221,8 +215,6 @@ class ConsoleReporter implements EvalReporter {
   ): { name: string; avg: number; count: number }[] {
     const totals = new Map<string, { sum: number; count: number }>();
 
-    // One value per name per eval, the group minimum, matching what the
-    // export reporters record; `count` is the number of evals.
     for (const result of results) {
       const softs = result.assertions.filter((assertion) => assertion.severity === "soft");
       for (const [name, group] of groupAssertionScores(softs, (assertion) => assertion.name)) {
@@ -245,10 +237,6 @@ class ConsoleReporter implements EvalReporter {
   }
 }
 
-/**
- * Per-eval gate pass counts across attempts, for repeated runs only. Scored
- * and skipped attempts have no pass/fail verdict, so they are left out.
- */
 function aggregateAttempts(
   results: readonly EveEvalResult[],
 ): { id: string; passed: number; total: number }[] {

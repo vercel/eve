@@ -1,4 +1,3 @@
-// @linux-only: Vercel auth provisioning API calls (mocked)
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 import { provisionWebChatAuth } from "./provision-auth.js";

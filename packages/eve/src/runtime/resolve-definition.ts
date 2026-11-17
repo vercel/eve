@@ -27,11 +27,9 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 interface Scope {
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string | undefined;
-  /** The names the agent's tool files take, which an eve feature's tools yield to. */
   readonly toolFiles: ReadonlySet<string>;
 }
 
-/** Reattaches the code of a file the agent declares from its module, and checks its shape. */
 export async function resolveDefinition(
   definition: CompiledDefinition,
   scope: Scope,
@@ -64,10 +62,6 @@ export async function resolveDefinition(
   });
 }
 
-/**
- * Reattaches a schedule collection's definition from its module, and stamps it with where it
- * lives, so `schedules()` binds it wherever the agent's code passes it.
- */
 export async function resolveScheduleCollection(
   collection: CompiledScheduleCollectionDefinition,
   scope: Scope,
@@ -115,7 +109,6 @@ export async function resolveScheduleCollection(
   });
 }
 
-/** Reattaches a compiled `defineDynamic()` export's function from its module. */
 export async function resolveDynamicDefinition<T extends ModuleSourceRef>(
   definition: T,
   input: Omit<Scope, "toolFiles"> & { readonly kindLabel: string },

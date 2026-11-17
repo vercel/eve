@@ -1,15 +1,5 @@
-// @linux-only: forwarded principal baggage
 import { describe, expect, it, vi } from "vitest";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
-
-/**
- * Integration coverage for forwarded principal across the create route and the
- * runtime: an accepted `forwardedPrincipal` body becomes the run's session
- * principal (`AuthKey` / `InitiatorAuthKey`, projected as
- * `session.auth.current` / `.initiator`) and reaches
- * `resolveConnectionPrincipal` as a `user` principal — the seam per-user
- * Vercel Connect requires on the receiving deployment.
- */
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
@@ -229,7 +219,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       issuer: "slack",
       type: "user",
     });
-    // The audit attribute never enters Connect token-cache keying.
     expect(principalKey(principal)).toBe('["user","slack","slack:U123"]');
     expect(trustedForwarders).toHaveBeenCalledTimes(1);
     expect(logs.records).toContainEqual(

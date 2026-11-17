@@ -82,7 +82,6 @@ function initialInput(overrides: Record<string, unknown> = {}) {
   } as Parameters<typeof bootInitialOwner>[0];
 }
 
-/** A subagent node's session, which `createSessionStep` creates after checking its compiled node. */
 function subagentInput(overrides: Record<string, unknown> = {}) {
   return initialInput({
     ...overrides,
@@ -153,7 +152,6 @@ describe("bootInitialOwner", () => {
 
     const boot = await bootPromise;
     expect(boot?.session.initialTurnControl).toBeDefined();
-    // The session loop starts the timer, once ownership is confirmed.
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     await boot!.session.sessionTimeoutControl!.start();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();

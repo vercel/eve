@@ -8,13 +8,10 @@ import { createCodexFetch, type CodexTransportOptions } from "./transport.js";
 
 const CODEX_LOCAL_AUTH_API_KEY = "codex-local-auth";
 
-/** Configures the Codex model selected by the local ChatGPT login. */
 interface CodexModelOptions {
-  /** OpenAI model ID passed to the Codex Responses endpoint, for example `gpt-5.6-sol`. */
   readonly model: string;
 }
 
-// Test seam for the direct Codex transport boundary.
 export function createCodexSubscriptionModel(
   input: CodexModelOptions,
   options: CodexTransportOptions = {},
@@ -31,8 +28,6 @@ export function createCodexSubscriptionModel(
     name: "codex",
   }).responses(slug);
 
-  // Keep item IDs until the provider has grouped streamed reasoning summaries.
-  // The transport removes them from the stateless request sent to Codex.
   return {
     specificationVersion: openaiModel.specificationVersion,
     provider: openaiModel.provider,
@@ -54,14 +49,8 @@ function normalizeCodexCallOptions(
   const providerOptions = options.providerOptions;
   const openaiOptions = providerOptions?.openai ?? {};
 
-  // The Codex backend requires system instructions in the top-level
-  // `instructions` field and rejects a `developer`/`system` role inside the
-  // `input` array (the shape the AI SDK produces by default). Hoist the system
-  // messages out of the prompt and into `instructions` before delegation.
   const { instructions, prompt } = hoistSystemInstructions(options.prompt);
 
-  // The Codex backend rejects `max_output_tokens` with
-  // `400 Unsupported parameter`, so drop it before delegation.
   const { maxOutputTokens: _maxOutputTokens, ...rest } = options;
 
   return {
@@ -71,8 +60,6 @@ function normalizeCodexCallOptions(
       ...providerOptions,
       openai: {
         ...openaiOptions,
-        // OpenAI documents `fast` as an alias of `priority`, but the Codex
-        // backend rejects `fast`. Codex itself sends `priority` for Fast mode.
         ...((openaiOptions.serviceTier === "fast" ||
           (fast && openaiOptions.serviceTier === undefined)) && { serviceTier: "priority" }),
         ...(instructions !== undefined && { instructions }),

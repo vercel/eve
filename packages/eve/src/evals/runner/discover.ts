@@ -6,18 +6,10 @@ import type { EveEval, EveEvalConfig, EveEvalDefinition } from "#evals/types.js"
 
 const EVAL_FILE_SUFFIX = ".eval.ts";
 
-/** Required run-wide config file at the root of the `evals/` directory. */
 const EVAL_CONFIG_FILE = "evals.config.ts";
 
-/** Width of the zero-padded index suffix for array-exported evals. */
 const ARRAY_INDEX_PAD = 4;
 
-/**
- * Discovers eval files under `<appRoot>/evals/` by recursively
- * scanning for files matching `*.eval.ts`.
- *
- * Returns absolute paths sorted alphabetically by relative path.
- */
 export async function discoverEvalFiles(appRoot: string): Promise<string[]> {
   const evalsDir = join(appRoot, "evals");
   const files: string[] = [];
@@ -35,15 +27,6 @@ export async function discoverEvalFiles(appRoot: string): Promise<string[]> {
   return files;
 }
 
-/**
- * Finds directories under `<appRoot>/agent/` that directly contain
- * `*.eval.ts` files. Used to produce a clear error when eval files are placed
- * inside the agent tree instead of the top-level `evals/` directory that
- * {@link discoverEvalFiles} scans.
- *
- * Returns app-root-relative, POSIX-normalized directory paths, sorted and
- * de-duplicated. Returns `[]` when `agent/` is absent.
- */
 export async function findMisplacedEvalDirs(appRoot: string): Promise<string[]> {
   const agentDir = join(appRoot, "agent");
   const dirs = new Set<string>();
@@ -60,11 +43,6 @@ export async function findMisplacedEvalDirs(appRoot: string): Promise<string[]> 
   return [...dirs].sort((a, b) => a.localeCompare(b));
 }
 
-/**
- * Derives the canonical eval id from one absolute eval file path.
- *
- * `<appRoot>/evals/sub/weather.eval.ts` → `"sub/weather"`.
- */
 function deriveEvalId(appRoot: string, filePath: string): string {
   const evalsDir = join(appRoot, "evals");
   const relativePath = relative(evalsDir, filePath).split(/[\\/]/u).join("/");
@@ -76,26 +54,11 @@ function deriveEvalId(appRoot: string, filePath: string): string {
   return relativePath;
 }
 
-/**
- * Returns true when `evalId` matches one of the requested filters. A filter
- * matches its exact eval id or any eval nested under it, so `"runtime"`
- * matches both `evals/runtime.eval.ts` and every eval in `evals/runtime/`
- * (and every entry of an array-exported `evals/runtime.eval.ts`).
- */
 export function matchesEvalFilter(evalId: string, filters: readonly string[]): boolean {
   if (filters.length === 0) return true;
   return filters.some((filter) => evalId === filter || evalId.startsWith(`${filter}/`));
 }
 
-/**
- * Imports a discovered eval file and stamps the path-derived id(s) onto
- * the eval definition(s).
- *
- * The file must `export default` either one `EveEvalDefinition` (produced
- * by `defineEval()`) or an array of them. A single definition derives its
- * id from the file path; array entries derive `<file-id>/<index>` ids with
- * the index zero-padded to four digits (e.g. `"weather/0000"`).
- */
 export async function importEvalFile(appRoot: string, filePath: string): Promise<EveEval[]> {
   const module = (await loadAuthoredModuleNamespace(filePath)) as Record<string, unknown>;
   const exported = module.default;
@@ -123,13 +86,6 @@ export async function importEvalFile(appRoot: string, filePath: string): Promise
   );
 }
 
-/**
- * Discovers and imports all eval files, optionally filtering by eval id.
- * Filters match exactly or by directory prefix (see {@link matchesEvalFilter}).
- *
- * Throws when two files derive the same eval id (e.g. an array-exported
- * `evals/weather.eval.ts` colliding with `evals/weather/0000.eval.ts`).
- */
 export async function discoverAndImportEvals(
   appRoot: string,
   evalIds?: readonly string[],
@@ -163,13 +119,6 @@ export async function discoverAndImportEvals(
   return evaluations;
 }
 
-/**
- * Discovers and imports the required `evals/evals.config.ts` run-wide
- * configuration (produced by `defineEvalConfig()`).
- *
- * Throws when the file is missing or does not default-export a valid
- * `EveEvalConfig`.
- */
 export async function discoverEvalConfig(appRoot: string): Promise<EveEvalConfig> {
   const configPath = join(appRoot, "evals", EVAL_CONFIG_FILE);
 

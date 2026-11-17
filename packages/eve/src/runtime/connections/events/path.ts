@@ -15,7 +15,6 @@ export function connectionEventDestination(connectionName: string): string {
   );
 }
 
-/** The watch run's hook: the receiver finds it by the binding id Connect echoes in context. */
 export function connectionEventHookToken(bindingId: string): string {
   return `eve:connection-event:${bindingId}`;
 }

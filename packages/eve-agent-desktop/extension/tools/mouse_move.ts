@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, xy } from "../lib/tool";
 
+/** Lets the agent move the pointer to absolute screen coordinates. Requires the extension to run `headed`. */
 export default desktopTool({
   description:
     "Move the pointer to absolute screen coordinates. Requires the extension to run headed.",

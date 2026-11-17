@@ -54,7 +54,6 @@ export const idField = z
     "The skill's `id`, as `list`, `read`, or `create` returned it. It pins the change to that skill, so a skill deleted and recreated under the same name isn't changed by mistake.",
   );
 
-/** Refuses a change to `name` when it is no longer the skill `id` the caller read. */
 export function requireSkillId(name: string, actual: string, expected: string): void {
   if (actual !== expected) {
     throw new SkillChangeRefusedError(
@@ -69,7 +68,6 @@ export const modeField = z
     "'always' injects the skill on every turn (personas, writing preferences). 'on-demand' advertises it in the prompt for loading when relevant (task procedures). 'deferred' keeps it out of the prompt until a skill search finds it (rarely needed procedures).",
   );
 
-/** What the lifecycle tools and their approvals read from eve's context. */
 export interface SkillCallContext {
   readonly session: { readonly id: string; readonly auth: SessionAuth };
   readonly conversation?: ConversationContext;
@@ -96,7 +94,6 @@ function toFailure(error: unknown, failure: string): Failure {
   return { success: false, error: failure };
 }
 
-/** Runs a read in the requested scope and turns lifecycle errors into a result the model can act on. */
 export async function withSkillScope<T extends object>(
   ctx: SkillCallContext,
   requested: string | undefined,
@@ -112,10 +109,8 @@ export async function withSkillScope<T extends object>(
   }
 }
 
-/** What a planner returns: the plan the tool runs, and what the approval rule judges. */
 export interface ChangeOutline<TPlan> {
   readonly plan: TPlan;
-  /** The action the approval rule sees, when the plan decides it, such as a publish that rolls back. */
   readonly action?: SkillAction;
   readonly changesLive: boolean;
   readonly targets: readonly SkillApprovalTarget[];
@@ -137,18 +132,11 @@ type Change =
     }
   | { readonly kind: "removed"; readonly skills: readonly SkillRef[] };
 
-/** What running a change returns: the tool output and the change to report. */
 export interface ChangeResult<T> {
   readonly output: T;
   readonly change?: Change;
 }
 
-/**
- * A lifecycle tool's approval and execution, built from one planner so the
- * approval rule judges exactly what the tool runs. The tool plans again when
- * it runs: if the change now needs a person and none approved it, `run` gets
- * `approved: false` and either holds the change back or refuses.
- */
 export function skillChange<
   TInput extends { readonly scope?: string },
   TPlan,
@@ -216,8 +204,6 @@ export function skillChange<
         const planned = await plan(ctx, toolInput);
         const decision = await rule()(planned.request);
         if (typeof decision === "object") throw new SkillChangeRefusedError(decision.deny);
-        // The default response policy judged the approver without the conversation; check them
-        // against the scope the change actually targets.
         if (ctx.approval !== undefined && skillConfig().approval.response === undefined) {
           requireDefaultResponder(planned.scope, ctx.session.auth.current, ctx.approval.responder);
         }
@@ -232,12 +218,6 @@ export function skillChange<
   };
 }
 
-/**
- * Whether an approval's call targets a shared scope, resolved as the requester
- * without the conversation, which a response doesn't carry. A scope that
- * depends on the conversation, such as a channel's, doesn't resolve, and counts
- * as shared.
- */
 async function targetsSharedScope(ctx: Parameters<ApprovalResponsePolicy>[0]): Promise<boolean> {
   try {
     const scopes = await skillScopes({
@@ -267,7 +247,6 @@ function changeBase(
   };
 }
 
-/** The responder's identity, without its credential accessor. */
 function stripResponder(responder: SessionAuthContext): SessionAuthContext {
   const { getToken: _getToken, ...identity } = responder as SessionAuthContext & {
     getToken?: unknown;
@@ -283,7 +262,6 @@ async function emit(event: SkillChangeEvent): Promise<void> {
   }
 }
 
-/** Refuses a change that now needs approval nobody gave. */
 export function requireApproval(approved: boolean): void {
   if (!approved) {
     throw new SkillChangeRefusedError(
@@ -292,7 +270,6 @@ export function requireApproval(approved: boolean): void {
   }
 }
 
-/** The approval target for publishing or rolling back to `version`. */
 export function publishTarget(
   name: string,
   { head, version }: { readonly head: SkillHead; readonly version: SkillVersionRecord },

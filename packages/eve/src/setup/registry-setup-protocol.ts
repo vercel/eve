@@ -34,17 +34,8 @@ export type RegistrySetupOutcome =
   | { kind: "cancelled" }
   | { kind: "failed"; error: RegistrySetupError };
 
-/**
- * Stands in for the query inside {@link RegistrySetupSearchAction.labelTemplate}.
- * NUL cannot appear in typed filter text, so it never collides with a label.
- */
 export const REGISTRY_SETUP_SEARCH_QUERY = "\0query\0";
 
-/**
- * The serializable shape of a select's search action. IPC carries JSON, so the
- * child renders its `label` once with {@link REGISTRY_SETUP_SEARCH_QUERY} as the
- * query and resolves the picked action with its own `value`.
- */
 export interface RegistrySetupSearchAction {
   labelTemplate: string;
 }

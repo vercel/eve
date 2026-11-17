@@ -1,4 +1,3 @@
-// @linux-only: cross-version handoff on Workflow; in-memory history fixtures
 import { expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
@@ -32,7 +31,6 @@ it("continues an idle session from an eve 0.83 owner on the same stream", async 
     const { owner, sessionId, successor } = await handOffForced(KITCHEN_SINK, turnCount);
     try {
       const followUp = await readTurn(sessionId, KITCHEN_SINK.length);
-      // The successor's first line follows the v26 lines: it compacts the earlier conversation.
       expect(followUp[0]?.meta.position.line).toBe(KITCHEN_SINK.length);
       const types = followUp.map((event) => event.type);
       expect(types.indexOf("context.settled")).toBeLessThan(types.indexOf("turn.started"));
@@ -42,7 +40,6 @@ it("continues an idle session from an eve 0.83 owner on the same stream", async 
           data: expect.objectContaining({ kind: "compaction", outcome: "completed" }),
         }),
       );
-      // The follow-up turn takes the next number and follows the earlier owner's last turn.
       expect(followUp).toContainEqual(
         expect.objectContaining({
           type: "turn.started",
@@ -58,8 +55,6 @@ it("continues an idle session from an eve 0.83 owner on the same stream", async 
           data: expect.objectContaining({ value: expect.stringContaining(FOLLOW_UP) }),
         }),
       );
-      // The import already started a fresh run, so its compaction moves the session nowhere: once
-      // the follow-up parks, the successor itself runs the next message.
       await waitForParkedTurnStep(successor.runId, 2);
       const nextLine = (followUp.at(-1)?.meta.position.line ?? 0) + 1;
       await createWorkflowRuntime({
@@ -71,7 +66,6 @@ it("continues an idle session from an eve 0.83 owner on the same stream", async 
       await readTurn(sessionId, nextLine);
       const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
       expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
-      // A reader of the whole stream sees the v26 conversation and the new turns as one session.
       const history: SessionStreamEvent[] = [];
       for await (const event of streamSessionEvents(sessionId, { follow: false })) {
         history.push(event);
@@ -88,12 +82,6 @@ it("continues an idle session from an eve 0.83 owner on the same stream", async 
   });
 });
 
-/**
- * The source is gone by the time the successor's inbox waits for a handover, as
- * an eve 0.83 owner that ended leaves it. The watch checks the source before its
- * first interval, so the next message's turn starts at once rather than after
- * the 10s an interval would add.
- */
 it("starts the next turn without waiting out the ended source's watch interval", async () => {
   const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-ended" } });
   await runtime.run(async () => {
@@ -122,7 +110,6 @@ it("starts the next turn without waiting out the ended source's watch interval",
 it("moves a session past an idle subagent and ends the subagent's run on the earlier build", async () => {
   const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-idle-task" } });
   await runtime.run(async () => {
-    // The helper answered Alice earlier; on 0.83 its run stays parked on its control hook.
     const hookToken = `helper-control:${crypto.randomUUID()}`;
     const helper = await start(parkedTaskRunWorkflow, [{ token: hookToken }]);
     await waitForHook(helper, { token: hookToken });
@@ -145,7 +132,6 @@ it("moves a session past an idle subagent and ends the subagent's run on the ear
       await readTurn(sessionId, KITCHEN_SINK.length);
       const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
       expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
-      // The successor told the old run to end; a cancel would leave a resumable task parked.
       await expect(helper.returnValue).resolves.toMatchObject({ kind: "end" });
     } finally {
       await successor.cancel().catch(() => {});
@@ -175,10 +161,6 @@ it("leaves a session whose owner still runs a task with that owner", async () =>
   });
 });
 
-/**
- * An eve 0.83 owner (handoff version 3), whose session stream holds `records`, keeps its addresses
- * while the successor starts; the successor takes them over and the owner exits.
- */
 async function handOffForced(records: readonly unknown[], turnCount: number) {
   const handoff = await startForcedHandoff(records, turnCount);
   await handoff.owner.returnValue;
@@ -203,7 +185,6 @@ async function startForcedHandoff(
   return { owner, sessionId, successor };
 }
 
-/** The start input of the successor an eve 0.83 owner hands its session to. */
 function successorArguments(input: {
   readonly alias: string;
   readonly commandToken: string;
@@ -236,7 +217,6 @@ async function recordLines(sessionId: string, records: readonly unknown[]): Prom
   } finally {
     writer.releaseLock();
   }
-  // A write resolves before its line is stored; an owner hands off only after its lines are.
   await vi.waitFor(async () => expect(await readTailIndex(sessionId)).toBe(records.length - 1), {
     timeout: 10_000,
   });
@@ -251,7 +231,6 @@ async function readTailIndex(sessionId: string): Promise<number> {
   }
 }
 
-/** The events of the first turn written from `startIndex`, through its settlement. */
 async function readTurn(sessionId: string, startIndex: number): Promise<SessionStreamEvent[]> {
   const reader = readSessionEventStream(sessionId, startIndex).getReader();
   const events: SessionStreamEvent[] = [];
@@ -293,7 +272,6 @@ function followUpDelivery(): DeliverHookPayload {
   };
 }
 
-/** The version 17 checkpoint an idle eve 0.83 owner hands off after `turnCount` turns. */
 function savedCheckpoint(sessionId: string, turnCount: number, state: Record<string, unknown>) {
   return {
     admittedDeliveryKeys: [],

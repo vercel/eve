@@ -21,11 +21,6 @@ import {
   type TurnState,
 } from "./state.js";
 
-// What the session machine reads, and the read-only selectors the rest of eve uses. Lifecycle
-// comes from the stored projection, which publishing folds from every event the session
-// publishes; execution comes from `TurnState`. Workflow bodies import this module, so it stays
-// free of runtime dependencies; a step reads the live projection through `current.ts`.
-
 export type {
   ApprovalAsk,
   ApprovedCall,
@@ -36,24 +31,17 @@ export type {
 
 export const SESSION_PROJECTION_STATE_KEY = "eve.harness.sessionProjection";
 
-/** What a transition sees. */
 export interface SessionView {
   readonly turn: TurnState;
   readonly projection: SessionProjection;
-  /** Requests this session relays for a child session or a workflow run, by `requestId`. */
   readonly relayedRequestIds: ReadonlySet<string>;
-  /** Who gave each answer a response policy still weighs, by response id. */
   readonly responders: Readonly<Record<string, PendingResponder>>;
-  /** The sign-in attempts the session waits on, with what completing them needs. */
   readonly signIns: readonly AuthorizationChallenge[];
 }
 
-/** Reads the authoritative lifecycle facts saved alongside execution state. */
 export function storedProjection(state: SessionStateMap | undefined): SessionProjection {
   const stored = state?.[SESSION_PROJECTION_STATE_KEY] as Partial<SessionProjection> | undefined;
   if (stored === undefined) return initialSessionProjection();
-  // A projection an earlier build stored may lack what this one keeps beside its view, and carry
-  // what this one no longer keeps.
   const initial = initialSessionProjection();
   const projection: SessionProjection = {
     counters: stored.counters ?? initial.counters,
@@ -65,16 +53,12 @@ export function storedProjection(state: SessionStateMap | undefined): SessionPro
     : { ...projection, outputStarted: stored.outputStarted };
 }
 
-/** Coordinates the next lifecycle event carries, and whether a turn is open. */
 export interface TurnPosition {
   readonly sessionStarted: boolean;
   readonly sequence: number;
   readonly stepIndex: number;
-  /** The open turn's id, or `""` between turns. */
   readonly turnId: string;
-  /** The open turn streamed assistant output, so steering can no longer restart it. */
   readonly assistantOutputStarted?: boolean;
-  /** The open turn's latest open model run, which content and calls belong to. */
   readonly runId?: string;
 }
 
@@ -94,7 +78,6 @@ export function turnPosition(projection: SessionProjection): TurnPosition {
   return position;
 }
 
-/** The open turn's id, or the id the next turn takes. */
 export function activeTurnId(position: Pick<TurnPosition, "sequence" | "turnId">): string {
   return position.turnId === "" ? `turn_${position.sequence}` : position.turnId;
 }
@@ -103,7 +86,6 @@ export function isBetweenTurns(projection: SessionProjection): boolean {
   return activeTurnIdOf(projection) === undefined;
 }
 
-/** Input the session holds until it can run. */
 export function queuedInput(state: SessionStateMap | undefined): HarnessStepInput | undefined {
   return readTurnState(state).queued;
 }
@@ -112,7 +94,6 @@ export function suspendedSteps(state: SessionStateMap | undefined): readonly Sus
   return readTurnState(state).suspended;
 }
 
-/** The ids of calls that already have a result in `messages`. */
 export function answeredCallIds(messages: readonly ModelMessage[]): ReadonlySet<string> {
   const answered = new Set<string>();
   for (const message of messages) {
@@ -125,13 +106,11 @@ export function answeredCallIds(messages: readonly ModelMessage[]): ReadonlySet<
   return answered;
 }
 
-/** Workflow and agent calls of `step` the runtime still runs. */
 export function runningTasks(step: SuspendedStep): readonly RuntimeWorkflowTaskRequest[] {
   const answered = answeredCallIds(step.messages);
   return step.tasks.filter((task) => !answered.has(task.callId));
 }
 
-/** What the turn waits on the runtime for: dispatched runs and the task tool calls. */
 export interface RuntimeWait {
   readonly event: StepCoordinates;
   readonly callIds: readonly string[];
@@ -139,7 +118,6 @@ export interface RuntimeWait {
   readonly taskToolCalls: readonly TaskToolCall[];
 }
 
-/** The calls suspended steps wait on the runtime for, or `undefined` when none do. */
 export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | undefined {
   const waiting = suspendedSteps(state).flatMap((step) => {
     const tasks = runningTasks(step);
@@ -158,7 +136,6 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
   };
 }
 
-/** The suspended step whose approval `interactionId` names. */
 export function stepForRequest(
   view: SessionView,
   interactionId: string,
@@ -168,7 +145,6 @@ export function stepForRequest(
   );
 }
 
-/** Requests this session asked itself and still awaits; relayed requests answer elsewhere. */
 export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<string> {
   return new Set(
     openRequests(view.projection.view)
@@ -182,10 +158,6 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
   );
 }
 
-/**
- * The parked steps whose response already ended the turn with a call that ran before they parked,
- * by their coordinates: a step's object changes as its results arrive.
- */
 export function endingStepKeys(view: SessionView): ReadonlySet<string> {
   return new Set(
     view.turn.suspended.flatMap((parked) =>
@@ -194,17 +166,12 @@ export function endingStepKeys(view: SessionView): ReadonlySet<string> {
   );
 }
 
-/** Whether one of the `ending` steps committed: it no longer waits on a call. */
 export function committedEndingStep(view: SessionView, ending: ReadonlySet<string>): boolean {
   if (ending.size === 0) return false;
   const waiting = new Set(view.turn.suspended.map((parked) => stepCoordinatesKey(parked.event)));
   return [...ending].some((key) => !waiting.has(key));
 }
 
-/**
- * Whether every call of each parked response has a result, counting `settledIds`, and none ran at
- * its provider, whose outcome the model reads.
- */
 export function parkedCallsAnswered(
   suspended: readonly SuspendedStep[],
   settledIds: ReadonlySet<string>,

@@ -22,20 +22,12 @@ export function readSlackConversationPrivacy(
   }
 }
 
-/** What eve knows about a Slack conversation: whether it is private, and what kind of space it is. */
 export interface SlackConversationKind {
-  /** Whether to treat it as private, failing closed. */
   readonly isPrivate: boolean;
   readonly spaceType?: ConversationSpaceType;
-  /** Its visibility, only when Slack said. */
   readonly visibility?: ConversationSpaceVisibility;
 }
 
-/**
- * Classifies a conversation from the event's `channel_type`, or from
- * `conversations.info` when the event has none, as `app_mention` events don't.
- * Unknown conversations fail closed as private.
- */
 export async function readSlackConversationKind(input: {
   readonly channelId: string;
   readonly raw: Readonly<Record<string, unknown>> | undefined;

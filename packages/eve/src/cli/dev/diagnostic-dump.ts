@@ -11,18 +11,12 @@ import { captureVercel, resolveVercelInvocation } from "#setup/primitives/run-ve
 
 const VERCEL_VERSION_TIMEOUT_MS = 5_000;
 
-/**
- * Environment facts captured once per `eve dev` process, written into the
- * diagnostic dump so a shared log always travels with the toolchain state
- * that produced it.
- */
 export interface DevEnvironmentInfo {
   readonly eveVersion: string;
   readonly nodeVersion: string;
   readonly platform: string;
   readonly vercelCliVersion?: string;
   readonly vercelCliPath?: string;
-  /** Local durable session store measurements; absent when the directory does not exist yet. */
   readonly sessionsDirectory?: {
     readonly path: string;
     readonly files: number;
@@ -30,42 +24,26 @@ export interface DevEnvironmentInfo {
   };
 }
 
-/**
- * Aggregate counters for the TUI process's session activity. Reported by
- * the renderer at each turn boundary so the dump stays current even if
- * the process dies mid-session.
- */
 export interface DevSessionStats {
   readonly prompts: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
-  /** Tool invocations observed, keyed by tool name. */
   readonly toolCalls: Readonly<Record<string, number>>;
-  /** Distinct subagent dispatches that produced observable output. */
   readonly subagents: number;
 }
 
 export interface DevDiagnosticDump {
   readonly path: string;
-  /** Project-relative reference, forward slashes on every platform. */
   readonly displayPath: string;
   updateSessionStats(stats: DevSessionStats): void;
   close(): Promise<void>;
 }
 
 export interface CreateDevDiagnosticDumpOptions {
-  /** Injectable environment collector; defaults to {@link collectDevEnvironmentInfo}. */
   readonly environment?: () => Promise<DevEnvironmentInfo>;
   readonly now?: () => Date;
 }
 
-/**
- * Creates the environment dump paired with one dev diagnostic log: the same
- * instance name with a `.dump` extension. The environment section is
- * collected in the background and written as soon as it resolves; session
- * stats rewrite the file on every update. Like the log sink, write failures
- * disable the dump silently — never through stderr, which the TUI captures.
- */
 export function createDevDiagnosticDump(
   appRoot: string,
   logPath: string,
@@ -102,9 +80,7 @@ export function createDevDiagnosticDump(
       environment = collected;
       write();
     })
-    .catch(() => {
-      // Collection is best-effort; the dump keeps its pending marker.
-    });
+    .catch(() => {});
 
   return {
     path,
@@ -122,13 +98,6 @@ export function createDevDiagnosticDump(
   };
 }
 
-/**
- * One pretty-printed JSON document. `environment` is `null` until the
- * background collection resolves; `session` is `null` until the first
- * stats report. Parseable standalone (`jq . <file>.dump`) and, because a
- * JSON document followed by JSON Lines is a valid JSON value stream,
- * composable with the log by plain concatenation (`eve logs --dump`).
- */
 function formatDump(input: {
   readonly at: Date;
   readonly durationMs: number;
@@ -144,7 +113,6 @@ function formatDump(input: {
   return `${JSON.stringify(document, null, 2)}\n`;
 }
 
-/** Collects the real environment facts for {@link createDevDiagnosticDump}. */
 async function collectDevEnvironmentInfo(appRoot: string): Promise<DevEnvironmentInfo> {
   const [vercelCli, sessionsDirectory] = await Promise.all([
     detectVercelCli(appRoot),
@@ -166,9 +134,6 @@ async function collectDevEnvironmentInfo(appRoot: string): Promise<DevEnvironmen
 async function detectVercelCli(
   appRoot: string,
 ): Promise<{ vercelCliVersion?: string; vercelCliPath?: string }> {
-  // `captureVercel` owns the invocation resolution, capture, and hard
-  // deadline; the invocation is re-resolved only to report which binary
-  // answered (a workspace-local install beats the PATH lookup).
   const invocation = resolveVercelInvocation(appRoot);
   const [result, path] = await Promise.all([
     captureVercel(["--version"], {
@@ -193,18 +158,11 @@ async function findOnPath(executable: string): Promise<string | undefined> {
     try {
       await access(candidate, constants.X_OK);
       return candidate;
-    } catch {
-      // Not here; keep scanning.
-    }
+    } catch {}
   }
   return undefined;
 }
 
-/**
- * Counts files and total bytes under the app's local durable session store
- * (`.eve/.workflow-data`). Returns `undefined` when the directory does not
- * exist yet.
- */
 export async function measureSessionsDirectory(
   appRoot: string,
 ): Promise<DevEnvironmentInfo["sessionsDirectory"]> {
@@ -223,9 +181,7 @@ export async function measureSessionsDirectory(
     files += 1;
     try {
       bytes += (await stat(join(entry.parentPath, entry.name))).size;
-    } catch {
-      // Entries can vanish while a live session compacts; count what remains.
-    }
+    } catch {}
   }
   return { path: displayLocalWorkflowWorldDataDirectory(appRoot), files, bytes };
 }

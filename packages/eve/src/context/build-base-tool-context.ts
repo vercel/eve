@@ -4,14 +4,12 @@ import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.j
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 
-/** Base context shared by tool executors. */
 type BaseToolContext = SessionContext & {
   readonly abortSignal: AbortSignal;
   readonly callId: string;
   readonly toolName: string;
 };
 
-/** Builds the base context for one tool execution. */
 export function buildBaseToolContext(input: {
   readonly options: Pick<ToolExecuteOptions, "abortSignal" | "toolCallId">;
   readonly toolName: string;

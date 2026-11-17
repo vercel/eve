@@ -7,10 +7,8 @@ import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 
 const position = { sequence: 1, stepIndex: 0, turnId: "child-turn" };
 
-/** The token of a hook a run awaits a remote agent's reply on. */
 const REPLY = "eve:reply:v1:parent-hook";
 
-/** The parent's callback URL for that hook, naming no protocol. */
 const UNMARKED = `https://parent.example.com/eve/v1/callback/${encodeURIComponent(REPLY)}`;
 const AGREED = `${UNMARKED}?eveRemoteProtocol=2`;
 
@@ -129,8 +127,6 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
   });
 
   it("passes a protocol 2 callback as is to a parent run from before v27", async () => {
-    // Its URL names no protocol: the run reads protocol 2 input itself, as its own deployment's
-    // route passed it, so the child's request reaches it across the parent's upgrade.
     const nested = {
       ...approvalRequest,
       remote: {
@@ -160,7 +156,6 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       subagentName: "deployer",
     };
     await post(approved, UNMARKED);
-    // Such a run reads an approval's own settlement too.
     expect(resumeRunnableHook).toHaveBeenCalledWith(REPLY, approved);
   });
 
@@ -193,9 +188,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
   });
 
   it.each([
-    // Alice's order workflow waits on a hook it named for the order.
     ["a hook authored code named", "order:1042"],
-    // A remote agent's result never lands in a session's inbox.
     ["a session's inbox", "eve:inbox:v1:eve:session:wrun_1:inbox"],
   ])("answers not pending for %s, without reading the request or resuming it", async (_, token) => {
     const request = new Request(AGREED, { body: JSON.stringify(approvalRequest), method: "POST" });
@@ -214,7 +207,6 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     resumeRunnableHook.mockRejectedValue(new Error("hook not found"));
     const response = await post(approvalRequest);
     expect(response.status).toBe(404);
-    // The same message as every protocol's route, now with a code a child can read.
     await expect(response.json()).resolves.toEqual({
       code: "CALLBACK_NOT_PENDING",
       error: "Session callback not pending.",

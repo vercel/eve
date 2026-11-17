@@ -99,8 +99,6 @@ const MOCK_MODELS: CatalogModel[] = [
 
 const MOCK_PROVIDER_ALIASES: Record<string, string> = { blackForestLabs: "bfl" };
 
-/** An app root no other run wrote a model catalog cache into. A fixed path picks up
- * whatever a real `eve` run left in it, and the loader then skips the mocked fetch. */
 function unusedAppRoot(): string {
   return join(tmpdir(), `eve-model-catalog-${randomUUID()}`);
 }

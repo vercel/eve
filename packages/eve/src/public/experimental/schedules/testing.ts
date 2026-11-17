@@ -1,4 +1,3 @@
-/** Experimental in-memory dynamic schedule collections for tests. */
 export {
   inMemoryScheduleProvider,
   type InMemoryScheduleProviderOptions,

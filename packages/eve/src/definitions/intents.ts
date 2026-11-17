@@ -9,18 +9,10 @@ import { readDefinitionsState, writeDefinitionsState, type PendingIntent } from 
 
 const log = createLogger("hooks");
 
-// Cancellation targets the running turn, never a later one. A continuation targets the next turn,
-// for the turn that settled. Repeated requests add nothing.
-
-/** A command a hook asked for, before it's queued. */
 export type Command =
   | { readonly type: "cancel"; readonly reason?: string }
   | { readonly type: "continue"; readonly turnId: string; readonly delivery: DeliverHookPayload };
 
-/**
- * Adds a hook's commands to the session's queue. Cancels between turns are dropped; each hook's
- * continuation joins the turn's one continuation delivery.
- */
 export function queueCommands(
   ctx: ContextContainer,
   definition: { readonly id: string; readonly label: string },
@@ -35,7 +27,6 @@ export function queueCommands(
   let changed = false;
   for (const command of commands) {
     if (command.type === "continue") {
-      // A hook joins the turn's continuation; `ctx.continue()` already refused one it can't join.
       const queued = continuation?.turnId === command.turnId ? continuation : undefined;
       continuation = {
         delivery:
@@ -67,7 +58,6 @@ export function queueCommands(
   }
 }
 
-/** Removes and returns the waiting intents that match, because the session acted on them. */
 export function takeIntents(
   ctx: ContextContainer,
   matches: (intent: PendingIntent) => boolean,
@@ -80,11 +70,6 @@ export function takeIntents(
   return taken;
 }
 
-/**
- * A hook, or an effect eve runs after a commit, failed. During a turn, the turn fails at its next
- * boundary: before its next model call, or as it would settle. Between turns, there's no turn to
- * fail, and the failure is logged.
- */
 export function reportEffectFailure(
   ctx: ContextContainer,
   definition: { readonly id: string; readonly label: string },
@@ -93,7 +78,6 @@ export function reportEffectFailure(
 ): void {
   const turnId = activeTurnIdOf(currentProjection(ctx));
   const message = toErrorMessage(error);
-  // Hooks and memory capture run after commits; nothing else reaches here.
   const subject = `${definition.id.startsWith("memory:") ? "Memory" : "Hook"} "${definition.label}"`;
   log.error(`${subject} failed.`, { error: message, occurrence, turnId });
   if (turnId === undefined) return;
@@ -115,7 +99,6 @@ export function reportEffectFailure(
   });
 }
 
-/** Takes the failure a hook reported for the running turn, if any. */
 export function takeTurnFailure(ctx: ContextContainer): string | undefined {
   const turnId = activeTurnIdOf(currentProjection(ctx));
   if (turnId === undefined) return undefined;

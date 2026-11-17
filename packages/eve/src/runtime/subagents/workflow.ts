@@ -24,10 +24,8 @@ type AgentModelsToolCall = WorkflowServeCall<AgentModelsToolInput>;
 
 type AgentModelsToolReceive = WorkflowServeReceive<AgentModelsToolInput>;
 
-/** One turn of the agent's session, and the signal of the calls it answers. */
 interface AgentTurn {
   readonly result: Promise<AgentMessageResult>;
-  /** Aborts when the task is cancelled, which cancels the turn. */
   readonly signal: AbortSignal;
 }
 
@@ -39,12 +37,6 @@ type AgentModelsTurnEvent =
   | { readonly kind: "call"; readonly call: AgentModelsToolCall }
   | { readonly kind: "result"; readonly result: AgentMessageResult };
 
-/**
- * The `serve` body of every agent tool: local, remote, dynamic, and the
- * `agent` copy of the root. Each task talks to one session with the agent. A
- * call that arrives while the agent works joins its turn, and the turn's final
- * response settles every call it answered.
- */
 export async function agentToolServeWorkflow(
   receive: AgentToolReceive,
   ctx: WorkflowServeContext<string>,
@@ -54,7 +46,6 @@ export async function agentToolServeWorkflow(
   return await serveAgentTool(receive, ctx);
 }
 
-/** {@link agentToolServeWorkflow}'s body, for a host that runs it without Workflow. */
 export async function serveAgentTool(
   receive: AgentToolReceive,
   ctx: WorkflowServeContext<string>,
@@ -69,19 +60,12 @@ export async function serveAgentTool(
       next = receive();
       continue;
     }
-    // A cancel already settled the turn's calls, and the task stays available.
     if (!turn.signal.aborted) {
       if (event.result.status === "failed") {
-        // The throw ends this task, so the model can only retry with a new one.
         throw new Error(
           `The agent's turn failed: ${event.result.error.message}\nThis task has ended; to retry, call ${ctx.toolName} without taskId.`,
         );
       }
-      // `next` can take a call after the result wins the race, and the reply
-      // would settle that call unread. `receive()` returns `next` only while
-      // it's pending, so another promise means the agent reads that call
-      // first. Nothing may await between this check and the reply. The
-      // session's end aborts the turn, so `following` can't reject here.
       const following = receive();
       if (following !== next) {
         turn = sendToAgent(agent, await next);
@@ -95,10 +79,6 @@ export async function serveAgentTool(
   }
 }
 
-/**
- * The `serve` body of `agent({ models })`: each task talks to one root-copy session on the model
- * its first call chose, or on the current model when that call named none.
- */
 export async function agentModelsServeWorkflow(
   receive: AgentModelsToolReceive,
   ctx: WorkflowServeContext<string>,
@@ -107,8 +87,6 @@ export async function agentModelsServeWorkflow(
 
   const first = await receive();
   const model = first.input.model;
-  // The model is the option's key. The step that opens the session reads the option from this
-  // tool, so a live model never crosses the workflow boundary.
   const agent = ctx.agent("agent", model === undefined ? undefined : { model });
   let turn = sendToModelAgent(agent, first, model);
   let next = receive();
@@ -138,7 +116,6 @@ export async function agentModelsServeWorkflow(
   }
 }
 
-/** A cancel aborts the call's `abortSignal`, which cancels the agent's turn. */
 function sendToAgent(agent: AgentSession, call: AgentToolCall): AgentTurn {
   const result = agent
     .send(call.input.message, { signal: call.abortSignal })
@@ -146,7 +123,6 @@ function sendToAgent(agent: AgentSession, call: AgentToolCall): AgentTurn {
   return { result, signal: call.abortSignal };
 }
 
-/** A later call may omit the model, but it can't name another one. */
 function sendToModelAgent(
   agent: AgentSession,
   call: AgentModelsToolCall,
@@ -163,7 +139,6 @@ function sendToModelAgent(
   return { result, signal: call.abortSignal };
 }
 
-/** `next` may take a call even when the turn's result wins, so the loop keeps it until it's read. */
 async function nextCallOrResult(
   next: Promise<AgentToolCall>,
   turn: AgentTurn,
@@ -184,11 +159,6 @@ async function nextModelCallOrResult(
   ]);
 }
 
-/**
- * The message joins the running turn, or starts the next one if it just
- * ended. A cancelled turn is left to end first, so the message starts a turn
- * that answers it instead of joining one whose calls were already settled.
- */
 async function forwardCall(
   agent: AgentSession,
   turn: AgentTurn,

@@ -1,7 +1,3 @@
-/**
- * Schedule authoring helpers for `agent/schedules/*` files.
- */
-
 export {
   defineSchedule,
   type ScheduleDefinition,

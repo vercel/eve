@@ -15,14 +15,12 @@ import { isPathInsideOrEqual } from "#shared/path-inside.js";
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   readonly fingerprint: string;
-  /** Identity of the authored sources the workflow driver and step registrations are built from. */
   readonly workflowSourceFingerprint?: string;
 }
 
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
 ): Promise<DevelopmentGeneration> {
-  // Drain both operations before discarding a failed candidate's snapshot.
   const [preparation, staging] = await Promise.allSettled([
     prepareAuthoredRuntimeModules({
       appRoot: compileResult.project.appRoot,
@@ -54,8 +52,6 @@ export async function stageDevelopmentGeneration(
       ...snapshot,
       authoredWorkflowModules: prepared.authoredWorkflowModules,
       fingerprint: materialized.fingerprint,
-      // The watcher covers the agent root; shared modules imported from elsewhere
-      // in the package, such as a workspace's root lib/, need their own entries.
       sourceWatchPaths: [
         ...(snapshot.sourceWatchPaths ?? []),
         ...prepared.sourceModules.filter(
@@ -79,7 +75,6 @@ export async function stageDevelopmentGeneration(
   }
 }
 
-/** Moves the dev runtime pointer so new sessions load `generation`. */
 export async function activateDevelopmentGeneration(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
@@ -96,14 +91,6 @@ export async function discardDevelopmentGeneration(
   await rm(generation.snapshotRoot, { force: true, recursive: true });
 }
 
-/**
- * Creates a serial queue that prunes retired generations in the background.
- * Requests made while a prune runs coalesce into one more pass. When a pass
- * removes snapshots, `onRuntimePruned` reconciles the Workflow runs they
- * owned; a failed reconciliation, or a failed prune that may have removed
- * some, is retried after the next pass even if that pass removes nothing.
- * `close()` drops pending requests and resolves once the running pass ends.
- */
 export function createDevelopmentGenerationPruner(input: {
   readonly appRoot: string;
   readonly onRuntimePruned?: () => Promise<void>;
@@ -150,7 +137,6 @@ export function createDevelopmentGenerationPruner(input: {
 }
 
 export interface DevelopmentGenerationPruner {
-  /** Requests a pass; ignored once closed. */
   request(): void;
   close(): Promise<void>;
 }

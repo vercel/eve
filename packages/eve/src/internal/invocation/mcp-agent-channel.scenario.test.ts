@@ -4,7 +4,6 @@ import { type ScenarioAppDescriptor, useScenarioApp } from "#internal/testing/sc
 import { startEveDev } from "#internal/testing/dev-server-harness.js";
 import { requiredRecord, requiredString } from "#internal/testing/scenario-values.js";
 
-/** A production build that runs the scenario's own `mockModel`. */
 const SCENARIO_ENV = { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" };
 
 const scenarioApp = useScenarioApp();

@@ -15,11 +15,9 @@ export type LegacySession = DurableSession & { readonly history: ModelMessage[] 
 const LEGACY_EMISSION_KEY = "eve.harness.emission";
 
 const PRESERVED_FRAMEWORK_STATE = new Set(["eve.harness.sessionRuntimeTokenLimit"]);
-/** What a legacy driver counted the session spent, and how much of it a parent was told. */
 const LEGACY_USAGE_KEY = "eve.harness.turnUsage";
 const REPORTED_USAGE_KEY = "eve.harness.reportedSessionUsage";
 
-/** Reads the driver's embedded snapshot; every supported driver carries one. */
 export function readLegacySnapshot(
   state: Record<string, unknown> & { sessionId: string },
 ): LegacySession {
@@ -36,7 +34,6 @@ export function readLegacySnapshot(
   return session as LegacySession;
 }
 
-/** Keep committed conversation data, but no pre-cutover execution registries. */
 export function importConversation(session: LegacySession): {
   readonly history: HarnessModelMessage[];
   readonly sessionState: DurableSessionState;
@@ -66,10 +63,6 @@ export function importConversation(session: LegacySession): {
   };
 }
 
-/**
- * The turn position a legacy driver persisted, as the projection that replaces it, with what it
- * counted the session spent as the view's usage, so the session's limits keep counting.
- */
 export function importProjection(session: LegacySession): SessionProjection {
   const raw = session.state?.[LEGACY_EMISSION_KEY];
   const initial = initialSessionProjection();
@@ -87,7 +80,6 @@ export function importProjection(session: LegacySession): SessionProjection {
   if (turnId === "") {
     return { ...projection, view: { ...view, session: { status, turnCount: raw.sequence } } };
   }
-  // A legacy driver kept the index its next step takes: the steps its turn already ran.
   const runs = typeof raw.stepIndex === "number" ? raw.stepIndex : 0;
   const turn = {
     cause: { hook: "legacy" },
@@ -108,7 +100,6 @@ export function importProjection(session: LegacySession): SessionProjection {
   };
 }
 
-/** A legacy usage total: its counts, and its cost only when a provider reported one. */
 function legacyUsage(raw: unknown): TokenUsage | undefined {
   if (!isObject(raw)) return undefined;
   const count = (field: string) => (typeof raw[field] === "number" ? raw[field] : 0);

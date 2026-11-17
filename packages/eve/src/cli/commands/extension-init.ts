@@ -67,7 +67,6 @@ const defaultDependencies: ExtensionInitCommandDependencies = {
 };
 
 const CURRENT_DIRECTORY_PROJECT_NAME = ".";
-/** Same override env as agent `eve init` so CI can pin the eve package specifier. */
 export const EVE_INIT_PACKAGE_SPEC_ENV = "EVE_INIT_PACKAGE_SPEC";
 
 const initLog = createLogger("extension-init");
@@ -219,10 +218,6 @@ function resolveInitEvePackageOverride(): EvePackageContract | undefined {
   };
 }
 
-/**
- * Creates a new eve extension package. Same install/git flow as agent `eve init`,
- * but always create-only and prints next steps instead of starting `eve dev`.
- */
 export async function runExtensionInitCommand(
   logger: ExtensionInitCliLogger,
   parentDirectory: string,
@@ -231,7 +226,6 @@ export async function runExtensionInitCommand(
   trackStep?: (step: ExtensionInitSetupStep) => void,
 ): Promise<void> {
   trackStep?.("resolve_target");
-  // Coding agent with no target: print a setup guide, same gate as agent init.
   if (target === undefined && (await dependencies.isCodingAgentLaunch())) {
     logger.log(initExtensionInstructions());
     return;

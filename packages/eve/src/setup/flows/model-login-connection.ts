@@ -26,7 +26,6 @@ import { CONNECTION_OPTIONS } from "./model-login-options.js";
 
 type Team = { teamId: string; teamName: string };
 
-/** Evidence from this login attempt; credentials stay with their existing owner. */
 export interface ValidatedModelConnection {
   selected: ModelConnectionSelection;
   team?: Team;

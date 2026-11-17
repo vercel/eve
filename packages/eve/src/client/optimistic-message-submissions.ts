@@ -7,7 +7,6 @@ type Submission = LocalSubmission & { readonly deliveryId?: string };
 
 let submissionSequence = 0;
 
-/** Local message echoes until their deliveries arrive, including failed sends. */
 export class OptimisticMessageSubmissions {
   readonly #optimistic: boolean;
   readonly #show: (submissions: readonly LocalSubmission[]) => void;
@@ -25,7 +24,6 @@ export class OptimisticMessageSubmissions {
 
   submit(input: SendTurnPayload, turnId?: string): string | undefined {
     if (input.message === undefined) return undefined;
-    // Browsers expose `randomUUID` only in secure contexts, so plain-HTTP origins lack it.
     const id = crypto.randomUUID?.() ?? `submission_${(submissionSequence += 1).toString()}`;
     this.#submissions.set(id, { id, message: summarizeMessage(input.message), turnId });
     this.#publish();

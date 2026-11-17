@@ -8,8 +8,6 @@ import {
 } from "#execution/in-process/step-boundary.js";
 import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 
-// The in-process default and Workflow's serializer agree on what a step receives, so an
-// in-process session's steps see what a deployment's would.
 const boundaries: readonly (readonly [string, StepBoundary])[] = [
   ["a structured clone", structuredCloneBoundary],
   ["Workflow's serializer", workflowStepBoundary],

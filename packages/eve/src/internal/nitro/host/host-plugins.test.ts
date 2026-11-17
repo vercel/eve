@@ -79,7 +79,6 @@ describe("createModulePathMatcher", () => {
     };
     const handler = "/app/.eve/workflow/workflows-handler.mjs";
     const winHandler = "C:\\app\\.eve\\workflow\\workflows-handler.mjs";
-    // Rolldown filters see `/` separators; handlers see the specifier as written.
     const admitted = (platform: keyof typeof matchers, specifier: string) =>
       [specifier, specifier.replaceAll("\\", "/")].map((id) =>
         matchers[platform].specifierFilter.some((pattern) => pattern.test(id)),

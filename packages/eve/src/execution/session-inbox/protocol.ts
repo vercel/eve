@@ -14,7 +14,6 @@ type DecodedSessionInbox =
   | SessionTimeoutHookPayload
   | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
 
-/** Invalid current-generation inbox payload. Historical wire shapes are not accepted. */
 export class SessionInboxPayloadError extends Error {
   constructor(message: string) {
     super(message);
@@ -22,7 +21,6 @@ export class SessionInboxPayloadError extends Error {
   }
 }
 
-/** Normalizes the one authored `send` convenience command into a delivery. */
 export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
   if (value === null || typeof value !== "object" || !("kind" in value)) {
     throw new SessionInboxPayloadError("Session inbox payload must be an object with a kind.");

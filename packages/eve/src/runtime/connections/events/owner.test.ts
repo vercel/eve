@@ -23,7 +23,6 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   },
   getRun(runId: string) {
     const run = runs.get(runId)!;
-    // The run's published subscribe outcome, as its stream delivers it.
     return {
       getReadable: () =>
         Object.assign(
@@ -77,7 +76,6 @@ const subscription = {
   status: "active" as const,
   expiresAt: null,
 };
-/** A running watch holding its hook; call the result to publish its subscribe outcome. */
 function holdWatch() {
   let publish!: (value: unknown) => void;
   const run = {
@@ -105,7 +103,6 @@ it("starts each delivery in its own run, under the binding its watch's hook carr
   expect(started).toHaveBeenCalledExactlyOnceWith({ workflowId: "delivery" }, [
     { binding, payload, serializedContext: expect.any(Object) },
   ]);
-  // The watch's own run takes nothing per delivery.
   expect(resumed).not.toHaveBeenCalled();
 });
 

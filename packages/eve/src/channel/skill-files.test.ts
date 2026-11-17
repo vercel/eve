@@ -21,8 +21,6 @@ const memory: SkillFileSource = {
   readFile: async (_skill, path) => files[path]!,
 };
 
-// A production build's embedded skill files. Like a `bytes:` module, every
-// read of one digest resolves the same array.
 const shipped = new Uint8Array([1, 2, 3]);
 const bundledSession = createRuntimeSession("bundled-skill-files");
 await withRuntimeSession(bundledSession, () =>

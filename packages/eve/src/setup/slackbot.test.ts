@@ -39,7 +39,6 @@ const mockedOpenUrl = vi.mocked(openUrl);
 const INSTALL_URL =
   /^https:\/\/vercel\.com\/api\/v1\/connect\/install\/scl_my_agent\?teamId=team_demo&request_code=[\w-]{43}$/;
 
-/** `vercel connect create slack … -F json` stdout payload on CLI 54.x. */
 function createSlackConnectorJson(uid: string, id = "scl_my_agent"): string {
   return JSON.stringify({ uid, id, type: "slack", name: "my-agent" });
 }
@@ -69,10 +68,6 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
-/**
- * A `connect create` that reached the browser flow, so the run may have
- * created a connector even when its stdout names none.
- */
 function browserCreate<T>(result: T | (() => Promise<T>)) {
   return async (
     _args: string[],
@@ -99,7 +94,6 @@ const PROJECT = "prj_demo";
 const ROUTE = "/eve/v1/slack";
 const LINK = { projectId: PROJECT, orgId: "team_demo" };
 
-/** Provisioning deps over the mocked Vercel CLI, linked to {@link LINK}. */
 function linkedDeps() {
   return {
     captureVercel: mockedCaptureVercel,
@@ -125,7 +119,6 @@ interface ListedConnector {
   projects?: { id: string; name?: string }[];
 }
 
-/** One page of `GET /v1/connect/connectors?include=projects`. */
 function listPage(connectors: readonly ListedConnector[], next?: string) {
   return {
     ok: true as const,
@@ -154,14 +147,12 @@ const isListCall = (args: readonly string[]): boolean =>
 const isUidLookup = (args: readonly string[]): boolean =>
   args[0] === "api" && /^\/v1\/connect\/connectors\/slack%2F[^/?]*\?/.test(args[1] ?? "");
 
-/** The reads before a create when nothing exists yet: an empty project list and free UIDs. */
 function emptyInspection(args: readonly string[]) {
   if (isListCall(args)) return listPage([]);
   if (isUidLookup(args)) return NOT_FOUND;
   return undefined;
 }
 
-/** Mocks the full new-connector path: nothing existing, completed browser verifier, routing. */
 function mockHappyPathProvision(): void {
   mockedRunVercelCaptureStdout.mockResolvedValue({
     ok: true,
@@ -197,11 +188,6 @@ function connector(input: Partial<FakeConnector> & { uid: string }): FakeConnect
   };
 }
 
-/**
- * In-memory Vercel Connect behind the mocked CLI. It applies attach, create,
- * and trigger-destination replacement the way Connect does, so tests assert
- * the commands eve issued and the destinations they leave behind.
- */
 function fakeConnect(initial: FakeConnector[]) {
   const state = new Map(initial.map((entry) => [entry.uid, structuredClone(entry)]));
   const commands: string[] = [];
@@ -226,7 +212,6 @@ function fakeConnect(initial: FakeConnector[]) {
     pageSize: Number.POSITIVE_INFINITY,
     fail: (_args: readonly string[]): boolean => false,
     patchError: undefined as string | undefined,
-    /** Every command that changes Connect state, in order; detach included. */
     mutations: () =>
       commands.filter(
         (command) =>
@@ -281,7 +266,6 @@ function fakeConnect(initial: FakeConnector[]) {
     if (args[1] === "attach") {
       const entry = state.get(args[2]!)!;
       attachProject(entry, PROJECT);
-      // Like the CLI, `--triggers` appends a destination; plain attach only grants token access.
       if (args.includes("--triggers")) {
         entry.destinations.push({
           projectId: PROJECT,
@@ -382,7 +366,6 @@ describe("parseCreatedSlackConnector", () => {
   });
 });
 
-/** Inspects, then provisions the preferred connector or `select`'s choice, as setup does. */
 async function provision(
   log: ChannelSetupLog,
   root: string,
@@ -426,7 +409,6 @@ describe("provisionSlackbot", () => {
 
   it.each([
     ["no destination", []],
-    // An earlier run that detached the project but failed to re-attach it.
     ["a stale default destination", [{ projectId: PROJECT, path: "/triggers/slack" }]],
   ])(
     "attaches an unattached connector no other project uses, with %s",
@@ -481,7 +463,6 @@ describe("provisionSlackbot", () => {
         projects: [{ id: "prj_prod", name: "chief-prod" }],
         destinations: [{ projectId: "prj_prod", path: ROUTE }],
       }),
-      // Only a destination ties this one to another project.
       connector({ uid: "slack/routed", projects: [], destinations: [{ projectId: "prj_prod" }] }),
     ]);
 
@@ -699,15 +680,12 @@ describe("provisionSlackbot", () => {
       state: "create-failed",
       detail: "Error: Connect is not available for this team.",
     });
-    // Nothing could exist, so there is no browser warning and no ownership lookup.
     expect(log.warning).not.toHaveBeenCalled();
-    // One lookup during discovery and one to reserve the name at create time.
     expect(connect.commands.filter((command) => command.includes("slack%2F"))).toHaveLength(2);
   });
 
   it("fails closed when create fails without proving it stopped before the browser flow", async () => {
     const connect = fakeConnect([]);
-    // No recognized browser line and no CLI error: the browser may still create one.
     mockedRunVercelCaptureStdout.mockResolvedValue({ ok: false, stdout: "", stderr: "" });
     const log = createTestLog();
 
@@ -915,7 +893,6 @@ describe("provisionSlackbot", () => {
     });
 
     await expect(provisioning).resolves.toMatchObject({ state: "attached" });
-    // Three lookups until the workspace connects, then one fresh routing read.
     expect(connectorLookups).toBe(4);
     expect(createSignal?.aborted).toBe(true);
   });
@@ -987,7 +964,6 @@ describe("provisionSlackbot", () => {
       { message: "Waiting for Slack setup to finish...", stopped: true },
       { message: "Configuring Slack event delivery for this agent...", stopped: true },
     ]);
-    // Phases are spinner-only; outcomes still persist on their own channels.
     expect(log.message).not.toHaveBeenCalled();
     expect(log.success).not.toHaveBeenCalled();
   });
@@ -1007,7 +983,6 @@ describe("provisionSlackbot", () => {
 
   type ChoiceLog = ChannelSetupLog & { awaitChoice: ChannelSetupAwaitChoice };
 
-  /** A test harness that resolves its interactive wait with a scripted choice sequence. */
   function choiceLog(choices: readonly (string | undefined | "never")[]): ChoiceLog {
     let call = 0;
     return Object.assign(createTestLog(), {
@@ -1022,10 +997,6 @@ describe("provisionSlackbot", () => {
     });
   }
 
-  /**
-   * A fresh fake clock per test: `delay` advances the deadline so an unraced
-   * poll is bounded (no busy-loop), while a racing choice still settles first.
-   */
   function makeClock(): { delay: (ms: number) => Promise<void>; now: () => number } {
     let now = 0;
     return {
@@ -1042,8 +1013,6 @@ describe("provisionSlackbot", () => {
       stdout: createSlackConnectorJson("slack/my-agent"),
     });
     mockedRunVercel.mockResolvedValue(true);
-    // The existing-check sees nothing; cancellation removes the UID returned by
-    // the create command.
     mockedCaptureVercel.mockImplementation(
       async (args) =>
         emptyInspection(args) ?? { ok: true, stdout: createSlackConnectorJson("slack/my-agent") },
@@ -1243,7 +1212,6 @@ describe("provisionSlackbot", () => {
       stdout: createSlackConnectorJson("slack/my-agent"),
     });
     mockedRunVercel.mockResolvedValue(true);
-    // The install only lands on the second attempt (after one create + retry).
     mockedCaptureVercel.mockImplementation(async (args) => {
       const inspection = emptyInspection(args);
       if (inspection !== undefined) return inspection;
@@ -1272,7 +1240,6 @@ describe("provisionSlackbot", () => {
     );
 
     expect(result.state).toBe("attached");
-    // Two attempts created two connectors; the first was removed before retrying.
     expect(mockedRunVercelCaptureStdout).toHaveBeenCalledTimes(2);
     expect(mockedRunVercel).toHaveBeenCalledWith(
       ["connect", "remove", "slack/my-agent", "--disconnect-all", "--yes"],
@@ -1454,8 +1421,6 @@ describe("provisionSlackbot", () => {
     mockedRunVercel.mockResolvedValue(true);
     let detailCalls = 0;
     mockedCaptureVercel.mockImplementation(async (args) => {
-      // The snapshot sees no workspace; park the next lookup so the wait is
-      // in flight when we abort.
       if (!isListCall(args)) {
         detailCalls += 1;
         return detailCalls === 1
@@ -1484,8 +1449,6 @@ describe("provisionSlackbot", () => {
     controller.abort();
     workspace.resolve({ ok: true, stdout: createSlackConnectorJson("slack/my-agent") });
 
-    // The wait was interrupted, not concluded: the abort propagates and eve never
-    // claims the connector is disconnected (it never finished checking).
     await expect(provisioning).rejects.toMatchObject({ name: "AbortError" });
     expect(log.warning).not.toHaveBeenCalledWith(
       expect.stringContaining("is not installed in a Slack workspace"),
@@ -1514,7 +1477,6 @@ describe("provisionSlackbot", () => {
     );
 
     expect(result.state).toBe("attached");
-    // The completed verifier won the race, so the prompt is torn down and nothing is removed.
     expect(close).toHaveBeenCalled();
     expect(mockedRunVercel).not.toHaveBeenCalledWith(
       ["connect", "remove", "slack/my-agent", "--disconnect-all", "--yes"],
@@ -1552,7 +1514,6 @@ describe("provisionSlackbot", () => {
       state: "attached",
       chatUrl: "https://slack.com/app_redirect?app=A0&team=T0",
     });
-    // Inventory, snapshot, two polls, fresh details and projects, then the replacement.
     expect(mockedCaptureVercel).toHaveBeenCalledTimes(7);
     expect(mockedCaptureVercel.mock.calls.at(-1)?.[0]).toContain("PATCH");
     expect(mockedRunVercelCaptureStdout).not.toHaveBeenCalled();
@@ -1626,7 +1587,6 @@ describe("provisionSlackbot", () => {
     });
 
     expect(result.state).toBe("existing-not-installed");
-    // One snapshot read, then five polls inside the five-minute deadline.
     expect(now).toBe(6 * 60_000);
     const detailCalls = mockedCaptureVercel.mock.calls.filter(([args]) => !isListCall(args));
     expect(detailCalls).toHaveLength(6);

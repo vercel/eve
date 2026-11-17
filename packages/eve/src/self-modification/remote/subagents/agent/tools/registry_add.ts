@@ -18,12 +18,6 @@ import {
   installProductionRegistryItem,
 } from "../../../production-registry-add.js";
 
-/**
- * Production installation mutates only the disposable proposal checkout. It is
- * restricted to the official registry, supports resumable non-secret setup and
- * external authorization boundaries, and reports paths destined for the draft
- * pull request rather than claiming that those changes are deployed.
- */
 const productionInputSchema = {
   type: "object",
   additionalProperties: false,

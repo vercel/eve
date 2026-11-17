@@ -1,4 +1,3 @@
-// @linux-only: signed inbox handle (crypto, World API)
 import { generateKeyPairSync } from "node:crypto";
 import { expect, it, vi } from "vitest";
 

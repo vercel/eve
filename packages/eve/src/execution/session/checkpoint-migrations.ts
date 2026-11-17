@@ -16,37 +16,19 @@ import {
   MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH,
 } from "#channel/delivery-idempotency.js";
 
-/**
- * Oldest checkpoint a successor upgrades in place: the first that writes v27 session events.
- * Older ones, from an owner before v27, are imported instead (`pre-v27-checkpoint.ts`): their
- * stream's lines, projection, and private records of running work changed shape together, so the
- * successor also folds their stream before it continues.
- */
 export const MIN_SESSION_CHECKPOINT_VERSION = 18;
 
 export type SessionCheckpointMigration =
   | { readonly kind: "current"; readonly checkpoint: SessionCheckpoint }
-  /** A checkpoint from an owner before v27, still without the projection its stream holds. */
   | { readonly kind: "pre-v27"; readonly imported: PreV27Checkpoint }
-  /** An owner before v27 still runs work for the session; a later delivery can move it. */
   | { readonly kind: "busy"; readonly detail: string }
   | { readonly kind: "incompatible"; readonly detail: string };
 
 type CheckpointRecord = Record<string, unknown>;
 
-/**
- * One pure upgrade per checkpoint version, keyed by the version it reads. Bumping
- * `SESSION_CHECKPOINT_VERSION` within v27 adds the step from the previous version: a successor
- * accepts its predecessors' checkpoints back to {@link MIN_SESSION_CHECKPOINT_VERSION}. A step
- * refuses state the current build cannot continue, such as work still in flight; the owner then
- * keeps the session.
- */
 const CHECKPOINT_UPGRADES: Readonly<
   Record<number, (checkpoint: CheckpointRecord) => CheckpointRecord>
 > = {
-  // 19 renders the system prompt from the deployment's files on every model call, so the session
-  // no longer stores the prompt it last rendered, and its definitions keep what 18 recorded beside
-  // them. An owner that reads 18 or less refuses 19.
   18: (checkpoint) => withDefinitionRecords(withoutStoredPrompt(checkpoint)),
 };
 
@@ -54,12 +36,6 @@ const OFFERED_CATALOG_TOOLS_KEY = "eve.offeredCatalogTools";
 const HISTORY_STATE_KEY = "eve.historyState";
 const CATALOG_SLOT = "eve.catalog";
 
-/**
- * Moves what 18 recorded beside its definitions into their state. The catalog tools the session
- * was offered become the catalog's kept value. The digest of each user instruction a dynamic file
- * added becomes that instruction's announcement, but only while the history still holds it: one a
- * compaction or clear removed is announced again.
- */
 function withDefinitionRecords(checkpoint: CheckpointRecord): CheckpointRecord {
   const context = checkpoint.serializedContext;
   if (!isObject(context)) return checkpoint;
@@ -85,8 +61,6 @@ function withDefinitionRecords(checkpoint: CheckpointRecord): CheckpointRecord {
         slots: {
           ...(catalog !== undefined && {
             [CATALOG_SLOT]: {
-              // The session workflow runs this, where eve can't hash: a digest no value has, which
-              // the catalog replaces with its own at the next model call.
               digest: "",
               since: typeof latest["*"] === "number" ? latest["*"] : 0,
               value: catalog,
@@ -105,7 +79,6 @@ function withDefinitionRecords(checkpoint: CheckpointRecord): CheckpointRecord {
   };
 }
 
-/** The digests 18 recorded for dynamic user instructions whose content the history still holds. */
 function heldInstructions(
   appended: unknown,
   slots: CheckpointRecord,
@@ -125,7 +98,6 @@ function heldInstructions(
   });
 }
 
-/** 18's record of the catalog tools offered, if it offered any. */
 function offeredCatalogTools(offered: unknown): Record<string, JsonValue> | undefined {
   if (!isObject(offered)) return undefined;
   const tools = {
@@ -145,11 +117,6 @@ function withoutStoredPrompt(checkpoint: CheckpointRecord): CheckpointRecord {
   return { ...checkpoint, sessionState: { ...state, snapshot: { ...state.snapshot, session } } };
 }
 
-/**
- * Upgrades a checkpoint written by an older eve build to the current shape.
- * Pure, so the session workflow can run it before validation. Newer
- * checkpoints and those older than eve 0.69 are incompatible.
- */
 export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpointMigration {
   if (!isObject(checkpoint)) return { kind: "incompatible", detail: "checkpoint is not an object" };
   const { version } = checkpoint;

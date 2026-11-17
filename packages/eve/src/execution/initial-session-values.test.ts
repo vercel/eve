@@ -6,7 +6,6 @@ import { createSession } from "#execution/session.js";
 import { withPendingHistory } from "#execution/session/pending-history.js";
 
 describe("createInitialSessionValues", () => {
-  // It skips the HITL state read `createDurableSessionValues` makes, so both must agree.
   it.each([
     { name: "a bare session", input: { continuationToken: "", sessionId: "s1" } },
     {

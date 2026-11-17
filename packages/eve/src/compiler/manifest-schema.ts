@@ -1,8 +1,3 @@
-/**
- * Zod schemas for the compiled agent manifest. They live apart from `manifest.ts`, whose constants
- * and types the runtime imports everywhere, so a deployed agent builds them only when it reads a
- * manifest from disk. Hosted builds check the bundled manifest against them at build time.
- */
 import { z } from "#compiled/zod/index.js";
 import { mountIdSchema } from "#shared/extension-mount.js";
 import { discoverDiagnosticsSummarySchema } from "#discover/diagnostics.js";
@@ -445,7 +440,6 @@ export const compiledScheduleDefinitionSchema = z.discriminatedUnion("sourceKind
 
 export const compiledScheduleCollectionDefinitionSchema = z
   .object({
-    /** The agent the collection's schedules belong to, which their namespace names. */
     application: z.string(),
     description: z.string().optional(),
     logicalPath: z.string(),
@@ -453,7 +447,6 @@ export const compiledScheduleCollectionDefinitionSchema = z
     providerKind: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    /** Set when the collection is one named scope of a definition: the definition's name, and the scope's. */
     namedScope: z.object({ definition: z.string(), name: z.string() }).strict().optional(),
     tools: z.union([z.boolean(), z.literal("deferred")]).optional(),
   })
@@ -461,7 +454,6 @@ export const compiledScheduleCollectionDefinitionSchema = z
 
 export const compiledSandboxDefinitionSchema = z
   .object({
-    /** Stable provider name from the exported environment. */
     providerName: z.string().optional(),
     environmentExportName: z.string().optional(),
     inheritsParent: z.boolean().optional(),
@@ -497,27 +489,10 @@ export const compiledConnectionDefinitionSchema = z
     description: z.string(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
-    /**
-     * Wire protocol the connection speaks. Defaults to `"mcp"` so
-     * manifests produced before the discriminator existed continue to
-     * load as MCP connections. `"openapi"` selects the OpenAPI client at
-     * runtime.
-     */
     protocol: z.enum(["mcp", "openapi"]).default("mcp"),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    /**
-     * Endpoint the connection talks to: the MCP server URL for MCP
-     * connections, the API base URL for OpenAPI connections.
-     */
     url: z.string(),
-    /**
-     * Marker the compiler captures when the connection's `auth` is built
-     * by `connect()` from `@vercel/connect/eve`. The `connector` field
-     * carries whatever the author wrote — UID (`"oauth/mcp-linear-app"`)
-     * or opaque service-connector key (`"scl_..."`); both forms address
-     * the same connector on the Vercel Connect side.
-     */
     vercelConnect: compiledVercelConnectMetadataSchema.optional(),
   })
   .strict();
@@ -620,9 +595,6 @@ export const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
   })
   .strict();
 
-/**
- * Zod schema for one non-recursive compiled authored agent payload.
- */
 export const compiledAgentResourceFields = {
   agentRoot: z.string(),
   appRoot: z.string(),
@@ -691,9 +663,6 @@ export const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.uni
     .strict(),
 ]);
 
-/**
- * Zod schema for the versioned compiled manifest emitted by the compiler.
- */
 export const compiledAgentManifestSchema = z
   .object({
     ...compiledAgentResourceFields,

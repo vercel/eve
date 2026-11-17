@@ -108,7 +108,6 @@ describe("HTTP request guards", () => {
 
     expect(validateHttpEndpointRequest(forwarded(), "A2A")?.status).toBe(403);
     expect(validateHttpEndpointRequest(forwarded(), "A2A", "forwarded-https")).toBeUndefined();
-    // Refused under forwarded-https, the message points at the proxy header, not loopback.
     await expect(
       validateHttpEndpointRequest(
         request("http://agent.internal:3000/a2a"),
@@ -116,7 +115,6 @@ describe("HTTP request guards", () => {
         "forwarded-https",
       )?.json(),
     ).resolves.toMatchObject({ error: { message: expect.stringContaining("X-Forwarded-Proto") } });
-    // The first value is the client's hop.
     expect(
       validateHttpEndpointRequest(
         forwarded({ "x-forwarded-proto": "http, https" }),
@@ -131,7 +129,6 @@ describe("HTTP request guards", () => {
         "forwarded-https",
       )?.status,
     ).toBe(403);
-    // A browser behind the proxy sends its HTTPS origin, which is the one it addressed.
     expect(
       validateHttpEndpointRequest(
         forwarded({ origin: "https://agent.internal" }),
@@ -146,7 +143,6 @@ describe("HTTP request guards", () => {
         "forwarded-https",
       )?.status,
     ).toBe(403);
-    // Host is still checked against the URL eve received.
     expect(
       validateHttpEndpointRequest(forwarded({ host: "attacker.example" }), "A2A", "forwarded-https")
         ?.status,
@@ -170,7 +166,6 @@ describe("HTTP request guards", () => {
         "x-forwarded-proto": "https",
       });
     expect(clientUrl(behind("8443"), "forwarded-https").origin).toBe("https://agent.internal:8443");
-    // The default port drops out, and a value that isn't a port is ignored.
     expect(clientUrl(behind("443"), "forwarded-https").origin).toBe("https://agent.internal");
     expect(clientUrl(behind("8443, 443"), "forwarded-https").origin).toBe(
       "https://agent.internal:8443",

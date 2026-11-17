@@ -37,8 +37,6 @@ describe("framework-nuxt dev", () => {
       ],
       {
         cwd: app.appRoot,
-        // Proxy to an unused origin so the module does not spawn an eve dev
-        // server; serving the page does not reach eve.
         env: { ...process.env, EVE_BASE_URL: "http://127.0.0.1:9" },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -60,8 +58,6 @@ describe("framework-nuxt dev", () => {
         180_000,
       );
 
-      // Unbundled, `eve/vue` reaches the browser with CommonJS dependencies
-      // whose named imports fail, and the app never hydrates.
       const appModule = await (await fetch(`${origin}/_nuxt/app.vue`)).text();
       const importSource = /import \{ useEveAgent \} from "([^"]+)"/.exec(appModule)?.[1];
 

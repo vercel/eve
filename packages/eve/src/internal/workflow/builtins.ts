@@ -1,18 +1,5 @@
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
-/**
- * Built-in Workflow response body steps used by eve-owned workflow bundles.
- *
- * These mirror Workflow's tiny `workflow/internal/builtins` module without
- * requiring eve to depend on Workflow's umbrella package.
- *
- * Every Workflow step bundle registers these steps, so Workflow's host
- * installs with them: the step code in the bundle reads the attempt of the
- * step running now from it (a retried step repairs what its interrupted
- * attempt wrote), and reaches Workflow for the hooks, runs and streams no
- * host in this realm holds. A bundle that runs eve's steps can't run them
- * without it.
- */
 installWorkflowHost();
 export async function __builtin_response_array_buffer(
   this: Request | Response,
@@ -41,31 +28,6 @@ function formatUnknownError(error: unknown): string {
   return String(error);
 }
 
-/**
- * Step bridge for `setAttributes`.
- *
- * Mirrors the `__builtin_set_attributes` step from
- * `@workflow/workflow/internal/builtins`. The workflow-body shim's
- * `setAttributes` (in `internal/workflow-bundle/workflow-core-shim.ts`)
- * dispatches into the workflow runtime with the step id
- * `"__builtin_set_attributes"`; the runtime walks the deployment's step
- * registry to resolve it, so the step has to live inside an
- * eve-vendored builtins module that the registry visits. The eve bundler
- * already pulls this file in via `resolveWorkflowModulePath("workflow/internal/builtins")`,
- * so adding the function here is sufficient to register it.
- *
- * Implementation notes — kept intentionally close to the upstream:
- * - Reads world, attempt and run id directly from the runtime's
- *   `globalThis` symbols, as upstream's step does, so it behaves exactly
- *   as upstream's whichever copy of `@workflow/core` a bundle inlines.
- * - Treats missing world support as a silent best-effort no-op with a
- *   single process-wide warning, matching upstream behaviour and the
- *   contract on `setEveAttributes`.
- * - On any other error, retries up to `EVE_INTERNAL_ATTRIBUTES_MAX_ATTEMPTS - 1`
- *   times via the runtime's normal step retry path, then degrades to a
- *   `console.error` so failed attribute writes never escalate into a
- *   `FatalError` and tear down the user's agent run.
- */
 export async function __builtin_set_attributes(
   changes: Array<{ key: string; value: string | null }>,
   options?: { allowReservedAttributes?: boolean },

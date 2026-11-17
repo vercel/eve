@@ -1,15 +1,6 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { vi } from "vitest";
 
-/**
- * Installs a mocked Vercel OIDC issuer for unit-tier verifier tests.
- *
- * Generates a fresh RSA keypair, exports the public key as a JWK, and
- * installs a `globalThis.fetch` spy that responds to the issuer's
- * discovery and JWKS endpoints. Each call uses a unique team slug so
- * jose's module-level JWKS cache (keyed on the JWKS URL) does not bleed
- * keys across tests when several cases run in the same file.
- */
 export async function installMockedVercelIssuer(
   slug: string,
   issuerMode: "global" | "team" = "team",

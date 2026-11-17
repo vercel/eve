@@ -1,6 +1,3 @@
-// Channel-building helpers for eve's own first-party channel packages, such as `@eve/recall`.
-// Not a public API: it changes with eve, so a package importing it releases with eve.
-
 export { surfaceEvents } from "#channel/surface.js";
 export {
   postedIn,

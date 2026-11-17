@@ -12,7 +12,6 @@ export type InstrumentationDecision =
 
 export const DROP_INSTRUMENTATION: InstrumentationDecision = { action: "drop" };
 
-/** Reads durable decision state, treating malformed persisted values as drop. */
 export function readInstrumentationDecision(value: unknown): InstrumentationDecision | undefined {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== "object" || Array.isArray(value)) {

@@ -14,7 +14,6 @@ function byteLength(value: string): number {
   return encoder.encode(value).length;
 }
 
-/** Text of a serialized GenAI message's text parts, the truncatable content. */
 function messageText(parts: unknown): string {
   if (!Array.isArray(parts)) return "";
   let text = "";
@@ -27,14 +26,6 @@ function messageText(parts: unknown): string {
   return text;
 }
 
-/**
- * Shrinks a serialized GenAI message array to `budgetBytes` while keeping it
- * valid JSON: the newest message's text is truncated with the library's
- * truncation marker, mirroring how the serializer caps oversized prompts.
- * The cut is binary searched, so an attribute far over the budget costs a
- * logarithmic number of encodes instead of re-encoding a near-full candidate
- * at every step.
- */
 function fitTurnContent(input: string, budgetBytes: number): string | undefined {
   if (budgetBytes <= 0) return undefined;
   if (byteLength(input) <= budgetBytes) return input;
@@ -79,12 +70,6 @@ function fitTurnContent(input: string, budgetBytes: number): string | undefined 
   return byteLength(minimal) <= budgetBytes ? minimal : undefined;
 }
 
-/**
- * Adds truncated copies of the turn's content attributes back into a stripped
- * checkpoint, sized so the whole record stays within the snapshot budgets. A
- * copy that cannot fit small enough is left out; the capture-policy attributes
- * stay truthful either way.
- */
 function withFittedTurnContent(
   attributes: Record<string, unknown>,
   original: Readonly<Record<string, unknown>>,
@@ -103,8 +88,6 @@ function withFittedTurnContent(
     );
     while (budget > 0) {
       const truncated = fitTurnContent(value, budget);
-      // Shrinking the budget cannot help when even the minimal form does not
-      // fit or the copy is not truncatable JSON.
       if (truncated === undefined) break;
       const candidate = { ...fitted, [key]: truncated };
       if (nodeBytes({ ...record, attributes: candidate } as ScopeRecord) <= SNAPSHOT_BYTES) {
@@ -157,7 +140,6 @@ export function boundedSerializer(
   };
 }
 
-/** Each node is capped on its own; settled children leave the tree. */
 function nodeBytes(record: ScopeRecord): number {
   return new TextEncoder().encode(JSON.stringify({ ...record, children: undefined })).length;
 }
@@ -330,9 +312,6 @@ export function snapshotRecord(record: ScopeRecord, serializer: ContentSerialize
       structural = { ...structural, options: { ...structural.options, runtimeContext: undefined } };
     if (structural.type === "model")
       structural = { ...structural, options: { ...structural.options, runtimeContext: undefined } };
-    // A size-driven strip is not a capture-policy decline: the policy
-    // attributes keep the record's real decision, and the turn's content
-    // attributes stay as truncated copies when they fit the node budget.
     const original = record.attributes ?? {};
     const attributes = withFittedTurnContent(
       preservingCapturePolicy(withoutDeclinedContent(original, declined) ?? {}, original),

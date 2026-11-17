@@ -7,23 +7,12 @@ export interface StatefulMcpRequest {
 }
 
 export interface StatefulMcpServer {
-  /** Serves MCP Streamable HTTP in-process; pass it as the client's `fetch`. */
   readonly fetch: typeof fetch;
-  /** Every request the server answered, in order. */
   readonly requests: readonly StatefulMcpRequest[];
-  /** Sessions initialized and not yet closed by a client DELETE. */
   readonly liveSessions: ReadonlySet<string>;
-  /** Resolves with the first answered request that matches, already answered or not. */
   waitForRequest(match: (request: StatefulMcpRequest) => boolean): Promise<StatefulMcpRequest>;
 }
 
-/**
- * A stateful 2025-era MCP server built from the MCP SDK's own transport, one
- * transport per session, routed by `mcp-session-id` the way the SDK's examples
- * do. It enforces the session rules real servers do: requests other than
- * `initialize` need a known session (400 without one, 404 for an unknown one),
- * a second standalone GET stream gets 409, and DELETE ends the session.
- */
 export function createStatefulMcpServer(): StatefulMcpServer {
   const transports = new Map<string, WebStandardStreamableHTTPServerTransport>();
   const liveSessions = new Set<string>();

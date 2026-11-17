@@ -6,7 +6,6 @@ export { validateProgrammaticLogicalPath } from "#compiler/source-graph-paths.js
 
 export type ProgrammaticModuleNamespace = Readonly<Record<string, unknown>>;
 
-/** Shares zero-argument definition-factory results within one module-map load. */
 export function memoizeModuleNamespaceFactories(
   namespace: ProgrammaticModuleNamespace,
 ): ProgrammaticModuleNamespace {
@@ -51,7 +50,6 @@ export interface AgentSourceRegistration {
 }
 
 interface AgentSourceRegistryOptions {
-  /** Programmatic extension declarations loaded by compiled virtual mounts. */
   readonly extensionDeclarations?: readonly ProgrammaticAgentSource[];
 }
 
@@ -175,11 +173,8 @@ export interface AgentModuleBinding {
 }
 
 export interface CompiledModuleBinding extends AgentModuleBinding {
-  /** Compiler-owned namespace usage for this selected binding. */
   readonly usage: {
-    /** The compiler evaluated this namespace while normalizing the node. */
     readonly compile: boolean;
-    /** The namespace is an entry in the runtime module map. */
     readonly runtimeEntry: boolean;
   };
 }
@@ -485,10 +480,6 @@ export async function loadProgrammaticModuleNamespace(input: {
   return namespace;
 }
 
-/**
- * Canonical composition slot for one logical path. Module extensions, folder
- * forms, and skill packages collapse onto the same authored primitive identity.
- */
 export function canonicalSourceSlot(logicalPath: string): string {
   const normalized = normalizeLogicalPath(logicalPath);
   if (

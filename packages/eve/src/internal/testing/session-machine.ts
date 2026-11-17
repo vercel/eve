@@ -39,11 +39,6 @@ import { initialSessionProjection, type SessionProjection } from "#protocol/sess
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
 
-// Fixtures for tests that start a session part-way through its lifecycle. They reach that
-// state the way a session does, by folding what it would have published and by the machine's
-// own transitions, so a test never seeds a shape the machine can't produce.
-
-/** The session as publishing `events` leaves it. */
 export function withPublished(
   session: HarnessSession,
   events: readonly SessionEvent[],
@@ -57,13 +52,10 @@ export function withPublished(
   return saveProjection(session, projection);
 }
 
-/** The session with `position`'s turn open, at its step. */
 export function withOpenTurn(
   session: HarnessSession,
   position: { readonly sequence: number; readonly turnId: string; readonly stepIndex?: number },
 ): HarnessSession {
-  // A real session names each turn by the sequence it mints, so a fixture that opens a later turn
-  // first counts the turns before it.
   const stored = storedProjection(session.state);
   const projection =
     stored.view.session.turnCount < position.sequence && activeTurnIdOf(stored) !== position.turnId
@@ -99,10 +91,6 @@ export function withOpenTurn(
   return withPublished(session, events);
 }
 
-/**
- * The session parked as a model step parks: its response waits on approvals, runtime calls, or
- * both. An approval-only park ends its turn.
- */
 export function withParkedStep(
   session: HarnessSession,
   step: {
@@ -134,10 +122,6 @@ export function withParkedStep(
   return withPublished(saveTransition(opened, transition), transition.events);
 }
 
-/**
- * Wraps a test's event handler so the harness's events fold into the step's projection, as the
- * publish sink does in a running session.
- */
 export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
   return async (publication, messages) => {
     const ctx = contextStorage.getStore();
@@ -149,26 +133,17 @@ export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
   };
 }
 
-/** A test's event handler: one event at a time, with the conversation its participants read. */
 export type TestEventHandler = (
   event: SessionEvent,
   messages?: readonly ModelMessage[],
 ) => void | Promise<void>;
 
-/**
- * Adapts a test's per-event handler to the harness's sink, which publishes a transition's events
- * as one commit: the handler hears each event in order.
- */
 export function eachEvent(handler: TestEventHandler): HarnessEmitFn {
   return async (publication, messages) => {
     for (const event of eventsOf(publication)) await handler(event, messages);
   };
 }
 
-/**
- * Session state whose projection sits at `position`: inside its open turn, or between turns when
- * `turnId` is empty, with `sequence` the next turn's.
- */
 export function positionState(position: {
   readonly sequence: number;
   readonly stepIndex?: number;
@@ -189,7 +164,6 @@ export function positionState(position: {
   };
 }
 
-/** The session holding `input` until it can run. */
 export function withQueuedInput<T extends Pick<HarnessSession, "state">>(
   session: T,
   input: HarnessStepInput,
@@ -205,7 +179,6 @@ export function positionOf(session: Pick<HarnessSession, "state">): TurnPosition
   return turnPosition(storedProjection(session.state));
 }
 
-/** `session` relaying requests for a child, as the session machine records them. */
 export function withRelays<T extends { readonly state?: SessionStateMap }>(
   session: T,
   relays: NonNullable<HitlStateChange["relays"]>,
@@ -213,7 +186,6 @@ export function withRelays<T extends { readonly state?: SessionStateMap }>(
   return writeHitlState(session, { relays });
 }
 
-/** The public tables `events` fold into, each event its own line, as a reader receives them. */
 export function tablesOf(events: readonly SessionEvent[]): PublicSessionView {
   return viewOfEvents(
     events.map((event, line) => ({

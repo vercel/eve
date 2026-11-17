@@ -20,7 +20,6 @@ export function resolveSessionStepResult(
     serializedContext: nextSerializedContext,
     ...createDurableSessionValues(stepResult.session),
   };
-  // Steering cut the model call short; the next step reads it.
   if (stepResult.steered) return { action: "continue", ...values };
 
   if (
@@ -47,7 +46,6 @@ export function resolveSessionStepResult(
   }
   if (stepResult.next !== null) return { action: "continue", ...values };
 
-  // Usage stays unreported until the turn settles, so the caller's result includes all of it.
   const reported =
     stepResult.settledTurn === undefined ? undefined : takeSessionUsageDelta(stepResult.session);
   const fields =
@@ -70,10 +68,6 @@ export function resolveSessionStepResult(
   );
 }
 
-/**
- * The turn pauses on the calls the runtime runs for it, or, with none, parks the session.
- * `settled` is a settled turn's answer to its delegated caller.
- */
 export function pausedOrParked(
   session: HarnessSession,
   fields: DurableStepResultFields,

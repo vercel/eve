@@ -16,10 +16,6 @@ const NOW = 1_700_000_000_000;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const HOUR_MS = 60 * 60 * 1_000;
 
-/**
- * Writes one trace whose segments directory carries `modifiedAtMs`, which is
- * what the policy reads as "when this trace last received a span".
- */
 async function writeTrace(input: {
   readonly appRoot: string;
   readonly modifiedAtMs: number;
@@ -109,7 +105,6 @@ describe("pruneLocalTraceStore", () => {
     });
 
     expect(result.reasons).toContain("maxTotalBytes");
-    // The budget wants one trace; the floor guarantees two.
     await expect(listTraceIds(appRoot)).resolves.toEqual(["trace-0", "trace-1"]);
   });
 
@@ -179,8 +174,6 @@ describe("pruneLocalTraceStore", () => {
   it("keeps sweeping when stray files sit where directories are expected", async () => {
     const appRoot = await createScratchDirectory("eve-trace-retention-stray-");
     await writeTrace({ appRoot, modifiedAtMs: NOW - 30 * DAY_MS, traceId: "old" });
-    // Finder leaves these behind in any browsed directory, and a sweep that
-    // throws on one would stop bounding the store forever.
     await writeFile(join(resolveLocalTraceSchemaDirectory(appRoot), ".DS_Store"), "junk");
     const occupied = join(resolveLocalTraceSchemaDirectory(appRoot), "occupied");
     await mkdir(occupied, { recursive: true });
@@ -198,15 +191,12 @@ describe("pruneLocalTraceStore", () => {
       retainCount: 0,
     });
 
-    // Both aged-out entries go, and the stray file is simply not a trace.
     expect(result.removedTraces).toBe(2);
     await expect(listTraceIds(appRoot)).resolves.toEqual([".DS_Store"]);
   });
 
   it("never evicts a trace written inside the quiescence window", async () => {
     const appRoot = await createScratchDirectory("eve-trace-retention-quiescent-");
-    // Another dev worker could still be writing this one: liveness is tracked
-    // per process, so recency is the only cross-process signal.
     await writeTrace({ appRoot, modifiedAtMs: NOW - 1_000, traceId: "draining" });
     await writeTrace({ appRoot, modifiedAtMs: NOW - HOUR_MS, traceId: "settled" });
 
@@ -231,9 +221,7 @@ describe("pruneLocalTraceStore", () => {
       traceId: "bloated",
     });
     const segments = resolveLocalTraceSegmentsDirectory(appRoot, "bloated");
-    // Recent enough to survive reaping, so its bytes must still be counted.
     await writeFile(join(segments, "dddddddddddddddd.otlp.json.tmp-1-a"), "x".repeat(5_000));
-    // Writing into the directory bumped its mtime; restore the settled age.
     const settledAt = new Date(NOW - HOUR_MS);
     await utimes(segments, settledAt, settledAt);
 

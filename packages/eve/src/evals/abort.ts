@@ -1,4 +1,3 @@
-/** Stop waiting at the eval deadline even if a provider ignores cancellation. */
 export async function runUntilAborted<T>(
   task: T | PromiseLike<T>,
   signal: AbortSignal,

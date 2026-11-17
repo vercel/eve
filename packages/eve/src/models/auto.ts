@@ -28,6 +28,10 @@ import { DEFAULT_DECISION_MODEL } from "#ai/decision-adapter.js";
 
 type AutoModelSelection = ModelOptionSelection;
 
+/**
+ * Options for {@link auto}: the model options to choose between, and optionally the decision
+ * model and a fallback selection.
+ */
 export interface AutoConfig<T extends ModelOptions = ModelOptions> {
   /** Decision model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
   readonly model?: DecisionModel;
@@ -44,20 +48,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * What the turn decides on: the turn, and the text it opened with. It holds still while the turn
- * runs, so the turn decides once: its tool calls, steering, and compaction don't decide again.
- */
 function turnState(turn: DynamicTurn): TurnState {
   return { input: turnInputText(turn), turnId: turn.id };
 }
 
 type TurnState = { readonly input: string; readonly turnId: string };
 
-/**
- * What the decision reads: the turn's input, after up to seven earlier user and assistant text
- * messages from before it. The decision provider enforces its input limits.
- */
 function routingState(
   turn: TurnState,
   conversation: readonly ModelMessage[],
@@ -73,7 +69,6 @@ function routingState(
             .join("\n");
     return text.trim() ? [{ role: message.role, text }] : [];
   });
-  // The conversation may already hold the input, and what steered the turn after it.
   let end = texts.length;
   for (let index = texts.length - 1; index >= 0; index--) {
     if (texts[index]!.role === "user" && texts[index]!.text === turn.input) {
@@ -138,7 +133,6 @@ export function auto<const T extends ModelOptions>(
   }
   const criteria = Object.fromEntries(options.map(({ key, description }) => [key, description]));
 
-  /** The option a turn chooses: the decision's, or the fallback's. */
   async function choose(
     turn: TurnState,
     ctx: DynamicModelContext,
@@ -176,7 +170,6 @@ export function auto<const T extends ModelOptions>(
     }
   }
 
-  // The memo decides once per turn and keeps the option's key; the model is built from the key.
   return defineDynamic<PublicAgentDynamicModelResult, DynamicModelContext>(async (ctx) => {
     if (ctx.turn === null) throw new Error("auto() chooses a model per turn, before any turn.");
     const turn = turnState(ctx.turn);

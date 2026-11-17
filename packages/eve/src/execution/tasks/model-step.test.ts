@@ -16,7 +16,6 @@ const session: HarnessSession = {
   sessionId: "test-session",
 };
 
-// Some models fill an optional string with "" or a placeholder instead of omitting it (#4819).
 it.each(["", "undefined", "null"])(
   "starts a new task for an agent call whose taskId is %j",
   (taskId) => {

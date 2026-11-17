@@ -19,17 +19,11 @@ import { skillDefinition } from "./skills.js";
 import { subagentDefinition } from "./subagents.js";
 import { toolDefinition, toolsDefinition } from "./tools.js";
 
-// A compiled agent, as the session-agent port (`createSessionAgent`): its node's files, mapped to
-// an agent's contents (which `agentDefinitionsOf` places among eve's runtime definitions), and
-// `agent.ts`'s settings. Its sandbox and connections are its node's.
-
 const agents = new WeakMap<CompiledBundle, SessionAgent>();
 
-/** A compiled node's agent, made once per bundle: its files' definitions, and `agent.ts`'s settings. */
 export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
   const known = agents.get(bundle);
   if (known !== undefined) return known;
-  // Each part is read on use: a bundle's graph and config are only reached by what asks for them.
   const agent = createSessionAgent({
     adapters: bundle.adapterRegistry,
     compiled: bundle,
@@ -49,7 +43,6 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
       nodeId: bundle.nodeId,
       source: serializeDurableCompiledArtifactsSource(bundle.compiledArtifactsSource),
     }),
-    // A deployment names its code; elsewhere the artifacts' version does.
     revision: async () => {
       const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
       return deploymentId
@@ -67,7 +60,6 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
   return agent;
 }
 
-/** `agent.ts`'s settings, resolved by the compiler, as `settingsOf` takes them. */
 function compiledSettings(bundle: CompiledBundle): SessionAgentSettings {
   const config = bundle.resolvedAgent.config;
   return settingsOf({
@@ -77,17 +69,10 @@ function compiledSettings(bundle: CompiledBundle): SessionAgentSettings {
     reasoning: bundle.turnAgent.reasoning,
     retention: config?.experimental?.workflow?.retention,
     sessionTimeoutMs: config?.limits?.sessionTimeoutMs,
-    // Falls back to the root's, which only the graph knows.
     sessionUsage: () => resolveSessionUsageLimit(bundle),
   });
 }
 
-/**
- * The node's files as an agent's contents: each declared file through the builder its kind goes
- * through, an extension's under its namespace. Its static tool files (eve's defaults among them)
- * reach a session through the step's tool table, eve's `staticTools`, which `agentDefinitionsOf`
- * places itself.
- */
 export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentContents> {
   const agent = bundle.resolvedAgent;
   const model = await loadModelDefinition(bundle);
@@ -97,7 +82,6 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
     files: {
       dynamicSubagents: bundle.subagentRegistry.dynamicResolvers.map(subagentDefinition),
       hooks: declared(agent, "hook").map(hookDefinition),
-      // Every memory, then the tools those that offer them do.
       memory: [
         ...declared(agent, "memory").map(memoryDefinition),
         ...declared(agent, "memory")
@@ -115,10 +99,6 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
   };
 }
 
-/**
- * Each collection's tools, as the tool file `agent/tools/schedule__<name>.ts` would offer them.
- * The named scopes of one definition share the one set its name gives.
- */
 function scheduleToolsDefinitions(
   collections: readonly ResolvedScheduleCollection[],
 ): readonly Definition[] {
@@ -130,7 +110,6 @@ function scheduleToolsDefinitions(
     if (collection.namedScope === undefined) {
       definitions.push(
         toolsDefinition(source, async () => {
-          // Loaded where it runs: the schedule client reaches Workflow, which the harness doesn't.
           const { scheduleCollectionTools } = await import("#context/schedule-collection-tools.js");
           return scheduleCollectionTools(collection.definition, collection.name);
         }),

@@ -9,10 +9,6 @@ const tests = (await readdir(root))
   .filter((name) => name.startsWith("tui-") && name.endsWith(".ts"))
   .sort();
 
-// Four smoke tests use the same built app. `startAgentServer` reads this
-// directory to build each app once per run and start that `.output` afterwards.
-// A fresh directory per run keeps the reuse from outliving the sources it was
-// built from.
 const buildStateDir = await mkdtemp(join(tmpdir(), "eve-tui-builds-"));
 
 let failures = 0;

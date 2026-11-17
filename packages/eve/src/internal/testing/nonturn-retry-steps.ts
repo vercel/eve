@@ -8,21 +8,14 @@ import { fact } from "#harness/facts.js";
 import { commitOf, transition } from "#harness/session-machine/commit.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 
-// Non-turn session steps, as plain bodies: a test runs each attempt of each step itself, with
-// its own writable onto the session's stream, so a step can lose its completion or throw and
-// run again. Code in a step reads whether it's a retry through `isRetriedStep()`.
-
-/** What one attempt of a step runs with. */
 export interface TestStepAttempt {
   readonly sessionId: string;
   readonly sessionWritable: WritableStream<Uint8Array>;
-  /** 1 for the first attempt, more for a retry. */
   readonly attempt: number;
 }
 
 type Published = Awaited<ReturnType<typeof publishSessionEvents>>;
 
-/** The session's state as a step that published it left it. */
 export type PublishedState = Pick<Published, "serializedContext" | "sessionState">;
 
 const turnStarted = () =>
@@ -109,7 +102,6 @@ export async function publishProgress(
   );
 }
 
-/** The session's values before its first step. */
 export function initialValues(sessionId: string, context: Record<string, unknown>) {
   return {
     history: [],
@@ -118,7 +110,6 @@ export function initialValues(sessionId: string, context: Record<string, unknown
   };
 }
 
-/** Publishes two commits, then only the first once its retry decides differently. */
 export async function publishLessOnRetry(
   step: TestStepAttempt,
   values: ReturnType<typeof initialValues>,

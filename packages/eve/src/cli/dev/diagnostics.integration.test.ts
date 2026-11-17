@@ -29,8 +29,6 @@ describe("createDevDiagnostics", () => {
   async function makeRecorder() {
     const root = await mkdtemp(join(tmpdir(), "eve-diagnostics-recorder-"));
     roots.push(root);
-    // Injected environment: the real collector spawns a `vercel --version`
-    // child whose lingering handle makes Windows tmp-dir cleanup flaky.
     const diagnostics = await createDevDiagnostics(root, {
       environment: () => Promise.resolve(STUB_ENVIRONMENT),
     });
@@ -48,8 +46,6 @@ describe("createDevDiagnostics", () => {
         toolName: "always_fail",
       });
 
-      // Structured, exactly once: the record reaches the sink and the
-      // display callback, never the console.
       expect(displayed).toEqual(["tool execution failed"]);
       expect(errorSpy).not.toHaveBeenCalled();
 

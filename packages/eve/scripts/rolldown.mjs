@@ -1,9 +1,5 @@
 import { createRequire } from "node:module";
 
-// eve declares `rolldown` itself and hands the same copy to Nitro through
-// `deps.paths`. It loads lazily so commands that never bundle skip the
-// native binding.
-
 let rolldownPromise;
 let rolldownParseAstPromise;
 

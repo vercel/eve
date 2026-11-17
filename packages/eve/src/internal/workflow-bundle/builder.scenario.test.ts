@@ -35,7 +35,6 @@ import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builde
 const runFile = promisify(execFile);
 const scenarioApp = useScenarioApp();
 
-// Runs the installed package's own builder, as `eve build` and `eve dev` do.
 const INSTALLED_BUILD_SCRIPT = `
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -442,9 +441,6 @@ describe("WorkflowBundleBuilder", () => {
             "",
           ].join("\n"),
         ),
-        // A plain (non-`"use step"`) helper that pulls in a node builtin —
-        // the same shape as the runtime-actions -> logging -> node:util
-        // regression that previously failed at workflow run time.
         writeFile(
           helperFilePath,
           [
@@ -740,8 +736,6 @@ describe("WorkflowBundleBuilder", () => {
             "",
           ].join("\n"),
         ),
-        // node:crypto is used only inside a `"use step"` function, which the
-        // transform stubs out of the driver chunk — the guard must not fire.
         writeFile(
           flowFilePath,
           [
@@ -804,7 +798,6 @@ describe("WorkflowBundleBuilder", () => {
           join(appRoot, "package.json"),
           `${JSON.stringify({ dependencies: { eve: "*" }, name: "authored-app", version: "0.0.0" })}\n`,
         ),
-        // Dependency trees are never authored modules, even with directives.
         writeFile(
           join(appRoot, "node_modules", "vendored", "index.js"),
           'export async function vendored() {\n  "use step";\n}\n',
@@ -885,7 +878,6 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowCode).toContain("deploy ${service}");
       expect(workflowCode).not.toContain("defineWorkflowTool");
       expect(workflowCode).not.toContain("node:crypto");
-      // A linked eve changes without a version bump, so its framework layer is never reused.
       expect(existsSync(join(appRoot, "node_modules", ".cache", "eve", "workflow-driver"))).toBe(
         false,
       );
@@ -922,7 +914,6 @@ describe("WorkflowBundleBuilder", () => {
         manifest: JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8")),
       };
     };
-    // Replaced rather than written through, which would edit pnpm's shared store.
     const editInstalledEve = async (distPath: string, appended: string) => {
       const path = join(eveRoot, "dist", "src", distPath);
       await writeFile(`${path}.edit`, `${await readFile(path, "utf8")}\n${appended}\n`);
@@ -937,7 +928,6 @@ describe("WorkflowBundleBuilder", () => {
     await expect(build(true)).resolves.toEqual(cold);
     expect((await stat(mappedEntryPath)).mtimeMs).toBe(mtimeMs);
 
-    // The transform is not in the layer's graph, so only the key notices it changed.
     await editInstalledEve(
       "internal/workflow-bundle/workflow-transformer.js",
       "// edited in place",
@@ -957,7 +947,6 @@ describe("WorkflowBundleBuilder", () => {
     expect(unmapped.code).not.toContain("sourceMappingURL");
     expect(await readdir(cacheDirectory)).toHaveLength(2);
 
-    // A second agent in the same package gets its own entry rather than evicting this one.
     const secondAppRoot = join(app.appRoot, "agents", "second");
     await mkdir(secondAppRoot, { recursive: true });
     await build(true, secondAppRoot);
@@ -969,7 +958,6 @@ describe("WorkflowBundleBuilder", () => {
 
   it.each([
     { importer: "workflow code", specifier: "missing-workflow-package" },
-    // Dependency warnings are otherwise filtered as non-actionable.
     { importer: "a dependency", specifier: "dep" },
   ])(
     "rejects unresolved imports from $importer before emitting a VM bundle",

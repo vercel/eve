@@ -87,11 +87,6 @@ function pathname(prefix: string, key: string): string {
   return `${prefix}/${encodeURIComponent(key)}/MEMORY.md`;
 }
 
-/**
- * `get` puts a pathname into the blob's URL as is, and the store decodes that
- * URL once, so a key's `%2F` would come back as `/` and miss the object `put`
- * stored under the literal pathname. Escaping `%` keeps the two in step.
- */
 function urlPathname(pathname: string): string {
   return pathname.replaceAll("%", "%25");
 }

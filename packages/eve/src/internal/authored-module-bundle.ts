@@ -1,6 +1,3 @@
-/**
- * Adds actionable context to lower-level authored module bundling failures.
- */
 export function createAuthoredModuleBundleError(modulePath: string, error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
   const hints: string[] = [];

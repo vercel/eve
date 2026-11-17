@@ -11,7 +11,6 @@ const COMMAND_ANSWERS = {
   "discord-command-name": "ask",
   "discord-command-description": "Ask the eve agent",
 };
-// Answering messages asks no command questions, so none are supplied.
 const GATEWAY_ANSWERS = {
   "discord-messages": "gateway",
   "discord-bot-token": " bot-token ",
@@ -91,7 +90,6 @@ describe("Discord setup", () => {
     expect(written().get("/project/daemon/main.ts")).toContain(
       'runDiscordGatewayRelay({\n  credentials: connectDiscordCredentials("discord/agent")',
     );
-    // Setup turned the intent on, so thread follow-ups work without a mention.
     expect(effects.enableMessageContent).toHaveBeenCalledWith("bot-token");
     expect(written().get("/project/daemon/main.ts")).toContain("messageContent: true,");
     expect([...written().keys()]).toEqual(
@@ -107,7 +105,6 @@ describe("Discord setup", () => {
       },
       framework: "eve",
     });
-    // View Channels, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads.
     expect(completion.facts).toContainEqual({
       kind: "url",
       label: "Discord bot install URL",

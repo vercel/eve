@@ -17,14 +17,6 @@ import type { CompiledBindingNamespaceLoader } from "#compiler/load-binding-name
 
 const SANDBOX_SELECTOR_MARKER = Symbol.for("eve.sandbox-selector");
 
-/**
- * Shared compile-time context threaded through every per-primitive
- * normalize step.
- *
- * Holds expensive lazily-loaded resources (currently the model catalog)
- * so each `compileAgentManifest` invocation pays the load cost once and
- * reuses the cache across all of its child compilations.
- */
 export interface ManifestCompileContext {
   readonly modelCatalog: CompiledRuntimeModelCatalogLoader;
   readonly registries: readonly AgentSourceRegistry[];
@@ -51,15 +43,6 @@ export function requireModuleBackedDefinitionLoadOptions(
   return { binding: options.binding, loadNamespace: options.loadNamespace };
 }
 
-/**
- * Loads one authored module's value for a given source reference and
- * resolves any value-returning factory it may export.
- *
- * Used by every per-primitive compiler that targets a `module` source
- * (channels, sandboxes, tools, schedules, skills, prompt layers,
- * subagents). Wraps execution errors so the message identifies which
- * authored file failed.
- */
 export async function loadModuleBackedDefinition(input: {
   readonly binding: AgentModuleBinding;
   readonly dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>;
@@ -76,8 +59,6 @@ export async function loadModuleBackedDefinition(input: {
   const moduleNamespace = await input.loadNamespace(input.source.sourceId);
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 
-  // Sandbox selectors execute only when a runtime session opens its environment.
-  // Keep them distinguishable from zero-argument definition factories at compile time.
   if (
     input.kind === "sandbox" &&
     typeof exportValue === "function" &&
@@ -100,7 +81,6 @@ export async function loadModuleBackedDefinition(input: {
   }
 }
 
-/** What `source` compiles to as a file eve asks at runtime, named `slug`. */
 export function compiledDefinition(
   kind: CompiledDefinitionKind,
   source: ModuleSourceRef,
@@ -118,7 +98,6 @@ export function compiledDefinition(
   };
 }
 
-/** The definition `value` compiles to when it's a `defineDynamic()` export, or `undefined`. */
 export function dynamicDefinition(
   kind: CompiledDefinitionKind,
   source: ModuleSourceRef,

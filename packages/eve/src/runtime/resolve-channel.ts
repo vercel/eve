@@ -16,19 +16,6 @@ import {
 } from "#runtime/resolve-helpers.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
-/**
- * Resolves one compiled channel entry into a runtime-owned definition
- * with a live `handler` (the per-route handler authored via `POST` /
- * `GET` / etc. inside `defineChannel`) and the channel's `receive` hook
- * if the author declared one.
- *
- * Every authored channel is a `CompiledChannel` from `defineChannel` —
- * the bare `{ fetch, receive? }` Route shape is rejected by
- * {@link normalizeChannelDefinition}. Framework-internal channels
- * (the connection callback route, the `eve` session channel) build
- * `ResolvedChannelDefinition` values directly and do not flow through
- * this resolver.
- */
 export async function resolveChannelDefinition(
   definition: CompiledChannelDefinition,
   moduleMap: CompiledModuleMap,
@@ -63,7 +50,6 @@ export async function resolveChannelDefinition(
 
     const adapter = channelDefinition.adapter;
     if (adapter && adapter.kind !== HTTP_ADAPTER_KIND) {
-      // Repurpose `kind` as the unique path-derived registry/discriminant key.
       (adapter as { kind: string }).kind = channelKind;
     }
 

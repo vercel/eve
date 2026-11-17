@@ -8,16 +8,6 @@ import {
   statusCodeIs,
 } from "../rule.js";
 
-/**
- * A provider's rejection of a request longer than the model's context window. Anthropic says
- * "prompt is too long" or "exceed context limit"; Bedrock says "Input is too long"; OpenAI says
- * "maximum context length" (Chat Completions) or "exceeds the context window" (Responses); Gemini
- * says "input token count ... exceeds the maximum". AI Gateway relays the upstream message. The
- * prose only counts on a 400 or 413, so another error that quotes it isn't misread. OpenAI stream
- * errors carry `code: "context_length_exceeded"` instead.
- *
- * Message prose is a stopgap until the AI SDK classifies this itself (vercel/ai#22461).
- */
 const isContextOverflowLink = anyOf(
   codeIs("context_length_exceeded"),
   allOf(
@@ -28,19 +18,8 @@ const isContextOverflowLink = anyOf(
   ),
 );
 
-/**
- * Discriminators verified against the vendored `@ai-sdk/provider` /
- * `@ai-sdk/provider-utils` source: the error classes set
- * `name = "AI_LoadAPIKeyError"` / `"AI_UnsupportedFunctionalityError"`,
- * and `loadApiKey` builds its message as
- * `"<provider> API key is missing. Pass it using the …"`. The bare
- * `LoadAPIKeyError` spelling is defensive, for provider adapters that
- * rethrow under the unprefixed class name.
- */
 export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
   {
-    // A 400 that would otherwise end the session. Only the turn fails: the session can still
-    // fit a later message, once compaction or a smaller agent makes room.
     id: "model-context-overflow",
     name: "Model context window exceeded",
     tags: ["model-provider", "recoverable"],
@@ -60,10 +39,6 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
   },
   {
-    // eve's own EmptyModelResponseError (harness/model-call-error.ts); its
-    // message is authored for end users, so it passes through. The
-    // model-call classifier special-cases this shape *before* consulting
-    // tags — a same-hooks retry would read a stale step result.
     id: "empty-model-response",
     name: "Empty model response",
     tags: ["model-provider", "transient"],
@@ -79,7 +54,6 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Review the request and its context against your model provider's content policy.",
   },
   {
-    // A 400 that would otherwise end the session; only the refused prompt fails.
     id: "model-request-cyber-policy-refused",
     name: "Model request refused",
     tags: ["model-provider", "recoverable", "refused"],

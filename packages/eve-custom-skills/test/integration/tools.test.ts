@@ -192,10 +192,8 @@ test("by default the requester answers for personal skills, and someone else for
 
   assert.equal(await answer(undefined, alice), "allowed");
   assert.equal(await answer(undefined, bob), "rejected");
-  // The channel scope depends on the conversation, which a response doesn't carry, so it counts as shared.
   assert.equal(await answer("channel", alice), "rejected");
   assert.equal(await answer("channel", bob), "allowed");
-  // Alice under a new subject (a renamed login) is still Alice's account, so not a second person.
   const renamed = { ...alice, subject: "alice-renamed" };
   assert.equal(await answer("channel", renamed), "rejected");
   assert.equal(await answer(undefined, renamed), "rejected");
@@ -208,7 +206,6 @@ test("an approval applies only to the skill it showed, not one recreated under i
   const original = await run(create, input, context(approvedBy));
   await run(create, { ...input, instructions: "Check the build twice." }, context());
 
-  // While Alice's approval to publish the original's v2 waits, Bob replaces the skill.
   const publishOriginal = { name: "deploy", id: original.id, version: 2, scope: "channel" };
   assert.equal((await decide(publish, publishOriginal, context())).status, "user-approval");
   await run(
@@ -223,7 +220,6 @@ test("an approval applies only to the skill it showed, not one recreated under i
   assert.equal(published.success, false);
   assert.match(String(published.error), /was replaced since/);
 
-  // Removing by the original's id leaves the replacement alone.
   const removal = await run(
     remove,
     { skills: [{ name: "deploy", id: original.id }], scope: "channel" },
@@ -233,7 +229,6 @@ test("an approval applies only to the skill it showed, not one recreated under i
   assert.notEqual(replacement.id, original.id);
 });
 
-/** Only an administrator may approve, and every live change in a shared scope asks. */
 const adminOnly: SkillApprovalRule = (change) =>
   change.changesLive && change.scope.shared ? "ask" : "allow";
 
@@ -243,7 +238,6 @@ test("a shared draft save stays a draft when the skill is deleted before it comm
   const racing: MemoryDocumentBackend = {
     read: backend.read,
     async write(input) {
-      // Just before the draft's version document lands, an administrator deletes the skill.
       if (input.key.includes("/skills/") && deleteBeforeNextVersion) {
         const removal = deleteBeforeNextVersion;
         deleteBeforeNextVersion = undefined;
@@ -264,13 +258,11 @@ test("a shared draft save stays a draft when the skill is deleted before it comm
   })!;
   deleteBeforeNextVersion = async () => void (await admin.remove(channel, [String(original.id)]));
 
-  // Bob's draft needed no approval, since it changes nothing live.
   const draft = { ...input, instructions: "Bob's revision." };
   assert.equal((await decide(create, draft, context({ caller: bob }))).status, "not-applicable");
   const saved = await run(create, draft, context({ caller: bob }));
   assert.equal(saved.success, false, `the racing save returned ${JSON.stringify(saved)}`);
 
-  // Retried without approval, the save is a new first version that needs one, so it waits as a draft.
   const retried = await run(create, draft, context({ caller: bob }));
   assert.equal(retried.status, "draft");
   assert.deepEqual(
@@ -342,7 +334,6 @@ test("a person can inspect, publish, roll back, and change the mode of their own
 
   const approved = context({ approvedBy: alice });
   assert.equal((await run(publish, { name: "deploy", id, version: 2 }, approved)).liveVersion, 2);
-  // Publishing an earlier version rolls back to it, and the rule and card call it that.
   const rollingBack = { name: "deploy", id, version: 1 };
   const { prompt } = await decide(publish, rollingBack, context());
   assert.match(prompt, /^Roll back "deploy" for you to v1/);
@@ -399,7 +390,6 @@ test("a requester can't approve their own shared change, even when it reaches th
     context({ approvedBy: { ...alice, subject: "alice-renamed" } }),
   );
   assert.match(String(renamed.error), /someone other than the person who asked/);
-  // A personal change still needs its owner, whoever else answered.
   const notOwner = await run(create, { ...deploy }, context({ approvedBy: bob }));
   assert.equal(notOwner.success, false);
   assert.match(String(notOwner.error), /Only the person who asked/);

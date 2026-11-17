@@ -50,7 +50,6 @@ const searchCall = {
   toolName: "web_search",
 };
 
-/** The search's result, which the provider defers to its next response, then text. */
 function searchResultThenText(text: string) {
   return {
     stream: simulateReadableStream({
@@ -71,10 +70,6 @@ function searchResultThenText(text: string) {
   };
 }
 
-/**
- * A harness whose model calls every tool in `tools` in one step, then writes text. With
- * `search`, the step also calls a provider tool whose result opens the model's next response.
- */
 function setup(tools: readonly HarnessToolDefinition[], options: { readonly search?: true } = {}) {
   const events: SessionEvent[] = [];
   const calls = [
@@ -119,7 +114,6 @@ function setup(tools: readonly HarnessToolDefinition[], options: { readonly sear
   ctx.set(SandboxKey, mockSandbox().access);
   const runStep = (current: HarnessSession, input?: HarnessStepInput) =>
     contextStorage.run(ctx, () => createTestKernel(config)(current, recorder.admit(input)));
-  /** Runs a step and every step it chains to in-process. */
   const run = async (current: HarnessSession, input?: HarnessStepInput): Promise<StepResult> => {
     let result = await runStep(current, input);
     while (typeof result.next === "function") result = await runStep(result.session);

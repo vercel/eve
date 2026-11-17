@@ -1,16 +1,8 @@
-/**
- * Strips HTML tags and extracts readable text content.
- *
- * Removes content inside `<script>`, `<style>`, and `<noscript>` elements,
- * replaces block-level tags with newlines, decodes common HTML entities, and
- * normalises whitespace.
- */
 export function extractTextFromHtml(html: string): string {
   let text = stripTags(html);
 
   text = decodeHtmlEntities(text);
 
-  // Collapse runs of whitespace on each line, then collapse blank lines.
   text = text
     .split("\n")
     .map((line) => line.replace(/[ \t]+/g, " ").trim())
@@ -21,8 +13,6 @@ export function extractTextFromHtml(html: string): string {
   return text;
 }
 
-// A Map, not an object literal: tag names come from untrusted HTML, and
-// `<constructor>` must not resolve to an inherited property.
 const RAW_TEXT_CLOSE_TAGS = new Map([
   ["noscript", /<\/noscript(?=[\s/>])/gi],
   ["script", /<\/script(?=[\s/>])/gi],
@@ -57,12 +47,6 @@ const BLOCK_ELEMENTS = new Set([
 
 const TAG_NAME_PATTERN = /^(\/?)([^\s/>]+)/;
 
-/**
- * Removes tags in a single forward pass. Fetched HTML is untrusted and can be
- * megabytes long, so every search resumes past the previous match: the scan
- * stays linear even for unclosed tags, which made the earlier regex-based
- * stripping backtrack quadratically and block the event loop.
- */
 function stripTags(html: string): string {
   const parts: string[] = [];
   let pos = 0;
@@ -79,7 +63,6 @@ function stripTags(html: string): string {
     }
 
     const close = html.indexOf(">", open + 1);
-    // No `>` remains, so nothing after this point can be a tag.
     if (close === -1) break;
 
     parts.push(html.slice(pos, open));
@@ -99,7 +82,6 @@ function stripTags(html: string): string {
     if (rawTextClose) {
       rawTextClose.lastIndex = pos;
       const end = rawTextClose.exec(html) ? html.indexOf(">", rawTextClose.lastIndex) : -1;
-      // Like browsers, an unclosed raw-text element swallows the rest.
       pos = end === -1 ? html.length : end + 1;
     }
   }

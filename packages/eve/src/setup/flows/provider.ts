@@ -7,7 +7,6 @@ export type ProviderConnection = ProviderSelection | "external";
 
 type AcceptedGatewayKeyValidation = Exclude<GatewayKeyValidation, { kind: "invalid" }>;
 
-/** A provider choice, including the accepted evidence for an inline key. */
 export type ProviderPickerChoice =
   | { kind: "ai-gateway-project" }
   | { kind: "chatgpt" }
@@ -18,7 +17,6 @@ export type ProviderPickerChoice =
       validation: AcceptedGatewayKeyValidation;
     };
 
-/** Private Dev TUI request for the provider's one-screen chooser. */
 export interface ProviderPickerRequest {
   message: string;
   options: readonly SelectOption<ProviderConnection>[];

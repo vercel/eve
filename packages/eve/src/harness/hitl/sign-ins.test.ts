@@ -14,7 +14,6 @@ import { sameRelayedSignIn, waitingSignIn } from "./sign-ins.js";
 const PARENT = { origin: "https://v.example", sessionId: "parent" };
 const OWN = callsBackFor(PARENT);
 
-/** A callback on `origin` that names `sessionId`'s inbox. */
 function callbackUrl(origin = PARENT.origin, sessionId = PARENT.sessionId): string {
   return `${origin}${createEveConnectionCallbackRoutePath("github", "attempt-1", authHookToken(sessionId))}`;
 }
@@ -129,7 +128,6 @@ describe("waitingSignIn", () => {
   });
 
   it("leaves a sign-in this session can't call back with its own card", () => {
-    // Two remote children on one deployment: their sign-ins match, but only theirs resumes them.
     const remote = "https://remote.example";
     const relayedFrom = (interactionId: string, sessionId: string) => ({
       ...opened(interactionId, { callbackUrl: callbackUrl(remote, sessionId) }),
@@ -138,7 +136,6 @@ describe("waitingSignIn", () => {
     const view = viewOf(relayedFrom("first", "child-a"));
     const second = relayedFrom("second", "child-b");
     expect(waitingSignIn(view, second, OWN)).toBe(second);
-    // Its inbox's token names another session, or its URL doesn't parse.
     const local = viewOf(opened("shown"));
     const wrongInbox = {
       ...opened("wrong", { callbackUrl: callbackUrl(PARENT.origin, "child-c") }),
@@ -147,7 +144,6 @@ describe("waitingSignIn", () => {
     expect(waitingSignIn(local, wrongInbox, OWN)).toBe(wrongInbox);
     const malformed = opened("malformed", { callbackUrl: "not a url" });
     expect(waitingSignIn(local, malformed, OWN)).toBe(malformed);
-    // Outside a workflow, nothing calls anyone's callback.
     const next = opened("next");
     expect(waitingSignIn(local, next, undefined)).toBe(next);
   });

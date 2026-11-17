@@ -12,12 +12,12 @@ Every `@portabletext/*` library exports a `toPlainText()` utility. Use it for me
 
 ```ts
 // From any framework library:
-import {toPlainText} from '@portabletext/react'
+import { toPlainText } from "@portabletext/react";
 // or: import {toPlainText} from '@portabletext/svelte'
 // or: import {toPlainText} from '@portabletext/vue'
 // or: import {toPlainText} from '@portabletext/to-html'
 
-const plainText = toPlainText(portableTextBlocks)
+const plainText = toPlainText(portableTextBlocks);
 ```
 
 ## Common Patterns
@@ -26,8 +26,8 @@ const plainText = toPlainText(portableTextBlocks)
 
 ```ts
 function getMetaDescription(body: PortableTextBlock[]): string {
-  const text = toPlainText(body)
-  return text.length > 160 ? text.slice(0, 157) + '...' : text
+  const text = toPlainText(body);
+  return text.length > 160 ? text.slice(0, 157) + "..." : text;
 }
 ```
 
@@ -35,23 +35,23 @@ function getMetaDescription(body: PortableTextBlock[]): string {
 
 ```ts
 // Index document content for search
-const searchableText = toPlainText(document.body)
+const searchableText = toPlainText(document.body);
 ```
 
 ### Slug Generation
 
 ```ts
-import slugify from 'slugify'
+import slugify from "slugify";
 
-const slug = slugify(toPlainText(blocks), {lower: true, strict: true})
+const slug = slugify(toPlainText(blocks), { lower: true, strict: true });
 ```
 
 ### Character/Word Count
 
 ```ts
-const text = toPlainText(blocks)
-const wordCount = text.split(/\s+/).filter(Boolean).length
-const charCount = text.length
+const text = toPlainText(blocks);
+const wordCount = text.split(/\s+/).filter(Boolean).length;
+const charCount = text.length;
 ```
 
 ## Behavior

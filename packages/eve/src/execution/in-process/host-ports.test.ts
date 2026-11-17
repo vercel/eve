@@ -23,7 +23,6 @@ describe("the in-process line store", () => {
     const encoder = new TextEncoder();
     const buffer = encoder.encode("alice\n");
     await writer.write(buffer);
-    // The writer may reuse its buffer.
     buffer.set(encoder.encode("bob!!\n"));
     await expect(store.tail("session-alice")).resolves.toBe(0);
 
@@ -64,7 +63,6 @@ describe("the in-process inbox transport", () => {
     const alice = createSessionInbox(registry.transportFor("session-alice"));
     const bob = createSessionInbox(registry.transportFor("session-bob"));
     await alice.claimSessionHook("shared");
-    // The conflict the core recognizes, so the session that lost joins the one that holds it.
     const conflict = await bob.claimSessionHook("shared").catch((error: unknown) => error);
     expect(isHookConflictError(conflict)).toBe(true);
     expect(conflict).toMatchObject({ conflictingRunId: "session-alice", token: "shared" });
@@ -89,7 +87,6 @@ describe("the in-process inbox transport", () => {
     const compact: SessionCommand = { deliveryId: "compact-1", kind: "compact" };
     const clear: SessionCommand = { deliveryId: "clear-1", kind: "clear" };
 
-    // Back to back, to two of the session's addresses: two commands, then a message behind them.
     await registry.deliver("alice-commands", compact);
     await registry.deliver("alice-commands", clear);
     await registry.deliver("alice", send("Bob asks again."));

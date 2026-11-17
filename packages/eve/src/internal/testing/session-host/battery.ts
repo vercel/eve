@@ -46,20 +46,13 @@ import {
   type ProbeOptions,
 } from "./probe.js";
 
-// The host battery: what every session host guarantees, as tests. `describeSessionHost` runs them
-// against the host `make` returns; a host without a capability skips the cases that need it, and
-// says so. Port-level cases drive the host's addresses, streams and commands; session-level cases
-// run a probe agent with a scripted model through the faults a host can suffer.
-
 vi.setConfig({ testTimeout: 60_000 });
 
-/** A case: a probe agent, a host for it, and what to check. */
 interface CaseOptions extends ProbeOptions {
   readonly setup?: HostSetup;
 }
 
 export function describeSessionHost(name: string, kind: SessionHostKind): void {
-  /** Runs `body` against a fresh host for the probe agent `options` describe. */
   const withHost = async (
     options: CaseOptions,
     body: (host: HostUnderTest, probe: Probe) => Promise<void>,
@@ -76,13 +69,8 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
     return agent;
   };
 
-  /** A case that runs only on hosts with `capability`; others report it skipped. */
   const needs = (capability: keyof HostCapabilities, title: string, test: () => Promise<void>) =>
     it.skipIf(!kind.capabilities[capability])(`${title} [${capability}]`, test);
-  /**
-   * A case a host with `capability` is known to fail, with the symptom it shows. `test` asserts
-   * the broken state itself, so it fails once the bug is fixed, and the fix turns it into a case.
-   */
   const brokenOn = (
     capability: keyof HostCapabilities,
     title: string,
@@ -110,7 +98,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
             const lines = [...new Set(events.map(({ meta }) => meta.position.line))];
             expect(lines).toEqual(lines.map((_, index) => index));
             expect(await runtime.getStreamTailIndex(first.sessionId)).toBe(lines.at(-1));
-            // A negative start reads back from the tail.
             const tail = await (
               await runtime.getEventStream(first.sessionId, { follow: false, startIndex: -1 })
             )
@@ -130,7 +117,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
             const first = await (
               await address.send("Alice asks.", { auth: null, [startsNewAddress]: true })
             ).result();
-            // Wrongly marked: the start finds the address taken and hands the message to its owner.
             const second = await (
               await address.send("Alice asks again.", { auth: null, [startsNewAddress]: true })
             ).result();
@@ -189,7 +175,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           {
             name: `${name}-child`,
             respond: (prompt) =>
-              // The child the agent tool opens answers; its parent hears it.
               firstMessage(prompt).includes("Summarize Bob's notes.")
                 ? textStreamResult("Bob's notes say ship on Friday.")
                 : prompt.includes('"role":"tool"')
@@ -214,7 +199,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
             const events = await recorded(runtime, result.sessionId);
             const settledCalls = ofType(events, "call.settled");
             expect(settledCalls).toHaveLength(1);
-            // The child session ran: its reply is the call's output the parent read.
             expect(settledCalls[0]).toMatchObject({ data: { outcome: "completed" } });
             expect(JSON.stringify(settledCalls[0])).toContain("Bob's notes say ship on Friday.");
             expect(await violations(runtime, result.sessionId)).toEqual([]);
@@ -282,8 +266,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
                       toolCallId: `lookup-${call}`,
                       toolName: "lookup",
                     }),
-              // Every attempt of the first step loses its completion; the step that fails the turn
-              // keeps its own.
               setup: {
                 faults: { loseCompletion: (step) => isTurnStep(step) && ++completions <= 4 },
               },
@@ -306,9 +288,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               expect(ofType(events, "session.ended")).toEqual([]);
             },
           );
-          // The first retry knew it was one: it read what its attempt did.
           expect(prompts[1]).toContain("This call completed, but its result was lost");
-          // The first attempt and three retries ran; the attempt past the limit didn't.
           expect(ran).toEqual(["lookup", "lookup", "lookup", "lookup"]);
         },
       );
@@ -317,7 +297,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
         "retries",
         "fails the turn with a fixed error when every attempt's write fails, and runs the next",
         async () => {
-          // A failed attempt waits this long for its stream's writes before it retries.
           vi.stubEnv("WORKFLOW_STEP_STREAM_DRAIN_TIMEOUT_MS", "500");
           onTestFinished(() => {
             vi.unstubAllEnvs();
@@ -329,7 +308,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
                 call === 1
                   ? toolCallStreamResult({ input: "{}", toolCallId: "lookup", toolName: "lookup" })
                   : textStreamResult("Done."),
-              // Every attempt of the first step fails to write; the recovery step's write succeeds.
               setup: { faults: { failFirstWrites: 4 } },
               tools: [lookup],
             },
@@ -339,8 +317,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               await (await address.send("Try again, please.", { auth: null })).result();
               await settled();
               const events = await recorded(runtime, failed.sessionId);
-              // The turn reports a fixed failure, under an id its log line carries, not what the
-              // last attempt threw.
               expect(ofType(events, "turn.settled")).toMatchObject([
                 {
                   data: {
@@ -369,11 +345,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           : "starts a task's run once when the step that reports it started is retried",
         async () => {
           let reported = 0;
-          // The run whose step lost its completion.
           let lostIn: string | undefined;
-          // The first dispatch step commits the task's start, and its hook may run after the step
-          // completes, so the fault keys on the step, armed from the start, not on the hook. In
-          // process, where dispatch is no step of its own, it is the turn step after the hook ran.
           const { dispatchStep } = kind;
           const loses = (step: CompletingStep) =>
             dispatchStep === undefined
@@ -395,7 +367,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
                       toolCallId: "deploy",
                       toolName: "deploy_service",
                     }),
-              // That step loses its completion once.
               setup: {
                 faults: {
                   loseCompletion: (step) => {
@@ -435,8 +406,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           "durable",
           `finishes a turn whose model call was running when the process died (spec ${spec})`,
           async () => {
-            // Spec 8 runs stamp inline steps with their owner; a restart must release them instead
-            // of waiting out the owner's lease.
             let started!: () => void;
             const modelCallStarted = new Promise<void>((resolve) => (started = resolve));
             const { prompts } = await withHost(
@@ -445,7 +414,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
                 setup: { specVersion: spec },
                 respond: async (_prompt, call) => {
                   if (call > 1) return textStreamResult("Noted, Alice.");
-                  // The first call never returns: its process dies while it runs.
                   started();
                   return await new Promise<never>(() => {});
                 },
@@ -491,7 +459,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           const sent = await alice(runtime, `${name}:nap`).send("Alice asks you to nap.", {
             auth: null,
           });
-          // The nap's wait, due soon; the session's idle timeout is due much later.
           const napOf = (waits: readonly StoredWait[]) =>
             waits.find((wait) => Date.parse(wait.resumeAt!) - Date.parse(wait.createdAt) < 60_000);
           await vi.waitFor(
@@ -500,13 +467,11 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
             },
             { interval: 20, timeout: 10_000 },
           );
-          // The timer was still pending when the process died, so the restart must arm it.
           expect((await storedWaits!()).map((wait) => wait.status)).not.toContain("completed");
           const resumeAt = Date.parse(napOf(await storedWaits!())!.resumeAt!);
           await restart!();
           const turn = await turnFrom(runtime, sent.sessionId);
           expect(ofType(turn, "turn.settled")).toMatchObject([{ data: { outcome: "completed" } }]);
-          // It waited out the nap: the turn didn't finish before its timer was due.
           expect(Date.now()).toBeGreaterThanOrEqual(resumeAt);
         });
       });
@@ -531,14 +496,10 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
                 auth: null,
               });
               const crash = await crashed;
-              // Past the nap's due time, a World that recovered it is delivering its wake-up.
               const due = Date.now() + 500;
               await restart!();
               await new Promise((resolve) => setTimeout(resolve, due - Date.now()));
               await settled();
-              // world-local bug: it stores a wait's claim and the wait before its `wait_created`
-              // event, so the replay's `wait_created` hits the claim, fails with
-              // `EntityConflictError` and is dropped. No event, no timer: the run stays parked.
               const waits = await storedWaits!();
               expect(waits.find((wait) => wait.waitId === crash.waitId)?.status).toBe("waiting");
               expect(await runStatus!(crash.runId)).toBe("running");
@@ -563,13 +524,11 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               ).result();
               await settled();
               const tail = await runtime.getStreamTailIndex(first.sessionId);
-              // As after the first upgrade from a release that didn't stamp its owners.
               await restart!({
                 beforeStart: () =>
                   rewriteRunAttributes!(first.sessionId, { [EVE_VERSION_ATTRIBUTE]: undefined }),
               });
               await settled();
-              // The restart's replay of the run was skipped: it wrote nothing, and still runs.
               const messages = () => logs.records.map((record) => record.message).join("\n");
               expect(messages()).toContain(
                 `Skipping replay of stranded session run "${first.sessionId}"`,
@@ -636,7 +595,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
                   (error: unknown) => error,
                 );
               await settled();
-              // The answer never reaches the cancelled session.
               expect(answered).not.toBe(asked.sessionId);
             },
           );
@@ -678,8 +636,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
                     default: defineMemory({
                       provider: {
                         recall: {
-                          // The second turn's recall fails that turn; an abort-shaped error isn't
-                          // retried.
                           "turn.started": async (context) => {
                             if (context.turn.sequence === 0) return null;
                             throw Object.assign(new Error("This operation was aborted"), {
@@ -704,7 +660,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               ).result();
               await createSession(first.sessionId, runtime).compact();
               await settled();
-              // The session kept its address across the move.
               const failed = await (await address.send("Bob asks again.", { auth: null })).result();
               expect(failed.sessionId).toBe(first.sessionId);
               await settled();
@@ -712,7 +667,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               expect(ofType(events, "context.settled")).toMatchObject([
                 { data: { kind: "compaction", outcome: "completed" } },
               ]);
-              // A value that fails fails its turn, not the session.
               expect(
                 ofType(events, "turn.settled").map(({ data }) => [data.turnId, data.outcome]),
               ).toEqual([

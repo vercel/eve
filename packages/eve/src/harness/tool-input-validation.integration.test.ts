@@ -1,4 +1,3 @@
-// @linux-only: framework tool input validation
 import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -27,7 +26,6 @@ type StreamPart =
     ? Part
     : never;
 
-/** Streams one scripted response per model call, in order. */
 function scriptedStreams(responses: readonly (readonly StreamPart[])[]) {
   const queue = [...responses];
   return async () => {

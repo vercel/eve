@@ -109,7 +109,6 @@ describe("packed package consumption", () => {
     const appRoot = join(root, "app");
     await mkdir(appRoot, { recursive: true });
 
-    // The scenario setup packs eve the same way: lifecycle scripts off.
     const eveTarball = await ensureScenarioEveTarballPath();
     await writeAppFile(
       appRoot,

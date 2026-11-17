@@ -23,27 +23,18 @@ import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-build
 
 export interface HostPluginsInput {
   readonly appRoot: string;
-  /** Loads eve's vendored dependencies from its install instead of bundling them (development hosts). */
   readonly loadVendoredDependenciesNatively?: boolean;
-  /** Package root authored assets may not escape. */
   readonly authoredPackageRoot: string;
   readonly externals: ExternalsPolicy;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly instrumentationEntryPlugin?: NitroBuildPlugin;
   readonly instrumentationSourcePaths?: readonly string[];
-  /** Installed packages that generated modules left for the host; see `createAuthoredPlugins`. */
   readonly hostBundledPackageRoots?: readonly string[];
-  /** Generated modules eve's runtime plugin imports only for their side effects. */
   readonly runtimeModules: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
 }
 
-/**
- * eve's host build plugins in the order they must run, all ahead of Nitro's
- * own. Step transforms and side-effect resolution come first so
- * extension-mount resolution never claims a workflow module.
- */
 export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
   const plugins: (NitroBuildPlugin | null)[] = [
@@ -60,8 +51,6 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
       ...input.runtimeModules,
     ]),
     input.instrumentationEntryPlugin ?? null,
-    // Before Nitro's externals and tracing, so a pseudo-package never reaches
-    // the output as a live import.
     createPseudoPackagePlugin(),
     createHostedGraphPlugin({ appRoot: input.appRoot, externals: input.externals }),
     createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths),
@@ -71,7 +60,6 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
         sourceRoot: mount.sourceRoot,
       })),
     ),
-    // Workflow step modules reach Nitro as authored source, not prebundled.
     ...createAuthoredPlugins({
       authoredSourceOnly: true,
       hostBundledPackageRoots: input.hostBundledPackageRoots,
@@ -83,14 +71,6 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
     .map((plugin) => ({ ...plugin, enforce: "pre" as const }));
 }
 
-/**
- * eve's `#compiled/*` modules are prebuilt vendored dependencies, about two
- * thirds of a development host's input. Loading them from eve's install saves
- * re-bundling and re-emitting them on every start. Production hosts still
- * bundle them. They are not entirely self-contained: peer dependencies such as
- * `ai` (kept external by `@ai-sdk/otel`) stay bare imports, which resolve from
- * eve's install, the same file Nitro's dev externals resolve for the bundle.
- */
 function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
   const packageRoot = resolvePackageRoot();
   return {
@@ -98,7 +78,6 @@ function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
     resolveId: {
       filter: { id: /^#compiled\// },
       handler(source, importer) {
-        // Only eve's own modules: a dependency nested under eve has its own `#` imports.
         const path = importer?.replace(/\?.*$/su, "");
         if (
           path === undefined ||
@@ -130,21 +109,8 @@ function stripPathQueryAndHash(path: string): string {
 }
 
 export interface ModulePathMatcher {
-  /**
-   * Matches a module specifier or id against the paths as the platform's
-   * filesystem does: specifiers resolve against their importer, drive-less
-   * absolute paths take the current drive on Windows, separators are compared
-   * as `/`, and Windows compares case-insensitively. Returns the matched path
-   * with `/` separators, or null.
-   */
   readonly match: (specifier: string, importer?: string) => string | null;
-  /**
-   * A Rolldown id filter that admits every path `match` accepts, as given or
-   * as `match` resolves it. A plugin that resolves a path to that form hands
-   * later hooks the resolved id.
-   */
   readonly idFilter: RegExp;
-  /** Rolldown `resolveId` id filters that together admit every specifier `match` accepts. */
   readonly specifierFilter: RegExp[];
 }
 
@@ -184,8 +150,6 @@ export function createModulePathMatcher(
     }
     return keys.has(toKey(resolved)) ? resolved : null;
   };
-  // A path resolves to its own last segment unless that is empty, `.`, or `..`. File URLs may
-  // percent-encode the name, so all of them pass.
   const basenames = new Set(targets.map((target) => target.slice(target.lastIndexOf("/") + 1)));
   const pathSpecifier = new RegExp(
     `^(?=\\.|[\\\\/]|[A-Za-z]:[\\\\/])(?:[^?#]*[\\\\/])?(?:${[...basenames].map(escapeRegex).join("|")}|\\.{0,2})(?:[?#].*)?$`,
@@ -259,11 +223,6 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
   return undefined;
 }
 
-/**
- * Keeps modules evaluated for their side effects: the workflow bundle and its
- * handler, step modules that register durable steps, and instrumentation
- * modules the generated instrumentation plugin imports eagerly.
- */
 function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
   const { match, specifierFilter } = createModulePathMatcher(rootDir, paths);
   return {
@@ -278,14 +237,7 @@ function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]
   };
 }
 
-/**
- * Transforms package-owned execution sources in step mode so the generated
- * `steps.mjs` entry can import raw source files while still registering
- * durable step handlers with the Workflow runtime.
- */
 function createStepTransformPlugin(rootDir: string, stepTargets: readonly string[]) {
-  // Step targets are also side-effect modules, so a transform sees the id
-  // the side-effect plugin resolved them to.
   const { idFilter, match } = createModulePathMatcher(rootDir, stepTargets);
   return {
     name: "eve:workflow-step-transform",

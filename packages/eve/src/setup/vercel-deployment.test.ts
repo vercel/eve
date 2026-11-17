@@ -104,8 +104,6 @@ describe("resolveVercelDeployment", () => {
     const resolution = await resolveVercelDeployment({
       workspaceRoot: "/repo",
       host: "inbound.example.com",
-      // The caller may scope with a team slug, but the OIDC owner_id claim is
-      // the canonical team_* id; the target must carry the id Vercel returned.
       source: { orgId: "acme", projectId: "prj_target" },
       deps: { captureVercel },
     });

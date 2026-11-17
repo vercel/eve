@@ -1,6 +1,3 @@
-// Stop at the first failing array element before the SDK's errorsText joins
-// every Ajv error. Keep its dialect selection and format validation unchanged.
-// Fail the build on upstream drift rather than silently restoring allErrors.
 function createFailFastValidationPlugin() {
   const source = `function createDefaultAjvInstance(engineClass) {
 \tconst ajv = new engineClass({

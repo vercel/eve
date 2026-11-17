@@ -47,40 +47,24 @@ import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("harness.step");
 
-/**
- * One harness step: the session it changes, and the machine it changes the session through.
- * Every lifecycle change goes through `apply`, which publishes the transition's events and saves
- * what it changed; `position` reads where those events left the session.
- */
 export interface Step {
   session: HarnessSession;
-  /** The model the step's call runs, once eve has chosen it for the call. */
   model?: ModelChoice;
   frameworkToolNames: ReadonlySet<string>;
   readonly config: KernelConfig;
-  /** The session's context. */
   readonly ctx: AlsContext;
   readonly runStep: StepFn;
   readonly publish: Publish;
-  /** The caller's event handler. Without one, a failure throws instead of being reported. */
   readonly emit: HarnessEmitFn | undefined;
   readonly instrumentation: InstrumentationStepScope<HarnessSession> | undefined;
-  /** A child's caller or a schedule hears only the turn's real end. */
   readonly hasDelegatedCaller: boolean;
-  /**
-   * The session's reader sees only its final reply: a child's caller or a schedule. A held turn's
-   * text there narrates; a person reads it as a reply.
-   */
   readonly finalReplyOnly: boolean;
-  /** A tool's `endsTurn` applies: a root turn without an output schema. */
   readonly endsTurn: boolean;
   view(): SessionView;
   position(): TurnPosition;
-  /** Publishes a transition, or kernel facts that change nothing private, as one commit. */
   apply(change: Transition | Commit, messages?: readonly ModelMessage[]): Promise<void>;
 }
 
-/** The model the step's call runs. Read only once eve has chosen it for the call. */
 export function stepReference(step: Pick<Step, "model">): RuntimeModelReference {
   if (step.model === undefined) throw new Error("The step read its model before eve chose it.");
   return step.model.reference;
@@ -115,7 +99,6 @@ export function createStep(input: {
     position: () => turnPosition(live.read()),
     async apply(change, messages) {
       const transition = "events" in change ? change : unchangedBy(change, step.view().turn);
-      // Records whose rows the commit closed retire with it; the writer closes and scopes.
       step.session = dropClosedRecords(
         await applyTransition(step.session, transition, input.publish, messages),
         live.read(),
@@ -126,13 +109,11 @@ export function createStep(input: {
   return step;
 }
 
-/** Opens the turn, or joins the open one. Returns the step's result when opening failed the session. */
 export async function openTurn(
   step: Step,
   opened: {
     readonly input: readonly HarnessModelMessage[];
     readonly message?: HarnessStepInput["message"];
-    /** The deliveries the turn consumes. */
     readonly deliveries?: HarnessStepInput["deliveries"];
   },
 ): Promise<StepResult | undefined> {
@@ -163,10 +144,6 @@ export async function openTurn(
   return undefined;
 }
 
-/**
- * Before a model call: the session's dynamic values are evaluated with the conversation the call
- * reads. A value that fails fails the turn; returns the step's result then.
- */
 export async function prepareModelCall(
   step: Step,
   preview: Prompt,
@@ -182,14 +159,12 @@ export async function prepareModelCall(
   return undefined;
 }
 
-/** A hook failed during the turn: the turn fails. Returns the step's result then. */
 export async function failTurnForEffect(step: Step): Promise<StepResult | undefined> {
   const reason = takeTurnFailure(step.ctx as ContextContainer);
   if (reason === undefined) return undefined;
   return failTurn(step, new Error(reason), "HOOK_FAILED");
 }
 
-/** The turn fails with `error`; the session waits for its next message. */
 async function failTurn(step: Step, error: unknown, code: string): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   step.instrumentation?.recordError(error);
@@ -210,14 +185,12 @@ async function failTurn(step: Step, error: unknown, code: string): Promise<StepR
   };
 }
 
-/** A lifecycle event failed to publish: a dynamic model selection failure ends the session. */
 export async function failBoundaryEvent(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
   throw error;
 }
 
-/** No model can serve the turn: the session fails. */
 export async function failModelSelection(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   if (isTurnCancellation(error)) throw error;

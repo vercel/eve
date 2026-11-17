@@ -6,16 +6,6 @@ import {
 } from "#execution/proxied-deliver-step.js";
 import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
 
-/**
- * Routes any descendant-bound input responses down to the owning child. A
- * descendant session-limit Stop is returned as parent-owned turn control after
- * the child consumes the answer.
- *
- * Short-circuits via `hasProxyInputRequests` so the common no-active-descendant
- * path skips a durable step boundary. Lives in its own non-step module so both
- * the owner and the active turn can share it (a `"use step"` module cannot
- * re-export plain helpers into a workflow body).
- */
 export async function routeDeliverToChildren(input: {
   readonly delivery: DeliverHookPayload;
   readonly sessionWritable: WritableStream<Uint8Array>;

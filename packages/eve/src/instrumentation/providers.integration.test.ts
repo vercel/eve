@@ -1,4 +1,3 @@
-// @linux-only: instrumentation dispatch order
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { turnIdempotencyKey } from "#instrumentation/lifecycle.js";

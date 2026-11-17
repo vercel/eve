@@ -95,7 +95,6 @@ test("a shared change whose card can't show it in full is refused", async () => 
     await defaultSkillApproval(request({ scope: channel, targets: [target(100, 2_000)] })),
     "ask",
   );
-  // A long description pushes instructions off the card as surely as long instructions do.
   for (const [description, instructions] of [
     [100, 3_000],
     [2_000, 2_000],
@@ -108,7 +107,6 @@ test("a shared change whose card can't show it in full is refused", async () => 
       /more than the 3000 an approver can read/,
     );
   }
-  // A personal change isn't seen by anyone else, so its length doesn't matter.
   assert.equal(await defaultSkillApproval(request({ targets: [target(2_000, 5_000)] })), "allow");
 });
 
@@ -128,7 +126,6 @@ test("a shared change needs someone other than the requester to approve it", asy
 });
 
 test("a changed subject isn't a second person for shared skills, nor the owner of personal ones", () => {
-  // A GitHub sender keeps their account ID but can rename the login that becomes the subject.
   const before = {
     attributes: {},
     authenticator: "github",

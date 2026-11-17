@@ -4,7 +4,6 @@ import { applySessionStateDelta } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { applyValueDelta, diffValue } from "#shared/value-delta.js";
 
-/** Whether every plain object and array in `value` is frozen. */
 function deeplyFrozen(value: unknown): boolean {
   if (value === null || typeof value !== "object") return true;
   if (!Object.isFrozen(value)) return false;
@@ -17,7 +16,6 @@ function dictionary(entries: Record<string, unknown>): Record<string, unknown> {
 
 const message = (role: string, content: string) => ({ role, content });
 
-/** The session values here are plain stand-ins; only their shape matters. */
 async function run(
   input: Record<string, unknown>,
   work: (input: any) => Promise<Record<string, unknown>>,
@@ -41,11 +39,9 @@ describe("withSessionStateDelta", () => {
     expect(next?.kind).toBe("value");
     const value = (next as { value: typeof history }).value;
     expect(value).toEqual([...history, message("user", "next")]);
-    // Unchanged entries are the given objects, so Workflow stores only the change.
     expect(value[0]).toBe(kept);
     expect(deeplyFrozen(value)).toBe(true);
 
-    // Removed, reordered and changed entries match the structural delta exactly.
     const state = (result.stateDelta.sessionState as { value: typeof sessionState }).value;
     const expected = applyValueDelta(
       sessionState,
@@ -56,7 +52,6 @@ describe("withSessionStateDelta", () => {
     expect(Object.getPrototypeOf(state.tables)).toBe(null);
     expect(state.tables.a).toBe(sessionState.tables.a);
     expect(deeplyFrozen(state)).toBe(true);
-    // The given values are left as they were.
     expect(sessionState.turn).toBe(1);
     expect(Object.isFrozen(sessionState)).toBe(false);
   });

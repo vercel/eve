@@ -15,18 +15,21 @@ Let Sanity generate `_id` values for imported documents unless you are intention
 - Reserve explicit `_id` values for singleton documents such as `settings`, `homePage`, or localized singleton IDs like `homePage-en`.
 
 ## 1. HTML Import (Legacy CMS)
+
 Use `@portabletext/block-tools` with `JSDOM` to convert HTML to Portable Text. This covers setup, custom deserializers, pre-processing, image uploads, and wrapping in `defineMigration`.
 
 **See `migration-html-import.md` for the full guide with working examples.**
 
 ## 2. Markdown Import (Static Sites)
+
 Use `@portabletext/markdown` for direct, schema-aware Markdown ↔ Portable Text conversion.
 
 **Recommended: Direct Conversion with `@portabletext/markdown`**
-```typescript
-import {markdownToPortableText} from '@portabletext/markdown'
 
-const blocks = markdownToPortableText(markdownString)
+```typescript
+import { markdownToPortableText } from "@portabletext/markdown";
+
+const blocks = markdownToPortableText(markdownString);
 ```
 
 This handles headings, lists, bold, italic, code, links, images, and tables. Use `@portabletext/sanity-bridge` to pass your Sanity schema so only valid types are produced.
@@ -40,6 +43,7 @@ For complex Markdown with non-standard extensions, convert to HTML first, then u
 > **Note:** `@sanity/block-content-to-markdown` and `@sanity/block-tools` are deprecated. Use `@portabletext/markdown` and `@portabletext/block-tools` instead.
 
 ## 3. Image Handling (Universal)
+
 Don't just link to external images. Download them and upload to Sanity Asset Pipeline.
 
 1.  **Extract:** Find `<img>` tags or Markdown image syntax.
@@ -48,6 +52,8 @@ Don't just link to external images. Download them and upload to Sanity Asset Pip
 4.  **Replace:** Return a Sanity Image block with the new asset reference.
 
 ## 4. Schema Validation
+
 Ensure your destination schema allows the structures you are importing.
--   **Tables:** Need a `table` type (HTML `<table>` or GFM tables).
--   **Code:** Need a `code` type (HTML `<pre><code>` or MD code fences).
+
+- **Tables:** Need a `table` type (HTML `<table>` or GFM tables).
+- **Code:** Need a `code` type (HTML `<pre><code>` or MD code fences).

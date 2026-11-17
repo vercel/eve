@@ -48,24 +48,12 @@ import type {
   compiledAgentManifestSchema,
 } from "#compiler/manifest-schema.js";
 
-/**
- * Stable manifest kind emitted by the compiler for runtime loading.
- */
 export const COMPILED_AGENT_MANIFEST_KIND = "eve-agent-compiled-manifest";
 
-/**
- * Stable node id used by compiled artifacts for the root authored agent.
- */
 export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 
-/**
- * Current compiled manifest schema version.
- */
 export const COMPILED_AGENT_MANIFEST_VERSION = 56;
 
-/**
- * Active compiled channel entry — backed by an authored `Channel` module.
- */
 export interface CompiledChannelDefinition {
   readonly kind: "channel";
   readonly name: string;
@@ -75,29 +63,12 @@ export interface CompiledChannelDefinition {
   readonly sourceId: string;
   readonly sourceKind: "module";
   readonly exportName?: string;
-  /**
-   * Stable identifier of the `ChannelAdapter.kind` returned by the authored
-   * route, captured at compile time. Examples: `"slack"`, `"http"`. Authors
-   * may override the default kind on their adapter, so this field is the
-   * adapter's reported value verbatim. Consumers (eg. dashboard surfaces)
-   * normalize it for display via {@link normalizeChannelKindForDisplay}.
-   *
-   * Omitted when the route does not register an adapter.
-   */
   readonly adapterKind?: string;
-  /**
-   * Serializable CORS options to apply to this channel route. Omitted when the
-   * channel leaves CORS untouched.
-   */
   readonly cors?: NormalizedChannelCorsOptions;
   readonly manifest?: JsonObject;
   readonly vercelConnect?: VercelConnectMetadata;
 }
 
-/**
- * Disabled compiled channel entry — marker that an authored file at this
- * slug exported `disableRoute()` to remove the matching framework default.
- */
 export interface CompiledChannelPreflightDefinition {
   readonly cors: NormalizedChannelCorsOptions;
   readonly method: "OPTIONS";
@@ -118,40 +89,18 @@ export interface CompiledChannelRoutePlan {
   readonly shadowed: readonly CompiledShadowedChannelRoute[];
 }
 
-/**
- * Serializable runtime model reference preserved in the compiled manifest.
- *
- * Carries {@link ModelRouting} — decided at compile time from the authored model
- * value — so consumers (the dev server's `/eve/v1/info`, the TUI) can tell how
- * the model is reached without re-resolving it. Runtime model resolution uses
- * the routing-free {@link InternalAgentModelDefinition}; routing is a
- * compiled-output concern only.
- */
 export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
   routing: ModelRouting;
 };
 
-/**
- * Dynamic model resolver source preserved in the compiled manifest.
- */
 export type CompiledDynamicModelDefinition = ModuleSourceRef;
 
-/**
- * Normalized hosted-build configuration preserved in the compiled manifest.
- */
 export type CompiledAgentBuildDefinition = AgentBuildDefinition;
 
-/**
- * Normalized authored compaction configuration preserved in the compiled
- * manifest.
- */
 export type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition, "model"> & {
   model?: CompiledRuntimeModelReference;
 };
 
-/**
- * Normalized additive agent configuration preserved in the compiled manifest.
- */
 type CompiledAgentDefinitionBase = Omit<InternalAgentDefinition, "model" | "compaction"> & {
   compaction?: CompiledAgentCompactionDefinition;
   source: ModuleSourceRef;
@@ -169,10 +118,6 @@ export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
       }
   );
 
-/**
- * Normalized authored instructions prompt preserved in the compiled
- * manifest.
- */
 export type CompiledInstructionsDefinition = InternalInstructionsDefinition &
   (
     | (Omit<MarkdownSourceRef<undefined>, "definition"> & {
@@ -181,9 +126,6 @@ export type CompiledInstructionsDefinition = InternalInstructionsDefinition &
     | Omit<ModuleSourceRef, "exportName">
   );
 
-/**
- * Normalized authored skill preserved in the compiled manifest.
- */
 export type CompiledSkillDefinition = NamedSkillDefinition &
   (
     | (Omit<MarkdownSourceRef<undefined>, "definition"> & {
@@ -193,47 +135,24 @@ export type CompiledSkillDefinition = NamedSkillDefinition &
     | (SkillPackageSourceRef & { readonly owner: AgentSourceOwner })
   );
 
-/**
- * Normalized authored schedule preserved in the compiled manifest.
- */
 export type CompiledScheduleDefinition = z.infer<typeof compiledScheduleDefinitionSchema>;
 export type CompiledScheduleCollectionDefinition = z.infer<
   typeof compiledScheduleCollectionDefinitionSchema
 >;
 
-/**
- * Normalized authored sandbox metadata preserved in the compiled manifest.
- */
 export type CompiledSandboxDefinition = z.infer<typeof compiledSandboxDefinitionSchema>;
 
-/**
- * Compiled sandbox workspace folder preserved in the compiled manifest.
- *
- * Corresponds to the `agent/sandbox/workspace/` directory discovered on
- * disk. Mounted into the live sandbox cwd at session bootstrap.
- */
 type CompiledSandboxWorkspace = z.infer<typeof compiledSandboxWorkspaceSchema>;
 
-/**
- * Byte-free descriptor for the compiled workspace resource tree owned by one
- * graph node.
- */
 export type CompiledWorkspaceResourceRoot = z.infer<typeof compiledWorkspaceResourceRootSchema>;
 
-/**
- * Normalized authored connection metadata preserved in the compiled manifest.
- */
 export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefinitionSchema>;
 
-/**
- * Normalized authored tool metadata preserved in the compiled manifest.
- */
 export type CompiledToolDefinition = InternalToolDefinition &
   ModuleSourceRef & {
     readonly behavior?: CompiledToolBehavior;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
-    /** The input schema as eve sends it to a model; absent for provider-managed tools. */
     readonly modelInputSchema?: JsonObject;
     readonly requiresApproval: boolean;
     readonly workflowProgram?: {
@@ -241,7 +160,6 @@ export type CompiledToolDefinition = InternalToolDefinition &
     };
   };
 
-/** The kinds of file eve asks at runtime, each a definition of the agent's. */
 export type CompiledDefinitionKind =
   | "connection"
   | "hook"
@@ -250,24 +168,14 @@ export type CompiledDefinitionKind =
   | "skill"
   | "tool";
 
-/**
- * A file the agent declares that eve asks at runtime: a `defineDynamic()` tool, skill,
- * connection, or instructions file, a hook, or a memory. Its module holds the code; this holds
- * what reading the agent needs without loading it.
- */
 export interface CompiledDefinition extends ModuleSourceRef {
   readonly kind: CompiledDefinitionKind;
-  /** Its name, from its path: `tools/weather.ts` is `"weather"`, `memory/notes.ts` `"notes"`. */
   readonly slug: string;
-  /** An extension's namespace, which the names of what a map returns take. */
   readonly extensionNamespace?: string;
-  /** A hook's events. */
   readonly eventNames?: readonly string[];
-  /** A memory's description. */
   readonly description?: string;
 }
 
-/** A node's definitions of one kind, in the order it declares them. */
 export function compiledOf(
   node: { readonly definitions: readonly CompiledDefinition[] },
   kind: CompiledDefinitionKind,
@@ -275,10 +183,6 @@ export function compiledOf(
   return node.definitions.filter((definition) => definition.kind === kind);
 }
 
-/**
- * Non-recursive compiled authored agent payload shared by the root agent and
- * every flattened subagent node.
- */
 export type CompiledAgentNodeManifest = z.infer<typeof compiledAgentNodeManifestSchema>;
 
 export type CompiledAgentResources = z.infer<typeof compiledAgentResourcesSchema>;
@@ -308,27 +212,14 @@ export type CompiledSubagentNode = Readonly<
 
 export type { CompiledRemoteAgentNode } from "#compiler/remote-agent-node.js";
 
-/**
- * Versioned compiled manifest emitted by the compiler and loaded by runtime.
- */
 export type CompiledAgentManifest = z.infer<typeof compiledAgentManifestSchema>;
 
-/**
- * One mounted extension recorded on a compiled agent manifest. The runtime
- * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
- * call binds the extension's config on its instance handle before any tool runs.
- */
 export interface CompiledExtensionMount {
-  /** Runtime packages this extension requires the consuming application to externalize. */
   readonly externalDependencies: readonly string[];
-  /** Mount-derived namespace that prefixes the extension's tool/skill names. */
   readonly namespace: string;
   readonly packageName: string;
-  /** Package export imported by the mount declaration. */
   readonly specifier: string;
-  /** Canonical path of this mount in the root agent tree. */
   readonly mountId: string;
-  /** Absolute path to the extension's distributed source root. */
   readonly sourceRoot: string;
   readonly mountSourceId: string;
   readonly mountSourcePath: string;
@@ -361,7 +252,6 @@ export interface CreateCompiledAgentResourcesInput {
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }
 
-/** Creates compiled filesystem-owned resources with stable defaults. */
 export function createCompiledAgentResources(
   input: CreateCompiledAgentResourcesInput,
 ): CompiledAgentResources {
@@ -394,7 +284,6 @@ export function createCompiledAgentResources(
   };
 }
 
-/** Creates a compiled authored agent payload with stable defaults. */
 export function createCompiledAgentNodeManifest(
   input: CreateCompiledAgentResourcesInput & { readonly config: CompiledAgentDefinition },
 ): CompiledAgentNodeManifest {
@@ -406,10 +295,6 @@ export function createCompiledAgentNodeManifest(
   return manifest;
 }
 
-/**
- * The sorted root entries of a node's workspace resource tree. The in-memory manifest factory and
- * `materializeWorkspaceResources` both use it, so both emit identical descriptors.
- */
 export function deriveResourceRootEntries(
   sandboxWorkspaces: readonly CompiledSandboxWorkspace[],
 ): readonly string[] {
@@ -417,10 +302,6 @@ export function deriveResourceRootEntries(
   return [...rootEntries].sort((left, right) => left.localeCompare(right));
 }
 
-/**
- * Creates one stable compiled subagent node id from the parent node id and the
- * source entry discovered in that parent package.
- */
 export function createCompiledSubagentNodeId(parentNodeId: string, sourceId: string): string {
   if (parentNodeId === ROOT_COMPILED_AGENT_NODE_ID) {
     return sourceId;
@@ -429,9 +310,6 @@ export function createCompiledSubagentNodeId(parentNodeId: string, sourceId: str
   return `${parentNodeId}::${sourceId}`;
 }
 
-/**
- * Creates a compiled manifest with stable defaults.
- */
 export function createCompiledAgentManifest(
   input: CreateCompiledAgentResourcesInput & {
     readonly config: CompiledAgentDefinition;

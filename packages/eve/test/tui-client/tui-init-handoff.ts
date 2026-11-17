@@ -8,27 +8,6 @@ import { spawnInPseudoTerminal } from "./lib/pty.ts";
 import { theme } from "./lib/theme.ts";
 import { MockScreen } from "./lib/tui.ts";
 
-/**
- * End-to-end check of what a person sees during `eve init <name>` in a real
- * terminal, from the first progress row to `eve dev`'s chat prompt.
- *
- * Runs the built CLI in a pseudo-terminal against a packed eve, so the
- * scaffold really installs and `eve init` really hands the terminal to the
- * project's own `eve dev`. Every screen the terminal could have shown is
- * replayed (a synchronized update counts once, at its end) and checked, so a
- * screen that blanks, flashes a premature state, or paints twice fails the
- * test even when the final screen looks right.
- *
- * Regression: eve 1.0.1 erased init's onboarding screen when the install
- * finished, printed "Created an eve agent", and showed a "Starting your agent"
- * row while `eve dev` loaded, so the agent's screen appeared, vanished, and
- * came back. Printing that summary above a kept screen instead pushed the
- * screen down, so the header must also stay on one row throughout.
- *
- * Needs no agent server and no model credentials: onboarding is skipped with
- * Escape. Network: the scaffold's install resolves eve's declared dependencies
- * from the registry.
- */
 const root = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(root, "..", "..");
 const COLUMNS = 100;
@@ -39,7 +18,6 @@ const STATUS_LABELS = [
   "Starting agent…",
   "Reading saved connection…",
 ] as const;
-/** Environment variables that make eve treat the launch as a coding agent's, not a person's. */
 const AGENT_ENV = [
   "AI_AGENT",
   "ANTIGRAVITY_AGENT",
@@ -66,7 +44,6 @@ void (async () => {
   const workRoot = await mkdtemp(join(tmpdir(), "eve-tui-init-"));
   try {
     const tarballPath = join(workRoot, "eve.tgz");
-    // `test:tui` already built the package; packing must stay faithful to that build.
     await exec("pnpm", ["pack", "--config.ignore-scripts=true", "--out", tarballPath], packageRoot);
     console.log(theme.muted("[tui-init-handoff] packed eve tarball"));
 
@@ -82,14 +59,12 @@ void (async () => {
       EVE_TUI_UNICODE: "1",
       EVE_TELEMETRY_DISABLED: "1",
       EVE_INIT_PACKAGE_SPEC: `file:${tarballPath}`,
-      // Scaffold with pnpm, as `pnx eve init` does.
       npm_config_user_agent: "pnpm/12.0.0 npm/? node/v26.0.0 linux x64",
       GIT_AUTHOR_NAME: "Alice",
       GIT_AUTHOR_EMAIL: "alice@example.com",
       GIT_COMMITTER_NAME: "Alice",
       GIT_COMMITTER_EMAIL: "alice@example.com",
     };
-    // A person's terminal: no CI, no coding agent, no model credentials to discover.
     for (const key of [
       ...AGENT_ENV,
       "CI",
@@ -146,7 +121,6 @@ function assertSmoothJourney(frames: readonly string[], workRoot: string): void 
   const firstScreen = frames.findIndex((frame) => STARTUP_HEADER.test(frame));
   check(firstScreen >= 0, "The agent's screen never appeared.", frames, 0);
 
-  // Init's progress row stays until the agent's screen paints over it.
   const firstRow = frames.findIndex((frame) => frame.includes("Creating agent"));
   for (let index = Math.max(firstRow, 0); firstRow >= 0 && index < firstScreen; index += 1) {
     check(
@@ -250,7 +224,6 @@ function check(condition: boolean, message: string, frames: readonly string[], i
   throw new Error(`${message}\n\n${context}`);
 }
 
-/** Waits for eve dev's settled chat prompt: its agent header, the composer, and no startup status. */
 async function waitForChatPrompt(
   screen: InstanceType<typeof MockScreen>,
   timeoutMs: number,
@@ -275,7 +248,6 @@ async function waitForChatPrompt(
   }
 }
 
-/** Runs a command to completion, failing loudly with its combined output. */
 function exec(command: string, args: readonly string[], cwd: string): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(command, [...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });

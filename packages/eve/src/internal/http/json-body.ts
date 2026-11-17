@@ -1,14 +1,9 @@
-/** A request body read as JSON under a byte cap. */
 export type JsonBodyRead =
   | { readonly kind: "json"; readonly value: unknown }
   | { readonly kind: "empty" }
   | { readonly kind: "too-large" }
   | { readonly kind: "invalid-json" };
 
-/**
- * Reads `request`'s body as JSON, counting bytes as they stream: a declared `Content-Length` is
- * trusted only to refuse early, so a body that lies about its length still stops at `maxBytes`.
- */
 export async function readJsonBody(request: Request, maxBytes: number): Promise<JsonBodyRead> {
   const body = request.body;
   if (body === null) return { kind: "empty" };

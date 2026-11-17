@@ -57,8 +57,6 @@ describe("createCompactionPrompt", () => {
 
     expect(result.prompt).toContain("Conversation transcript:");
     expect(result.prompt).toContain("### assistant");
-    // Raw clipped JSON, not a pre-digested object(…) skeleton: the checkpoint
-    // model is the one deciding which parts of a payload matter.
     expect(result.prompt).toContain('Called search with {"query":"debug"}');
     expect(result.prompt).toContain('"alpha"');
     expect(result.prompt).toContain('"delta"');
@@ -206,8 +204,6 @@ describe("createCompactionPrompt", () => {
   });
 
   it("renders conversational text verbatim regardless of length", () => {
-    // A delegated task message destroyed here is unrecoverable after the first
-    // compaction, so user/assistant text must reach the summarizer whole.
     const taskTail = "CRITICAL_REQUIREMENT_AFTER_280_CHARACTERS";
     const task = `${"do the following work item. ".repeat(30)}${taskTail}`;
 
@@ -232,7 +228,6 @@ describe("createCompactionPrompt", () => {
         { content: oldest, role: "user" },
         { content: newest, role: "user" },
       ],
-      // Fits one full entry plus a degraded one, but not both full.
       transcriptBudgetTokens: 3_500,
       previousCheckpoint: undefined,
     });
@@ -242,8 +237,6 @@ describe("createCompactionPrompt", () => {
   });
 
   it("does not split a UTF-16 surrogate pair when capping degraded conversational text", () => {
-    // 📥 is U+1F4E5 — two UTF-16 units. Place its high surrogate exactly at
-    // the degraded-text limit boundary (index 1999 of the 2000-unit cap).
     const content = "x".repeat(1999) + "📥" + " tail ".repeat(400);
     const { prompt } = createCompactionPrompt({
       messages: [{ role: "user", content }],

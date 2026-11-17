@@ -17,14 +17,7 @@ import {
 } from "#internal/authored-package-boundary.js";
 import { buildWithRolldown } from "#internal/bundler/rolldown.js";
 
-/**
- * Bundles a compile's application modules as one code-split graph per set of
- * external dependencies, so a module they share is evaluated once, as in the
- * runtime module map. A module bundled on its own evaluates a private copy of
- * everything it imports.
- */
 export interface AuthoredModuleGraph {
-  /** Returns the graph entry file for `modulePath`, or `undefined` to bundle it alone. */
   entryPath(
     modulePath: string,
     externalDependencies: readonly string[],
@@ -45,7 +38,6 @@ export function createAuthoredModuleGraph(
       const key = externals.join("\0");
       let build = builds.get(key);
       if (build === undefined) {
-        // Modules fall back to their own bundle, which reports any bundling error.
         build = writeAuthoredModuleGraph(entries, externals, options.appRoot).catch(
           () => undefined,
         );
@@ -70,7 +62,6 @@ async function writeAuthoredModuleGraph(
       .map((modulePath, index) => [`entry-${index}`, modulePath]),
   );
   const sourcemap = evaluatedBundleSourcemap();
-  // The content hash ignores inline maps, so cached chunks with and without one need distinct names.
   const fileName = sourcemap === false ? "[name]-[hash].mjs" : "[name]-[hash]-mapped.mjs";
   const result = await buildWithRolldown({
     ...createAuthoredModuleBuildOptions({
@@ -82,7 +73,6 @@ async function writeAuthoredModuleGraph(
       plugins: [createAuthoredWorkflowDirectivePlugin({ appRoot: appRoot ?? packageRoot })],
     }),
     input: Object.fromEntries(inputs),
-    // Each entry chunk must expose exactly its module's exports.
     preserveEntrySignatures: "strict",
     write: false,
     output: {
@@ -92,15 +82,12 @@ async function writeAuthoredModuleGraph(
       entryFileNames: fileName,
       format: "esm",
       sourcemap,
-      // Shared chunks can import each other even when the source graph is
-      // acyclic; strict order keeps top-level evaluation in source order.
       strictExecutionOrder: true,
     },
   });
   const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
   for (const item of result.output) {
     if (item.type !== "chunk") continue;
-    // File names carry a content hash, so an existing file already has this content.
     const filePath = writeAuthoredModuleCacheFile(directoryPath, item.fileName, item.code);
     const modulePath = item.isEntry ? inputs.get(item.name) : undefined;
     if (modulePath !== undefined) entryPaths.set(modulePath, filePath);

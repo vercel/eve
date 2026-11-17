@@ -40,10 +40,6 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("omits __dirname when the chunk already declares it at the top level", () => {
-    // Regression: previously the banner unconditionally prepended
-    // `const __dirname = ...`, producing `SyntaxError: Identifier
-    // '__dirname' has already been declared` when bundled output
-    // re-declared the path global itself.
     const banner = buildNodeEsmCompatBanner(programWithTopLevelBindings("__filename", "__dirname"));
 
     expect(banner).not.toContain("__dirname");
@@ -102,8 +98,6 @@ describe("buildNodeEsmCompatBanner", () => {
       ],
     });
 
-    // The chunk has not bound `__dirname` at the top level, so the
-    // banner must still provide it.
     expect(banner).toContain("const __dirname = __eveDirname(__filename);");
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
   });
@@ -162,8 +156,6 @@ describe("createNodeEsmCompatBannerPlugin", () => {
   });
 
   it("scans adjacent comments after a comma in linear time", () => {
-    // Each boundary between adjacent comments must have exactly one parse;
-    // otherwise a failed match retries 2^n comment partitions.
     const comments = Array.from({ length: 26 }, (_, index) => `/** Timer ${index}. */`);
     const code = `export const timers = [first,\n${comments.join("\n")}\nsecond];\nexport const directory = __dirname;`;
     const parse = vi.fn(() => EMPTY_PROGRAM);

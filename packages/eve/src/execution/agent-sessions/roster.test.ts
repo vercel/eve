@@ -8,7 +8,6 @@ it("names the agents a call resolves to a remote agent, as its lookup finds them
       subagentsByName: new Map([
         ["reviewer", { definition: { kind: "subagent", name: "reviewer" } }],
         ["billing", { definition: { kind: "remote", name: "billing" } }],
-        // Shares its name with a dynamic remote agent, and is found first.
         ["finance", { definition: { kind: "subagent", name: "finance" } }],
       ]),
     },
@@ -17,7 +16,6 @@ it("names the agents a call resolves to a remote agent, as its lookup finds them
     "subagents/tenant": { kind: "remote", prepared: { kind: "remote", name: "tenant" } },
     "subagents/helper": { kind: "subagent", prepared: { kind: "subagent", name: "helper" } },
     "subagents/finance": { kind: "remote", prepared: { kind: "remote", name: "finance" } },
-    // A dynamic agent the calling turn didn't select.
     "subagents/idle": null,
   };
 

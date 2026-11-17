@@ -96,7 +96,6 @@ export function linearContinuationToken({
   return `agent-session:${agentSessionId}`;
 }
 
-/** Parses a verified Linear webhook body into a normalized event, or `null` when unsupported. */
 export function parseLinearWebhookEvent(input: {
   readonly body: string;
   readonly headers: Headers;
@@ -139,7 +138,6 @@ export function parseLinearWebhookEvent(input: {
   };
 }
 
-/** Builds the user-facing message for a Linear Agent Session event. */
 export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEvent): MessageContent {
   if (event.action === "prompted") {
     const body = event.agentActivity?.body;
@@ -161,7 +159,6 @@ export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEven
   return "Linear agent session started.";
 }
 
-/** Formats Linear issue/session context as an eve context block. */
 export function formatLinearContextBlock(event: LinearAgentSessionEvent): string {
   const session = event.agentSession;
   const issue = session.issue;

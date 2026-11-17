@@ -1,9 +1,6 @@
 import type { Dirent } from "node:fs";
 import { sep } from "node:path";
 
-/**
- * Supported authored JavaScript and TypeScript module file extensions.
- */
 export const SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS = [
   ".cts",
   ".mts",
@@ -13,10 +10,6 @@ export const SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS = [
   ".js",
 ] as const;
 
-/**
- * Files that mark a surrounding directory as an application root when paired
- * with a top-level `agent/` directory.
- */
 const PROJECT_MARKER_FILE_NAMES = ["package.json", "vercel.json"] as const;
 
 const PROJECT_MARKER_FILE_NAME_SET = new Set<string>(PROJECT_MARKER_FILE_NAMES);
@@ -29,14 +22,8 @@ const GENERATED_AGENT_DIRECTORY_NAMES = new Set<string>([
   "node_modules",
 ]);
 
-/**
- * Filesystem entry type used by discovery classifiers.
- */
 export type DirectoryEntryType = "directory" | "file" | "other";
 
-/**
- * Classified root-level agent entry.
- */
 type AgentRootEntryKind =
   | "agent-config-module"
   | "channels-directory"
@@ -60,9 +47,6 @@ type AgentRootEntryKind =
   | "unknown"
   | "subagents-directory";
 
-/**
- * Classified local-subagent root entry.
- */
 type LocalSubagentEntryKind =
   | "agent-config-module"
   | "connections-directory"
@@ -84,9 +68,6 @@ type LocalSubagentEntryKind =
   | "unknown"
   | "subagents-directory";
 
-/**
- * Classified Agent Skills package entry.
- */
 type SkillPackageEntryKind =
   | "skill-assets-directory"
   | "skill-markdown"
@@ -94,9 +75,6 @@ type SkillPackageEntryKind =
   | "skill-resource"
   | "skill-scripts-directory";
 
-/**
- * Classified top-level entry inside `skills/`.
- */
 type SkillsDirectoryEntryKind =
   | "flat-skill-markdown"
   | "flat-skill-module"
@@ -105,9 +83,6 @@ type SkillsDirectoryEntryKind =
   | "skill-package-directory"
   | "unknown";
 
-/**
- * Returns the normalized entry type for a Node filesystem dirent.
- */
 export function getDirectoryEntryType(
   entry: Pick<Dirent, "isDirectory" | "isFile">,
 ): DirectoryEntryType {
@@ -122,16 +97,10 @@ export function getDirectoryEntryType(
   return "other";
 }
 
-/**
- * Returns whether an entry marks a directory as an app root for nested agents.
- */
 export function isProjectMarkerEntry(name: string, entryType: DirectoryEntryType): boolean {
   return entryType === "file" && PROJECT_MARKER_FILE_NAME_SET.has(name);
 }
 
-/**
- * Classifies a top-level agent-root entry according to the spec-legal grammar.
- */
 export function isDiscoverableAgentRootEntry(name: string, entryType: DirectoryEntryType): boolean {
   const kind = classifyAgentRootEntry(name, entryType);
   return (
@@ -231,9 +200,6 @@ export function classifyAgentRootEntry(
   return "unknown";
 }
 
-/**
- * Classifies a local-subagent package root entry according to the spec-legal grammar.
- */
 export function classifyLocalSubagentEntry(
   name: string,
   entryType: DirectoryEntryType,
@@ -315,9 +281,6 @@ export function classifyLocalSubagentEntry(
   return "unknown";
 }
 
-/**
- * Classifies a file or directory inside an Agent Skills package.
- */
 export function classifySkillPackageEntry(
   name: string,
   entryType: DirectoryEntryType,
@@ -347,9 +310,6 @@ export function classifySkillPackageEntry(
   return "skill-resource";
 }
 
-/**
- * Classifies one top-level entry inside the authored `skills/` directory.
- */
 export function classifySkillsDirectoryEntry(
   name: string,
   entryType: DirectoryEntryType,
@@ -379,17 +339,10 @@ export function classifySkillsDirectoryEntry(
   return "unknown";
 }
 
-/**
- * Normalizes an agent-root-relative logical path to forward slashes.
- */
 export function normalizeLogicalPath(input: string): string {
   return input.replaceAll(sep, "/").replace(/^\.\//, "").replace(/^\/+/, "");
 }
 
-/**
- * Returns the authored module basename when the file uses a supported module
- * extension.
- */
 export function getSupportedModuleBaseName(name: string): string | null {
   if (isTypeScriptDeclarationFileName(name)) {
     return null;
@@ -404,17 +357,14 @@ export function getSupportedModuleBaseName(name: string): string | null {
   return null;
 }
 
-/** Returns whether a filename is a TypeScript declaration module. */
 export function isTypeScriptDeclarationFileName(name: string): boolean {
   return /\.d\.(?:cts|mts|ts)$/.test(name);
 }
 
-/** Identifies colocated tests to omit from automatic agent source discovery. */
 export function isAuthoredTestPath(path: string): boolean {
   return /(?:^|[/\\])__tests__(?:[/\\]|$)/.test(path) || /\.(?:test|spec)\.[cm]?[jt]s$/.test(path);
 }
 
-/** Returns whether a filename is a source map for a generated module or declaration. */
 export function isGeneratedSourceMapFileName(name: string): boolean {
   if (!name.endsWith(".map")) return false;
   const sourceFileName = name.slice(0, -".map".length);
@@ -424,16 +374,10 @@ export function isGeneratedSourceMapFileName(name: string): boolean {
   );
 }
 
-/**
- * Returns whether the file name matches one supported authored module basename.
- */
 export function matchesSupportedModuleBaseName(name: string, baseName: string): boolean {
   return getSupportedModuleBaseName(name) === baseName;
 }
 
-/**
- * Removes a final file extension from a logical path when present.
- */
 export function stripLogicalPathExtension(input: string): string {
   const normalizedPath = normalizeLogicalPath(input);
   const lastSlashIndex = normalizedPath.lastIndexOf("/");

@@ -11,7 +11,6 @@ import {
   createRuntimeLoaderPackageBoundaryPlugin,
 } from "#internal/authored-package-boundary.js";
 
-/** Calls a plugin's `resolveId` for a static import, with `resolve` as its context's resolver. */
 async function resolveThrough(
   plugin: Plugin,
   resolve: PluginContext["resolve"],

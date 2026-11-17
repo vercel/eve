@@ -324,7 +324,6 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       return rebuildTeamsContext(state, session, config);
     },
 
-    // `session.auth.current` is the caller of this delivery.
     deliver(
       payload,
       channel: TeamsChannelContext & { readonly session: ChannelContext["session"] },
@@ -338,7 +337,6 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
         };
       }
       const caller = channel.session.auth.current;
-      // A message names its sender; an answer's state patch carries its responder.
       const sender = payload.message === undefined ? undefined : state?.triggeringUser;
       const responders =
         caller !== null && sender !== undefined && sender !== null
@@ -377,8 +375,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           if (activity.type === "message") {
             waitUntil(
               isTeamsAnswerActivity(activity)
-                ? // The retired card is the notice here: a message has no private reply.
-                  dispatchAnswers({ activity, config, from, onAnswers }).then((answer) =>
+                ? dispatchAnswers({ activity, config, from, onAnswers }).then((answer) =>
                     answer?.outcome === "inactive" ? answer.retirement : undefined,
                   )
                 : dispatchMessage({
@@ -702,7 +699,6 @@ async function handleInvoke(input: {
   const reveal = readTeamsAuthorizationReveal(input.activity);
   if (reveal !== null) return Response.json(await revealAuthorization({ ...input, reveal }));
   if (isTeamsAnswerActivity(input.activity)) {
-    // Answered after delivery, so the presser learns when no session took it.
     const answer = await dispatchAnswers({
       activity: input.activity,
       config: input.config,
@@ -710,7 +706,6 @@ async function handleInvoke(input: {
       from: input.from,
     });
     if (answer?.outcome !== "inactive") return Response.json(teamsInvokeResponse());
-    // The reply doesn't wait for the card's edit, which the request still keeps.
     input.waitUntil(answer.retirement);
     return Response.json(teamsInvokeResponse({ message: INACTIVE_REQUEST_NOTICE }));
   }
@@ -723,7 +718,6 @@ async function handleInvoke(input: {
   return teamsOk();
 }
 
-/** Identifies the presser the same way a HITL card submission does. */
 async function revealAuthorization(input: {
   readonly activity: TeamsInvokeActivity;
   readonly config: TeamsChannelConfig;
@@ -753,11 +747,6 @@ async function revealAuthorization(input: {
   });
 }
 
-/**
- * Delivers a card submission and reports what became of it. When no session
- * can take it, the card's retirement has started and the caller keeps the
- * request alive until it settles.
- */
 async function dispatchAnswers(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
@@ -789,7 +778,6 @@ async function dispatchAnswers(input: {
     {
       async retirePrompt(label) {
         if (activity.replyToId === undefined) return;
-        // A card posted before prompts rode in its data still loses its buttons.
         await ctx.thread.update(
           activity.replyToId,
           renderInactiveInputRequestMessage(readTeamsInputPrompt(activity), label),
@@ -821,7 +809,6 @@ function stateFromActivity(
   };
 }
 
-/** Continues the thread a card recorded when posted, or the activity's own thread. */
 function cardContinuationToken(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
   state: TeamsChannelState,
@@ -835,10 +822,6 @@ function cardContinuationToken(
   });
 }
 
-/**
- * What an answer adds to the session's state: the account behind its principal, so the answered
- * card can name them, and for an approval, the card it answers.
- */
 function answerStatePatch(
   activity: TeamsInvokeActivity | TeamsMessageActivity,
   auth: SessionAuthContext | null,

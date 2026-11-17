@@ -166,10 +166,16 @@ CI.
 9. **All runtime functionality lives in the `eve` package.** Never rely on
    emitted or generated code for runtime behavior.
 
-10. **Comment why, not what.** Default to no comment; well-named code is the
-    documentation. Comment only what the code cannot say itself — a non-obvious
-    why, an invariant, a surprising edge case. Public API docs (principle 1) are
-    the exception.
+10. **Comments document the public API, nothing else.** In `packages/`, the
+    only comments are JSDoc on declarations users can see (what a published
+    entry exports and the types it refers to), tool directives such as
+    `@ts-expect-error`, and license notices (`/*! ... */`, `@license`,
+    `SPDX-License-Identifier`) that credit adapted third-party code. Every
+    published export has JSDoc. Do not add comments
+    while fixing a bug or refactoring; well-named code is the documentation.
+    Express an invariant as code that fails when it breaks: a named assert that
+    throws with the reason in its message, a type, or a `pnpm guard:invariants`
+    rule. Rules 67 and 68 enforce this with no baseline.
 
 11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
     spec, one ordered plugin list, and one route table. Follow the foundation

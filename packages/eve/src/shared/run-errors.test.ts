@@ -18,9 +18,6 @@ import {
   NonRetryableError,
 } from "#shared/run-errors.js";
 
-// eve's run errors and Workflow's must recognize each other, so either host's code reads the
-// other's errors and a report names them as before.
-
 describe("run errors", () => {
   it("are Workflow's to Workflow's own checks", () => {
     const fatal = new NonRetryableError("no retry");

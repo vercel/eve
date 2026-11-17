@@ -34,7 +34,6 @@ function stateWith(overrides: Partial<SetupState>): SetupState {
   return Object.assign(state, overrides);
 }
 
-/** Runs `perform` directly so the linked/unlinked branches stay testable past shouldRun. */
 function performWith(
   prompter: Prompter,
   deps: ApplyAiGatewayCredentialDeps,

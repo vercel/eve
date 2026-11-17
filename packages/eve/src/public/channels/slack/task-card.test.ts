@@ -24,7 +24,6 @@ function harness(audience: "private" | "public" = "private") {
   const view = emptySessionView();
   let position = 0;
   const events = withTaskCards({}, renderDefaultSlackTaskCard);
-  /** Commits `facts` as the server does, then runs each through the channel with the view after. */
   async function commit(...facts: SessionEvent[]): Promise<SessionView> {
     foldLine(view, { at: `2026-10-13T00:00:${String(10 + position)}.000Z`, facts }, position, {
       retention: "operational",

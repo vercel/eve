@@ -10,20 +10,12 @@ import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 const STATE_MODULE = "eve/context";
 const STATE_EXPORT = "defineState";
 
-/**
- * Detects whether emitted extension modules call `defineState` from
- * `eve/context`. Usage is followed through local re-export barrels — aliased
- * re-exports, `export *`, and import-then-re-export chains — so indirect
- * usage still stamps the `state` capability requirement.
- */
 export async function extensionUsesState(runtimeRoot: string): Promise<boolean> {
   const modulePaths = await collectRuntimeModules(runtimeRoot);
   const sources = new Map<string, string>();
   for (const modulePath of modulePaths) {
     sources.set(modulePath, await readFile(modulePath, "utf8"));
   }
-  // A call site always names `defineState` (or a re-exported alias defined in
-  // some local module), so a tree without the token cannot use state.
   if (![...sources.values()].some((source) => source.includes(STATE_EXPORT))) {
     return false;
   }
@@ -81,18 +73,12 @@ interface StateAstNode {
 }
 
 interface ModuleStateShape {
-  /** Local binding → its import source, from `import { X as L } from "spec"`. */
   readonly imports: Map<string, { specifier: string; importedName: string }>;
-  /** Local binding → specifier, from `import * as L from "spec"`. */
   readonly namespaceImports: Map<string, string>;
-  /** Exported name → its origin, from `export { X as Y } from "spec"`. */
   readonly reexports: Map<string, { specifier: string; importedName: string }>;
-  /** Specifiers of `export * from "spec"`. */
   readonly starReexportSpecifiers: string[];
-  /** Exported name → local binding, from `export { L as Y }` without a source. */
   readonly localReexports: Map<string, string>;
   readonly calledIdentifiers: Set<string>;
-  /** Namespace object name → member names it is called through. */
   readonly calledMembers: Map<string, Set<string>>;
 }
 
@@ -175,10 +161,6 @@ function analyzeModule(ast: StateAstNode): ModuleStateShape {
   return shape;
 }
 
-/**
- * Fixpoint over local modules: which of each module's exports resolve back to
- * `eve/context`'s `defineState`, under whatever names the barrels chose.
- */
 function computeStateExports(
   shapes: ReadonlyMap<string, ModuleStateShape>,
   moduleSet: ReadonlySet<string>,
@@ -252,7 +234,6 @@ function resolveLocalSpecifier(
   return candidates.find((candidate) => moduleSet.has(candidate)) ?? null;
 }
 
-/** `./lib/eve.js` in nodenext-style source resolves to `lib/eve.ts` on disk. */
 function emittedExtensionVariants(base: string): string[] {
   const swaps: readonly (readonly [string, string])[] = [
     [".js", ".ts"],

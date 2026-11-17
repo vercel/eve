@@ -24,14 +24,9 @@ import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
 import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 
-// Scenario tier: building the extension package spawns tsc for declarations.
 const createAppRoot = useTemporaryAppRoots();
 const createScratchDirectory = useTemporaryDirectories();
 
-/**
- * Compiles the app and hydrates the module map from authored source, the
- * `eve eval` / `eve dev` path.
- */
 async function compileRuntimeGraph(appRoot: string) {
   await compileAgent({ startPath: appRoot });
   const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
@@ -186,12 +181,6 @@ const EXT_TREE: Readonly<Record<string, string>> = {
   ].join("\n"),
 };
 
-/**
- * Builds a TypeScript-authored extension and returns exactly the package's
- * publishable files: package.json plus the complete dist tree. No author source
- * is placed under the consumer's node_modules, so the consumer must discover
- * and normalize the emitted agent-shaped distribution.
- */
 async function buildInstalledExtensionFiles(
   tree: Readonly<Record<string, string>> = EXT_TREE,
 ): Promise<Record<string, string>> {
@@ -425,7 +414,6 @@ describe("mounted extension installed under node_modules", () => {
         "});",
         "",
       ].join("\n");
-    // A helper outside the extension source shared by two tools is emitted to `dist/_chunks`.
     const extensionFiles = await buildInstalledExtensionFiles({
       "extension/extension.ts": EXT_TREE["extension/extension.ts"]!,
       "lib/api-key.ts": [

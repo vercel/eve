@@ -20,9 +20,7 @@ export type SetupPresenter = Pick<Prompter, "log" | "note"> & {
 };
 
 export interface SetupPrepareContext {
-  /** Selected agent project where authored files are changed. */
   readonly appRoot: string;
-  /** Project root for shared dependencies, Vercel links, and environment files. */
   readonly projectRoot: string;
   readonly asker: Asker;
   readonly environment: IntegrationSetupEnvironment;
@@ -33,9 +31,7 @@ export interface SetupPrepareContext {
 }
 
 export interface SetupApplyContext {
-  /** Selected agent project where authored files are changed. */
   readonly appRoot: string;
-  /** Project root for shared dependencies, Vercel links, and environment files. */
   readonly projectRoot: string;
   readonly presenter: SetupPresenter;
   signal?: AbortSignal;
@@ -66,7 +62,6 @@ export interface SetupIntegration {
   }): Promise<IntegrationSetupResult>;
 }
 
-/** Captures an integration's private plan type behind one executable lifecycle. */
 export function defineSetupIntegration<Plan>(
   definition: SetupIntegrationDefinition<Plan>,
 ): SetupIntegration {

@@ -38,28 +38,15 @@ import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
 import { recordModelUsage } from "./usage.js";
 
-/** A model step's response, for the session to act on. */
 export interface ModelResponse {
-  /** The step's catalog, which decides what each of the response's calls runs. */
   readonly catalog: StepCatalog;
-  /** How many prompt messages the model read, when no client context was spliced in. */
   readonly durableModelPromptMessageCount?: number;
-  /** Tools that can end the turn in this step, with their `endsTurn` option. */
   readonly endsTurnTools: EndsTurnTools;
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens?: number;
   readonly result: HarnessStepResult;
 }
 
-/**
- * One model step of the open turn: the prompt it reads, the model that serves it, and the call
- * with its retries and recoveries. The response handler applies what it returned.
- *
- * The session's dynamic values are evaluated first, with the conversation the call reads, which
- * fixes its model, tools, and context. Then the turn's input joins history, so a call that fails
- * keeps it, and the budget gate passes. Then the turn requests a model run, and the run starts as
- * its provider call begins.
- */
 export async function runModelStep(
   step: Step,
   input: {
@@ -72,15 +59,12 @@ export async function runModelStep(
   const failed = await prepareModelCall(step, prepared);
   if (failed !== undefined) return failed;
   const prompt = commitTurnInput(step, prepared);
-  // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
 
   const run = await requestRun(step, prompt);
   if ("failed" in run) return run.failed;
   const projectedMessages = projectPrompt(prompt);
-  // Dynamic tools and subagents were evaluated before the run was requested, so the step's calls
-  // resolve once, against this catalog.
   const catalog = await stepCatalog(step);
   step.frameworkToolNames = frameworkToolNames(catalog);
   const { approvalMemory } = humanInputContext(step);
@@ -117,7 +101,6 @@ export async function runModelStep(
     generation.check();
     stepResult = await handleStepResult(step, {
       catalog,
-      // Usage measures what the model read only when no client context was spliced in.
       durableModelPromptMessageCount:
         prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
           ? caller.modelMessages.length
@@ -133,15 +116,10 @@ export async function runModelStep(
     if (generation.interrupted) return caller.steered();
     throw error;
   }
-  // The returned session now owns these messages; persist their baseline with it.
   step.ctx.set(HistoryStateKey, caller.request.historyState);
   return stepResult;
 }
 
-/**
- * The turn requests a model run, which the dynamic model evaluated for it serves, or the agent's
- * model. No model fails the session.
- */
 async function requestRun(
   step: Step,
   prompt: Prompt,
@@ -163,7 +141,6 @@ async function requestRun(
   }
 }
 
-/** The run's model is chosen and its provider call begins. */
 async function startRun(step: Step, attempt: number): Promise<void> {
   const runId = step.position().runId;
   if (runId === undefined) return;

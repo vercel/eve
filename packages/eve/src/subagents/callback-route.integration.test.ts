@@ -1,4 +1,3 @@
-// @linux-only: a remote reply hook on Workflow, behind the callback route
 import { expect, it } from "vitest";
 
 import { remoteReplyWorkflow } from "#internal/testing/remote-reply-workflow.js";
@@ -26,7 +25,6 @@ it("resumes a run's remote reply hook, whose token a step drew and a replay keep
       { params: { token }, requestIp: null, waitUntil() {} },
     );
     expect(response.status).toBe(202);
-    // The payload wakes the run, which replays its body: the hook it opens again is the same one.
     await expect(run.returnValue).resolves.toMatchObject({
       payload: {
         kind: "runtime-action-result",
@@ -34,8 +32,6 @@ it("resumes a run's remote reply hook, whose token a step drew and a replay keep
       },
       token,
     });
-    // Opening the hook is all the run did, so its one step is the one that drew the token: a
-    // body's own `crypto` is seeded, and a token drawn there records no step.
     const steps = await (await getWorld()).steps.list({ resolveData: "none", runId: run.runId });
     expect(steps.data).toHaveLength(1);
   } finally {

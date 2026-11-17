@@ -5,10 +5,6 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
-/**
- * A compiled agent's delegates for one workflow tool run: its copy (a root session's `agent`
- * tool), its subagents, and the dynamic agents the calling turn selected.
- */
 export function compiledDelegates(
   bundle: CompiledBundle,
   ctx: ContextReader,

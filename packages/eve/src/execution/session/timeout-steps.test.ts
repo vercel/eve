@@ -30,7 +30,6 @@ const TIMEOUT_HOOK = {
   token: "session-1:session-timeout",
 };
 
-/** A single-deployment World whose owner runs record the given eve version. */
 function singleDeploymentWorld(ownerEveVersion = resolveInstalledPackageInfo().version) {
   return {
     getDeploymentId: async () => "dpl_current",
@@ -88,7 +87,6 @@ describe("session timeout steps", () => {
 
   it("drops a signal to a stranded owner without delivering it", async () => {
     getWorldMock.mockResolvedValue(singleDeploymentWorld("0.0.1"));
-    // Runnable owners are remembered per process, so the stranded owner needs its own run.
     getHookByTokenMock.mockImplementation(async (token: string) => {
       if (!token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
       return { runId: "stranded-owner", specVersion: 6, token };

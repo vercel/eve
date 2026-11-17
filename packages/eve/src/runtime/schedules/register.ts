@@ -1,14 +1,7 @@
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 
-/**
- * Prefix of eve's own task name for an authored schedule, which dispatch uses
- * to find the compiled schedule. Nitro and Vercel name the task separately.
- */
 const EVE_SCHEDULE_TASK_NAME_PREFIX = "eve.schedule.";
 
-/**
- * One compiled schedule registration consumed by the Nitro host wiring.
- */
 export interface ScheduleRegistration {
   readonly cron: string;
   readonly timezone?: string;
@@ -19,10 +12,6 @@ export interface ScheduleRegistration {
   readonly taskName: string;
 }
 
-/**
- * Error raised when authored schedules cannot be converted into stable runtime
- * registrations.
- */
 export class ScheduleRegistrationError extends Error {
   readonly scheduleId?: string;
   readonly sourceId?: string;
@@ -53,10 +42,6 @@ export class ScheduleRegistrationError extends Error {
   }
 }
 
-/**
- * Creates stable registrations for the Nitro host's scheduled tasks from
- * resolved authored schedules.
- */
 export function createScheduleRegistrations(
   schedules: readonly ResolvedScheduleDefinition[],
 ): ScheduleRegistration[] {

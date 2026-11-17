@@ -1,4 +1,3 @@
-// @linux-only: ctx.to() fork/dedup on Workflow; in-memory Slack mocks
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -62,7 +61,6 @@ describe("ctx.to() in tools", () => {
               async receive({ message, target, ...send }, { from }) {
                 const delivery = await from(`dm:${String(target.userId)}`).send(message, send);
                 deliveredTo.push(delivery.sessionId);
-                // The first delivery lands, but the step never records it.
                 if (deliveredTo.length === 1) throw new Error("The delivery response was lost.");
                 return delivery;
               },
@@ -86,12 +84,8 @@ describe("ctx.to() in tools", () => {
       ]);
       const reply = String(await readFirstTurnReply(run));
       const { sessionId } = JSON.parse(reply.slice(reply.indexOf("{"))) as { sessionId: string };
-      // The retry reaches the same address; the replay after the sleep reuses the recorded
-      // result and never calls receive() again.
       expect(deliveredTo).toEqual([sessionId, sessionId]);
 
-      // The session reads its inbox in order, so by the turn that sees this marker it has
-      // also seen any redelivered summary.
       await sendToSession(sessionId, "Marker.");
       await vi.waitFor(() => expect(lastModelInput(modelInputs, sessionId)).toContain("Marker."), {
         timeout: 15_000,
@@ -139,7 +133,6 @@ describe("ctx.to() in tools", () => {
       ],
       toolName: "fork_to_dm",
     });
-    // The agent's first top-level post in the DM anchors the fork's thread.
     const threadRoots = () =>
       slackCalls
         .filter(
@@ -167,13 +160,11 @@ describe("ctx.to() in tools", () => {
         expect(firstThread).toBeDefined();
         expect(lastModelInput(modelInputs, first)).toContain("Run fork_to_dm");
 
-        // Slack has no thread to name for a DM target, so a second fork starts a second thread.
         await sendToSession(source.runId, "Run fork_to_dm");
         const second = forkedSessionId(await sourceTurns.nextTurn());
         expect(second).not.toBe(first);
         await waitForCompletedTurns(second, 1);
 
-        // Alice replies in the first fork's thread; only that fork hears it.
         await deliverSlackDirectMessage(slack, signingSecret, {
           text: "Alice prefers Friday.",
           threadTs: firstThread!,
@@ -210,14 +201,12 @@ describe("ctx.to() in tools", () => {
               : { id: body.channel, is_private: false },
         });
       }
-      // Alice's message is a reply in the origin thread, which its permalink names.
       if (method === "chat.getPermalink") {
         return Response.json({
           ok: true,
           permalink: `https://acme.slack.com/archives/${body.channel}/p${body.message_ts!.replace(".", "")}?thread_ts=1700000000.000001&cid=${body.channel}`,
         });
       }
-      // Slack returns the same channel for a repeated session_id.
       if (method === "agents.conversations.create") {
         return Response.json(
           createError === undefined
@@ -233,7 +222,6 @@ describe("ctx.to() in tools", () => {
       credentials: { botToken: "xoxb-test", signingSecret },
     });
     const { modelInputs, recordModelInputs } = modelInputRecorder();
-    // The tool an app writes around openCodeChannel(), as docs/channels/slack/index.mdx shows.
     const runtime = await createToolRuntime<{ message: string; name: string }>({
       agentName: "tool-slack-code-channel",
       execute: async ({ message, name }, ctx) =>
@@ -263,7 +251,6 @@ describe("ctx.to() in tools", () => {
             ...buildWorkflowToolSerializedContext({
               continuationToken: "slack:C_ORIGIN:1700000000.000001",
             }),
-            // A thread session started by Alice's message, as the Slack channel records it.
             "eve.channel": {
               kind: "channel:slack",
               state: {
@@ -275,7 +262,6 @@ describe("ctx.to() in tools", () => {
                 triggeringUserId: "U_ALICE",
               },
             },
-            // The message hook returned its own auth; the tool still finds the conversation.
             "eve.auth": {
               attributes: { email: "alice@example.com" },
               authenticator: "acme-sso",
@@ -289,7 +275,6 @@ describe("ctx.to() in tools", () => {
       try {
         const codeSession = forkedSessionId(await sourceTurns.nextTurn());
         await waitForCompletedTurns(codeSession, 1);
-        // The code channel session starts from the thread and the tool's first message.
         expect(lastModelInput(modelInputs, codeSession)).toContain("Run open_code_channel");
         expect(lastModelInput(modelInputs, codeSession)).toContain("Start by reproducing it.");
 
@@ -300,14 +285,12 @@ describe("ctx.to() in tools", () => {
           origin_message_ts: "1700000000.000002",
         });
         expect(create?.body.session_id).toMatch(/^[0-9a-f]{32}$/u);
-        // The code channel's reply posts top-level.
         const codeReplies = slackCalls.filter(
           ({ body, method }) => method === "chat.postMessage" && body.channel === "C_CODE",
         );
         expect(codeReplies.length).toBeGreaterThan(0);
         expect(codeReplies.every(({ body }) => body.thread_ts === undefined)).toBe(true);
 
-        // Alice writes in the code channel without a mention; only its session hears it.
         await deliverSlackChannelMessage(slack, signingSecret, {
           channel: "C_CODE",
           text: "Alice prefers Friday.",
@@ -315,8 +298,6 @@ describe("ctx.to() in tools", () => {
         await waitForCompletedTurns(codeSession, 2);
         expect(lastModelInput(modelInputs, codeSession)).toContain("Alice prefers Friday.");
         expect(lastModelInput(modelInputs, source.runId)).not.toContain("Alice prefers Friday.");
-        // A reply in a thread inside the code channel reaches the same session and is
-        // answered in that thread.
         const postsBefore = slackCalls.length;
         await deliverSlackChannelMessage(slack, signingSecret, {
           channel: "C_CODE",
@@ -336,11 +317,9 @@ describe("ctx.to() in tools", () => {
             .map(({ body }) => body.thread_ts),
         ).toEqual(["1700000100.000099"]);
 
-        // Another call for the same message reaches the same code channel and session.
         await sendToSession(source.runId, request);
         expect(forkedSessionId(await sourceTurns.nextTurn())).toBe(codeSession);
 
-        // A permanent Slack refusal fails the call with Slack's error for the model to relay.
         createError = "feature_disabled";
         await sendToSession(source.runId, request);
         const settled = filterEventsByType(await sourceTurns.nextTurn(), "call.settled");
@@ -375,7 +354,6 @@ describe("ctx.to() in tools", () => {
     });
 
     await runtime.run(async () => {
-      // Alice and Bob each ask to fork their own thread; the test model gives both calls one id.
       const sources = await Promise.all(
         ["U_ALICE", "U_BOB"].map((userId) =>
           startSessionOwner(workflowEntry, [
@@ -456,7 +434,6 @@ describe("ctx.to() in tools", () => {
   );
 });
 
-/** A source session in a Slack thread, started by the given user, as Slack's webhook starts one. */
 function slackSourceContext(name: string, userId: string): Record<string, unknown> {
   return {
     ...buildWorkflowToolSerializedContext({ continuationToken: `http:${name}` }),
@@ -479,7 +456,6 @@ function slackSourceContext(name: string, userId: string): Record<string, unknow
   };
 }
 
-/** A runtime whose agent has one ordinary tool, which the test model calls on "Run <toolName>". */
 async function createToolRuntime<TInput = Record<string, never>>(input: {
   readonly agentName: string;
   readonly execute: (input: TInput, ctx: ToolContext) => Promise<unknown>;
@@ -509,7 +485,6 @@ async function createToolRuntime<TInput = Record<string, never>>(input: {
   });
 }
 
-/** Records what each session's model sees before each model call, through a dynamic value. */
 function modelInputRecorder() {
   const modelInputs: { readonly sessionId: string; readonly text: string }[] = [];
   const recordModelInputs: ProgrammaticAgentModule = {
@@ -562,7 +537,6 @@ async function waitForCompletedTurns(sessionId: string, count: number): Promise<
   }
 }
 
-/** Sends Alice's signed DM through the Slack channel's own events route. */
 async function deliverSlackDirectMessage(
   slack: ReturnType<typeof slackChannel>,
   signingSecret: string,
@@ -639,7 +613,6 @@ async function postToChannelRoute(
   await Promise.all(pending);
 }
 
-/** The conversation the model saw, as text history: what the pattern doc's tools copy. */
 function toHistory(messages: ToolContext["messages"]): SessionHistoryMessage[] {
   return messages.flatMap((message) => {
     if (message.role !== "user" && message.role !== "assistant") return [];
@@ -651,7 +624,6 @@ function toHistory(messages: ToolContext["messages"]): SessionHistoryMessage[] {
   });
 }
 
-/** The DM tool from docs/patterns/fork-conversations-into-new-threads.md, with test import paths. */
 function forkToSlackDm(slack: SlackChannel) {
   return async (_input: Record<string, never>, ctx: ToolContext) => {
     const auth = ctx.session.auth.current;
@@ -670,7 +642,6 @@ function forkToSlackDm(slack: SlackChannel) {
   };
 }
 
-/** The thread tool from docs/patterns/fork-conversations-into-new-threads.md. */
 function forkToSlackThread(slack: SlackChannel) {
   return async (_input: Record<string, never>, ctx: ToolContext) => {
     if (!isChannel(ctx.channel, slack) || ctx.channel.metadata.channelId === null)
@@ -698,7 +669,6 @@ async function openDirectMessage(userId: string) {
   return (response.channel as { id: string }).id;
 }
 
-/** Sends Alice's signed, un-mentioned channel message through the Slack events route. */
 async function deliverSlackChannelMessage(
   slack: ReturnType<typeof slackChannel>,
   signingSecret: string,

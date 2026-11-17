@@ -33,11 +33,6 @@ function stripAnsi(text: string): string {
 }
 
 async function createTemporaryAppRoot(input: {
-  /**
-   * When `true`, omit the authored `instructions.md` so discovery fails with
-   * `DISCOVER_REQUIRED_INSTRUCTIONS_MISSING`. Used to exercise build failure
-   * diagnostics output.
-   */
   omitInstructionsSource?: boolean;
   prefix: string;
 }): Promise<string> {
@@ -81,16 +76,11 @@ async function readDirectorySources(root: string): Promise<string> {
   return sources.join("\n");
 }
 
-/**
- * The workflow driver code the host bundled. It reaches the server output as a plain string
- * literal, from the entrypoint's `text:` import.
- */
 function readEmbeddedWorkflowCode(source: string): string {
   const start = source.indexOf('"globalThis.__private_workflows');
   if (start === -1) return "";
   let end = start + 1;
   while (end < source.length && source[end] !== '"') end += source[end] === "\\" ? 2 : 1;
-  // A JavaScript string literal, which may hold characters JSON rejects, such as raw tabs.
   return runInNewContext(source.slice(start, end + 1)) as string;
 }
 
@@ -226,8 +216,6 @@ describe("eve build process output", () => {
     const serverSources = await readDirectorySources(output);
     expect(serverSources).toContain('"step//./agent/lib/plan//hashPlan"');
     expect(serverSources).toContain('"workflow//./agent/tools/deploy_service//execute"');
-    // The driver body is embedded as a string; check it registers the authored workflow and
-    // proxies the authored step without its Node import.
     const driverCode = readEmbeddedWorkflowCode(serverSources);
     expect(driverCode).toContain(
       '__private_workflows.set("workflow//./agent/tools/deploy_service//execute"',

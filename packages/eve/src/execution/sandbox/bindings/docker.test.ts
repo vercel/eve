@@ -157,7 +157,6 @@ describe("Docker sandbox network policy", () => {
     await expect(
       provider.start({
         appRoot: "/tmp/eve-app",
-        // DefaultSandbox forwards the shared network policy type unchanged.
         options: { networkPolicy: { allow: ["example.com"] } } as never,
         sandboxName: "session-key",
       }),

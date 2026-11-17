@@ -7,7 +7,6 @@ type RoutedTurnSelection =
   | { readonly kind: "consumed" }
   | TurnSelection;
 
-/** Routes one selected delivery exactly once, independent of active/parked mode. */
 export async function routeSelectedDelivery(
   selection: TurnSelection,
   cursor: SessionStateCursor,

@@ -1,15 +1,3 @@
-// What a remote child on remote agent protocol 2 relays about its people's input, read as the
-// interaction facts a v27 child relays. Such a child posts its requests as
-// `subagent-input-request` and how they and its sign-ins went as `subagent-authorization-event`;
-// this session mirrors both the way it mirrors a v27 child's `subagent-interaction`.
-//
-// A protocol 2 child decides only its tool approvals and sign-ins here: it relays no
-// settlement for a question or budget prompt, so the forwarding session settles those as it
-// forwards their answer (`routeProxiedDeliverStep`). Its answers go back as `inputResponses`
-// (`respondToRemoteAgentSession`).
-//
-// Delete once no remote agent this one calls speaks protocol 2.
-
 import { z } from "#compiled/zod/index.js";
 import type { RelayedInteractionEvent, SubagentInteractionHookPayload } from "#channel/types.js";
 import { relayEvent } from "#channel/relay-event.js";
@@ -23,7 +11,6 @@ import {
 } from "#protocol/v26-interactions.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
 
-/** The callback kinds a protocol 2 child posts about its people's input. */
 export const PROTOCOL_TWO_INPUT_CALLBACK_KINDS: ReadonlySet<unknown> = new Set([
   "subagent-input-request",
   "subagent-authorization-event",
@@ -31,7 +18,6 @@ export const PROTOCOL_TWO_INPUT_CALLBACK_KINDS: ReadonlySet<unknown> = new Set([
 
 const position = { sequence: z.number(), stepIndex: z.number(), turnId: z.string() };
 
-// Protocol 2's v26 request: what the child asks, and the tool call it asks about.
 const v26RequestSchema = z.object({
   action: z.object({
     callId: z.string().min(1),
@@ -62,8 +48,6 @@ const v26ResponseSchema = z.object({
   text: z.string().optional(),
 });
 
-// The callback token grants access to the pending turn. Validate remote input
-// before handing it to the parent; the child session ID is not authority.
 const inputRequestCallbackSchema = z.object({
   callId: z.string().min(1),
   childContinuationToken: z.string().min(1),
@@ -73,8 +57,6 @@ const inputRequestCallbackSchema = z.object({
     .strict()
     .optional(),
   inputSource: z.string().min(1).optional(),
-  // A grandchild's binding, which a protocol 2 child relays with that grandchild's requests. This
-  // session answers through its own binding to the child, so only a passthrough keeps it.
   remote: z
     .object({
       forwardPrincipal: z.boolean().optional(),
@@ -175,12 +157,6 @@ const authorizationCallbackSchema = z.object({
   ]),
 });
 
-/**
- * The answers a session forwarded to a protocol 2 child that it settles itself, as the child takes
- * them: every answer but an approval's, which the child settles and relays, and but the one
- * `decidedHere` names, which this session already settles its own way, such as Stop on a budget
- * prompt.
- */
 export function protocolTwoAnswersSettledOnForward(input: {
   readonly answers: readonly Answer[];
   readonly decidedHere?: string;
@@ -192,10 +168,6 @@ export function protocolTwoAnswersSettledOnForward(input: {
   );
 }
 
-/**
- * A protocol 2 input callback as that protocol's own parent reads it, for a parent run from before
- * v27 (the callback route resumes its hook with it as is), or `undefined` when the body is not one.
- */
 export function parseProtocolTwoInputCallback(body: unknown): object | undefined {
   const request = inputRequestCallbackSchema.safeParse(body);
   if (request.success) return request.data;
@@ -203,11 +175,6 @@ export function parseProtocolTwoInputCallback(body: unknown): object | undefined
   return authorization.success ? authorization.data : undefined;
 }
 
-/**
- * Reads a protocol 2 child's input callback as the interaction facts it records, or `undefined`
- * when the body is not one. A callback that records nothing this session mirrors, such as an
- * approval's own settlement, reads as a payload without events.
- */
 export function readProtocolTwoInputCallback(
   body: unknown,
 ): SubagentInteractionHookPayload | undefined {
@@ -221,7 +188,6 @@ export function readProtocolTwoInputCallback(
         const origin = { interactionId: entry.requestId, sessionId: data.childSessionId };
         return relayEvent("interaction.opened", {
           interactionId: entry.requestId,
-          // A budget prompt asks about no call; the others ask about the call that asked.
           origin:
             entry.kind === "session-limit"
               ? origin
@@ -234,7 +200,6 @@ export function readProtocolTwoInputCallback(
                   },
                 },
           request: v26InteractionRequest(entry),
-          // The serving session names its own call as the subject.
           subject: { turnId: data.event.turnId },
         });
       }),
@@ -267,8 +232,6 @@ function authorizationEvents(
 ): RelayedInteractionEvent[] {
   switch (event.type) {
     case "approval.candidate": {
-      // A candidate is an answer the child received: pending, it stands while the child checks
-      // who gave it; otherwise the child turned it away and the request stays open.
       const { outcome, reason, requestId: interactionId } = event.data;
       if (outcome === "pending") return [relayEvent("response.admitted", { interactionId })];
       return [
@@ -280,7 +243,6 @@ function authorizationEvents(
       ];
     }
     case "approval.settled":
-      // The `input.resolved` that follows settles the approval, with the answer that decided it.
       return [];
     case "input.resolved":
       return event.data.resolutions.map((resolution) => {
@@ -324,10 +286,6 @@ const CANDIDATE_OUTCOMES: Record<"rejected" | "failed" | "timed-out" | "stale", 
   "timed-out": "expired",
 };
 
-/**
- * A sign-in's id: its attempt, or, from a child that names none, what the child's sign-in is for,
- * which its required and completed events both carry.
- */
 function signInId(
   childSessionId: string,
   data: { readonly attemptId?: string; readonly name: string; readonly principalId?: string },

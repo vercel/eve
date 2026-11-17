@@ -1,4 +1,3 @@
-// @linux-only: session reset semantics on Workflow
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it, vi } from "vitest";
 

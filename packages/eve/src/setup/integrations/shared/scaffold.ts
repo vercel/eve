@@ -5,7 +5,6 @@ import {
   runPackageManagerInstall,
 } from "#setup/primitives/pm/run.js";
 
-/** Effects used to install dependencies added by an integration scaffold. */
 interface IntegrationScaffoldDeps {
   detectPackageManager: typeof detectPackageManager;
   runPackageManagerInstall: typeof runPackageManagerInstall;
@@ -13,7 +12,6 @@ interface IntegrationScaffoldDeps {
 
 const defaultDeps: IntegrationScaffoldDeps = { detectPackageManager, runPackageManagerInstall };
 
-/** Installs dependencies added by an integration scaffold without failing setup if installation fails. */
 export async function installScaffoldDependencies(input: {
   changed: boolean;
   log: ChannelSetupLog;
@@ -40,7 +38,6 @@ export async function installScaffoldDependencies(input: {
   );
 }
 
-/** Reports files overwritten by one integration scaffold. */
 export function reportOverwrittenFiles(
   log: ChannelSetupLog,
   files: readonly string[] | undefined,

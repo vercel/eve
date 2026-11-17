@@ -18,7 +18,6 @@ type ToolExecuteWithAuthInput<TInput> = {
   readonly execute: (toolInput: TInput, ctx: ToolContext) => unknown;
 };
 
-/** Supplies the shared auth capability to one authored tool execution. */
 export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInput<TInput>) {
   return (toolInput: TInput, options: ToolExecuteOptions) => {
     const auth = createAuthorizationContext({ scope: input.scope });
@@ -45,7 +44,6 @@ const unavailableChannelTo: CrossChannelToFn = () => {
   throw new Error("ctx.to() is only available while a session's turn runs the tool.");
 };
 
-/** What an approved call reads about the person who approved it. */
 function approvalOf(
   responder: SessionAuthContext,
   auth: ReturnType<typeof createAuthorizationContext>,
@@ -58,7 +56,6 @@ function approvalOf(
   };
 }
 
-/** Binds the same capability to the person responding to an approval. */
 export function buildApprovalResponseAuth(input: {
   readonly responder: SessionAuthContext;
   readonly scope: string;
@@ -81,7 +78,6 @@ function namespaceApprovalAuthOptions(
     : { ...options, authKey: `${scope}:${options.authKey}` };
 }
 
-/** Starts authorization requested by an approval response authorizer. */
 export async function handleApprovalResponsePolicyError(error: unknown): Promise<unknown> {
   return await handleAuthorizationError(error);
 }

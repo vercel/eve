@@ -1,6 +1,3 @@
-// Guards for observers: hooks and channels branch on open values with these, and fall back for
-// values they don't know. Plain functions with no dependencies.
-
 import { isTerminalType } from "./catalog.js";
 import type { FactOf } from "./facts.js";
 

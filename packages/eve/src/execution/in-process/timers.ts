@@ -1,13 +1,7 @@
-// Timers for sessions and runs in this process. Every wait is to an absolute deadline, and a wait
-// longer than `setTimeout` allows (about 24.8 days) re-arms until it is due. Timers don't hold the
-// process open: a host that is still serving keeps it alive itself.
-
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
 export interface InProcessTimers {
-  /** Resolves at `deadline` (epoch milliseconds), or never once the timers are disposed. */
   until(deadline: number): Promise<void>;
-  /** Clears every pending timer. */
   dispose(): void;
 }
 

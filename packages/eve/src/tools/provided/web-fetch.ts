@@ -3,12 +3,20 @@ import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/**
+ * Input to the provided `web_fetch` tool: the `https:` URL to fetch, the format to return, and a
+ * timeout in seconds.
+ */
 export interface WebFetchToolInput {
   format?: "markdown" | "text" | "html";
   timeout?: number;
   url: string;
 }
 
+/**
+ * Result of the provided `web_fetch` tool: the fetched content, its content type, the URL, and
+ * whether the content was truncated.
+ */
 export interface WebFetchToolOutput {
   content: string;
   contentType: string;
@@ -38,7 +46,6 @@ export const WEB_FETCH_INPUT_SCHEMA = defineJsonSchema<WebFetchToolInput>(
     required: ["url"],
     additionalProperties: false,
   },
-  // AbortSignal.timeout() throws on a negative delay, and 0 aborts the request at once.
   (input) =>
     input.timeout !== undefined && !(input.timeout > 0)
       ? "timeout must be greater than 0 seconds."
@@ -57,6 +64,10 @@ export const WEB_FETCH_OUTPUT_SCHEMA = defineJsonSchema<WebFetchToolOutput>({
   additionalProperties: false,
 });
 
+/**
+ * The provided `web_fetch` tool, which lets the agent fetch an `https:` URL and read its content as
+ * Markdown, plain text, or HTML.
+ */
 export const webFetch: ToolDefinition<WebFetchToolInput, WebFetchToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Fetch", input.url) },

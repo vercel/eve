@@ -26,26 +26,15 @@ import {
   resolveContinuation,
 } from "#execution/workflow-runtime.js";
 
-// A run's agent sessions on Workflow: each operation is a step of the run, a local child is a
-// durable run of its own, and a delivery is named by the step that sends it.
-
 const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
   async start(prepared, { context }) {
     const childRuntime = createWorkflowRuntime(prepared.runtime);
-    // The child inherits none of the calling step's session lineage.
     const started = await contextStorage.run(
       new ContextContainer({ localDevRequest: context.localDevRequest }),
       () => childRuntime.createSession(prepared.runInput),
     );
-    // The start claims the child's address, so a retried attempt is refused and
-    // names the run an earlier attempt started.
     return { address: prepared.address(started.sessionId), deliveryId: prepared.deliveryId };
   },
-  /**
-   * A session's start claimed its address, so it takes commands before it boots and a refusal
-   * means it ended. A session opened by an earlier eve may have lost its address to a duplicate
-   * start, and the command then goes to the session holding its continuation.
-   */
   async command(opened, command) {
     const { continuationToken, sessionId } = opened.address;
     const result = await dispatchWorkflowSessionCommand({ command, sessionId });
@@ -55,8 +44,6 @@ const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
     return await dispatchWorkflowSessionCommand({ command, sessionId: current });
   },
   async commandLate(sessionId, command) {
-    // Waiting for a booting inbox would hold the parent's next turn. A child
-    // whose start claimed its address takes the command there before it boots.
     try {
       await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), command);
     } catch (error) {
@@ -73,11 +60,6 @@ const workflowAgentSessions = agentSessionsOver({
   remote: { callbackBaseUrl: () => resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url) },
 });
 
-/**
- * Opens a run's session with its first message, as a child of the call whose
- * `context` it binds. `key` names the handle within the run, so a retried step
- * reaches the same session instead of a second one.
- */
 export async function openAgentSessionStep(
   input: AgentSessionOpenInput,
 ): Promise<StartedAgentSession> {
@@ -86,10 +68,6 @@ export async function openAgentSessionStep(
   return await workflowAgentSessions.open(input);
 }
 
-/**
- * Sends a later message; it joins the session's running turn or starts the
- * next. It keeps the session's lineage and carries its own auth.
- */
 export async function sendAgentSessionMessageStep(
   input: AgentSessionMessage & OpenedAgentSession,
 ): Promise<AgentSessionReceipt> {
@@ -98,26 +76,18 @@ export async function sendAgentSessionMessageStep(
   return await workflowAgentSessions.send(input);
 }
 
-/**
- * Names the hook one message's reply arrives on from a remote agent. The name is all the agent
- * presents with its reply. A workflow body's own `crypto` is seeded from its run's ids, so a
- * name drawn there could be computed from them; a step draws from the real one, and its result
- * replays as recorded.
- */
 export async function createRemoteReplyTokenStep(): Promise<string> {
   "use step";
 
   return remoteReplyHookToken(crypto.randomUUID());
 }
 
-/** Cancels a session's running turn; the turn still reports, as cancelled. */
 export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Promise<void> {
   "use step";
 
   await workflowAgentSessions.cancelTurn(input);
 }
 
-/** Ends a run's sessions when the run finishes, cancelling any turn still running. */
 export async function endAgentSessionsStep(input: {
   readonly sessions: readonly OpenedAgentSession[];
 }): Promise<void> {
@@ -126,7 +96,6 @@ export async function endAgentSessionsStep(input: {
   await workflowAgentSessions.end(input);
 }
 
-/** Best-effort cleanup for a late address whose cancelled run cannot own it. */
 export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Promise<void> {
   "use step";
 

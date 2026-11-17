@@ -34,17 +34,11 @@ import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-a
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 
-// A session's first owner, on any host: creates the session, claims its addresses, and resolves
-// its caller, then hands the session loop what it runs from. The host supplies where the session
-// lives (`InitialOwnerPorts`).
-
-/** A first owner, booted: its inbox and what its session loop runs from. */
 export interface BootOutcome {
   readonly inbox: SessionInboxHandle;
   readonly session: SessionBoot;
 }
 
-/** `serializedContext` as the session `sessionId` runs it: its id, and its inbox's. */
 export function stampSessionIdentity(
   serializedContext: Record<string, unknown>,
   sessionId: string,
@@ -68,7 +62,6 @@ async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
     readonly continuationToken: string;
-    /** The claims confirm after it, so it runs inline while their hooks commit. */
     readonly sessionCreation: Promise<unknown>;
     readonly sessionId: string;
     readonly sessionTimeoutMs: number | false;
@@ -78,14 +71,10 @@ async function prepareInitialOwner(
 ): Promise<InitialOwnerPreparation> {
   const owner: OwnedInitialSession = {
     kind: "owned",
-    // The session loop starts the timer once the claims are confirmed; one
-    // started sooner could signal a command hook that is not registered yet.
     timeoutControl: input.timeouts({
       sessionId: input.sessionId,
       timeoutMs: input.sessionTimeoutMs,
     }),
-    // Created before any await so its abort hooks commit with the session's
-    // hooks instead of beside the first turn's step.
     turnControl: createTurnControl(),
   };
   const claim = { confirmAfter: input.sessionCreation };
@@ -114,23 +103,16 @@ function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
   return result.value;
 }
 
-/**
- * Where a first owner keeps its session: the stream it writes, the transport its addresses
- * arrive on, its timers, and where a message for a continuation another session holds goes.
- * Each host supplies its own: Workflow's are on the owner's run (`workflowEntry`).
- */
 export interface InitialOwnerPorts<Hook extends InboxHook = InboxHook> {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly inboxTransport: SessionInboxTransport<Hook>;
   readonly timeouts: SessionTimeouts;
-  /** Hands the message to the session that holds `continuationToken`. */
   settleContinuationConflict(input: {
     readonly command: Extract<SessionCommand, { readonly kind: "send" }>;
     readonly continuationToken: string;
   }): Promise<void>;
 }
 
-/** Returns `undefined` when a competing continuation owner already exists. */
 export async function bootInitialOwner<Hook extends InboxHook>(
   input: InitialWorkflowEntryInput,
   sessionId: string,
@@ -147,9 +129,6 @@ export async function bootInitialOwner<Hook extends InboxHook>(
   };
   try {
     const history = input.input.message === undefined ? input.input.history : undefined;
-    // A root session's creation is pure, so the body computes it instead of a step, which would
-    // add a step's round trips before the first turn. A subagent node's step first checks its
-    // compiled config.
     const sessionCreationPromise =
       serializedBundle.nodeId === undefined
         ? Promise.resolve(
@@ -170,7 +149,6 @@ export async function bootInitialOwner<Hook extends InboxHook>(
             dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
               | DynamicSubagentAgentConfig
               | undefined,
-            // With a first message, its delivery carries the history instead.
             history,
             nodeId: serializedBundle.nodeId,
             outputSchema: input.input.outputSchema,
@@ -201,7 +179,6 @@ export async function bootInitialOwner<Hook extends InboxHook>(
         await ports.settleContinuationConflict(conflict);
       }
       await inbox.dispose();
-      // This run never becomes the session, so nothing else would end its stream.
       await closeSessionStreamStep({ sessionWritable });
       return undefined;
     }

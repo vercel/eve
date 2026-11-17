@@ -1,11 +1,3 @@
-/**
- * Authored workflow tool bodies for integration tests. Each exported
- * `"use workflow"` function stands in for a tool's `execute`: the test tier's
- * bundler registers them in the workflow owner, and the harness sees the stubs the
- * client transform leaves behind, exactly as it would for an application's
- * `agent/tools/*.ts`.
- */
-
 import {
   createHook,
   getStepMetadata,
@@ -36,7 +28,6 @@ export async function deployServiceWorkflow(
   return { callId: ctx.callId, plan, sessionId: ctx.session.id };
 }
 
-/** `deployServiceWorkflow`'s plain body, as the in-process host runs it. */
 export function deployServiceBody(): WorkflowBody {
   return stampedWorkflowBody(deployServiceWorkflow, async (input, ctx) => ({
     callId: ctx.callId,
@@ -76,11 +67,6 @@ export async function sandboxParallelPrepareWorkflow(input: DeployInput, ctx: Wo
 
 const STEP_RUNS = Symbol.for("eve.test.sandbox-step-runs");
 
-/**
- * How many times each sandbox-writing step ran, by file name, so a test can
- * rule out reruns. Steps run from their own bundled copy of this module, so
- * the count lives on `globalThis`.
- */
 export function sandboxStepRuns(): Map<string, number> {
   const shared = globalThis as typeof globalThis & { [STEP_RUNS]?: Map<string, number> };
   return (shared[STEP_RUNS] ??= new Map());
@@ -190,7 +176,6 @@ export async function* confirmDeployWorkflow(input: DeployInput, ctx: WorkflowTo
   return yield* confirmDeploy(input, ctx);
 }
 
-/** `confirmDeployWorkflow`'s plain body, as the in-process host runs it. */
 export function confirmDeployBody(): WorkflowBody {
   return stampedWorkflowBody(confirmDeployWorkflow, confirmDeploy);
 }
@@ -219,11 +204,6 @@ export async function waitingForCleanupWorkflow(): Promise<void> {
   await workflowSleep("1h");
 }
 
-/**
- * `waitingForCleanupWorkflow` in process: it waits an hour, or until its call is stopped, which
- * on Workflow cancels its run outright. The timer doesn't hold the process open if a test fails
- * before its call is stopped.
- */
 export function waitingForCleanupBody(): WorkflowBody {
   return stampedWorkflowBody(
     waitingForCleanupWorkflow as (input: unknown, ctx: WorkflowToolContext) => Promise<void>,
@@ -257,7 +237,6 @@ export async function answerWithResponderWorkflow(
   return JSON.stringify({ answer, runStartPrincipal: ctx.session.auth.current?.principalId });
 }
 
-/** Returns `ctx.ask()`'s answer as-is; a selected option carries `text: undefined`. */
 async function returnAskAnswer(_input: DeployInput, ctx: WorkflowToolContext) {
   return await ctx.ask({
     display: "confirmation",
@@ -272,12 +251,10 @@ export async function returnAskAnswerWorkflow(input: DeployInput, ctx: WorkflowT
   return await returnAskAnswer(input, ctx);
 }
 
-/** `returnAskAnswerWorkflow`'s plain body, as the in-process host runs it. */
 export function returnAskAnswerBody(): WorkflowBody {
   return stampedWorkflowBody(returnAskAnswerWorkflow, returnAskAnswer);
 }
 
-/** Asks two questions at once, so answering one leaves the other pending. */
 export async function confirmTwoStepsWorkflow(
   input: DeployInput,
   ctx: WorkflowToolContext,
@@ -305,7 +282,6 @@ export async function* reportingDeployWorkflow(input: DeployInput) {
   return yield* reportingDeploy(input);
 }
 
-/** `reportingDeployWorkflow`'s plain body, as the in-process host runs it. */
 export function reportingDeployBody(): WorkflowBody {
   return stampedWorkflowBody(reportingDeployWorkflow, reportingDeploy);
 }
@@ -324,7 +300,6 @@ async function planDeployStep(service: string): Promise<string> {
   return `plan:${service}`;
 }
 
-/** Holds in a step until `ctx.abortSignal` fires, then cleans up in `finally`. */
 export async function holdUntilAbortedWorkflow(
   input: DeployInput,
   ctx: WorkflowToolContext,
@@ -381,7 +356,6 @@ export async function askThenRaceWorkflow(
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
 }
 
-/** Receives the actual delegated result over the durable parent hook. */
 export async function receiveDelegatedResultWorkflow(token: string): Promise<unknown> {
   "use workflow";
   using result = createHook<unknown>({ token });
@@ -397,7 +371,6 @@ export async function reportCallerWorkflow(input: unknown, ctx: WorkflowToolCont
   return await reportCaller(input, ctx);
 }
 
-/** `reportCallerWorkflow`'s plain body, as the in-process host runs it. */
 export function reportCallerBody(): WorkflowBody {
   return stampedWorkflowBody(reportCallerWorkflow, reportCaller);
 }
@@ -407,7 +380,6 @@ export async function failingServeWorkflow(): Promise<never> {
   throw new Error("Live serve workflow must not execute.");
 }
 
-/** Sends from a step, then waits durably, so the body replays past the recorded step. */
 export async function sendThenSleepWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
   "use workflow";
   const delivered = await sendSummary(ctx, input.service);
@@ -417,8 +389,6 @@ export async function sendThenSleepWorkflow(input: DeployInput, ctx: WorkflowToo
 
 async function sendSummary(ctx: WorkflowStepToolContext, userId: string) {
   "use step";
-  // A step loads its own copy of a channel module; eve matches it to the
-  // registered channel by its routes.
   const dm = defineChannel({ routes: [POST("/dm", async () => new Response("ok"))] });
   const delivery = await ctx.to(dm, { userId }).send("Here is the summary.", {
     auth: ctx.session.auth.current,
@@ -427,7 +397,6 @@ async function sendSummary(ctx: WorkflowStepToolContext, userId: string) {
   return { sessionId: delivery.sessionId };
 }
 
-/** Calls ctx.to() from a step and returns what it threw, for a test that reads the refusal. */
 export async function sendFromStepWorkflow(_input: unknown, ctx: WorkflowToolContext) {
   "use workflow";
   return await trySendNote(ctx);
@@ -444,7 +413,6 @@ async function trySendNote(ctx: WorkflowStepToolContext) {
   }
 }
 
-/** Sleeps for `input.ms`, durably, then reports it: a turn that waits on a timer. */
 export async function napWorkflow(input: { readonly ms?: number }): Promise<{ slept: number }> {
   "use workflow";
   const ms = input.ms ?? 1_000;

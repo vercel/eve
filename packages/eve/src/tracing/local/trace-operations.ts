@@ -14,7 +14,6 @@ export function uniqueLocalTraceSpans(spans: readonly LocalTraceSpan[]): LocalTr
   return [...byId.values()];
 }
 
-/** Pairs action wrappers with execution spans without constructing a sorted timeline. */
 export function localTraceOperations(spans: readonly LocalTraceSpan[]): LocalTraceOperation[] {
   const byId = new Map(spans.map((span) => [span.spanId, span]));
   const pairedActions = new Set<string>();

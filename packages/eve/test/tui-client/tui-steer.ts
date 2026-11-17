@@ -7,20 +7,6 @@ import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 import { run } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
-/**
- * End-to-end proof of steer-on-Enter, single-Esc cooperative cancellation,
- * and double-Ctrl+C exit against a live server:
- *
- *   1. Start a long turn, then press Enter on a follow-up while it streams.
- *      The message steers the running turn immediately.
- *   2. The steered message is answered and the runner returns to an idle prompt.
- *   3. One Esc cancels another long turn, then a
- *      follow-up succeeds on the preserved session.
- *
- * The tokens prove delivery order end-to-end: each must appear twice
- * (the echoed user block and the model's reply).
- */
-
 const STEER_TOKEN = "STEER-MARKER-B7Q";
 const CANCEL_FOLLOW_UP_TOKEN = "CANCEL-FOLLOW-UP-MARKER-P8N";
 process.env.EVE_TUI_UNICODE = "1";
@@ -45,7 +31,6 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
 
   await screen.waitForIdlePrompt(5_000);
 
-  // A long first turn holds the stream open while Enter submits steering.
   input.type("Write a short story of about 150 words about tides. Do not use any tools.");
   input.enter();
   await waitForActiveTurn(screen, 30_000);
@@ -67,7 +52,6 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.enter();
   await waitForActiveTurn(screen, 30_000);
 
-  // The first Esc cooperatively cancels the turn.
   input.emit("data", Buffer.from("\x1b"));
   await sleep(60);
   await waitForRawOutput(
@@ -104,7 +88,6 @@ async function waitForActiveTurn(screen: MockScreen, timeoutMs: number): Promise
   throw new Error(`Timed out waiting for an active turn.\n\nScreen:\n${screen.snapshot()}`);
 }
 
-/** Waits until `token` appears at least twice: the echoed prompt and the reply. */
 async function waitForTwice(
   screen: MockScreen,
   token: string,

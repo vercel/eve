@@ -219,10 +219,6 @@ export interface EveEvalTaskResult {
   readonly traceContexts: readonly EveEvalTraceContext[];
 }
 
-// ---------------------------------------------------------------------------
-// Assertions
-// ---------------------------------------------------------------------------
-
 /**
  * How a failing assertion affects the verdict. A `"gate"` is a hard
  * assertion: missing it fails the eval. A `"soft"` assertion is tracked
@@ -475,10 +471,6 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
   expectOk(): this;
 }
 
-// ---------------------------------------------------------------------------
-// Judge (LLM-as-judge)
-// ---------------------------------------------------------------------------
-
 /** Decision settings used only for scoring, independently of the agent under test. */
 export interface EveEvalJudgeConfig {
   /** Decision model ID or instance. Defaults to the model used by `eve/ai` decide. */
@@ -600,10 +592,14 @@ export interface EveEvalTarget {
   readonly capabilities: EveEvalTargetCapabilities;
 }
 
+/** Capabilities a live eval target reports, such as whether its dev-only routes are enabled. */
 export interface EveEvalTargetCapabilities {
   readonly devRoutes: boolean;
 }
 
+/**
+ * Result of dispatching an authored schedule from an eval: the schedule and the sessions it started.
+ */
 export interface EveEvalScheduleDispatchResult {
   readonly scheduleId: string;
   readonly sessionIds: readonly string[];
@@ -629,10 +625,6 @@ export interface EveEvalWatchOptions {
   readonly until?: (event: SessionStreamEvent) => boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Eval definition types
-// ---------------------------------------------------------------------------
-
 /**
  * Shared fields between the user-facing input and the validated eval.
  *
@@ -655,10 +647,6 @@ interface EveEvalBase {
   readonly reporters?: readonly EvalReporter[];
 }
 
-/**
- * Complete top-level key set accepted by {@link defineEval}, used to reject
- * unknown authored keys.
- */
 export interface EveEvalInputFields extends EveEvalBase {
   readonly test?: (t: EveEvalContext) => void | Promise<void>;
 }
@@ -747,10 +735,6 @@ export interface EveEvalRunSummary {
   /** The execution-error subset of `failed` (timeouts, connection failures, exceptions). */
   readonly errored: number;
 }
-
-// ---------------------------------------------------------------------------
-// Eval run configuration
-// ---------------------------------------------------------------------------
 
 /**
  * Run-wide eval configuration authored in `evals.config.ts`.

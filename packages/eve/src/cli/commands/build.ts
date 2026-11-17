@@ -22,7 +22,6 @@ interface BuildCliOptions {
   skipSandboxPrewarm?: boolean;
 }
 
-/** Registers the production application build command. */
 export function registerBuildCommand(input: {
   readonly applicationContext: CliApplicationContext;
   readonly buildHost?: BuildHost;

@@ -7,10 +7,6 @@ import {
   durableSessionStoreFixtureWorkflow,
 } from "#internal/testing/durable-session-workflow.js";
 
-/**
- * Exercises `readDurableSession` / `createDurableSessionState` inside
- * a real workflow runtime, including returned state under step retry.
- */
 describe("durableSessionStore integration", () => {
   it("each step's readDurableSession returns the immediately-preceding write", async () => {
     const runtime = await createTestRuntime({ agent: { name: "durable-session-store-fixture" } });
@@ -33,8 +29,6 @@ describe("durableSessionStore integration", () => {
         { historyDepth: 3, marker: "beta", sessionId: result.sessionId },
         { historyDepth: 5, marker: "gamma", sessionId: result.sessionId },
       ]);
-      // The tail read runs after the loop with no write of its own, so the
-      // returned state must still carry the latest snapshot across a step boundary.
       expect(result.tailReadAfterAllWrites).toEqual({
         historyDepth: 5,
         marker: "gamma",
@@ -53,9 +47,6 @@ describe("durableSessionStore integration", () => {
 
       const result = await run.returnValue;
 
-      // The retry-forcing step throws on attempt 1 and returns state on
-      // attempt 2. The subsequent read must observe the retry's state,
-      // not the seed state or any orphan from attempt 1.
       expect(result.writeAttempt).toBe(2);
       expect(result.readAfterRetry).toEqual({
         historyDepth: 9,

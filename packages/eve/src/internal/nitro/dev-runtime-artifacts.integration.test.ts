@@ -298,7 +298,6 @@ describe("development runtime artifact snapshots", () => {
     );
   });
 
-  // https://github.com/vercel/eve/issues/1151 — hoisting-workspace expression.
   it("mounts declared dependencies hoisted above the app root into source snapshots", async () => {
     const workspaceRoot = await createScratchDirectory("eve-dev-runtime-hoisted-dependency-");
     const appRoot = join(workspaceRoot, "agents", "support");
@@ -335,13 +334,6 @@ describe("development runtime artifact snapshots", () => {
       project: { appRoot },
     } as CompileAgentResult);
 
-    // The compiled module map imports the dependency relative to the app's
-    // compile directory, escaping the app root toward the install location
-    // (`../../../../node_modules/@acme/extension/...`). Any correct snapshot
-    // must materialize the package somewhere inside the snapshot where that
-    // resolution can land: either mirroring the hoisted location relative to
-    // the snapshot source root, or flattened into the app root's own
-    // node_modules.
     const acceptableMountLocations = [
       join(snapshot.runtimeAppRoot, "node_modules", "@acme", "extension"),
       join(snapshot.runtimeAppRoot, "..", "..", "node_modules", "@acme", "extension"),
@@ -349,9 +341,6 @@ describe("development runtime artifact snapshots", () => {
     expect(acceptableMountLocations.some((location) => existsSync(location))).toBe(true);
   });
 
-  // https://github.com/vercel/eve/issues/1151 — withEve bare-agent-dir expression:
-  // the agent root has no package.json of its own; the host app owns the
-  // dependency declaration and the install.
   it("mounts host-declared dependencies for bare agent roots without a package.json", async () => {
     const hostRoot = await createScratchDirectory("eve-dev-runtime-bare-agent-dependency-");
     const appRoot = join(hostRoot, "agents", "research");
@@ -361,8 +350,6 @@ describe("development runtime artifact snapshots", () => {
     await mkdir(appRoot, { recursive: true });
     await mkdir(hostPackageRoot, { recursive: true });
     await mkdir(compileDirectoryPath, { recursive: true });
-    // The host boundary is a real workspace root marker so the snapshot's
-    // source-root walk resolves to it, exactly like a withEve app.
     await writeFile(join(hostRoot, "pnpm-workspace.yaml"), "packages: []\n");
     await writeFile(
       join(hostRoot, "package.json"),
@@ -864,8 +851,6 @@ describe("development runtime artifact snapshots", () => {
 
     await writeFile(join(packageRoot, "dist", "index.js"), 'export const message = "live";\n');
 
-    // Workspace dependency packages are mounted in place like installed
-    // dependencies instead of being copied into the snapshot.
     expect(existsSync(join(snapshot.snapshotSourceRoot, "packages"))).toBe(false);
     const snapshotMountPath = join(snapshot.runtimeAppRoot, "node_modules", "@repo", "message");
     await expect(lstat(snapshotMountPath).then((stats) => stats.isSymbolicLink())).resolves.toBe(

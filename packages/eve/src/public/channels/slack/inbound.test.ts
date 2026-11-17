@@ -209,7 +209,6 @@ describe("parseAppMentionEvent", () => {
             url_private: "https://files.slack.com/a/chart.png",
             size: 1024,
           },
-          // A Google Drive file shared through Slack's integration (#855).
           {
             id: "F2",
             mode: "external",
@@ -514,7 +513,6 @@ describe("parseDirectMessageEvent", () => {
               name: "diagram.png",
               size: 2048,
             },
-            // A Dropbox file shared through Slack's integration is skipped (#855).
             {
               id: "F02",
               is_external: true,
@@ -546,7 +544,6 @@ describe("parseDirectMessageEvent", () => {
     ]);
   });
 
-  // A thread reply posted with "Also send to direct message" (#5774).
   it("keeps a DM thread reply that is also sent to the conversation", () => {
     const payload = parseSlackWebhookBody(
       JSON.stringify({

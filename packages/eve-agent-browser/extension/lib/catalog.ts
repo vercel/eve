@@ -7,13 +7,6 @@ import { runMcpTool, type BrowserToolContext, type ContentBoundary } from "./bro
 
 const PREFIX = "agent_browser_";
 
-/**
- * Catalog arguments the model never sees: the ones the extension sets from its
- * config, `extraArgs`, the raw CLI flag escape hatch, and `capture`, which
- * records a session for the flow tools this package doesn't expose and relaunches
- * a running browser to do it. agent-browser lists only the shared arguments a
- * tool uses but accepts all of them on every tool.
- */
 const APP_OWNED_ARGUMENTS = new Set([
   "allowedDomains",
   "caCert",

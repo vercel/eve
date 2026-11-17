@@ -1,10 +1,5 @@
 import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
-/**
- * Scenario-tier descriptor exercising every framework-tool override pattern:
- * wrap (`bash`), replace (`write_file`), and disable (`agent`, `web_fetch`, `web_search`).
- * The compile pipeline must preserve the override semantics end-to-end.
- */
 export const TOOL_OVERRIDES_DESCRIPTOR: ScenarioAppDescriptor = {
   dependencies: {
     zod: "^4.3.6",

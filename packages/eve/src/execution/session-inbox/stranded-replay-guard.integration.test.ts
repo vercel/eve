@@ -1,4 +1,3 @@
-// @linux-only: stranded replay guard logic
 import { describe, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -23,7 +22,6 @@ const { name: packageName, version: currentEveVersion } = resolveInstalledPackag
 const SESSION_QUEUE = `${QUEUE_PREFIX}workflow//${packageName}//${WORKFLOW_ENTRY_NAME}`;
 const TOOL_QUEUE = `${QUEUE_PREFIX}workflow//${packageName}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`;
 
-/** Parks a run on the shared local World, stamped with the given `$eve.version` and attributes. */
 async function parkRun(
   token: string,
   eveVersion: string | undefined,
@@ -39,10 +37,6 @@ async function parkRun(
   return run;
 }
 
-/**
- * Guards a view of the shared World whose queue hands back the wrapped
- * delivery handler, so the test can deliver messages without a queue.
- */
 async function guardedDelivery(capabilities?: World["capabilities"]) {
   const world = Object.create(await getWorld()) as World;
   if (capabilities !== undefined) world.capabilities = capabilities;

@@ -28,10 +28,6 @@ const repoModelIds = collectGatewayModelIds([
   resolvePathFromSetup("../../src/internal/testing/scenario-apps"),
 ]);
 
-// A worker that runs several test files runs this setup file for each one, so it replaces the
-// wrapper it installed before instead of wrapping it: a second wrapper would answer the catalog
-// from the first file's model ids, and each file would add a layer. It wraps the fetch under that
-// wrapper, which `unit-guard.ts` replaces for every file.
 const GATEWAY_FETCH = Symbol.for("eve.testing.gateway-fetch");
 const FETCH_UNDER_GATEWAY = Symbol.for("eve.testing.fetch-under-gateway");
 const fetchHolder = globalThis as {

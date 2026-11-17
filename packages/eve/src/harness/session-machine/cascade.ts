@@ -25,11 +25,6 @@ const TREE_FAMILY: Partial<Record<string, Family>> = {
   turn: "turn",
 };
 
-/**
- * How each family closes when its owner ends: `interrupted` unless a retry superseded the owner,
- * which leaves what it held `abandoned`. A delivery isn't interrupted: the turn that consumed it
- * answered it.
- */
 const ENDS_WITH: Record<Exclude<Family, "child" | "part">, { cut: string; superseded: string }> = {
   call: { cut: "interrupted", superseded: "abandoned" },
   change: { cut: "interrupted", superseded: "interrupted" },
@@ -41,12 +36,6 @@ const ENDS_WITH: Record<Exclude<Family, "child" | "part">, { cut: string; supers
   turn: { cut: "cancelled", superseded: "cancelled" },
 };
 
-/**
- * An owner's end ends everything under it, in the same commit. For each fact that ends an entity
- * still holding open ones, this closes them first, leaves first, as their families close when
- * an owner ends; the deliveries a turn consumed settle after it. Writers that already closed
- * them leave nothing to add.
- */
 export function cascade(view: SessionView, events: readonly SessionEvent[]): SessionEvent[] {
   if (!events.some((event) => isFactType(event.type))) return [...events];
   const scratch = copyView(view);
@@ -55,7 +44,6 @@ export function cascade(view: SessionView, events: readonly SessionEvent[]): Ses
     foldReceivedEvent(scratch, { ...event, meta: { endOfLine: false } });
     out.push(stamped(scratch, event));
   };
-  // What the commit closes itself, it closes its own way.
   const explicit = new Set(
     events.flatMap((event) => {
       const ref = endedBy(view, event, false);
@@ -75,11 +63,8 @@ export function cascade(view: SessionView, events: readonly SessionEvent[]): Ses
       readonly reason?: string;
     };
     const why = { reason: reasonFor(owner, outcome, reason), superseded: outcome === "abandoned" };
-    // What the owner still holds once its end is folded: a run that completes hands the calls
-    // it made on to its turn, so they don't close with it.
     const probe = copyView(scratch);
     foldReceivedEvent(probe, { ...event, meta: { endOfLine: false } });
-    // A turn's deliveries settle after it; `session.ended` is always last.
     const under = cascaded(openUnder(probe, owner));
     const after = (ref: Ref) => ref.family === "delivery" && owner !== "session";
     for (const ref of under.filter((entry) => !after(entry)))
@@ -90,11 +75,6 @@ export function cascade(view: SessionView, events: readonly SessionEvent[]): Ses
   return out;
 }
 
-/**
- * A fact with the owners it belongs to, read from the tree: those of the entity it's about, or
- * of the owner it names. Readers that don't fold place it by them. Progress keeps its own,
- * since what it previews isn't in the tables yet.
- */
 function stamped(view: SessionView, event: SessionEvent): SessionEvent {
   if (!isFactType(event.type)) return event;
   const descriptor = FACT_CATALOG[event.type];
@@ -110,7 +90,6 @@ function stamped(view: SessionView, event: SessionEvent): SessionEvent {
   return Object.keys(scope).length === 0 ? event : ({ ...event, scope } as SessionEvent);
 }
 
-/** The facts that close everything open under `owner`, leaves first, as it its owner cut it. */
 export function closeUnder(view: SessionView, owner: Ref, reason: string): SessionEvent[] {
   const scratch = copyView(view);
   return openUnder(scratch, owner).map((ref) => {
@@ -120,10 +99,6 @@ export function closeUnder(view: SessionView, owner: Ref, reason: string): Sessi
   });
 }
 
-/**
- * The facts that close the open entities `which` selects, leaves first, as a retry superseded
- * them. The writer closes what each leaves open under it.
- */
 export function supersede(view: SessionView, which: (ref: Ref) => boolean, reason: string): Commit {
   const scratch = copyView(view);
   const facts: SessionEvent[] = [];
@@ -133,13 +108,10 @@ export function supersede(view: SessionView, which: (ref: Ref) => boolean, reaso
     foldReceivedEvent(scratch, { ...fact, meta: { endOfLine: false } });
     facts.push(fact);
   }
-  // A cast, not `commitOf`: `commit.ts` loads the harness, and `eve/internal/legacy-events`
-  // reaches this module from browser bundles (guard rule 65).
   const closures: readonly SessionEvent[] = facts;
   return closures as Commit;
 }
 
-/** Why what an owner held closed, as its readers already see it. */
 function reasonFor(owner: Ref | "session", outcome?: string, reason?: string): string {
   if (owner === "session") return "session-ended";
   switch (owner.family) {
@@ -158,7 +130,6 @@ function reasonFor(owner: Ref | "session", outcome?: string, reason?: string): s
   }
 }
 
-/** The entity a fact ends, if it's open; the session for `session.ended`. */
 function endedBy(
   view: SessionView,
   event: SessionEvent,

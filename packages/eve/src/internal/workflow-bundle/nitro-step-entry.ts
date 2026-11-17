@@ -12,11 +12,6 @@ export interface NitroStepEntrypointDiscoveredEntries {
   readonly discoveredSteps: readonly string[];
 }
 
-/**
- * Writes the hosted Nitro step entrypoint source and returns the manifest
- * metadata discovered from the imported step and serde files, plus the
- * absolute paths the entry imports.
- */
 export async function writeNitroStepEntrypoint(input: {
   readonly builtinsPath: string;
   readonly discoveredEntries: NitroStepEntrypointDiscoveredEntries;

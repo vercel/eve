@@ -9,6 +9,7 @@ interface Result {
   content: readonly unknown[];
 }
 
+/** Converts an AI SDK usage object into a {@link Usage}, for hosts that record model calls themselves. */
 export function modelUsage(usage: Result["usage"]): Usage {
   return Object.freeze({
     inputTokens: usage.inputTokens,
@@ -20,6 +21,7 @@ export function modelUsage(usage: Result["usage"]): Usage {
   });
 }
 
+/** Converts AI SDK result content into {@link ContentPart}s, keeping text, reasoning, and tool call, result, and error parts and dropping the rest. */
 export function modelContent(content: Result["content"]): readonly ContentPart[] {
   return content.flatMap((part): ContentPart[] => {
     if (part === null || typeof part !== "object" || !("type" in part)) return [];

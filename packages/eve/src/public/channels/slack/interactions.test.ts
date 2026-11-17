@@ -90,8 +90,6 @@ describe("parseBlockActionsPayload", () => {
     const body = new URLSearchParams({
       payload: JSON.stringify({
         ...withoutMessage,
-        // Slack sends no `message` for a click on an ephemeral message; the
-        // container carries its channel, timestamp, and thread.
         container: {
           type: "message",
           message_ts: "1700000000.000300",

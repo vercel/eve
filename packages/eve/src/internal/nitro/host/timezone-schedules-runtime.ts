@@ -7,7 +7,6 @@ interface TimezoneSchedule {
   readonly nitroTaskName: string;
 }
 
-/** Nitro tasks stay responsible for dispatch; only their clock is eve-owned. */
 export function installTimezoneSchedules(
   app: {
     readonly ready: Promise<unknown>;
@@ -15,7 +14,6 @@ export function installTimezoneSchedules(
   },
   schedules: readonly TimezoneSchedule[],
 ): void {
-  // Match Nitro's schedule runner, which stays idle under TEST.
   if (process.env.TEST) return;
   const jobs: Cron[] = [];
   let closed = false;

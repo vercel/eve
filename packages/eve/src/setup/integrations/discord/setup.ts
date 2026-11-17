@@ -67,26 +67,19 @@ export default discordChannel({
 `;
 }
 
-/** View Channels and Send Messages, for slash command replies. */
 const COMMAND_PERMISSIONS = "3072";
-/** Also Read Message History, Create Public Threads, and Send Messages in Threads. */
 const GATEWAY_PERMISSIONS = "309237713920";
 
 interface DiscordSetupPlan {
   botToken: string;
-  /** The slash command to register; absent when the agent answers messages instead. */
   command?: { readonly name: string; readonly description: string };
-  /** How to register the Gateway relay; absent for slash commands only. */
   gateway?: DiscordGatewayPlan;
   project: VercelProjectReference;
   slug: string;
 }
 
-/** The project's Vercel config, checked before anything is written. */
 type DiscordGatewayPlan =
-  /** `vercel.json` with the daemon added, or `undefined` when it's already there. */
   | { readonly vercelJson: string | undefined }
-  /** The project configures Vercel in `vercel.ts`, which setup doesn't edit. */
   | { readonly vercelTs: { readonly registered: boolean } };
 
 export async function prepareDiscordSetup(
@@ -111,7 +104,6 @@ export async function prepareDiscordSetup(
           hint: "No long-running process",
         },
       ],
-      // An experimental, always-on relay is a choice to make, not one for `--yes` to make silently.
       recommended: "commands" as const,
       required: true,
     }),
@@ -131,7 +123,6 @@ export async function prepareDiscordSetup(
     )
   ).trim();
   const command = messages === "commands" ? await askCommand(context) : undefined;
-  // Checked before anything remote or on disk changes, so a conflict leaves nothing half-done.
   const gateway = await preflightFiles(context, messages === "gateway", deps);
   const project = await context.resolveVercelProject("Discord");
   const plan: DiscordSetupPlan = {
@@ -173,7 +164,6 @@ async function askCommand(
   return { name: name.trim(), description: description.trim() };
 }
 
-/** Refuses files setup would overwrite without `--force`, and reads the project's Vercel config. */
 async function preflightFiles(
   context: SetupPrepareContext,
   gateway: boolean,
@@ -221,7 +211,6 @@ export async function applyDiscordSetup(
   if (plan.command !== undefined) {
     await deps.registerCommand(application.id, plan.botToken, plan.command);
   }
-  // Button presses, including on sign-ins, arrive as interactions even without a command.
   await deps.configureEndpoint(plan.botToken, connector.id);
   const { gateway } = plan;
   await deps.writeTextFile(
@@ -231,7 +220,6 @@ export async function applyDiscordSetup(
   );
   const facts: { label: string; value: string; kind?: "url" }[] = [];
   if (gateway !== undefined) {
-    // Without it, a thread's follow-ups arrive empty unless they mention the bot.
     const messageContent = await deps.enableMessageContent(plan.botToken).catch(() => false);
     if (!messageContent) {
       facts.push({
@@ -271,7 +259,6 @@ export async function applyDiscordSetup(
   ]);
   return {
     deploymentRequired: true as const,
-    // A fact, unlike a next step, stays visible after `/add` in `eve dev` collapses its panel.
     facts: [
       { label: "Discord bot install URL", value: installUrl, kind: "url" as const },
       {

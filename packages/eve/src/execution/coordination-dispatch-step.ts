@@ -1,5 +1,3 @@
-/** Starts workflow-tool runs for pending coordination, then publishes the calls it started. */
-
 import {
   prepareCoordinationDispatch,
   type CoordinationDispatchInput,
@@ -46,11 +44,6 @@ import type { HarnessSessionBase } from "#harness/types.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
-/**
- * The dispatch Workflow's `dispatchCoordinationStep` runs (`workflow-host/dispatch-step.ts`),
- * starting each run with `startRun`: Workflow starts its runs on the current deployment, and
- * another host starts them its own way.
- */
 export function dispatchCoordinationOn(
   startRun: StartWorkflowToolRun,
 ): (
@@ -60,11 +53,6 @@ export function dispatchCoordinationOn(
     await withSessionStateDelta(input, (state) => dispatchCoordination(state, startRun));
 }
 
-/**
- * Publishes, as one commit, what the dispatch recorded: the calls the turn
- * waits on started, the tasks it started or reached, and the calls it refused. Run ownership is
- * checkpointed first, so retrying the publication cannot start those runs again.
- */
 export async function publishDispatchedCallsStep(
   input: SessionStepInput & { readonly pending: PendingDispatch },
 ): Promise<SessionStateTransition> {
@@ -97,9 +85,6 @@ async function dispatchCoordination(
   const started: TaskCallStart[] = [];
   const refused: PendingDispatch["refused"][number][] = [];
   const executing: PendingDispatch["executing"][number][] = [];
-  // Prospective facts for this admission batch use the same fold as committed facts. This
-  // shadow is never saved: limits count work actually started earlier in the batch without
-  // introducing a private lifecycle counter or treating undispatched intents as queued work.
   const admissionView = copyView(storedProjection(session.state).view);
   const admitted: RuntimeWorkflowTaskRequest[] = [];
   for (const task of prepared.plan) {
@@ -120,7 +105,6 @@ async function dispatchCoordination(
       isError: true,
     });
     results.push(result);
-    // No approval policy refused it, so it isn't labelled as one.
     refused.push({ policy: "admission", result });
     if (task.entry.entryPoint === "task" || task.entry.entryPoint === "serve") {
       nextSession = writeTaskTable(
@@ -156,7 +140,6 @@ async function dispatchCoordination(
     );
     nextSession = dispatched.session;
     if (dispatched.result !== undefined) results.push(dispatched.result);
-    // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
     else if (task.entry.entryPoint === "execute")
       executing.push({ callId: task.callId, clearedBy: task.clearedBy });
     if (dispatched.started !== undefined) {
@@ -186,11 +169,6 @@ async function dispatchCoordination(
   };
 }
 
-/**
- * Starts the runs of a batch at once, in place of one after another, when
- * dispatching it in order is sure to record every one of them. Otherwise
- * each dispatch starts its own run, as the task cap and earlier calls allow.
- */
 function withPrestartedRuns(
   starts: readonly StartWorkflowTaskInput[],
   table: TaskTable,
@@ -205,16 +183,11 @@ function withPrestartedRuns(
     const entry = entries[index];
     if (entry === undefined) return start;
     const run = startWorkflowToolCallRun(start, entry);
-    // Each dispatch awaits its own run in order, so a later failure waits unhandled until then.
     run.catch(() => {});
     return { ...start, prestarted: { entry, run } };
   });
 }
 
-/**
- * Starts the run the call's entry point names, or sends a call with `taskId`
- * to the running `serve` task it names.
- */
 async function dispatchWorkflowCall(
   start: StartWorkflowTaskInput,
   admissionView: SessionView,

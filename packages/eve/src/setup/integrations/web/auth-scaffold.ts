@@ -19,7 +19,6 @@ async function readOptional(path: string): Promise<string | undefined> {
   }
 }
 
-/** Checks authored files before provisioning, then returns the local scaffold operation. */
 export async function prepareWebAuthScaffold(input: {
   environmentRoot: string;
   agentAppRoot: string;

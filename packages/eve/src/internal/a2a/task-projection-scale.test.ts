@@ -8,7 +8,6 @@ import { contextBusy, contextTasks, projectTask } from "./task-projection.js";
 
 const AT = "2026-01-01T00:00:00.000Z";
 
-/** A context with `count` finished tasks, each one delivery and one completed turn. */
 function contextWith(count: number): SessionView {
   const view = emptySessionView();
   const deliveries = view.deliveries as Record<string, DeliveryRow>;
@@ -40,12 +39,10 @@ describe("projecting a long context", () => {
   it("lists every task in time linear in the session, not quadratic", () => {
     const view = contextWith(3_000);
     const started = performance.now();
-    // With history, as a ListTasks that asks for it projects each task.
     const tasks = contextTasks(view, "wrun_1");
     expect(contextBusy(view, "wrun_1")).toBe(false);
     const elapsed = performance.now() - started;
     expect(tasks).toHaveLength(3_000);
-    // A scan of the session per task takes seconds here; the index keeps it far below that.
     expect(elapsed).toBeLessThan(1_000);
   });
 

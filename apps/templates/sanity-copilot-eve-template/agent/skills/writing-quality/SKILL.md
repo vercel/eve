@@ -1,6 +1,7 @@
 ---
 description: "Writing-quality guardrails for any prose the agent drafts or edits: blog posts, page copy, Notion drafts, release notes, marketing text. Use this skill whenever writing or revising content meant for humans to read, to keep the prose natural, plain, and free of AI-sounding phrasing. Not needed for code, queries, or structural CMS work."
 ---
+
 # Writing Quality
 
 House-neutral rules for making drafted content read like a person wrote it. They apply to any prose surface. Layer project- or brand-specific voice guidance on top of them.
@@ -8,6 +9,7 @@ House-neutral rules for making drafted content read like a person wrote it. They
 ## When to Apply
 
 Load this skill before:
+
 - Drafting new content (a blog post, landing-page copy, a Notion draft, release notes)
 - Editing or rewriting existing content
 - Reviewing a draft before proposing it to the user

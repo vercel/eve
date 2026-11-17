@@ -63,11 +63,9 @@ export interface InternalSession extends Session {
   getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
   getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
-  /** Whether a run that can still execute owns the session; `true` when the runtime can't tell. */
   hasRunnableOwner(): Promise<boolean>;
 }
 
-/** HTTP framing and conformance readers operate on framework-created handles. */
 export function internalSession(session: Session): InternalSession {
   return session as InternalSession;
 }
@@ -106,7 +104,6 @@ export interface SessionSendOptions {
   readonly turnPolicy?: TurnPolicy;
 }
 
-// A record, so adding a field to SessionSendOptions fails to compile until it's listed here.
 const SESSION_SEND_OPTION_FIELDS: Record<keyof SessionSendOptions, true> = {
   auth: true,
   context: true,
@@ -121,10 +118,6 @@ const SESSION_SEND_OPTION_KEYS = Object.keys(
   SESSION_SEND_OPTION_FIELDS,
 ) as readonly (keyof SessionSendOptions)[];
 
-/**
- * Copies only the {@link SessionSendOptions} fields and validates the key. Callers can pass wider
- * objects, which must not carry internal send fields such as `callback` across a channel boundary.
- */
 export function toSessionSendOptions(options: SessionSendOptions): SessionSendOptions {
   validateDeliveryIdempotencyKey(options.idempotencyKey);
   const picked: Partial<Record<keyof SessionSendOptions, unknown>> = {};
@@ -140,7 +133,6 @@ export type SessionRespondOptions = SessionDeliveryOptions;
 interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
   readonly inbox?: string;
   readonly callback?: SessionCallback;
-  /** The delivery's id, when the request names it (`deliveryIdForIdempotencyKey`). */
   readonly deliveryId?: string;
 }
 
@@ -248,8 +240,6 @@ export function createSession(
       const result = await runtime.dispatchSession({ command, sessionId: id });
       return commandDelivery(runtime, result, command.deliveryId, { follow: false });
     },
-    // Not an async generator: its return() waits for a pending next(), which waits for the
-    // session's next event, so a consumer that stopped reading could hold the read open forever.
     stream(options?: SessionStreamOptions) {
       return {
         [Symbol.asyncIterator]() {
@@ -283,7 +273,6 @@ export function createSession(
   };
 }
 
-/** Builds an I/O-free factory for fixed session-ID handles. */
 export function createAttachSessionFn(
   runtime: Runtime,
   metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
@@ -300,7 +289,6 @@ function createDelivery(metadata: Partial<ChannelDeliverySource>, deliveryId?: s
   return deliveryId === undefined ? delivery : { ...delivery, deliveryId };
 }
 
-/** Live metadata and routing authority stay separate, including when auth changes mid-step. */
 export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
   return {
     session: {
@@ -345,7 +333,7 @@ function namespaceContinuationToken(currentToken: string, rawToken: string): str
   return `${currentToken.slice(0, separatorIndex + 1)}${rawToken}`;
 }
 
-/** @internal Converts validated public callback metadata into runtime turn routing. */
+/** @internal */
 export function sessionCallbackToTurnCaller(
   callback: SessionCallback | undefined,
 ): TurnCaller | undefined {

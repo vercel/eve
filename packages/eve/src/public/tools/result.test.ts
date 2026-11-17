@@ -281,8 +281,6 @@ describe("toolResultFrom", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  // #3085: loaded definitions match by source identity, so a shared fallback
-  // key alone should not warn at registration time.
   it("does not warn when loaded connections share a fallback identity", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const key = connectionDefinitionKey("https://api.githubcopilot.com/mcp/", "GitHub");

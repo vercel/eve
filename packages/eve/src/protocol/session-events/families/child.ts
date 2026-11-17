@@ -3,6 +3,7 @@ import { z } from "#compiled/zod/index.js";
 import { conforming, envelopeOf, id } from "../common.js";
 import type { Envelope } from "../envelope.js";
 
+/** The payload of `child.opened`: a call or task opened a child session, such as a subagent's. */
 export interface ChildOpenedData {
   /** The child session; its own lifecycle lives in its own stream. */
   readonly sessionId: string;
@@ -25,8 +26,11 @@ export interface ChildSentData {
   readonly callId: string;
 }
 
+/** The fact that introduces a child session. */
 export type ChildOpened = Envelope<"child.opened", ChildOpenedData>;
+/** The fact recording a delivery a child session accepted for one of this session's calls. */
 export type ChildSent = Envelope<"child.sent", ChildSentData>;
+/** Any fact in the `child` family. */
 export type ChildFact = ChildOpened | ChildSent;
 
 export const childSchemas = {

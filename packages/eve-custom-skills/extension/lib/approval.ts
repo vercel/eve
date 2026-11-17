@@ -35,7 +35,6 @@ export const defaultSkillApproval: SkillApprovalRule = (request) => {
   return request.action === "create" || request.action === "set_mode" ? "allow" : "ask";
 };
 
-/** One account: the stable identity fields, without the `subject`, which can change (a renamed GitHub login). */
 function sameAccount(left: SessionAuthContext, right: SessionAuthContext): boolean {
   return (
     left.authenticator === right.authenticator &&
@@ -45,12 +44,6 @@ function sameAccount(left: SessionAuthContext, right: SessionAuthContext): boole
   );
 }
 
-/**
- * Why `responder` may not approve `requester`'s change, if they may not. Each
- * side errs toward refusing: a shared change needs a different account, so a
- * changed `subject` doesn't pass as a second person, and a personal change
- * needs the same full identity its scope was keyed by.
- */
 export function responderRefusal(
   shared: boolean,
   requester: SessionAuthContext | null,
@@ -68,12 +61,6 @@ export function responderRefusal(
     : "Only the person who asked can approve a change to their own skills.";
 }
 
-/**
- * Who may answer by default. A personal change is the asker's alone. A change
- * to a shared scope needs a second person, so no one member can put text into
- * everyone's prompt by approving it themselves. `isShared` reports whether the
- * call targets a shared scope; a scope it can't resolve counts as shared.
- */
 export function defaultSkillResponse(
   isShared: (ctx: Parameters<ApprovalResponsePolicy>[0]) => Promise<boolean>,
 ): ApprovalResponsePolicy {
@@ -87,7 +74,6 @@ export function defaultSkillResponse(
   };
 }
 
-// Slack section text, the tightest card eve renders, holds 3,000 characters.
 const MAX_CARD = 3_000;
 const MAX_PREVIEW = 2_000;
 
@@ -113,11 +99,6 @@ function targetLines(target: SkillApprovalTarget, limit: number): string[] {
   return lines;
 }
 
-/**
- * The approval card for a change: what it does, for whom, and the content that
- * will apply. A card too long to show whole previews the instructions; a shared
- * change's default rule refuses one, so its approver always reads everything.
- */
 export function approvalCard(request: SkillApprovalRequest): string {
   const full = fullApprovalCard(request);
   if (full.length <= MAX_CARD) return full;
@@ -168,22 +149,15 @@ function composeCard(request: SkillApprovalRequest, limit: number): string {
   return [headline, ...body].join("\n\n");
 }
 
-/** What a change would do, for the approval rule, the card, and the tool that runs it. */
 export interface PlannedChange<TPlan> {
   readonly scope: SkillScope;
   readonly request: SkillApprovalRequest;
   readonly plan: TPlan;
 }
 
-/**
- * Cards made by the request policy, for the prompt to show. The prompt only
- * sees the call ID, tool name, and input, so two sessions with the same call
- * ID and input can't be told apart: their card falls back to a plain one.
- */
 const cards = new Map<string, { sessionId: string; card: string } | "ambiguous">();
 const MAX_CARDS = 256;
 
-/** JSON with sorted keys: the policy sees parsed input and the prompt the model's, in any key order. */
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (typeof value !== "object" || value === null) return value;
@@ -227,12 +201,6 @@ function toEveStatus(decision: SkillApprovalDecision) {
   return { type: "denied", reason: decision.deny } as const;
 }
 
-/**
- * The approval for a lifecycle tool: the configured rule decides from the
- * planned change, the card shows its content, and the response rule decides
- * who may answer. A change that can't be planned runs without asking, so the
- * tool reports why it fails.
- */
 export function skillApproval<TInput extends object, TPlan>(input: {
   readonly plan: (ctx: ApprovalContext<TInput>, input: TInput) => Promise<PlannedChange<TPlan>>;
   readonly rule: () => SkillApprovalRule;
@@ -266,13 +234,6 @@ export function skillApproval<TInput extends object, TPlan>(input: {
   };
 }
 
-/**
- * Re-checks who approved, once the change runs with its real scope. A response
- * is judged without the conversation, so a scope that depends on it, such as
- * a custom personal scope keyed by the channel, may have been taken for a
- * shared one: here a personal change still needs its asker, and a shared one
- * someone else.
- */
 export function requireDefaultResponder(
   scope: SkillScope,
   requester: SessionAuthContext | null,

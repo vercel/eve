@@ -46,14 +46,12 @@ export interface GitHubChannelState extends PromptQueueState {
   pendingSignIns?: Record<string, string>;
 }
 
-/** Minimal receive target needed to seed GitHub channel state. */
 interface GitHubReceiveStateTarget {
   readonly installationId?: number;
   readonly issueNumber?: number;
   readonly pullRequestNumber?: number;
 }
 
-/** Initial empty GitHub channel state. */
 export function initialGitHubState(): GitHubChannelState {
   return {
     baseRef: null,
@@ -76,7 +74,6 @@ export function initialGitHubState(): GitHubChannelState {
   };
 }
 
-/** Builds state for an issue or PR timeline comment. */
 export function stateFromIssueCommentEvent(event: GitHubIssueCommentEvent): GitHubChannelState {
   return {
     ...initialGitHubState(),
@@ -97,7 +94,6 @@ export function stateFromIssueCommentEvent(event: GitHubIssueCommentEvent): GitH
   };
 }
 
-/** Builds state for an inline pull-request review comment. */
 export function stateFromPullRequestReviewCommentEvent(
   event: GitHubPullRequestReviewCommentEvent,
 ): GitHubChannelState {
@@ -121,7 +117,6 @@ export function stateFromPullRequestReviewCommentEvent(
   };
 }
 
-/** Builds state for an issue event hook dispatch. */
 export function stateFromIssueEvent(event: GitHubIssueWebhookEvent): GitHubChannelState {
   return {
     ...initialGitHubState(),
@@ -135,7 +130,6 @@ export function stateFromIssueEvent(event: GitHubIssueWebhookEvent): GitHubChann
   };
 }
 
-/** Builds state for a pull-request event hook dispatch. */
 export function stateFromPullRequestEvent(
   event: GitHubPullRequestWebhookEvent,
 ): GitHubChannelState {
@@ -157,7 +151,6 @@ export function stateFromPullRequestEvent(
   };
 }
 
-/** Builds pull-request state for a CI event hook dispatch. */
 export function stateFromCiEvent(event: GitHubCiWebhookEvent): GitHubChannelState {
   const ci = ciPayload(event);
   const pullRequestNumber = ci.pullRequests[0] ?? null;
@@ -175,7 +168,6 @@ export function stateFromCiEvent(event: GitHubCiWebhookEvent): GitHubChannelStat
   };
 }
 
-/** Builds state for proactive `receive()` calls. */
 export function stateFromReceiveTarget(input: {
   readonly target: GitHubReceiveStateTarget;
   readonly owner: string;
@@ -200,7 +192,6 @@ export function stateFromReceiveTarget(input: {
   };
 }
 
-/** Fields a later delivery's event sets, as opposed to the checkout's own. */
 const DELIVERED_EVENT_FIELDS = [
   "baseRef",
   "baseSha",
@@ -212,12 +203,6 @@ const DELIVERED_EVENT_FIELDS = [
   "triggeringUserLogin",
 ] as const satisfies readonly (keyof GitHubChannelState)[];
 
-/**
- * Applies what a later delivery's event says to the session's state: the head
- * it was pushed to and the comment that triggered it. A field the event does
- * not carry (null) is applied as null, so the next checkout resolves the
- * current head from the API instead of reusing the last checkout's sha.
- */
 export function applyDeliveredGitHubState(
   state: GitHubChannelState,
   delivered: Partial<GitHubChannelState> | undefined,
@@ -228,7 +213,6 @@ export function applyDeliveredGitHubState(
   }
 }
 
-/** Reconstructs the channel-local GitHub conversation reference from state. */
 export function conversationFromState(state: GitHubChannelState): GitHubConversationRef {
   return {
     issueNumber: state.issueNumber,
@@ -237,7 +221,6 @@ export function conversationFromState(state: GitHubChannelState): GitHubConversa
   };
 }
 
-/** Builds the channel-local continuation token from durable state. */
 export function continuationTokenFromState(state: GitHubChannelState): string {
   return githubContinuationToken({
     conversationKind: state.conversationKind,

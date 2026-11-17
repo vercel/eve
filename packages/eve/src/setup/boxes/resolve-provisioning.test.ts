@@ -79,7 +79,6 @@ function stateWithAgentName(agentName: string): SetupState {
   return { ...createDefaultSetupState(), agentName };
 }
 
-/** A Connect-backed connection plan, as the select-connections box records it. */
 function connectPlan(slug: string): ConnectionPlan {
   return {
     slug,
@@ -89,13 +88,6 @@ function connectPlan(slug: string): ConnectionPlan {
   };
 }
 
-/**
- * Composes the ask channel the way the onboarding site does: the headless base
- * when `mode.headless`, the interactive base over the test prompter otherwise.
- * The deploy-tree questions travel the asker by option id, so the interactive
- * `selectValues` are the option ids ("vercel"/"local"/"new"/"link"/"api-key"),
- * not the rich values the old `prompter.select<boolean>` returned directly.
- */
 function makeBox(
   options: Omit<ResolveProvisioningOptions, "asker"> & { mode: ProvisioningMode },
 ): ReturnType<typeof resolveProvisioning> {
@@ -349,8 +341,6 @@ describe("resolveProvisioning box", () => {
       kind: "linked",
       projectId: "prj_demo",
     }));
-    // A prompter with no configured answers: any select or password throws,
-    // proving the adopted link resolves every provisioning question.
     const prompter = createPrompter();
     const box = makeBox({
       prompter,
@@ -368,8 +358,6 @@ describe("resolveProvisioning box", () => {
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
     expect(result.state.project).toEqual({ kind: "linked", projectId: "prj_demo" });
-    // The link is the source of truth: no project plan, gateway inherited
-    // (the runtime mints an OIDC token from the login + link).
     expect(result.state.vercelProject).toEqual({ kind: "none" });
     expect(result.state.aiGateway).toEqual({ kind: "inherit" });
     expect(result.state.modelWiring).toBe("gateway");
@@ -402,8 +390,6 @@ describe("resolveProvisioning box", () => {
 
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
-    // A link without a login cannot mint an OIDC token, so the run falls
-    // back to the questions, whose Vercel branch enforces login.
     expect(result.state.vercelProject).toEqual({ kind: "new", project: "my-agent", team: "team" });
     expect(deps.requireAuth).toHaveBeenCalled();
   });
@@ -480,8 +466,6 @@ describe("resolveProvisioning box", () => {
   });
 
   it("propagates fail-fast through the flag-driven provisioning path", async () => {
-    // Default deps: the real validateTeam reads teams through the (mocked)
-    // Vercel CLI boundary and rejects on an unknown slug.
     mockedCaptureVercel.mockImplementation(async (args): Promise<VercelCaptureResult> => {
       if (args[0] === "whoami") return { ok: true, stdout: "me" };
       if (args[0] === "teams" && args[1] === "ls") {

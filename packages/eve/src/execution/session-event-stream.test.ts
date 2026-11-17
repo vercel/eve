@@ -13,7 +13,6 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getWorld: async () => ({ runs: { get: getRunMetadataMock } }),
 }));
 
-// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
 installWorkflowHost();
 
 const encoder = new TextEncoder();

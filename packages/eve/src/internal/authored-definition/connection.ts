@@ -46,26 +46,10 @@ const KNOWN_AUTHORIZATION_KEYS = [
   "getToken",
   "principalType",
   "startAuthorization",
-  // Optional metadata marker that auth-provider helpers may attach so
-  // downstream tooling (eg. the eve compiler / Vercel dashboard) can
-  // detect Vercel Connect-backed connections without opening the
-  // closure state of `getToken`. The runtime never reads it; it
-  // survives `normalizeAuthorizationSpec` so consumers can pick it
-  // off the normalized auth definition. See
-  // `runtime/connections/types.ts#AuthorizationDefinitionBase` for
-  // the type and `@vercel/connect/eve`'s `connect()` for the
-  // canonical producer.
   "vercelConnect",
 ] as const;
 const KNOWN_TOOL_CALL_KEYS = ["providedArguments"] as const;
 
-/**
- * Validates one authored MCP client connection module export at build time
- * and returns the public definition type. The module export is `unknown`
- * because it comes from a dynamically-loaded authored file; this function
- * bridges the gap with runtime checks so authoring errors surface during
- * `eve build`.
- */
 export function normalizeMcpClientConnectionDefinition(
   value: unknown,
   message: string,
@@ -221,13 +205,6 @@ function normalizeConnectionToolCall(
   return { providedArguments: providedArguments as ProvidedArgumentsDefinition };
 }
 
-/**
- * Validates one authored OpenAPI connection module export at build time
- * and returns the public definition type. Mirrors
- * {@link normalizeMcpClientConnectionDefinition} but validates the
- * OpenAPI-specific `spec`/`baseUrl`/`operations` fields and reuses the
- * shared auth and headers validation.
- */
 export function normalizeOpenApiConnectionDefinition(
   value: unknown,
   message: string,
@@ -422,12 +399,6 @@ function normalizeToolFilter(
   return normalizeFilterField(record, "tools", message);
 }
 
-/**
- * Validates an allow/block filter field (`tools` for MCP connections,
- * `operations` for OpenAPI connections). Both carry the same
- * {@link ToolFilterDefinition} shape — exactly one of `allow` or
- * `block`, each an array of strings.
- */
 function normalizeFilterField(
   record: Record<string, unknown>,
   fieldName: "tools" | "operations",

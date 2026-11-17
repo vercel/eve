@@ -37,10 +37,6 @@ import {
   type ToolEntry,
 } from "./definition.js";
 
-/**
- * The agent's `defineTool()` files: the same tools in every session, so they keep nothing. The step
- * holds them, as it runs them outside a turn too; each joins the call like any other tool.
- */
 export const staticTools: Definition = {
   contribute: ({ step }) => ({
     tools: () => ({ entries: toolEntries([...(step?.agentTools.values() ?? [])], "eve.tools") }),
@@ -49,20 +45,10 @@ export const staticTools: Definition = {
   label: "the agent's tools",
 };
 
-/**
- * A `defineDynamic()` in `agent/tools/`: one tool named after the file, or a map of them. It keeps
- * what the model is offered; the tools themselves are code. Its tools take their names from the
- * agent's own.
- */
 export function toolDefinition(resolver: ResolvedDynamicDefinition<"tool">): Definition {
   return toolsDefinition(resolver, authoredEvaluate(resolver.evaluate));
 }
 
-/**
- * Tools `evaluate` makes, as the tool file `source` names would: a `defineDynamic()` tool file's,
- * or an eve feature's, which offers its tools under the file it would take, such as a memory
- * slot's. Their versions are kept under that file's ID.
- */
 export function toolsDefinition(
   source: ToolSource,
   evaluate: (ctx: InternalContext) => unknown,
@@ -95,7 +81,6 @@ export function toolsDefinition(
   };
 }
 
-/** The names of the dynamic tools the session keeps, live or not. */
 export function dynamicToolNames(ctx: Pick<ContextReader, "get">): readonly string[] {
   return slotsOf(ctx, "tool").flatMap(({ slot }) =>
     Array.isArray(slot.value) ? slot.value.map((tool) => (tool as { name: string }).name) : [],
@@ -114,14 +99,12 @@ export function toolEntries(
   );
 }
 
-/** Where dynamic tools come from: a file, by its slug, in an extension's namespace or none. */
 export interface ToolSource {
   readonly extensionNamespace?: string;
   readonly logicalPath: string;
   readonly slug: string;
 }
 
-/** The tools `result` defines, checked and named as `source`'s, with their declarations. */
 export function contributeTools(source: ToolSource, result: unknown, ctx: ContextContainer): Kept {
   const tools = namedTools(source, result).map(({ entry, name }) => {
     assertToolNameAvailable(ctx, source, name);
@@ -152,14 +135,7 @@ interface CompiledWorkflow {
   readonly workflowId: string;
 }
 
-/**
- * The build compiles a `"use workflow"` function only where it can see it: a top-level function
- * declaration, or the entry point of a default-exported `defineWorkflowTool()`. A dynamic
- * function's workflow tool must point at one of those, so its calls run the compiled workflow.
- */
 function compiledWorkflow(source: ToolSource, name: string, entry: object): CompiledWorkflow {
-  // eve's own workflow tools, such as `agent({ models })`, read settings the runtime finds only
-  // among the agent's static tools.
   if (isFrameworkTool(entry)) {
     throw new Error(
       `The defineDynamic() in "${source.logicalPath}" returned eve's built-in workflow tool "${name}", which only works as a static tool. Export it from its own file under agent/tools/ instead.`,
@@ -187,10 +163,6 @@ function compiledWorkflow(source: ToolSource, name: string, entry: object): Comp
   return { entryPoint, workflowId };
 }
 
-/**
- * The agent's static workflow tools and agents keep their names for calls that outlive the model
- * step, so a dynamic tool can't take them. Nor can a connection's.
- */
 function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, name: string): void {
   assertNotConnectionOwned({
     connectionNames: sessionConnectionNames(ctx),
@@ -238,7 +210,6 @@ function liveTool(
         : toOutputSchema(entry.outputSchema as ToolSchemaSource),
     toModelOutput: entry.toModelOutput as HarnessToolDefinition["toModelOutput"],
   };
-  // A workflow tool's calls run after the model step, from the workflow registry, as a static one's do.
   if (isWorkflowToolDefinition(entry)) {
     const { entryPoint, workflowId } = compiledWorkflow(source, name, entry);
     return createWorkflowToolHarnessDefinition({
@@ -264,7 +235,6 @@ function liveTool(
   };
 }
 
-/** What a tool's slot records: what the model is offered, without the code. */
 function declaration(tool: HarnessToolDefinition): JsonObject {
   return {
     description: tool.description,

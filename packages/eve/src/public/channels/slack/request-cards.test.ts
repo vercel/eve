@@ -32,23 +32,15 @@ interface Sent {
 interface Asked {
   readonly interactionId: string;
   readonly request: Record<string, unknown>;
-  /** The call the request asks about; a budget prompt asks about its turn instead. */
   readonly call?: { readonly name: string; readonly input?: Record<string, string> };
 }
 
-/**
- * The Slack channel's input-request handlers over a real session view: `commit` folds facts as
- * the server does and runs each through the handlers, and `sent` records every Slack call.
- */
 function harness(
   options: {
     readonly approvalChannel?: SlackApprovalChannelResolver;
-    /** Binds the session to a code channel instead of a thread. */
     readonly codeChannel?: boolean;
     readonly renderers?: readonly SlackRenderer[];
-    /** Slack's error code for a call it fails, or `NETWORK` for one that never gets an answer. */
     readonly fails?: (sent: Sent) => string | undefined;
-    /** Event types whose handlers don't run, as when a renderer skips `next()` for them. */
     readonly skip?: readonly string[];
   } = {},
 ) {
@@ -70,7 +62,6 @@ function harness(
     threadTs: options.codeChannel === true ? null : "1.0",
     triggeringUserId: "U_ALICE",
   };
-  // A code channel is the session itself, with no thread root, as production state records it.
   if (options.codeChannel === true) state.codeChannel = true;
   const channel = {
     slack: {
@@ -111,7 +102,6 @@ function harness(
   let position = 0;
 
   async function commit(...facts: SessionEvent[]): Promise<void> {
-    // State persists as JSON between workflow steps, so each commit starts from a round trip.
     channel.state = JSON.parse(JSON.stringify(channel.state)) as SlackChannelState;
     const line = position;
     foldLine(view, { at, facts }, line, { retention: "operational" });
@@ -132,7 +122,6 @@ function harness(
   }
 
   let started = false;
-  /** Opens `requests` in one commit, as one step asking them together. */
   async function ask(...requests: Asked[]): Promise<void> {
     const first = !started;
     const start: SessionEvent[] = !first
@@ -181,7 +170,6 @@ function harness(
     );
   }
 
-  /** An answer to `interactionId`, submitted and admitted; Bob's unless `principal` says. */
   async function answer(
     interactionId: string,
     value: Record<string, string>,
@@ -205,7 +193,6 @@ function harness(
     );
   }
 
-  /** Settles `interactionId` in its own commit. */
   async function settle(...args: Parameters<typeof settled>): Promise<void> {
     await commit(settled(...args));
   }
@@ -217,7 +204,6 @@ function harness(
 
 const NETWORK = "network";
 
-/** `principal`'s answer `approve` to `interactionId`, submitted but not yet admitted. */
 function submitted(responseId: string, interactionId: string, principal: string): SessionEvent[] {
   return [
     {
@@ -236,7 +222,6 @@ function submitted(responseId: string, interactionId: string, principal: string)
   ];
 }
 
-/** `interactionId`'s settlement, decided by the answer `answer` recorded when `response` is given. */
 function settled(
   interactionId: string,
   outcome: "accepted" | "declined" | "withdrawn",
@@ -301,7 +286,6 @@ const budgetPrompt: Asked = {
   },
 };
 
-/** Every eve action ID in `value`, however deeply its blocks nest them. */
 function eveActionIds(value: unknown): string[] {
   return [...JSON.stringify(value).matchAll(/"action_id":"(eve_input[^"]*)"/gu)].map(
     (match) => match[1]!,
@@ -313,7 +297,6 @@ const section = (text: string): BlockKitBlock => ({
   type: "section",
 });
 
-/** A renderer for answered and settled cards, naming the answer and who gave it. */
 const doneRenderer = defineSlackRenderer({
   interactionCard(card, next) {
     const { answer, status } = card.interaction;
@@ -325,7 +308,6 @@ const doneRenderer = defineSlackRenderer({
   },
 });
 
-/** A renderer that retitles every card, which a test's Slack can refuse by that title. */
 const styledRenderer = defineSlackRenderer({
   interactionCard(card, next) {
     const parts = next(card);
@@ -457,7 +439,6 @@ describe("Slack input request cards", () => {
       await settle("a_deploy", outcome);
     }
 
-    // The settlement renders what the admitted answer already showed, so it updates nothing.
     expect(calls("chat.update").map((update) => blocksOf(update))).toEqual([[section(shows)]]);
     expect(calls("chat.delete")).toEqual([]);
     expect(channel.state.interactionCards).toEqual([]);
@@ -500,7 +481,6 @@ describe("Slack input request cards", () => {
     });
     await ask(dayQuestion());
 
-    // The note goes first: Slack hides an ephemeral in a thread that has no replies yet.
     expect(sent.map((call) => call.method)).toEqual(["thread.post", "chat.postEphemeral"]);
     expect(calls("thread.post")[0]?.body.text).toBe("Waiting on a response from <@U_ALICE>…");
     const [card] = calls("chat.postEphemeral");
@@ -510,7 +490,6 @@ describe("Slack input request cards", () => {
     await answer("q_day", { optionId: "Saturday" }, "p_alice");
     await settle("q_day", "accepted", { optionId: "Saturday" });
 
-    // Slack can't edit an ephemeral, so only the thread note changes, without the answer.
     expect(calls("chat.update").map((update) => [update.body.ts, update.body.text])).toEqual([
       ["ts_1", "Answered by <@U_ALICE>."],
     ]);
@@ -536,7 +515,6 @@ describe("Slack input request cards", () => {
     const { answer, ask, calls, commit } = harness({ approvalChannel: () => "ephemeral" });
     await ask(approval("a_deploy", "deploy", { target: "production" }));
     const [first] = calls("chat.postEphemeral");
-    // An ephemeral can't drop a details message later, so the details ride with the controls.
     expect(JSON.stringify(first?.body)).toContain("production");
     await answer("a_deploy", { optionId: "approve" }, "p_alice");
 
@@ -652,7 +630,6 @@ describe("Slack input request cards", () => {
     "shows $shows again when a refused answer reopens a compact card whose renderer then throws",
     async ({ blocks, questions }) => {
       let broken = false;
-      // One block per open question, where eve's default needs a prompt and a select: two.
       const compact = defineSlackRenderer({
         interactionCard(card, next) {
           const parts = next(card);
@@ -795,7 +772,6 @@ describe("Slack input request cards", () => {
     await ask(approval("a_one", "deploy"), approval("a_two", "migrate"));
     await answer("a_one", { optionId: "approve" });
 
-    // A message steering the turn withdraws the neighbor as the answer decides the first.
     await commit(
       settled("a_one", "accepted", { optionId: "approve" }),
       settled("a_two", "withdrawn"),
@@ -810,7 +786,6 @@ describe("Slack input request cards", () => {
   });
 
   it("leaves a request that settled in the same commit to interaction.settled", async () => {
-    // As if a renderer skipped `next()` on `interaction.settled`: no handler writes the card.
     const { ask, calls, commit } = harness({ skip: ["interaction.settled"] });
     await ask(approval("a_deploy", "deploy"));
 
@@ -850,7 +825,6 @@ describe("Slack input request cards", () => {
   });
 
   it("regroups a refused batch's defaults across as many messages as they need", async () => {
-    // One block per question, where eve's default needs a prompt and a select: two.
     const compact = defineSlackRenderer({
       interactionCard(card, next) {
         const parts = next(card);
@@ -889,8 +863,6 @@ describe("Slack input request cards", () => {
   });
 
   it("deletes a details message shared by two controls messages once both settle", async () => {
-    // Two blocks of controls per approval and one of details: 26 approvals post one details
-    // message and two controls messages.
     const tall = defineSlackRenderer({
       interactionCard(card, next) {
         const parts = next(card);
@@ -1041,7 +1013,6 @@ describe("Slack input request cards", () => {
     const { ask, calls, commit } = harness({ renderers: [watching] });
     await ask(approval("a_deploy", "deploy"));
 
-    // Bob's answer waits on a response policy while Carol's is refused.
     await commit(...submitted("r_bob", "a_deploy", "p_bob"));
     await commit(...submitted("r_carol", "a_deploy", "p_carol"), {
       data: { outcome: "refused", responseId: "r_carol" },
@@ -1105,7 +1076,6 @@ describe("Slack input request cards", () => {
         type: "response.settled",
       });
 
-      // Clicks decode the session from the route, so a card outside the session's thread needs it.
       const posted = sent.find(
         (call) =>
           (call.method === "thread.post" || call.method === "chat.postMessage") &&

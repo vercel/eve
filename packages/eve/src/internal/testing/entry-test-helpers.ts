@@ -41,7 +41,6 @@ export function buildSerializedContext(overrides: {
       principalType: "anonymous",
     };
   }
-  // Raw workflow fixtures bypass channel dispatch and supply its initial identity here.
   context["eve.channelDelivery"] = {
     acceptedDeploymentId: overrides.acceptedDeploymentId,
     channelKind: overrides.channelKind,
@@ -70,7 +69,6 @@ export function expectSingleTurn(events: readonly SessionStreamEvent[], turnId: 
 
 const CALLER_STEP_NAMES = new Set(["notifyTurnCallerStep", "resolveInitialTurnCallerStep"]);
 
-/** Steps that run only when a session has workflow tool runs, tasks, or a caller to act on. */
 const CONDITIONAL_STEP_NAMES = new Set([
   "cancelDescendantTurnsStep",
   "dispatchCoordinationStep",
@@ -109,7 +107,6 @@ export interface CapturedEventStream {
   ): Promise<SessionStreamEvent[]>;
 }
 
-/** Reads a run's stream line by line, as {@link captureTurnEvents} does, failing a wait by name. */
 export function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
   const stream = captureTurnEvents(run);
   return {
@@ -152,7 +149,6 @@ export async function expectHookClaims(runId: string, tokens: string[]): Promise
   );
 }
 
-/** A queued follow-up delivery accepted by `acceptedDeploymentId`. */
 export function handoffFollowUp(acceptedDeploymentId: string, message: string, deliveryId: string) {
   return {
     turnPolicy: "queue" as const,

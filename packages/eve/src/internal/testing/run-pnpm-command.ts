@@ -11,31 +11,11 @@ interface PnpmCommandInput {
   readonly env?: NodeJS.ProcessEnv;
 }
 
-/**
- * Captured stdout/stderr from one pnpm invocation.
- *
- * Callers that just want to ensure success can ignore the result; callers
- * that need to parse output (e.g. `pnpm dlx vercel deploy --json`) read
- * `stdout` directly.
- */
 interface PnpmCommandResult {
   readonly stderr: string;
   readonly stdout: string;
 }
 
-/**
- * Runs pnpm from scenario, e2e, and setup helpers.
- *
- * Windows GitHub runners expose pnpm through `PNPM_HOME` for shell commands,
- * but child processes spawned by Vitest setup do not always inherit a PATH
- * that can resolve the bare `pnpm` command. {@link resolvePnpmInvocation}
- * picks the right executable for the current OS and execution environment
- * so callers do not have to special-case Windows or Corepack-shimmed paths.
- *
- * Returns the captured stdout/stderr so callers that need to parse output
- * (e.g. `pnpm dlx vercel deploy --json`) do not have to reach for `execFile`
- * directly and re-implement the platform handling.
- */
 export async function runPnpmCommand(input: PnpmCommandInput): Promise<PnpmCommandResult> {
   const invocation = resolvePnpmInvocation(input.args);
 
@@ -73,32 +53,12 @@ export async function runPnpmCommand(input: PnpmCommandInput): Promise<PnpmComma
   }
 }
 
-/**
- * Resolved invocation for the host's pnpm executable. The shape carries
- * everything `child_process.spawn` and `execFile` need to dispatch to the
- * right binary across macOS/Linux PATH installs, Corepack-managed shims,
- * and Windows runners that surface pnpm only through `PNPM_HOME`.
- */
 interface PnpmInvocation {
   readonly args: readonly string[];
   readonly command: string;
   readonly shell?: boolean;
 }
 
-/**
- * Picks the right pnpm executable for the current host. Resolution order:
- *
- *  1. `PNPM_HOME` — the standard install location used by Corepack and the
- *     pnpm installers. On Windows, points at `pnpm.CMD` because the bare
- *     `pnpm` shim is not directly invokable from a non-shell spawn.
- *  2. `npm_execpath` — set when the current process was launched by an
- *     npm-compatible package manager. Pointing at a `.cjs`/`.js` entry
- *     means we have to run it through `node` (typical for Corepack
- *     shims); otherwise treat it as a bare executable path.
- *  3. Bare `pnpm` on PATH — the macOS/Linux happy path.
- *
- * Pure: no side effects, returns the invocation shape.
- */
 function resolvePnpmInvocation(args: readonly string[]): PnpmInvocation {
   const pnpmHome = process.env.PNPM_HOME;
 

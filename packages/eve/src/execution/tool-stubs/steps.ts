@@ -45,10 +45,6 @@ export async function publishStubFailureStep(error: string): Promise<void> {
   }
 }
 
-/**
- * Ordinary tools call this inside their existing step.
- * Workflow tools use this function as a separate step.
- */
 export async function callToolStubStep(scope: StubScope, call: StubCall): Promise<StubResult> {
   "use step";
   return await requestStub(scope, { kind: "call", call });
@@ -63,8 +59,6 @@ export async function reportStubFailureStep(
   try {
     await requestStub(scope, { kind: "failure", callId, error });
   } catch (cause) {
-    // Without an acknowledgement, verification cannot safely declare this eval successful.
-    // Cancel the stub-owning run so the caller can keep its original output error or fallback.
     if (scope.rootSessionId === undefined) throw cause;
     await getRun(scope.rootSessionId).cancel({
       cancelReason: "Could not record a tool stub output-processing failure.",
@@ -110,7 +104,6 @@ export async function readStubFailure(sessionId: string): Promise<string | undef
   }
 }
 
-/** Use the session's inbox so failures reach it after a newer deployment takes over. */
 export async function failStubSessionStep(sessionId: string): Promise<void> {
   "use step";
   await resumeSessionInbox(
@@ -119,7 +112,6 @@ export async function failStubSessionStep(sessionId: string): Promise<void> {
   );
 }
 
-/** Read completed matches without waiting for the still-running session to finish. */
 export async function readMatchedStubRules(sessionId: string): Promise<readonly string[]> {
   const stream = getRun(sessionId).getReadable<string>({ namespace: STUB_MATCHES_NAMESPACE });
   const tail = await stream.getTailIndex();

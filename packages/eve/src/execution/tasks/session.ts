@@ -14,11 +14,6 @@ import type { TaskCancelReason } from "#execution/tasks/table.js";
 import { TASK_CANCEL_TOOL_NAME, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
-// What the session's workflow body does with tasks between steps: records
-// change only in `steps.ts`, and these decide when to run them. They live apart
-// because the workflow bundle keeps only the steps of a step module.
-
-/** Whether a run's message changes a task record. */
 export function isTaskRunMessage(message: WorkflowToolRunMessage): message is TaskRunMessage {
   if (message.from.taskId === undefined) return false;
   return (
@@ -29,16 +24,10 @@ export function isTaskRunMessage(message: WorkflowToolRunMessage): message is Ta
   );
 }
 
-/** The session's task table as the workflow body last committed it. */
 export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
   return readTaskTable(cursor.sessionState.snapshot.session.state);
 }
 
-/**
- * Cancels every working task: `session.cancel()` stops them, and a turn that
- * ends anyway, such as by failing, cancels the tasks it held on. With
- * `turnCalls`, the workflow tool runs the turn waits on stop in the same step.
- */
 export async function cancelWorkingTasks(
   cursor: SessionStateCursor,
   reason: Exclude<TaskCancelReason, "task-cancel">,
@@ -50,7 +39,6 @@ export async function cancelWorkingTasks(
   await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds, turnCalls }));
 }
 
-/** An unreadable run registry counts as waiting, so the step runs and logs it. */
 function mayWaitOnWorkflowToolRuns(cursor: SessionStateCursor): boolean {
   try {
     return getBlockingWorkflowToolRuns(cursor.sessionState.snapshot?.session?.state).length > 0;

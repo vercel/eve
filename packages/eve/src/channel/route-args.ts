@@ -19,37 +19,25 @@ import {
   type RemoteAgentStreamHeadersResolver,
 } from "#internal/nitro/routes/channel-route-context.js";
 
-/** What a host supplies for one request to a channel route, such as Nitro's dispatch. */
 export interface ChannelRoutePorts {
-  /** Where the channel's sessions run. */
   readonly runtime: Runtime;
-  /** The adapter the channel's deliveries go through. */
   readonly adapter: ChannelAdapter;
-  /** Where the request came from; its `channelName` namespaces continuation tokens. */
   readonly deliverySource: ChannelDeliverySource;
   readonly turnPolicy?: TurnPolicy;
   readonly agentName: string;
   readonly params: Readonly<Record<string, string>>;
   readonly requestIp: string | null;
-  /** The agent as callers see it, and its tools outside a turn. */
   readonly agent: Pick<
     RouteHandlerArgs,
     "describe" | "invokeTool" | "listSkillFiles" | "readSkill"
   >;
-  /** Answers `GET /eve/v1/info`. */
   readonly agentInfo: () => Promise<Response>;
   readonly to: CrossChannelToFn;
-  /** Keeps work going after the response; the host logs a task that fails. */
   readonly waitUntil: (task: Promise<unknown>) => void;
   readonly skillFiles?: SkillFileSource;
   readonly remoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;
 }
 
-/**
- * The arguments a channel route handler gets, from what its host supplies: the channel
- * operations, `attachSession`, and the framework's own fields that eve's channels read (the
- * session creator, `/info`, the channel and agent names, skill files, remote stream headers).
- */
 export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerArgs {
   const { adapter, deliverySource, runtime, turnPolicy } = ports;
   const { channelName } = deliverySource;
@@ -92,8 +80,6 @@ export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerAr
         delivery,
         requestId: deliverySource.requestId,
       });
-      // Not a spread: reading `events` opens a live read of the session's stream, which these
-      // callers never consume or cancel.
       return {
         get events() {
           return handle.events;

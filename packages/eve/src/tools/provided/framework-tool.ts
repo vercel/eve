@@ -22,7 +22,6 @@ export function interactionOnly<F extends (...args: never[]) => unknown>(execute
   return execute;
 }
 
-/** Whether `value` is, or is a definition resolved from, an {@link interactionOnly} executor. */
 export function isInteractionOnly(value: unknown): boolean {
   return (
     (typeof value === "function" || (typeof value === "object" && value !== null)) &&
@@ -30,7 +29,6 @@ export function isInteractionOnly(value: unknown): boolean {
   );
 }
 
-/** Carries an executor's {@link interactionOnly} mark onto its resolved definition. */
 export function markInteractionOnly<T extends object>(definition: T): T {
   Object.defineProperty(definition, INTERACTION_ONLY, { enumerable: true, value: true });
   return definition;

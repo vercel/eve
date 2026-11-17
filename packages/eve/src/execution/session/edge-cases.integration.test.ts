@@ -1,4 +1,3 @@
-// @linux-only: session edge cases; compiled from memory; Workflow + in-process cells
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import type { DeliverPayload, SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
@@ -59,13 +58,6 @@ import {
   receiveDelegatedResultWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 
-// Sessions driven through their odd paths: tools that fail, approvals that are cancelled,
-// steered, answered twice or for nothing, models that fail mid-response, and controls that
-// arrive while a person is asked. The integration config checks every line each session
-// writes against the event contract; each test also folds the whole stream as a reader would
-// and checks what a finished turn leaves behind.
-
-// The first session in a file compiles the agent; later ones reuse it.
 vi.setConfig({ testTimeout: 90_000 });
 
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
@@ -89,7 +81,6 @@ const HEARD_TYPES = [
   "model.settled",
 ] as const;
 
-/** Registers a provider for the agent that records every lifecycle event it hears. */
 async function hearInstrumentation(agentName: string): Promise<InstrumentationEvent[]> {
   const heard: InstrumentationEvent[] = [];
   const record = (event: InstrumentationEvent) => void heard.push(event);
@@ -121,7 +112,6 @@ interface Call {
   readonly toolCallId?: string;
 }
 
-/** What the prompt says so far: the latest person's text, and the results of the turn's calls. */
 function readPrompt(prompt: Prompt) {
   const users = prompt.filter((message) => message.role === "user");
   const lastUser = users.at(-1);
@@ -141,7 +131,6 @@ function readPrompt(prompt: Prompt) {
   return { results, said: (words: string) => text.includes(words), users: users.length };
 }
 
-/** A model that answers each request with what `script` returns for the prompt. */
 function scriptedModel(
   script: (
     prompt: ReturnType<typeof readPrompt>,
@@ -170,7 +159,6 @@ function scriptedModel(
   return markMockModel(model);
 }
 
-/** A response that streams `calls`, then fails the way a dropped connection does. */
 function failingAfterCalls(calls: readonly Call[]): StreamResult {
   return {
     stream: simulateReadableStream({
@@ -191,14 +179,12 @@ function failingAfterCalls(calls: readonly Call[]): StreamResult {
   };
 }
 
-/** A promise the test resolves when it decides; `wait` is what the session awaits. */
 function gate<T = void>() {
   let open!: (value: T) => void;
   const wait = new Promise<T>((resolve) => (open = resolve));
   return { open, wait };
 }
 
-/** Workflow tool run ids so far. Tests share one world, so each excludes the runs before it. */
 async function workflowToolRunIds(): Promise<string[]> {
   const runs = await (
     await getWorld()
@@ -238,10 +224,6 @@ async function waitForOwnerGate<T>(
   }
 }
 
-/**
- * A reply that holds until `release` resolves. With `before`, that text streams first, so the
- * reply has started when it holds; without it, nothing has.
- */
 function heldReply(text: string, release: Promise<void>, before?: string): StreamResult {
   return {
     stream: new ReadableStream({
@@ -264,7 +246,6 @@ function heldReply(text: string, release: Promise<void>, before?: string): Strea
   };
 }
 
-/** A tool call whose input streams part of the way, then waits for `release` to finish. */
 function heldToolInput(toolName: string, release: Promise<void>): StreamResult {
   const id = "call_held";
   return {
@@ -300,16 +281,13 @@ interface ToolSpec {
   readonly response?: ApprovalResponsePolicy;
   readonly inputSchema?: z.ZodType;
   readonly execute?: (input: unknown, ctx: ToolContext) => unknown;
-  /** A `"use workflow"` body from the test fixtures, which makes this a workflow tool. */
   readonly workflow?: (...args: never[]) => unknown;
 }
 
 type Stage = SessionStreamEvent[];
 
 interface Session {
-  /** Reads to the session's next turn boundary. */
   readonly next: (label: string) => Promise<Stage>;
-  /** Reads through the first event `matches` accepts. */
   readonly until: (
     label: string,
     matches: (event: SessionStreamEvent) => boolean,
@@ -327,7 +305,6 @@ interface Session {
     kind: "cancel" | "clear" | "compact" | "reset",
     extra?: object,
   ) => Promise<void>;
-  /** The approvals opened so far, oldest first. */
   readonly approvals: () => string[];
   readonly events: () => readonly SessionStreamEvent[];
 }
@@ -342,10 +319,6 @@ async function withSession(
     readonly hooks?: Readonly<Record<string, HookDefinition>>;
     readonly parent?: SessionParent;
     readonly sessionUsage?: SessionUsageLimit;
-    /**
-     * The host its sessions run on: in process, unless the test reads what Workflow keeps (its
-     * runs) or runs a `"use workflow"` tool, which only Workflow can.
-     */
     readonly host?: TestSessionHostKind;
   },
   body: (session: Session) => Promise<void>,
@@ -432,8 +405,6 @@ async function withSession(
     });
     const commandInbox = sessionInboxHookToken(sessionCommandHookToken(run.runId));
     const stream = captureTurnEvents(run);
-    // Each read gives up well inside the test's timeout, naming what it waited for and what the
-    // session had written, so a stuck session reports where it stopped.
     const read = async (label: string, stage: Promise<Stage>) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const read = await Promise.race([
@@ -505,7 +476,6 @@ async function withSession(
         async forward(callId, message) {
           const { parent } = options;
           if (parent === undefined) throw new Error("A forwarded call needs a parent session.");
-          // The command a parent's agent session sends to serve another of its calls.
           await resumeRoutedHook(commandInbox, {
             auth: ALICE,
             caller: {
@@ -535,8 +505,6 @@ async function withSession(
       await vi.waitFor(() => expectInstrumentationPairs(events, heard, run.runId));
     } finally {
       stream.dispose();
-      // What the checks below compare is the session as the test left it. Workflow's cancel stops
-      // the run without a word; the in-process host ends its sessions, which instrumentation hears.
       const heardBeforeCleanup = heard.length;
       const cleanup = run.cancel().catch(() => {});
       if (name === "edge-cancel-hung-task")
@@ -551,11 +519,6 @@ async function withSession(
   return { events, heard, ran };
 }
 
-/**
- * What every finished stream must say, whatever happened in it: a settled turn leaves none of
- * its calls, runs or requests open, and a client folding the same stream shows each of its calls
- * settled.
- */
 function expectReadersAgree(events: readonly SessionStreamEvent[]) {
   const { view } = viewOfEvents(events);
   const settledTurns = new Set(
@@ -580,7 +543,6 @@ function expectReadersAgree(events: readonly SessionStreamEvent[]) {
       expect(interaction.status, `interaction ${interaction.interactionId}`).toBe("settled");
   }
 
-  // A reader that receives every line twice, as a reconnect can, shows the same conversation.
   const conversation = conversationOf(events);
   expect(conversationOf(events.flatMap((event) => [event, event])).messages).toEqual(
     conversation.messages,
@@ -596,17 +558,11 @@ function expectReadersAgree(events: readonly SessionStreamEvent[]) {
   }
 }
 
-/**
- * What instrumentation hears for the same session: each turn, call and request it hears begin
- * ends once at most, and once for each the stream settled; each attempt that started ends once.
- */
 function expectInstrumentationPairs(
   events: readonly SessionStreamEvent[],
   all: readonly InstrumentationEvent[],
   sessionId: string,
 ) {
-  // Providers are process-wide, so a child session and a cancelled session that an earlier test
-  // left running report to the same one; this stream is its owner run's session.
   const sessionOf = (event: InstrumentationEvent) =>
     "sessionId" in event ? event.sessionId : "scope" in event ? event.scope.sessionId : undefined;
   const heard = all.filter((event) => sessionOf(event) === sessionId);
@@ -644,7 +600,6 @@ function expectInstrumentationPairs(
       heard.filter((event) => event.type === type),
       type,
     ).toHaveLength(streamed(type));
-  // Each attempt ends once, and an attempt that started ends once its turn has.
   const attemptEnds = new Map<string, number>();
   for (const event of heard)
     if (event.type === "model.settled" || event.type === "model.retried")
@@ -708,8 +663,6 @@ describe("tools that go wrong", () => {
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
-  // The AI SDK answers a call it can't run itself, so the model hears why; eve runs nothing and,
-  // as before v27, announces no call for it.
   it.each([
     {
       call: { input: { town: 3 }, toolName: "weather" },
@@ -797,7 +750,6 @@ describe("calls in flight", () => {
       },
       async (session) => {
         await session.next("asks");
-        // What needed nobody has already settled while the approval waits.
         expect(settlements(session.events()).sort()).toEqual([
           "call_broken:failed",
           "call_check:completed",
@@ -893,8 +845,6 @@ describe("calls in flight", () => {
     expect(JSON.stringify(events)).not.toContain("The job finished.");
   });
 
-  // A turn that ends without aborting its controls leaves them to the next turn; a cancelled
-  // turn's controls stay aborted, so the turn after it gets fresh ones.
   it("cancels a turn on controls an earlier turn left, and runs the next one on fresh ones", async () => {
     const started = gate();
     const finish = gate();
@@ -941,8 +891,6 @@ describe("calls in flight", () => {
     expect(JSON.stringify(events)).toContain("Nothing is running.");
   });
 
-  // A workflow tool's question sent just before a cancel stopped its run can reach the session
-  // after the turn settled. Nobody can answer it then, so the next message must start a turn.
   it("drops a workflow tool's question that arrives after its turn was cancelled", async () => {
     const earlierRuns = await workflowToolRunIds();
     const { events } = await withSession(
@@ -985,7 +933,6 @@ describe("calls in flight", () => {
         );
         await session.send("Next turn.");
         await session.next("next turn");
-        // A proxied answer to the stopped run's question would fail the session instead.
         expect(ofType(session.events(), "session.ended")).toEqual([]);
       },
     );
@@ -1073,7 +1020,6 @@ describe("calls in flight", () => {
     const { events } = await withSession(
       "edge-steer-before-output",
       {
-        // It reads which message reaches the model first, which Workflow's step timing decides.
         host: "workflow",
         message: "Write a long story.",
         model: scriptedModel(({ said }) => {
@@ -1095,7 +1041,6 @@ describe("calls in flight", () => {
     );
 
     expect(replies).toEqual(["long", "short"]);
-    // One turn takes both messages: the cut run never replied, and the steered one did.
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
     expect(ofType(events, "delivery.consumed")).toHaveLength(2);
     expect(ofType(events, "content.completed").map((event) => event.data.value)).toEqual([
@@ -1158,7 +1103,6 @@ describe("calls in flight", () => {
       },
     );
 
-    // The input already streamed is kept: the model writes it once, and the tool runs.
     expect(writes).toBe(1);
     expect(ran).toEqual(["write_file"]);
     expect(finalPrompt).toContain("Also add a comment at the top.");
@@ -1171,8 +1115,6 @@ describe("approvals off the happy path", () => {
     scriptedModel(({ results, said }) => {
       if (said("Never mind")) return "Okay, stopping.";
       if (results.length > 0) return `Deploy finished: ${JSON.stringify(results[0]?.output)}`;
-      // A stale answer reaches the model as the person's text, naming the request it answered.
-      // An answer to a request the session never made: the model asks for the deploy again.
       if (said("interaction_missing")) return [{ toolName: "deploy", toolCallId: "call_deploy" }];
       if (said("requestId")) return "That was already done.";
       return [{ toolName: "deploy", toolCallId: "call_deploy" }];
@@ -1261,8 +1203,6 @@ describe("approvals off the happy path", () => {
         const [approval] = session.approvals();
         await session.answer(approval!, "approve");
         await session.next("approved");
-        // A closed request takes no answer; the session reads it as the person's words, so it
-        // can't approve anything again.
         await session.answer(approval!, "approve");
         await session.until("reply", (event) => event.type === "turn.settled");
       },
@@ -1281,7 +1221,6 @@ describe("approvals off the happy path", () => {
       async (session) => {
         await session.next("asks");
         await session.answer("interaction_missing", "approve");
-        // The model reads it, and asks again.
         const [first] = session.approvals();
         await session.until(
           "asks again",
@@ -1496,7 +1435,6 @@ describe("approvals off the happy path", () => {
     expect(ran).toEqual([]);
     expect(turnOutcomes(events)).toEqual(["turn_0:cancelled"]);
     expect(ofType(events, "session.ended")).toHaveLength(1);
-    // The session's end is its last line.
     expect(events.at(-1)?.type).toBe("session.ended");
   });
 });
@@ -1561,7 +1499,6 @@ describe("models that fail", () => {
     expect(ran).toEqual(["weather"]);
     expect(settlements(events)).toEqual(["call_first:abandoned", "call_second:completed"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
-    // A reader shows the call the turn kept, not the one the retry replaced.
     const calls = conversationOf(events)
       .messages.flatMap((message) => message.parts)
       .filter((part): part is EveToolPart => part.type === "tool");
@@ -1617,12 +1554,10 @@ describe("models that fail", () => {
       "turn_2:failed",
       "turn_3:completed",
     ]);
-    // A failed call keeps the person's message, but a refused one would be refused again.
     expect(nextPrompt).toContain("Alice asks about the release.");
     expect(nextPrompt).toContain("Alice asks about pricing.");
     expect(nextPrompt).not.toContain("incident report");
     expect(nextPrompt).not.toContain("The report says");
-    // In their place, the model reads that a turn was refused, once for both.
     expect(nextPrompt.split("The model provider refused a response in this turn")).toHaveLength(2);
   });
 
@@ -1663,11 +1598,9 @@ describe("models that fail", () => {
 
     expect(turnOutcomes(events)).toEqual(["turn_0:failed", "turn_1:completed"]);
     expect(sends).toBe(1);
-    // The invoice went out, so the model must still read that it did, though not the request.
     expect(nextPrompt).toContain("call_send");
     expect(nextPrompt).toContain('"sent":1');
     expect(nextPrompt).not.toContain("March invoice");
-    // The note takes the input's place, so the call still follows a user message.
     expect(nextPrompt.indexOf("The model provider refused")).toBeLessThan(
       nextPrompt.indexOf("call_send"),
     );
@@ -1740,7 +1673,6 @@ describe("models that fail", () => {
 
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:failed", "turn_2:completed"]);
     expect(ofType(events, "session.ended")).toEqual([]);
-    // The refused prompt stays out of the history, so it can't fail the next turn too.
     expect(nextPrompt).toContain("What is a sandbox?");
     expect(nextPrompt).toContain("An isolated VM.");
     expect(nextPrompt).toContain("How does pricing work?");
@@ -1762,8 +1694,6 @@ describe("models that fail", () => {
       },
     );
 
-    // The session failed, so its end closes the turn, which carries no error of its own: a
-    // channel posts one notice, and the turn's failure reads as the session's error.
     expect(turnOutcomes(events)).toEqual(["turn_0:cancelled"]);
     const [ended] = ofType(events, "session.ended");
     expect(ended?.data).toMatchObject({
@@ -1812,7 +1742,6 @@ describe("work delegated to a child session", () => {
         await session.next("cancelled task's turn");
         await waitForOwnerGate(session.send("Next turn."), "next turn delivery", session.events);
         await session.next("next turn");
-        // The cancelled run may still address the owner after the task has ended.
         const taskId = ofType(session.events(), "task.ended")[0]!.data.taskId;
         const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
         expect(runIds).toHaveLength(1);
@@ -1860,16 +1789,12 @@ describe("work delegated to a child session", () => {
     scriptedModel((_prompt, raw) => {
       const prompt = JSON.stringify(raw);
       const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
-      // The child, whose conversation starts with the parent's message: deploys, behind an
-      // approval, and reports.
       const first = raw.find((message) => message.role === "user");
       if (JSON.stringify(first?.content).includes("CHILD:")) {
         return called("deploy")
           ? "Child deployed."
           : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
       }
-      // The parent: delegates once, waits for its child, and reports. A delegated call's
-      // result arrives when its task ends, so the prompt shows the call before it does.
       if (!called("agent"))
         return [
           {
@@ -1907,7 +1832,6 @@ describe("work delegated to a child session", () => {
     );
 
     expect(ran).toEqual(["deploy"]);
-    // The parent asks on the call that waits for the child, naming the child's own request.
     const [relayed] = ofType(events, "interaction.opened");
     expect(relayed?.data).toMatchObject({
       origin: { call: { callId: "call_child_deploy", name: "deploy" } },
@@ -1924,8 +1848,6 @@ describe("work delegated to a child session", () => {
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
-  // #5726: Slack sends its responder as `state` with every button answer. That field stays
-  // with the parent, and the child still has to admit the answer forwarded to it.
   it("runs the child's call when its relayed approval's answer also carries channel state", async () => {
     const { events, ran } = await withSession(
       "edge-child-approval-state",
@@ -1955,7 +1877,6 @@ describe("work delegated to a child session", () => {
     ).toMatchObject({ outcome: "completed", output: "Child deployed." });
   });
 
-  // What every session, child sessions included, records about its deliveries and answers.
   const observeReceipts = () => {
     const seen: { session: string; type: string; data: Record<string, unknown> }[] = [];
     const record = (event: { type: string; data: object }, ctx: { session: { id: string } }) =>
@@ -1985,8 +1906,6 @@ describe("work delegated to a child session", () => {
           principalType: auth.principalType,
         };
 
-  // Without a response policy only the requester answers; the answer's channel state keeps the
-  // payload split, so the refusal happens in the child that admits its share.
   it("refuses another person's relayed approval that carries channel state, and keeps the child waiting", async () => {
     const receipts = observeReceipts();
     const callers: unknown[] = [];
@@ -2037,7 +1956,6 @@ describe("work delegated to a child session", () => {
       "refused",
       "applied",
     ]);
-    // Each answer reaches the child as a delivery of its own, under the person who sent it.
     const receiptOf = (type: string, deliveryId: string) =>
       receipts.of(child!, type).find(({ data }) => data.deliveryId === deliveryId)?.data;
     expect(
@@ -2111,7 +2029,6 @@ describe("work delegated to a child session", () => {
     expect(callSaw).toEqual([{ caller: principal(ALICE), responder: principal(SLACK_BOB) }]);
   });
 
-  // The parent delegates two deploys, each behind an approval in its child, and waits for both.
   const twoDelegatedDeploys = () =>
     scriptedModel((_prompt, raw) => {
       const prompt = JSON.stringify(raw);
@@ -2127,7 +2044,6 @@ describe("work delegated to a child session", () => {
           { input: { message: "CHILD: deploy a." }, toolName: "agent", toolCallId: "call_a" },
           { input: { message: "CHILD: deploy b." }, toolName: "agent", toolCallId: "call_b" },
         ];
-      // Waits until both children report.
       const reported = prompt.split("Child deployed.").length - 1;
       const waits = prompt.split('"toolName":"eve__task_wait"').length - 1;
       if (reported < 2)
@@ -2135,9 +2051,6 @@ describe("work delegated to a child session", () => {
       return "Both children are done.";
     });
 
-  // One payload that answers two children's prompts gives each child a share. Each share is a
-  // delivery of its own in its child, named from the payload's id and the child's place in it,
-  // so a retried forward names it the same way and the child admits it once.
   it("forwards one payload's answers to each child that asked, each under its own stable receipt", async () => {
     const receipts = observeReceipts();
     const ranIn: string[] = [];
@@ -2169,8 +2082,6 @@ describe("work delegated to a child session", () => {
           "the parent's turn",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
         );
-        // A retried forward sends each child its share again under the same receipt. A cancel
-        // after it shows when the child has read it.
         for (const child of childSessions(session.events())) {
           const inbox = sessionInboxHookToken(sessionCommandHookToken(child));
           for (const { data } of receipts.of(child, "response.submitted"))
@@ -2214,7 +2125,6 @@ describe("work delegated to a child session", () => {
     const children = childSessions(events);
     expect(children).toHaveLength(2);
     expect(ranIn.toSorted()).toEqual(children.toSorted());
-    // Each child admitted one share, under its own receipt, and nothing more but the probe.
     const answeredIn = children.map((child) =>
       receipts
         .of(child, "delivery.admitted")
@@ -2244,9 +2154,6 @@ describe("work delegated to a child session", () => {
       ).toMatchObject({ outcome: "completed", output: "Child deployed." });
   });
 
-  // A child reports how it settled its share under the share's own id, which this session never
-  // recorded. It still credits the outcome to the answer that share came from, not to a later
-  // person's answer to the same prompt.
   it("credits a child's refusal of its share to the answer it came from, not a later one", async () => {
     let prompts: string[] = [];
     let bobAnswer = "";
@@ -2264,8 +2171,6 @@ describe("work delegated to a child session", () => {
           "both relayed approvals",
           (event) => event.type === "interaction.opened" && ++opened === 2,
         );
-        // Bob answers both prompts, and Alice answers them too before either child has read
-        // Bob's answer. Only Alice, who asked, may approve.
         prompts = session.approvals();
         bobAnswer = await session.answer(prompts, "approve", BOB, {
           state: { responder: "U_BOB" },
@@ -2305,9 +2210,6 @@ describe("work delegated to a child session", () => {
     ]);
   });
 
-  // #4923: a typed answer to a relayed prompt is a message, so only the turn's
-  // own principal may answer it by text; another person's text waits for the
-  // turn to end instead of being forwarded to the child under alice's auth.
   it("keeps another principal's typed answer out of the turn that relays a child's prompt", async () => {
     const seen: (readonly [string, string, unknown])[] = [];
     const { events, ran } = await withSession(
@@ -2318,7 +2220,6 @@ describe("work delegated to a child session", () => {
             events: {
               "delivery.consumed"(event, ctx) {
                 const text = event.data.parts.find((part) => part.kind === "text")?.text;
-                // The child session runs the same hooks; only the parent's deliveries count.
                 if (text === undefined || text.includes("CHILD:")) return;
                 seen.push([text, event.data.turnId, ctx.session.auth.current?.principalId]);
               },
@@ -2347,19 +2248,16 @@ describe("work delegated to a child session", () => {
             return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait" }];
           return "The child is done.";
         }),
-        // Bob may press the child's approve button; his typed text is still his own message.
         tools: [{ allowOtherResponders: true, approval: true, name: "deploy" }],
       },
       async (session) => {
         await session.next("relayed approval pause");
-        // "1" names the first option, approve, as well as its id does.
         await session.send("1", BOB);
         await session.send("approve");
         await session.until(
           "Alice's answer runs the child's call",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
         );
-        // Only Alice's text answered; Bob's is still waiting for its own turn.
         expect(seen).toEqual([
           ["Delegate the deploy.", "turn_0", "alice"],
           ["approve", "turn_0", "alice"],
@@ -2388,11 +2286,9 @@ describe("work delegated to a child session", () => {
           const prompt = JSON.stringify(raw);
           if (prompt.includes("If the person should hear from you now")) blocks.add("person");
           if (prompt.includes("Only your final reply reaches your caller")) blocks.add("caller");
-          // The child reports once the test lets it.
           const first = raw.find((message) => message.role === "user");
           if (JSON.stringify(first?.content).includes("CHILD:"))
             return heldReply("Child deployed.", childWorks.wait);
-          // The parent delegates, says the work is underway, and reports the child's result.
           if (!prompt.includes('"toolName":"agent"'))
             return [
               {
@@ -2416,8 +2312,6 @@ describe("work delegated to a child session", () => {
       },
     );
 
-    // A person reads the text a held turn writes, so both texts are replies, and the model is told
-    // it may confirm the work is underway.
     expect(
       ofType(events, "content.completed").flatMap((event) =>
         event.data.kind === "text" ? [[event.data.value, event.data.phase]] : [],
@@ -2470,7 +2364,6 @@ describe("work delegated to a child session", () => {
     const [ended] = ofType(events, "task.ended");
     expect(ended?.data).toMatchObject({ outcome: "cancelled", reason: "turn-cancelled" });
     expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
-    // The cleared conversation's next turn reads only the new message: no task result or note.
     const last = prompts.at(-1)!;
     expect(last).not.toContain("call_agent");
     expect(last).not.toContain(ended!.data.taskId);
@@ -2500,7 +2393,6 @@ describe("work delegated to a child session", () => {
                 toolCallId: "call_agent",
               },
             ];
-          // The parent keeps generating while the child finishes, so its result stays unread.
           return heldReply("Still", never.wait, "going");
         }),
         tools: [],
@@ -2508,7 +2400,6 @@ describe("work delegated to a child session", () => {
       async (session) => {
         await session.until("generating", (event) => event.type === "content.delta");
         await waitForOwnerGate(childReplied.wait, "child reply", session.events);
-        // The child's result reaches the parent's inbox while the parent still generates.
         await new Promise((resolve) => setTimeout(resolve, 2_000));
         await session.control("clear");
         await session.until("cleared", (event) => event.type === "context.settled");
@@ -2532,13 +2423,11 @@ describe("deliveries a child session reads", () => {
         model: scriptedModel((_prompt, raw) => {
           const prompt = JSON.stringify(raw);
           const called = (callId: string) => prompt.includes(`"toolCallId":"${callId}"`);
-          // The child answers the last message it read.
           const first = raw.find((message) => message.role === "user");
           if (JSON.stringify(first?.content).includes("CHILD:")) {
             const last = raw.findLast((message) => message.role === "user");
             return JSON.stringify(last?.content).includes("second") ? "Child two." : "Child one.";
           }
-          // The parent starts the child, waits for it, then continues the same task by its id.
           if (!called("call_one"))
             return [
               { input: { message: "CHILD: first" }, toolName: "agent", toolCallId: "call_one" },
@@ -2586,7 +2475,6 @@ describe("deliveries a child session reads", () => {
     const { events } = await withSession(
       name,
       {
-        // Its parent is a Workflow run of its own (`receiveDelegatedResultWorkflow`).
         host: "workflow",
         message: "Review the release notes.",
         parent: {
@@ -2595,7 +2483,6 @@ describe("deliveries a child session reads", () => {
           sessionId: "parent",
           turn: { id: "parent-turn", sequence: 1 },
         },
-        // The first model call spends past the limit, so the turn waits on a continuation prompt.
         sessionUsage: ({ window }) => window.inputTokens > 0,
         model: scriptedModel(({ results }) =>
           results.length === 0 ? [{ toolName: "review_notes" }] : "Reviewed.",
@@ -2620,7 +2507,6 @@ describe("deliveries a child session reads", () => {
           cancelled ||= event.type === "turn.settled";
           return cancelled && event.meta.endOfLine !== false;
         });
-        // Turn settlement precedes the reply; let it arrive before the helper cancels its owner.
         await expect(receiver.returnValue).resolves.toMatchObject({
           kind: "runtime-action-result",
         });
@@ -2657,7 +2543,6 @@ describe("controls between turns", () => {
         async (session) => {
           if (when === "idle") await session.next("first");
           else await session.until("generating", (event) => event.type === "content.delta");
-          // A control from a newer eve, such as one an older owner on another deployment reads.
           await session.control("from-the-future" as "clear", { turnId: "turn_0" });
           release.open();
           await session.until(
@@ -2744,8 +2629,6 @@ describe("controls between turns", () => {
           await session.next("first reply");
           await session.send("Should Alice water it more?");
           await session.next("cancelled after summary");
-          // A later turn's budget reads the checkpoint, not only the live stream. In the batched
-          // case it must retain the cut call's summary spend above the completed tool call.
           await session.send("Bob asks for the next care steps.");
           await session.until(
             "budget after cancellation",
@@ -2869,12 +2752,10 @@ describe("controls between turns", () => {
     const { events } = await withSession(
       "edge-cancel-before-consumption",
       {
-        // A hook may cancel as the message is admitted, before the turn consumes it.
         hooks: {
           stop: defineHook({
             events: {
               "delivery.admitted": (_event, ctx) => {
-                // The second message; a retried step would admit it again, and not cancel then.
                 if (++admitted === 2) ctx.cancel();
               },
             },
@@ -2900,7 +2781,6 @@ describe("controls between turns", () => {
       },
     );
 
-    // The step that admitted the message writes it once, and isn't retried.
     expect(ofType(events, "session.started")).toHaveLength(1);
     const [, cancelled, next] = ofType(events, "delivery.admitted").map(
       (event) => event.data.deliveryId,
@@ -2920,14 +2800,11 @@ describe("controls between turns", () => {
       expect.objectContaining({ deliveryId: cancelled, outcome: "handled", turnId: "turn_1" }),
       expect.objectContaining({ deliveryId: next, outcome: "handled", turnId: "turn_2" }),
     ]);
-    // The cancelled turn's message stays in history once, as it would if its model had started.
     expect(prompts.at(-1)?.filter((content) => content.includes("Never mind."))).toHaveLength(1);
   });
 });
 
 describe("turns parked on their own prompt", () => {
-  // #4923: a turn parked on its continuation prompt is still alice's turn, so
-  // bob's message waits for it to end instead of joining it.
   it("keeps another principal's message out of a turn parked on its prompt", async () => {
     const seen: (readonly [string, string, unknown])[] = [];
     const { events } = await withSession(
@@ -2952,7 +2829,6 @@ describe("turns parked on their own prompt", () => {
         },
         message: "Hello there",
         model: scriptedModel(() => "Hello."),
-        // The first turn spends the whole budget, so the next one parks on the prompt.
         sessionUsage: ({ window }) => window.inputTokens >= 1,
         tools: [],
       },
@@ -2972,7 +2848,6 @@ describe("turns parked on their own prompt", () => {
           "declined",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
         );
-        // Bob's message runs as his own turn, which parks on its own prompt.
         await session.until(
           "Bob's prompt",
           (event) => event.type === "interaction.opened" && event.data.request.kind === "budget",
@@ -2988,8 +2863,6 @@ describe("turns parked on their own prompt", () => {
     ]);
   });
 
-  // A turn waiting on its own tool approval gives way to its person's message,
-  // but not to anyone else's: bob's waits for alice's turn to end.
   it("keeps another principal's message out of a turn waiting on its own approval", async () => {
     const seen: (readonly [string, string, unknown])[] = [];
     const { events, ran } = await withSession(
@@ -3027,7 +2900,6 @@ describe("turns parked on their own prompt", () => {
           "the approved turn",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
         );
-        // Bob's message runs as his own turn, which asks for its own approval.
         await session.until(
           "Bob's approval",
           (event) => event.type === "turn.paused" && event.data.turnId === "turn_1",

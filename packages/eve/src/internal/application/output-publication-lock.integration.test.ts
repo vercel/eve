@@ -39,7 +39,6 @@ describe("acquireRecoveryLease", () => {
     const holder = await acquireRecoveryLease(lockPath, "holder");
     expect(holder).toBeDefined();
 
-    // Recursive mkdir sees EEXIST, then stats a lock that its holder renamed away in between.
     fileSystemFaults.mkdir = async (path, options) => {
       if (path !== lockPath || (options as { recursive?: boolean })?.recursive !== true) return;
       fileSystemFaults.mkdir = undefined;

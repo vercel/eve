@@ -1,4 +1,3 @@
-// @linux-only: pending history
 import { describe, expect, it } from "vitest";
 import { defineChannel, POST } from "#public/definitions/channel.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
@@ -12,7 +11,6 @@ import { resumeRoutedHook } from "#execution/hosts.js";
 const channel = defineChannel({
   routes: [POST("/drop", async () => new Response("ok"))],
   state: {},
-  // A channel drops a delivery it does not handle by replacing it with nothing to deliver.
   deliver(payload) {
     return payload.message === "drop me" ? {} : undefined;
   },

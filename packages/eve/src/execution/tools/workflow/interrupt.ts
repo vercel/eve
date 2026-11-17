@@ -6,16 +6,8 @@ import { resumeRoutedHook, routedRunEnded } from "#execution/hosts.js";
 
 const INTERRUPT: WorkflowToolRunControlMessage = { kind: "interrupt" };
 
-/** How long a steered turn waits for a run that is still starting to take its interrupt. */
 const RUN_START_TIMEOUT_MS = 30_000;
 
-/**
- * Aborts the `execute` call's `abortSignal`. A turn steered right after it
- * started the run can get here before the run registers its control hook, so
- * a live run's missing hook is waited for. A run that ended has nothing left
- * to interrupt. A run still without its hook at the deadline fails the step,
- * which the runtime retries, since the interrupt was not delivered.
- */
 export async function interruptWorkflowToolRun(run: WorkflowToolRunAddress): Promise<void> {
   "use step";
 

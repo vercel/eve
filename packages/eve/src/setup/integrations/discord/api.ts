@@ -8,7 +8,6 @@ const DiscordApplicationSchema = z.object({
   verify_key: z.string(),
 });
 
-/** Non-secret Discord application metadata resolved from a bot token. */
 interface DiscordApplication {
   id: string;
   name: string;
@@ -31,7 +30,6 @@ async function discordRequest(
   });
 }
 
-/** Validates a bot token and returns its Discord application. */
 export async function resolveDiscordApplication(
   botToken: string,
   fetchImpl: typeof fetch = fetch,
@@ -48,7 +46,6 @@ export async function resolveDiscordApplication(
   return { id: parsed.data.id, name: parsed.data.name, publicKey: parsed.data.verify_key };
 }
 
-/** Registers the global command consumed by the default Discord channel. */
 export async function registerDiscordCommand(
   applicationId: string,
   botToken: string,
@@ -87,7 +84,6 @@ export async function registerDiscordCommand(
   }
 }
 
-/** Points Discord HTTP Interactions at a persisted Connect connector. */
 export async function configureDiscordInteractionsEndpoint(
   botToken: string,
   connectorId: string,
@@ -109,20 +105,12 @@ export async function configureDiscordInteractionsEndpoint(
   }
 }
 
-// Application flags: Message Content approved for a verified app, or self-served below 100 servers.
 const GATEWAY_MESSAGE_CONTENT = 1 << 18;
 const GATEWAY_MESSAGE_CONTENT_LIMITED = 1 << 19;
-// The only flags an app may set itself: the limited presence, members, and message content intents.
 const EDITABLE_INTENT_FLAGS = (1 << 13) | (1 << 15) | GATEWAY_MESSAGE_CONTENT_LIMITED;
 
 const DiscordApplicationFlagsSchema = z.object({ flags: z.number().optional() });
 
-/**
- * Turns on the Message Content intent, so messages that don't mention the bot,
- * such as thread follow-ups, arrive with their text. Returns `false` when
- * Discord refuses, as it does for a verified app in 100 or more servers, which
- * needs Discord's approval instead.
- */
 export async function enableDiscordMessageContentIntent(
   botToken: string,
   fetchImpl: typeof fetch = fetch,

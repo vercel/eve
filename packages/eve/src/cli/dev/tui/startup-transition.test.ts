@@ -22,7 +22,6 @@ afterEach(() => {
   renderer.shutdown();
 });
 
-/** The runner's steps from a ready agent's startup screen to its chat composer, in one tick. */
 function finishStartup(): void {
   renderer.finishStartupDraft();
   renderer.renderAgentHeader({
@@ -39,7 +38,6 @@ it("goes from the startup screen to the chat composer without a prompt-less fram
   const startupFrames = screen.frames().length;
 
   finishStartup();
-  // Shutdown interrupts the open composer.
   renderer.readInput({ title: "alice-agent" }).catch(() => undefined);
 
   const frames = screen.frames().slice(startupFrames);

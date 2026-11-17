@@ -12,7 +12,6 @@ const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
 
-// Driver layers bundle separate copies; hydration uses the SDK's first registration.
 export const FatalError = (workflowGlobal[Symbol.for("@workflow/errors//FatalError")] ??
   SdkFatalError) as typeof SdkFatalError;
 export const RetryableError = (workflowGlobal[Symbol.for("@workflow/errors//RetryableError")] ??
@@ -23,9 +22,6 @@ interface WorkflowHook<T> extends AsyncIterable<T> {
   getConflict(): Promise<{ readonly runId: string } | null>;
 }
 
-/**
- * Creates a Workflow hook from inside a durable workflow body.
- */
 export function createHook<T = unknown>(options?: unknown): WorkflowHook<T> {
   const createHookFn = workflowGlobal[WORKFLOW_CREATE_HOOK] as
     | ((hookOptions?: unknown) => WorkflowHook<T>)
@@ -41,8 +37,6 @@ export function createHook<T = unknown>(options?: unknown): WorkflowHook<T> {
     try {
       return await getConflict();
     } catch (error) {
-      // The SDK rejects when its full Run class is absent from the VM. eve only
-      // exposes the owner's runId, so it can honor that contract without Run.
       if (HookConflictError.is(error) && typeof error.conflictingRunId === "string") {
         return { runId: error.conflictingRunId };
       }
@@ -52,9 +46,6 @@ export function createHook<T = unknown>(options?: unknown): WorkflowHook<T> {
   return hook;
 }
 
-/**
- * Returns metadata for the current durable workflow body.
- */
 export function getWorkflowMetadata(): Record<string, unknown> {
   const ctx = workflowGlobal[WORKFLOW_CONTEXT_SYMBOL] as Record<string, unknown> | undefined;
 
@@ -67,9 +58,6 @@ export function getWorkflowMetadata(): Record<string, unknown> {
   return ctx;
 }
 
-/**
- * Creates a Workflow writable stream handle from inside a durable workflow body.
- */
 export function getWritable<T = unknown>(options: { namespace?: string } = {}): WritableStream<T> {
   const getStreamId = workflowGlobal[WORKFLOW_GET_STREAM_ID] as
     | ((namespace?: string) => string)
@@ -89,9 +77,6 @@ export function getWritable<T = unknown>(options: { namespace?: string } = {}): 
   }) as WritableStream<T>;
 }
 
-/**
- * Creates a Workflow webhook from inside a durable workflow body.
- */
 export function createWebhook<T = unknown>(options?: unknown): WorkflowHook<T> & { url?: string } {
   const { respondWith, token, ...rest } = (options ?? {}) as Record<string, unknown>;
   if (token !== undefined) {
@@ -111,9 +96,6 @@ export function createWebhook<T = unknown>(options?: unknown): WorkflowHook<T> &
   return hook;
 }
 
-/**
- * Defines a Workflow hook factory for workflow-body code.
- */
 export function defineHook<T = unknown>(): {
   readonly create: (options?: unknown) => WorkflowHook<T>;
   readonly resume: () => never;
@@ -126,9 +108,6 @@ export function defineHook<T = unknown>(): {
   };
 }
 
-/**
- * Sleeps from inside workflow-body code.
- */
 export function sleep(duration: string | number | Date): Promise<void> {
   const sleepFn = workflowGlobal[WORKFLOW_SLEEP] as
     | ((sleepDuration: string | number | Date) => Promise<void>)
@@ -141,54 +120,18 @@ export function sleep(duration: string | number | Date): Promise<void> {
   return sleepFn(duration);
 }
 
-/**
- * `resumeHook()` is an external/runtime API and must not run in workflow bodies.
- */
 export function resumeHook(): never {
   throw new Error("`resumeHook()` can only be called from outside a workflow function");
 }
 
-/**
- * Step metadata is only available in step functions.
- */
 export function getStepMetadata(): never {
   throw new Error("`getStepMetadata()` can only be called inside a step function");
 }
 
-/**
- * Options accepted by {@link setAttributes}.
- *
- * Mirrors `SetAttributesOptions` from `@workflow/core` so the
- * eve workflow-body bundle does not have to pull the real type in.
- */
 export interface SetAttributesOptions {
-  /**
-   * Permit attribute keys that start with the reserved `$` prefix. eve
-   * framework code passes `true` so it can write the `$eve.*` namespace;
-   * authored agent code never calls this shim directly.
-   */
   allowReservedAttributes?: boolean;
 }
 
-/**
- * Workflow-body implementation of `setAttributes` for the eve
- * bundle. Mirrors the dispatch path of `@workflow/core`'s workflow-body
- * export (`dist/workflow/set-attributes.js`):
- *
- * 1. Convert the attribute map into the `AttributeChange[]` shape the
- *    runtime expects (`undefined` -> `null` to clear a key).
- * 2. Resolve the workflow runtime's step dispatcher from
- *    `globalThis[Symbol.for("WORKFLOW_USE_STEP")]` (the same global symbol
- *    eve already relies on to materialize `"use step"` proxies).
- * 3. Invoke the builtin `__builtin_set_attributes` step with the changes,
- *    which the runtime records on the active workflow run.
- *
- * Validation is intentionally skipped here. The only caller, `setEveAttributes`,
- * already normalizes keys/values and is the sole entry point for the
- * `$eve.*` reserved namespace; bouncing through the runtime's full
- * validator would require pulling `@workflow/world` into the workflow body
- * bundle.
- */
 export async function setAttributes(
   attrs: Record<string, string | undefined>,
   options: SetAttributesOptions = {},

@@ -40,10 +40,8 @@ const TEST_CONFIG: EveEvalConfig = {
   judge: { model: "openai/gpt-5.4-mini" },
 };
 
-/** The shape `executeTask` (mocked here) resolves to. */
 type TaskOutcome = { result: EveEvalTaskResult; assertions: readonly AssertionResult[] };
 
-/** Calls `runEvals` with the required config defaulted unless overridden. */
 function run(options: Omit<RunEvalsOptions, "config"> & { config?: EveEvalConfig }) {
   return runEvals({ config: TEST_CONFIG, ...options });
 }
@@ -91,9 +89,6 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-// `executeTask` is mocked in these tests, so the client never reaches the
-// network. We pass a real `Client` instance to satisfy the type without
-// adding a duplicate interface.
 const unusedClient = new Client({ baseUrl: "http://localhost" });
 
 const localTarget = createEvalTargetHandle({
@@ -400,7 +395,6 @@ describe("runEvals", () => {
       },
     };
 
-    // The same reporter instance shared by two evals dedupes into one binding.
     await run({
       evaluations: [
         createEval("one", { reporters: [scopedReporter] }),
@@ -612,8 +606,6 @@ describe("runEvals", () => {
       },
     };
 
-    // The config reporter observes every eval; referencing it from an eval too
-    // must not double-fire its callbacks.
     await run({
       evaluations: [createEval("one", { reporters: [configReporter] }), createEval("two")],
       config: {

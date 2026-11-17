@@ -18,7 +18,6 @@ import type { SlackConnectorCandidate, SlackRoutingPlan } from "./slack-setup-pl
 
 export const CONNECT_LOOKUP_TIMEOUT_MS = 60_000;
 
-/** Connect subprocess operations needed to inspect and remove Slack connectors. */
 export interface SlackConnectLifecycleDeps {
   captureVercel: typeof captureVercel;
   runVercel: typeof runVercel;
@@ -32,7 +31,6 @@ type CommandOutput = ReturnType<typeof createPromptCommandOutput>;
 
 type LookupFailure = { state: "failed"; message: string };
 
-/** Shared dependencies and output routing for one connector cleanup operation. */
 interface SlackConnectorCleanupContext {
   log: ChannelSetupLog;
   deps: SlackConnectLifecycleDeps;
@@ -41,7 +39,6 @@ interface SlackConnectorCleanupContext {
   onOutput: CommandOutput;
 }
 
-/** `vercel api` arguments for a team-scoped Connect request. */
 function connectApiArgs(
   path: string,
   orgId: string | undefined,
@@ -60,16 +57,9 @@ function connectorPath(key: string): string {
   return `/v1/connect/connectors/${encodeURIComponent(key)}`;
 }
 
-/** The largest page the connector list accepts. */
 const CONNECTOR_LIST_PAGE_SIZE = 100;
-/** Upper bound on list pages so a misbehaving cursor cannot loop forever. */
 const MAX_CONNECTOR_LIST_PAGES = 50;
 
-/**
- * Lists the Slack connectors attached to one project, with each connector's
- * attached projects. Connect filters by project server-side, so the team's
- * size doesn't matter.
- */
 async function listProjectSlackConnectors(input: {
   deps: SlackConnectLifecycleDeps;
   projectRoot: string;
@@ -123,11 +113,6 @@ async function listProjectSlackConnectors(input: {
   };
 }
 
-/**
- * The first page of a connector's attached projects. A connector with more
- * than one page is used elsewhere either way, so later pages never change
- * whether setup may reuse it.
- */
 async function fetchConnectorProjects(input: {
   deps: Pick<SlackConnectLifecycleDeps, "captureVercel">;
   projectRoot: string;
@@ -159,10 +144,6 @@ async function fetchConnectorProjects(input: {
   }
 }
 
-/**
- * Projects other than this one that use the connector, by attachment or by
- * trigger destination.
- */
 function otherProjectsOf(
   projects: readonly SlackConnectorProject[],
   destinations: readonly SlackTriggerDestination[],
@@ -197,33 +178,20 @@ function toCandidate(input: {
   return candidate;
 }
 
-/** Detail lookups run a few at a time so many connectors cannot fan out unbounded subprocesses. */
 const INSPECTION_CONCURRENCY = 4;
 
 export type SlackConnectorInspection =
   | {
       state: "ok";
-      /** Connectors attached to this project or found by UID, with details. */
       candidates: readonly SlackConnectorCandidate[];
     }
   | LookupFailure;
 
-/**
- * Read-only snapshot of the Slack connectors that matter to the linked
- * project: those attached to it, plus `namedUids` looked up directly. Each
- * carries its attachment, workspace installation, and trigger destination.
- * Any unreadable connector fails the whole snapshot so setup never guesses.
- */
 export async function inspectSlackConnectors(input: {
   deps: SlackConnectLifecycleDeps;
   projectRoot: string;
   projectId: string;
   orgId: string | undefined;
-  /**
-   * UIDs to look up even when this project isn't attached: the channel
-   * file's connector and `slack/<slug>`, the names a connector made for this
-   * agent would carry. No other unattached connector is ever reused.
-   */
   namedUids: ReadonlySet<string>;
   onOutput: CommandOutput;
   signal?: AbortSignal;
@@ -269,7 +237,6 @@ export async function inspectSlackConnectors(input: {
     if (projects.state === "failed") return `${uid}: ${projects.message}`;
     return toCandidate({
       details: lookup.details,
-      // The project-scoped list is authoritative; this only absorbs a lagging list.
       attached: projects.projects.some((project) => project.id === projectId),
       projects: projects.projects,
       projectId,
@@ -290,7 +257,6 @@ export async function inspectSlackConnectors(input: {
   return { state: "ok", candidates };
 }
 
-/** Rechecks the chosen connector before changing its project access or destinations. */
 export async function refreshSlackCandidate(input: {
   deps: SlackConnectLifecycleDeps;
   projectRoot: string;
@@ -335,15 +301,8 @@ export async function refreshSlackCandidate(input: {
   };
 }
 
-/** Name probes stop here so a long run of taken names fails with a clear error. */
 const MAX_CONNECTOR_NAME_PROBES = 20;
 
-/**
- * Picks the `--name` for a new connector: `slug`, then `slug-2`, `slug-3`,
- * and so on. Connect derives the UID `slack/<name>` from it, and a UID a
- * team connector already uses fails the create, so each name is checked by
- * looking its UID up directly.
- */
 export async function findFreeSlackConnectorName(input: {
   deps: Pick<SlackConnectLifecycleDeps, "captureVercel">;
   projectRoot: string;
@@ -369,16 +328,10 @@ export async function findFreeSlackConnectorName(input: {
   };
 }
 
-/** Result of making a connector deliver this project's events to eve's Slack route. */
 export type SlackRoutingResult =
   | { state: "configured" }
   | { state: "attach-failed"; message?: string };
 
-/**
- * Applies the planned routing mutation. Never detaches: attach only adds
- * token access, and the trigger-destinations replacement keeps the project's
- * token access and every other project's entries intact.
- */
 export async function applySlackRouting(input: {
   deps: SlackConnectLifecycleDeps;
   projectRoot: string;
@@ -431,10 +384,6 @@ type SlackConnectorDetailsLookup =
   | { state: "found"; details: SlackConnectorDetails }
   | { state: "failed"; message: string };
 
-/**
- * Looks one connector up by ID or UID. Connect answers 404 for a key no team
- * connector uses, which is how a UID is proven free.
- */
 async function lookupSlackConnector(input: {
   deps: Pick<SlackConnectLifecycleDeps, "captureVercel">;
   projectRoot: string;
@@ -470,7 +419,6 @@ async function lookupSlackConnector(input: {
   }
 }
 
-/** Fetches and validates one team-scoped connector detail payload. */
 export async function fetchSlackConnectorDetails(input: {
   deps: Pick<SlackConnectLifecycleDeps, "captureVercel">;
   projectRoot: string;
@@ -484,7 +432,6 @@ export async function fetchSlackConnectorDetails(input: {
   return lookup.state === "absent" ? { state: "failed", message: lookup.message } : lookup;
 }
 
-/** Fetches the Slack workspace connected to a connector, if one exists yet. */
 export async function fetchSlackWorkspace(input: {
   deps: Pick<SlackConnectLifecycleDeps, "captureVercel">;
   projectRoot: string;
@@ -513,9 +460,6 @@ async function cleanupConnectorUid(
   });
   if (removed) return true;
 
-  // A failed `connect remove` fails closed: a single inventory read that omits
-  // the connector is not proof of removal under eventual consistency, so the
-  // caller must surface it rather than assume it is gone.
   log.warning(
     `Could not remove the abandoned Slack connector. Run \`vercel connect remove ${uid} --disconnect-all --yes\` to clean it up.`,
   );
@@ -533,22 +477,11 @@ async function cleanupConnectorUids(
   return failed.length === 0 ? { state: "clean" } : { state: "failed", connectorUids: failed };
 }
 
-/**
- * Removes the exact connector returned by `connect create`. A run the CLI
- * rejected before its browser flow cannot have created a connector, so there
- * is nothing to remove. Otherwise, when no UID was returned, ownership cannot be
- * proven: the browser page may still create one, and a concurrent or
- * eventually-consistent connector looks the same as this attempt's. So
- * cleanup fails closed. It removes nothing and instead surfaces
- * `expectedUid`, which was free before this attempt, if it now exists, so the
- * caller can stop rather than risk removing a bystander's connector.
- */
 export async function cleanupCreatedAttempt(
   context: SlackConnectorCleanupContext,
   input: {
     expectedUid: string;
     createdRef: SlackConnectorRef | undefined;
-    /** The CLI reported its own error before printing the browser URL. */
     rejected: boolean;
   },
 ): Promise<SlackConnectorCleanupResult> {

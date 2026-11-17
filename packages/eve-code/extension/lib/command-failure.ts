@@ -12,7 +12,6 @@ function boundedStream(name: "stderr" | "stdout", output: string): string | unde
   return `${name} (last ${MAX_STREAM_CHARS} characters):\n${trimmed.slice(-MAX_STREAM_CHARS)}`;
 }
 
-/** Preserve useful output from failed sandbox commands without flooding build logs. */
 export function commandFailureDetail(result: CommandOutput): string {
   const streams = [boundedStream("stdout", result.stdout), boundedStream("stderr", result.stderr)];
   return (

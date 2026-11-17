@@ -13,14 +13,6 @@ export type DockerSandboxExtensions = Pick<DockerSandboxSession, "setNetworkPoli
 
 const DOCKER_SPAWN_PID_FILE_PREFIX = "/tmp/.eve-sbx-spawn-";
 
-/**
- * Recursive in-container process-tree kill, written against `/proc`
- * directly so it only depends on bash (already a hard requirement) and
- * not on `pgrep`/`ps` being present in the image. Receives the pid
- * file path as `$1`, kills children depth-first, then the recorded
- * wrapper pid. Double-forked daemons that reparented to PID 1 are out
- * of reach by design — they no longer belong to the spawn's tree.
- */
 const DOCKER_KILL_TREE_SCRIPT = [
   'pid_file="$1"',
   'target="$(cat "$pid_file" 2>/dev/null)" || exit 0',
@@ -44,13 +36,6 @@ const DOCKER_KILL_TREE_SCRIPT = [
   "exit 0",
 ].join("\n");
 
-/**
- * A connection bound to one container's identity rather than its name, so a
- * stale connection's commands, file operations, network policy changes, and
- * stop never reach a later container that reuses the session's name.
- * Deletion is the exception: `onSessionEnd` removes by session name, because
- * it is the single deletion path and must work without an open connection.
- */
 export function createDockerConnection(input: {
   readonly cli: DockerCli;
   readonly containerIdentity: string;
@@ -58,8 +43,6 @@ export function createDockerConnection(input: {
   const { cli, containerIdentity } = input;
 
   async function killSpawnTree(pidFilePath: string): Promise<void> {
-    // Best-effort: the container may already be stopped or the process
-    // already gone; the script itself exits 0 in those cases.
     await cli
       .run([
         "exec",
@@ -87,13 +70,6 @@ export function createDockerConnection(input: {
       for (const [key, value] of Object.entries(options.env)) {
         args.push("-e", `${key}=${value}`);
       }
-      // `docker exec` cannot deliver signals to the exec'd process, so
-      // killing the local CLI client alone would leak the command
-      // inside the long-lived container. The wrapper records its own
-      // pid (the parent of the whole spawn tree) into a per-spawn file
-      // that `kill()` and abort feed to DOCKER_KILL_TREE_SCRIPT; on
-      // natural exit it removes the file and preserves the inner
-      // command's exit code.
       const pidFilePath = `${DOCKER_SPAWN_PID_FILE_PREFIX}${randomUUID()}.pid`;
       const wrapped =
         `echo "$$" > ${shellQuote(pidFilePath)}; ` +
@@ -127,8 +103,6 @@ export function createDockerConnection(input: {
           containerIdentity,
           "bash",
           "-lc",
-          // A sentinel exit code distinguishes "missing" from real read
-          // failures (permissions, directories) which must surface.
           `if [ -e ${quoted} ]; then exec cat ${quoted}; else exit 43; fi`,
         ],
         { signal: options.signal },

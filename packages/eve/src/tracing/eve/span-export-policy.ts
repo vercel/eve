@@ -1,5 +1,9 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
+/**
+ * The span a {@link SpanExportPolicy} decides on: its name, IDs, attributes, and conversation
+ * audience.
+ */
 export interface SpanExportContext {
   readonly attributes: Readonly<Record<string, unknown>>;
   readonly audience: ChannelAudience;
@@ -8,6 +12,10 @@ export interface SpanExportContext {
   readonly traceId: string;
 }
 
+/**
+ * What to do with one span for a destination: `{ emit }` to keep or omit it, or `{ redact: true }`
+ * with `inputs`, `outputs`, or both to keep it and remove that content.
+ */
 export type SpanExportDecision =
   | { readonly emit: boolean }
   | {
@@ -16,6 +24,10 @@ export type SpanExportDecision =
       readonly outputs?: boolean;
     };
 
+/**
+ * A value a {@link SpanAttributeDecision} may put on a span attribute: a primitive or a
+ * homogeneous array of primitives.
+ */
 export type SpanExportAttributeValue =
   | string
   | number
@@ -24,10 +36,18 @@ export type SpanExportAttributeValue =
   | readonly number[]
   | readonly boolean[];
 
+/**
+ * What to do with one span attribute for a destination: `{ emit }` to keep or remove it, or
+ * `{ replace: true, value }` to change its value.
+ */
 export type SpanAttributeDecision =
   | { readonly emit: boolean }
   | { readonly replace: true; readonly value: SpanExportAttributeValue };
 
+/**
+ * Per-destination filtering applied before spans are exported: drop or redact whole spans, and
+ * keep, remove, or replace individual attributes. A `span` callback that throws drops the span.
+ */
 export interface SpanExportPolicy {
   /** Drop one span or redact its directional content for this destination. */
   readonly span?: (span: SpanExportContext) => SpanExportDecision;

@@ -5,9 +5,6 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { positionState, withQueuedInput } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
 
-// A session hands off only with nothing open: the projection reports every open turn, and
-// execution state holds queued input and retained requests.
-
 function checkpoint(session: Pick<HarnessSession, "state">) {
   const value = createTestSessionState();
   return {

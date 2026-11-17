@@ -42,11 +42,6 @@ import {
 } from "#definitions/state.js";
 import type { CommitInput, Definition, Effect } from "./definition.js";
 
-/**
- * An authored hook: after every commit, its handlers run once for each fact of their type, typed
- * handler first, then `*`. Its occurrence identifies the fact for external services that support
- * idempotency.
- */
 export function hookDefinition(hook: ResolvedHookDefinition): Definition {
   const definition = { id: `hook:${hook.slug}`, label: hook.logicalPath };
   return {
@@ -55,7 +50,6 @@ export function hookDefinition(hook: ResolvedHookDefinition): Definition {
       effects: () =>
         (ctx.commit?.written ?? []).flatMap(({ event: written, position, progress, view }) => {
           const { meta, ...event } = written;
-          // Streamed progress reaches a handler that names it, and never `*`.
           return (progress ? [event.type] : [event.type, "*"]).flatMap((key): Effect[] => {
             const handler = hook.events[key];
             if (handler === undefined) return [];
@@ -131,14 +125,11 @@ async function runHandler(call: {
     options: HookContinueOptions = {},
   ): HookContinueResult => {
     assertOpen("continue");
-    // Intake drops what this drops, so a blank message would start a turn with no message.
     if (normalizeMessage(message) === undefined) {
       throw new TypeError(`Hook "${label}" called ctx.continue() without a message.`);
     }
-    // `*` handlers receive it too, for every event; only a settled turn has a next turn.
     if (call.event.type !== "turn.settled") return { queued: false, reason: "not-settled" };
     const settledTurn = call.event.data as TurnSettledData;
-    // A hook that cancelled the turn can redirect it; a person's cancel stops the session.
     const state = readDefinitionsState(ctx);
     const cancelledHere =
       settledTurn.outcome === "cancelled" &&
@@ -161,7 +152,6 @@ async function runHandler(call: {
     ) {
       return { queued: false, reason: "already-queued" };
     }
-    // One delivery acts for one principal, so continuations join only when they agree on it.
     if (queued.length > 0 && actsFor(ctx, queued[0]!.auth) !== actsFor(ctx, options.auth)) {
       return { queued: false, reason: "auth-conflict" };
     }
@@ -186,14 +176,12 @@ async function runHandler(call: {
     occurrence: { abortSignal, idempotencyKey },
     position: call.position,
     session: { ...base.session, ...frame.session },
-    // Only handlers whose key can continue get the method, as their types say.
     ...(HOOK_CONTINUE_KEYS[call.key as HookEventKey] === true && { continue: continueTurn }),
   };
   try {
     await call.handler(call.event, hookContext);
     keepMemos(ctx, memoScope, memos.used());
     settled = true;
-    // A handler that throws asks for nothing: its failure fails the turn instead.
     const beforeTurn =
       call.event.type === "delivery.admitted" &&
       activeTurnIdOf(currentProjection(ctx)) === undefined
@@ -203,7 +191,6 @@ async function runHandler(call: {
     else
       for (const command of requested)
         if (command.type === "cancel") {
-          // The turn opens after this commit; it's the hook's to continue once it settles.
           const deliveryIds = call.commit.written.flatMap(({ event }) =>
             event.type === "delivery.admitted" ? [event.data.deliveryId] : [],
           );
@@ -225,7 +212,6 @@ async function runHandler(call: {
   }
 }
 
-/** The principal a continuation's turn acts for: omitted `auth` keeps the session's identity. */
 function actsFor(ctx: ContextContainer, auth: DeliverHookPayload["auth"]): string {
   return principalOf(auth === undefined ? ctx.get(AuthKey) : auth);
 }
@@ -235,12 +221,6 @@ function agentOf(ctx: ContextContainer): HookContext["agent"] {
   return { name: agent.id, nodeId: agent.nodeId };
 }
 
-/**
- * A hook's message as a delivery into its own session. It queues behind the running turn and
- * keeps the channel of the turn that settled, so the channel's `deliver` hook reads it like any
- * other message. Its source names the hook, from which intake notes for the model that no person
- * wrote it; the message and context stay as the hook passed them.
- */
 function hookDelivery(
   ctx: ContextContainer,
   input: HookContinueOptions & {
@@ -277,7 +257,6 @@ function hookDelivery(
   };
 }
 
-/** After a commit's effects: acts on the cancels hooks asked for, and drops what no longer holds. */
 export function settleHookCommands(
   ctx: ContextContainer,
   definitions: readonly Definition[],
@@ -290,11 +269,6 @@ export function settleHookCommands(
   dropYieldedContinuations(ctx, input.written);
 }
 
-/**
- * Stops the running turn for the first cancel that targets it, and drops cancels and failures
- * whose turn has ended. One the commit can't act on waits for a commit that can, while its turn
- * still runs.
- */
 function actOnCancels(
   ctx: ContextContainer,
   definitions: readonly Definition[],
@@ -319,11 +293,6 @@ function actOnCancels(
   cancelTurn({ hook, ...(first.reason !== undefined && { reason: first.reason }) });
 }
 
-/**
- * A hook's continuation yields: once another turn starts, a cancel or reset arrives, or the
- * history is cleared, the session no longer continues the turn it was queued for, and it's dropped.
- * A compaction keeps it: the conversation it continues is still there, summarized.
- */
 function dropYieldedContinuations(ctx: ContextContainer, written: readonly WrittenEvent[]): void {
   const { continuation, ...state } = readDefinitionsState(ctx);
   if (continuation === undefined) return;
@@ -350,12 +319,6 @@ function stopsContinuations(event: WrittenEvent["event"]): boolean {
   );
 }
 
-/**
- * A cancel from a hook before its turn opened stops the turn its input opens. The next turn to
- * start is that turn only if one of the cancelled deliveries caused it; input the session ignored
- * opens no turn, so an unrelated turn just clears the record. Bound before the commit's hooks
- * see the turn settle.
- */
 export function bindOpeningCancel(
   state: DefinitionsState,
   written: readonly WrittenEvent[],

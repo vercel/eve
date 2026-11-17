@@ -37,39 +37,16 @@ export interface GeneratedInstrumentationLayout {
   readonly slots: readonly string[];
 }
 
-/**
- * Paths to the generated compiled-artifacts files shared by Nitro and the
- * vendored workflow bundles for one application.
- */
 export interface GeneratedCompiledArtifactsFiles {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
-  /**
-   * Installs the bundled artifacts on import; eve's runtime plugin and the
-   * workflow step entry both import it.
-   */
   bootstrapPath: string;
-  /** Installs the selected Workflow world on import, failing the import when it cannot. */
   workflowWorldPluginPath: string;
-  /**
-   * Optional Nitro plugin that imports prepared instrumentation runtime
-   * entries when present.
-   */
   instrumentationPluginPath?: string;
-  /** Layout identity used by dev plugin selection and structural fingerprinting. */
   instrumentationLayout?: GeneratedInstrumentationLayout;
-  /**
-   * Absolute paths to prepared provider modules. Nitro uses these to preserve
-   * each module's side effects during packaging.
-   */
   instrumentationSourcePaths?: readonly string[];
-  /**
-   * Installed packages the generated modules import and leave for Nitro to bundle. They keep
-   * the authored transforms, such as asset imports, that inlining them would have applied.
-   */
   hostBundledPackageRoots?: readonly string[];
 }
 
-/** Writes the generated compiled-artifacts modules, which install themselves on import. */
 export async function writeCompiledArtifactsFiles(input: {
   compileResult: CompileAgentResult;
   defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
@@ -131,7 +108,6 @@ export async function writeCompiledArtifactsFiles(input: {
   return generatedArtifacts;
 }
 
-/** Writes `compiled-artifacts-data.json`, the only generated file whose inputs sandbox prewarm changes. */
 export async function writeCompiledArtifactsData(input: {
   compileResult: CompileAgentResult;
   outDir: string;
@@ -145,13 +121,9 @@ export async function writeCompiledArtifactsData(input: {
   );
 
   await mkdir(input.outDir, { recursive: true });
-  // The data reaches the bundle through a `text:` import so Nitro's `replace`
-  // cannot rewrite tokens such as `import.meta.dev` inside authored text.
   await writeFile(
     dataPath,
     JSON.stringify({
-      // Checked and defaulted here rather than at runtime: the runtime trusts a bundled manifest,
-      // since the same eve version wrote it.
       manifest: compiledAgentManifestSchema.parse(input.compileResult.manifest),
       metadata: input.compileResult.metadata,
       modelMetadata,
@@ -182,10 +154,6 @@ function instrumentationSourcePathsOf(layout: InstrumentationLayout): readonly s
   return Object.values(layout.modulePathsBySlot);
 }
 
-// The dev host's Nitro inputs outlive any single generation, so nothing
-// written here may point into authored source or a prunable snapshot: the
-// bootstrap references no authored module, and the instrumentation bundle is
-// copied out of the generation into the stable host directory.
 export async function writeDevelopmentCompiledArtifactsFiles(input: {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   readonly compileResult: CompileAgentResult;
@@ -248,11 +216,6 @@ function generatedInstrumentationLayout(
   return { kind: "directory", slots: Object.keys(layout.modulePathsBySlot) };
 }
 
-/**
- * Copies each materialized instrumentation bundle out of the prunable
- * generation and into the stable dev-host directory, returning the layout in
- * terms of the copies.
- */
 async function copyMaterializedInstrumentation(input: {
   readonly instrumentation: MaterializedInstrumentation;
   readonly outDir: string;
@@ -306,20 +269,11 @@ function resolveInstallWorldImportSpecifier(): string {
 }
 
 interface WorkflowWorldWiring {
-  /** Import specifier for the `workflowWorldModule` namespace import. */
   readonly moduleImportSpecifier: string;
-  /** Extra import lines the construction source depends on. */
   readonly extraImportLines: readonly string[];
-  /** Statement that assigns `workflowWorld`. */
   readonly createWorldSource: string;
 }
 
-/**
- * Per-world wiring for the generated workflow-world plugin. The pieces
- * co-vary and must stay together: a world constructed through an explicit
- * `createWorld(config)` call must not import `createWorldFromModule`, and
- * only the vendored local World needs the data-directory resolver import.
- */
 function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
   if (packageName === "@workflow/world-local") {
     const dataDirectoryImportSpecifier = stringifyEsmImportSpecifier(
@@ -410,15 +364,6 @@ export function createWorkflowWorldPluginSource(input: {
   ].join("\n");
 }
 
-/**
- * Generates the dev worker's Workflow World wiring. Configs that resolve to
- * the vendored local World get the parent RPC client so run state survives
- * worker replacement; any other World is instantiated inside the worker
- * unchanged, because eve does not own its lifetime. The selection predicate
- * is shared with the parent's world creation — a worker wired for the RPC
- * client fails every World call unless the parent created a World to serve
- * it.
- */
 export function createDevelopmentWorkflowWorldPluginSource(input: {
   compiledArtifactsBootstrapPath: string;
   configuredWorld: AgentWorkflowWorldDefinition | undefined;
@@ -443,13 +388,6 @@ export function createDevelopmentWorkflowWorldPluginSource(input: {
   ].join("\n");
 }
 
-/**
- * Generates the Nitro plugin that registers the authored instrumentation.
- *
- * Registers one provider per file in slot order, awaiting each `setup` so a
- * provider cannot miss an event published while it is still starting up, then
- * builds the one OpenTelemetry pipeline their declarations add up to.
- */
 function createInstrumentationPluginSource(input: {
   agentName: string;
   layout: InstrumentationLayout;

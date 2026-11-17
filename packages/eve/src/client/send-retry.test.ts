@@ -63,7 +63,6 @@ describe("session send readiness retries", () => {
       notReadyMs: 3_750,
       acceptedAt: startedAt + 3_750,
     });
-    // Each attempt resolves fresh headers so rotated credentials apply to retries.
     expect(observedHeaders).toEqual(["1", "2", "3", "4", "5"]);
     expect(new Set(observedPaths)).toEqual(new Set(["/eve/v1/session/session_1"]));
   });

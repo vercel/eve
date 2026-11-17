@@ -19,7 +19,6 @@ import { waitWithSignal } from "#shared/wait-with-signal.js";
 import { isObject } from "#shared/guards.js";
 import { isRunExpired } from "#shared/run-errors.js";
 
-/** Every hop resolves recorded authority on its owning deployment, never an event-supplied URL. */
 export async function descendantStreamResponse(input: {
   readonly request: Request;
   readonly root: Session;
@@ -170,10 +169,6 @@ function unavailable(code = "descendant_unavailable", status = 404): Response {
   );
 }
 
-/**
- * The child the parent's stored line at `hop.position` opened, read from that line alone: a v26
- * line too, so verifying a hop costs one line however long the parent's history is.
- */
 async function recordedChild(
   parent: Session,
   hop: DescendantHop,

@@ -1,4 +1,3 @@
-// @linux-only: hook state reaches model calls
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { MockLanguageModelV4 } from "ai/test";
@@ -26,9 +25,6 @@ import { defineState } from "#public/definitions/state.js";
 import { otelIntegration } from "#tracing/eve/otel-declaration.js";
 import { defineTool } from "#tools/definition.js";
 
-// A turn.started hook can decide something for the turn, such as which model it runs or a
-// feature flag, and keep it in state. These pin that the turn's own readers see that decision.
-
 type Choice = "first" | "second";
 
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
@@ -46,7 +42,6 @@ function caller(plan: string) {
   };
 }
 
-/** Each turn calls `lookup` once and then replies, so it makes two model calls. */
 function scriptedModel(name: Choice, served: Choice[]) {
   return markMockModel(
     new MockLanguageModelV4({
@@ -66,10 +61,6 @@ function scriptedModel(name: Choice, served: Choice[]) {
   );
 }
 
-/**
- * Two turns of two model calls each. The hook picks the second model for a turn that asks for
- * it, after a pause like a remote lookup's; the dynamic model runs what the hook picked.
- */
 async function runTwoTurns(): Promise<readonly Choice[]> {
   const served: Choice[] = [];
   const models = { first: scriptedModel("first", served), second: scriptedModel("second", served) };
@@ -126,7 +117,6 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
     });
     const stream = captureTurnEvents(run);
     try {
-      // The second message must start its own turn, not steer the first one.
       await withTimeout(stream.nextTurn(), "first turn");
       await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
         auth: caller("team"),
@@ -146,8 +136,6 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
 describe("state a turn.started hook writes", () => {
   afterEach(async () => {
     await shutdownInstrumentationProviders();
-    // Shutdown flushes the otel integration but leaves its global registration, which would
-    // refuse the next file's tracer provider in a worker that shares.
     trace.disable();
     context.disable();
     propagation.disable();

@@ -1,4 +1,3 @@
-/** Consumer-facing helpers exported as `eve/extensions/git/sandbox`. */
 export {
   executeGitHubShell,
   GitHubCommandInputError,

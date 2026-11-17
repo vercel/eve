@@ -11,7 +11,6 @@ describe("telegram space", () => {
   it.each([
     ["private", { type: "direct", visibility: "private" }],
     ["group", { type: "shared", visibility: "private" }],
-    // A supergroup or channel may have a public link, which the chat type doesn't say.
     ["supergroup", { type: "shared" }],
     ["channel", { type: "shared" }],
   ] as const)("reports a %s chat as %o", (chatType, expected) => {

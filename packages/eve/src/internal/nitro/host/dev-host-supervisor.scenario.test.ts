@@ -22,8 +22,6 @@ import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-
 const ADDRESS = DEVELOPMENT_CLIENT_ADDRESS_HEADER;
 const SIGNATURE = DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER;
 
-// A worker entry in the shape Nitro's dev build emits. `workerData` picks the
-// behavior per host; file gates let a test step a worker without timers.
 const WORKER_SOURCE = `
 import { existsSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
@@ -128,7 +126,6 @@ async function startSupervisor() {
     }),
     listener,
     logs,
-    /** A file path whose creation releases whatever waits on it. */
     path: (name: string) => join(root, name),
     supervisor,
     url,
@@ -150,7 +147,6 @@ async function readToEnd(reader: ReadableStreamDefaultReader<Uint8Array>): Promi
   }
 }
 
-/** POSTs on a fresh connection whose client asks to close it, as `vercel dev` does. */
 async function postClosingConnection(target: URL): Promise<number> {
   const { promise, reject, resolve } = Promise.withResolvers<number>();
   const request = httpRequest(
@@ -177,14 +173,12 @@ describe("dev host supervisor", () => {
       "candidate failed to boot",
     );
 
-    // The candidate's host never served, so its workspace is gone already.
     expect(disposeFailed).toHaveBeenCalledOnce();
     await expect(whoami()).resolves.toEqual(before);
   });
 
   it("holds a request that arrives before any worker until one is active", async () => {
     const { host, supervisor, url } = await startSupervisor();
-    // Control routes run just before a request waits for a worker.
     const admitted = Promise.withResolvers<void>();
     supervisor.setControlHandler(async () => {
       admitted.resolve();
@@ -324,7 +318,6 @@ describe("dev host supervisor", () => {
     supervisor.prepareSpare();
     await supervisor.recycle();
     expect((await whoami()).id).not.toBe(recycled.id);
-    // The recycle took the spare instead of booting a worker of its own.
     await expect(boots()).resolves.toBe(3);
     expect(disposeFirst).not.toHaveBeenCalled();
 
@@ -346,7 +339,6 @@ describe("dev host supervisor", () => {
     supervisor.prepareSpare();
     await vi.waitFor(async () => expect(await lines(bootLog)).toHaveLength(2));
 
-    // A new host retires the active worker and discards the old host's spare.
     await supervisor.swapTo(host());
     const booted = await lines(bootLog);
     await vi.waitFor(async () => expect((await lines(closeMarker)).sort()).toEqual(booted.sort()));
@@ -363,8 +355,6 @@ describe("dev host supervisor", () => {
     await vi.waitFor(() => expect(logs).toContain("[eve:dev] dev worker exited; restarting."));
     await open(bootGate);
     await second;
-    // Queued behind the restart, so the restart has run once this settles; a
-    // restart that swapped retired code back in would recycle to it.
     await supervisor.recycle();
 
     await expect(whoami()).resolves.toMatchObject({ label: "second" });
@@ -389,12 +379,10 @@ describe("dev host supervisor", () => {
     const bootGate = context.path("boot-gate");
     await open(bootGate);
     await context.supervisor.swapTo(context.host({ bootGate }));
-    // Workers booted from here on wait forever.
     await rm(bootGate);
 
     const pending = begin(context);
     pending.catch(() => undefined);
-    // Let the swap start waiting on its booting worker.
     await new Promise((resolve) => setImmediate(resolve));
     const startedAt = performance.now();
     await context.supervisor.close();
@@ -426,8 +414,6 @@ describe("dev host supervisor", () => {
     await reader.read();
 
     await open(failGate);
-    // A truncated stream must reach the client as a failure, never as a
-    // cleanly terminated response.
     await expect(readToEnd(reader)).rejects.toThrow();
   });
 

@@ -19,7 +19,6 @@ const scenarioApp = useScenarioApp();
 describe("framework-vite dev", () => {
   it("proxies eve routes to EVE_BASE_URL", async () => {
     const app = await scenarioApp(createViteEveServiceDescriptor());
-    // Stands in for the eve server, so the plugin does not spawn `eve dev`.
     const eveServer = createServer((request, response) => {
       response.end(`eve ${request.method} ${request.url}`);
     });

@@ -11,16 +11,10 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("context.sandbox");
 
-/**
- * Starts a prewarmed session's sandbox. A turn neither starts nor resumes
- * one: every agent has a sandbox, most turns may not need it, and resuming a
- * stopped sandbox can start billed compute, so the first use opens it.
- */
 export const sandboxPrewarmer: SessionPrewarmer = {
   name: "sandbox",
   start(ctx, phase) {
     if (phase !== "session") return;
-    // `sandboxProvider.create` built this step's access.
     (ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined)?.prepare();
   },
 };
@@ -60,7 +54,6 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     return { ...session, sandboxState: state };
   },
 
-  // Closes the connection the step opened; `create` built the access.
   async dispose(access) {
     await (access as EnsuredSandboxAccess).release().catch((error: unknown) => {
       logError(log, "failed to close a step's sandbox connection", error);

@@ -12,9 +12,6 @@ import {
 import type { JsonObject } from "#shared/json.js";
 import type { WebSearchSelection } from "#shared/web-search.js";
 
-/**
- * The provider backend resolved for one web search tool invocation.
- */
 type WebSearchBackend =
   | "anthropic"
   | "exa"
@@ -25,46 +22,16 @@ type WebSearchBackend =
 
 type GatewaySchemaBackend = "browserbase" | "tako";
 
-/**
- * Maps an upstream identifier back to the framework tool name that injected it: a provider tool
- * type (the literal `type` string the AI SDK sends to the provider), or a request value the AI SDK
- * adds only for that tool.
- *
- * Used when a host does not support a provider-specific tool — the upstream error references
- * the provider-specific identifier (e.g. `web_search_20250305`), but the harness needs to drop
- * the framework tool by its public name (`web_search`).
- *
- * Adding a new provider tool requires adding the corresponding mapping
- * entry here alongside its {@link resolveWebSearchProviderTool} switch
- * arm so detection stays in lockstep with injection.
- */
 const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
-  // Anthropic's stable web search tool. The Bedrock and Vertex
-  // Anthropic backends reject this type because they only host the
-  // older Claude Messages surface.
   web_search_20250305: WEB_SEARCH_TOOL_NAME,
-  // OpenAI's web search tool, which OpenAI-compatible hosts such as Bedrock may not serve.
   web_search: WEB_SEARCH_TOOL_NAME,
-  // The `include` value `@ai-sdk/openai` adds only alongside OpenAI web search.
   "web_search_call.action.sources": WEB_SEARCH_TOOL_NAME,
 };
 
-/**
- * Returns the framework tool name that produced an upstream provider tool
- * `type`, or `null` when the type is not one we know how to remove.
- *
- * Used by the harness recovery path to decide which tools to drop when a
- * host rejects a tool. Unknown types fall through to
- * the existing terminal/recoverable handling.
- */
 export function resolveFrameworkToolFromUpstreamType(type: string): string | null {
   return UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME[type] ?? null;
 }
 
-/**
- * Returns the output schema for the provider-managed web search tool that
- * will be injected for `backend`.
- */
 export function resolveWebSearchOutputSchema(
   backend: Exclude<WebSearchBackend, GatewaySchemaBackend>,
 ): JsonObject {
@@ -82,12 +49,6 @@ export function resolveWebSearchOutputSchema(
   }
 }
 
-/**
- * Determines the web search backend for a model. On AI Gateway it is the selected search
- * provider (Parallel by default); `native` selects the model vendor's own search, or the fallback
- * when the model has none. Direct models always use their provider's native search. A model
- * left without a backend gets none (`null`).
- */
 export function resolveWebSearchBackend(
   profile: ModelProfile,
   selection: WebSearchSelection = { provider: "parallel" },
@@ -111,13 +72,6 @@ const NATIVE_WEB_SEARCH_BACKENDS: ReadonlySet<string> = new Set<NativeWebSearchB
   "openai",
 ]);
 
-/**
- * Constructs the AI SDK provider tool for web search based on the resolved
- * backend. Called once per harness step when web search is enabled.
- *
- * Dynamic imports keep unused provider SDKs out of the bundle — only the
- * provider matching the current model is loaded.
- */
 export async function resolveWebSearchProviderTool(
   backend: WebSearchBackend,
 ): Promise<ToolSet[string]> {
@@ -136,10 +90,6 @@ export async function resolveWebSearchProviderTool(
     }
     case "anthropic": {
       const { anthropic } = await import("#compiled/@ai-sdk/anthropic/index.js");
-      // `webSearch_20260209()` in @ai-sdk/anthropic@3.0.68 adds the
-      // `code-execution-web-tools-2026-02-09` beta header, which Anthropic
-      // currently rejects. Keep Anthropic web search working by using the
-      // stable tool version until the upstream helper is fixed.
       return attachWebSearchOutputSchema(
         anthropic.tools.webSearch_20250305() as ToolSet[string],
         backend,

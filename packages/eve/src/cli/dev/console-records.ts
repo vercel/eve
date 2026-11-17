@@ -65,7 +65,6 @@ export function parseConsoleRecord(line: string): ConsoleRecord | undefined {
   return undefined;
 }
 
-/** Runs in the dev child and its worker threads before application imports. */
 export function installConsoleRecords(): void {
   const write = (record: ConsoleRecord) =>
     process.stderr.write(`${CONSOLE_RECORD_PREFIX}${JSON.stringify(record)}\n`);

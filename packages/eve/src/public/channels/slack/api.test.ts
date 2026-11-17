@@ -106,9 +106,6 @@ describe("callSlackApi encoding", () => {
     vi.unstubAllGlobals();
   });
 
-  // Slack accepts form encoding on every endpoint but JSON on only a
-  // subset (conversations.replies rejects JSON). Lock in form so the
-  // partial-JSON endpoints don't silently break again.
   it("sends every Slack API call as application/x-www-form-urlencoded", async () => {
     for (const operation of [
       "conversations.replies",
@@ -476,8 +473,6 @@ describe("SlackThread.refresh", () => {
 
     await thread.refresh();
 
-    // conversations.replies rejects JSON; lock in the form encoding at
-    // the public refresh surface so replies never get silently dropped.
     const repliesCall = mock.calls.find(
       (call) => call.url === "https://slack.com/api/conversations.replies",
     );
@@ -888,8 +883,6 @@ describe("auto-anchor on first post", () => {
     expect(anchors).toEqual(["1700000001.000001"]);
     expect(slack.threadTs).toBe("1700000001.000001");
 
-    // The first post itself lands at the channel root (no thread_ts in body)
-    // because the anchor is set AFTER Slack assigns the ts.
     const firstCall = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage")!;
     expect((firstCall.body as { thread_ts?: string }).thread_ts).toBeUndefined();
   });
@@ -1117,8 +1110,6 @@ describe("api transport options", () => {
     vi.stubGlobal("fetch", globalFetch);
     const apiFetch = okFetch();
 
-    // No trailing slash and never passed through resolveSlackTransportOptions:
-    // the call resolves its own options.
     await callSlackApi({
       api: { apiBaseUrl: "http://localhost:3000/api/slack", fetch: apiFetch },
       body: {},

@@ -1,11 +1,5 @@
 import { spawn } from "node:child_process";
 
-/**
- * Relays a child process through a pseudo-terminal of a fixed size, using
- * Python's standard `pty` module so the smoke tests need no native Node
- * dependency. The child sees a real TTY on stdin, stdout, and stderr, exactly
- * like a person's terminal; this process reads what it paints and types into it.
- */
 const PTY_BRIDGE = `
 import fcntl, os, pty, select, signal, struct, sys, termios
 columns, rows = int(sys.argv[1]), int(sys.argv[2])
@@ -37,13 +31,9 @@ sys.exit(code if code >= 0 else 128 - code)
 `;
 
 export interface PseudoTerminal {
-  /** Types into the terminal, as raw bytes (`\r` for Enter, `\x1b` for Escape). */
   write(input: string): void;
-  /** Called with each chunk the child paints, in order. */
   onData(listener: (chunk: string) => void): void;
-  /** Resolves with the child's exit code. */
   readonly exited: Promise<number>;
-  /** Kills the child and everything it started. */
   kill(): void;
 }
 

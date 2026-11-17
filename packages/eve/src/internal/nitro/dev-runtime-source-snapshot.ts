@@ -74,11 +74,6 @@ interface SnapshotPlanState {
 
 export async function createDevelopmentSourceSnapshotPlan(input: {
   readonly appRoot: string;
-  /**
-   * Workspace roots that host extension-authored source. Their dependency and
-   * tsconfig topology participates in watch and mount discovery before the
-   * authored module graph is materialized.
-   */
   readonly authoredSourceRoots?: readonly string[];
   readonly snapshotRoot: string;
 }): Promise<DevelopmentSourceSnapshotPlan> {
@@ -177,7 +172,6 @@ export function toDevelopmentSourceSnapshotPath(input: {
   return toSnapshotPath(input);
 }
 
-/** Resolves the repository/workspace boundary used for authored development sources. */
 export function resolveDevelopmentSourceRoot(appRoot: string): string {
   let currentDirectory = resolve(appRoot);
 
@@ -256,11 +250,6 @@ async function addDependencyMountsForRoot(
   }
 }
 
-/**
- * An app root without its own `package.json` (a bare `withEve` agent
- * directory) resolves imports through the nearest owning package. Its
- * dependency declarations live there, not at the app root (vercel/eve#1151).
- */
 function resolveDependencyDeclarationRoot(packageRoot: string, sourceRoot: string): string {
   let currentDirectory = resolve(packageRoot);
   const boundary = resolve(sourceRoot);
@@ -282,13 +271,6 @@ function resolveDependencyDeclarationRoot(packageRoot: string, sourceRoot: strin
   return packageRoot;
 }
 
-/**
- * Node resolution walks every ancestor `node_modules`. Mirror that walk up to
- * the source boundary so hoisted installs — npm/yarn workspaces and
- * intermediate monorepo levels — are materialized in the snapshot instead of
- * only the package's own and the source root's `node_modules`
- * (vercel/eve#1151).
- */
 function listAncestorNodeModulesRoots(packageRoot: string, sourceRoot: string): string[] {
   const boundary = resolve(sourceRoot);
   const roots = new Set<string>();
@@ -306,20 +288,12 @@ function listAncestorNodeModulesRoots(packageRoot: string, sourceRoot: string): 
     currentDirectory = parentDirectory;
   }
 
-  // A package root outside the boundary keeps the pre-existing two-point
-  // behavior: its own node_modules plus the source root's.
   roots.add(resolve(packageRoot));
   roots.add(boundary);
 
   return [...roots];
 }
 
-/**
- * npm and Yarn mark the workspace root only in `package.json` (`workspaces`),
- * unlike pnpm's `pnpm-workspace.yaml`. Without recognizing it, a gitless npm
- * workspace collapses the source root to the app root and hides the hoisted
- * `node_modules` level from the snapshot (vercel/eve#1151).
- */
 function isWorkspaceManifestRoot(directory: string): boolean {
   const packageJsonPath = join(directory, "package.json");
 
@@ -348,8 +322,6 @@ async function addDependencyMount(state: SnapshotPlanState, mountPath: string): 
     return;
   }
 
-  // Installation topology does not express ownership: npm and hoisted Yarn
-  // use directories where pnpm uses links for the same installed package.
   const sourcePathCandidates = await resolveDependencySourcePathCandidates(mountPath);
   const workspaceSourcePath = sourcePathCandidates.find((candidate) =>
     isAuthoredSourcePath(candidate, state.sourceRoot),
@@ -377,13 +349,6 @@ async function addDependencyMount(state: SnapshotPlanState, mountPath: string): 
   });
 }
 
-/**
- * Workspace dependency packages are mounted in place rather than copied: the
- * dev runtime resolves their contents through the real tree, the same way
- * installed dependencies already resolve (vercel/eve#652). Their dependency
- * closure is still discovered so externalized dependencies resolve from the
- * same installation topology as the authored source bundle.
- */
 async function addWorkspaceDependencyMount(input: {
   readonly mountPath: string;
   readonly state: SnapshotPlanState;
@@ -411,15 +376,11 @@ async function resolveDependencySourcePathCandidates(mountPath: string): Promise
   try {
     const declaredTarget = await readlink(mountPath);
     candidates.add(resolve(dirname(mountPath), declaredTarget));
-  } catch {
-    // Continue to canonical target fallback below.
-  }
+  } catch {}
 
   try {
     candidates.add(await realpath(mountPath));
-  } catch {
-    // Broken dependency entries are ignored by the caller.
-  }
+  } catch {}
 
   return [...candidates];
 }

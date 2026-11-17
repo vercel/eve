@@ -43,7 +43,6 @@ export default function installLocalSchedulesRuntimePlugin(nitroApp: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastFailure: string | undefined;
 
-  // Service-hosted queue functions are not discovered by vc dev yet.
   const poll = async () => {
     let delay = 1_000;
     try {

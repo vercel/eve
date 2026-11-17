@@ -3,12 +3,17 @@ import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Input to the provided `glob` tool: the pattern to match, where to search, and a result limit. */
 export interface GlobToolInput {
   limit?: number;
   path?: string;
   pattern: string;
 }
 
+/**
+ * Result of the provided `glob` tool: the matching paths, their count, the path searched, and
+ * whether the list was truncated.
+ */
 export interface GlobToolOutput {
   content: string;
   count: number;

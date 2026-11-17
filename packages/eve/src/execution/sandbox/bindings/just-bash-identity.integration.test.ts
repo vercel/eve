@@ -9,8 +9,6 @@ import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/provi
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// Recorded from the provider before it moved to the public provider API.
-// Running sessions depend on it, so it must never change.
 const GOLDEN_SESSION_ROOT = "just-bash/sessions/e87bbba07bceb2ae5b77ad77";
 
 class QueryCommand {

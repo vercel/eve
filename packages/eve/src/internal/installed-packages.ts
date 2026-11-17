@@ -4,13 +4,11 @@ import { dirname, join, resolve } from "node:path";
 
 const NODE_MODULES_SEGMENT = "/node_modules/";
 
-/** A package found on disk, or a declared dependency that isn't installed (empty `root`). */
 export interface InstalledPackage {
   readonly name: string | undefined;
   readonly root: string;
 }
 
-/** The packages at `packageRoots` and every package they can load, as installed on disk. */
 export function installedDependencyClosure(
   packageRoots: readonly string[],
 ): readonly InstalledPackage[] {
@@ -34,25 +32,12 @@ export function installedDependencyClosure(
   return closure;
 }
 
-/** The packages at `packageRoots` and every package they can load. */
 export interface InstalledPackageScope {
-  /** Whether a module path sits inside one of the packages. Caches each directory's answer. */
   readonly includes: (modulePath: string) => boolean;
-  /**
-   * Each package's directory below `node_modules`, such as `@ai-sdk/openai`. It is where the
-   * package is installed, which an npm alias makes differ from the package's name. A module of
-   * such a package has it in its path, by its real path and through a link of the same name.
-   * Packages outside `node_modules`, such as linked workspace packages, have none.
-   */
   readonly nodeModulesDirectories: () => readonly string[];
-  /**
-   * The roots of the packages outside `node_modules`. A module of such a package can still have
-   * `node_modules` in its path: a directory there that names no package belongs to the package.
-   */
   readonly rootsOutsideNodeModules: () => readonly string[];
 }
 
-/** Builds the closure once, on first use. */
 export function createInstalledPackageScope(
   packageRoots: readonly string[],
 ): InstalledPackageScope {
@@ -93,7 +78,6 @@ export function createInstalledPackageScope(
   };
 }
 
-/** The nearest enclosing directory whose package.json names a package, skipping nested stubs. */
 export function installedPackageRoot(filePath: string): string | undefined {
   let directory = dirname(toCanonicalPath(filePath));
   while (true) {
@@ -136,8 +120,6 @@ function findInstalledDependencyRoot(dependency: string, fromRoot: string): stri
   return packageJsonPath === undefined ? undefined : toCanonicalPath(dirname(packageJsonPath));
 }
 
-// The native realpath also expands Windows 8.3 names, such as a temp directory's `RUNNER~1`, so
-// package roots recorded here match the long-form module ids bundlers hand to plugins.
 function toCanonicalPath(path: string): string {
   try {
     return realpathSync.native(path);

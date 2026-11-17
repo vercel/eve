@@ -1,18 +1,8 @@
-// @linux-only: authored tool pipeline; compiled from memory, mock sandbox
 import { describe, expect, it } from "vitest";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockTool } from "#internal/testing/mocks/mock-tool.js";
-
-/**
- * Integration coverage for authored tool execution through the harness.
- *
- * Replaces the `test/harness-tool-execution.integration.test.ts` fixture —
- * these cases exercise the same seam (tool execute, error propagation,
- * session and sandbox exposure) through the AppHarness. No test body
- * touches `mkdtemp`, `installBundledCompiledArtifacts`, or real sandboxes.
- */
 
 const WEATHER_INPUT_SCHEMA = {
   additionalProperties: false,

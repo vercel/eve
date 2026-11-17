@@ -16,12 +16,10 @@ const signIn: SignIn = {
 type SlackBody = Record<string, unknown>;
 type SlackReply = Record<string, unknown> & { readonly ok: boolean };
 
-/** The parts of a Slack event context the sign-in handlers read. */
 function context(input: {
   readonly threadTs: string;
   readonly channelId?: string;
   readonly codeChannel?: boolean;
-  /** Overrides Slack's reply to one call; return `undefined` for the default. */
   readonly reply?: (operation: string, body: SlackBody) => SlackReply | undefined;
 }) {
   const channelId = input.channelId ?? "C01";
@@ -60,14 +58,12 @@ function context(input: {
     teamId: undefined,
     threadTs: input.threadTs,
   };
-  // The handlers read only these fields of the full Slack event context.
   const channel = { slack, state, thread } as never;
   return { channel, request, state, thread };
 }
 
 type Request = ReturnType<typeof context>["request"];
 
-/** The bodies of the `chat.postMessage` calls that targeted a person's DM. */
 function directMessages(request: Request, user = "U777"): SlackBody[] {
   return request.mock.calls
     .filter(([operation, body]) => operation === "chat.postMessage" && body.channel === user)
@@ -199,7 +195,6 @@ describe("showSlackSignIn", () => {
   });
 
   it("keeps the public status and private prompt in a code channel", async () => {
-    // A code channel's session has no thread ts, but the channel itself is the conversation.
     const { channel, request, thread } = context({ codeChannel: true, threadTs: "" });
 
     await showSlackSignIn(signIn, channel);

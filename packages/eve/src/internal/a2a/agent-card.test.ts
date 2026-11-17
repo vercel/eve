@@ -40,7 +40,6 @@ describe("buildAgentCard", () => {
   });
 
   it("reads security from the auth policy", () => {
-    // A policy that declares no challenge, such as none(), advertises no scheme.
     expect(buildAgentCard(base)).not.toHaveProperty("securitySchemes");
     expect(buildAgentCard(base)).not.toHaveProperty("securityRequirements");
     expect(
@@ -124,7 +123,6 @@ describe("agentCardResponse", () => {
   it("serves the card when the client's copy is stale, preferring If-None-Match", async () => {
     expect((await get({ "if-none-match": '"stale"' })).status).toBe(200);
     expect((await get({ "if-modified-since": "Thu, 01 Jan 2015 00:00:00 GMT" })).status).toBe(200);
-    // A non-matching ETag wins over a current date.
     const future = new Date(Date.now() + 60_000).toUTCString();
     expect((await get({ "if-modified-since": future, "if-none-match": '"stale"' })).status).toBe(
       200,

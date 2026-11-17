@@ -23,10 +23,8 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
-/** Vercel-shaped: owners run on their own deployment, so ingress resumes by token without a lookup. */
 const vercelWorld = { capabilities: { deploymentAffinity: true } };
 
-/** A World without deployment affinity; owner runs record `ownerEveVersion`. */
 function singleDeploymentWorld(ownerEveVersion: string | undefined) {
   return {
     runs: {
@@ -168,7 +166,6 @@ describe("session inbox resume", () => {
       runs: { get: vi.fn(async (runId: string) => ({ attributes: {}, runId })) },
     });
     const keyFailure = runKeyFailure(reason);
-    // Sealed to the run's public key, the command is accepted without the deployment's key.
     resumeHookMock.mockResolvedValue({
       runId: "owner-2",
       get metadata() {
@@ -190,7 +187,6 @@ describe("session inbox resume", () => {
   });
 
   it("delivers to the live replacement of an owner whose deployment was deleted", async () => {
-    // Bob's message replaced the owner after Alice's resume failed against it.
     resumeHookMock
       .mockRejectedValueOnce(runKeyFailure("Deployment not found."))
       .mockResolvedValueOnce(sessionHook("replacement", "channel:alias", { sessionId: "fresh" }));
@@ -244,7 +240,6 @@ describe("session inbox resume", () => {
     getWorldMock.mockResolvedValue(
       singleDeploymentWorld(ownerEveVersion ?? resolveInstalledPackageInfo().version),
     );
-    // The `eve dev` World refuses every hook lookup for a dormant run, including the resume's own.
     const dormant = async (token: string) => {
       if (!token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
       throw new DevelopmentRunUnavailableError({ availability: "dormant", runId: "owner-1" });
@@ -257,7 +252,6 @@ describe("session inbox resume", () => {
       { kind: "send", payload: { message: "Bob checks in." } },
     ).catch((error: unknown) => error);
 
-    // A same-version dormant run may resume with `eve dev --resume`, so it is never ended.
     expect(refusal).toBeInstanceOf(
       stranded ? StrandedSessionOwnerError : DevelopmentRunUnavailableError,
     );
@@ -265,7 +259,6 @@ describe("session inbox resume", () => {
   });
 });
 
-/** The error Vercel's World throws when a run's payload key lookup fails with a 404. */
 function runKeyFailure(reason: string) {
   return Object.assign(
     new Error(
@@ -277,7 +270,6 @@ function runKeyFailure(reason: string) {
 
 describe("remembering a continuation's owner", () => {
   const guardedWorld = { capabilities: { deploymentAffinity: true, resolvedHookResume: true } };
-  /** A hook a handle could carry: its run's public key routes a resume without a lookup. */
   function routableHook(runId: string, token: string, sessionId: string) {
     return {
       createdAt: new Date("2026-11-01T00:00:00Z"),
@@ -303,7 +295,6 @@ describe("remembering a continuation's owner", () => {
     const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
     resumeHookMock
       .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
-      // Resuming a remembered descriptor returns a hook without metadata.
       .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
     for (let attempt = 0; attempt < 2; attempt++) {
       await expect((await resumeSessionInbox("slack:remembered", send)).sessionId).resolves.toBe(

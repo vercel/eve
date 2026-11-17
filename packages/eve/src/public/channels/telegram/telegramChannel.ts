@@ -617,16 +617,11 @@ async function dispatchCallbackQuery(input: {
   }
 
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
-    // Telegram takes one answer per callback, so it waits for delivery: a press
-    // no session can take is answered with the inactive notice instead.
-    // The prompt's edit starts before the answer and finishes after it.
     const message = input.query.message;
     const data = input.query.data;
     const answer =
       message && state.chatId
         ? await respondOrRetireInactivePrompt(
-            // The presser acts as themselves, so a press that starts a turn lets
-            // their next message steer it.
             () =>
               input
                 .from(telegramContinuationTokenFromState(state))
@@ -669,11 +664,6 @@ async function dispatchCallbackQuery(input: {
   }
 }
 
-/**
- * Edits a prompt no session holds the way `input.resolved` edits a resolved
- * one. The session's record of the prompt is gone, so its text comes from the
- * pressed message.
- */
 async function retireInactivePrompt(
   telegram: TelegramContext,
   message: TelegramMessageReference,
@@ -715,10 +705,6 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   };
 }
 
-/**
- * Records the name of the Telegram user who sent a delivery as the one behind its caller, so a
- * prompt the delivery answers can name them.
- */
 function recordTelegramName(
   state: TelegramChannelState,
   caller: SessionAuthContext | null,

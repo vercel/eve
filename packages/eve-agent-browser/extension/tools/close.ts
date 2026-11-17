@@ -1,4 +1,4 @@
 import { catalogTool } from "../lib/catalog";
 
-// `all` would close every session in the sandbox, not just this extension's.
+/** Lets the agent close the current browser session. */
 export default catalogTool("close", { hiddenArguments: ["all"] });

@@ -15,61 +15,38 @@ import { readHitlState, writeHitlState, type HitlStateChange } from "#harness/hi
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import type { SessionView } from "./view.js";
 
-// The save side of the machine. A transition returns the events that report what changed and
-// the execution state that follows; `applyTransition` publishes the events in order (the publish
-// sink folds each into the projection) and writes the rest.
-// A private record lives only while the projection shows its owner open, so closing an owner is
-// one event: a transition reports it, and the save drops the record here.
-
 declare const transitionBrand: unique symbol;
 
-/** What a machine transition returns. Only the kernel builds one, through `transition`. */
 export interface Transition extends HitlStateChange {
   readonly [transitionBrand]: true;
   readonly turn: TurnState;
   readonly events: readonly SessionEvent[];
-  /** How the transition changes history: messages it commits, or a clear's empty history. */
   readonly history?: HistoryChange;
 }
 
-/** A change the kernel decided, as the transition the commit takes. Only the kernel calls this. */
 export function transition<T extends Omit<Transition, typeof transitionBrand>>(
   change: T,
 ): T & Transition {
   return change as T & Transition;
 }
 
-/** Kernel facts that change nothing private, as a transition that keeps the turn as it is. */
 export function unchangedBy(commit: Commit, turn: TurnState): Transition {
   return transition({ events: commit, turn });
 }
 
-/**
- * Publishes one transition's facts as one commit, or one progress record; `messages` is the
- * conversation as of the commit, for the reactions that read it.
- */
 export type Publish = (
   publication: SessionPublication,
   messages?: readonly ModelMessage[],
 ) => Promise<void>;
 
-/**
- * The facts a kernel transition built, as the one commit the sink takes. Only the kernel calls
- * this; guard rule 51 counts any other caller.
- */
 export function commitOf(facts: readonly SessionEvent[]): Commit {
   return facts as Commit;
 }
 
-/** Transitions decided together, as the one commit their facts make. */
 export function commitTransitions(transitions: readonly Transition[]): Commit {
   return commitOf(transitions.flatMap((transition) => transition.events));
 }
 
-/**
- * Publications in order, with each run of commits joined into one, as one commit's facts are one
- * line. Progress stays its own.
- */
 export function joinCommits(publications: readonly SessionPublication[]): SessionPublication[] {
   const joined: SessionPublication[] = [];
   for (const publication of publications) {
@@ -92,8 +69,6 @@ export function sessionView(
     projection,
     relayedRequestIds: new Set(hitl.relays.keys()),
     responders: hitl.responders,
-    // A sign-in whose interaction closed, as when its call settles without it, is no longer one
-    // the session waits on.
     signIns: hitl.signIns.filter(
       (challenge) =>
         projection.view.interactions[signInInteractionId(challenge)]?.status !== "settled",
@@ -102,10 +77,6 @@ export function sessionView(
   };
 }
 
-/**
- * Publishes a transition's events as one commit, then saves what it changed. A transition that
- * changes history needs a session restored with it.
- */
 export async function applyTransition<T extends { readonly state?: SessionStateMap }>(
   session: T,
   transition: Transition,
@@ -116,7 +87,6 @@ export async function applyTransition<T extends { readonly state?: SessionStateM
   return saveTransition(session, transition);
 }
 
-/** Saves what a transition changes once its events are published. */
 export function saveTransition<T extends { readonly state?: SessionStateMap }>(
   session: T,
   transition: Transition,
@@ -132,18 +102,12 @@ export function saveTransition<T extends { readonly state?: SessionStateMap }>(
   );
 }
 
-/** The messages a transition commits to the end of history. */
 export function committedMessages(transition: Transition): readonly ModelMessage[] {
   return transition.history !== undefined && "append" in transition.history
     ? transition.history.append
     : [];
 }
 
-/**
- * Drops the private records whose row the projection shows done, the one way they retire: a
- * relay's route once its asker settles the interaction, and a responder's once their answer
- * settled. Admitted answers can still be refused while the rest of their batch waits.
- */
 export function dropClosedRecords<T extends HarnessSessionBase>(
   session: T,
   projection: SessionProjection,

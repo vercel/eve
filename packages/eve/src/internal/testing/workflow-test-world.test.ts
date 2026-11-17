@@ -10,7 +10,6 @@ function delivery(messageId: string): Request {
   });
 }
 
-/** Whether `idle()` resolves within a few macrotasks. */
 async function settles(idle: Promise<void>): Promise<boolean> {
   let settled = false;
   void idle.then(() => (settled = true));
@@ -23,7 +22,6 @@ describe("trackDeliveries", () => {
     const deliveries = trackDeliveries(async () => new Response("failed", { status: 500 }));
     deliveries.queued("delayed", true);
 
-    // The delay ends and the delivery fails, so the queue redelivers it later.
     await deliveries.handler(delivery("delayed"));
 
     expect(await settles(deliveries.idle())).toBe(false);
@@ -36,7 +34,6 @@ describe("trackDeliveries", () => {
     await deliveries.handler(delivery("sleeping"));
     expect(await settles(deliveries.idle())).toBe(true);
 
-    // The timer fires and the handler hands the message straight back.
     answer = Response.json({ timeoutSeconds: 0 });
     await deliveries.handler(delivery("sleeping"));
 
@@ -47,7 +44,6 @@ describe("trackDeliveries", () => {
 describe("fenceClosedWorld", () => {
   it("refuses every call a handler from before the restart makes on the closed World", () => {
     const written: string[] = [];
-    // What a handler holds: the World, and its namespaces.
     const world = {
       events: { create: async (runId: string) => void written.push(runId) },
       specVersion: 8,

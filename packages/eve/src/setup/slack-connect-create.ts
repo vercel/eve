@@ -29,11 +29,6 @@ type SlackConnectorCreateResult =
       ref: SlackConnectorRef;
       workspace: SlackWorkspaceConnection;
     }
-  /**
-   * `detail` is the CLI's own error line, when it printed one. `rejected`
-   * proves no connector exists: the CLI reported an error before it printed
-   * the browser URL, the only flow that can create a managed connector.
-   */
   | { state: "failed"; detail?: string; rejected: boolean }
   | { state: "unresolved" };
 
@@ -43,13 +38,6 @@ const CREATE_TIMEOUT_MS = 10 * 60_000;
 const LOOKUP_REQUEST_TIMEOUT_MS = 10_000;
 const LOOKUP_POLL_INTERVAL_MS = 3_000;
 const CREATED_CONNECTOR_PROGRESS = /\bConnector created:\s*(scl_[A-Za-z0-9]+)\b/;
-/**
- * The CLI prints these once Connect hands back the browser URL. Connect
- * creates a managed connector only inside that browser flow, so a run that
- * reports its own error before either line (or a `Connector created` line)
- * cannot have created one. Any other run fails closed, so a reworded CLI
- * line costs a cleanup warning rather than an orphaned connector.
- */
 const BROWSER_FLOW_STARTED = /^(Opening browser for |If the browser doesn't open, visit:)/;
 
 const realDelay = (ms: number, signal?: AbortSignal): Promise<void> =>
@@ -90,11 +78,6 @@ async function pollCreatedSlackConnector(
   }
 }
 
-/**
- * Waits for either the CLI's final browser result or connector metadata proving
- * that Slack connected the workspace. A connector progress event establishes
- * ownership only; the exact detail endpoint establishes workspace completion.
- */
 export async function createSlackConnector(input: {
   deps: SlackConnectorCreateDeps;
   projectRoot: string;

@@ -1,4 +1,3 @@
-// @linux-only: decide model resolution
 import { Experimental_DecisionMockModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 

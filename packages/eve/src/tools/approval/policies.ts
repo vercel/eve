@@ -11,6 +11,10 @@ const DEFAULT_INSTRUCTIONS = `Review the exact tool action for dangerous effects
 const DEFAULT_CLEAR_DESCRIPTION = "The action is routine and low impact.";
 const DEFAULT_CAUTION_DESCRIPTION = "The action is dangerous or its important effects are unclear.";
 
+/**
+ * Options for the {@link auto} approval policy: the decision model, its instructions, and the
+ * criteria that describe each approval outcome.
+ */
 export interface AutoApprovalOptions {
   /** Decision model instance or ID. Defaults to TypeSafe Jev. */
   readonly model?: DecisionModel;
@@ -97,7 +101,6 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
     const evaluation = approvalEvaluation(context as ApprovalContext);
     if (evaluation === undefined) return "user-approval";
     const { entry, pending } = evaluation.read("once");
-    // An approval still waiting on its own answer stays a separate question.
     return entry?.outcome === "accepted" && !pending ? "approved" : evaluation.ask({ key: "once" });
   };
 }

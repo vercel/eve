@@ -14,12 +14,6 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import type { SetupFlowPrompterRenderer, SetupSelectRequest } from "./setup-flow.js";
 
-/**
- * The renderer slice the TUI-native prompter drives: the bordered setup
- * panel for questions, the footer status for ephemeral loading, and toned
- * transcript lines for persistent output. Same members as the optional
- * methods on {@link AgentTUIRenderer}, required here.
- */
 export type TuiPrompterRenderer = SetupFlowPrompterRenderer;
 
 function setupSelectRequest<T extends PrompterValue>(
@@ -87,7 +81,6 @@ function setupSelectRequest<T extends PrompterValue>(
       }
     }
   } else {
-    // The public "inline" hint layout is the panel's "task-list" presentation.
     const kind = opts.hintLayout === "inline" ? "task-list" : (opts.hintLayout ?? "single");
     request = { ...base, kind };
   }
@@ -95,16 +88,6 @@ function setupSelectRequest<T extends PrompterValue>(
   return withContext(request);
 }
 
-/**
- * A {@link Prompter} implemented by the TUI itself: questions render as the
- * bordered setup panel (an input-region variant, clearly not chat content),
- * spinners become the footer's ephemeral status line, and log output lands
- * as toned transcript lines. A cancelled panel throws
- * {@link WizardCancelledError}, which the setup flows already fold.
- *
- * `intro`/`outro` are no-ops — the command's elbow-connected outcome line is
- * the opening and closing of a TUI flow.
- */
 export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
   function guardCancel<T>(value: T | undefined): T {
     if (value === undefined) throw new WizardCancelledError();
@@ -219,8 +202,6 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
       success: line("success"),
       warning: line("warning"),
       error: line("error"),
-      // Subprocess output is a transient preview behind the spinner, not a
-      // narrative line — the rail-log treats it the same way.
       commandOutput: (text) => renderer.renderOutput(text),
       section(title, lines) {
         renderer.renderLine(title, "info");

@@ -1,6 +1,5 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
-/** Pure pieces of the transcript projection: tool rows, task lines, and agent steps. */
 
 import { agentToolSession } from "#client/conversation-state.js";
 import type { TaskEntry } from "./task-activity.js";
@@ -33,15 +32,9 @@ export type ToolState = {
   readonly errorText?: string;
 };
 
-/**
- * A task whose start line is written, named once and never renamed. Calls that reach the task
- * while it works join this record rather than reading as tasks of their own.
- */
 export interface TaskRecord {
-  /** The call that started this stretch of the task. */
   readonly callId: string;
   readonly taskId: string;
-  /** Every call this record answers, the starting call first. */
   readonly callIds: string[];
   readonly kind: "agent" | "tool";
   readonly name: string;
@@ -99,7 +92,6 @@ export function startLine(record: TaskRecord): Block {
   };
 }
 
-/** A later call that reached a working task: a message to it, not a new delegation. */
 export function followUpLine(
   record: TaskRecord,
   part: EveToolPart,
@@ -152,7 +144,6 @@ export function nestedTaskRecord(
   };
 }
 
-/** The call's row, in the transcript's vocabulary. */
 export function toolState(part: EveToolPart, view: SessionView): ToolState {
   const errorText = part.error?.message;
   switch (part.state) {
@@ -210,12 +201,10 @@ export function toolBlock(
   return block;
 }
 
-/** A task's end line: how long it took and what it did, or why it failed, or that it stopped. */
 export function endLine(
   record: TaskRecord,
   call: Pick<CallRow, "status" | "outcome" | "output" | "error">,
   childTools: readonly Block[] | undefined,
-  /** The theme's `·`, which separates the line's facts. */
   separator: string,
 ): Block {
   const dot = ` ${separator} `;
@@ -259,7 +248,6 @@ export function labelContext(label: string | undefined): ToolPresentationContext
   return label === undefined ? undefined : { label };
 }
 
-/** The first line of an agent call's message: what the agent was asked to do. */
 export function agentTaskSummary(input: unknown): string {
   if (input === null || typeof input !== "object") return "";
   const message: unknown = Reflect.get(input, "message");
@@ -273,14 +261,12 @@ export function firstLine(text: string): string | undefined {
 
 export type SubagentStep = {
   readonly key: string;
-  /** Where the step ends among its messages' parts, to order it among the agent's tool calls. */
   readonly order: number;
   readonly reasoning: string;
   readonly message: string;
   readonly finalized: boolean;
 };
 
-/** Pairs each child reply with the reasoning that preceded it. */
 export function subagentSteps(messages: readonly EveMessage[]): SubagentStep[] {
   const steps: SubagentStep[] = [];
   let order = 0;
@@ -329,12 +315,10 @@ export function subagentSteps(messages: readonly EveMessage[]): SubagentStep[] {
     .filter((step) => step.reasoning.length > 0 || step.message.length > 0);
 }
 
-/** A tool call, including one whose input is still streaming and so has no kind yet. */
 export function isToolCallRow(part: EveMessagePart): part is EveToolPart {
   return part.type === "tool" && (part.state === "streaming" || isTerminalToolCallPart(part));
 }
 
-/** Every call that started or reached a task, by call ID. */
 export function taskCallsById(
   conversation: ConversationState,
 ): Map<string, { task: TaskRow; call: CallRow }> {
@@ -347,7 +331,6 @@ export function taskCallsById(
   return calls;
 }
 
-/** Tools a step runs in parallel settle together, so a finished one waits for its siblings. */
 export function activeToolSteps(
   states: ReadonlyMap<EveToolPart, ToolState>,
 ): Set<number | undefined> {
@@ -400,8 +383,6 @@ export function formatAuthorization(
   } else {
     const description = stripTerminalControls(part.request.prompt);
     if (description.length > 0) lines.push(description);
-    // The URL gets a row of its own; returning it as `link` (the block's
-    // `Block.link`) lets the renderer hyperlink every wrapped row to it.
     if (challenge?.url) {
       link = stripTerminalControls(challenge.url);
       lines.push("Open to authorize:", link);
@@ -418,7 +399,6 @@ export function formatAuthorization(
   return link === undefined ? { body } : { body, link };
 }
 
-/** Reads the shared write-file result's `existed` flag, whatever the tool. */
 export function writeExistedFlag(output: unknown): boolean | undefined {
   if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
   const existed = (output as Record<string, unknown>)["existed"];

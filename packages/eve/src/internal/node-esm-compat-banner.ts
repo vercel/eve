@@ -36,13 +36,6 @@ const BANNER_LINES: readonly BannerLine[] = [
 const FILENAME_BANNER_LINE = BANNER_LINES[0]!;
 const DIRNAME_BANNER_LINE = BANNER_LINES[1]!;
 
-/**
- * Builds the ESM CommonJS-compatibility banner appropriate for a parsed
- * bundle chunk. Identifiers the chunk already binds in a top-level variable
- * declaration are skipped so the prepended banner never re-declares them.
- *
- * Returns an empty string when the chunk already provides every binding.
- */
 export function buildNodeEsmCompatBanner(program: ParsedProgram): string {
   const imports: string[] = [];
   const declarations: string[] = [];
@@ -64,7 +57,6 @@ export function buildNodeEsmCompatBanner(program: ParsedProgram): string {
   }
 
   if (chunkProvidesFilename && !chunkProvidesDirname) {
-    // The chunk's binding is initialized after this prepended banner.
     imports.unshift(FILENAME_BANNER_LINE.importLine);
   }
 
@@ -114,11 +106,6 @@ interface SourceMap {
   readonly mappings: string;
 }
 
-/**
- * Creates a bundler plugin that prepends the Node ESM compatibility
- * banner to each output chunk, skipping any banner line whose binding
- * the chunk already provides. Compatible with both Rollup and Rolldown.
- */
 export function createNodeEsmCompatBannerPlugin(): BannerPlugin {
   return {
     name: "eve-node-esm-compat-banner",
@@ -142,15 +129,8 @@ export function createNodeEsmCompatBannerPlugin(): BannerPlugin {
   };
 }
 
-// A block comment body must not be able to span `*/`: a lazy `[\s\S]*?`
-// lets a failed match re-end the comment at every later `*/`, which
-// backtracks catastrophically on large JSDoc-heavy chunks.
 const DECLARATION_TRIVIA = String.raw`(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
-// A keyword directly after a quote can only be string content, such as these
-// banner templates in a bundled copy of this module; it must not force a parse.
 const DECLARATION_START = String.raw`(?:(?<![\w$"'\x60])(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}`;
-// `\b` would accept bundler-deconflicted names such as `__filename$1`, which
-// would force a needless parse of a possibly large bundle.
 const BINDING_END = String.raw`(?![\w$])`;
 const COMPATIBILITY_BINDING_DECLARATION = new RegExp(
   String.raw`${DECLARATION_START}(?:__filename|__dirname|require)${BINDING_END}`,
@@ -163,10 +143,6 @@ const ESCAPED_IDENTIFIER_DECLARATION = new RegExp(
 const IDENTIFIER_ESCAPE_PATTERN = new RegExp(IDENTIFIER_ESCAPE, "g");
 
 function mayDeclareCompatibilityBinding(code: string): boolean {
-  // This is only a negative filter: comments/strings can cause extra parsing,
-  // never a missed declaration. Nearly every large bundle contains `\u` in
-  // strings or regexes, so escaped names are decoded rather than treated as a
-  // reason to parse the whole chunk.
   return COMPATIBILITY_BINDING_DECLARATION.test(code) || declaresEscapedCompatibilityBinding(code);
 }
 

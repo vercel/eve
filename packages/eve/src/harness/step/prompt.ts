@@ -21,13 +21,7 @@ import { followingToolResults, type TurnInput } from "./intake.js";
 
 type ClientContext = NonNullable<ReturnType<typeof getTurnClientContextState>>;
 
-/**
- * What the model reads this step: durable history, which holds the turn's input, with the task
- * results the step delivers, and the client's context for the turn, which keeps one position
- * across the turn's steps and never joins history.
- */
 export interface Prompt {
-  /** Durable messages. Compaction may rewrite them. */
   messages: HarnessModelMessage[];
   clientContext: ClientContext | undefined;
 }
@@ -41,11 +35,6 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
   };
 }
 
-/**
- * History repaired and with the task results the step delivers, the session that records the
- * delivery, and the turn as the repair left its client context's position. The step's session is
- * left as it was, so a preview can read the same prompt without delivering anything.
- */
 async function settleHistory(
   step: Step,
   turn: TurnInput,
@@ -60,7 +49,6 @@ async function settleHistory(
     insertionIndex: turn.storedClientContext?.insertionIndex,
   });
   let session = changeHistory(step.session, { repaired: repaired.messages });
-  // Its own copy: task results join it below.
   const messages = [...session.history];
   if (turn.storedClientContext !== undefined && repaired.insertionIndex !== undefined) {
     const storedClientContext = {
@@ -74,12 +62,9 @@ async function settleHistory(
     const taskContext = await appendTaskContext({
       messages,
       session,
-      // Dynamic values can read these results, so use the tools kept before evaluating them.
       tools: await stepCatalog(step),
     });
     session = taskContext.session;
-    // A turn a task's result starts brings no input of its own: what eve adds for the turn
-    // sits ahead of the results instead.
     messages.push(
       ...taskContext.messages.map((message) =>
         message.role === "user" ? anchorToTurn(message, turn.turnId) : message,
@@ -89,10 +74,6 @@ async function settleHistory(
   return { messages, session, turn };
 }
 
-/**
- * Commits the prepared prompt only after dynamic evaluation succeeds, without projecting task
- * results again. A model call that fails leaves the turn's input in history.
- */
 export function commitTurnInput(step: Step, prepared: PreparedPrompt): Prompt {
   step.session = prepared.session;
   if (prepared.clientContext !== undefined) {
@@ -105,10 +86,6 @@ export function commitTurnInput(step: Step, prepared: PreparedPrompt): Prompt {
   };
 }
 
-/**
- * The prompt the session's dynamic values are evaluated with: the one the model call reads, with
- * the task results it delivers, without committing the turn's input or the delivery.
- */
 export async function previewPrompt(step: Step, turn: TurnInput): Promise<PreparedPrompt> {
   const settled = await settleHistory(step, turn);
   const messages = validateHarnessModelMessages(settled.messages);
@@ -146,7 +123,6 @@ function withTurnInput(
   ];
 }
 
-/** `messages`, the prompt's by default, with the client's context at its position. */
 export function withClientContext(
   prompt: Prompt,
   messages: readonly HarnessModelMessage[] = prompt.messages,
@@ -154,8 +130,6 @@ export function withClientContext(
   const { clientContext } = prompt;
   if (clientContext === undefined || clientContext.messages.length === 0) return [...messages];
   let insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
-  // What eve announced for the turn joined history at the same position, ahead of the turn's
-  // input. The context goes after it, so the durable prefix the next turn reads stays cached.
   while (insertionIndex < messages.length && isAnnouncement(messages[insertionIndex]!)) {
     insertionIndex += 1;
   }
@@ -168,11 +142,6 @@ export function withClientContext(
   ];
 }
 
-/**
- * A message `announce()` added ahead of a turn's input: only it puts unanchored `context.state` and
- * `context.instruction` messages at a turn's start. Other framework messages there, such as a
- * compaction checkpoint or its "Continue.", keep the context ahead of them.
- */
 function isAnnouncement(message: HarnessModelMessage): boolean {
   return (
     message.role === "user" &&
@@ -181,15 +150,10 @@ function isAnnouncement(message: HarnessModelMessage): boolean {
   );
 }
 
-/** The prompt as the model reads it: with the client's context. */
 export function projectPrompt(prompt: Prompt): HarnessModelMessage[] {
   return validateHarnessModelMessages(normalizeModelMessages(withClientContext(prompt)));
 }
 
-/**
- * Compaction rewrote the durable messages: the client's context keeps its distance from the end,
- * so it stays after the turn's input.
- */
 export function compactPrompt(step: Step, prompt: Prompt, messages: HarnessModelMessage[]): void {
   const { clientContext } = prompt;
   if (clientContext !== undefined) {

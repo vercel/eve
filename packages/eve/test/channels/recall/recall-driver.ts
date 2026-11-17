@@ -22,15 +22,6 @@ interface ChatBody {
   readonly to?: string;
 }
 
-/**
- * Drives a Recall bot in a meeting through signed real-time webhooks. People
- * type in the meeting chat, or with `"speech"` say each message to the bot
- * by name. `platform` decides what the chat can do: only Zoom reaches one
- * participant privately. Messages `overheard` picks are spoken without naming
- * the bot, as people talking to each other do. Messages `privately` picks are
- * typed to the bot alone. `spoken` phrases a spoken message, by default
- * `Eve, <text>`. `shouldRespond` replaces the channel's default.
- */
 export function recallDriver(
   options: {
     readonly input?: "chat" | "speech";
@@ -73,7 +64,6 @@ export function recallDriver(
       email: null,
       extra_data: {},
       is_host: person === "alice",
-      // How they joined; the meeting platform comes from the bot.
       platform: "desktop",
     };
   }
@@ -145,7 +135,6 @@ export function recallDriver(
       const chat = chatOf(call);
       if (chat?.message === undefined) return undefined;
       return {
-        // Meeting chat can't edit a message, so each one is its own.
         id: chat.message,
         onlyPerson: chat.to !== undefined && chat.to !== "everyone",
         options: [],

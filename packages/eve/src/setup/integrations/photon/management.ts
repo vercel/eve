@@ -7,7 +7,6 @@ const PHOTON_SPECTRUM_HOST = "https://spectrum.photon.codes";
 const PHOTON_DEVICE_CLIENT_ID = "photon-cli";
 const E164 = /^\+[1-9]\d{6,14}$/;
 
-/** Validates international syntax and the fixed-length North American numbering plan. */
 export function validatePhotonPhoneNumber(value: string): string | null {
   const phoneNumber = value.trim();
   if (!E164.test(phoneNumber)) {
@@ -58,7 +57,6 @@ export interface PhotonManagedProject {
   projectId: string;
   projectSecret: string;
   assignedPhoneNumber?: string;
-  /** Deletes the dedicated project when a later setup phase fails. */
   cleanup(): Promise<void>;
 }
 
@@ -250,7 +248,6 @@ async function registerUser(
   return body.data.assignedPhoneNumber;
 }
 
-/** Returns the least-loaded dedicated iMessage line, when the project has one. */
 export async function findDedicatedPhotonLine(input: {
   projectId: string;
   projectSecret: string;
@@ -280,7 +277,6 @@ async function deleteProject(
   if (!response.ok && response.status !== 404) await json(response, "project cleanup");
 }
 
-/** Authorizes Photon and creates an isolated iMessage project for one eve agent. */
 export async function provisionPhotonProject(
   options: ProvisionPhotonProjectOptions,
 ): Promise<PhotonManagedProject> {
@@ -306,7 +302,6 @@ export async function provisionPhotonProject(
   }
 }
 
-/** Validates existing Photon credentials and registers the agent's iMessage user. */
 export async function usePhotonProject(
   options: UsePhotonProjectOptions,
 ): Promise<PhotonManagedProject> {

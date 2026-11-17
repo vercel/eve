@@ -5,7 +5,6 @@ import { isSampledTrace } from "#shared/trace-policy.js";
 import { enteredView } from "#harness/session-machine/current.js";
 import { contextStorage } from "#context/container.js";
 
-/** Attribute a turn only when exactly one message delivery was consumed, across workers. */
 export function createAgentChannelDeliveryInstrumentation(input: {
   readonly recordInputs: boolean;
   readonly stateStore: AgentTraceStateStore;
@@ -13,7 +12,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
   return {
     async "delivery.consumed"(event) {
       if (event.turnId === undefined) return;
-      // Answer-only deliveries resume the original request; they do not replace its attribution.
       const ctx = contextStorage.getStore();
       if (ctx !== undefined && enteredView(ctx)?.deliveries[event.deliveryId]?.parts?.length === 0)
         return;

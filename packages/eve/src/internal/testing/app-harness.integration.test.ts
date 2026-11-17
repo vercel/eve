@@ -1,4 +1,3 @@
-// @linux-only: test harness artifact isolation (memory)
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { describe, expect, it } from "vitest";
 
@@ -12,18 +11,14 @@ describe("AppHarness", () => {
   it("keeps compiled artifacts scoped to the test runtime session", async () => {
     const runtime = await createTestRuntime({ agent: { name: "scope-probe" } });
 
-    // Before `run`, the session has no artifacts installed.
     expect(runtime.session.compiledArtifacts).toBeNull();
 
     await runtime.run(async () => {
-      // Inside `run`, reads hit the scoped session (installed on entry).
       expect(getActiveRuntimeSession()).toBe(runtime.session);
       expect(runtime.session.compiledArtifacts).not.toBeNull();
       expect(runtime.session.compiledArtifacts?.manifest.config.name).toBe("scope-probe");
     });
 
-    // After `run`, the active session falls back to the process default, and
-    // the process default never saw the test artifacts.
     const defaultSession = getActiveRuntimeSession();
     expect(defaultSession).not.toBe(runtime.session);
     expect(defaultSession.id).toBe("process-default");
@@ -67,8 +62,6 @@ describe("AppHarness", () => {
 
     expect(outputs[0]).toContain("hello tenant-a");
     expect(outputs[1]).toContain("hello tenant-b");
-    // Each runtime observed its own bundle cache; the shared process default
-    // stayed clean because installation always targeted the scoped session.
     expect(runtimeA.session.bundleCache.size).toBeGreaterThan(0);
     expect(runtimeB.session.bundleCache.size).toBeGreaterThan(0);
   });

@@ -51,8 +51,6 @@ describe("local instrumentation runtime", () => {
   it("persists the agent trace hierarchy in OTLP segments", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-local-traces-"));
     temporaryDirectories.push(appRoot);
-    // Resolve and cache the public API tracer before eve installs its vendored
-    // provider, matching an authored module's normal module-scope setup.
     const authoredTracer = (
       require("@opentelemetry/api") as typeof import("@opentelemetry/api")
     ).trace.getTracer("test-user");
@@ -183,7 +181,6 @@ describe("local instrumentation runtime", () => {
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         sessionId: "session-1",
         turnId: "turn-1",
-        // Settling the turn emits the turn span with the pre-allocated id.
         outcome: "completed",
         type: "turn.settled",
       });

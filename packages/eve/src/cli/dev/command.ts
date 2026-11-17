@@ -127,7 +127,6 @@ function addTerminalDisplayOptions(command: Command): Command {
     .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode);
 }
 
-/** Registers an interactive client for existing eve agents. */
 export function registerRemoteCommands(input: {
   applicationContext: CliApplicationContext;
   logger: DevelopmentCommandLogger;
@@ -249,7 +248,6 @@ export function registerRemoteCommands(input: {
   );
 }
 
-/** Registers the local development server command. */
 export function registerDevelopmentCommand(input: {
   applicationContext: CliApplicationContext;
   logger: DevelopmentCommandLogger;
@@ -286,7 +284,6 @@ export function registerDevelopmentCommand(input: {
     if (options.input !== undefined && mode === "headless") {
       throw new InvalidArgumentError("--input requires the interactive UI.");
     }
-    // After `eve init`, its screen stays up until this one paints over it in place.
     const buildProgress =
       mode === "tui" && options.onboarded !== true
         ? startCliLiveRow(logger, { elapsed: true })
@@ -321,7 +318,6 @@ export function registerDevelopmentCommand(input: {
               onExitRequest: lifecycle.requestStop,
               ...resolveTuiDisplayOptions(options),
             });
-            // The rest of the TUI loads while the server boots, off the prompt's path.
             void import("#cli/dev/tui/tui.js").catch(() => undefined);
             return startup;
           })
@@ -343,12 +339,8 @@ export function registerDevelopmentCommand(input: {
         server.start().then((handle) => ({ handle })),
         lifecycle.stopped.then(() => ({ handle: undefined })),
       ]);
-      // Fresh-agent onboarding needs only the project files until it saves, so the person
-      // picks a provider and signs in while the server boots. A server that fails to start
-      // or exits while onboarding is open ends it, like a stop does.
       const stopOnboarding = new AbortController();
       const startedServer: DevelopmentServer & { wait?: () => Promise<void> } = server;
-      // Only a server this command owns can exit under onboarding; an attached one outlives it.
       const ownedServerExited = started.then(({ handle }) =>
         handle?.kind === "started" && startedServer.wait !== undefined
           ? startedServer.wait()
@@ -358,7 +350,6 @@ export function registerDevelopmentCommand(input: {
         () => stopOnboarding.abort(),
         () => stopOnboarding.abort(),
       );
-      // The runner reports how onboarding ended; when eve dev ends first, it's reported here.
       let onboardingOpened = false;
       const reportOnboardingEnded = (result: StartupOnboardingResult | undefined) => {
         if (!onboardingOpened) return;
@@ -396,7 +387,6 @@ export function registerDevelopmentCommand(input: {
         tuiStartupPromise,
         startupOnboardingPromise,
       ]).catch(async (error: unknown) => {
-        // Let onboarding unwind off the terminal before the startup screen shuts down.
         stopOnboarding.abort();
         reportOnboardingEnded(
           await Promise.race([
@@ -416,7 +406,6 @@ export function registerDevelopmentCommand(input: {
         return;
       }
       if (startupOnboardingPromise !== undefined && stopOnboarding.signal.aborted) {
-        // The server exited while onboarding was open, which stopped the startup screen.
         reportOnboardingEnded(startupOnboarding);
         await tuiStartup?.shutdown();
         await ownedServerExited;
@@ -485,8 +474,6 @@ function parseInitQueuedInput(value: string | undefined): string[] | undefined {
     if (Array.isArray(parsed) && parsed.every((message) => typeof message === "string")) {
       return parsed;
     }
-  } catch {
-    // A malformed value came from outside `eve init`; there is nothing to queue.
-  }
+  } catch {}
   return undefined;
 }

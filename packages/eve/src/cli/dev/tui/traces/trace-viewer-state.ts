@@ -1,12 +1,3 @@
-/**
- * Navigation state for the `/traces` conversation viewer — a pure reducer in
- * the style of `select-state.ts`: keys go in, a new state (plus an optional
- * `close` effect) comes out, and rendering lives elsewhere. Data updates
- * from the store poller arrive through {@link applyTraceList}/
- * {@link applyLoadedTrace} so a live trace can grow underneath an open
- * viewer without losing the user's selection.
- */
-
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local/trace-reader.js";
 
 import type { ConversationItem } from "#cli/dev/tui/traces/trace-conversation.js";
@@ -17,59 +8,35 @@ import {
 import type { TraceStoreEntry } from "#cli/dev/tui/traces/trace-store.js";
 import type { TerminalKey } from "#cli/dev/tui/stream-format.js";
 
-/**
- * Rows above the conversation body (padding, title, padding). Lives here
- * rather than in the renderer because the mouse handlers need the same
- * offset to map terminal rows to conversation lines.
- */
 export const TRACE_VIEWER_HEADER_ROWS = 3;
 
 export interface TraceViewerState {
-  /** Stored traces, most recent activity first. */
   readonly traces: readonly TraceStoreEntry[];
-  /** Index into `traces` of the trace being viewed. */
   readonly traceIndex: number;
-  /** The loaded trace, or `undefined` while it has no readable spans. */
   readonly trace?: LocalTrace;
-  /** The trace re-told as conversation items (system/user/assistant/tool cards). */
   readonly conversationItems: readonly ConversationItem[];
-  /** Conversation cards toggled open (the system card starts collapsed). */
   readonly expandedItems: ReadonlySet<number>;
-  /** Index into `conversationItems` of the highlighted card. */
   readonly selectedRow: number;
-  /** First conversation line painted (line-level scroll offset). */
   readonly scrollRow: number;
   readonly panelOpen: boolean;
-  /** Whether ↑/↓ scroll the details drawer instead of moving the selection. */
   readonly panelFocus: boolean;
   readonly panelScroll: number;
-  /** One-line status for edge cases (trace pruned, tracing disabled, …). */
   readonly notice?: string;
-  /** Mouse drag selection over the conversation or drawer, in line/column cells. */
   readonly textSelection?: TextSelectionRange;
 }
 
-/**
- * One end of a text selection: line index + 0-based column, both relative
- * to the selection's region — absolute conversation lines for the cards,
- * absolute detail lines (and panel-content columns) for the drawer.
- */
 export interface TextSelectionPoint {
   readonly line: number;
   readonly column: number;
 }
 
-/** A drag selection from anchor (press) to head (latest drag position). */
 export interface TextSelectionRange {
   readonly anchor: TextSelectionPoint;
   readonly head: TextSelectionPoint;
-  /** The pointer moved off the anchor cell — release copies instead of clicking. */
   readonly dragging: boolean;
-  /** Where the drag started; the selection stays in that region. */
   readonly region: "conversation" | "panel";
 }
 
-/** Selection endpoints ordered top-to-bottom for rendering and extraction. */
 export function orderedTextSelection(selection: TextSelectionRange): {
   start: TextSelectionPoint;
   end: TextSelectionPoint;
@@ -80,28 +47,17 @@ export function orderedTextSelection(selection: TextSelectionRange): {
   return anchorFirst ? { start: anchor, end: head } : { start: head, end: anchor };
 }
 
-/** Viewport metrics the controller measures so scrolling math stays pure. */
 export interface TraceViewerKeyEnvironment {
-  /** Body rows available to the conversation. */
   readonly timelineViewportRows: number;
-  /** Body rows available to the detail panel. */
   readonly panelViewportRows: number;
-  /** Total detail rows the panel would paint for the selected span. */
   readonly panelTotalRows: number;
-  /** Body column width — card expandability is width-dependent. */
   readonly contentWidth: number;
-  /**
-   * Rendered height of each conversation card. The conversation viewport
-   * scrolls by lines, not items — without these, long conversations overflow
-   * the screen with no way to reach lower cards.
-   */
   readonly conversationLineCounts?: readonly number[];
 }
 
 interface TraceViewerKeyResult {
   readonly state: TraceViewerState;
   readonly effect?: "close";
-  /** A completed drag selection to copy — the controller extracts and copies the text. */
   readonly copySelection?: TextSelectionRange;
 }
 
@@ -109,11 +65,6 @@ export function createTraceViewerState(): TraceViewerState {
   return { ...clearedTraceView(), traces: [], traceIndex: 0 };
 }
 
-/**
- * The view fields a different trace resets: nothing loaded, nothing expanded,
- * selected, scrolled, or open. A fresh set each call, since each state owns
- * its own expansion set.
- */
 function clearedTraceView(): Pick<
   TraceViewerState,
   | "conversationItems"
@@ -143,26 +94,16 @@ export function selectedTraceViewerSpan(state: TraceViewerState): LocalTraceSpan
   return state.conversationItems[state.selectedRow]?.span;
 }
 
-/** The number of selectable cards. */
 function traceViewerItemCount(state: TraceViewerState): number {
   return state.conversationItems.length;
 }
 
-/**
- * Applies a fresh trace listing. The viewed trace is kept by identity across
- * reorders (a live trace climbs the list as spans land); when it disappears,
- * selection falls back to the newest trace. `preferTraceId` wins on first
- * load — the viewer opens on the current chat session's trace.
- */
 export function applyTraceList(
   state: TraceViewerState,
   entries: readonly TraceStoreEntry[],
   options: { readonly preferTraceId?: string } = {},
 ): TraceViewerState {
   const current = state.traces[state.traceIndex]?.traceId;
-  // A one-time preference (current session, /traces <prefix>) wins over the
-  // existing selection — the fallback was only chosen because the preferred
-  // trace hadn't appeared yet.
   let traceIndex =
     options.preferTraceId !== undefined
       ? entries.findIndex((entry) => entry.traceId === options.preferTraceId)
@@ -183,12 +124,6 @@ export function applyTraceList(
   return { ...state, ...clearedTraceView(), traces: entries, traceIndex, notice };
 }
 
-/**
- * Applies a freshly read trace. Selection follows the previously selected
- * card (span id + kind — cards can share spans) so live growth never jumps
- * the cursor; a pruned trace clears the view with a notice instead of
- * pretending stale data is current.
- */
 export function applyLoadedTrace(
   state: TraceViewerState,
   trace: LocalTrace | undefined,
@@ -214,8 +149,6 @@ export function applyLoadedTrace(
   if (selectedSpanId === undefined) {
     selectedRow = state.selectedRow;
   } else {
-    // Several cards can share one span (a model span also carries its
-    // provider-executed tool cards), so match by occurrence, not first hit.
     const matches = (item: ConversationItem): boolean =>
       item.span.spanId === selectedSpanId && item.kind === selectedItemKind;
     const occurrence = state.conversationItems.slice(0, state.selectedRow).filter(matches).length;
@@ -230,7 +163,6 @@ export function applyLoadedTrace(
   return { ...state, trace, conversationItems, selectedRow, notice };
 }
 
-/** The one key handler: navigation, expansion, the details drawer, closing. */
 export function reduceTraceViewerKey(
   state: TraceViewerState,
   key: TerminalKey,
@@ -253,8 +185,6 @@ export function reduceTraceViewerKey(
       return { state: base, effect: "close" };
     }
     case "mouse": {
-      // Scroll wheel (SGR button 64/65): over the open drawer it scrolls
-      // the drawer, otherwise the conversation viewport.
       if (key.action === "press" && (key.button === 64 || key.button === 65)) {
         const delta = key.button === 64 ? -3 : 3;
         if (base.panelOpen && key.x - 1 >= environment.contentWidth) {
@@ -263,9 +193,6 @@ export function reduceTraceViewerKey(
         }
         return { state: scrollConversation(base, delta, environment) };
       }
-      // Left press anchors a possible drag selection in whichever region the
-      // pointer sits over — the cards or the open drawer; the click action
-      // (and any copy) waits for release so dragging never toggles cards.
       if (key.action === "press" && key.button === 0) {
         const anchored = selectionCellAt(base, environment, key.x, key.y);
         if (anchored === undefined) return { state: { ...base, textSelection: undefined } };
@@ -281,8 +208,6 @@ export function reduceTraceViewerKey(
           },
         };
       }
-      // Motion with the left button held (SGR button 32) extends the
-      // selection within the region the drag started in.
       if (key.action === "press" && key.button === 32) {
         if (base.textSelection === undefined) return { state: base };
         const point =
@@ -301,12 +226,10 @@ export function reduceTraceViewerKey(
       if (key.action !== "release" || key.button !== 0) return { state: base };
       const selection = base.textSelection;
       const released: TraceViewerState = { ...base, textSelection: undefined };
-      // A drag that moved copies the selection; a stationary click acts.
       if (selection !== undefined && selection.dragging) {
         return { state: released, copySelection: selection };
       }
-      // Left click selects and expands/collapses cards.
-      const bodyIndex = key.y - 1 - TRACE_VIEWER_HEADER_ROWS; // 1-based coordinates
+      const bodyIndex = key.y - 1 - TRACE_VIEWER_HEADER_ROWS;
       if (bodyIndex < 0) return { state: released };
       const itemIndex = conversationItemAtBodyRow(released, environment, bodyIndex);
       if (itemIndex === undefined) return { state: released };
@@ -373,8 +296,6 @@ export function reduceTraceViewerKey(
       } else {
         expandedItems.add(base.selectedRow);
       }
-      // Recalculate the scroll offset: expanding changes card heights, so
-      // the previous offset may leave the selected card's bottom cut off.
       const scrolled = { ...base, expandedItems };
       return { state: { ...scrolled, scrollRow: conversationScrollRow(scrolled, environment) } };
     }
@@ -429,13 +350,6 @@ function moveSelection(
   };
 }
 
-/** First line offset that keeps the selected card's last line visible. */
-/**
- * First body line of each card, plus the conversation's total line count as a
- * final entry. Every card is followed by one separator row, and a card with no
- * measured height counts as one line, so a frame measured before a repaint
- * still maps rows to cards.
- */
 function cardLineOffsets(state: TraceViewerState, counts: readonly number[]): number[] {
   const offsets = [0];
   for (let index = 0; index < state.conversationItems.length; index += 1) {
@@ -444,7 +358,6 @@ function cardLineOffsets(state: TraceViewerState, counts: readonly number[]): nu
   return offsets;
 }
 
-/** Lines the whole conversation paints, separators included. */
 function conversationLineTotal(state: TraceViewerState, counts: readonly number[]): number {
   const offsets = cardLineOffsets(state, counts);
   return offsets[offsets.length - 1]!;
@@ -461,22 +374,13 @@ function conversationScrollRow(
   const cardStart = offsets[state.selectedRow] ?? 0;
   const cardHeight = counts[state.selectedRow] ?? 1;
   const cardEnd = cardStart + cardHeight;
-  // Already visible? Keep the current offset.
   if (state.scrollRow <= cardStart && cardEnd <= state.scrollRow + viewportRows) {
     return state.scrollRow;
   }
-  // Card taller than the viewport: align its top so the user can scroll
-  // down through the rest. Otherwise scroll just enough to show the end.
   if (cardHeight > viewportRows) return cardStart;
   return Math.max(0, cardEnd - viewportRows);
 }
 
-/**
- * Maps 1-based terminal coordinates to a conversation cell: absolute line
- * (scroll offset applied) and 0-based column. Cells above the body, past
- * the conversation's last line, or right of the cards (the details drawer)
- * do not select.
- */
 function conversationCellAt(
   state: TraceViewerState,
   environment: TraceViewerKeyEnvironment,
@@ -485,7 +389,7 @@ function conversationCellAt(
 ): TextSelectionPoint | undefined {
   const counts = environment.conversationLineCounts;
   if (counts === undefined || state.conversationItems.length === 0) return undefined;
-  const bodyIndex = y - 1 - TRACE_VIEWER_HEADER_ROWS; // 1-based coordinates
+  const bodyIndex = y - 1 - TRACE_VIEWER_HEADER_ROWS;
   if (bodyIndex < 0 || bodyIndex >= environment.timelineViewportRows) return undefined;
   const column = x - 1;
   if (column < 0 || column >= environment.contentWidth) return undefined;
@@ -495,11 +399,6 @@ function conversationCellAt(
   return { column, line };
 }
 
-/**
- * Maps 1-based terminal coordinates to a detail-drawer cell: absolute
- * detail-line index (drawer scroll applied) and a column relative to the
- * drawer's content (the area right of the conversation and its separator).
- */
 function panelCellAt(
   state: TraceViewerState,
   environment: TraceViewerKeyEnvironment,
@@ -507,7 +406,7 @@ function panelCellAt(
   y: number,
 ): TextSelectionPoint | undefined {
   if (!state.panelOpen || environment.panelTotalRows === 0) return undefined;
-  const bodyIndex = y - 1 - TRACE_VIEWER_HEADER_ROWS; // 1-based coordinates
+  const bodyIndex = y - 1 - TRACE_VIEWER_HEADER_ROWS;
   if (bodyIndex < 0 || bodyIndex >= environment.panelViewportRows) return undefined;
   const column = x - 1 - (environment.contentWidth + 1);
   if (column < 0) return undefined;
@@ -516,7 +415,6 @@ function panelCellAt(
   return { column, line };
 }
 
-/** Resolves a press to the region under the pointer: cards first, then drawer. */
 function selectionCellAt(
   state: TraceViewerState,
   environment: TraceViewerKeyEnvironment,
@@ -532,7 +430,6 @@ function selectionCellAt(
   return undefined;
 }
 
-/** Maps a click's body row to a card index, walking card heights + separators. */
 function conversationItemAtBodyRow(
   state: TraceViewerState,
   environment: TraceViewerKeyEnvironment,
@@ -548,7 +445,6 @@ function conversationItemAtBodyRow(
   return undefined;
 }
 
-/** Scrolls the conversation viewport by `delta` lines (mouse wheel). */
 function scrollConversation(
   state: TraceViewerState,
   delta: number,
@@ -560,7 +456,5 @@ function scrollConversation(
   const maxScroll = Math.max(0, conversationLineTotal(state, counts) - viewportRows);
   const scrollRow = Math.min(maxScroll, Math.max(0, state.scrollRow + delta));
   if (scrollRow === state.scrollRow) return state;
-  // The selection stays on the same card even when it scrolls out of view;
-  // arrow keys re-scroll to bring it back (conversationScrollRow).
   return { ...state, scrollRow };
 }

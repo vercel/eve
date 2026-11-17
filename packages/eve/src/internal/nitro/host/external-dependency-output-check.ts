@@ -14,7 +14,6 @@ import { escapeRegex } from "#internal/bundler/filters.js";
 import type { RolldownOutputAsset, RolldownOutputChunk } from "#internal/bundler/rolldown.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
-/** The parts of a written Rolldown bundle the check reads. */
 export type CheckedBundle = Readonly<
   Record<
     string,
@@ -29,26 +28,10 @@ interface ExternalImport {
   readonly specifier: string;
 }
 
-/**
- * Nitro resolves a traced external to this placeholder and rewrites it only
- * while rendering, so chunk metadata keeps the placeholder.
- */
 const NITRO_TRACED_ID_RE = /^nitro:traced\/\d+\/(.+)$/;
 
-/** Placed beside a chunk, so `import.meta.resolve` resolves exactly as that chunk's imports do. */
 const PROBE_SOURCE = "export const resolve = (specifier) => import.meta.resolve(specifier);\n";
 
-/**
- * Fails the hosted build when a written chunk imports (statically or by a
- * literal dynamic import) a configured external that Node does not resolve,
- * from that chunk, to a file inside the output. Nitro's tracer only warns
- * when it cannot find a package to copy, so without this check the build
- * succeeds and the deployed function fails with ERR_MODULE_NOT_FOUND (or
- * ERR_PACKAGE_PATH_NOT_EXPORTED when it copied a different version).
- *
- * Resolution is Node's own ESM resolver, run by the build's Node in a child
- * process; no dependency code is loaded.
- */
 export async function checkExternalDependencyOutput(input: {
   readonly appRoot: string;
   readonly bundle: CheckedBundle;
@@ -71,9 +54,6 @@ export async function checkExternalDependencyOutput(input: {
       ) {
         continue;
       }
-      // Nitro renders a traced import as the bare specifier when the traced
-      // copy is hoisted, and otherwise as a relative path to that copy, which
-      // is inside the output by construction.
       if (traced !== undefined && !importsSpecifier(output.code, traced)) {
         continue;
       }
@@ -100,19 +80,12 @@ export async function checkExternalDependencyOutput(input: {
   });
 }
 
-/** Whether rendered chunk code imports `specifier`, statically or by a literal dynamic import. */
 function importsSpecifier(code: string, specifier: string): boolean {
   return new RegExp(
     String.raw`(?:\bfrom|\bimport)\s*\(?\s*(["'\`])${escapeRegex(specifier)}\1`,
   ).test(code);
 }
 
-/**
- * Returns, for each import, the URL Node's ESM resolver selects from beside
- * its chunk, or null when resolution throws. `import.meta.resolve` returns an
- * `exports` target's URL even when that file is missing, so callers must
- * check the file exists.
- */
 async function resolveWithNode(
   outputDir: string,
   probeName: string,
@@ -147,7 +120,6 @@ async function resolveWithNode(
         maxBuffer: 10 * 1024 * 1024,
       }));
     } catch (error) {
-      // execFile's message carries the child's stderr.
       throw new Error(
         `Cannot check build.externalDependencies in the hosted output: ${error instanceof Error ? error.message : String(error)}`,
         { cause: error },

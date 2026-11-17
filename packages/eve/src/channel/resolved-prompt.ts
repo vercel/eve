@@ -3,11 +3,6 @@ import type { InteractionOption } from "#protocol/session-events/families/intera
 
 type PromptOption = Pick<InteractionOption, "id" | "label">;
 
-/**
- * How eve resolved a posted prompt, such as `Approved` or a chosen option's
- * label. A request that ends without an answer, such as one withdrawn when its
- * turn is cancelled, is no longer needed.
- */
 export function resolvedPromptAnswer(
   resolution: RequestSettlement,
   options: readonly PromptOption[] = [],
@@ -21,10 +16,6 @@ export function resolvedPromptAnswer(
   return options.find((option) => option.id === answer?.optionId)?.label ?? answer?.text;
 }
 
-/**
- * The line a prompt shows once resolved, such as `Approved` or `Answered: Saturday`. `by` names
- * who gave the deciding answer, as in `Approved by Alice` or `Answered by Alice: Saturday`.
- */
 export function resolvedPromptLabel(
   resolution: RequestSettlement,
   options: readonly PromptOption[] = [],
@@ -39,10 +30,6 @@ export function resolvedPromptLabel(
   return answer === undefined ? "" : `${answer}${named}`;
 }
 
-/**
- * The name a channel recorded for whoever gave a settlement's deciding answer, from the names it
- * keeps by principal id as people send messages and press buttons.
- */
 export function responderName(
   names: Readonly<Record<string, string>> | undefined,
   resolution: RequestSettlement,
@@ -51,7 +38,6 @@ export function responderName(
   return id === undefined ? undefined : names?.[id];
 }
 
-/** A question or budget prompt someone answered. */
 export function isAnswered(resolution: RequestSettlement): boolean {
   return (
     resolution.kind !== "approval" &&

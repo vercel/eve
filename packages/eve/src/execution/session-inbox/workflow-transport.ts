@@ -11,13 +11,8 @@ import {
 } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunMessageBatch } from "#execution/tools/workflow/messages.js";
 
-/** A session address on Workflow: one hook. */
 export type SessionHook = Hook<SessionInboxPayload | WorkflowToolRunMessageBatch>;
 
-/**
- * The Workflow transport: each address is a hook on the owner's run, tagged with the session it
- * belongs to. Call it from the workflow body that owns the session.
- */
 export function workflowInboxTransport(sessionId: string): SessionInboxTransport<SessionHook> {
   return {
     open: (token, { claimedAtStart, force }) =>

@@ -30,7 +30,6 @@ function chatSdkAudience(thread: SerializedThread | null): ChannelAudience {
   return "unknown";
 }
 
-/** The Chat SDK channel a thread is in, namespaced by its adapter. */
 function chatSdkSpace(thread: SerializedThread | null): ConversationSpace | undefined {
   if (!thread?.channelId) return undefined;
   const prefix = `${thread.adapterName}:`;

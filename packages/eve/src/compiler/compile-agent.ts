@@ -16,25 +16,12 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 
-/**
- * Input for compiling the current authored agent into framework-owned
- * discovery artifacts.
- */
 interface CompileAgentInput {
-  /** Development-only source extensions applied before source composition. */
   developmentExtensions?: DevelopmentExtensionSelection;
-  /**
-   * Optional {@link ProjectSource} used for discovery reads. Defaults to a
-   * disk-backed source so production callers keep their current behaviour.
-   */
   source?: ProjectSource;
   startPath?: string;
 }
 
-/**
- * Result of compiling the current authored agent into framework-owned
- * artifacts.
- */
 export interface CompileAgentResult {
   diagnostics: CompilerDiagnostic[];
   manifest: CompiledAgentManifest;
@@ -43,10 +30,6 @@ export interface CompileAgentResult {
   project: ResolvedDiscoveryProject;
 }
 
-/**
- * Error raised when discovery artifacts were written but discovery still
- * contained errors.
- */
 export class CompileAgentError extends Error {
   readonly result: CompileAgentResult;
 
@@ -72,10 +55,6 @@ export class CompileAgentError extends Error {
   }
 }
 
-/**
- * Runs discovery, writes compiler-owned artifacts, and throws when discovery
- * produced errors.
- */
 export async function compileAgent(input: CompileAgentInput = {}): Promise<CompileAgentResult> {
   const discovered = await discoverAgentForCompilation(input);
   const artifactsRoot = join(discovered.project.appRoot, ".eve");
@@ -87,11 +66,6 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
   return finishAgentCompilation(result, CompileAgentError.fromDurableArtifacts);
 }
 
-/**
- * Compiles an agent into a caller-owned workspace. Artifacts are written to
- * `writeRoot`, while metadata and module maps record paths under the stable
- * `publishedRoot` where the caller will expose them.
- */
 export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
   readonly developmentExtensions?: DevelopmentExtensionSelection;

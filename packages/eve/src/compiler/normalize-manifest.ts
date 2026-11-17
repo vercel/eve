@@ -161,7 +161,6 @@ export async function compileAgentManifest(
     diagnosticsSummary,
     subagents,
   });
-  // In the background, so pruning never delays a compile.
   void pruneAuthoredModuleCache();
   return compiled;
 }
@@ -473,7 +472,6 @@ class AgentGraphCompiler {
 
     const isSchedule = (candidate: AgentSourceCandidate) =>
       state.sourcesBySourceId.get(candidate.sourceId)?.kind === "schedule";
-    // Schedules compile first: a tool file disables a collection's tools by the collection's name.
     for (const candidate of [
       ...state.orderedCandidates.filter(isSchedule),
       ...state.orderedCandidates.filter((candidate) => !isSchedule(candidate)),

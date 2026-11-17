@@ -1,4 +1,3 @@
-// @linux-only: approval answer weighing
 import { jsonSchema } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -30,7 +29,6 @@ function gated(name: string, response?: ApprovalResponsePolicy): HarnessToolDefi
   };
 }
 
-/** A harness whose model calls every tool in `tools` in one step, then replies. */
 function setup(tools: readonly HarnessToolDefinition[]) {
   const events: SessionEvent[] = [];
   const model = new MockLanguageModelV4({
@@ -71,7 +69,6 @@ function setup(tools: readonly HarnessToolDefinition[]) {
   ctx.set(SandboxKey, sandbox.access);
   const step = (current: HarnessSession, input?: HarnessStepInput) =>
     contextStorage.run(ctx, () => createTestKernel(config)(current, recorder.admit(input)));
-  /** The approval the step asked for `toolName`'s call. */
   const approvalOf = (toolName: string): string => {
     const opened = events.find(
       (event) =>
@@ -142,7 +139,6 @@ describe("approval answers (real AI SDK)", () => {
     expect(prompt.indexOf("First, check")).toBeLessThan(prompt.indexOf("Then, notify"));
   });
 
-  // #4817: a second press of the same Approve reaches the pass that authorizes the first.
   it("authorizes a pending approval when a duplicate answer joins its pass", async () => {
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     const deploy = gated("deploy", response);
@@ -203,8 +199,6 @@ describe("approval answers (real AI SDK)", () => {
     expect(parkedSteps(result.session)).toEqual([]);
   });
 
-  // A responder's later answer to the same approval revises their unweighed earlier ones, so the
-  // response policy runs once per person and approval, however many answers they send.
   it("weighs only each responder's latest unweighed answer to an approval", async () => {
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     const deploy = gated("deploy", response);
@@ -254,7 +248,6 @@ describe("approval answers (real AI SDK)", () => {
     expect(parkedSteps(result.session)).toEqual([]);
   });
 
-  // #4817: an answer the approval can't take is refused with why, and the approval stays open.
   it.each([
     {
       answer: { optionId: "bogus" },
@@ -312,7 +305,6 @@ describe("approval answers (real AI SDK)", () => {
         },
       ],
     });
-    // A response policy decides the Cancel in the pass the answer schedules.
     if (responsePolicy) result = await fixture.step(result.session);
 
     expect(deploy.execute).not.toHaveBeenCalled();

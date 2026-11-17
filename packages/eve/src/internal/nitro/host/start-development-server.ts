@@ -170,7 +170,6 @@ function addDevelopmentControlHandler(input: {
   });
 }
 
-/** Disposes a cleanup stack and returns every failure in teardown order. */
 async function disposeCollectingErrors(cleanup: AsyncDisposableStack): Promise<unknown[]> {
   try {
     await cleanup.disposeAsync();
@@ -181,7 +180,6 @@ async function disposeCollectingErrors(cleanup: AsyncDisposableStack): Promise<u
 }
 
 function collectDisposalErrors(error: unknown): unknown[] {
-  // Each later failure wraps the earlier ones as `suppressed`.
   return error instanceof SuppressedError
     ? [...collectDisposalErrors(error.suppressed), error.error]
     : [error];
@@ -260,7 +258,6 @@ async function listenForDevelopmentServer(input: {
 
 interface DevelopmentServerStartResult {
   readonly handle: DevelopmentServerHandle;
-  /** Teardown for a server this process owns; undefined when attached to an existing owner. */
   readonly close: (() => Promise<void>) | undefined;
 }
 
@@ -268,9 +265,6 @@ async function startNitroDevelopmentServer(
   rootDir: string,
   options: DevelopmentServerOptions,
 ): Promise<DevelopmentServerStartResult> {
-  // Marks this process tree as an `eve dev` session so runtime features
-  // that must never run in production (for example auto-installing
-  // optional sandbox engine packages) can gate on it.
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
 
   const developmentExtensions = options.developmentExtensions ?? defaultDevelopmentExtensions();
@@ -302,7 +296,6 @@ async function startNitroDevelopmentServer(
     throw await createDevelopmentServerAlreadyRunningError(project.appRoot, existingServerUrl);
   }
 
-  // Teardown runs in reverse registration order, shared by failed startup and close().
   const cleanup = new AsyncDisposableStack();
   const previousDevelopmentSandboxRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
   const developmentSandboxRunId = createDevelopmentSandboxRunId();
@@ -380,9 +373,6 @@ async function startNitroDevelopmentServer(
     }
     const onRuntimePruned =
       workflowWorld === undefined ? undefined : () => workflowWorld.reconcileExpiredRuns();
-    // Parent-owned control routes must answer before the World starts: queue
-    // redelivery begins at start(), and a delivery's World calls would
-    // otherwise fall through to the worker and 404.
     addDevelopmentControlHandler({
       appRoot: project.appRoot,
       devServer: devServer,
@@ -410,8 +400,6 @@ async function startNitroDevelopmentServer(
 
     const serverUrl = normalizeDevelopmentServerClientUrl(server.url);
     restoreWorkflowLocalQueueEnvironment = installWorkflowLocalQueueEnvironment(serverUrl);
-    // Published before the first worker is created, so every runtime generation
-    // inherits it: workers copy `process.env` at construction.
     restoreLocalDevCapabilityEnvironment = installLocalDevCapabilityEnvironment({
       appRoot: project.appRoot,
       serverUrl,
@@ -421,9 +409,6 @@ async function startNitroDevelopmentServer(
       async () => {
         const payload = await build.buildHost(preparedHost);
         build.close();
-        // Publish before the first worker goes live. The supervisor holds
-        // requests until then, and with no generation published they would
-        // read artifacts from the app root, which `eve dev` never writes.
         await activateDevelopmentGeneration({
           appRoot: preparedHost.appRoot,
           generation: preparedHost.generation,
@@ -440,11 +425,6 @@ async function startNitroDevelopmentServer(
       options.onBootProgress,
     );
     devServer.prepareSpare();
-    // A worker loads a generation on its first channel request. Asking now
-    // overlaps that load with the rest of startup and the client's own first
-    // request. An app without the eve channel has no health route, so this
-    // does nothing there. A generation that fails to load logs its error under
-    // this request first, and again when a client asks.
     void fetch(new URL(EVE_HEALTH_ROUTE_PATH, serverUrl))
       .then(async (response) => await response.body?.cancel())
       .catch(() => undefined);
@@ -457,8 +437,6 @@ async function startNitroDevelopmentServer(
       initialHost: preparedHost,
       onRuntimePruned,
     });
-    // Registered after the World, so a running prune pass, which may
-    // reconcile runs through it, ends before the World closes.
     cleanup.defer(async () => await rebuildCoordinator.close());
 
     const watcher = await devBootPhase(
@@ -475,8 +453,6 @@ async function startNitroDevelopmentServer(
     );
     authoredSourceWatcher = watcher;
     cleanup.defer(async () => {
-      // Before the watcher, which waits for an in-flight rebuild: that rebuild's
-      // build process exits, so the rebuild fails instead of finishing first.
       builds.close();
       await watcher.close();
     });
@@ -507,19 +483,6 @@ async function startNitroDevelopmentServer(
   }
 }
 
-/**
- * Creates a development server for an eve application. Call `start()` to boot an
- * owned Nitro server or attach to a running owner, and `close()` to tear down a
- * server this instance started. `close()` waits for an in-progress `start()`,
- * resolves after failed-start cleanup, and is a no-op when it attached to an
- * existing owner or was never started.
- *
- * Authored schedules are never registered with Nitro's cron scheduler in dev
- * mode. To fire one authored schedule on demand, `POST` the dev-only
- * `/eve/v1/dev/schedules/:scheduleId` route — the handler returns
- * `{ scheduleId, sessionIds }` so callers can subscribe to the existing
- * per-session stream route.
- */
 export function createDevelopmentServer(
   rootDir: string,
   options?: DevelopmentServerOptions & { existing?: "reject" },

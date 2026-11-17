@@ -313,9 +313,6 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
-    // withEve() generates the eve service + /eve/v1/* routes into
-    // .vercel/output/config.json at build time, so the scaffold only writes a
-    // minimal vercel.json rather than a services block the platform rejects.
     await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
       `${JSON.stringify(
         {
@@ -491,8 +488,6 @@ describe("ensureChannel", () => {
       ),
       "utf8",
     );
-    // The template is LF; a Windows checkout may hand back the source app as
-    // CRLF (no repo .gitattributes), so compare line content, not line endings.
     const normalizeEol = (text: string): string => text.replaceAll("\r\n", "\n");
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
   });
@@ -639,9 +634,6 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    // withEve() owns eve service generation, so the scaffold leaves an existing
-    // vercel.json completely untouched — no injected services block, no $schema
-    // rewrite, no reformatting of a file the user manages.
     await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
       existingVercelJson,
     );
@@ -1146,12 +1138,7 @@ describe("scaffoldBaseProject", () => {
     expect(readme).not.toContain("__EVE_INIT_");
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"eve": "^0.25.0"');
-    // Channels added later (`eve add channel/slack`, possibly next to a
-    // running `eve dev`) import @vercel/connect; init ships it so a later
-    // channel add never introduces a missing dependency.
     expect(packageJson).toContain('"@vercel/connect": "0.2.2"');
-    // The default path used by `eve init` must carry the stable toolchain
-    // version captured from the workspace catalog into generated projects.
     expect(JSON.parse(packageJson)).toMatchObject({
       scripts: {
         build: "eve build",
@@ -1164,10 +1151,6 @@ describe("scaffoldBaseProject", () => {
       devDependencies: { typescript: "7.0.2" },
       engines: { node: "26.x" },
     });
-    // Every scaffold ships @types/node plus tsconfig `types: ["node"]` so agent
-    // code touching `process`/`fs` typechecks out of the box, matching the eve
-    // agent fixtures (without the `types` entry, NodeNext resolution does not
-    // auto-include the ambient node types under pnpm's symlinked layout).
     expect(packageJson).toContain('"@types/node": "26.x"');
     const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
       compilerOptions: { types?: string[] };
@@ -1200,10 +1183,6 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("eve deploy --non-interactive --yes");
     expect(agentsMd).toContain("Use eve to link and deploy Vercel projects");
     expect(agentsMd).toContain("Run the validation the task requests");
-    // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
-    // the platform default-ignores only the .env.local variants — eve's dev
-    // artifacts and a bare .env must be excluded here or a source deploy
-    // ships them (and `.eve` alone can blow the upload size limit).
     const vercelignore = await readFile(join(projectRoot, ".vercelignore"), "utf8");
     for (const entry of [".env*", ".eve", ".output", ".nitro", "dist"]) {
       expect(vercelignore.split("\n")).toContain(entry);
@@ -1582,9 +1561,6 @@ describe("scaffoldBaseProject", () => {
     });
 
     expect(projectRoot).toBe(targetDirectory);
-    // The scaffolder reports template paths as `${targetRoot}/${relPath}` with
-    // forward slashes on every platform; `join` would expect backslashes on
-    // Windows and fail there.
     expect(overwritten).toEqual([
       `${targetDirectory}/agent/agent.ts`,
       `${targetDirectory}/package.json`,

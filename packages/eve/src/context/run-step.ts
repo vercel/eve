@@ -5,12 +5,6 @@ import { connectionProvider } from "#context/providers/connection.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
 import { sessionProvider } from "#context/providers/session.js";
 
-/**
- * Framework providers in dependency order.
- *
- * Session runs first (depends only on durable seed values). Later providers
- * may read framework-derived virtual values through the unified context view.
- */
 const frameworkProviders: readonly FrameworkContextProvider<any>[] = [
   sessionProvider,
   connectionProvider,
@@ -22,14 +16,6 @@ interface ContextScopeResult<T, S extends HarnessSessionBase> {
   readonly session: S;
 }
 
-/**
- * Runs `callback` inside a fully-initialized ALS scope with all framework
- * providers (session, connection, sandbox) built and committed.
- *
- * The callback receives the enriched session and must return both its own
- * result and the (possibly mutated) session so provider commit hooks can
- * persist provider-owned state (e.g. sandbox snapshots).
- */
 export async function withContextScope<T, S extends HarnessSessionBase>(
   ctx: ContextContainer,
   session: S,
@@ -87,12 +73,6 @@ export async function withContextScope<T, S extends HarnessSessionBase>(
   }
 }
 
-/**
- * Runs one harness step inside the unified context.
- *
- * Delegates to {@link withContextScope} for provider lifecycle, then
- * reassembles the {@link StepResult}.
- */
 export async function runStep(
   ctx: ContextContainer,
   harnessSession: HarnessSession,

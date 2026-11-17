@@ -8,15 +8,21 @@ import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/work
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Options for {@link workflow}, such as the maximum number of child-agent calls per program. */
 export interface WorkflowToolOptions {
   /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
   readonly maxSubagents?: number;
 }
 
+/**
+ * Input to the `workflow` tool: the body of an async JavaScript function that invokes agents and
+ * returns one JSON-serializable value.
+ */
 export interface WorkflowToolInput {
   readonly js: string;
 }
 
+/** The workflow tool {@link workflow} returns. Each call runs the model's program as a task. */
 export type WorkflowTool = WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
 
 const workflowProgramAgentContract =

@@ -34,7 +34,6 @@ export function desktopTool<TSchema extends z.ZodObject, TOutput = unknown>(
     description: spec.description,
     inputSchema: spec.inputSchema as never,
     async execute(input, ctx) {
-      // Reject what cannot run before paying for the sandbox probe and desktop start.
       if (spec.headed && !extension.config.headed) {
         throw new Error(
           "This tool sends physical input and needs the extension mounted with headed: true. In headless mode, use the ref tools such as click and scroll_to.",
@@ -51,14 +50,12 @@ export function desktopTool<TSchema extends z.ZodObject, TOutput = unknown>(
   });
 }
 
-/** `--name value` when set, `--name` for `true`, nothing otherwise. Uses `=` so negative numbers parse. */
 export function flag(name: string, value: string | number | boolean | undefined | null): string[] {
   if (value === undefined || value === null || value === false) return [];
   if (value === true) return [`--${name}`];
   return [`--${name}=${value}`];
 }
 
-/** One `--name=value` per entry. */
 export function repeated(name: string, values: readonly string[] | undefined): string[] {
   return (values ?? []).map((value) => `--${name}=${value}`);
 }
@@ -71,7 +68,6 @@ export const ref = z
 
 const XY = /^-?\d+,-?\d+$/;
 
-/** Screen coordinates, the one shape every coordinate input takes. */
 export const xy = z
   .string()
   .regex(XY, 'Screen coordinates as "x,y", such as "640,400".')
@@ -84,7 +80,6 @@ export const point = z
   })
   .describe('An element ref like "@s8f3k2p9:e12", or screen coordinates as "x,y".');
 
-/** A ref goes to `refFlag` (or stays positional without one); coordinates go to `xyFlag`. */
 export function pointArgs(target: string, refFlag: string | undefined, xyFlag: string): string[] {
   if (target.startsWith("@")) return refFlag ? [`--${refFlag}=${target}`] : [target];
   return [`--${xyFlag}=${target}`];

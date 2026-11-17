@@ -9,7 +9,6 @@ const source = { kind: "bundled" } as const;
 const sandboxRegistry = { sandbox: { definition: { kind: "independent" } } };
 const rootUsage = () => true;
 
-/** A compiled node bundle with only what the port reads. */
 function bundle(input: {
   readonly connections?: readonly unknown[];
   readonly definitions?: readonly { readonly kind: string }[];

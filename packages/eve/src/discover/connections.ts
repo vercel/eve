@@ -12,41 +12,19 @@ import { type ConnectionSourceRef, createConnectionSourceRef } from "#discover/m
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
 import { collectNamedSlotCandidates } from "#discover/slots.js";
 
-/**
- * Shared diagnostic emitted when the authored `connections/` root is not a
- * directory.
- */
 const DISCOVER_CONNECTIONS_DIRECTORY_INVALID = "discover/connections-directory-invalid";
 
-/**
- * Discovery diagnostic emitted when a connection exists in both file form
- * (`connections/<name>.ts`) and folder form (`connections/<name>/`).
- */
 const DISCOVER_CONNECTION_FILE_FOLDER_COLLISION = "discover/connection-file-folder-collision";
 
-/**
- * Discovery diagnostic emitted when a folder-form connection contains no
- * `connection.ts` definition module.
- */
 const DISCOVER_CONNECTION_FOLDER_EMPTY = "discover/connection-folder-empty";
 
-/**
- * Filename of the connection definition module inside a folder-form
- * connection.
- */
 const CONNECTION_DEFINITION_BASE_NAME = "connection";
 
-/**
- * Result of discovering authored connection sources from a single agent root.
- */
 interface DiscoverConnectionSourcesResult {
   connections: ConnectionSourceRef[];
   diagnostics: DiscoverDiagnostic[];
 }
 
-/**
- * Discovers authored connections under `agent/connections/`.
- */
 export async function discoverConnectionSources(input: {
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
@@ -203,10 +181,6 @@ export async function discoverConnectionSources(input: {
   };
 }
 
-/**
- * Returns the file names inside a folder-form connection that match the
- * `connection.ts` definition slot.
- */
 function collectFolderConnectionModuleCandidates(
   entries: readonly ProjectSourceEntry[],
 ): readonly string[] {

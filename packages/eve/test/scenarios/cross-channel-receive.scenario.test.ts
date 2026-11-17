@@ -19,18 +19,6 @@ import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-a
 import { mockChannelContext } from "../../src/internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
-/**
- * Locks the cross-channel `ctx.to(channel, target).send(...)` path end-to-end:
- * a two-channel agent is compiled from disk, its resolved bundle
- * preserves the per-channel `definition` reference, and dispatching by
- * that reference routes through to the target channel's `receive`
- * with the target's continuation-token namespace.
- *
- * Authors as inline `__kind: "eve:channel"` objects in `.mjs` so the
- * test compiles without an eve install. The compiler's
- * normalizer is the same shape gate used for `defineChannel`.
- */
-
 const createAppRoot = useTemporaryAppRoots();
 const APP_ROOT_OPTIONS = { packageName: "cross-channel-receive-test-agent" } as const;
 
@@ -163,8 +151,6 @@ describe("cross-channel receive end-to-end", () => {
 
       expect(session.sessionId).toBe("sess_scenario");
       expect(captured).toHaveLength(1);
-      // Target's raw token "target:scenario-123" is namespaced by the
-      // target channel name → "target:target:scenario-123".
       expect(captured[0]!.continuationToken).toBe("target:target:scenario-123");
       expect(captured[0]!.auth).toEqual(auth);
       expect(captured[0]!.adapter).toEqual(expect.objectContaining({ kind: "http" }));

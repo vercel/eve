@@ -13,7 +13,6 @@ function makeScreen(columns = 80) {
   return new MockScreen({ columns, rows: 10 });
 }
 
-/** The glyph column carries a lit marker on visible pulse steps, a space otherwise. */
 function lit(screen: MockScreen): boolean {
   return screen.snapshot().trimStart().startsWith("▪");
 }
@@ -107,12 +106,10 @@ describe("startCliLiveRow", () => {
     expect(screen.snapshot()).toBe("  Preparing project...");
 
     progress.update("Installing dependencies", "npm install");
-    // The detail replaces the row in place — one screen line, no stranded row.
     expect(screen.snapshot()).toBe("  Installing dependencies npm install");
 
     const rawAfterUpdate = screen.rawOutput();
     vi.advanceTimersByTime(600);
-    // A silent pulse sequence never repaints, so nothing more is written.
     expect(screen.rawOutput()).toBe(rawAfterUpdate);
 
     progress.stop();

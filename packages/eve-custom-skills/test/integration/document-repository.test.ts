@@ -169,7 +169,6 @@ test("the layout is readable and listable across scopes", async () => {
     ),
   );
 
-  // An admin view scans every scope without knowing the keys up front.
   const scopes = await repository.listScopes?.();
   assert.deepEqual(scopes?.map(({ key }) => key).sort(), [channel.key, alice.key].sort());
   const library = await Promise.all(
@@ -281,8 +280,6 @@ test("a catalog write that lands but reports failure doesn't leave a ghost skill
 });
 
 test("a version stays when the write's outcome can't be checked", async () => {
-  // The catalog write lands but reports failure, and the read that would check it fails too.
-  // Storage then recovers, so anything that clears the version afterwards would succeed.
   const backend = inMemory();
   let catalogWrites = 0;
   let failedReads = 0;

@@ -27,19 +27,11 @@ import type {
 } from "#runtime/types.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 
-/**
- * Input for resolving the compiled authored manifest and flattened module graph
- * into a runtime-owned recursive agent graph.
- */
 interface ResolveRuntimeAgentGraphInput {
   manifest: CompiledAgentManifest;
   moduleMap: CompiledModuleMap;
 }
 
-/**
- * Error raised when the flattened compiled authored graph cannot be hydrated
- * into a runtime-owned agent graph.
- */
 class ResolveRuntimeAgentGraphError extends Error {
   readonly logicalPath?: string;
   readonly nodeId?: string;
@@ -70,10 +62,6 @@ class ResolveRuntimeAgentGraphError extends Error {
   }
 }
 
-/**
- * Resolves the compiled authored manifest and flattened module graph into one
- * runtime-owned bundle of agent nodes.
- */
 export async function resolveRuntimeAgentGraph(
   input: ResolveRuntimeAgentGraphInput,
 ): Promise<ResolvedAgentGraphBundle> {
@@ -414,7 +402,6 @@ function attachInheritedSandboxWorkspaceResources(input: {
       nodeId: owner.nodeId,
       workspaceResourceRoot: owner.sandboxRegistry.sandbox.workspaceResourceRoot,
     };
-    // The subagent works in its owner's sandbox, so its prompt describes that workspace.
     (node.turnAgent as { workspaceSpec: WorkspaceRuntimeSpec }).workspaceSpec =
       owner.agent.workspaceSpec;
   }

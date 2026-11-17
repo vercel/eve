@@ -40,7 +40,6 @@ import {
 const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
 export const JUST_BASH_PROVIDER_NAME = "just-bash";
 
-// Holds the template key, not its path: the build and runtime app roots can differ.
 type JustBashPreparedArtifact = { readonly templateKey: string };
 type JustBashSessionState = { readonly rootPath: string; readonly version: 2 };
 
@@ -64,7 +63,6 @@ export function createJustBashSandboxProvider(
       await rm(state?.rootPath ?? sessionRootPath(context), { force: true, recursive: true });
     },
     async prepare(context) {
-      // Custom commands and the filesystem apply only to live sessions, so they stay out of the key.
       const templateKey = context.templateKey({ version: 2 }).slice(0, 24);
       const templateRootPath = resolveTemplateRootPath(context.storagePath, templateKey);
       if (await pathExists(templateRootPath)) {
@@ -118,15 +116,10 @@ export function createJustBashSandboxProvider(
       );
       return { connection: await connect(context, rootPath), state: { rootPath, version: 2 } };
     },
-    // eve never ends a keyed sandbox; just-bash keeps it only as files on the local disk.
     toolSessions: true,
   };
 }
 
-/**
- * The session's root, under the app's storage path. The template applies
- * only when the root is created, so a session keeps its files across rebuilds.
- */
 function sessionRootPath(context: SandboxSessionContext): string {
   return resolveSessionRootPath(
     context.storagePath,

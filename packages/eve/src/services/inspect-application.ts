@@ -11,28 +11,18 @@ import {
   EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
 
-/**
- * Stable message-contract details surfaced to CLI consumers.
- */
 export interface ApplicationInspectionMessaging {
   readonly createSessionRoutePath: string;
   readonly sessionMessagesRoutePattern: string;
   readonly streamRoutePattern: string;
 }
 
-/**
- * Structured application inspection data for CLI surfaces.
- */
 export interface ApplicationInspection {
   readonly application: ApplicationInfo;
   readonly compiledState: CompileAgentResult | null;
   readonly messaging: ApplicationInspectionMessaging;
 }
 
-/**
- * Resolves application details, compile artifacts, and the active message
- * contract for one eve application root.
- */
 export async function inspectApplication(appRoot: string): Promise<ApplicationInspection> {
   const compiledState = await loadCompiledApplicationState(appRoot);
   const application = getApplicationInfo(compiledState?.project.appRoot ?? appRoot);

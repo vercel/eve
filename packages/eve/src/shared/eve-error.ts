@@ -1,5 +1,3 @@
-// The global symbol registry is shared by every copy of eve loaded in one process, so errors
-// from a duplicated bundle still carry a brand this copy can read.
 const LINEAGE = Symbol.for("eve.error.lineage");
 
 /**
@@ -21,8 +19,6 @@ export class EveError extends Error {
 
   constructor(code: string, message: string, options?: ErrorOptions) {
     super(message, options);
-    // An inherited `errorName` would give the subclass its parent's identity, so `is()` would
-    // narrow unrelated errors to it.
     if (new.target !== EveError && !Object.hasOwn(new.target, "errorName")) {
       throw new TypeError(`${new.target.name} must declare its own static errorName.`);
     }

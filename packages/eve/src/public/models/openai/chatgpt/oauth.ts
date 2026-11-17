@@ -6,7 +6,6 @@ import {
 } from "./auth.js";
 
 export const CHATGPT_ISSUER = "https://auth.openai.com";
-// OpenAI's public OAuth client, also used by fx and opencode; no client secret.
 export const CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const CHATGPT_LOGIN_HINT =
   "Open `/model` in `eve dev` and select ChatGPT subscription to sign in.";

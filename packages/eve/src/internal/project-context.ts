@@ -66,7 +66,6 @@ async function resolveWorkspace(root: string, source: ProjectSource): Promise<Ag
   return { members, root };
 }
 
-/** Try to resolve the owning eve package and classify the input path within it. */
 export async function findEveProjectContext(
   startPath: string,
   options: { readonly source?: ProjectSource } = {},
@@ -118,7 +117,6 @@ export async function findEveProjectContext(
   throw new Error(`Invalid eve project at ${projectRoot}: found no agent files.`);
 }
 
-/** Resolve the owning eve project, throwing when the path has no eve package owner. */
 export async function resolveEveProjectContext(
   startPath: string,
   options: { readonly source?: ProjectSource } = {},

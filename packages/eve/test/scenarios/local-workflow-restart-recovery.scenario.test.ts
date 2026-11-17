@@ -11,17 +11,8 @@ import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workf
 import { startPackagedEveStart } from "./eve-start-harness.js";
 
 const AUTH = { basic: { username: "alice", password: "fixture" } };
-// Long enough that the crash lands while it is pending on a slow runner, with
-// over 10 s to spare, short enough that the restarted server does not idle until
-// it fires.
 const SLEEP_SECONDS = 15;
 
-// The one test that kills a real `eve start`: what a restart does with a session's runs and waits
-// on the local World is the host battery's (`internal/testing/session-host/`), which restarts the
-// World in process. Only a real process boots the built server, applies its spec version, runs the
-// World's start-time recovery through the stranded-run guard, which must replay a run this build
-// owns, mounts the flow route with its queue key, and leaves a SIGKILLed process group's files
-// behind. That the guard is installed and skips a stranded run is `install-workflow-world.test.ts`'s.
 let app: Awaited<ReturnType<typeof materializeScenarioApp>>;
 
 function stubProductionEnv(): void {
@@ -36,7 +27,6 @@ beforeAll(async () => {
       name: "local-workflow-restart",
       installDependencies: true,
       files: {
-        // The model sleeps in a workflow tool, then answers.
         "agent/agent.ts": `import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineAgent } from "eve";
@@ -89,11 +79,6 @@ function readStoredWaits(appRoot: string): { readonly status: string; readonly w
     );
 }
 
-/**
- * Counts stored waits whose `wait_created` event is in their run's log. The
- * World writes a wait before its event, and a crash between the two leaves a
- * run that cannot replay, so the test crashes only once both are written.
- */
 function countJournaledWaits(appRoot: string): number {
   const events = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "events");
   if (!existsSync(events)) return 0;
@@ -111,12 +96,6 @@ function countJournaledWaits(appRoot: string): number {
   return readStoredWaits(appRoot).filter((wait) => journaled.has(wait.waitId)).length;
 }
 
-/**
- * Counts stored steps a crash would catch mid-write: running ones, and settled ones whose
- * `step_completed` or `step_failed` isn't in their run's log yet. world-local stores a step's
- * terminal state before its event, so a crash between the two leaves a step the replay can't
- * settle again ("Cannot modify step in terminal state").
- */
 function countUnsettledSteps(appRoot: string): number {
   const dataDir = resolveLocalWorkflowWorldDataDirectory(appRoot);
   const steps = join(dataDir, "steps");
@@ -150,7 +129,6 @@ function countUnsettledSteps(appRoot: string): number {
   return unsettled;
 }
 
-/** Posts an empty delivery to the flow route, with `proof` as its delivery header when given. */
 async function postDelivery(url: string, proof?: string): Promise<Response> {
   return await fetch(new URL("/.well-known/workflow/v1/flow", url), {
     body: "{}",
@@ -160,8 +138,6 @@ async function postDelivery(url: string, proof?: string): Promise<Response> {
   });
 }
 
-// The local queue is in memory, so the wait's timer died with the process.
-// Only a recovery message tells a spec 9 run to arm it again.
 it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async () => {
   stubProductionEnv();
   const { appRoot } = app;
@@ -177,24 +153,17 @@ it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async
     await expect
       .poll(() => existsSync(join(appRoot, ".sleep-requested")), { timeout: 30_000 })
       .toBe(true);
-    // The session's idle timeout and the sleep: the crash must lose a stored wait's timer.
     await expect
       .poll(() => countJournaledWaits(appRoot), { timeout: 30_000 })
       .toBeGreaterThanOrEqual(2);
-    // And only once every step is settled in the log: what the test kills is a sleeping turn,
-    // not a step write.
     await expect.poll(() => countUnsettledSteps(appRoot), { timeout: 30_000 }).toBe(0);
   } finally {
     await server.crash();
   }
-  // Every stored wait was still pending when the process died, so the
-  // restarted server must arm their timers again.
   expect(readStoredWaits(appRoot).map((wait) => wait.status)).not.toContain("completed");
 
   server = await startPackagedEveStart(appRoot);
   try {
-    // The built server refuses a delivery without its queue key, before eve checks its own
-    // proof, which still guards anything that gets past it.
     for (const proof of [undefined, "incorrect-delivery-proof"]) {
       const refused = await postDelivery(server.url, proof);
       expect(refused.status, server.stderr()).toBe(401);
@@ -216,7 +185,6 @@ it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async
     } catch (error) {
       if (!(error instanceof Error && error.name === "TimeoutError")) throw error;
     }
-    // Its own deliveries carry the key, and its guard replays the run this build owns.
     expect(outcome, `The turn did not settle within 60s.\n${server.stderr()}`).toBe("completed");
     expect(server.stdout() + server.stderr()).not.toContain("Skipping replay of stranded session");
   } finally {

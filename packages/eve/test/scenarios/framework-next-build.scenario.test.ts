@@ -8,7 +8,6 @@ import { createNextEveProxyDescriptor } from "../../src/internal/testing/scenari
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
-// The first CLI that accepts schedules in a service's Build Output.
 const VERCEL_GENERATED_SERVICES_VERSION = "65.14.0";
 const VERCEL_PNPM_10_PROJECT_CREATED_AT = Date.UTC(2026, 6, 13);
 const scenarioApp = useScenarioApp();
@@ -179,7 +178,6 @@ describe("framework-next build", () => {
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const config = await readVercelOutputConfig(outputRoot);
     expect(config.crons).toEqual([{ path: "/api/user-cleanup", schedule: "0 0 * * *" }]);
-    // Vercel CLI lifts each service's schedules into the deployment and sets `service`.
     expect(config.schedules).toEqual({
       "eve.billing.sweep": {
         function: "_vercel/tasks",

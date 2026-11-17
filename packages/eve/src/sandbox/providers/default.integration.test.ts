@@ -33,7 +33,6 @@ afterEach(async () => {
   vi.mocked(isLinuxDockerDaemonAvailableSync).mockClear();
 });
 
-/** Prepares the environment the way the build does and records the artifact. */
 async function build(environment: ReturnType<typeof DefaultSandbox.environment>, dev: boolean) {
   const appRoot = await createScratchDirectory("eve-default-sandbox-");
   const log = vi.fn();
@@ -98,7 +97,6 @@ describe("DefaultSandbox", () => {
     expect(artifact).toMatchObject({ provider: "just-bash" });
     vi.mocked(isLinuxDockerDaemonAvailableSync).mockClear();
 
-    // A runtime that probed the host would now select Vercel Sandbox.
     vi.stubEnv("VERCEL", "1");
     const sandbox = await access({
       appRoot,
@@ -153,8 +151,6 @@ describe("DefaultSandbox", () => {
     await expect(opened?.setNetworkPolicy("deny-all")).rejects.toThrow(/just-bash/);
   });
 
-  // Recorded from DefaultSandbox before it moved to the public provider API.
-  // Deployed builds and running sessions depend on them, so they must never change.
   it("records the same artifact and session state as earlier releases", async () => {
     const environment = DefaultSandbox.environment();
     const { appRoot, artifact } = await build(environment, true);

@@ -7,7 +7,6 @@ export interface MatchedAuthorizationCallback {
   readonly result: { readonly name: string; readonly attemptId: string } & AuthorizationResult;
 }
 
-/** Matches each callback to exactly one pending authorization attempt. */
 export function matchAuthorizationCallbacks(
   signIns: readonly AuthorizationChallenge[],
   payloads: readonly DeliverPayload[],

@@ -21,11 +21,6 @@ function modelOption(
   return { id: value, label, value, hint, featured: featured || undefined };
 }
 
-/**
- * Curated shortlist shown as the picker's default view; the rest of the
- * catalog is reached by scrolling past it or typing a filter. Order here is
- * display order.
- */
 const FEATURED_MODEL_IDS: readonly string[] = [
   DEFAULT_AGENT_MODEL_ID,
   "anthropic/claude-opus-4.8",
@@ -39,7 +34,6 @@ const FALLBACK_MODELS: SelectOption<string>[] = [
   modelOption("google/gemini-3.5", "Gemini 3.5", "Google", false),
 ];
 
-// Brand capitalizations first-letter uppercasing cannot produce.
 const PROVIDER_BRANDS: Record<string, string> = {
   openai: "OpenAI",
   zai: "Z.AI",
@@ -54,7 +48,6 @@ function providerLabel(provider: string): string {
   return PROVIDER_BRANDS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-/** Fetches the raw AI Gateway catalog. */
 export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<GatewayCatalogModel[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -70,20 +63,11 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
   }
 }
 
-/** Position in the curated shortlist, or its length for everything else. */
 function featuredPriority(id: string): number {
   const index = FEATURED_MODEL_IDS.indexOf(id);
   return index === -1 ? FEATURED_MODEL_IDS.length : index;
 }
 
-/**
- * Builds picker options from a fetched catalog, keeping the default model and
- * filtering the rest to language models with the `web-search` tag. The curated
- * shortlist comes first in its own order, followed by the rest newest-first.
- * Catalog entries on the shortlist are marked `featured`, so a searchable
- * picker opens on just them and scrolling or filtering reaches the rest. Falls
- * back to a static shortlist when the catalog is missing or yields nothing.
- */
 export function modelOptionsFromCatalog(
   catalog: readonly GatewayCatalogModel[] | undefined,
 ): SelectOption<string>[] {

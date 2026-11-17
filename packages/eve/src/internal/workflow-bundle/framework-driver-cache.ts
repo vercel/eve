@@ -13,8 +13,6 @@ import { mapConcurrent } from "#shared/map-concurrent.js";
 
 const CACHE_DIRECTORY_PATH = join("node_modules", ".cache", "eve", "workflow-driver");
 
-// eve's code that builds the layer is not in the layer's graph: the workflow transform and bundler
-// setup, and the modules outside them that the transform imports to emit code and ids.
 const BUILD_CODE_DIRECTORIES = ["internal/workflow-bundle", "internal/bundler"];
 const BUILD_CODE_FILES = [
   "execution/stable-workflow-names.js",
@@ -35,30 +33,14 @@ export interface DriverChunk {
 
 interface CacheEntry extends DriverChunk {
   readonly key: string;
-  /** Content hash of each module in the chunk's build graph, by absolute path. */
   readonly modules: Readonly<Record<string, string>>;
 }
 
-/**
- * eve's real package root when it is installed under `node_modules`, where its
- * version pins all of eve's code, including the workflow transform. `undefined`
- * for a linked or source checkout, whose code changes without a version bump.
- */
 export function resolveInstalledEveRoot(): string | undefined {
   const root = realpathSync.native(resolvePackageRoot());
   return root.split(sep).includes("node_modules") ? root : undefined;
 }
 
-/**
- * Returns the framework driver chunk an earlier build of the same installed eve
- * stored under `packageRoot` for this app, or builds and stores it. The key
- * covers eve's package.json and root, Rolldown's version, the build options, and
- * a content hash of eve's workflow-bundle and bundler code plus the modules the
- * transform imports. Each entry also records a content hash of every module in
- * its build graph. So eve edited in place, for example by `patch-package`,
- * rebuilds, unless the edit only touches another module those import, such as a
- * resolution helper of the authored plugins. Cache failures never fail the build.
- */
 export async function reuseFrameworkDriverChunk(
   input: {
     readonly eveRoot: string;
@@ -70,8 +52,6 @@ export async function reuseFrameworkDriverChunk(
   },
   build: (graphPlugin: Plugin) => Promise<DriverChunk>,
 ): Promise<DriverChunk> {
-  // One entry per app and sourcemap setting, replaced when stale, so agents sharing a package do
-  // not evict each other and the directory grows only with the package's apps.
   const app = createHash("sha256")
     .update(JSON.stringify([input.projectRoot, input.workingDir]))
     .digest("hex")
@@ -129,7 +109,6 @@ async function createKey(input: {
     .digest("hex");
 }
 
-/** Once per process: an installed eve's code does not change under a running build. */
 function hashBuildCode(eveRoot: string): Promise<Record<string, string>> {
   let hashes = buildCodeHashes.get(eveRoot);
   if (hashes === undefined) {
@@ -171,7 +150,6 @@ async function readEntry(path: string, key: string): Promise<DriverChunk | undef
   return { code: entry.code, manifest: entry.manifest };
 }
 
-/** Virtual modules have no file; the cache key covers what produces them. */
 async function hashModules(ids: readonly string[]): Promise<Record<string, string>> {
   const files = ids.filter((id) => isAbsolute(id));
   const hashes = await mapConcurrent(files, async (file) =>

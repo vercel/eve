@@ -11,7 +11,6 @@ import {
 } from "#shared/conversation-context.js";
 import { readForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
-/** What a conversation context is built from: a run, or a direct tool call's channel and caller. */
 type ConversationSource =
   | RunInput
   | (Pick<RunInput, "adapter" | "auth"> &
@@ -65,7 +64,6 @@ export function buildConversationContext(
   };
 }
 
-/** Projects route auth into the minimal identity audience classifiers need. */
 export function toAudienceCaller(auth: SessionAuthContext | null | undefined): AudienceCaller {
   if (auth === null || auth === undefined || auth.principalType === "anonymous") {
     return { type: "anonymous" };

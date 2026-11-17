@@ -14,7 +14,6 @@ import {
 import { emitExtensionDeclarations } from "#internal/nitro/host/extension-declarations.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
-/** Emits the runnable, agent-shaped tree and its package entrypoints into staging. */
 export async function emitExtensionDistribution(input: {
   readonly appRoot: string;
   readonly declarationModule: ModuleSourceRef;
@@ -90,11 +89,6 @@ function collectExtensionResourceRoots(manifest: AgentSourceManifest): string[] 
   ];
 }
 
-/**
- * Thrown when publishing failed and the prior output could not be moved back.
- * The prior output survives at {@link preservedOutputPath}; callers must not
- * delete the transaction directory that contains it.
- */
 export class ExtensionOutputRestoreError extends Error {
   readonly preservedOutputPath: string;
 
@@ -108,7 +102,6 @@ export class ExtensionOutputRestoreError extends Error {
   }
 }
 
-/** Atomically publishes a staged extension output, restoring the prior tree on failure. */
 export async function replaceExtensionBuildOutput(input: {
   readonly outDir: string;
   readonly stagedOutDir: string;

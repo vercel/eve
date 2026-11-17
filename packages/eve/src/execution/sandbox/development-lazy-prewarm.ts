@@ -13,7 +13,6 @@ import { prewarmAppSandboxes } from "./prewarm.js";
 
 const PREPARATION_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** Serializes whole-generation preparation across dev workers, rechecking artifacts under the lock. */
 export async function ensureDevelopmentSandboxesPrepared(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
   readonly nodeId: string;
@@ -38,7 +37,6 @@ export async function ensureDevelopmentSandboxesPrepared(input: {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  // Workers share the parent's pid: heartbeat expiry, not pid alone, detects a crashed worker.
   const stopHeartbeat = startPublicationJournalHeartbeat(join(lockPath, "lease"));
   try {
     if ((await loadSandboxPreparedArtifact(input)) !== undefined) return;

@@ -17,11 +17,6 @@ const LONG_RESPONSE_NOTICE = "Here's a snippet with the full response.";
 const FALLBACK_LOG = "Slack refused the final reply; delivering it with a fallback";
 const ROOT_GONE_LOG = "Slack thread root was deleted; dropping the final reply";
 
-/**
- * Slack error codes for a message payload Slack refused as too large or
- * malformed. Slack posts nothing for a refused call, so a fallback post
- * cannot duplicate it.
- */
 const REFUSED_PAYLOAD_ERRORS = new Set([
   "invalid_blocks",
   "invalid_blocks_format",
@@ -90,10 +85,6 @@ export async function postCompletedSlackReply(
   await deliverCompletedSlackReply(channel, reply, {});
 }
 
-/**
- * {@link postCompletedSlackReply} with fields for its fallback log, such as
- * the turn id eve's default renderer knows.
- */
 export async function deliverCompletedSlackReply(
   channel: SlackContext,
   reply: SlackCompletedReply,
@@ -132,23 +123,8 @@ export async function deliverCompletedSlackReply(
   await uploadReplySnippet(channel, markdown);
 }
 
-/**
- * True when the bound thread's root message no longer exists. Slack accepts
- * a `thread_ts` whose parent is gone and posts the message at the top level
- * of the channel, so a reply to a deleted root would leak into the channel.
- *
- * `chat.getPermalink` needs no scopes, unlike `conversations.replies`, so
- * the check works with the minimal `app_mentions:read` + `chat:write` app.
- * Only `message_not_found` counts as gone. Any other failure to look it up
- * counts as "not gone", so a lookup problem never swallows a reply.
- *
- * Once eve has posted in the thread, deleting the root leaves a tombstone
- * that keeps the thread, and `chat.getPermalink` may not tell a tombstone
- * from a missing message, so the check is skipped.
- */
 async function threadRootIsGone(channel: SlackContext): Promise<boolean> {
   const { channelId, codeChannel, threadTs } = channel.slack;
-  // A code channel has no session root, and a reply that lands top-level stays in the channel.
   if (!channelId || !threadTs || codeChannel) return false;
   if ((channel as Partial<SlackChannelContext>).state?.postedInThread === true) return false;
   try {
@@ -169,10 +145,8 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
     mimeType: "text/markdown",
   };
 
-  // A code channel posts top-level by design; only a threadless proactive session needs an anchor.
   const hasThread = channel.slack.codeChannel || channel.slack.threadTs.length > 0;
   if (!hasThread) {
-    // Uploads cannot anchor proactive sessions; post the notice first.
     const anchor = await channel.thread.post(LONG_RESPONSE_NOTICE);
     if (!anchor.id || channel.slack.threadTs.length === 0) {
       throw new Error("Slack did not return a thread timestamp for the long response notice.");
@@ -184,12 +158,10 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
   });
 }
 
-/** Whether Slack's error `code` means it refused the message's content and posted nothing. */
 export function isRefusedPayloadCode(code: unknown): code is string {
   return typeof code === "string" && REFUSED_PAYLOAD_ERRORS.has(code);
 }
 
-/** Slack's error code when `error` is a refused-payload error, checking its causes. */
 export function refusedPayloadError(error: unknown): string | undefined {
   let current = error;
   for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
@@ -198,7 +170,6 @@ export function refusedPayloadError(error: unknown): string | undefined {
       readonly data?: { readonly error?: unknown };
       readonly response?: { readonly error?: unknown };
     };
-    // eve's Slack client reports the code on `response`; `@slack/web-api` on `data`.
     const code = candidate.response?.error ?? candidate.data?.error;
     if (isRefusedPayloadCode(code)) return code;
     current = candidate.cause;
@@ -206,17 +177,6 @@ export function refusedPayloadError(error: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Wraps a channel's composed `content.completed` chain, authored renderers
- * included, so a final reply that fails is never lost without a trace.
- *
- * When the chain throws on a final reply, eve logs the error at error level,
- * posts a content-free notice with its error id, and tells the model on the
- * next delivery that its reply was not seen. eve never sends the reply from
- * here: the chain owns the content, including any change a renderer made
- * before `next`, and {@link postCompletedSlackReply} owns the fallbacks.
- * Narration, other content, and empty replies pass through.
- */
 export function withFinalReplyDelivery(
   render: ContentCompletedHandler | undefined,
 ): ContentCompletedHandler {

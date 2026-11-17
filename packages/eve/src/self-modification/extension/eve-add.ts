@@ -4,22 +4,14 @@ import { findPackageJSON } from "node:module";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-/**
- * An install runs the project's package manager, which is slow but not
- * unbounded. The cap exists so a wedged child cannot hold the authored-source
- * watcher suspended for the rest of the session.
- */
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const TERMINATION_GRACE_MS = 5_000;
-/** Enough to retain the terminal protocol event without accumulating child output indefinitely. */
 const OUTPUT_LIMIT = 64_000;
 
-/** Minimal spawn surface, injectable so tests need no real child process. */
 export type SpawnLike = typeof nodeSpawn;
 
 export type EveAddOutcome =
   | { readonly kind: "installed" }
-  /** The child ended in a state that needs a terminal (a setup question). */
   | { readonly kind: "blocked"; readonly message: string }
   | {
       readonly kind: "failed";
@@ -75,11 +67,6 @@ function isChildTreeAlive(child: ReturnType<SpawnLike>): boolean {
   }
 }
 
-/**
- * Resolves the `eve` executable the way eve already resolves setup binaries:
- * from the application's own dependency graph and the package's declared bin,
- * never a `PATH` lookup. A `PATH` hit could be any version, or not eve at all.
- */
 export async function resolveEveExecutable(appRoot: string): Promise<string> {
   const packageJsonPath = findPackageJSON("eve", pathToFileURL(resolve(appRoot, "package.json")));
   if (packageJsonPath === undefined) {
@@ -111,12 +98,6 @@ export async function resolveEveExecutable(appRoot: string): Promise<string> {
   return executable;
 }
 
-/**
- * Reads the one terminal event `eve add --non-interactive` prints.
- *
- * The registry SDK writes its own progress to the same streams, so this scans
- * for the JSON line rather than assuming the output is only NDJSON.
- */
 export function readTerminalHeadlessEvent(output: string): HeadlessEvent | undefined {
   let terminal: HeadlessEvent | undefined;
   for (const line of output.split("\n")) {
@@ -144,18 +125,6 @@ export function readTerminalHeadlessEvent(output: string): HeadlessEvent | undef
   return terminal;
 }
 
-/**
- * Runs `eve add <address> --non-interactive --skip-setup` in `appRoot`.
- *
- * The argv shape is fixed here rather than composed by a caller: the
- * subcommand, the interaction mode, and the setup opt-out are the constraints
- * that make this safe to expose, so none of them is a parameter.
- *
- * `--skip-setup` is redundant given the split rule, which reads the cached
- * catalog index while the manifest is fetched fresh at install. If the two ever
- * disagree, this flag is what keeps a setup flow from starting in a process
- * with no way to answer it.
- */
 export async function runEveAdd(input: {
   readonly address: string;
   readonly appRoot: string;

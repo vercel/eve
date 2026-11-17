@@ -6,14 +6,6 @@ import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js"
 import type { ConnectionClient } from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 
-/**
- * Per-step container mapping connection names to lazily-initialized
- * client wrappers. `withContextScope` builds one per step, and the connection
- * provider disposes it when the step ends.
- *
- * The registry is protocol-agnostic: it dispatches to the client
- * implementation matching each connection's `protocol` (MCP or OpenAPI).
- */
 export class ConnectionRegistryImpl implements ConnectionRegistry {
   #clients = new Map<string, ConnectionClient>();
   #connections: readonly ResolvedConnectionDefinition[];
@@ -24,7 +16,6 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     this.#connections = connections;
   }
 
-  /** Replaces the dynamic connections, by reaction, and closes clients whose definition changed. */
   async replaceDynamicConnections(
     connectionsByResolver: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
   ): Promise<void> {
@@ -68,10 +59,6 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     return [...connections.values()];
   }
 
-  /**
-   * Returns the client for the named connection, creating it on first
-   * access. The connection's `protocol` selects the client type.
-   */
   getClient(connectionName: string): ConnectionClient {
     const existing = this.#clients.get(connectionName);
     if (existing !== undefined) {
@@ -91,37 +78,23 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     return client;
   }
 
-  /**
-   * Returns the authored approval function for the named connection,
-   * or `undefined` if the connection did not specify one.
-   */
   getConnectionApproval(connectionName: string): Approval | undefined {
     const connection = this.#connections.find((c) => c.connectionName === connectionName);
     return connection?.approval;
   }
 
-  /**
-   * Returns all registered connection names.
-   */
   getConnectionNames(): readonly string[] {
     return this.#connections.map((c) => c.connectionName);
   }
 
-  /** The names of the connections the agent declares, without the dynamic ones installed. */
   getStaticConnectionNames(): readonly string[] {
     return this.#staticConnections.map((c) => c.connectionName);
   }
 
-  /**
-   * Returns the resolved definitions for all connections.
-   */
   getConnections(): readonly ResolvedConnectionDefinition[] {
     return this.#connections;
   }
 
-  /**
-   * Closes all active client connections.
-   */
   async dispose(): Promise<void> {
     const closePromises = [...this.#clients.values()].map((client) => client.close());
     await Promise.allSettled(closePromises);
@@ -129,11 +102,9 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
   }
 }
 
-/** A dynamic connection may neither own nor be owned by another connection's name. */
 function assertNoNestedConnection(dynamicName: string, connectionNames: Iterable<string>): void {
   for (const other of connectionNames) {
     if (other === dynamicName) continue;
-    // Only the shorter of two names can own the other.
     const [name, owner] =
       other.length < dynamicName.length ? [dynamicName, other] : [other, dynamicName];
     assertNotConnectionOwned({

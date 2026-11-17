@@ -30,7 +30,6 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 
-// Approval must retain prepared data across durable suspension, not in a resolver closure.
 const PreparedWritesKey = new ContextKey<Readonly<Record<string, PreparedScheduleWrite>>>(
   "eve.schedulePreparedWrites",
 );
@@ -78,21 +77,15 @@ const expressionSchema = z.discriminatedUnion("type", [
 const timingGuidance =
   "For relative requests use expression { type: 'delay', minutes: 1 }; eve resolves timing after approval and rounds up to minute precision (up to 59 seconds later). Do not guess the clock or ask for a timezone for delays.";
 
-/** One collection behind a set of schedule tools; `scope` names it when it is a named scope. */
 export interface ScheduleToolsMember {
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly collection: string;
   readonly scope?: string;
-  /** Explains the named scope, not the shared definition. */
   readonly description?: string;
 }
 
 type ReadOrStateOperation = "get" | "list" | "enable" | "disable" | "invoke" | "delete";
 
-/**
- * The tools a schedule collection offers the model, named `schedule__<collection>__<action>`, or
- * `null` when its `tool` is `false`.
- */
 export function scheduleCollectionTools<TInput, TPrepared = TInput>(
   definition: DynamicSchedulesDefinition<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
   collection: string,
@@ -101,10 +94,6 @@ export function scheduleCollectionTools<TInput, TPrepared = TInput>(
   return scheduleTools([{ definition, collection }], scheduleCollectionToolPrefix(collection));
 }
 
-/**
- * The one set of tools a definition's named scopes share, under the tool slot `slug`. Each call
- * names a scope, and that scope's resolver, `preparePayload`, and approval policies apply.
- */
 export function scheduleScopesTools(
   scopes: readonly (ScheduleToolsMember & { readonly scope: string })[],
   slug: string,
@@ -118,7 +107,6 @@ function scheduleTools(
   slug: string,
 ): Record<string, DynamicToolEntry> {
   const first = members[0]!;
-  // A definition's named scopes take a `scope` input; a collection on its own takes none.
   const named = first.scope !== undefined;
   const memberOf = (input: unknown): ScheduleToolsMember => {
     if (!named) return first;
@@ -130,7 +118,6 @@ function scheduleTools(
       );
     return member;
   };
-  // The scope's client takes the input it would take as a collection of its own.
   const withoutScope = <T extends object>(input: T): T => {
     const { scope: _scope, ...rest } = input as T & { scope?: unknown };
     return rest as T;
@@ -172,7 +159,6 @@ function scheduleTools(
       message: "Schedule update requires an expression or replacement payload.",
     });
   const namedSchema = z.object({ ...scopeShape, name: nameInput.shape.name }).strict();
-  // Each scope keeps its own policies, and a remembered approval stays with its scope.
   const memberPolicy = <T>(
     context: ApprovalContext,
     input: unknown,
@@ -200,7 +186,6 @@ function scheduleTools(
           : await resolveApprovalPolicy(routed.policy)(routed.context);
       },
     };
-    // As for one collection: only a scope that sets a response policy gates the tool's responses.
     const gates = (member: ScheduleToolsMember) => {
       const policy = policyOf(member);
       return typeof policy === "object" && policy.response !== undefined;
@@ -208,14 +193,12 @@ function scheduleTools(
     if (members.some(gates))
       approval.response = async (context) => {
         const policy = policyOf(memberOf(context.request.toolInput));
-        // A scope without a response policy keeps the default: only the requester answers.
         return typeof policy === "object" && policy.response !== undefined
           ? await policy.response(context)
           : requesterOnlyResponse(context);
       };
     return approval;
   };
-  // A response policy on any scope gates the shared tool; the other scopes stay requester-only.
   const gatesResponses = (operation: "create" | "update") =>
     members.some((member) => {
       const policy = member.definition.approval?.[operation];
@@ -396,7 +379,6 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
             ),
             [key]: prepared,
           };
-          // Evicted approvals fail closed instead of blocking future creation forever.
           while (Buffer.byteLength(JSON.stringify(snapshots)) > 512 * 1024)
             delete snapshots[Object.keys(snapshots)[0]!];
           loadContext().set(PreparedWritesKey, snapshots);
@@ -421,10 +403,8 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
   if (gatesResponses)
     approval.response = async (context) => {
       const policy = policyOf(context.request.toolInput);
-      // A scope without a response policy keeps the default: only the requester answers.
       if (typeof policy === "function" || policy.response === undefined)
         return requesterOnlyResponse(context);
-      // Each key family is written by one typed preparer; restore that type after durable suspension.
       const prepared = loadContext().get(PreparedWritesKey)?.[keyFor(context.request.callId)] as
         | TWrite
         | undefined;

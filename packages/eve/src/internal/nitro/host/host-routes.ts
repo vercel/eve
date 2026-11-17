@@ -34,7 +34,6 @@ import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-rou
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 
-/** The dedicated Vercel function a route needs instead of the shared server function. */
 export type HostRouteVercelFunction = "schedule-queue" | "workflow-queue";
 
 type HostRoute =
@@ -43,11 +42,6 @@ type HostRoute =
       readonly method: ChannelRouteMethod;
       readonly path: string;
       readonly cors?: NormalizedChannelCorsOptions;
-      /**
-       * Set on the GET handler of a path with no HEAD route (an HTTP GET
-       * route, else a WebSocket route): every method declared for the path.
-       * The handler answers HEAD with 405 and this `Allow` set.
-       */
       readonly allow?: readonly string[];
     }
   | {
@@ -73,17 +67,11 @@ type HostRoute =
       readonly kind: "workflow";
       readonly method: "ALL";
       readonly path: string;
-      /** Registers the bundle's `POST` on the worker's own world queue. */
       readonly directQueuePrefix?: string;
       readonly vercelFunction: "workflow-queue";
     };
 
-/** An authored schedule registered as a Nitro task. */
 export interface HostScheduleTask extends ScheduleRegistration {
-  /**
-   * The Nitro task name, which Vercel Schedules also uses as the schedule
-   * name. See {@link createVercelScheduleName}.
-   */
   readonly nitroTaskName: string;
 }
 
@@ -98,11 +86,9 @@ interface HostRouteTableInput {
   readonly mode: "development" | "production";
   readonly scheduleRegistrations: readonly ScheduleRegistration[];
   readonly vercel: boolean;
-  /** Built as one service of a multi-service Vercel project. */
   readonly vercelService?: boolean;
 }
 
-/** Every route, task, and cron path eve's Nitro host serves, in registration order. */
 export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable {
   const { manifest } = input;
   const development = input.mode === "development";
@@ -171,7 +157,6 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
   };
 }
 
-// Nitro keys tasks by name, so a shared name would drop a schedule silently.
 function assertUniqueScheduleNames(tasks: readonly HostScheduleTask[]): void {
   const byName = new Map<string, HostScheduleTask>();
   for (const task of tasks) {
@@ -185,11 +170,6 @@ function assertUniqueScheduleNames(tasks: readonly HostScheduleTask[]): void {
   }
 }
 
-/**
- * Dev queues dispatch in the worker unless the parent owns the World. Hosted
- * Vercel builds deliver through queue functions, so only a self-hosted build
- * with a configured World dispatches in process.
- */
 function hasDirectWorkflowQueue(input: HostRouteTableInput): boolean {
   const configuredWorld = input.manifest.config.experimental?.workflow?.world;
   return input.mode === "development"
@@ -201,7 +181,6 @@ function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRout
   if (route.kind !== "channel" || (route.method !== "GET" && route.method !== "WEBSOCKET")) {
     return route;
   }
-  // Match as the router does: parameter names don't distinguish paths.
   const pattern = normalizeRoutePattern(route.path);
   const methods = routes
     .filter((candidate) => normalizeRoutePattern(candidate.path) === pattern)
@@ -209,17 +188,11 @@ function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRout
     .filter((method) => method !== "WEBSOCKET" && method !== "ALL");
   if (methods.includes("HEAD")) return route;
   if (route.method === "WEBSOCKET") {
-    // An HTTP GET route on the path owns the guard; otherwise the upgrade's
-    // GET handler is the one HEAD reaches.
     return methods.includes("GET") ? route : { ...route, allow: [...new Set(["GET", ...methods])] };
   }
   return { ...route, allow: [...new Set(methods)] };
 }
 
-/**
- * A route with its own Vercel function must be static: eve names that
- * function's directory after the path instead of after Nitro's pattern rules.
- */
 function staticVercelFunctionPath(path: string): string {
   if (/[:*]/.test(path)) {
     throw new Error(`A route with its own Vercel function must be static: ${path}`);
@@ -235,11 +208,6 @@ export interface HostNitroRoutes {
   readonly virtual: Record<string, string>;
 }
 
-/**
- * Renders the route table into Nitro config. Writes the artifacts config every
- * route module shares to `artifactsConfigPath` and the workflow handler file
- * beside the workflow bundle; everything else is a virtual module.
- */
 export async function renderHostRoutes(
   table: HostRouteTable,
   input: {
@@ -256,8 +224,6 @@ export async function renderHostRoutes(
   const virtual: Record<string, string> = {
     [ROUTE_CONFIG_ID]: renderRouteConfigModule({ configPath: input.artifactsConfigPath }),
   };
-  // The bundler types a module by its id's extension, and names embed authored
-  // route paths (`/agent-card.json`), so every id ends in `.mjs` (#5742).
   const addVirtualModule = (name: string, source: string): string => {
     const id = `#eve/${name}.mjs`;
     virtual[id] = source;
@@ -271,9 +237,6 @@ export async function renderHostRoutes(
     handlers.push({ handler: addVirtualModule(name, source), ...registration });
   };
 
-  // A WebSocket upgrade arrives as a GET, so a path with both routes gets one
-  // GET handler that serves HTTP requests and answers upgrades. Paths match
-  // as the router matches them: parameter names don't distinguish them.
   const channelRoutes = table.routes.filter((route) => route.kind === "channel");
   const httpGetPatterns = new Set(
     channelRoutes
@@ -338,9 +301,6 @@ export async function renderHostRoutes(
         );
         break;
       case "development-schedule":
-        // Resolved here, in the unbundled host process: resolving the
-        // module-map loader from inside the bundled dev server can land on the
-        // authored app instead of the installed eve package (vercel/eve#311).
         addVirtualHandler(
           `route${route.path}`,
           renderHostHandler({
@@ -372,8 +332,6 @@ export async function renderHostRoutes(
   const tasks: HostNitroRoutes["tasks"] = {};
   const scheduledTasks: Record<string, string[]> = {};
   for (const task of table.scheduleTasks) {
-    // The id's basename becomes the chunk filename, and a task name encodes its
-    // whole source path, so a digest keeps the filename short.
     const digest = createHash("sha256").update(task.taskName).digest("hex").slice(0, 16);
     const handler = addVirtualModule(`schedule-task/${digest}`, renderScheduleTaskModule(task));
     tasks[task.nitroTaskName] = { description: task.description, handler };
@@ -396,11 +354,6 @@ export async function renderHostRoutes(
   };
 }
 
-/**
- * The workflow route's handler file, written beside the bundle. It stays a
- * file because it registers queue handlers as top-level side effects, and
- * Nitro virtual modules default to `moduleSideEffects: false`.
- */
 export function workflowHandlerPath(workflowArtifacts: WorkflowArtifacts): string {
   return join(dirname(workflowArtifacts.workflowsPath), "workflows-handler.mjs");
 }

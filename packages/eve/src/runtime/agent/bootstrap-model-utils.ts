@@ -9,10 +9,6 @@ type BootstrapStreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>
 
 const BOOTSTRAP_RESPONSE_TIMESTAMP = new Date("2026-03-16T00:00:00.000Z");
 
-/**
- * Builds a deterministic `doGenerate` result from a text response and token
- * estimates. Shared by the real bootstrap model and the authored-model mock.
- */
 export function createBootstrapGenerateResult(input: {
   readonly inputTokens: number;
   readonly modelId: string;
@@ -49,10 +45,6 @@ export function createBootstrapGenerateResult(input: {
   } as unknown as BootstrapGenerateResult;
 }
 
-/**
- * Converts a `doGenerate` result into a synchronous `doStream` result by
- * replaying content parts through a `ReadableStream`.
- */
 export function createBootstrapStreamResult(
   result: BootstrapGenerateResult,
 ): BootstrapStreamResult {
@@ -124,16 +116,10 @@ export function createBootstrapStreamResult(
   } as unknown as BootstrapStreamResult;
 }
 
-/**
- * Rough token estimate based on character length (1 token per 4 chars).
- */
 export function estimateTokenCount(value: string): number {
   return Math.max(1, Math.ceil(value.trim().length / 4));
 }
 
-/**
- * Extracts all text from a prompt message's content, joining text parts.
- */
 export function getPromptContentText(content: BootstrapPrompt[number]["content"]): string {
   if (typeof content === "string") {
     return content;
@@ -155,13 +141,6 @@ export function getPromptContentText(content: BootstrapPrompt[number]["content"]
     .join("");
 }
 
-/**
- * Returns the text from the last user message in the prompt, or `null`.
- *
- * Skips framework-injected `[Tasks]` notes and task results: they ride the
- * user role in conversation history, but they are not authored input and must
- * not drive mock directive parsing.
- */
 export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
   for (const message of [...prompt].reverse()) {
     if (message.role !== "user") {
@@ -182,18 +161,10 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
   return null;
 }
 
-/**
- * True when the text is a framework-injected `[Tasks]` note or task result:
- * user-role scaffolding, not authored input. Mock model heuristics must scan
- * past it instead of treating it as the turn's message or as a turn boundary.
- */
 export function isFrameworkAnnouncementText(text: string): boolean {
   return text.startsWith(TASKS_NOTE_LABEL) || text.startsWith(TASK_RESULT_TAG);
 }
 
-/**
- * Joins all message content in the prompt into a single string.
- */
 export function getPromptText(prompt: BootstrapPrompt): string {
   return prompt
     .map((message: BootstrapPrompt[number]) => getPromptContentText(message.content))

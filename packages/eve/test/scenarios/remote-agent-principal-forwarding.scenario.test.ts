@@ -10,17 +10,6 @@ import {
 } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "#internal/testing/dev-server-harness.js";
 
-/**
- * Locks the remote-agent principal-forwarding hop over a real HTTP boundary: the
- * test process plays the router deployment (driving the real sender dispatch
- * function) against a receiver dev server whose `eveChannel` configures
- * `trustedForwarders`. The receiver's `onMessage` asserts that the
- * forwarded principal — not the transport caller — became the effective
- * session caller, with the `eve:forwarded-by` audit attribute stamped from
- * the verified transport principal. The predicate also limits the router to
- * Slack principals, so an assertion of any other identity type is refused.
- */
-
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
 
@@ -99,9 +88,6 @@ describe("remote agent auth forwarding", () => {
       const receiver = await startEveDev(receiverApp.appRoot);
 
       try {
-        // Accepted: the trusted transport principal asserts a forwarded user.
-        // The receiver's onMessage (which throws on any other caller) proves
-        // the principal replacement happened.
         const child = await startRemoteAgentSession({
           action: createAction(),
           auth: FORWARDED_USER,
@@ -112,8 +98,6 @@ describe("remote agent auth forwarding", () => {
         });
         expect(child.sessionId.length).toBeGreaterThan(0);
 
-        // Mismatch: an authenticated caller outside the forwarder allow-list
-        // fails loud at the hop instead of downgrading to service identity.
         await expect(
           startRemoteAgentSession({
             action: createAction(),
@@ -125,8 +109,6 @@ describe("remote agent auth forwarding", () => {
           }),
         ).rejects.toThrow(/HTTP 403/);
 
-        // Over-reach: the trusted router asserts an identity type it may not
-        // speak for, so the receiver refuses what is asserted.
         await expect(
           startRemoteAgentSession({
             action: createAction(),

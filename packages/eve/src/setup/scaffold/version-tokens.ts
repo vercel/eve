@@ -2,13 +2,6 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/**
- * Build-stamp tokens authored in scaffold sources, mapped to the source of
- * truth each one is stamped from. `pnpm build` rewrites the tokens in `dist`
- * as its final step (`scripts/stamp-version-tokens.mjs`); dev-tree executions
- * — tsc watch emits and tests running from `src` — never run that step, so
- * {@link resolveVersionToken} resolves the same sources at the point of need.
- */
 type TokenSource =
   | { kind: "eve-version" }
   | { kind: "eve-node-engine" }
@@ -18,10 +11,6 @@ function versionToken(name: string): string {
   return `__${name}_VERSION__`;
 }
 
-// Built at runtime, never written as a literal. The build stamper rewrites the
-// token only at its use site (DEFAULT_EVE_PACKAGE_CONTRACT); a literal here
-// would let it corrupt this lookup key too. Same reason versionToken()
-// constructs its tokens. Kept in sync with the key in stamp-version-tokens.mjs.
 function bareToken(name: string): string {
   return `__${name}__`;
 }
@@ -45,14 +34,8 @@ const TOKEN_SOURCES: Readonly<Record<string, TokenSource>> = {
   [versionToken("TYPES_REACT_DOM")]: { kind: "catalog", packageName: "@types/react-dom" },
 };
 
-// The published name; rule 28 keeps the scaffold layer free of `#internal/*`
-// imports, so the shared package-name constant cannot be reused here.
 const EVE_PACKAGE_NAME = "eve";
 
-// Published tarballs ship only bin/ and dist/ (package.json `files`), so the
-// stamp script's presence next to the package marks a dev checkout. Without
-// this gate an unstamped *publish* running inside a consumer's pnpm workspace
-// would silently pin the consumer's catalog versions instead of failing loudly.
 const DEV_TREE_MARKER = "scripts/stamp-version-tokens.mjs";
 
 const resolvedTokens = new Map<string, string>();
@@ -82,9 +65,6 @@ function findWorkspaceManifest(packageRoot: string): string | undefined {
   }
 }
 
-// Line-oriented mirror of resolveCatalogVersion in
-// scripts/stamp-version-tokens.mjs, which cannot be imported: it is a build
-// script that must run before dist exists.
 function readCatalogVersion(manifestPath: string, packageName: string): string | undefined {
   const lines = readFileSync(manifestPath, "utf8").split(/\r?\n/);
   let inCatalog = false;
@@ -127,22 +107,10 @@ function resolveTokenFromDevTree(token: string): string | undefined {
     if (manifestPath === undefined) return undefined;
     return readCatalogVersion(manifestPath, source.packageName);
   } catch {
-    // Any filesystem or parse failure falls through to the unstamped throw;
-    // the fallback must never turn a loud failure into a corrupt scaffold.
     return undefined;
   }
 }
 
-/**
- * Returns a scaffold version value, resolving a build-stamp token at the point
- * of need when the running code is unstamped. The published package is stamped
- * by the build (`scripts/stamp-version-tokens.mjs`), so the fallback only ever
- * fires in a dev tree — tsc watch emits and tests running from `src` — where
- * the live package and workspace manifests are the sources the stamp would have captured.
- * Outside a dev tree an unstamped token still throws, because writing the
- * literal token into a scaffolded package.json would break the generated
- * project.
- */
 export function resolveVersionToken(field: string, value: string): string {
   if (!value.startsWith("__")) return value;
   const cached = resolvedTokens.get(value);

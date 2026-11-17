@@ -11,8 +11,6 @@ interface Shape {
   readonly tags: readonly string[];
 }
 
-// The cases are compile-time checks: each `@ts-expect-error` fails the build if it stops being
-// one. The test only keeps them in a file that runs.
 describe("conforming", () => {
   it("accepts a schema that parses to exactly the type", () => {
     const schema = conforming<Shape>()(

@@ -6,10 +6,8 @@ type RootSandbox = Pick<SandboxSession, "resolvePath" | "run">;
 
 const MAX_ERROR_DETAIL_CHARS = 2_000;
 
-/** The resolved root, or why the given directory cannot be one. */
 export type RepositoryRoot = { readonly root: string } | { readonly refused: string };
 
-/** A workspace directory that must also be the top of a git work tree. */
 export async function validateRepositoryRoot(
   sandbox: RootSandbox,
   root: string,
@@ -31,7 +29,6 @@ export async function validateRepositoryRoot(
   return { root: resolved };
 }
 
-/** NUL-delimited output keeps paths that contain newlines unambiguous. */
 async function realPath(
   sandbox: RootSandbox,
   path: string,

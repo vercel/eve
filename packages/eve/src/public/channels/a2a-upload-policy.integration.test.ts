@@ -12,10 +12,6 @@ import { a2aChannel } from "#public/channels/a2a.js";
 
 vi.mock("#execution/web-fetch/request.js", () => ({ requestPublicUrl: vi.fn() }));
 
-/**
- * The A2A channel's own adapter holds staged files to its upload policy. Intake only sees a
- * file's declared type and, for a URL, no size at all; staging sees the downloaded bytes.
- */
 describe("a2aChannel upload policy at staging", () => {
   it("caps URL downloads at maxBytes and refuses bytes whose real type the policy excludes", async () => {
     vi.mocked(requestPublicUrl).mockResolvedValueOnce(
@@ -29,21 +25,18 @@ describe("a2aChannel upload policy at staging", () => {
     const sandbox = mockSandbox({ id: "sbx_a2a_policy" });
     const runtime = await createTestRuntime();
     const content: UserContent = [
-      // A URL intake can't size: the download is capped and its bytes checked.
       {
         data: "https://example.com/big.png",
         filename: "big.png",
         mediaType: "image/png",
         type: "file",
       },
-      // Declared as an allowed image, but the bytes are a PDF.
       {
         data: Buffer.from("%PDF-1.7\n%\u00e2\u00e3\n", "latin1"),
         filename: "scan.png",
         mediaType: "image/png",
         type: "file",
       },
-      // An allowed image within the limit is staged.
       { data: pngBytes(1, 1), filename: "dot.png", mediaType: "image/png", type: "file" },
     ];
 

@@ -65,7 +65,6 @@ export function recallParticipantPrincipalId(botId: string, participantId: strin
   return `recall:${botId}:${participantId}`;
 }
 
-/** The participant id in a principal {@link recallParticipantAuth} made for `botId`, if it is one. */
 export function participantIdOf(
   principalId: string | undefined,
   botId: string,
@@ -111,7 +110,6 @@ const ORDINALS = [
   "ninth",
   "tenth",
 ];
-/** Words people wrap a choice in, such as "okay, let's go with option two, please". */
 const FILLER_WORDS = new Set(
   "okay ok so um uh hey yes yeah yep sure please it that this the option number let's lets go with do pick choose i we and then".split(
     " ",
@@ -126,11 +124,6 @@ function words(text: string): string[] {
     .filter(Boolean);
 }
 
-/**
- * The option a natural reply picks, such as "Okay eve, approve it" or "eve,
- * option one". Drops the bot's name, filler words, and number words, then
- * matches what's left exactly, so "neither, Thursday is bad" picks nothing.
- */
 export function matchSpokenOption<T extends { readonly id: string; readonly label: string }>(
   text: string,
   botName: string,
@@ -146,7 +139,6 @@ export function matchSpokenOption<T extends { readonly id: string; readonly labe
       continue;
     }
     const word = said[i]!;
-    // "the second one": after an ordinal, "one" names the option, not a number.
     if (word === "one" && ORDINALS.includes(said[i - 1] ?? "")) continue;
     if (optionWords.has(word)) rest.push(word);
     else if (NUMBER_WORDS.includes(word)) rest.push(String(NUMBER_WORDS.indexOf(word) + 1));
@@ -163,7 +155,6 @@ export function matchSpokenOption<T extends { readonly id: string; readonly labe
   return Number.isInteger(index) && index >= 1 ? options[index - 1] : undefined;
 }
 
-/** Default inbound hook: speech, chat, joins, and leaves, each as its participant. */
 export function defaultOnMeetingEvent(
   _ctx: RecallContext,
   event: RecallMeetingEvent,
@@ -171,24 +162,19 @@ export function defaultOnMeetingEvent(
   return event.type === "status" ? null : { auth: recallParticipantAuth(event) };
 }
 
-/** Default respond check: every chat message, and speech that names the bot. */
 export function defaultShouldRespond(input: RecallRespondInput): boolean {
   const { event } = input;
   if (event.type === "chat") return true;
   return event.type === "speech" && isAddressedTo(event.text, input.botName);
 }
 
-/** Built-in Recall event handlers: chat replies, typed prompts, private sign-ins, and errors. */
 export const defaultEvents: RecallChannelEvents = {
   ...surfaceEvents<RecallEventContext>({
     post: (channel, text) => channel.recall.sendChatMessage(text),
     restart: "meeting",
-    // Meeting chat has no buttons, so a reply can only answer the request it sees.
     requests: { showOne: showPrompt },
     signIns: recallSignIns,
   }),
-  // Text before a tool call is the agent saying it's starting, which a
-  // meeting wants to hear about while it waits.
   async "content.completed"({ data }, { channel }) {
     if (data.kind !== "text" || typeof data.value !== "string" || !data.value) return;
     await channel.recall.sendChatMessage(data.value);
@@ -203,7 +189,6 @@ export function recallSignIns(channel: RecallEventContext): SignInSurface {
   return {
     private: false,
     postChallenge: (signIn) => post(signInChallengeText(signIn)),
-    // A sign-in link or code is a credential, so it goes only to the person signing in.
     async deliverPrivately(signIn) {
       if (!hasCredential(signIn)) return false;
       const participantId = participantIdOf(signIn.principalId, channel.recall.botId);
@@ -211,7 +196,6 @@ export function recallSignIns(channel: RecallEventContext): SignInSurface {
       return channel.recall.sendChatMessage(signInChallengeText(signIn), { to: participantId });
     },
     postStatus(signIn, delivered) {
-      // Instructions alone, such as "approve on your phone", are safe for everyone to see.
       if (!hasCredential(signIn)) return post(signInChallengeText(signIn));
       return post(
         delivered

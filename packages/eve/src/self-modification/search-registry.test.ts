@@ -330,7 +330,6 @@ describe("selfmod__search_registry", () => {
     return fetchMock;
   }
 
-  /** Narrows the tool's promise-or-stream return to its resolved object. */
   async function run(input: Record<string, unknown>, context: never) {
     const result = await searchRegistry.execute(input, context);
     if (Symbol.asyncIterator in result) {

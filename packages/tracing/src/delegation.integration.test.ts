@@ -70,7 +70,6 @@ describe("agent delegation", () => {
           "gen_ai.conversation.id": "conversation",
           "agent.parent_run.id": "parent-run",
         });
-        // A local child's first turn nests under the call that delegated to it.
         const call = calls.find((span) => span.attributes["gen_ai.tool.call.id"] === callId)!;
         expect(first.parentSpanContext?.spanId).toBe(call.spanContext().spanId);
         expect(first.spanContext().traceId).toBe(call.spanContext().traceId);

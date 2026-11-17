@@ -238,14 +238,8 @@ function createDeferred<T>(): {
   };
 }
 
-/** The owned-server shape the suite asserted against before `close()` moved onto `DevelopmentServer`. */
 type StartedTestServer = DevelopmentServerHandle & { close(): Promise<void> };
 
-/**
- * Adapts `createDevelopmentServer().start()` back into the handle-plus-`close()`
- * shape these tests assert against, so each call exercises the real factory,
- * `start()`, and `close()` while keeping the call sites terse.
- */
 async function loadStartDevelopmentServer(): Promise<
   (rootDir: string, options?: DevelopmentServerOptions) => Promise<StartedTestServer>
 > {
@@ -286,7 +280,6 @@ describe("normalizeDevelopmentServerClientUrl", () => {
   });
 });
 
-/** Readiness probes of a recorded server, not the started server's warm-up request. */
 function stateProbes() {
   return (mocks.fetch.mock.calls as unknown[][]).filter(
     ([url]) => !String(url).endsWith("/eve/v1/health"),
@@ -373,9 +366,6 @@ describe("createDevelopmentServer", () => {
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    // Explicit "local" resolves to the same vendored world as an absent
-    // config; the worker plugin wires the parent RPC client for it, so the
-    // parent must create the World that serves those calls.
     expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledOnce();
     await server.close();
   });
@@ -523,7 +513,6 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
-    // The worker starts loading the published generation before a client asks.
     expect(mocks.fetch).toHaveBeenCalledWith(new URL("/eve/v1/health", "http://localhost:2000/"));
     await server.close();
   });
@@ -534,9 +523,7 @@ describe("createDevelopmentServer", () => {
 
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("worker failed");
 
-    // The pointer references it; discarding it would leave the pointer dangling.
     expect(mocks.discardDevelopmentGeneration).not.toHaveBeenCalled();
-    // The supervisor disposes a candidate host that never served.
     expect(mocks.removeDevelopmentHostWorkspace).not.toHaveBeenCalled();
     expect(mocks.devServer.close).toHaveBeenCalledOnce();
   });
@@ -709,7 +696,6 @@ describe("createDevelopmentServer", () => {
 
     expect(mocks.devServer.close).toHaveBeenCalledOnce();
     expect(readStateRecord()).toBeUndefined();
-    // The worker and the published pointer already own the first generation.
     expect(mocks.discardDevelopmentGeneration).not.toHaveBeenCalled();
     expect(mocks.removeDevelopmentHostWorkspace).not.toHaveBeenCalled();
   });
@@ -743,8 +729,6 @@ describe("createDevelopmentServer", () => {
 
     const owner = await startDevelopmentServer("/tmp/eve-test");
     const ownerSandboxRunId = process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID;
-    // A real attaching TUI is a separate process and does not inherit the
-    // owner's internally installed listener port.
     delete process.env.PORT;
     const attached = await startDevelopmentServer("/tmp/eve-test", {
       existing: "attach-if-unconfigured",
@@ -772,8 +756,6 @@ describe("createDevelopmentServer", () => {
 
     const owner = createDevelopmentServer("/tmp/eve-test");
     await owner.start();
-    // A real attaching TUI is a separate process and does not inherit the
-    // owner's internally installed listener port.
     delete process.env.PORT;
 
     const attaching = createDevelopmentServer("/tmp/eve-test", {
@@ -784,8 +766,6 @@ describe("createDevelopmentServer", () => {
 
     mocks.devServer.close.mockClear();
     await attaching.close();
-    // The attaching instance owns nothing, so close() is a no-op: it neither
-    // closes the listener nor disturbs the owner's published state.
     expect(mocks.devServer.close).not.toHaveBeenCalled();
     expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
 

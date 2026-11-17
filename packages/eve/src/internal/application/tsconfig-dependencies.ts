@@ -4,10 +4,6 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { type ParseError, parse as parseJsonc } from "#compiled/jsonc-parser/index.js";
 
-/**
- * Resolves every local tsconfig/jsconfig file that can affect bundling from
- * one package root: root configs plus their extends chain.
- */
 export async function resolveTsConfigDependencyPaths(appRoot: string): Promise<string[]> {
   const rootConfigPaths = await resolveRootTsConfigPaths(appRoot);
   const resolvedConfigPaths = new Set<string>();
@@ -43,9 +39,7 @@ async function resolveRootTsConfigPaths(appRoot: string): Promise<string[]> {
 
       paths.add(join(appRoot, entry.name));
     }
-  } catch {
-    // Best-effort dependency resolution: skip directory reads when unavailable.
-  }
+  } catch {}
 
   return [...paths];
 }
@@ -200,10 +194,7 @@ function resolvePackageExtendsCandidates(input: {
   for (const candidate of candidates) {
     try {
       resolvedPaths.add(resolver.resolve(candidate));
-    } catch {
-      // Best-effort dependency resolution: unresolved package tsconfig targets
-      // are ignored so callers can decide whether to validate more strictly.
-    }
+    } catch {}
   }
 
   return [...resolvedPaths];

@@ -25,7 +25,6 @@ describe("A2A ids", () => {
     for (const messageId of ["m-1", "with\nnewline", "x".repeat(256), "名".repeat(256)]) {
       const deliveryId = deliveryIdForMessage(messageId);
       expect(messageIdOfDelivery(deliveryId)).toBe(messageId);
-      // Even the longest message ID leaves a task ID the request schemas accept.
       expect(encodeTaskId({ deliveryId, sessionId: "wrun_01ABC" }).length).toBeLessThan(2048);
     }
     expect(deliveryIdForMessage("m-1")).not.toBe(deliveryIdForMessage("m-2"));

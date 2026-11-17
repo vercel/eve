@@ -487,8 +487,6 @@ describe("production build isolation", () => {
   );
 
   describe("after a successful real build", () => {
-    // Both tests start from the same installed, built app. Each leaves the
-    // app buildable, so they hold in either order.
     let appRoot: string;
     let cleanupBuiltApp: (() => Promise<void>) | undefined;
 

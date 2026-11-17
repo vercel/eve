@@ -312,7 +312,6 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
       return rebuildDiscordContext(state, session, config);
     },
 
-    // `session.auth.current` is the caller of this delivery.
     deliver(
       payload,
       channel: DiscordChannelContext & { readonly session: ChannelContext["session"] },
@@ -435,11 +434,6 @@ function buildDiscordHandle(input: {
   const state = input.state;
   const credentials = mergeCredentials(input.config.credentials, state);
 
-  /**
-   * The first posted message anchors the conversation. Every posted message
-   * is aliased too: a press finds its session by the id of the message it is
-   * on, and a Gateway reply by the id of the message it replies to.
-   */
   function anchor(posted: DiscordPostedMessage): void {
     if (!posted.id) return;
     if (!state.hasMessageAnchor) {
@@ -660,12 +654,6 @@ async function handleCommandInteraction(input: {
   return discordDeferredJson(result.ephemeral === true);
 }
 
-/**
- * Answers a sign-in button press with an ephemeral message, identifying the
- * presser the same way a HITL press does. Finding the sign-in reads the
- * session's stream, so the press is acknowledged first, as an ephemeral
- * deferred response, to stay inside Discord's 3-second deadline.
- */
 function revealAuthorization(input: {
   readonly config: DiscordChannelConfig;
   readonly interaction: DiscordComponentInteraction;
@@ -704,7 +692,6 @@ async function answerRevealedAuthorization(input: {
   }
   const body = await answerDiscordAuthorizationReveal({
     auth,
-    // The sign-in message is one of the session's addresses, as every bot post is.
     resolveSession: () =>
       input.resolveSession(
         discordContinuationToken({
@@ -715,7 +702,6 @@ async function answerRevealedAuthorization(input: {
     reveal: input.reveal,
   });
   try {
-    // Fills in the ephemeral deferred response, so only the presser sees it.
     await discord.editOriginalResponse(body);
   } catch (error) {
     log.error("Discord sign-in reply failed", { error });
@@ -829,7 +815,6 @@ async function dispatchAnswers(input: {
 }): Promise<void> {
   const state = stateFromInteraction(input.interaction, {
     conversationId: input.conversationId,
-    // A modal opened outside a message falls back to the interaction id, which is no message.
     hasMessageAnchor: input.conversationId !== input.interaction.id,
     initialResponseSent: true,
   });
@@ -862,9 +847,6 @@ async function dispatchAnswers(input: {
         state: { triggeringUserId: input.interaction.user.id },
       }),
     {
-      // The session's record of the prompt is gone, so its text comes from the
-      // pressed message. A modal submitted outside a message has neither, and
-      // editing without the prompt would erase it.
       retirePrompt: async (label) => {
         const messageId = input.interaction.messageId;
         const content = readMessageContent(input.interaction.raw);
@@ -878,7 +860,6 @@ async function dispatchAnswers(input: {
   await Promise.all([response.retirement, sendInactiveNotice(discord)]);
 }
 
-/** Tells only the presser that the prompt they answered is no longer active. */
 async function sendInactiveNotice(discord: DiscordHandle): Promise<void> {
   try {
     await discord.followup({
@@ -894,10 +875,6 @@ function acceptAsPresser(ctx: DiscordAnswerContext): DiscordAnswerResult {
   return { auth: ctx.defaultAuth };
 }
 
-/**
- * A custom `onCommand` may map users to its own principals or keep some out.
- * The default Discord auth would match neither, so answers fail closed.
- */
 function dropUnmappedAnswer(): null {
   log.warn(
     "dropped a Discord input response: onCommand is customized but onAnswers is not; set onAnswers to accept button presses and modal submissions",
@@ -926,10 +903,6 @@ function stateFromInteraction(
   };
 }
 
-/**
- * Records the Discord user who sent a delivery as the one behind its caller, so a prompt the
- * delivery answers can name them.
- */
 function recordDiscordUser(
   state: DiscordChannelState,
   caller: SessionAuthContext | null,

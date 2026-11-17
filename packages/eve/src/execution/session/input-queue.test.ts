@@ -98,9 +98,7 @@ describe("SessionInputQueue", () => {
     const queuedByBob = send("Invite the design team too.", bob, "queue");
     const admitted = new Set([fromBob, fromAlice, unauthenticated, queuedByBob]);
 
-    // A delivery without auth acts as the session's current identity, which is the turn's.
     expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromAlice, unauthenticated]);
-    // A turn held on Alice lets her queued messages steer it, but never Bob's.
     expect(queue.takeSteering(admitted, turn, { heldSince: 0 })).toBeUndefined();
     expect(queue.takeNext()).toMatchObject({
       delivery: { auth: bob },

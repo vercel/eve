@@ -30,7 +30,6 @@ export function healthResponse(): Response {
   });
 }
 
-/** Clients display the error text directly; keep operator details in structured fields. */
 export function sessionCommandErrorResponse(error: unknown): Response | undefined {
   if (SessionNotActiveError.is(error)) {
     return Response.json(
@@ -69,18 +68,12 @@ export function deliveryResponse(receipt: DeliveryReceipt): Response {
   );
 }
 
-/** Where a remote child the parent session recorded runs, and its credential key. */
 export interface RemoteAgentBinding {
   readonly forwardPrincipal?: boolean;
   readonly name: string;
   readonly resolverId?: string;
-  /**
-   * A dynamic remote agent's binding: what its credentials are built from again. Private: only
-   * the parent session's own state and steps carry it, never a request.
-   */
   readonly dynamicBinding?: JsonValue;
   readonly url: string;
-  /** The child's remote agent protocol, when it speaks an earlier one. */
   readonly earlierProtocol?: number;
 }
 
@@ -90,7 +83,6 @@ interface RemoteAgentStreamCoordinates {
   readonly childStreamPath: string;
 }
 
-/** Finds the remote child the parent session recorded for one proxy route, from its private binding. */
 export async function findRemoteAgentBinding(
   input: RemoteAgentStreamCoordinates & {
     readonly parent: {
@@ -110,7 +102,6 @@ export async function findRemoteAgentBinding(
   },
 ): Promise<RemoteAgentBinding | undefined> {
   const recorded = await input.parent.getChildBinding?.(input.childSessionId);
-  // The stream path embeds the parent session id, so matching it binds the parent.
   if (
     recorded === undefined ||
     recorded.callId !== input.callId ||
@@ -129,7 +120,6 @@ export async function findRemoteAgentBinding(
 
 interface OnMessageOutcome {
   readonly auth: SessionAuthContext | null;
-  /** Model-ready turn context: `onMessage`'s replacement, or the request's labeled entries. */
   readonly clientContext?: readonly string[];
   readonly context?: readonly string[];
   readonly history?: readonly SessionHistoryMessage[];
@@ -184,10 +174,6 @@ export async function resolveOnMessage(input: {
   };
 }
 
-/**
- * The turn's model context messages: `onMessage`'s replacement as written, otherwise
- * the request's entries labeled as client-supplied. Empty means none.
- */
 export function resolveTurnClientContext(
   replacement: ClientContextValue | undefined,
   requested: ClientContextValue | undefined,
@@ -199,7 +185,6 @@ export function resolveTurnClientContext(
   return messages.length === 0 ? undefined : messages;
 }
 
-/** One model message per string; an object is JSON-serialized into one. */
 function toContextEntries(value: ClientContextValue | undefined): readonly string[] {
   if (value === undefined || value === "") return [];
   if (typeof value === "string") return [value];

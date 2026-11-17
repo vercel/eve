@@ -1,4 +1,3 @@
-// @linux-only: tool history repair
 import { jsonSchema, type ModelMessage } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -149,8 +148,6 @@ describe("saved tool history", () => {
     if (kind === "late-result") messages.push({ role: "tool", content: [result] });
     if (kind === "earlier-result") messages.unshift({ role: "tool", content: [result] });
     if (kind === "nested-provider-call") {
-      // An Anthropic programmatic run calls tools from inside `code_execution`; the run's result,
-      // which arrives a response late, covers what it called.
       const run = { ...call, providerExecuted: true, toolCallId: "srvtoolu_run" };
       const fromRun = {
         anthropic: { caller: { toolId: run.toolCallId, type: "code_execution_20260120" } },

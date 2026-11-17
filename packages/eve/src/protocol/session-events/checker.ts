@@ -1,12 +1,3 @@
-// The stream checker: the lifecycle rules, checked line by line. Tests run it over golden streams,
-// and development runs it in the writer, so a producer mistake surfaces where it happens.
-//
-// It checks what a fact may assume about the entities it names: that they were introduced, that
-// each ends once with an outcome from its closed set, and that whatever an owner holds ends in the
-// owner's commit. It folds each fact into its own copy of the shared view and reads ownership from
-// the one tree, so its rules hold for every family alike. Facts and progress of unknown types
-// pass, as readers ignore them.
-
 import {
   FACT_CATALOG,
   isFactType,
@@ -35,7 +26,9 @@ import {
   rowOf,
 } from "../session-projection/tree.js";
 
+/** A way a session stream broke the event contract: where it happened, which rule, and why. */
 export interface Violation {
+  /** The position of the line that broke the rule. */
   readonly position: number;
   /** The fact's index in its commit; absent for a progress record or the whole line. */
   readonly index?: number;
@@ -44,6 +37,7 @@ export interface Violation {
   readonly message: string;
 }
 
+/** The contract rule a {@link Violation} broke. */
 export type ViolationRule =
   | "envelope"
   | "schema"
@@ -61,12 +55,12 @@ export type ViolationRule =
   | "batch-settles-together"
   | "cleared-before-start";
 
+/** Checks a session stream line by line against the event contract, reporting each {@link Violation}. */
 export interface StreamChecker {
   /** Checks the next line. Positions must increase; a repeated position is a duplicate, skipped. */
   check(line: StoredLine, position: number): readonly Violation[];
 }
 
-/** The tree's family for a catalog family; `undefined` for the session, usage, and children. */
 const TREE_FAMILY: Partial<Record<Family, TreeFamily>> = {
   call: "call",
   content: "part",
@@ -90,7 +84,6 @@ const ID_FIELDS: Readonly<Record<string, TreeFamily>> = {
   turnId: "turn",
 };
 
-/** The entities a fact names besides its own: its `…Id` fields, and keyed owners. */
 function referencesOf(data: Readonly<Record<string, unknown>>, ownId: string): Ref[] {
   const refs: Ref[] = [];
   for (const [field, value] of Object.entries(data)) {
@@ -107,11 +100,7 @@ function referencesOf(data: Readonly<Record<string, unknown>>, ownId: string): R
 
 export function createStreamChecker(
   options: {
-    /** Schema validation, from `schemas.ts`, for tests and development. */
     readonly validate?: (record: unknown, kind: "fact" | "progress") => string | undefined;
-    /** Check from a checkpoint's operational view, including retained ownership ancestors.
-     * Forgotten history cannot establish global identity uniqueness; full-stream checks can.
-     */
     readonly seed?: SessionView;
   } = {},
 ): StreamChecker {
@@ -189,7 +178,6 @@ export function createStreamChecker(
     },
   };
 
-  /** Checks one known fact against the view before it; returns what it ends, if anything. */
   function checkFact(
     fact: Fact,
     fail: (rule: ViolationRule, message: string) => void,
@@ -259,7 +247,6 @@ export function createStreamChecker(
         return undefined;
       case "complete": {
         if (row !== undefined) fail("one-terminal", `${family} "${id}" completes twice.`);
-        // A part no run wrote belongs to the turn its scope names.
         const owner =
           data.runId !== undefined
             ? refOf({ runId: String(data.runId) })
@@ -268,7 +255,6 @@ export function createStreamChecker(
           fail("schema", `${family} "${id}" names no run, and its scope names no turn.`);
           return undefined;
         }
-        // The reference check above covers `data.runId`, but not a turn named only in scope.
         if (rowOf(view, owner.family, owner.id) === undefined) {
           if (data.runId === undefined)
             fail(
@@ -307,10 +293,6 @@ export function createStreamChecker(
     }
   }
 
-  /**
-   * What a line that announces a wait or decides approvals promises, checked once it folds: an
-   * announced turn waits on a person, and a person's decision settles its whole batch.
-   */
   function checkWaitPromises(
     facts: readonly Fact[],
     report: (rule: ViolationRule, message: string, at: { readonly index: number }) => void,
@@ -342,10 +324,6 @@ export function createStreamChecker(
     });
   }
 
-  /**
-   * A call a person was asked about starts only once its latest approval is accepted, and names
-   * that approval as what cleared it. A relayed approval asked about the child's call, not this one.
-   */
   function checkCleared(
     data: CallStartedData,
     fail: (rule: ViolationRule, message: string) => void,
@@ -382,7 +360,6 @@ export function createStreamChecker(
       );
   }
 
-  /** A run's attempts go up, one `model.started` each; `model.retried` names the current one. */
   function checkAttempt(fact: Fact, fail: (rule: ViolationRule, message: string) => void): void {
     if (fact.type !== "model.started" && fact.type !== "model.retried") return;
     const { attempt, runId } = fact.data;

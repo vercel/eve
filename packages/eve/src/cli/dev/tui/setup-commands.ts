@@ -43,28 +43,17 @@ export type OnboardingScreenEvent = {
 
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
-  /** Project root for setup that changes shared dependencies, links, or environment files. */
   appRoot: string;
-  /** Selected agent root whose authored settings are changed by `/model`. */
   agentRoot?: string;
-  /** The renderer surface the TUI-native prompter drives. */
   renderer: TuiSetupCommandRenderer;
-  /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
-  /** Connection selected through `/login <connection>`. */
   initialLoginConnection?: ModelConnectionSelection;
-  /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
-  /** Presentation and navigation supplied by an enclosing setup journey. */
   onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
-  /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
-  /** Groups setup writes under one runtime update. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
-  /** Cancels the flow from outside the keyboard, as Ctrl-C on the working indicator does. */
   signal?: AbortSignal;
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
-  /** Test seam; defaults to the real setup flows. */
   flows?: Partial<TuiSetupFlows>;
 }
 
@@ -76,26 +65,15 @@ export interface TuiSetupFlows {
   runLoginFlow?: typeof runLoginFlow;
 }
 
-/** Setup owns flow-close behavior; the command adapter receives only the transcript outcome. */
 export interface TuiSetupCommandResult extends PromptCommandOutcome {
   message: string;
-  /** The user dismissed this setup step without completing it. */
   cancelled?: true;
-  /** Keep settled batch results instead of replacing them with an interrupt notice. */
   partial?: true;
-  /** Replaces the echoed invocation once the command settles. */
   summary?: string;
-  /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
-  /** Status refresh required after the command settles. */
   effect?: VercelStatusEffect | ModelAccessChange;
 }
 
-/**
- * After an interrupt starts cancellation, later renderer calls must neither
- * paint over the working state nor hang: prompts resolve as cancelled and
- * output drops while the flow unwinds.
- */
 function muteableRenderer(
   renderer: TuiSetupCommandRenderer,
   isMuted: () => boolean,
@@ -135,8 +113,6 @@ function muteableRenderer(
       if (!isMuted()) renderer.renderOutput(text);
     },
     withInheritedStdio: (task) => renderer.withInheritedStdio(task),
-    // Registry setup keeps the parent renderer attached; this capability now
-    // pauses runtime artifacts without handing the terminal to the child.
     withExclusiveTerminal: (task) => withSuspendedRuntime?.(task) ?? task(),
   };
 }
@@ -145,21 +121,12 @@ function cancelledSetupResult(): TuiSetupCommandResult {
   return { message: "", cancelled: true, preserveFlowDiagnostics: false };
 }
 
-/**
- * Runs one TUI setup command (/model, /add, /deploy) over the
- * shared setup flows, asking through the TUI's own bordered panel. Never throws:
- * every outcome — done, cancelled, failed — folds into the returned command
- * result. Ctrl-C or Esc on the working indicator (no question open) aborts the
- * active flow, then keeps command ownership until its subprocesses and setup
- * stack have unwound.
- */
 export async function runTuiSetupCommand(
   input: TuiSetupCommandInput,
 ): Promise<TuiSetupCommandResult> {
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
-  // Flow warnings outlive the panel only as short notes on the `/add` outcome.
   const warnings: string[] = [];
   const renderer = muteableRenderer(
     input.renderer,
@@ -168,7 +135,6 @@ export async function runTuiSetupCommand(
     warnings,
   );
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
-  // Mutes further questions so retry loops unwind instead of reopening the terminal.
   const stopFromOutside = () => {
     interrupted = true;
     controller.abort(new WizardCancelledError());
@@ -186,9 +152,6 @@ export async function runTuiSetupCommand(
       cancelActiveRegistryItem = undefined;
     }
   };
-  // Arm the idle trap before a flow can synchronously open its first question.
-  // Otherwise it replaces the question's key consumer, leaving addressed `/add`
-  // confirmations visible but unresponsive.
   let interrupt = input.renderer.waitForInterrupt();
   const execution = executeSetupCommand(
     input,
@@ -233,12 +196,10 @@ export async function runTuiSetupCommand(
     }
   } finally {
     input.signal?.removeEventListener("abort", stopFromOutside);
-    // A flow that threw or was abandoned mid-wait must not leave the footer spinning.
     input.renderer.setStatus(undefined);
   }
 }
 
-/** The per-command dispatch; every outcome folds into a result (never throws). */
 async function executeSetupCommand(
   input: TuiSetupCommandInput,
   prompter: Prompter,
@@ -270,7 +231,6 @@ async function executeSetupCommand(
         });
         if (result.kind === "cancelled") {
           return {
-            // Onboarding has no echoed `/login` to summarize, so it keeps the hint.
             message:
               input.initialModelStep === "provider"
                 ? "Connect a model with /login when you’re ready."
@@ -362,9 +322,6 @@ async function executeSetupCommand(
       signal,
     });
     if (upgrade !== undefined) return withRegistryResults(upgrade, error, warnings);
-    // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
-    // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
-    // dumping the raw "Human action required" message.
     const routed = vercelActionOutcome(actionableError, command);
     if (routed !== undefined) return withRegistryResults(routed, error, warnings);
     if (error instanceof RegistryFlowFailedError) {
@@ -398,7 +355,6 @@ function fallbackSummaries(
   }
 }
 
-/** Failed and cancelled outcomes leave a summary in place of their invocation too. */
 function withCommandSummary(
   input: TuiSetupCommandInput,
   outcome: TuiSetupCommandResult,
@@ -443,12 +399,6 @@ function withRegistryResults(
   };
 }
 
-/**
- * Offers `vercel login` when an installed item's setup stopped on a logged-out
- * Vercel CLI, then resumes only that item's setup. `/login` connects eve's
- * model access and does not log in the CLI that registry setup drives, so
- * without this the user is left retrying an add that can never succeed.
- */
 async function recoverVercelLoginSetup(
   result: RegistrySessionResult,
   input: {
@@ -502,12 +452,6 @@ async function recoverVercelLoginSetup(
   return { ...result, outcomes, ...(deployed !== undefined && { deployed }) };
 }
 
-/**
- * Offers to upgrade an old Vercel CLI when setup reports an unsupported
- * capability. This prompt is intentionally at the TUI boundary: shared setup
- * callers retain the structured human action, while an interactive command can
- * perform the recovery in place after the user opts in.
- */
 async function vercelCliUpgradeOutcome(
   error: unknown,
   command: string,
@@ -598,13 +542,6 @@ function vercelCliUpgradeFailureMessage(command: string, reason?: string): strin
   return `Couldn't upgrade the Vercel CLI${detail} — run \`vercel upgrade\`, then retry /${command}.`;
 }
 
-/**
- * Translates a Vercel {@link HumanActionRequiredError} into the in-TUI routing
- * message, or `undefined` for anything else. One translator so every path that
- * can surface a provisioning action, routing login, forbidden-scope, and CLI
- * recovery actions the same way rather than
- * leaking the raw error text.
- */
 function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandResult | undefined {
   if (!(error instanceof HumanActionRequiredError)) return undefined;
   const message = vercelActionMessage(error.action.kind, command);
@@ -613,7 +550,6 @@ function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandRe
     : { message, failed: true, preserveFlowDiagnostics: true };
 }
 
-/** The one-line fix message per Vercel action kind, or `undefined` for others. */
 function vercelActionMessage(kind: string, command: string): string | undefined {
   switch (kind) {
     case "vercel-login":

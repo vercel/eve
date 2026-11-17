@@ -31,7 +31,6 @@ export function messageContentOf(message: Message): MessageContent {
   if (message.text) {
     parts.push({ text: message.text, type: "text" });
   }
-  // Chat SDK thread ids start with the name of the adapter that owns them.
   const adapter = message.threadId.split(":")[0]!;
   for (const attachment of attachments) {
     parts.push(attachmentToPart(adapter, attachment));

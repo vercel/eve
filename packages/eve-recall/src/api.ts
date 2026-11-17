@@ -71,17 +71,12 @@ function recallApiBaseUrl(options: RecallApiOptions): string {
   return `https://${region}.recall.ai/api/v1`;
 }
 
-/**
- * Chat limits per meeting platform. Webex bots can't send chat, and only Zoom
- * delivers a message to one participant.
- */
 const PLATFORM_CHAT = {
   google_meet: { maxChars: 500, directMessages: false },
   microsoft_teams: { maxChars: 4096, directMessages: false },
   zoom: { maxChars: 4096, directMessages: true },
 } as const satisfies Record<string, { maxChars: number; directMessages: boolean }>;
 
-/** The lowest documented limit, for platforms Recall hasn't told us about. */
 const FALLBACK_CHAT = { maxChars: 500, directMessages: false };
 
 /** Whether Recall can send a chat message to one participant on `platform`. */
@@ -103,7 +98,6 @@ export interface RecallSendChatMessageInput extends RecallApiOptions {
   readonly platform?: string;
 }
 
-/** Splits a chat message into the messages Recall posts on `platform`. */
 export function splitRecallChatMessage(message: string, platform: string | undefined): string[] {
   return chunkText(message, chatLimitsOf(platform).maxChars);
 }
@@ -184,8 +178,6 @@ export function resolveRecallWebhookUrl(url?: string, route = DEFAULT_RECALL_ROU
   if (explicit) return explicit;
   const host = process.env.VERCEL_URL?.trim();
   const env = process.env.VERCEL_ENV;
-  // Previews post back to themselves: a production URL would hand the bot's
-  // webhooks to a different deployment than the one holding the session.
   if (host && (env === "production" || env === "preview")) {
     return createWorkflowCallbackUrl(resolveWorkflowCallbackBaseUrl(`https://${host}`), route);
   }
@@ -223,9 +215,6 @@ export function recallBotConfig(input: RecallBotConfigInput): Record<string, unk
       realtime_endpoints: [
         { events: [...RECALL_REALTIME_EVENTS], type: "webhook", url: input.webhookUrl },
       ],
-      // Recall's low-latency mode is English-only; its default accuracy mode
-      // delivers real-time transcripts minutes late. Swap in a third-party
-      // streaming provider for other languages.
       transcript: {
         provider: {
           recallai_streaming: { language_code: "en", mode: "prioritize_low_latency" },
@@ -263,7 +252,6 @@ export async function createRecallBot(
   return toRecallBot(await callRecallApi<RecallBotResponse>({ ...input, path: "/bot/" }));
 }
 
-/** Looks up a Recall bot by id. */
 export async function getRecallBot(
   input: RecallApiOptions & { readonly botId: string },
 ): Promise<RecallBot> {
@@ -275,8 +263,6 @@ export async function getRecallBot(
   );
 }
 
-// Participants carry a `platform` too, but it's how they joined ("desktop",
-// "dial_in"), not the meeting platform.
 function toRecallBot(bot: RecallBotResponse): RecallBot {
   const platform = bot.meeting_url?.platform;
   const result: { id: string; name?: string; platform?: string } = { id: bot.id };
@@ -289,7 +275,6 @@ function chunkText(text: string, size: number): string[] {
   const chunks: string[] = [];
   let rest = text.trim();
   while (rest.length > size) {
-    // Prefer a line break, then a space, so options and links stay whole.
     const newline = rest.lastIndexOf("\n", size);
     const space = rest.lastIndexOf(" ", size);
     const cut = newline > size / 2 ? newline : space > size / 2 ? space : size;

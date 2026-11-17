@@ -1,5 +1,3 @@
-// The startup prompt paints before the rest of the terminal UI loads, so this
-// module imports only what the startup draft needs.
 import { LOGIN_CONNECTION_COMMAND_OPTIONS } from "#setup/flows/model-login-options.js";
 import { createDevDiagnostics, type DevDiagnostics } from "../diagnostics.js";
 
@@ -74,11 +72,8 @@ export async function startDevelopmentTuiStartup(
   input: TuiDisplayOptions & {
     readonly appRoot: string;
     readonly initialInput?: string;
-    /** Messages to show queued, sent once the agent is ready. */
     readonly queuedInput?: readonly string[];
-    /** The first status shown; `eve init` opens the screen while it installs. */
     readonly phase?: "installing";
-    /** Rows above the startup header, such as `eve init`'s progress line. */
     readonly preamble?: readonly string[];
     readonly onExitRequest: () => void;
   },

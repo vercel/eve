@@ -30,7 +30,6 @@ import { gatewayCostAttributes, readGatewayCostData } from "#tracing/eve/gateway
 import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 
-/** Decision calls can run before a model attempt or outside an eve session. */
 export async function decideWithTracing<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
 >(options: DecisionOptions<Questions>, purpose: DecisionPurpose) {
@@ -99,7 +98,6 @@ export async function decideWithTracing<
     parent: turnContext ?? session.traceSeed,
     context: host,
   });
-  // eve owns this operation; the SDK integration would emit a second pair of spans.
   const telemetry = {
     integrations: [...getRegisteredTelemetryIntegrations({ excludeEveOtelIntegration: true })],
     ...aiSdkCapture(operation.capture, hooks),
@@ -119,8 +117,6 @@ export async function decideWithTracing<
     });
     return result;
   } catch (error) {
-    // A refusal is an answer, not a failed request. SDK errors can retain inputs and outputs on
-    // enumerable properties, so a failure records only its type.
     await operation.complete(
       DecisionRefusalError.isInstance(error)
         ? { output: decisionResults(options.questions, { refused: error.questionIds }) }

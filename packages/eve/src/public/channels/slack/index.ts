@@ -118,13 +118,6 @@ export {
   type SlackHitlRoute,
 } from "#public/channels/slack/hitl.js";
 
-/**
- * Card builders and eve-owned element types. The vendored factories remain an
- * implementation detail. These are pure data factories. They return plain typed
- * objects that the channel passes to {@link cardToBlocks} at post time.
- * The chat SDK runtime (`Chat`, `Thread`, `Adapter`, etc.) is not
- * imported and not reachable through this entry point.
- */
 export {
   Actions,
   Button,

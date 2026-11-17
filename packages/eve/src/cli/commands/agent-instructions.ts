@@ -5,19 +5,6 @@ import pc from "#compiled/picocolors/index.js";
 
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
-// The two coding-agent prompts are one onboarding flow in two phases, composed
-// from the section files in `agent-prompt/`. The setup guide runs before
-// anything is scaffolded when malformed init input prevents the command from
-// running; the handoff runs once a project exists (after `eve init`, or when
-// seeding a REPL). Both reuse the `collect-intent`, `vercel-connect`, and
-// `build-and-verify` sections verbatim, so guidance authored once reaches both.
-// `{{devCommand}}` is rendered per
-// caller; `{{workingDirectory}}` is post-scaffold only and lives in the handoff
-// intro. The shared sections use paths relative to the project directory so the
-// setup guide, which has no working directory yet, can reuse them unchanged.
-// Exported so `agent-instructions.test.ts` can assert these lists name exactly
-// the files in `agent-prompt/`, which is what keeps them from drifting.
-/** Ordered `agent-prompt/` sections composed into the pre-scaffold setup guide. */
 export const SETUP_SECTIONS = [
   "intro-setup.md",
   "collect-intent.md",
@@ -26,7 +13,6 @@ export const SETUP_SECTIONS = [
   "build-and-verify.md",
 ] as const;
 
-/** Ordered `agent-prompt/` sections composed into the post-scaffold handoff. */
 export const HANDOFF_SECTIONS = [
   "intro-handoff.md",
   "collect-intent.md",
@@ -51,16 +37,10 @@ function compose(
   return prompt.replaceAll("{{workingDirectory}}", () => workingDirectory);
 }
 
-/**
- * The pre-scaffold setup guide shown after malformed coding-agent input. It
- * scaffolds from scratch, so it renders with the universal `npx eve dev` rather
- * than a launcher-specific command.
- */
 export function initAgentInstructions(): string {
   return compose(SETUP_SECTIONS, { devCommand: "npx eve dev" });
 }
 
-/** Concise scaffold facts printed only when a coding agent launched `eve init`. */
 export function initAgentReadySummary(
   model: string | undefined,
   projectPath: string,
@@ -76,7 +56,6 @@ export function initAgentReadySummary(
   );
 }
 
-/** The post-scaffold handoff printed after a coding agent runs `eve init`. */
 export function initAgentDevHandoff(options: { projectPath: string; devCommand: string }): string {
   return compose(HANDOFF_SECTIONS, {
     devCommand: options.devCommand,
@@ -84,10 +63,6 @@ export function initAgentDevHandoff(options: { projectPath: string; devCommand: 
   });
 }
 
-/**
- * Pre-scaffold guide for a coding agent that ran `eve extension init` with no
- * target. Mirrors agent bare-init: collect a package name, then re-run with it.
- */
 export function initExtensionInstructions(): string {
   return [
     "You are scaffolding an eve extension package (a reusable package of tools,",
@@ -106,11 +81,6 @@ export function initExtensionInstructions(): string {
   ].join("\n");
 }
 
-/**
- * Post-scaffold handoff after `eve extension init`. Same text for human and
- * coding-agent launches: what was written and what to do next. Never assumes
- * `eve dev`.
- */
 export function initExtensionHandoff(options: {
   packageManager: string;
   packageName: string;

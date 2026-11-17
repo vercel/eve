@@ -52,6 +52,5 @@ function shouldRunAnotherModelCall(input: {
     return false;
   }
 
-  // Each step saves the lifecycle it published with its result.
   return !waitsOnAnything(input.result.session, storedProjection(input.result.session.state));
 }

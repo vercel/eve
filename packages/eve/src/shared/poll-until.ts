@@ -1,7 +1,3 @@
-/**
- * Calls `check` until it returns a value, backing off from 20 ms to 200 ms
- * between calls, and resolves `undefined` once `timeoutMs` passes without one.
- */
 export async function pollUntil<T>(
   check: () => Promise<T | undefined>,
   timeoutMs: number,

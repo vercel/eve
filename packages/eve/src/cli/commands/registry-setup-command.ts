@@ -73,12 +73,6 @@ function send(child: ChildProcess, message: RegistrySetupParentMessage): void {
   if (child.connected) child.send(message);
 }
 
-/**
- * Rebuilds a child's search action for the local prompter. The picked action
- * travels back as its encoded query so the child can resolve it with its own
- * `value`. A child that predates `labelTemplate` sends an empty object, because
- * JSON drops its functions; its select runs without the search row.
- */
 function parentSingleSelectOptions(
   options: Exclude<RegistrySetupSelectOptions, { multiple: true }>,
 ): SingleSelectOptions<PrompterValue> {
@@ -215,7 +209,6 @@ function handlePresentation(
   }
 }
 
-/** Executes a trusted setup binary while the parent prompter owns all terminal interaction. */
 export async function runRegistrySetupCommand(
   appRoot: string,
   setup: RegistrySetupCommand,

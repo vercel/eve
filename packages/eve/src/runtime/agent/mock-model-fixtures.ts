@@ -19,7 +19,6 @@ export function createMockAuthoredToolInput(
   message: string,
   city: string,
 ): Record<string, unknown> {
-  // The mock only starts tasks; it never names one to continue.
   const tool = { ...offered, inputSchema: withoutTaskIdInput(offered.inputSchema) };
   const inputPropertyNames = getToolInputPropertyNames(tool.inputSchema);
   if (inputPropertyNames.includes("question")) {
@@ -60,12 +59,6 @@ function withoutTaskIdInput(schema: unknown): unknown {
   return { ...schema, properties };
 }
 
-/**
- * Extracts tool inputs anchored to schema property names in the message, e.g.
- * `with label "smoke-test"`, ``value `hello```, or `note: 'smoke'`. This lets
- * deterministic smoke evals drive tools whose schemas fall outside the
- * special-cased heuristics above.
- */
 function extractAnchoredInputs(
   propertyNames: readonly string[],
   message: string,
@@ -97,12 +90,6 @@ export function resolveMockFixtureToken(prompt: BootstrapPrompt): string | null 
     .filter((message) => message.role === "system")
     .map((message) => getPromptContentText(message.content))
     .join("\n");
-  // The current turn's user batch participates last so instruction- and
-  // skill-delivered fixture directives always win. Scanning user text makes
-  // per-turn context (clientContext entries, channel context strings) and
-  // exact-reply prompts deterministically provable in smoke evals. Only the
-  // trailing user messages count: directives from earlier turns must not
-  // leak into later replies.
   const searchableTexts = [
     ...getLoadedSkillResultTexts(prompt),
     systemText,
@@ -143,7 +130,6 @@ export function formatToolOutput(output: unknown): string {
   }
 }
 
-/** Joined text of the user messages at the tail of the prompt (the current turn's batch). */
 function getTrailingUserText(prompt: BootstrapPrompt): string {
   const texts: string[] = [];
 
@@ -151,8 +137,6 @@ function getTrailingUserText(prompt: BootstrapPrompt): string {
     if (message.role === "system") continue;
     if (message.role !== "user") break;
     const text = getPromptContentText(message.content);
-    // Framework-injected [Tasks] notes are scaffolding, not part of the
-    // turn's authored ask.
     if (isFrameworkAnnouncementText(text.trim())) continue;
     texts.unshift(text);
   }

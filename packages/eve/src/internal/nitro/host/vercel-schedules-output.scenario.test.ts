@@ -75,7 +75,6 @@ process.exit(0);
 `,
       ],
       {
-        // Vitest sets TEST, which keeps Nitro's and eve's schedule runners idle.
         env: { ...process.env, PORT: "0", TEST: "", TZ: "UTC" },
         timeout: 15_000,
       },

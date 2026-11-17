@@ -13,18 +13,15 @@ import { currentView } from "#harness/session-machine/current.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
-/** A remote session sends input to its caller instead of presenting it on its own channel. */
 export async function forwardSessionInput(
   ctx: ContextContainer,
   event: SessionEvent,
   inputSource?: string,
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
-  // A caller on an earlier protocol can't read this session's requests; the turn fails instead.
   if (callback === undefined || ctx.get(EarlierRemoteCallerKey) !== undefined) return false;
   const childSessionId = ctx.require(SessionIdKey);
   const relayed = relayedInteractionEvents(currentView(ctx), event, childSessionId);
-  // Every other request of a commit rides with its first; the session keeps it off its channel.
   if (relayed.length === 0) return event.type === "interaction.opened";
   const inbox = ctx.get(SessionInboxKey);
   const body: SubagentInteractionHookPayload = {

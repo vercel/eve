@@ -123,9 +123,9 @@ Access in components via `portableText.global.context`.
 ## Plain Text Extraction
 
 ```js
-import {toPlainText} from '@portabletext/svelte'
+import { toPlainText } from "@portabletext/svelte";
 
-const text = toPlainText(blocks)
+const text = toPlainText(blocks);
 ```
 
 ## Reference

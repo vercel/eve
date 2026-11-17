@@ -426,8 +426,6 @@ describe("build output publication", () => {
       finalOutputDir,
       finalSummaryPath,
       interrupted,
-      // The test's own live pid simulates pid reuse: the recorded owner is
-      // gone, but `process.kill(pid, 0)` still succeeds.
       pid: process.pid,
     });
     const journalFilePath = join(resolveOutputPublicationLockPath(appRoot), "owner.json");

@@ -20,7 +20,6 @@ export interface JsonObject {
  */
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
-/** The object envelope a tolerant wire reader can inspect without loading runtime schemas. */
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

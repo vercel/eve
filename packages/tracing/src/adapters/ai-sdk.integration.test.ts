@@ -182,14 +182,12 @@ describe("AI SDK HarnessAgent consumer", () => {
           "gen_ai.usage.input_tokens": 6,
           "gen_ai.usage.output_tokens": 4,
         });
-        // Metadata-only capture is the default, so prompt and tool content stay out.
         expect(JSON.stringify(spans.map((span) => span.attributes))).not.toMatch(/Private|Alice/);
         expect(
           spans.every((span) =>
             Object.keys(span.attributes).every((key) => !key.startsWith("eve.")),
           ),
         ).toBe(true);
-        // Agent Runs finds a run's spans on Vercel by its session ID.
         expect(spans.every((span) => span.attributes["vercel.session_id"] === method)).toBe(true);
       } finally {
         await session.destroy();

@@ -1,16 +1,19 @@
 import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
 
-// Sibling file tools keep write_file's read record current through its own module.
 export { refreshReadFileStamp } from "#execution/sandbox/write-file.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Input to the provided `write_file` tool: the file path and its full new content. */
 export interface WriteFileToolInput {
   content: string;
   filePath: string;
 }
 
+/**
+ * Result of the provided `write_file` tool: the written path and whether the file already existed.
+ */
 export interface WriteFileToolOutput {
   existed: boolean;
   path: string;

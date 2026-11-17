@@ -134,32 +134,17 @@ const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
-  /** Usage tags written behind the turn; the step waits for them before it returns. */
   usage?: Promise<void>;
 }
 
-/**
- * What a session step needs from the host that runs it, beyond its input: where its callbacks
- * reach it, where the session's attributes go, and the runtime its durable calls start in.
- * Workflow is one host (`workflow-host/turn-step.ts`).
- */
 export interface SessionStepHost {
-  /** The base URL sign-in and hook callbacks reach this session at, when the host serves them. */
   readonly callbackBaseUrl?: string;
-  /** Records the session's attributes, such as its title. */
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
-  /** The runtime a durable call, such as a workflow tool's, starts in. */
   readonly createRuntime: CreateRuntime;
-  /** Answers a stubbed eval's tool calls; see {@link ToolStubHost}. */
   readonly toolStubs?: ToolStubHost;
-  /**
-   * With `callbackBaseUrl`: the host's delivery, through which a sign-in callback reaches its
-   * asker's inbox, so the askers waiting on the same grant hear the session's own answer.
-   */
   readonly deliver?: DurableHost["deliver"];
 }
 
-/** A turn step on `host`: Workflow runs it inside its `"use step"` boundary (`turnStep`). */
 export function turnStepOn(
   host: SessionStepHost,
 ): (input: TurnStepInput) => Promise<TurnStepResult> {
@@ -175,7 +160,6 @@ export function turnStepOn(
     );
 }
 
-/** One session step, on whichever host runs it. */
 async function runSessionStep(
   input: Entered<TurnStepInput>,
   host: SessionStepHost,
@@ -194,7 +178,6 @@ async function runSessionStepBody(
   pendingAttributes: PendingStepAttributes,
   host: SessionStepHost,
 ): Promise<DurableStepResult> {
-  // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
   let delivery = rawDelivery;
   const runtimeResults = input.input?.runtimeResults;
@@ -202,8 +185,6 @@ async function runSessionStepBody(
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   enterSessionProjection(ctx, durableSession.state);
-  // An earlier attempt may have published past the checkpoint. The step recovers from what it
-  // wrote instead of running the model and tools again, so every position and id follows it.
   const orphaned = await readOrphanedLines({
     sessionId: durableSession.sessionId,
     position: nextLinePosition(ctx),
@@ -219,10 +200,8 @@ async function runSessionStepBody(
   }
   const adapter = ctx.require(ChannelKey);
   const agent = sessionAgent(ctx);
-  // The compiled node whose `agent/tools/` and module scope the step runs.
   const bundle = requireCompiledBundle(ctx);
 
-  // Populate the callback base URL so getHookUrl() works during tool execution.
   if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
 
   const { signIns } = readHitlState(durableSession.state);
@@ -233,7 +212,6 @@ async function runSessionStepBody(
     if (matches.length > 0) {
       const matchedAttemptIds = matches.map((match) => match.result.attemptId);
       const authResults = matches.map((match) => match.result);
-      // The children waiting on the same grant hear this session's answer, as it hears theirs.
       const baseUrl = ctx.get(CallbackBaseUrlKey);
       if (baseUrl !== undefined && host.deliver !== undefined) {
         const own = ownCallbacks(durableSession.sessionId, baseUrl);
@@ -255,7 +233,6 @@ async function runSessionStepBody(
         );
       }
       ctx.set(PendingAuthorizationResultKey, authResults);
-      // The session stops waiting on them; the turn they resume reports their completion.
       const view = sessionView(storedProjection(durableSession.state), durableSession.state);
       const transition = matchSignIns(view, { attemptIds: matchedAttemptIds });
       if (transition.events.length !== 0) throw new Error("matchSignIns must not emit events.");
@@ -265,8 +242,6 @@ async function runSessionStepBody(
     }
   }
 
-  // A new inbound message is a new caller action, not a scheduled occurrence.
-  // Approval/input responses alone keep the parked turn's provenance.
   if (delivery?.payloads.some((payload) => payload.message !== undefined)) {
     ctx.delete(ScheduleIdKey);
     ctx.delete(ScheduleInstanceKey);
@@ -282,15 +257,10 @@ async function runSessionStepBody(
   const previousAuth = ctx.get(AuthKey);
   const hadInitiator = ctx.has(InitiatorAuthKey);
 
-  // Apply deliver-time auth ferried via `resumeHook` (initial-turn
-  // input has no auth; it was seeded by buildRunContext).
   if (delivery?.auth !== undefined) {
     ctx.set(AuthKey, delivery.auth ?? null);
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
-  // A sign-in callback carries no identity. Resume as the user who started the
-  // sign-in, not whoever spoke in the session while it was pending. Approval
-  // sign-ins (`candidateId`) bind their responder separately.
   const requester =
     delivery === undefined
       ? completedAuths?.find(({ challenge }) => challenge.candidateId === undefined)?.challenge
@@ -324,9 +294,6 @@ async function runSessionStepBody(
   }
 
   if (rawDelivery !== undefined) {
-    // Prepare only the session boundary here. Turn trace state is owned by the
-    // tool loop: preparing it this early would persist stale principals and a
-    // stale start time for deliveries that never start a turn (the park path).
     await contextStorage.run(ctx, () =>
       instrumentation?.preparePreamble({
         sequence: initialEmissionState.sequence,
@@ -342,8 +309,6 @@ async function runSessionStepBody(
     sessionWritable: input.sessionWritable,
   });
   const { adapterCtx } = publisher.dispatcher;
-  // A hook's `ctx.cancel()` aborts the same signal the harness already honors
-  // for `session.cancel()`, so both settle through one cancellation path.
   const hookCancellation = new AbortController();
   const abortSignal =
     input.abortSignal === undefined
@@ -374,14 +339,10 @@ async function runSessionStepBody(
       delivery !== undefined && !startedBetweenTurns
         ? structuredClone(adapterCtx.state)
         : undefined;
-    // Run the adapter's deliver hook for each queued payload and coalesce
-    // the resulting HarnessStepInput values; runtime results ride the same input.
     let resolved: HarnessStepInput | undefined;
     let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
       const delivered: { payload: DeliverPayload; input: StepInput | undefined }[] = [];
-      // History left by `create()` joins the first message's turn. It leaves state only once a
-      // deliver result carries it, so a dropped first message does not lose it.
       const pendingHistory = delivery.payloads.some((payload) => payload.message !== undefined)
         ? readPendingHistory(durableSession.state)
         : [];
@@ -395,7 +356,6 @@ async function runSessionStepBody(
             delivered.push({ input: undefined, payload });
             continue;
           }
-          // `history` is framework-owned, so a channel's deliver hook cannot drop or rewrite it.
           const history = [...(accepted === 0 ? pendingHistory : []), ...(payload.history ?? [])];
           accepted += 1;
           delivered.push({
@@ -419,8 +379,6 @@ async function runSessionStepBody(
       resolved =
         admission.inputs.length === 0 ? undefined : admission.inputs.reduce(coalesceTurnInputs);
     }
-    // A delivery without auth acts as the session's current identity, so
-    // only a delivery that names its sender can be answered by someone else.
     const answers =
       delivery?.auth === undefined
         ? undefined
@@ -431,17 +389,11 @@ async function runSessionStepBody(
             stepInput: resolved,
           });
     if (answers !== undefined) {
-      // The responder settles the request; the turn keeps its caller and
-      // initiator. Adapter state from the answer stays: channels record the
-      // responder and their prompt cards there, not the reply destination.
       resolved = answers;
       if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !startedBetweenTurns;
-    // The adapter saw the incoming caller. A responder's answers, an ignored
-    // correction and other input without a message keep a running turn's
-    // identity; a message joining it may update only its principal's claims.
     let turnAuth = ctx.get(AuthKey);
     if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
     else if (delivery !== undefined && !startedBetweenTurns) {
@@ -451,7 +403,6 @@ async function runSessionStepBody(
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
     if (ignoredActiveDelivery) {
-      // An ignored correction must not change the reply destination either.
       adapterCtx.state = previousAdapterState!;
     } else {
       if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {
@@ -485,9 +436,7 @@ async function runSessionStepBody(
       setChannelContext(ctx, updatedAdapter);
     }
 
-    /** Whether the admission changed the session: its history or its sandbox. */
     let admissionChangedSession = false;
-    /** The admission's commit: the session's start if it hasn't, then each delivery admitted. */
     const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): Commit => {
       if (admission === undefined || admitDeliveries(admission.deliveries).length === 0)
         return admitDeliveries([]);
@@ -505,24 +454,15 @@ async function runSessionStepBody(
             },
       });
     };
-    /** The admission commit, with the session's providers its hooks read. */
     const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
       const facts = admissionFacts(runtime);
       if (facts.length === 0) return;
-      // The admission commits before the step's framework context exists, and its hooks read
-      // the session (`ctx.session`) like every other commit's. The session's start resolves
-      // its dynamic connections into a registry, which the step's own scope rebuilds and
-      // rehydrates, and its dynamic skills write their files to the sandbox, whose state the
-      // step's scope resumes.
       const created = sessionProvider.create(ctx, initialSession);
       ctx.setVirtualContext(SessionKey, created.value);
       const registry = await connectionProvider.create(ctx, initialSession);
       if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
       const sandbox = await sandboxProvider.create(ctx, initialSession);
       if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.value);
-      // A user-role instruction the session's start resolves stays in its slot until the step
-      // builds the conversation, which takes it ahead of the turn's input.
-      // Instrumentation hears the admission like any commit, so providers see the session start.
       const publish = instrumentation?.createHandleEvent({ handleEvent }) ?? handleEvent;
       try {
         await contextStorage.run(ctx, () => publish(facts));
@@ -539,11 +479,6 @@ async function runSessionStepBody(
       }
     };
 
-    /**
-     * A cancel stops the turn its input was selected for. Input it hadn't consumed yet joins that
-     * turn first, opening it if need be, so the cancel settles each delivery with the turn and the
-     * history that keeps the message agrees with the stream.
-     */
     const consumeCancelledInput = async (): Promise<void> => {
       const projection = currentProjection(ctx);
       const waiting = (resolved?.deliveries ?? []).filter(
@@ -553,7 +488,6 @@ async function runSessionStepBody(
       const received = commitTransitions([
         receive(sessionView(projection, initialSession.state), { deliveries: waiting }),
       ]);
-      // The turn is already stopping, so this commit's hooks have nothing left to cancel.
       const emit = createTurnEventHandler({
         abortSignal,
         canCancelTurn: false,
@@ -566,7 +500,6 @@ async function runSessionStepBody(
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
-      // Nothing here starts a turn, so a cancel has nothing to stop.
       await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
@@ -634,7 +567,6 @@ async function runSessionStepBody(
       });
       if ("result" in recovered) {
         await instrumentation?.flush();
-        // The attempt that ended the session may have closed its stream already.
         if (recovered.result.action === "done") await publisher.writer.close().catch(() => {});
         return recovered.result;
       }
@@ -646,7 +578,6 @@ async function runSessionStepBody(
     try {
       await publishAdmission(runtimeIdentity);
     } catch (error) {
-      // A hook's cancel on the admission stops the turn below, like a cancel that arrives now.
       if (!isTurnCancellation(error)) {
         await instrumentation?.flush();
         throw error;
@@ -680,9 +611,6 @@ async function runSessionStepBody(
         agent,
         node: effectiveNode,
         sessionUsageLimit,
-        // Usage tags are observability, not state: they're written behind the turn, in order
-        // and after the title's write, and the step waits for them only before it returns, so
-        // the turn settles without a run-attribute round trip.
         setAttributes: async (attributes) => {
           const previous = pendingAttributes.usage ?? pendingAttributes.title;
           pendingAttributes.usage = (async () => {
@@ -697,10 +625,6 @@ async function runSessionStepBody(
     let completedModelCall: CompletedModelCallCheckpoint | undefined;
     let stepResult: StepResult;
     try {
-      // A signal already aborted at entry (cancellation during an in-line
-      // runtime-action wait) must settle before the park-resume stages run,
-      // or the pending batch would re-park and later re-dispatch. A turn stopped while its
-      // step kept failing settles too, whether or not its signal has reached this step yet.
       if (input.recover?.stopped === true) throw new TurnCancelledError();
       throwIfTurnAborted(abortSignal);
       stepResult = await runModelCallBatch({
@@ -710,7 +634,6 @@ async function runSessionStepBody(
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
           const result = await runStep(ctx, session, async (enrichedSession) => {
-            // Races session resources against the model call; their users wait for what remains.
             if (firstCall && input.input?.control === undefined) {
               startSessionPrewarmers(ctx, "turn");
             }
@@ -732,24 +655,17 @@ async function runSessionStepBody(
               firstCall && resolved?.outputSchema !== undefined
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
-            // The scope's providers start empty; the slots fill what they own.
             await installDefinitions(ctx);
-            // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined
                 ? completedAuths.map(({ challenge }) => challenge)
                 : undefined;
             const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
-            // Only the step knows whether it stopped for an interaction; the tables say which.
             await publisher.finish({ announce: stoppedForPerson(harnessResult) });
             return harnessResult;
           });
-          // The waiting boundary may reach the client before this step returns.
-          // Its settled result wins over a cancellation of that completed turn.
           if (result.settledTurn === undefined) throwIfTurnAborted(abortSignal);
-          // The call's result carries the lifecycle it published, which batching reads.
           const saved = { ...result, session: saveSessionProjection(result.session, ctx) };
-          // A cut continuation starts from this completed call's private state.
           recordAppliedSession(ctx, saved.session);
           completedModelCall = { result: saved, serializedContext: serializeContext(ctx) };
           return saved;
@@ -770,7 +686,6 @@ async function runSessionStepBody(
       });
     }
 
-    // Re-stamp the current address after handlers add a continuation alias.
     const aliased = saveSessionProjection(
       dropClosedRecords(
         reconcileSessionContinuationToken(ctx, stepResult.session),
@@ -795,24 +710,15 @@ async function runSessionStepBody(
   }
 }
 
-/**
- * The step stopped for an interaction: it says so, or it stopped with nothing of its own to wait on,
- * and the tables say whether that's an interaction (`announceWaiting`).
- */
 function stoppedForPerson(result: StepResult): boolean {
   if (result.held !== undefined) return result.held.kind === "request";
   return result.next === null && result.settledTurn === undefined;
 }
 
-/** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */
 function ignoreTurnCancellation(error: unknown): void {
   if (!isTurnCancellation(error)) throw error;
 }
 
-/**
- * How the person answered this session's own sign-in, read from its callback: a decline is RFC
- * 6749 `access_denied`, any other error is a failure its asker retries, and none is an acceptance.
- */
 function ownSignInAnswer(
   tables: SessionView,
   challenge: AuthorizationChallenge,

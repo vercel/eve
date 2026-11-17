@@ -160,8 +160,6 @@ describe("applyAgentModelSettingsToSource", () => {
 
       expect(result.kind).toBe("applied");
       if (result.kind !== "applied") return;
-      // Slicing out only the property used to strand its trailing comma as
-      // `defineAgent({ , })` — unparseable source written to agent.ts.
       expect(result.nextSource).not.toContain(",");
       await expect(checkAgentConfigSource(result.nextSource)).resolves.toBeUndefined();
     }

@@ -100,7 +100,6 @@ function assertTargetStaysWithinParent(
   }
 }
 
-/** Classifies the target itself without walking ancestor projects. */
 export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<InitTarget> {
   const parentPath = resolve(input.parentDirectory);
   const projectPath = resolve(parentPath, input.target ?? ".");

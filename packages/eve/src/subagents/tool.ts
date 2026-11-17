@@ -22,22 +22,11 @@ export type SubagentInputSource =
       readonly type: "runtime";
     };
 
-/**
- * Result of {@link buildSubagentRunInput}.
- *
- * Exposes the derived `childContinuationToken` alongside the
- * {@link RunInput} so dispatch sites never re-derive the token from
- * `(callId, parentSessionId)` on their own.
- */
 interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
   readonly runInput: RunInput;
 }
 
-/**
- * Runtime graph shape needed to answer sandbox-inheritance questions for
- * one declared child node. Partial test bundles may omit the graph.
- */
 export interface SubagentSandboxGraph {
   readonly nodesByNodeId: ReadonlyMap<
     string,
@@ -51,31 +40,16 @@ export interface SubagentSandboxGraph {
   >;
 }
 
-/**
- * Builds the {@link RunInput} for one delegated subagent child run.
- */
 export function buildSubagentRunInput(input: {
   readonly action: RuntimeSubagentDispatchRequest;
   readonly auth: SessionAuthContext | null;
-  /**
-   * Parent's session capabilities. Forwarded verbatim so HITL
-   * readiness flows transparently down through a subagent chain. Undefined
-   * parent capabilities produce an undefined child capability set.
-   */
   readonly capabilities?: SessionCapabilities;
   readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
-  /** Replay-stable key the child's continuation token derives from. */
   readonly continuationKey: string;
-  /** Parent's immutable conversation classification. */
   readonly inheritedConversation?: ConversationContext;
   readonly initiatorAuth: SessionAuthContext | null;
-  /**
-   * Runtime graph used to detect whether this declared child selected the
-   * dispatching parent's sandbox. Absence means no inheritance.
-   */
   readonly graph?: SubagentSandboxGraph;
-  /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
   readonly parent: SubagentParentContext;
@@ -129,7 +103,6 @@ export function buildSubagentRunInput(input: {
         action,
         source,
       }),
-      // `ctx.agent` already dropped an empty schema, so what arrives is one to honor.
       outputSchema: action.input.outputSchema as JsonObject | undefined,
     },
     conversationId: input.parent.conversationId,
@@ -140,9 +113,6 @@ export function buildSubagentRunInput(input: {
   return { childContinuationToken, runInput };
 }
 
-/**
- * Formats the synthesized child input message for one delegated subagent call.
- */
 function formatSubagentCallInputMessage(input: {
   readonly action: Pick<RuntimeSubagentDispatchRequest, "input" | "subagentName">;
   readonly source: SubagentInputSource;

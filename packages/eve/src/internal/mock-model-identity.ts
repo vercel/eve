@@ -1,4 +1,3 @@
-// Authored bundles and the host may load separate copies of this module.
 const MOCK_MODEL = Symbol.for("eve:mock-model");
 
 export function markMockModel<T extends object>(model: T): T {

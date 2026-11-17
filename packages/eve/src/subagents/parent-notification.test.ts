@@ -26,7 +26,6 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
 
-// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
 installWorkflowHost();
 
 const resumeHookMock = vi.mocked(resumeHook);
@@ -358,7 +357,6 @@ describe("turn caller notification", () => {
     });
 
     it("leaves the session alive when the caller already took the result or stopped waiting", async () => {
-      // A delivery whose 202 was lost: the caller applied it, so its repeat finds nothing pending.
       fetchMock.mockImplementation(async () => notPending());
       const notified = notify();
       await vi.runAllTimersAsync();

@@ -17,20 +17,11 @@ export function discordInstrumentationMetadata(
   };
 }
 
-/**
- * The Discord channel a session is in. DMs (type 1) are direct; server
- * channels and group DMs (type 3) are shared. A thread reports itself, since
- * its parent isn't known.
- * A proactive session knows neither its guild nor its channel type, so it
- * reports no space rather than one that differs from its channel's.
- */
 export function discordConversationSpace(
   state: DiscordChannelState,
 ): ConversationSpace | undefined {
   if (!state.channelId) return undefined;
   if (state.guildId) {
-    // Only a private thread (type 12) says it is private; a server channel's
-    // visibility lives in permission overwrites the channel never reads.
     return {
       id: `discord:${state.guildId}:${state.channelId}`,
       type: "shared",

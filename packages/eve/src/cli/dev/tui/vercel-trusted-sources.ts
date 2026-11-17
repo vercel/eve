@@ -127,7 +127,6 @@ async function readProject(input: {
   return { kind: "project", project };
 }
 
-/** Confirms a Trusted Sources grant for one verified target project. */
 export async function prepareVercelTrustedSourceAccess(input: {
   readonly workspaceRoot: string;
   readonly target: VerifiedVercelTarget;
@@ -138,7 +137,6 @@ export async function prepareVercelTrustedSourceAccess(input: {
   const deps: VercelTrustedSourceDeps = { ...defaultDeps, ...input.deps };
   const deployment = input.target.deployment;
 
-  // A local project-scoped OIDC token represents the Development environment.
   const projectResult = await readProject({
     deps,
     workspaceRoot: input.workspaceRoot,
@@ -197,7 +195,6 @@ export async function prepareVercelTrustedSourceAccess(input: {
   };
 }
 
-/** Applies an approved grant against the target project's latest policy. */
 export async function applyVercelTrustedSourceAccess(input: {
   readonly workspaceRoot: string;
   readonly grant: VercelTrustedSourceGrant;

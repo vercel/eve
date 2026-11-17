@@ -141,14 +141,8 @@ export class Client {
     return await fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal
-  // ---------------------------------------------------------------------------
-
   async #resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers> {
     const headers = new Headers();
-    // Start both dynamic providers together so shared credential state is
-    // captured once per request, before either provider can be replaced.
     const [baseHeaders, authHeaders] = await Promise.all([
       resolveHeadersValue(this.#headers),
       this.#resolveAuthHeaders(),
@@ -176,9 +170,6 @@ export class Client {
     if (!auth) return {};
 
     if ("vercelOidc" in auth) {
-      // One credential, two headers: the bearer the route reads and the
-      // trusted-OIDC header Vercel Deployment Protection accepts. Resolved
-      // once; the client-side mirror of the server `vercelOidc()` channel.
       const token = (await resolveTokenValue(auth.vercelOidc.token)).trim();
       if (token.length === 0) return {};
       return {
@@ -188,10 +179,6 @@ export class Client {
     }
 
     if ("bearer" in auth) {
-      // Skip the header entirely on an empty token rather than emitting a
-      // malformed `Bearer ` value the server has to reject. The dev client's
-      // OIDC resolver returns "" when no token is available locally; the
-      // request then follows the framework channel's local-dev fallback.
       const token = (await resolveTokenValue(auth.bearer)).trim();
       return token.length === 0 ? {} : { authorization: `Bearer ${token}` };
     }
@@ -206,10 +193,6 @@ export class Client {
     return {};
   }
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 async function resolveTokenValue(value: TokenValue): Promise<string> {
   return typeof value === "function" ? value() : value;

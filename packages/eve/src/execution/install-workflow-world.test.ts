@@ -31,7 +31,6 @@ describe("closeWorkflowWorld", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  // Nitro runs `close` hooks in sequence; sandbox shutdown and the trace flush come after this one.
   it("logs a failed close instead of rejecting, so later Nitro close hooks still run", async () => {
     const error = captureConsoleError();
     await installWorld(async () => {
@@ -63,7 +62,6 @@ describe("closeWorkflowWorld", () => {
 });
 
 describe("installWorkflowWorld", () => {
-  // `eve start` boots its World through here; a run no eve version owns must not replay.
   it("guards the World's queue against replaying a stranded session run", async () => {
     const logs = captureLogRecords();
     const { name, version } = resolveInstalledPackageInfo();

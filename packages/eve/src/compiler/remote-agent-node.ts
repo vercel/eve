@@ -8,11 +8,6 @@ import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 export type CompiledDynamicSubagentDefinition = Readonly<ModuleSourceRef>;
 
-/**
- * Remote subagent entry owned by one compiled agent node manifest. Like
- * channels, remote subagents are node-local manifest entries rather than a
- * separate graph-level list.
- */
 export type CompiledRemoteAgentNode = Readonly<
   ModuleSourceRef &
     Node & {
@@ -26,14 +21,10 @@ export type CompiledRemoteAgentNode = Readonly<
       path: string;
       rootPath: string;
       tool?: AgentToolExposure;
-      // Absent when the definition's `url` is a function the runtime resolves.
       url?: string;
     }
 >;
 
-/**
- * Zod schema for one compiled remote subagent entry.
- */
 export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> = z
   .object({
     backing: z.object({ kind: z.literal("resource"), sourcePath: z.string() }).strict(),

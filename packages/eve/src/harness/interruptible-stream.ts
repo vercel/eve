@@ -1,7 +1,3 @@
-/**
- * Stops consuming `stream` as soon as `failureSignal` aborts, including while
- * the underlying iterator is stalled in `next()`.
- */
 export async function* interruptStreamOnFailure<T>(
   stream: AsyncIterable<T>,
   failureSignal: AbortSignal,

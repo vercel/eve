@@ -16,25 +16,25 @@ import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
-// Local schedules accept what a deployment accepts, so a schedule that works under `eve dev` deploys.
 const DEVELOPMENT_PROVIDER: ScheduleProvider = {
   ...inMemoryScheduleProvider(),
   validateExpression: validateVercelExpression,
 };
 const CLIENT_OPTIONS = new WeakMap<ScheduleProvider, VercelScheduleProviderOptions>();
 
-/** Client options of a Vercel provider, so delivery verification talks to the same endpoint. */
 export function readVercelScheduleClientOptions(
   provider: ScheduleProvider,
 ): VercelScheduleProviderOptions | undefined {
   return CLIENT_OPTIONS.get(provider);
 }
 
-/** Sent with every Schedules API request so Vercel Schedules can attribute eve's traffic. */
 export const VERCEL_SCHEDULES_CLIENT_HEADERS: Readonly<Record<string, string>> = {
   "x-vss-framework": "eve",
 };
 
+/**
+ * Options for `vercelScheduleProvider()`, which stores and fires schedules with Vercel Schedules.
+ */
 export interface VercelScheduleProviderOptions {
   /** Overrides the public Vercel Schedules endpoint. */
   readonly baseUrl?: string;
@@ -157,11 +157,6 @@ const VERCEL_CRON_FIELDS = [
   { name: "day-of-week", min: 0, max: 6 },
 ] as const;
 
-/**
- * The cron rules Vercel Schedules documents: numeric fields in range, and not both a day of the
- * month and a day of the week. Checking here turns a rejected write, which a person may already
- * have approved, into an error the caller can correct first.
- */
 function validateVercelExpression(expression: ScheduleExpression): void {
   if (expression.type !== "cron") return;
   const invalid = (reason: string) =>

@@ -1,4 +1,3 @@
-// @linux-only: judge runner
 import { Experimental_DecisionMockModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "#client/client.js";

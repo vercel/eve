@@ -8,7 +8,6 @@ interface IntegrationVercelProjectDeps {
 
 const defaultDeps: IntegrationVercelProjectDeps = { readProjectLink };
 
-/** Requires the caller to link a Vercel project before integration setup begins applying. */
 export async function resolveIntegrationVercelProject(input: {
   appRoot: string;
   integration: string;

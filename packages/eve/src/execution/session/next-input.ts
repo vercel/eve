@@ -23,26 +23,18 @@ export type NextTurnInstruction =
   | { readonly kind: SessionControl; readonly origin?: ControlOrigin }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn"; readonly origin?: ControlOrigin }
-  /** `session.cancel()` while no turn runs, but tasks are working. */
   | { readonly kind: "cancel-working-tasks"; readonly origin?: ControlOrigin }
   | TurnSelection;
 
-/**
- * Waits for the next input the parked owner must act on. Fully routed
- * descendant deliveries leave nothing for the parent, so the wait continues.
- */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader &
     Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
-  /** Settles a control that changes nothing; a session that hasn't started defers it. */
   readonly ignore: (settlement: ControlSettlement) => Promise<void>;
 }): Promise<NextTurnInstruction> {
   const { inbox, cursor, queue } = input;
-  // A delivery admitted while the owner was fully idle (nothing queued, nothing
-  // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
   while (true) {
     const selected = queue.takeNext({
@@ -59,16 +51,12 @@ export async function nextTurnDelivery(input: {
       return routed;
     }
 
-    // A hook continues the turn that settled only once nothing else waits; input that starts
-    // another turn first discards it. Its idempotency key admits it once.
     if (queue.pendingCount === 0 && !inbox.hasPending()) {
       const continuation = pendingContinuation(
         cursor.serializedContext,
         latestTurnIdOf(storedProjection(readDurableSession(cursor.sessionState).state)),
       );
       if (continuation !== undefined) {
-        // Behind an awaited handover, older input is queued but unreadable: wait for it, so the
-        // continuation yields to it as it would to anything readable.
         if (inbox.awaitingHandover) {
           await inbox.whenHandoverSettled();
           continue;
@@ -82,10 +70,6 @@ export async function nextTurnDelivery(input: {
       if (targetDeploymentId !== undefined) return { kind: "prewarm", targetDeploymentId };
     }
 
-    // A delivery may already be in the pump queue by the time the owner exits
-    // its committed waiting step. It is still an idle arrival when no earlier
-    // input was admitted; the post-read `hasPending()` check below rejects a
-    // burst with later buffered input.
     const wasIdle = queue.pendingCount === 0;
     const payload = await inbox.next();
     if (payload === undefined) return { kind: "closed" };

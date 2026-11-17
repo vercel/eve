@@ -5,7 +5,6 @@ import { compiledAgentRoster } from "#execution/agent-sessions/roster.js";
 
 it("lists a dynamic remote agent the calling turn selected among the call's remote agents", () => {
   const bundle = { subagentRegistry: { subagentsByName: new Map() } };
-  // The calling turn selected the dynamic remote agent "tenant".
   const selections = {
     "subagents/tenant": { kind: "remote", prepared: { kind: "remote", name: "tenant" } },
   };

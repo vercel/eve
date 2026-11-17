@@ -1,9 +1,5 @@
 import type { ResolvedInstructionsDefinition } from "#runtime/types.js";
 
-/**
- * The agent's static system instructions as one block: the content of every non-empty one, under
- * a single name (the file's, when there's only one of the agent's own).
- */
 export function agentInstructionsOf(
   instructions:
     | readonly Pick<ResolvedInstructionsDefinition, "content" | "name" | "owner" | "role">[]
@@ -22,7 +18,6 @@ export function agentInstructionsOf(
   return { content, name };
 }
 
-/** The agent's instructions block in eve's default prompt. */
 export function renderInstructionsBlock(block: {
   readonly name: string;
   readonly content: string;

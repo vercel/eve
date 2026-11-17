@@ -64,7 +64,6 @@ function fixture(
   };
   return { closeSandbox, create, onSessionEnd, registry, resume, start, stopSandbox };
 }
-/** A provider that honors the contract: `start` upserts on the session id, and cleanup deletes by it. */
 function upsertingFixture() {
   const live = new Map<string, ReturnType<typeof mockSandbox>>();
   const connect = (sessionId: string) => {
@@ -258,7 +257,6 @@ describe("ensureSandboxAccess", () => {
     expect(value.create).toHaveBeenCalledOnce();
   });
 
-  // https://github.com/vercel/eve/issues/5113
   it("starts a fresh sandbox when the persisted one is gone", async () => {
     const setup = vi.fn();
     const value = fixture({ setup });
@@ -351,7 +349,6 @@ describe("ensureSandboxAccess", () => {
             continuationToken: "http:legacy",
             history: [],
             agent: { system: "" },
-            // eve 0.54 persisted a backend reconnect record, not provider state.
             sandboxState: {
               initialized: true,
               session: {
@@ -478,7 +475,6 @@ describe("ensureSandboxAccess", () => {
         state: null,
       });
       await expect(access.get()).rejects.toThrow("setup failed");
-      // The rejected connection is closed and left out of shutdown tracking.
       expect(value.closeSandbox).toHaveBeenCalledOnce();
       await shutdownActiveSandboxConnections();
       expect(value.stopSandbox).not.toHaveBeenCalled();
@@ -511,7 +507,6 @@ describe("ensureSandboxAccess", () => {
     const { access, sandbox } = await open(value.registry);
     if (sandbox === null) throw new Error("Expected a sandbox.");
     await access.stop();
-    // A resumed connection is still running, so shutdown stops it again.
     await sandbox.run({ command: "true" });
     expect(value.create).toHaveBeenCalledOnce();
     await shutdownActiveSandboxConnections();
@@ -523,7 +518,6 @@ describe("ensureSandboxAccess", () => {
     await shutdownActiveSandboxConnections();
     expect(value.stopSandbox).toHaveBeenCalledTimes(3);
 
-    // A connection with close() is closed by stop() and cannot resume.
     const closable = fixture({ closable: true });
     await (await open(closable.registry, "session-3")).access.stop();
     await shutdownActiveSandboxConnections();
@@ -550,12 +544,10 @@ describe("ensureSandboxAccess", () => {
       await access.get();
 
       await access.release();
-      // Only a connection without close() stays for shutdown, and only a session's own.
       await shutdownActiveSandboxConnections();
 
       expect(value.closeSandbox).toHaveBeenCalledTimes(expected.closed);
       expect(value.stopSandbox).toHaveBeenCalledTimes(expected.stopped);
-      // The next use in the session opens a new connection.
       await access.get();
       expect(value.create).toHaveBeenCalledTimes(2);
     },
@@ -602,7 +594,6 @@ describe("ensureSandboxAccess", () => {
     await child.end("completed");
     expect([...value.live.keys()]).toEqual(["parent-session"]);
 
-    // The parent never opened the sandbox and has no checkpointed provider state.
     const parent = await ensureSandboxAccess({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",

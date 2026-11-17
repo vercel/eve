@@ -1,4 +1,3 @@
-// @linux-only: model attempt retry accounting
 import { APICallError, jsonSchema, TypeValidationError } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -39,7 +38,6 @@ const reply = (text: string): StreamPart[] => [
   { finishReason: { raw: undefined, unified: "stop" }, type: "finish", usage },
 ];
 
-/** A provider overloaded mid-stream, which eve retries and the AI SDK doesn't. */
 const overloaded = (): StreamResult =>
   streamOf([
     { type: "stream-start", warnings: [] },
@@ -84,7 +82,6 @@ async function runTurn(
 
 const spent = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 };
 
-/** An answer with no text and no calls, which the provider billed with an AI Gateway cost. */
 const billedEmpty = (
   finish: "other" | "content-filter",
   before: readonly StreamPart[] = [],
@@ -110,7 +107,6 @@ const billed = {
   outputTokens: 300,
 };
 
-/** AI Gateway's provider stream closed before its finish (#5912). */
 const terminated = (before: readonly StreamPart[] = []): StreamResult =>
   streamOf([
     { type: "stream-start", warnings: [] },
@@ -126,7 +122,6 @@ const terminated = (before: readonly StreamPart[] = []): StreamResult =>
     },
   ]);
 
-/** A stream chunk the provider adapter could not parse (#5911). */
 const malformed = (): StreamResult => ({
   stream: new ReadableStream<StreamPart>({
     start(controller) {
@@ -177,7 +172,6 @@ describe("model attempts", () => {
     const doStream = vi
       .fn<MockLanguageModelV3["doStream"]>()
       .mockResolvedValueOnce(
-        // The text and the call it announced are output: a retry can't take them back.
         terminated([
           { id: "t", type: "text-start" },
           { delta: "Looking", id: "t", type: "text-delta" },
@@ -188,7 +182,6 @@ describe("model attempts", () => {
 
     const facts = await runTurn(doStream, execute);
 
-    // The response never finished, so the call it announced never runs.
     expect(execute).not.toHaveBeenCalled();
     expect(facts.map(({ data, type }) => ({ type, ...data }))).toMatchObject([
       { runId: "run_0", type: "model.requested" },
@@ -201,7 +194,6 @@ describe("model attempts", () => {
     ]);
   });
 
-  // The provider billed the answers eve discards, so the run counts them, as a steered one does.
   it("records what an empty answer it reissued spent, beside the kept answer's usage", async () => {
     const doStream = vi
       .fn<MockLanguageModelV3["doStream"]>()
@@ -225,7 +217,6 @@ describe("model attempts", () => {
     const doStream = vi
       .fn<MockLanguageModelV3["doStream"]>()
       .mockResolvedValueOnce(
-        // Its reasoning reached the stream, so the reissue needs a new run.
         billedEmpty("other", [
           { id: "r", type: "reasoning-start" },
           { delta: "Checking the report.", id: "r", type: "reasoning-delta" },
@@ -302,7 +293,6 @@ describe("run attributes", () => {
 
 describe("a failed model call", () => {
   it("keeps the person's message in history", async () => {
-    // The input joins history before the call, so a call that fails can't lose it.
     vi.spyOn(console, "error").mockImplementation(() => {});
     const events: SessionEvent[] = [];
     const message = "Alice asks for the weekly summary.";

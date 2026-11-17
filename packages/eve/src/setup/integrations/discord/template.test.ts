@@ -16,19 +16,13 @@ const TEMPLATE_ROOT = fileURLToPath(
 );
 const PROJECT_ROOT = "/project";
 
-/**
- * Runs the Gateway setup against an empty project named like the template, and
- * returns the files it writes and the connector UID it names.
- */
 async function runSetup(): Promise<{ files: Map<string, string>; connectorUid: string }> {
   const files = new Map<string, string>();
   let connectorUid = "";
   const deps: DiscordSetupDeps = {
     configureEndpoint: vi.fn(async () => {}),
-    // Setup names the connector after the project's package name.
     deriveConnectorSlug: vi.fn(async () => await deriveSlackConnectorSlug(TEMPLATE_ROOT)),
     enableMessageContent: vi.fn(async () => true),
-    // Vercel Connect gives a connector created with `--name <slug>` the UID `discord/<slug>`.
     provisionConnector: vi.fn(async ({ slug }) => {
       connectorUid = `discord/${slug}`;
       return { id: "connector", uid: connectorUid };
@@ -55,8 +49,6 @@ async function runSetup(): Promise<{ files: Map<string, string>; connectorUid: s
 
 const readTemplateFile = (path: string) => readFile(join(TEMPLATE_ROOT, path), "utf8");
 
-// The template ships what `eve add channel/discord` writes for it by default, so re-running
-// setup changes nothing. A setup change that isn't copied to the template fails here.
 describe("eve-discord-agent-template", () => {
   it("matches the files Discord Gateway setup generates", async () => {
     const { files: generated, connectorUid } = await runSetup();
@@ -77,15 +69,12 @@ describe("eve-discord-agent-template", () => {
     for (const [path, content] of generated) {
       let expected = content;
       if (path === "agent/channels/discord.ts" || path === "daemon/main.ts") {
-        // The template reads the connector UID that the Deploy with Vercel button stores in
-        // DISCORD_CONNECTOR, and falls back to the UID setup writes.
         expected = expected.replace(
           `connectDiscordCredentials(${JSON.stringify(connectorUid)})`,
           `connectDiscordCredentials(\n    process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)},\n  )`,
         );
       }
       if (path === "daemon/package.json") {
-        // Setup stamps the running eve's versions; the template pins the ones its agent uses.
         const manifest = JSON.parse(content) as { dependencies: Record<string, string> };
         for (const name of Object.keys(manifest.dependencies)) {
           manifest.dependencies[name] = rootDependencies[name]!;
@@ -94,7 +83,6 @@ describe("eve-discord-agent-template", () => {
       }
       expect(await readTemplateFile(path), path).toBe(expected);
     }
-    // Setup doesn't rewrite the tool, so it has to name the same connector.
     expect(await readTemplateFile("agent/tools/read_recent_messages.ts")).toContain(
       `process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)};`,
     );

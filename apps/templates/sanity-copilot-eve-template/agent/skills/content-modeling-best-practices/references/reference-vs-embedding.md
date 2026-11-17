@@ -4,23 +4,25 @@ When should content be linked (referenced) vs copied (embedded)? This decision a
 
 ## The Trade-offs
 
-| Aspect | Reference | Embedded Object |
-|--------|-----------|-----------------|
-| Reusability | ✅ Shared across documents | ❌ Copied per document |
-| Single source | ✅ Update once, reflects everywhere | ❌ Must update each copy |
-| Query complexity | Requires joins/expansion | Inline, simpler queries |
-| Editing UX | Separate editing interface | All fields in one place |
-| Independence | Can exist on its own | Only exists within parent |
+| Aspect           | Reference                           | Embedded Object           |
+| ---------------- | ----------------------------------- | ------------------------- |
+| Reusability      | ✅ Shared across documents          | ❌ Copied per document    |
+| Single source    | ✅ Update once, reflects everywhere | ❌ Must update each copy  |
+| Query complexity | Requires joins/expansion            | Inline, simpler queries   |
+| Editing UX       | Separate editing interface          | All fields in one place   |
+| Independence     | Can exist on its own                | Only exists within parent |
 
 ## When to Reference
 
 Use references when content:
+
 - **Is reusable** — Same author across many articles
 - **Needs central management** — Update product info once
 - **Has its own lifecycle** — Published/draft independent of parent
 - **Should stay in sync** — Price changes reflect everywhere
 
 **Examples:**
+
 - Author profiles
 - Product catalog items
 - Shared testimonials
@@ -30,12 +32,14 @@ Use references when content:
 ## When to Embed
 
 Use embedded objects when content:
+
 - **Is unique to this document** — Page-specific hero
 - **Doesn't make sense alone** — SEO metadata
 - **Should be copied, not linked** — Historical snapshot
 - **Simplifies editing** — All fields in one form
 
 **Examples:**
+
 - SEO metadata
 - Page-specific sections
 - Address information
@@ -47,20 +51,20 @@ Use embedded objects when content:
 ```typescript
 // Reference: Author is reusable
 defineField({
-  name: 'author',
-  type: 'reference',
-  to: [{ type: 'author' }]
-})
+  name: "author",
+  type: "reference",
+  to: [{ type: "author" }],
+});
 
 // Embedded: SEO is page-specific
 defineField({
-  name: 'seo',
-  type: 'object',
+  name: "seo",
+  type: "object",
   fields: [
-    defineField({ name: 'title', type: 'string' }),
-    defineField({ name: 'description', type: 'text' })
-  ]
-})
+    defineField({ name: "title", type: "string" }),
+    defineField({ name: "description", type: "text" }),
+  ],
+});
 ```
 
 ## The Hybrid Approach
@@ -69,21 +73,21 @@ Sometimes you want both: a reference for the canonical data, plus embedded overr
 
 ```typescript
 defineField({
-  name: 'featuredProduct',
-  type: 'object',
+  name: "featuredProduct",
+  type: "object",
   fields: [
-    defineField({ 
-      name: 'product', 
-      type: 'reference', 
-      to: [{ type: 'product' }] 
+    defineField({
+      name: "product",
+      type: "reference",
+      to: [{ type: "product" }],
     }),
-    defineField({ 
-      name: 'overrideTitle', 
-      type: 'string',
-      description: 'Optional: Override the product title for this context'
+    defineField({
+      name: "overrideTitle",
+      type: "string",
+      description: "Optional: Override the product title for this context",
     }),
-  ]
-})
+  ],
+});
 ```
 
 Query uses `coalesce(overrideTitle, product->title)`.

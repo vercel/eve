@@ -11,9 +11,6 @@ import type {
   RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
 
-/**
- * Verifies one bearer token against a resolved HMAC JWT strategy.
- */
 export async function authenticateJwtHmacStrategy(input: {
   readonly token: string;
   readonly strategy: ResolvedJwtHmacAuthStrategy;

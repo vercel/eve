@@ -16,8 +16,6 @@ import {
   tryReadExtensionBuildConfig,
 } from "#internal/nitro/host/build-extension.js";
 
-// `buildExtensionPackage` transforms a multi-entry graph with rolldown and emits
-// declarations with TypeScript, so these publishing-contract checks are scenario tier.
 async function createExtensionPackage(pkg?: Record<string, unknown>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "eve-ext-scenario-"));
   const evePackageRoot = dirname(createRequire(import.meta.url).resolve("eve/package.json"));
@@ -117,7 +115,6 @@ describe("extension build output", () => {
     const index = await readFile(join(outDir, "index.mjs"), "utf8");
     expect(index).toMatch(/from\s+["']\.\/extension\/extension\.mjs["']/);
 
-    // `eve/*` stays external so the mount resolves to the consumer's eve.
     const extensionModule = await readFile(join(outDir, "extension", "extension.mjs"), "utf8");
     expect(extensionModule).toMatch(/from\s+["']eve\/extension["']/);
 

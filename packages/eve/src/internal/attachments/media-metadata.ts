@@ -1,9 +1,3 @@
-/**
- * Byte-level media facts read once when a file enters the session, so token
- * estimates never need the payload again.
- */
-
-/** Facts about one file payload that drive its token estimate. */
 export interface MediaMetadata {
   readonly mediaType: string;
   readonly size: number;
@@ -12,22 +6,11 @@ export interface MediaMetadata {
   readonly pages?: number;
 }
 
-// Anthropic bills one visual token per 28px patch and caps each image at
-// 4,784; OpenAI's 32px patches times its 1.2 multiplier land just under the
-// 28px count, and Gemini caps images at 2,240. One patch rule under the
-// largest common cap stays within the right magnitude for every provider.
 const IMAGE_PATCH_PX = 28;
 const MAX_IMAGE_TOKENS = 4_784;
 
-// Providers render each PDF page as text plus a page image; ~3,000 tokens per
-// page is the upper end of that range.
 const PDF_PAGE_TOKENS = 3_000;
 
-/**
- * Estimates the input tokens a provider bills for one file. Images and PDFs
- * use provider-style costs; anything else falls back to the size of its
- * base64 text, which is how text-only providers receive it.
- */
 export function estimateMediaTokens(metadata: MediaMetadata): number {
   if (metadata.mediaType.startsWith("image/")) {
     if (metadata.width === undefined || metadata.height === undefined) return MAX_IMAGE_TOKENS;
@@ -44,12 +27,6 @@ export function estimateMediaTokens(metadata: MediaMetadata): number {
 const GENERIC_MEDIA_TYPE = "application/octet-stream";
 const PDF_MEDIA_TYPE = "application/pdf";
 
-/**
- * The media type a staged file carries: the format its bytes prove for an
- * image, PDF, or untyped file, or the declared type otherwise. A declared
- * PNG, JPEG, GIF, WebP, or PDF that the bytes don't confirm becomes
- * `application/octet-stream`, so no provider receives bytes it would reject.
- */
 export function verifyMediaType(bytes: Uint8Array, declared: string): string {
   const normalized = declared.toLowerCase();
   const checkable =
@@ -63,7 +40,6 @@ export function verifyMediaType(bytes: Uint8Array, declared: string): string {
   return VERIFIABLE_MEDIA_TYPES.has(normalized) ? GENERIC_MEDIA_TYPE : declared;
 }
 
-/** The image formats eve can verify from bytes, and that every major provider reads. */
 export const INLINE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   "image/gif",
   "image/jpeg",
@@ -77,16 +53,10 @@ const VERIFIABLE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   PDF_MEDIA_TYPE,
 ]);
 
-/**
- * Whether the bytes start with a PDF header. The format allows leading bytes,
- * but providers expect the header first, and a match deeper in would mark text
- * that only mentions it.
- */
 export function hasPdfHeader(bytes: Uint8Array): boolean {
   return readAscii(bytes, 0, 5) === "%PDF-";
 }
 
-/** Names the PNG, GIF, JPEG, or WebP format its leading bytes identify. */
 export function detectImageMediaType(bytes: Uint8Array): string | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const ascii = (start: number, end: number) => readAscii(bytes, start, end);
@@ -106,7 +76,6 @@ export function detectImageMediaType(bytes: Uint8Array): string | undefined {
   return undefined;
 }
 
-/** Reads PNG, GIF, JPEG, or WebP dimensions from the leading bytes. */
 export function readImageDimensions(
   bytes: Uint8Array,
 ): { readonly width: number; readonly height: number } | undefined {
@@ -150,7 +119,6 @@ function readJpegDimensions(
       offset += 1;
       continue;
     }
-    // SOF0–SOF15 carry the frame size, except DHT (C4), JPG (C8), and DAC (CC).
     if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
       return dimensions(view.getUint16(offset + 7), view.getUint16(offset + 5));
     }

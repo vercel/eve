@@ -1,33 +1,16 @@
-/**
- * Shared helpers for reading AI SDK `FilePart.data` values without
- * fetching remote resources.
- *
- * Every value has one meaning: typed arrays, base64 strings, `data:` URLs,
- * and tagged `data` or `text` shapes carry bytes; any other string or `URL`
- * with a scheme is a link the staging layer resolves; a provider reference
- * names a file the provider already holds. Anything else is unreadable.
- */
-
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 
-/** What a `FilePart.data` value carries. */
 export type FileData =
   | { readonly kind: "bytes"; readonly bytes: Buffer }
   | { readonly kind: "link"; readonly url: URL }
   | { readonly kind: "reference" }
   | { readonly kind: "unreadable" };
 
-// Base64 has no colon, so a leading scheme always marks a link.
 const SCHEME_PREFIX = /^[a-z][a-z\d+.-]*:/i;
 
 const REFERENCE: FileData = { kind: "reference" };
 const UNREADABLE: FileData = { kind: "unreadable" };
 
-/**
- * Classifies one `FilePart.data` value. A string with a framework-internal
- * scheme is unreadable: only eve mints those refs, so a caller-supplied one
- * must never turn into a privileged read.
- */
 export function readFileData(data: unknown): FileData {
   if (data instanceof Uint8Array) {
     return { bytes: Buffer.isBuffer(data) ? data : Buffer.from(data), kind: "bytes" };
@@ -63,10 +46,6 @@ export function readFileData(data: unknown): FileData {
   }
 }
 
-/**
- * Whether `FilePart.data` is a link or unreadable, so eve must resolve it
- * before a provider sees it. Never decodes the payload.
- */
 export function isUnresolvedFileData(data: unknown): boolean {
   if (data instanceof Uint8Array || data instanceof ArrayBuffer) return false;
   if (typeof data === "string") return SCHEME_PREFIX.test(data) && !data.startsWith("data:");
@@ -87,10 +66,6 @@ export function isUnresolvedFileData(data: unknown): boolean {
   }
 }
 
-/**
- * Returns the byte length of `FilePart.data` without performing any IO, or
- * `null` when only a fetch could tell.
- */
 export function getKnownByteLength(data: unknown): number | null {
   if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
     return data.byteLength;
@@ -116,11 +91,9 @@ function readStringData(data: string): FileData {
     const url = URL.parse(data);
     return url === null ? UNREADABLE : { kind: "link", url };
   }
-  // Bare strings are base64 payloads, matching AI SDK's `DataContent`.
   return { bytes: Buffer.from(data, "base64"), kind: "bytes" };
 }
 
-/** A bare AI SDK `ProviderReference`: provider names mapped to file ids. */
 function isProviderReference(data: object): boolean {
   const values = Object.values(data);
   return values.length > 0 && values.every((value) => typeof value === "string");
@@ -153,8 +126,6 @@ function computeStringByteLength(value: string): number | null {
   if (header.endsWith(";base64")) {
     return estimateBase64ByteLength(body);
   }
-  // Percent-encoded UTF-8 payload: count the decoded octets, not the
-  // percent-encoded string length.
   try {
     return Buffer.byteLength(decodeURIComponent(body), "utf8");
   } catch {

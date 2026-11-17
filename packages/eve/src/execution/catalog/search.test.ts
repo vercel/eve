@@ -22,7 +22,6 @@ interface SearchOutput {
   readonly unavailable?: readonly Record<string, unknown>[];
 }
 
-/** The step's `search` tool, run inside its session. */
 async function searchFor(
   tools: readonly HarnessToolDefinition[],
   options: {
@@ -67,7 +66,6 @@ describe("search", () => {
   it("ranks tools and skills together by name before description", async () => {
     const output = await (await searchFor(tools, { skills }))({ query: "refund" });
 
-    // Equal matches sort by name, compared by code unit: `-` before `_`.
     expect(names(output)).toEqual([
       "refund-policy",
       "refund_invoice",
@@ -117,7 +115,6 @@ describe("search", () => {
   it("finds only deferred entries; direct tools and listed skills are already in context", async () => {
     const search = await searchFor(tools, { skills });
 
-    // Four deferred tools and agents, and one deferred skill.
     expect(await search({ query: "add" })).toEqual({ remaining: 0, results: [], searched: 5 });
     expect(names(await search({ query: "refund voice" }))).not.toContain("refund-voice");
   });
@@ -148,16 +145,13 @@ describe("search", () => {
     const search = await searchFor(many);
 
     const top = await search({ limit: 50, query: "report" });
-    // `searched` counts every entry, matching or not; `remaining` counts only matches.
     expect(top).toMatchObject({ remaining: 10, searched: 61 });
     expect(await search({ query: "ledger" })).toMatchObject({ remaining: 0, searched: 61 });
     const best = names(top);
     expect(best).toHaveLength(50);
-    // A smaller limit keeps the best matches, in rank order.
     expect(names(await search({ limit: 3, query: "report" }))).toEqual(best.slice(0, 3));
     expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 10));
 
-    // The model's calls are checked against the schema, which caps limit at 50 and has no offset.
     const schema = (await catalogContext({ tools: many })).catalog.advertised.get(SEARCH_TOOL_NAME)!
       .inputSchema as StandardSchemaV1;
     expect(await schema["~standard"].validate({ limit: 51, query: "report" })).toEqual({
@@ -188,7 +182,6 @@ describe("search", () => {
         await searchFor(tools, { connections: [linear()] })
       )({ query: "issues" });
 
-      // The connection's description matches too, but weighs less than a tool's own name.
       expect(output.results).toEqual([
         {
           description: "list_issues description",
@@ -237,16 +230,12 @@ describe("search", () => {
         signature: "notion(input: {}): Promise<unknown>",
         tool: "notion",
       };
-      // Four deferred tools and agents, Linear's two tools, and Notion's sign-in
-      // entry, which stands in for the tools it can't list yet.
       expect(await search({ query: "notion" })).toEqual({
         remaining: 0,
         results: [signIn],
         searched: 7,
       });
-      // A namespace query counts only that namespace.
       expect(await search({ query: "linear__" })).toMatchObject({ searched: 2 });
-      // Found by the connection's description too, while its tools can't be listed.
       expect((await search({ query: "pages" })).results).toEqual([signIn]);
       expect(names(await search({ query: "notion__" }))).toEqual(["notion"]);
       expect(notion.signIns).toEqual([]);
@@ -525,7 +514,6 @@ describe("search", () => {
       );
       const search = await searchFor(
         [
-          // An extension mounted as `crm` adds a tool and a connection under its name.
           inlineTool("crm__export", { deferred: true, description: "Export CRM accounts." }),
           inlineTool("export_ledger", {
             deferred: true,
@@ -548,8 +536,6 @@ describe("search", () => {
         "crm__api__list_deals",
         "crm__export",
       ]);
-      // Connections that can't own the namespace aren't asked for their tools, so the
-      // failing one isn't reported either.
       expect(output.unavailable).toBeUndefined();
       for (const getToolMetadata of outside) expect(getToolMetadata).not.toHaveBeenCalled();
     });

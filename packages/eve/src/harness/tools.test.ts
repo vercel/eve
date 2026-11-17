@@ -73,7 +73,6 @@ async function resolveApproval(
   };
   const ctx = new ContextContainer();
   ctx.set(SessionKey, activeSession);
-  // The approval decision; the clearance a cleared call gets is the gate's, tested on its own.
   return contextStorage.run(ctx, async () => {
     const { clearance: _clearance, ...decision } = await decideApproval(definition, {
       abortSignal: options.abortSignal,
@@ -371,9 +370,6 @@ describe("buildToolSet", () => {
   });
 
   it("hands the AI SDK only its own schema type, whatever produced the tool schema", async () => {
-    // The AI SDK converts and parses Zod-vendored schemas with the app's own
-    // Zod copy. Handing it anything but its own `Schema` lets a mismatched
-    // copy crash mid-stream, so every source is lowered first.
     const remote = {
       anyOf: [{ required: ["page_id"] }, { required: ["title"] }],
       patternProperties: { "^x-": { type: "string" } },
@@ -457,9 +453,6 @@ describe("buildToolSet", () => {
   });
 
   it("omits tools whose name is in disabledProviderTools", () => {
-    // The harness recovery path lists tools to drop after an AI Gateway
-    // fallback provider rejected them. `buildToolSet` must honor the
-    // list so the retry call does not re-send the offending tool.
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
         "web_search",
@@ -988,7 +981,6 @@ describe("buildToolSet", () => {
         ],
       ]);
     const perTool = once();
-    /** What the session remembers once Alice accepts the prompt `once()` asked for bash. */
     const acceptedOnce = async (pending = false): Promise<ApprovalMemory> => {
       const asked = (await resolveApproval(bashWith(perTool), "bash", {})) as ApprovalDecision;
       const key = asked.remember!.key;
@@ -1025,7 +1017,6 @@ describe("buildToolSet", () => {
     });
 
     it("reads once() imported from a separate copy of eve's modules", async () => {
-      // Bundled authored tools can load eve/tools/approval apart from the harness's copy.
       const approvalMemory = await acceptedOnce();
       vi.resetModules();
       const copy = await import("#tools/approval/policies.js");
@@ -1099,7 +1090,6 @@ describe("buildToolSet", () => {
             key,
           });
         const asked = (await resolveApproval(lookupWith(forged), "lookup", {})) as ApprovalDecision;
-        // Settlement records an accepted decision under exactly the key the request carried.
         const approvalMemory: ApprovalMemory = {
           pending: [],
           remembered: {

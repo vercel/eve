@@ -13,7 +13,6 @@ export interface ConnectedModel {
   endpoint: ModelEndpointStatus;
 }
 
-/** Whether a completed connection or model edit still needs runtime activation. */
 export interface ModelAccessChange {
   kind: "model-access-changed";
   reload: boolean;

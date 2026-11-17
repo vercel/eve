@@ -138,7 +138,6 @@ describe("authored package tsconfig paths resolver", () => {
     };
     const hook = getResolveIdHook({
       authoredSourceOnly: true,
-      // Host-bundled, so only the check for eve's modules could turn the nested dependency away.
       handlesInstalledModule: () => true,
     });
     const resolveFrom = (packageRoot: string) =>

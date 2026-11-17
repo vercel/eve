@@ -75,8 +75,6 @@ it("points a workflow body that opens the sandbox to a step helper", async () =>
   });
 });
 
-// #3836: a selected option's answer carries `text: undefined`, and a tool that
-// returns it as-is, or returns nothing, must still complete with JSON.
 it.each([
   { expected: { optionId: "yes", status: "answered" }, returnsAnswer: true },
   { expected: null, returnsAnswer: false },

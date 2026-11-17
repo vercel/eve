@@ -22,7 +22,6 @@ export interface EnsureVercelProjectDeps {
   runLoginFlow: typeof runLoginFlow;
 }
 
-/** Ensures Vercel authentication and a project link using eve-owned prompts. */
 export async function ensureVercelProject(input: {
   appRoot: string;
   prompter: Prompter;

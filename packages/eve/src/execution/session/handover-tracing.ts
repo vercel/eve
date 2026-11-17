@@ -1,7 +1,6 @@
 import { trace, type Attributes } from "#compiled/@opentelemetry/api/index.js";
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-/** Called only from existing host steps; workflow bodies cannot export host spans. */
 export function traceSessionHandover(
   phase: "forwarding_started" | "part_submitted" | "final_submitted" | "inbox_unblocked",
   sessionId: string,
@@ -24,7 +23,5 @@ export function traceSessionHandover(
       if (value !== undefined) span.setAttribute(key, value);
     }
     span.addEvent(`eve.session.handover.${phase}`, fields);
-  } catch {
-    // A tracing failure must not retry a message delivery or fail a turn.
-  }
+  } catch {}
 }

@@ -26,10 +26,6 @@ const announcements: Record<string, Announcement> = {
   policy: { kind: "context.instruction", render: () => "Answer in one sentence.", value: "v1" },
 };
 
-/**
- * One model call, in `ModelCaller.buildRequest`'s order: announcements join the record, then the
- * model reads its projection.
- */
 function call(
   draft: CallRecord,
   turn: readonly UserModelMessage[],
@@ -84,8 +80,6 @@ describe("client context", () => {
       "Hello.",
     ]);
     expect(second.view.slice(0, first.view.length)).toEqual(first.view);
-    // The next turn reads no client context, so its prompt shares the first one's through the
-    // instruction.
     expect(next.view.slice(0, 3)).toEqual(first.view.slice(0, 3));
   });
 

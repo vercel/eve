@@ -15,9 +15,9 @@ npm install @portabletext/markdown
 ## Basic Usage
 
 ```ts
-import {portableTextToMarkdown} from '@portabletext/markdown'
+import { portableTextToMarkdown } from "@portabletext/markdown";
 
-const markdown = portableTextToMarkdown(portableTextBlocks)
+const markdown = portableTextToMarkdown(portableTextBlocks);
 ```
 
 ## Built-in Support
@@ -47,17 +47,17 @@ import {
   DefaultHorizontalRuleRenderer,
   DefaultTableRenderer,
   DefaultHtmlRenderer,
-} from '@portabletext/markdown'
+} from "@portabletext/markdown";
 
 const markdown = portableTextToMarkdown(blocks, {
   types: {
-    'code': DefaultCodeBlockRenderer,           // {code, language?} → fenced code block
-    'image': DefaultImageRenderer,              // {src, alt?, title?} → ![alt](src "title")
-    'horizontal-rule': DefaultHorizontalRuleRenderer, // → ---
-    'table': DefaultTableRenderer,              // {rows, headerRows?} → GFM table
-    'html': DefaultHtmlRenderer,                // {html} → raw HTML
+    code: DefaultCodeBlockRenderer, // {code, language?} → fenced code block
+    image: DefaultImageRenderer, // {src, alt?, title?} → ![alt](src "title")
+    "horizontal-rule": DefaultHorizontalRuleRenderer, // → ---
+    table: DefaultTableRenderer, // {rows, headerRows?} → GFM table
+    html: DefaultHtmlRenderer, // {html} → raw HTML
   },
-})
+});
 ```
 
 ## Custom Renderers
@@ -68,50 +68,50 @@ Handle custom block types and marks with renderer functions:
 const markdown = portableTextToMarkdown(blocks, {
   // Custom block types — receives {value, index, isInline}
   types: {
-    callout: ({value}) => `> **${value.title}**\n> ${value.text}`,
-    image: ({value, isInline}) => {
-      if (isInline) return ''
-      return `![${value.alt || ''}](${value.url})`
+    callout: ({ value }) => `> **${value.title}**\n> ${value.text}`,
+    image: ({ value, isInline }) => {
+      if (isInline) return "";
+      return `![${value.alt || ""}](${value.url})`;
     },
   },
 
   // Custom block style renderers — receives {value, children, index}
   block: {
-    h1: ({children}) => `# ${children}`,
-    blockquote: ({children}) => `> ${children}`,
+    h1: ({ children }) => `# ${children}`,
+    blockquote: ({ children }) => `> ${children}`,
   },
 
   // Custom mark renderers — receives {value, children, text, markType, markKey}
   marks: {
-    highlight: ({children}) => `==${children}==`,
-    internalLink: ({children, value}) => `[${children}](/docs/${value.slug})`,
+    highlight: ({ children }) => `==${children}==`,
+    internalLink: ({ children, value }) => `[${children}](/docs/${value.slug})`,
   },
 
   // Custom list item renderer — receives {value, children, listIndex}
-  listItem: ({children}) => children,
+  listItem: ({ children }) => children,
 
   // Control spacing between blocks — function, not string
-  blockSpacing: ({current, next}) => {
-    if (current.listItem && next.listItem) return '\n'
-    return undefined // use default (\n\n)
+  blockSpacing: ({ current, next }) => {
+    if (current.listItem && next.listItem) return "\n";
+    return undefined; // use default (\n\n)
   },
 
   // Handle unknown types gracefully
-  unknownType: ({value}) => `<!-- Unknown type: ${value._type} -->`,
-  unknownMark: ({children}) => children,
-})
+  unknownType: ({ value }) => `<!-- Unknown type: ${value._type} -->`,
+  unknownMark: ({ children }) => children,
+});
 ```
 
 ## Use Cases
 
-| Use Case | Why Markdown |
-|----------|-------------|
-| AI/LLM context | Models work well with Markdown input |
-| Static site generators | Hugo, Jekyll, Eleventy consume Markdown |
-| README generation | Generate docs from Sanity content |
-| Email (with converter) | Markdown → HTML for email templates |
-| Export/backup | Human-readable content export |
-| Documentation pipelines | Sanity as docs CMS, output as Markdown |
+| Use Case                | Why Markdown                            |
+| ----------------------- | --------------------------------------- |
+| AI/LLM context          | Models work well with Markdown input    |
+| Static site generators  | Hugo, Jekyll, Eleventy consume Markdown |
+| README generation       | Generate docs from Sanity content       |
+| Email (with converter)  | Markdown → HTML for email templates     |
+| Export/backup           | Human-readable content export           |
+| Documentation pipelines | Sanity as docs CMS, output as Markdown  |
 
 ## Bidirectional: Also Converts Markdown → PT
 

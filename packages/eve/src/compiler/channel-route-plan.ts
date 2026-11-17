@@ -126,11 +126,6 @@ function derivePreflights(
   return preflights;
 }
 
-/**
- * A WebSocket upgrade arrives as a GET, so a path with both routes is served
- * by one handler registered at the GET route, whose parameter names the
- * WebSocket handler then receives.
- */
 function rejectWebSocketParameterMismatches(effective: readonly CompiledChannelDefinition[]): void {
   for (const websocket of effective.filter((route) => route.method === "WEBSOCKET")) {
     const pattern = normalizeRoutePattern(websocket.urlPath);
@@ -179,7 +174,6 @@ function routePatternsOverlap(left: string, right: string): boolean {
   );
 }
 
-/** A route's identity for matching: `/items/:id` and `/items/:itemId` are one route. */
 export function normalizeRoutePattern(path: string): string {
   return splitRoute(path)
     .map((segment) => (isParameter(segment) ? ":" : segment))

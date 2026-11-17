@@ -16,13 +16,8 @@ const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
 const DEFAULT_PRODUCTION_SERVER_PORT = 3000;
 const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
-// How many probed ports an ephemeral start tries before it reports the failure.
 const EPHEMERAL_PORT_ATTEMPTS = 3;
-// srvx prints this line only after its own listener is bound.
 const LISTENING_URL_PATTERN = /Listening on:?\s+(https?:\/\/\S+)/;
-// On SIGTERM, srvx closes the server for up to 5s before Nitro's close hooks
-// run the bounded sandbox shutdown (15s in sandbox-shutdown-plugin.ts). The
-// grace covers both, so SIGKILL does not cut stopping sandboxes short.
 const TERMINATE_GRACE_MS = 25_000;
 const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0.0.0.0"]);
 
@@ -170,9 +165,6 @@ function once(child: ChildProcess, event: "exit"): Promise<void> {
   });
 }
 
-/**
- * Starts a built Nitro server for an eve application.
- */
 export async function startProductionServer(
   rootDir: string,
   options: {
@@ -194,9 +186,6 @@ export async function startProductionServer(
 
   const host = options.host ?? DEFAULT_PRODUCTION_SERVER_HOST;
   const requestedPort = options.port ?? readEnvironmentPort() ?? DEFAULT_PRODUCTION_SERVER_PORT;
-  // An ephemeral request picks a port by binding one and releasing it, so a
-  // parallel process can claim it before this child binds. Retry with a fresh
-  // port instead of failing the start.
   for (let attempt = 1; ; attempt += 1) {
     const port = await resolveListenPort({ host, port: requestedPort });
     const retryable = requestedPort === 0 && attempt < EPHEMERAL_PORT_ATTEMPTS;
@@ -219,16 +208,12 @@ async function spawnBuiltServer(input: {
   readonly appRoot: string;
   readonly host: string;
   readonly port: number;
-  /** Whether a taken port is retried; its startup stderr is then held until the start settles. */
   readonly retryable: boolean;
   readonly schedules: boolean | undefined;
   readonly serverEntry: string;
 }): Promise<ProductionServerHandle> {
   const { appRoot, host, port, serverEntry } = input;
-  // Startup output is kept only for URL detection and startup diagnostics.
-  // After readiness it is dropped so a long-running server does not grow it.
   let output = "";
-  // Startup stderr of a retryable attempt, written once the start settles unless it is retried.
   let heldStderr: Buffer[] | undefined = input.retryable ? [] : undefined;
   const releaseStderr = (write: boolean) => {
     if (write) for (const chunk of heldStderr ?? []) process.stderr.write(chunk);
@@ -245,12 +230,6 @@ async function spawnBuiltServer(input: {
     NITRO_PORT: String(port),
     PORT: String(port),
   };
-  // srvx hides its listening line when TEST is set, and that line is the only
-  // proof that this child, not another process, owns the port. With CI or
-  // TEST set, srvx also skips graceful shutdown, so SIGTERM would never run
-  // Nitro's close hooks, and SERVER_SHUTDOWN_TIMEOUT would stretch srvx's
-  // close past TERMINATE_GRACE_MS. A socket path would replace the port eve
-  // waits on.
   delete env.TEST;
   delete env.CI;
   delete env.SERVER_SHUTDOWN_TIMEOUT;

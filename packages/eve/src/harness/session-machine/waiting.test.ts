@@ -331,7 +331,6 @@ describe("announceWaiting", () => {
       interactions: [{ interactionId: "i_2" }],
       on: "interaction",
     });
-    // An admitted answer is not yet a settled interaction while the batch is weighed.
     expect(
       openInteractions(answered, { about: { callId: "c_1" } }).map((row) => row.interactionId),
     ).toEqual(["i_1", "i_2"]);

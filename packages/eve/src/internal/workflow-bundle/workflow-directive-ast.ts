@@ -1,7 +1,6 @@
 export type WorkflowDirective = "use step" | "use workflow";
 
 export function mayContainWorkflowDirective(source: string): boolean {
-  // Escapes can hide directive text; leave those sources to the syntax parser.
   return source.includes("use step") || source.includes("use workflow") || source.includes("\\");
 }
 
@@ -11,8 +10,6 @@ export interface DirectiveStatementNode {
   readonly type?: unknown;
 }
 
-// Some parsers record a directive prologue on the statement; others leave a
-// plain string-literal expression.
 export function readWorkflowDirective(
   statement: DirectiveStatementNode | undefined,
 ): WorkflowDirective | undefined {

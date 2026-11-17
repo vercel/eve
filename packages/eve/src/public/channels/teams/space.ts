@@ -5,12 +5,6 @@ import type {
   ConversationSpaceVisibility,
 } from "#shared/conversation-context.js";
 
-/**
- * The Teams chat or channel a session is in. A channel conversation's ID names
- * one thread, so a channel reports the Teams channel instead. A session with
- * no known tenant, such as a proactive send without `tenantId`, reports no
- * space rather than one that differs from its chat's.
- */
 export function teamsConversationSpace(
   state: Pick<TeamsChannelState, "channelId" | "conversationId" | "conversationType" | "tenantId">,
 ): ConversationSpace | undefined {
@@ -27,11 +21,9 @@ export function teamsConversationSpace(
     workspaceId,
   });
   if (state.conversationType === "channel") {
-    // A Teams channel's visibility isn't in the activity.
     return state.channelId ? scoped(state.channelId, "shared") : undefined;
   }
   if (!state.conversationId) return undefined;
-  // Chats have fixed members, so they are private.
   if (state.conversationType === "personal") {
     return scoped(state.conversationId, "direct", "private");
   }

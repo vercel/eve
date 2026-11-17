@@ -49,7 +49,6 @@ export interface GitHubComment {
   readonly url: string | undefined;
 }
 
-/** Normalized issue/PR timeline comment. */
 export interface GitHubIssueComment {
   readonly author: GitHubUser | undefined;
   readonly body: string;
@@ -61,7 +60,6 @@ export interface GitHubIssueComment {
   readonly url: string | undefined;
 }
 
-/** Normalized inline pull-request review comment. */
 export interface GitHubPullRequestReviewComment {
   readonly author: GitHubUser | undefined;
   readonly body: string;
@@ -223,13 +221,11 @@ export interface GitHubWorkflowRunWebhookEvent extends GitHubInboundEventBase {
   readonly workflowRun: GitHubWorkflowRunEvent;
 }
 
-/** Parsed CI webhook envelopes consumed by the GitHub channel. */
 export type GitHubCiWebhookEvent =
   | GitHubCheckRunWebhookEvent
   | GitHubCheckSuiteWebhookEvent
   | GitHubWorkflowRunWebhookEvent;
 
-/** Parsed GitHub webhook event shape consumed by the channel. */
 export type GitHubInboundEvent =
   | GitHubCheckRunWebhookEvent
   | GitHubCheckSuiteWebhookEvent
@@ -240,7 +236,6 @@ export type GitHubInboundEvent =
   | GitHubPullRequestWebhookEvent
   | GitHubWorkflowRunWebhookEvent;
 
-/** Parsed mention trigger for a bot-directed GitHub comment. */
 export interface GitHubCommentTrigger {
   readonly kind: "mention";
   readonly message: string;

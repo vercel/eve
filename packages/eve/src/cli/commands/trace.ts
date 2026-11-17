@@ -28,10 +28,6 @@ interface SpanExtent {
   readonly startTimeNs: bigint;
 }
 
-/**
- * Resolves an exact trace/conversation id or an unambiguous prefix. One
- * conversation ID can match several traces, since each turn is separate.
- */
 export function resolveLocalTraces(
   traces: readonly LocalTrace[],
   reference: string,
@@ -246,8 +242,6 @@ function renderSpanTree(
 
   const lines: string[] = [];
   const visited = new Set<string>();
-  // All tree chrome — bars and connectors, on span rows and detail lines
-  // alike — is dimmed so only labels and values render bright.
   const mute = options.dim ?? ((text: string) => text);
   const render = (span: LocalTraceSpan, prefix: string, connector: string): void => {
     if (visited.has(span.spanId)) return;
@@ -257,8 +251,6 @@ function renderSpanTree(
     const childPrefix = `${prefix}${connector === "" ? "" : connector === "└─ " ? "   " : "│  "}`;
     const descendants = children.get(span.spanId) ?? [];
     if (options.verbose === true) {
-      // Detail entries render as `tree(1)`-style entries beneath the span's
-      // row, dimmed so the span rows keep visual priority.
       for (const line of renderSpanDetailTree(span, {
         childrenFollow: descendants.length > 0,
         margin: childPrefix,
@@ -280,12 +272,6 @@ function renderSpanTree(
   return lines.join("\n");
 }
 
-/**
- * Extent of each span's own range unioned with its descendants', keyed by span id.
- *
- * Older schemas recorded zero-duration session markers. Include descendant
- * time when rendering those stored traces.
- */
 function subtreeExtents(
   spans: readonly LocalTraceSpan[],
   children: ReadonlyMap<string, readonly LocalTraceSpan[]>,

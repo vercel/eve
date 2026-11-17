@@ -104,7 +104,6 @@ describe("buildApplicationInfoJson", () => {
       status: "ready",
     });
     expect(json.tools).toContain("create_ticket");
-    // Library schemas are closed for the model; plain JSON Schema is sent as written.
     expect(json.toolInputSchemas.root.lookup_order).toEqual({
       additionalProperties: false,
       properties: { id: { type: "string" } },

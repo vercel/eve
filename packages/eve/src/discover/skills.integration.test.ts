@@ -150,8 +150,6 @@ describe("discoverSkills (memory)", () => {
   });
 
   it("reports used-frontmatter validation failures while accepting unmodeled frontmatter", async () => {
-    // Frontmatter that eve does not model must not block importing a shared
-    // SKILL.md from another runtime.
     const project = buildMemoryAgentProject({
       agentFiles: {
         "skills/bad-skill/SKILL.md": ["---", "description: 42", "---", "Broken frontmatter."].join(

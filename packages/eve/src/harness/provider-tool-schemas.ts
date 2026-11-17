@@ -4,9 +4,6 @@ export const WEB_SEARCH_TOOL_NAME = "web_search";
 
 export { resolveWebSearchActivityLabel } from "#tools/provided/web-search.js";
 
-/**
- * Output schema for OpenAI's provider-managed `webSearch` tool.
- */
 export const WEB_SEARCH_OPENAI_OUTPUT_SCHEMA: JsonObject = {
   $schema: "http://json-schema.org/draft-07/schema#",
   additionalProperties: false,
@@ -97,9 +94,6 @@ export const WEB_SEARCH_OPENAI_OUTPUT_SCHEMA: JsonObject = {
   type: "object",
 };
 
-/**
- * Output schema for Anthropic's stable provider-managed `webSearch_20250305` tool.
- */
 export const WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA: JsonObject = {
   $schema: "http://json-schema.org/draft-07/schema#",
   items: {
@@ -124,9 +118,6 @@ export const WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA: JsonObject = {
   type: "array",
 };
 
-/**
- * Output schema for Google's provider-managed `googleSearch` grounding tool.
- */
 export const WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA: JsonObject = {
   $schema: "http://json-schema.org/draft-07/schema#",
   additionalProperties: false,
@@ -134,9 +125,6 @@ export const WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA: JsonObject = {
   type: "object",
 };
 
-/**
- * Output schema for AI Gateway's provider-managed `exaSearch` tool.
- */
 export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
   $schema: "http://json-schema.org/draft-07/schema#",
   anyOf: [
@@ -255,9 +243,6 @@ export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
   ],
 };
 
-/**
- * Output schema for AI Gateway's provider-managed `parallelSearch` tool.
- */
 export const WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA: JsonObject = {
   $schema: "http://json-schema.org/draft-07/schema#",
   anyOf: [

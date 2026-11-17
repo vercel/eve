@@ -27,7 +27,6 @@ function agentTraceFetch(fetcher: typeof fetch, maxBytes: number): typeof fetch 
   };
 }
 
-/** The host validates provenance; well-formed trace metadata is not authorization. */
 function receiveAgentTrace<T>(
   headers: Headers,
   trusted: (handoff: AgentHandoff) => boolean,

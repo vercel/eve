@@ -1,4 +1,3 @@
-// @linux-only: session inbox hooks on Workflow
 import { describe, expect, it } from "vitest";
 
 import {
@@ -70,7 +69,6 @@ describe("session command inbox integration", () => {
 
       const claimer = await start(sessionInboxForceClaimWorkflow, [{ token }]);
       runs.push(claimer);
-      // The claimer returns once the original owner has taken the address back.
       await claimer.returnValue;
       await resumeHook(physicalToken, send("three"));
 

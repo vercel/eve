@@ -7,12 +7,6 @@ import {
   vercelTrustedSourcesErrorCode,
 } from "#services/dev-client/vercel-auth-error.js";
 
-/**
- * Trimmed sample that mirrors the markup Vercel ships on a
- * Deployment Protection SSO challenge. The full body is several
- * kilobytes; we keep just the markers `isVercelAuthChallenge`
- * relies on.
- */
 const VERCEL_SSO_CHALLENGE_BODY = `<!doctype html><html lang=en><meta charset=utf-8>
 <title>Authentication Required</title>
 <noscript><meta http-equiv=refresh content="1; URL=https://vercel.com/sso-api?url=https%3A%2F%2Fexample.vercel.app"></noscript>
@@ -36,9 +30,6 @@ describe("isVercelAuthChallenge", () => {
   });
 
   it("detects a duck-typed error with the same body shape (post-IPC)", () => {
-    // ClientErrors that cross a boundary (e.g. a worker thread, a
-    // structured-clone deserialization, a TypeScript-erased plain
-    // object) lose their prototype but keep the `body` field.
     expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY, status: 401 })).toBe(true);
   });
 

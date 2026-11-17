@@ -1,4 +1,3 @@
-// @linux-only: tool loop cancellation
 import type { SessionEvent } from "#protocol/session-event.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type LanguageModel } from "ai";
@@ -90,16 +89,12 @@ describe("tool loop cancellation (real AI SDK)", () => {
     }
   });
 
-  // #5025: a cancelled model call is not a failed attempt; instrumentation hears `model.retried`
-  // as one.
   it("neither fails nor retries the model call a cancellation cuts short", async () => {
     const abortController = new AbortController();
     const model = new MockLanguageModelV3({
       modelId: "integration-model",
       provider: "eve-integration-mock",
       doStream: async () => {
-        // A cancellation can reach the step without its reason, so the stream rejects with the
-        // platform's plain AbortError.
         abortController.abort();
         throw abortController.signal.reason;
       },
@@ -123,7 +118,6 @@ describe("tool loop cancellation (real AI SDK)", () => {
     ).toEqual([]);
   });
 
-  // #4273: a resolver can raise the cancellation before the turn's signal fires.
   it("propagates a model resolver cancellation raised before the signal aborts", async () => {
     const logs = captureLogRecords();
     const cancellation = new TurnCancelledError();

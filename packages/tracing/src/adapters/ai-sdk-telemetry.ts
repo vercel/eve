@@ -10,6 +10,7 @@ import { modelContent, modelUsage } from "./ai-sdk-payload.js";
 
 type Event<K extends keyof Telemetry & `on${string}`> = Parameters<NonNullable<Telemetry[K]>>[0];
 
+/** Options for `aiSdkTelemetry`. */
 export interface AiSdkTelemetryOptions {
   /** The turn a generation records. Called once per AI SDK call. */
   readonly turn: TurnInput | ((call: { readonly callId: string }) => TurnInput);
@@ -167,7 +168,6 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): T
       await finish(event.callId, (turn) => turn.complete({ outcome: "cancelled" }));
     },
     async onError(value: unknown) {
-      // Some agents report the bare error; it then belongs to every open call.
       const { callId, error } =
         value !== null && typeof value === "object" && "callId" in value && "error" in value
           ? (value as { callId: string; error: unknown })

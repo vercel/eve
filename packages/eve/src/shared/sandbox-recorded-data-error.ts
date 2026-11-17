@@ -1,4 +1,3 @@
-/** A provider's recorded session state does not match the shape this eve version writes. */
 export function invalidSandboxSessionStateError(label: string): Error {
   return new Error(
     `Invalid ${label} session state. ` +
@@ -7,7 +6,6 @@ export function invalidSandboxSessionStateError(label: string): Error {
   );
 }
 
-/** A provider's prepared artifact from `eve build` does not match the shape this eve version writes. */
 export function invalidPreparedSandboxArtifactError(label: string): Error {
   return new Error(
     `Invalid prepared ${label} artifact. ` +

@@ -42,7 +42,6 @@ export async function schedules<TPayload, TPrepared = TPayload>(
   );
 }
 
-/** Shared binding for model approval preview and code-only client access. */
 export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
   collection: DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
 ): Promise<ScheduleCollectionClient<TPayload, TPrepared>> {

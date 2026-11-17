@@ -6,7 +6,9 @@ type NetworkPolicySandboxSession = SandboxSession & {
 
 import { toolingPaths } from "./tooling.ts";
 
+/** Options for {@link authenticateGitHub} and {@link authenticateVercel}. */
 export interface BrokeredCredentialOptions {
+  /** The credential to deliver to the sandbox. */
   readonly token: string;
   /**
    * `firewall` keeps the token outside the sandbox. `command` writes it into
@@ -20,11 +22,14 @@ export interface BrokeredCredentialOptions {
   ) => Promise<void>;
 }
 
-// Keyed by session object because eve sessions expose no sandbox identity.
 const headersBySandbox = new WeakMap<SandboxSession, Map<string, Record<string, string>>>();
 const policyQueues = new WeakMap<SandboxSession, Promise<void>>();
 const environmentQueues = new WeakMap<SandboxSession, Promise<void>>();
 
+/**
+ * Makes a GitHub token available to `git` and `gh` in a sandbox.
+ * Firewall delivery, the default, injects it as an authorization header for `github.com` and `api.github.com`; `command` delivery writes it into git config and `GH_TOKEN`.
+ */
 export async function authenticateGitHub(
   sandbox: SandboxSession,
   options: BrokeredCredentialOptions,
@@ -50,6 +55,10 @@ export async function authenticateGitHub(
   );
 }
 
+/**
+ * Makes a Vercel token available to the Vercel CLI in a sandbox.
+ * Firewall delivery, the default, injects it as a bearer authorization header for `vercel.com` and `api.vercel.com`; `command` delivery writes it into `VERCEL_TOKEN`.
+ */
 export async function authenticateVercel(
   sandbox: SandboxSession,
   options: BrokeredCredentialOptions,

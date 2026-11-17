@@ -1,18 +1,5 @@
 import { afterAll, beforeAll, vi } from "vitest";
 
-/**
- * Guard for a shared-state test project.
- *
- * Files in that project reuse a worker's environment and module graph, so
- * process-wide state left behind by one file changes what the next file sees.
- * Each file records the environment, the global `fetch`, and OpenTelemetry's
- * global registrations it starts from, and fails when it ends different, or
- * when it ends with fake timers installed. A file that needs to change any of
- * them belongs in the isolated project, which the tier's config decides from
- * the file's source.
- */
-
-// OpenTelemetry's global registry: a registration left behind refuses the next file's.
 const OTEL_API = Symbol.for("opentelemetry.js.api.1");
 
 interface Snapshot {
@@ -41,7 +28,6 @@ afterAll(() => {
 
   if (endingState.fetch !== startingState.fetch) changed.push("globalThis.fetch (replaced)");
 
-  // The API keeps its `version` once anything registered; the registrations are the rest.
   for (const name of endingState.otel.keys()) {
     if (startingState.otel.get(name) !== endingState.otel.get(name)) {
       changed.push(`the global OpenTelemetry ${name}`);

@@ -6,14 +6,7 @@ import * as nodeModule from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-// Every eve command loads hundreds of modules from the installed package.
-// Child processes keep their own setting: `eve dev` children also load
-// per-run build output, which would add cache entries on every start.
-// Runtimes without the API (Bun) skip it.
 if (nodeModule.enableCompileCache?.() !== undefined) {
-  // Node writes the cache on a normal exit, but closing the terminal ends
-  // `eve dev` with SIGHUP, which skips that write. Write once startup has
-  // loaded its modules.
   setTimeout(() => nodeModule.flushCompileCache?.(), 1000).unref();
 }
 
@@ -215,10 +208,6 @@ function resolveTscCliPath({ tscCliPath }) {
     return tscCliPath;
   }
 
-  // The `typescript` package only exports `./package.json` in its `exports`
-  // map, so `require.resolve("typescript/bin/tsc")`
-  // fails with ERR_PACKAGE_PATH_NOT_EXPORTED. Resolve the package.json
-  // (which is exported) and join to the binary path manually.
   const packageJsonPath = require.resolve("typescript/package.json");
   return resolve(dirname(packageJsonPath), "bin", "tsc");
 }
@@ -247,9 +236,6 @@ async function runCommand(command, args, options) {
   });
 }
 
-/**
- * Ensures the compiled CLI entrypoint exists before the workspace bin is executed.
- */
 export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
   const options = createBootstrapOptions(overrides);
   const exists = dependencies.exists ?? fileExists;
@@ -309,9 +295,6 @@ export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
   throw new Error(`Building eve did not produce ${options.cliEntrypointPath}.`);
 }
 
-/**
- * Runs the compiled eve CLI, building the workspace package on demand when needed.
- */
 export async function runEveCli(argv = process.argv.slice(2), overrides = {}, dependencies = {}) {
   const options = createBootstrapOptions(overrides);
   await assertSupportedNodeVersion(
@@ -341,9 +324,6 @@ export async function runEveCli(argv = process.argv.slice(2), overrides = {}, de
   await cliModule.runCli(argv);
 }
 
-/**
- * Resolves once every write already queued on the stream has been handed to the OS.
- */
 async function flushWritable(stream) {
   if (stream.destroyed || stream.writableEnded) {
     return;
@@ -375,9 +355,6 @@ if (await isDirectExecution()) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
-    // Walk the `cause` chain so wrapped errors (sandbox prewarm wraps the
-    // underlying Vercel SDK failure with remediation hints, etc.) still
-    // surface the original SDK message a user can search for.
     let cause = error instanceof Error ? error.cause : undefined;
     while (cause instanceof Error) {
       console.error(`  Caused by: ${cause.message}`);
@@ -385,14 +362,7 @@ if (await isDirectExecution()) {
     }
     process.exitCode = 1;
   } finally {
-    // Pipes and sockets can accept writes asynchronously, and `process.exit`
-    // drops anything still queued, truncating large output such as
-    // `eve info --json` read by a parent Node process.
     await Promise.all([flushWritable(process.stdout), flushWritable(process.stderr)]);
-    // The CLI bootstraps build/dev toolchains that can leave native service
-    // handles alive after the command has completed. Once the top-level
-    // command resolves, terminate the bin process explicitly so commands like
-    // `eve dev` + `/exit` do not hang on leaked implementation details.
     process.exit(process.exitCode ?? 0);
   }
 }

@@ -46,13 +46,11 @@ export function formatApplyModelSettingsOutcome(outcome: ApplyModelSettingsOutco
   return `Model settings updated: ${labels.join(", ")}. Live on your next prompt.`;
 }
 
-/** The outcome of applying a model slug to the agent's authored source. */
 export type ApplyModelOutcome =
   | { kind: "changed"; to: string }
   | { kind: "unchanged"; model: string }
   | { kind: "rejected"; message: string };
 
-/** Applies one completed `/model` draft through a single atomic source write. */
 export async function changeAgentModelSettings(input: {
   readonly appRoot: string;
   readonly patch: AgentModelSettingsPatch;
@@ -88,7 +86,6 @@ export async function changeAgentModelSettings(input: {
   return outcome;
 }
 
-/** Applies a validated `/model <slug>` change to authored source. */
 export async function changeAgentModel(input: {
   readonly appRoot: string;
   readonly slug: string;
@@ -100,7 +97,6 @@ export async function changeAgentModel(input: {
   return changeValidatedAgentModel(input);
 }
 
-/** Applies a selection already confirmed by the provider catalog, retaining source-edit guards. */
 export async function changeValidatedAgentModel(input: {
   readonly appRoot: string;
   readonly slug: string;
@@ -141,7 +137,6 @@ export async function validateModelSlug(appRoot: string, slug: string): Promise<
   return null;
 }
 
-/** Uses the same source grammar as model edits, never the provider endpoint. */
 export async function readAuthoredModelSelection(startPath: string): Promise<string | undefined> {
   const project = await resolveDiscoveryProject(startPath);
   const { manifest } = await discoverAgent(project);

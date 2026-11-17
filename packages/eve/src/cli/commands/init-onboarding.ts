@@ -1,32 +1,14 @@
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 
-/** Fresh-agent onboarding that `eve init` shows while it installs dependencies. */
 export interface InitOnboarding {
-  /** Resolves when the person finishes or cancels onboarding. */
   readonly finished: Promise<{ readonly cancelled: boolean }>;
-  /**
-   * Aborts when the person presses Ctrl-C on the onboarding screen. The
-   * renderer holds the terminal in raw mode, so no SIGINT reaches init or its
-   * install; init stops both through this signal instead.
-   */
   readonly interrupted: AbortSignal;
-  /** Shows whether init is still installing once onboarding no longer owns the status line. */
   setInstalling(installing: boolean): void;
-  /**
-   * Restores the terminal and returns what the person typed, for `eve dev` to carry on with.
-   * Cancels onboarding first if it is still open.
-   *
-   * With `handOff`, eve dev starts next: the rows are printed above the screen, which stays
-   * up for eve dev to paint over in place. Otherwise the screen is erased.
-   */
   close(handOff?: { readonly rows: readonly string[] }): Promise<InitCarriedInput>;
 }
 
-/** What the person typed on the onboarding screen. */
 export interface InitCarriedInput {
-  /** The unsent prompt, for `eve dev` to pre-fill. */
   readonly draft?: string;
-  /** Messages queued with Enter, oldest first, for `eve dev` to send once ready. */
   readonly queued?: readonly string[];
 }
 
@@ -35,18 +17,8 @@ export interface InitOnboardingTelemetry {
   trackSetupTerminal(input: EveCliSetupTerminalEvent): void;
 }
 
-/**
- * Opens the terminal UI's startup screen and runs model onboarding on it
- * while `eve init` installs the project. Signing in needs only the project
- * files, so there's no dev server to wait for; `eve dev` starts afterwards
- * and picks up the saved connection.
- */
 export async function startInitOnboarding(input: {
   readonly projectPath: string;
-  /**
-   * Rows above the screen until it closes. `close()` commits its handoff rows in their place,
-   * so the same number of rows keeps the screen from moving.
-   */
   readonly preamble?: readonly string[];
   readonly telemetry?: InitOnboardingTelemetry;
 }): Promise<InitOnboarding> {
@@ -63,7 +35,6 @@ export async function startInitOnboarding(input: {
     appRoot: input.projectPath,
     phase: "installing",
     preamble: input.preamble,
-    // `close()` cancels onboarding with a synthetic Ctrl-C; only a real one interrupts init.
     onExitRequest: () => {
       if (!closing) interrupt.abort();
     },
@@ -82,7 +53,6 @@ export async function startInitOnboarding(input: {
     onOnboardingStep: telemetry && ((event) => telemetry.trackSetupStep(event)),
   }).then(
     ({ outcome }) => {
-      // Nothing settles after init: `eve dev` starts later and reads the saved connection.
       const result = outcome?.cancelled
         ? "cancelled"
         : outcome?.failed === true
@@ -118,7 +88,6 @@ export async function startInitOnboarding(input: {
     close(handOff) {
       closed ??= (async () => {
         closing = true;
-        // eve dev paints its startup screen where this one was.
         renderer.handOff(handOff?.rows);
         if (onboarding) {
           renderer.requestInterrupt();
@@ -127,8 +96,6 @@ export async function startInitOnboarding(input: {
         const { draft, queued } = startup.finish();
         await startup.shutdown();
         if ((await finished).cancelled) {
-          // Without a model, queued messages would fail; return them to the prompt instead.
-          // The prompt is single-line: eve dev strips newlines from pre-filled input.
           const carried = [...queued, draft].filter((text) => text !== "");
           return carried.length === 0 ? {} : { draft: carried.join(" ") };
         }

@@ -1,4 +1,3 @@
-/** eve-owned Slack card data contracts. Chat SDK classes retain their identity at eve/channels/chat-sdk. */
 import * as chat from "#compiled/chat/index.js";
 declare const _Actions: ActionsComponent;
 interface ActionsComponent {
@@ -6,6 +5,7 @@ interface ActionsComponent {
     children: (ButtonElement | LinkButtonElement | SelectElement | RadioSelectElement)[],
   ): ActionsElement;
 }
+/** Clickable button inside an {@link Actions} row, created with {@link Button}. */
 interface ButtonElement {
   actionType?: "action" | "modal";
   callbackUrl?: string;
@@ -18,7 +18,9 @@ interface ButtonElement {
   value?: string;
   visibleTo?: string[];
 }
+/** Visual style of a {@link Button} or {@link LinkButton}. */
 type ButtonStyle = "primary" | "danger" | "default";
+/** Button that opens a URL, created with {@link LinkButton}. */
 interface LinkButtonElement {
   id?: string;
   label: string;
@@ -28,6 +30,7 @@ interface LinkButtonElement {
   url: string;
   visibleTo?: string[];
 }
+/** Dropdown menu of fixed choices, created with {@link Select}. */
 interface SelectElement {
   dispatchAction?: boolean;
   id: string;
@@ -38,11 +41,13 @@ interface SelectElement {
   placeholder?: string;
   type: "select";
 }
+/** One choice in a {@link Select} or {@link RadioSelect}, created with {@link SelectOption}. */
 interface SelectOptionElement {
   description?: string;
   label: string;
   value: string;
 }
+/** Radio button group of fixed choices, created with {@link RadioSelect}. */
 interface RadioSelectElement {
   dispatchAction?: boolean;
   id: string;
@@ -52,12 +57,17 @@ interface RadioSelectElement {
   options: SelectOptionElement[];
   type: "radio_select";
 }
+/** Row of buttons and select controls, created with {@link Actions}. */
 interface ActionsElement {
   children: (ButtonElement | LinkButtonElement | SelectElement | RadioSelectElement)[];
   type: "actions";
 }
 type CardWidth = "default" | "full";
+/** Display style of a {@link CardText} block. */
 type TextStyle = "plain" | "bold" | "muted";
+/**
+ * Options for {@link Table}: column headers, rows of cell text, and optional layout settings.
+ */
 interface TableOptions {
   align?: TableAlignment[];
   caption?: string;
@@ -69,6 +79,7 @@ interface TableOptions {
   verticalAlign?: TableVerticalAlignment;
   widths?: number[];
 }
+/** Horizontal alignment of a {@link Table} column. */
 type TableAlignment = "left" | "center" | "right";
 type TableGridStyle = "default" | "emphasis" | "accent" | "good" | "attention" | "warning";
 type TableVerticalAlignment = "top" | "center" | "bottom";
@@ -96,6 +107,9 @@ interface ChartDataPoint {
   label: string;
   value: number;
 }
+/**
+ * Options for {@link Card}: an optional title, subtitle, header image, width, and child elements.
+ */
 interface CardOptions {
   children?: CardChild[];
   imageUrl?: string;
@@ -103,6 +117,7 @@ interface CardOptions {
   title?: string;
   width?: CardWidth;
 }
+/** Any element that can appear inside a {@link Card} or {@link Section}. */
 type CardChild =
   | TextElement
   | ImageElement
@@ -113,37 +128,45 @@ type CardChild =
   | LinkElement
   | TableElement
   | ChartElement;
+/** Block of Slack mrkdwn text, created with {@link CardText}. */
 interface TextElement {
   content: string;
   style?: TextStyle;
   type: "text";
 }
+/** Image shown in a card, created with {@link Image}. */
 interface ImageElement {
   alt?: string;
   type: "image";
   url: string;
 }
+/** Horizontal rule between card elements, created with {@link Divider}. */
 interface DividerElement {
   type: "divider";
 }
+/** Group of card elements, created with {@link Section}. */
 interface SectionElement {
   children: CardChild[];
   type: "section";
 }
+/** Group of labeled values, created with {@link Fields}. */
 interface FieldsElement {
   children: FieldElement[];
   type: "fields";
 }
+/** One labeled value inside {@link Fields}, created with {@link Field}. */
 interface FieldElement {
   label: string;
   type: "field";
   value: string;
 }
+/** Inline link in a card, created with {@link CardLink}. */
 interface LinkElement {
   label: string;
   type: "link";
   url: string;
 }
+/** Table of rows and columns, created with {@link Table}. */
 interface TableElement extends TableOptions {
   type: "table";
 }
@@ -152,6 +175,7 @@ interface ChartElement {
   title: string;
   type: "chart";
 }
+/** Root card layout, created with {@link Card} and posted with `thread.post({ card })`. */
 interface CardElement {
   children: CardChild[];
   imageUrl?: string;
@@ -160,6 +184,10 @@ interface CardElement {
   type: "card";
   width?: CardWidth;
 }
+/**
+ * Options for {@link Button}. `id` identifies the button in `onInteraction`, and `value` is passed back
+ * when it is clicked.
+ */
 interface ButtonOptions {
   actionType?: "action" | "modal";
   callbackUrl?: string;
@@ -171,6 +199,7 @@ interface ButtonOptions {
   value?: string;
   visibleTo?: string[];
 }
+/** Options for {@link LinkButton}: the label and the URL to open. */
 interface LinkButtonOptions {
   id?: string;
   label: string;
@@ -179,6 +208,7 @@ interface LinkButtonOptions {
   url: string;
   visibleTo?: string[];
 }
+/** Options for {@link Select}. `id` identifies the control in `onInteraction`. */
 interface SelectOptions {
   dispatchAction?: boolean;
   id: string;
@@ -188,6 +218,7 @@ interface SelectOptions {
   options: SelectOptionElement[];
   placeholder?: string;
 }
+/** Options for {@link RadioSelect}. `id` identifies the control in `onInteraction`. */
 interface RadioSelectOptions {
   dispatchAction?: boolean;
   id: string;
@@ -255,11 +286,16 @@ interface SelectOptionComponent {
   (options: { label: string; value: string; description?: string }): SelectOptionElement;
 }
 declare const _TableInternal: typeof _Table;
+/** File to attach to a posted card. */
 interface FileUpload {
   data: Buffer | Blob | ArrayBuffer;
   filename: string;
   mimeType?: string;
 }
+/**
+ * Message that posts a card with `thread.post`. When `fallbackText` is omitted, eve derives the
+ * notification text from the card.
+ */
 interface PostableCard {
   aiGenerated?: boolean;
   card: CardElement;
@@ -296,19 +332,34 @@ export type {
   TextElement,
   TextStyle,
 };
+/** Groups buttons, link buttons, and select controls into one row of a card. */
 export const Actions: typeof _Actions = chat.Actions as typeof _Actions;
+/** Creates a button whose clicks reach your channel's `onInteraction` handler. */
 export const Button: typeof _ButtonInternal = chat.Button as typeof _ButtonInternal;
+/** Creates a card, the root layout for a rich Slack message built from typed elements. */
 export const Card: typeof _CardInternal = chat.Card as typeof _CardInternal;
+/** Creates a link with a label for use inside a card. */
 export const CardLink: typeof _CardLinkInternal = chat.CardLink as typeof _CardLinkInternal;
+/** Creates a block of Slack mrkdwn text, optionally styled bold or muted. */
 export const CardText: typeof _CardText = chat.CardText as typeof _CardText;
+/** Creates a horizontal rule between card elements. */
 export const Divider: typeof _DividerInternal = chat.Divider;
+/** Creates one labeled value for {@link Fields}. */
 export const Field: typeof _FieldInternal = chat.Field;
+/** Groups {@link Field} values into a compact labeled list. */
 export const Fields: typeof _FieldsInternal = chat.Fields as typeof _FieldsInternal;
+/** Creates an image element from a URL with optional alt text. */
 export const Image: typeof _ImageInternal = chat.Image;
+/** Creates a button that opens a URL. */
 export const LinkButton: typeof _LinkButtonInternal = chat.LinkButton as typeof _LinkButtonInternal;
+/** Creates a radio button group of fixed choices for use inside {@link Actions}. */
 export const RadioSelect: typeof _RadioSelectInternal =
   chat.RadioSelect as typeof _RadioSelectInternal;
+/** Groups card elements together. */
 export const Section: typeof _SectionInternal = chat.Section as typeof _SectionInternal;
+/** Creates a dropdown menu of fixed choices for use inside {@link Actions}. */
 export const Select: typeof _SelectInternal = chat.Select as typeof _SelectInternal;
+/** Creates one choice for {@link Select} or {@link RadioSelect}. */
 export const SelectOption: typeof _SelectOptionInternal = chat.SelectOption;
+/** Creates a table from column headers and rows of cell text. */
 export const Table: typeof _TableInternal = chat.Table;

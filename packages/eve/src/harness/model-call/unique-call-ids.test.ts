@@ -26,7 +26,6 @@ async function streamed(model: ReturnType<typeof withUniqueCallIds>) {
   const reader = stream.getReader();
   for (let read = await reader.read(); !read.done; read = await reader.read())
     parts.push(read.value);
-  // Each part's call id, in stream order, for the parts that name one.
   return parts.flatMap((part) =>
     "toolCallId" in part
       ? [`${part.type} ${part.toolCallId}`]

@@ -227,10 +227,23 @@
  *             `import()`s count, including ones split across lines. Workflow
  *             reaches these modules through their host ports and the host
  *             registry. Only direct imports are checked.
+ *   rule 67 — Source under `packages/` carries comments only as JSDoc on
+ *             declarations users can see: what a published package entry
+ *             exports, plus the types those declarations refer to. Tool
+ *             directives (`@ts-expect-error`, `oxlint-disable`,
+ *             `/// <reference>`, `@__PURE__`) and license notices (`/*!`,
+ *             `@license`, `SPDX-License-Identifier`) are allowed anywhere. Anything
+ *             else drifts from the code it describes; an invariant belongs in
+ *             code that throws when it breaks (a named assert, a type, or a
+ *             guard rule). See `scripts/comment-policy.mjs`.
+ *   rule 68 — Every export of a published package entry has JSDoc. Users
+ *             read these docs in their editor and in the generated API
+ *             reference.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
+ * Rules 67 and 68 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -238,6 +251,7 @@ import { dirname, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { parseSummary } from "./changeset-format.mjs";
+import { checkComments } from "./comment-policy.mjs";
 import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
@@ -2491,6 +2505,8 @@ async function main() {
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
   }
+
+  violations.push(...(await checkComments()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

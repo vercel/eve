@@ -15,7 +15,6 @@ async function readResult(inbox: SessionInboxHandle): Promise<IteratorResult<Ses
   return value === undefined ? { done: true, value: undefined } : { done: false, value };
 }
 
-/** Resolves with the first interrupt the pump pushes to `onInterrupt`. */
 function nextInterrupt(inbox: SessionInboxHandle): Promise<SessionInboxPayload> {
   return new Promise((resolve) => {
     const unsubscribe = inbox.onInterrupt((payload) => {
@@ -164,7 +163,6 @@ describe("createSessionInbox", () => {
         sessionId: "child-1",
       },
     };
-    // Alice's reviewers report long findings, more than one step applies at once.
     const findings = (label: string): SessionInboxPayload => ({
       from,
       kind: "report",
@@ -190,7 +188,6 @@ describe("createSessionInbox", () => {
 
     expect(takeLeadingAppliedRunMessages(inbox)).toEqual([opened, findings("first")]);
     expect(takeLeadingAppliedRunMessages(inbox)).toEqual([findings("second")]);
-    // Taking run messages from the front stops at Bob's message.
     expect(takeLeadingAppliedRunMessages(inbox)).toEqual([]);
     expect(inbox.drain()).toEqual([send("Bob asks how it is going.")]);
     await inbox.dispose();
@@ -344,7 +341,6 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHooks(["stable", "channel"], { handover: "owner-a:1" });
 
     await expect(interrupted).resolves.toEqual(cancel);
-    // Arrivals count even while nothing is readable.
     await arrived;
     expect(inbox.awaitingHandover).toBe(true);
     expect(inbox.drain()).toEqual([]);
@@ -389,7 +385,6 @@ describe("createSessionInbox", () => {
         reads: [
           Promise.resolve(resolved(send("direct"))),
           Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
-          // A retried send step repeats its index.
           Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
           Promise.resolve(resolved(finalPart("owner-a:1", 2))),
           Promise.resolve(resolved(cancel)),
@@ -402,7 +397,6 @@ describe("createSessionInbox", () => {
     const pumped = nextInterrupt(inbox);
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
     await pumped;
-    // The final part has arrived, but part 0 has not.
     expect(inbox.awaitingHandover).toBe(true);
     expect(inbox.handoverObservation).toBeUndefined();
     expect(inbox.drain()).toEqual([]);
@@ -458,11 +452,8 @@ describe("createSessionInbox", () => {
     inbox.abandonHandover("owner-a:1");
     expect(inbox.awaitingHandover).toBe(false);
 
-    // The source ended, but a part it had already sent still lands: its payloads are
-    // input the session accepted, so they join the queue instead of being dropped.
     late.resolve(resolved(part("owner-a:1", 0, send("sent before the end"))));
     await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
-    // A retried send step repeats its index.
     repeat.resolve(resolved(part("owner-a:1", 0, send("sent before the end"))));
     await repeat.promise;
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -480,7 +471,6 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
     inbox.abandonHandover("owner-a:1");
 
-    // A running successor turn steers on deliveries, so a late one must reach it too.
     late.resolve(resolved(part("owner-a:1", 0, send("late"))));
     await vi.waitFor(() => expect(delivered).toHaveBeenCalledWith(send("late")));
     await inbox.dispose();
@@ -502,11 +492,9 @@ describe("createSessionInbox", () => {
     );
     const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
-    // Part 0 applies; part 2 waits behind the missing part 1.
     await new Promise((resolve) => setTimeout(resolve, 0));
     inbox.abandonHandover("owner-a:1");
 
-    // A retried send of the applied part repeats its index; the missing part still lands.
     retried.resolve(resolved(part("owner-a:1", 0, send("applied"))));
     missing.resolve(resolved(part("owner-a:1", 1, send("late"))));
     await missing.promise;
@@ -811,11 +799,7 @@ function createMockHook(input: {
     [Symbol.asyncIterator]() {
       return {
         next: vi.fn(
-          () =>
-            reads.shift() ??
-            new Promise<IteratorResult<SessionInboxPayload>>(() => {
-              // Intentionally pending.
-            }),
+          () => reads.shift() ?? new Promise<IteratorResult<SessionInboxPayload>>(() => {}),
         ),
         return: iteratorReturn,
       };

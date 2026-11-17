@@ -22,11 +22,6 @@ import type {
 } from "./repository.ts";
 import { SKILL_APPLICATION_MODES, type SkillScope } from "./types.ts";
 
-/**
- * The storage layout version, part of every key. A later layout lives beside
- * this one under its own prefix, so it can migrate documents in place of
- * reinterpreting them.
- */
 const LAYOUT = "v1";
 const SCHEMA_VERSION = 1;
 const MAX_CONFLICT_RETRIES = 8;
@@ -46,15 +41,9 @@ const skillEntrySchema = z.object({
   versions: z.array(versionEntrySchema).min(1),
 });
 
-/**
- * A scope's catalog. An entry that doesn't parse, such as one a newer layout
- * or a bad write left, is set aside instead of failing the whole scope, and is
- * written back unchanged so nothing is lost.
- */
 const catalogSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
-    /** Skills by ID. */
     skills: z.record(z.string(), z.unknown()),
   })
   .transform(({ schemaVersion, skills }) => {
@@ -78,14 +67,12 @@ const scopeEntrySchema = z.object({
   readOnly: z.boolean().optional(),
   loadPrefix: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-  /** Where the scope's documents live, under the namespace. */
   path: z.string(),
   updatedAt: z.string(),
 });
 
 const indexSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
-  /** Every scope that has held skills, by scope key. */
   scopes: z.record(z.string(), scopeEntrySchema),
 });
 
@@ -121,6 +108,7 @@ function emptyCatalog(): Catalog {
 type ScopeIndex = z.infer<typeof indexSchema>;
 type VersionDocument = z.infer<typeof versionDocumentSchema>;
 
+/** Where the custom skills extension keeps each user's skill documents. */
 export interface DocumentRepositoryOptions {
   /** Any versioned document store, such as `vercelBlob()` or `inMemory()` from `eve/memory/file`. */
   readonly backend: MemoryDocumentBackend;
@@ -132,12 +120,6 @@ export interface DocumentRepositoryOptions {
   readonly now?: () => Date;
 }
 
-/**
- * Encodes a scope key or skill ID as one readable, reversible path segment:
- * letters, digits, `-`, and `_` stay, and every other UTF-8 byte becomes `~`
- * and two hex digits, so `space:slack:T1:C1` is stored as
- * `space~3aslack~3aT1~3aC1`.
- */
 export function encodePathSegment(value: string): string {
   let encoded = "";
   for (const byte of new TextEncoder().encode(value)) {
@@ -169,10 +151,6 @@ export function documentRepository(options: DocumentRepositoryOptions): SkillRep
   return new DocumentSkillRepository(options);
 }
 
-/**
- * Copies a parsed record into an object without a prototype, so names and IDs
- * such as `constructor` or `__proto__` are only ever the record's own keys.
- */
 function dictionary<T>(record: Record<string, T>): Record<string, T> {
   return Object.assign(Object.create(null) as Record<string, T>, record);
 }
@@ -217,7 +195,6 @@ class DocumentSkillRepository implements SkillRepository {
   readonly #root: string;
   readonly #now: () => Date;
   readonly #signal = new AbortController().signal;
-  /** Scope descriptors this instance already recorded in the index. */
   readonly #indexed = new Map<string, string>();
 
   constructor(options: DocumentRepositoryOptions) {
@@ -253,7 +230,6 @@ class DocumentSkillRepository implements SkillRepository {
     return { value: parsed.data, version: document.version };
   }
 
-  /** Applies `change` to the latest document, retrying when another write lands first. */
   async #update<T, R>(input: {
     readonly key: string;
     readonly schema: z.ZodType<T, unknown>;
@@ -312,7 +288,6 @@ class DocumentSkillRepository implements SkillRepository {
     });
   }
 
-  /** Records the scope in the store's index, so `listScopes` can find it. */
   async #index(scope: SkillScope): Promise<void> {
     const descriptor = scopeDescriptor(scope, this.#scopePath(scope));
     const serialized = JSON.stringify(descriptor);
@@ -334,7 +309,6 @@ class DocumentSkillRepository implements SkillRepository {
     this.#indexed.set(scope.key, serialized);
   }
 
-  /** A version's content; one that doesn't parse reads as missing, like a removed one. */
   async #readVersion(key: string): Promise<VersionDocument | null> {
     try {
       return (await this.#read(key, versionDocumentSchema))?.value ?? null;
@@ -516,10 +490,6 @@ class DocumentSkillRepository implements SkillRepository {
         replayed: false,
       };
     } catch (error) {
-      // A catalog write can land and still report failure, such as on a dropped connection.
-      // Clearing the version then would leave a skill whose name is taken but has no content,
-      // so it's cleared only once a catalog read proves no write committed it. When that read
-      // fails too, the version stays: at worst an unreferenced document is left behind.
       const committed = await this.#committedVersion(scope, id, key).catch(
         () => "unknown" as const,
       );
@@ -536,7 +506,6 @@ class DocumentSkillRepository implements SkillRepository {
     }
   }
 
-  /** The catalog entry that numbers the version document at `key`, if a write committed it. */
   async #committedVersion(
     scope: SkillScope,
     id: string,

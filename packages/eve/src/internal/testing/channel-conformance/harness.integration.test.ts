@@ -1,4 +1,3 @@
-// @linux-only: conformance harness (conformance already Linux-only)
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -11,10 +10,6 @@ import {
 } from "#internal/testing/channel-conformance/harness.js";
 import { tuiDriver } from "#internal/testing/channel-conformance/tui-driver.js";
 
-/**
- * An HTTP origin that forwards to whichever agent the current conversation serves, started by
- * the first conversation and kept for the rest, as a browser client keeps one page.
- */
 function longLivedOrigin() {
   let target: string | undefined;
   let started: Promise<{ url: string; close(): Promise<void> }> | undefined;
@@ -92,8 +87,6 @@ describe("withChannelConversation", () => {
   const driver = longLivedOrigin();
   afterAll(() => driver.dispose?.());
 
-  // The origin's server took the first conversation's async context when it started listening.
-  // Every request it serves later must still reach the current conversation's agent.
   it.each(["workflow", "in-process"] as const)(
     "runs each conversation's own tools behind an origin that outlives it (%s)",
     async (host) => {

@@ -1,8 +1,3 @@
-/**
- * Aggregates every per-package config in this directory into the flat list
- * the orchestrator passes to `runVendor`. Adding a new vendored package
- * means writing a new per-package file and importing it here.
- */
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
 import google from "./@ai-sdk/google.mjs";

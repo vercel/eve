@@ -144,7 +144,6 @@ describe("renderCommandSuggestions", () => {
     expect(rows[0]).not.toContain(theme.glyph.selectedPointer);
     expect(rows[1]).toContain("/model");
     expect(rows[1]).toContain("model command");
-    // The argument hint is held back for the inline exact-match view.
     expect(rows[1]).not.toContain("[provider/model]");
     expect(rows[3]).toContain("/exit (/quit)");
   });

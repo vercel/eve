@@ -16,7 +16,6 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const HOME_PROBE = `printf '%s\\n' "$HOME"`;
 
-/** A connection that records what eve sends it and answers the `$HOME` probe. */
 function recordingConnection() {
   const files = new Map<string, Uint8Array>();
   const calls: string[] = [];
@@ -43,7 +42,6 @@ function recordingConnection() {
   return { calls, connection, files };
 }
 
-/** Runs the environment's `prepare()` with the context eve builds during `eve build`. */
 async function prepare(
   environment: SandboxEnvironmentIdentity,
   resources: Omit<SandboxTemplateResources, "key"> = {},
@@ -62,7 +60,6 @@ async function prepare(
   );
 }
 
-/** A provider whose `prepare` populates `connection`, passing `mountedAt` through. */
 function bakingProvider(
   connection: SandboxConnection<{ ping(): Promise<string> }>,
   mountedAt?: string,
@@ -114,7 +111,6 @@ describe("defineSandboxProvider", () => {
           expect(() => ctx.templateKey({ sourceRevision: "mine" })).toThrow(
             'ctx.templateKey() reserves "sourceRevision"',
           );
-          // These would hash like `{}` or overflow the stack, so they reject.
           expect(() => ctx.templateKey({ builtAt: new Date(0) })).toThrow(
             "but identity.builtAt is a Date",
           );
@@ -133,7 +129,6 @@ describe("defineSandboxProvider", () => {
     });
     await prepare(provider.environment());
 
-    // Golden value: if it changes, every custom provider's template keys change with it.
     expect(keys).toEqual(["d02550d7328ec5806580c8cd02c0c2b0b3e9a90bbbec7f552938442d79ffd8e1"]);
   });
 
@@ -226,9 +221,6 @@ describe("public sandbox types", () => {
   });
 
   it("keeps SandboxSession compatible with the AI SDK sandbox members it implements", () => {
-    // AI SDK 7.0.172 added `stat`, `listDirectory`, and `deleteFile`, and
-    // overloads `spawn` so `stdin: true` returns a required `stdin`. eve
-    // sessions do not offer those yet; the remaining members stay compatible.
     expectTypeOf<SandboxSession>().toExtend<
       Omit<
         Experimental_SandboxSession,

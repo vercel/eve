@@ -5,7 +5,6 @@ import {
   VERCEL_SCHEDULE_NAME_MAX_LENGTH,
 } from "#internal/nitro/host/vercel-schedule-name.js";
 
-// The schedule name pattern Vercel accepts.
 const VERCEL_SCHEDULE_NAME = /^[0-9A-Za-z][0-9A-Za-z._-]*$/;
 const HASHED = (prefix: string) => new RegExp(`^${prefix.replaceAll(".", "\\.")}-[0-9a-f]{8}$`);
 

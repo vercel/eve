@@ -11,7 +11,6 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 const runFile = promisify(execFile);
 const createDirectory = useTemporaryDirectories();
 
-// Reports how each import settles, so runs with and without the hook compare.
 const ENTRY = `
 const results = {};
 for (const [name, specifier] of [
@@ -30,7 +29,6 @@ for (const [name, specifier] of [
 console.log(JSON.stringify(results));
 `;
 
-/** An installed eve package with the built hook, as Node loads it from dist. */
 async function packageWithHook(): Promise<string> {
   const root = await createDirectory("eve-package-imports-hook-");
   const internal = join(root, "dist", "src", "internal");

@@ -47,7 +47,6 @@ interface TraceTimelineRecord {
 interface TraceAnalysis {
   readonly summary: LocalTraceSummary;
   readonly groups: readonly TraceAnalysisGroup[];
-  /** Accumulated operation time, not elapsed time; parallel calls can overlap. */
   readonly modelWorkMs: number;
   readonly toolWorkMs: number;
   readonly records: readonly TraceTimelineRecord[];
@@ -64,7 +63,6 @@ export interface TraceAnalysisGroup {
   readonly turnId?: string;
 }
 
-/** Builds the detailed timeline only when inspection, rather than search, needs it. */
 export function analyzeLocalTrace(
   traceId: string,
   spans: readonly LocalTraceSpan[],

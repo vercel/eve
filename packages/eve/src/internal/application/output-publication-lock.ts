@@ -33,12 +33,6 @@ export function resolveOutputPublicationLockPath(appRoot: string): string {
   return join(resolve(appRoot), ".eve", "locks", "output-publication.lock");
 }
 
-/**
- * Keeps a held lock's (or lease's) journal mtime fresh while its owner works.
- * Liveness cannot rest on `process.kill(pid, 0)` alone — journals survive
- * reboots, so a recycled pid (or an unrelated process answering `EPERM`)
- * would make a dead owner look alive forever. Returns a stop function.
- */
 export function startPublicationJournalHeartbeat(journalDirectoryPath: string): () => void {
   const journalFilePath = resolveJournalFilePath(journalDirectoryPath);
   const heartbeat = setInterval(() => {
@@ -182,10 +176,6 @@ export async function acquireRecoveryLease(
   try {
     await mkdir(recoveryPath, { recursive: true });
   } catch (error) {
-    // Recursive mkdir reports EEXIST by stat-ing the path; when a concurrent
-    // holder completes and renames the directory away in between, it rejects
-    // with ENOENT. That holder is done, so report contention and let the caller
-    // retry, as for the same race on the lease below.
     if (isErrnoCode(error, "ENOENT")) {
       return undefined;
     }
@@ -236,8 +226,6 @@ export async function acquireRecoveryLease(
         },
       };
     } catch (error) {
-      // ENOENT: a concurrent recoverer completed and renamed the recovery
-      // directory away, so recovery is done — report contention, not failure.
       if (isErrnoCode(error, "ENOENT")) {
         return undefined;
       }
@@ -271,12 +259,6 @@ export async function acquireRecoveryLease(
   }
 }
 
-/**
- * Recovery is driven entirely by the stale journal's own recorded paths: the
- * interrupted publication may have targeted a different output directory than
- * the recovering build (`.vercel/output` vs `.output`), and refusing to touch
- * it would wedge every later publication behind the retained recovery dir.
- */
 async function finishInterruptedPublication(journalPath: string): Promise<void> {
   const staleJournal = await readOutputPublicationJournal(journalPath);
   if (staleJournal === undefined || !hasTokenDerivedBackupPaths(staleJournal)) {
@@ -292,10 +274,6 @@ async function finishInterruptedPublication(journalPath: string): Promise<void> 
   await rm(journalPath, { force: true, recursive: true });
 }
 
-/**
- * Backup paths that do not match the token derivation mean the journal is
- * corrupt or tampered with; discard it without renaming anything it names.
- */
 function hasTokenDerivedBackupPaths(journal: OutputPublicationJournal): boolean {
   return (
     journal.outputBackupPath === `${journal.finalOutputDir}.eve-backup-${journal.token}` &&
@@ -303,9 +281,6 @@ function hasTokenDerivedBackupPaths(journal: OutputPublicationJournal): boolean 
   );
 }
 
-// The scratch directory is the failed build's preserved workspace; removing
-// it after recovery is what keeps `.eve/builds` from accumulating orphans.
-// The containment check stops a forged journal from deleting arbitrary paths.
 async function removePublicationScratchDirectory(journal: OutputPublicationJournal): Promise<void> {
   const relativeStagedPath = relative(journal.scratchDir, journal.stagedOutputDir);
   if (
@@ -326,8 +301,6 @@ async function waitForPublicationLockChange(lockPath: string, deadline: number):
     );
   }
 
-  // libuv resolves Windows event paths to their long form, so watching an
-  // 8.3 short path can abort Node when it tries to strip the original prefix.
   const locksDirectory = await realpath(dirname(lockPath));
   const watchedPrefix = basename(lockPath);
   const initialState = await readPublicationLockState(lockPath);
