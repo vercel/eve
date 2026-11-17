@@ -83,7 +83,7 @@ export default teamsChannel({
 });
 ```
 
-A custom `onMessage` makes eve reject approval and question card submissions until you also set `onAnswers`, so a card can't bypass your message check. If `onMessage` restricts who can reach the agent, apply the same rule in `onAnswers`.
+A custom `onMessage` makes eve reject approval and question card submissions until you also set `onAnswers`, so a card can't bypass your message check. To restrict who can reach the agent, use `admit` instead. See [Restrict access](#restrict-access).
 
 ## Human-in-the-loop interactions
 
@@ -96,6 +96,30 @@ By default, tool approvals and questions render as Adaptive Cards with buttons, 
 ## Handle file attachments
 
 Images pasted into a message and files uploaded in a personal chat reach the agent as files. Personal-chat uploads need `supportsFiles: true` on the bot in your Teams app manifest. See [Attachments](/docs/channels/teams/reference#attachments) for limits and other file hosts.
+
+## Restrict access
+
+A valid Bot Connector token proves the activity came from Teams, not that the sender should reach your agent. By default, the agent ignores conversations that include another Microsoft Entra tenant, such as shared channels, and guest and anonymous accounts. It doesn't answer them, take their approvals, or open their sign-ins.
+
+`admit` is the channel's one access check. It runs before every hook, so a policy written once covers messages, card answers, and invokes. To allow only certain people, call the default from your own `admit`:
+
+```ts title="agent/channels/teams.ts"
+import { connectTeamsCredentials } from "@vercel/connect/eve";
+import { defaultTeamsAdmit, teamsChannel } from "eve/channels/teams";
+
+// Microsoft Entra object ids of the people who may use the agent.
+const allowedUsers = new Set(["00000000-0000-0000-0000-000000000001"]);
+
+export default teamsChannel({
+  credentials: connectTeamsCredentials("microsoft-teams/my-agent"),
+  async admit(request) {
+    if (!(await defaultTeamsAdmit(request))) return false;
+    return request.kind === "send" || allowedUsers.has(request.actor?.aadObjectId ?? "");
+  },
+});
+```
+
+Pass `admit: () => true` to serve other tenants and guests. Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/teams/reference#restrict-who-can-reach-the-agent) covers every request kind and how the default classifies conversations and people.
 
 ## Reference
 

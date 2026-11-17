@@ -59,7 +59,7 @@ const channels = [
   ["slack", slackChannel({ credentials: { botToken: "xoxb-test" } }), { channelId: "C123" }],
   [
     "teams",
-    teamsChannel({ credentials: { tokenProvider: () => "token" } }),
+    teamsChannel({ admit: () => true, credentials: { tokenProvider: () => "token" } }),
     { conversationId: "CONV", serviceUrl: "https://service.example/teams" },
   ],
   ["telegram", telegramChannel({ credentials: { botToken: "bot-token" } }), { chatId: 42 }],

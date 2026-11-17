@@ -64,6 +64,14 @@ export {
   type TeamsFilesPolicy,
 } from "#public/channels/teams/attachments.js";
 
+export {
+  defaultTeamsAdmit,
+  type TeamsAdmit,
+  type TeamsAdmitActor,
+  type TeamsAdmitKind,
+  type TeamsAdmitRequest,
+} from "#public/channels/teams/admit.js";
+
 export { defaultTeamsAuth } from "#public/channels/teams/defaults.js";
 
 export { type TeamsWebhookVerifier } from "#public/channels/teams/verify.js";

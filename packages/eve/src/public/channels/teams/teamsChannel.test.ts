@@ -104,7 +104,7 @@ describe("teamsChannel", () => {
       });
       const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
       try {
-        const { response, send } = await firePost(teamsChannel(), activity);
+        const { response, send } = await firePost(teamsChannel({ admit: () => true }), activity);
         expect(response.status).toBe(status);
         expect(send).toHaveBeenCalledTimes(dispatched);
       } finally {
@@ -115,7 +115,9 @@ describe("teamsChannel", () => {
   );
 
   it("mounts the default Teams activity route", () => {
-    const channel = asCompiled(teamsChannel({ credentials: { webhookVerifier: () => true } }));
+    const channel = asCompiled(
+      teamsChannel({ admit: () => true, credentials: { webhookVerifier: () => true } }),
+    );
     expect(channel.routes.map((route) => `${route.method} ${route.path}`)).toEqual([
       "POST /eve/v1/teams",
     ]);
@@ -142,6 +144,7 @@ describe("teamsChannel", () => {
 
   it("dispatches verified personal messages with Teams state", async () => {
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       onMessage() {
         return {
@@ -179,6 +182,7 @@ describe("teamsChannel", () => {
 
   it("marks an accepted personal message without a mention as not mentioned", async () => {
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       onMessage: () => ({ auth: null }),
     });
@@ -194,7 +198,10 @@ describe("teamsChannel", () => {
   });
 
   it("default dispatch ignores unmentioned group messages", async () => {
-    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+    const channel = teamsChannel({
+      admit: () => true,
+      credentials: { webhookVerifier: () => true },
+    });
     const raw = messageActivity({ conversationType: "groupChat" });
     raw.entities = [];
 
@@ -203,7 +210,10 @@ describe("teamsChannel", () => {
   });
 
   it("default dispatch ignores bot-authored personal messages", async () => {
-    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+    const channel = teamsChannel({
+      admit: () => true,
+      credentials: { webhookVerifier: () => true },
+    });
     const raw = messageActivity({ conversationType: "personal" });
     raw.from = { id: "OTHER_BOT", name: "Other bot", role: "bot" };
 
@@ -216,6 +226,7 @@ describe("teamsChannel", () => {
     const observed: boolean[] = [];
     const resolveSession = vi.fn().mockResolvedValue({ id: "SESSION" });
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       async onMessage(ctx) {
         observed.push(await ctx.isSubscribed());
@@ -234,6 +245,7 @@ describe("teamsChannel", () => {
 
   it("allows a mention-or-subscription onMessage policy", async () => {
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       async onMessage(ctx, message) {
         return message.isBotMentioned || (await ctx.isSubscribed()) ? { auth: null } : null;
@@ -253,6 +265,7 @@ describe("teamsChannel", () => {
   it("passes bot-authored messages to onMessage", async () => {
     const onMessage = vi.fn((_ctx: unknown, _message: unknown) => null);
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       onMessage,
     });
@@ -271,7 +284,10 @@ describe("teamsChannel", () => {
   });
 
   it("resumes tool approvals with the clicker's auth and durable Teams identity", async () => {
-    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+    const channel = teamsChannel({
+      admit: () => true,
+      credentials: { webhookVerifier: () => true },
+    });
     const { response, send } = await firePost(channel, {
       ...baseActivity({ conversationType: "channel" }),
       from: { aadObjectId: "AAD_USER", id: "USER", name: "Ada" },
@@ -321,6 +337,7 @@ describe("teamsChannel", () => {
     });
     const channel = asCompiled<TeamsChannelState>(
       teamsChannel({
+        admit: () => true,
         api: { fetch: fetchMock },
         credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
       }),
@@ -384,6 +401,7 @@ describe("teamsChannel", () => {
     });
     const channel = asCompiled<TeamsChannelState>(
       teamsChannel({
+        admit: () => true,
         api: { fetch: fetchMock },
         credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
       }),
@@ -449,6 +467,7 @@ describe("teamsChannel", () => {
       },
     };
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       onAnswers: () => ({ auth: null }),
       onMessage,
@@ -467,6 +486,7 @@ describe("teamsChannel", () => {
 
   it("rejects HITL responses when a custom message gate has no input gate", async () => {
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       onMessage: () => ({ auth: null }),
     });
@@ -492,6 +512,7 @@ describe("teamsChannel", () => {
 
   it("normalizes suffixed channel conversation ids", async () => {
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       onMessage: () => ({ auth: null }),
     });
@@ -509,6 +530,7 @@ describe("teamsChannel", () => {
 
   it("keeps a channel thread token stable when follow-ups omit replyToId", async () => {
     const channel = teamsChannel({
+      admit: () => true,
       credentials: { webhookVerifier: () => true },
       onMessage: () => ({ auth: null }),
     });
@@ -531,7 +553,10 @@ describe("teamsChannel", () => {
   });
 
   it("keeps approval bookkeeping when a sent message carries its channel state", async () => {
-    const channel = teamsChannel({ credentials: { tokenProvider: () => "token" } });
+    const channel = teamsChannel({
+      admit: () => true,
+      credentials: { tokenProvider: () => "token" },
+    });
     const send = vi.fn(async () => ({ id: "SESSION" }));
     await channel.receive!(
       {
@@ -566,6 +591,7 @@ describe("teamsChannel", () => {
   it("receive starts proactive sessions and anchors initial channel messages", async () => {
     const requests: Array<{ body: unknown; url: string }> = [];
     const channel = teamsChannel({
+      admit: () => true,
       api: {
         fetch: vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
           requests.push({
@@ -605,6 +631,168 @@ describe("teamsChannel", () => {
     expect(send.mock.calls[0]![1]).toMatchObject({
       state: { replyToActivityId: "ANCHOR" },
     });
+  });
+});
+
+describe("teamsChannel admit", () => {
+  /** A Connector that reports `member` for every roster lookup and records each call. */
+  function connector(member: Record<string, unknown> | null) {
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${new URL(String(url)).pathname}`);
+      if (String(url).includes("/members/")) {
+        return member === null ? new Response("not found", { status: 404 }) : Response.json(member);
+      }
+      return Response.json({ id: "POSTED" });
+    });
+    return { calls, fetch };
+  }
+  const MEMBER = { tenantId: "TENANT", userRole: "user" };
+  // eve caches roster answers per user, so each test has its own person.
+  let nextUser = 0;
+  const person = () => ({ id: `USER-ADMIT-${++nextUser}`, name: "Ada" });
+
+  function channelMessage(channelData: Record<string, unknown> = {}): Record<string, unknown> {
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.channelData = { ...(raw.channelData as Record<string, unknown>), ...channelData };
+    raw.from = person();
+    return raw;
+  }
+
+  it("lets a tenant member's mention reach the agent by default", async () => {
+    const { calls, fetch } = connector(MEMBER);
+    const channel = teamsChannel({
+      api: { fetch },
+      credentials: {
+        tenantId: "TENANT",
+        tokenProvider: () => "token",
+        webhookVerifier: () => true,
+      },
+    });
+
+    const { send } = await firePost(channel, channelMessage());
+
+    expect(send).toHaveBeenCalledOnce();
+    // A channel's roster lives on its team.
+    expect(calls).toContainEqual(
+      expect.stringMatching(/^GET \/teams\/v3\/conversations\/TEAM\/members\//u),
+    );
+  });
+
+  it.each([
+    {
+      case: "another tenant's conversation",
+      activity: () => channelMessage({ tenant: { id: "PARTNER" } }),
+      member: MEMBER,
+    },
+    {
+      case: "a shared channel",
+      activity: () => channelMessage({ channel: { id: "CHANNEL", type: "shared" } }),
+      member: MEMBER,
+    },
+    {
+      case: "a member of another tenant",
+      activity: () => channelMessage(),
+      member: { ...MEMBER, tenantId: "PARTNER" },
+    },
+    { case: "a guest", activity: () => channelMessage(), member: { ...MEMBER, userRole: "guest" } },
+    {
+      case: "an anonymous participant",
+      activity: () => channelMessage(),
+      member: { ...MEMBER, userRole: "anonymous" },
+    },
+    { case: "a person Teams can't look up", activity: () => channelMessage(), member: null },
+    {
+      case: "a member without a tenant",
+      activity: () => channelMessage(),
+      member: { userRole: "user" },
+    },
+  ])("keeps $case from reaching the agent by default", async ({ activity, member }) => {
+    const { fetch } = connector(member);
+    const onMessage = vi.fn(() => ({ auth: null }));
+    const channel = teamsChannel({
+      api: { fetch },
+      credentials: {
+        tenantId: "TENANT",
+        tokenProvider: () => "token",
+        webhookVerifier: () => true,
+      },
+      onMessage,
+    });
+
+    const { send } = await firePost(channel, activity());
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("hands an authored admit the request and dispatches what it admits", async () => {
+    const admit = vi.fn(() => true);
+    const channel = teamsChannel({ admit, credentials: { webhookVerifier: () => true } });
+
+    const { send } = await firePost(channel, channelMessage({ tenant: { id: "PARTNER" } }));
+
+    expect(admit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: { userId: expect.stringMatching(/^USER-ADMIT-/u) },
+        conversationId: "CONV",
+        conversationType: "channel",
+        kind: "message",
+        tenantId: "PARTNER",
+      }),
+    );
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a guest's approval and leaves the request open", async () => {
+    const { fetch } = connector({ ...MEMBER, userRole: "guest" });
+    const onAnswers = vi.fn(() => ({ auth: null }));
+    const channel = teamsChannel({
+      api: { fetch },
+      credentials: { tokenProvider: () => "token", webhookVerifier: () => true },
+      onAnswers,
+    });
+
+    const { send } = await firePost(channel, {
+      ...baseActivity({ conversationType: "channel" }),
+      from: person(),
+      name: "adaptiveCard/action",
+      type: "invoke",
+      value: {
+        action: {
+          data: { eve_input: { kind: "tool-approval", optionId: "approve", requestId: "REQ" } },
+        },
+      },
+    });
+
+    expect(onAnswers).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("refuses to start a session in a conversation without a tenant", async () => {
+    const { calls, fetch } = connector(MEMBER);
+    const channel = teamsChannel({
+      api: { fetch },
+      credentials: { tokenProvider: () => "token" },
+    });
+    const send = vi.fn();
+
+    await expect(
+      channel.receive!(
+        {
+          target: {
+            conversationId: "CONV",
+            initialMessage: "Investigation",
+            serviceUrl: "https://service.example/teams",
+          },
+          auth: null,
+          message: "Begin",
+        },
+        mockChannelContext(send),
+      ),
+    ).rejects.toThrow("refused to post in Teams conversation CONV");
+    expect(calls).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -680,7 +868,10 @@ describe("teamsChannel sign-in button", () => {
 
   it("answers the person signing in with a card only they see, carrying the link and code", async () => {
     const resolveSession = vi.fn(async () => sessionWith([required()]));
-    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+    const channel = teamsChannel({
+      admit: () => true,
+      credentials: { webhookVerifier: () => true },
+    });
 
     const { response } = await firePost(channel, press(), { resolveSession });
 
@@ -739,7 +930,11 @@ describe("teamsChannel sign-in button", () => {
       reply: "This sign-in is no longer active.",
     },
   ])("withholds the sign-in when $case", async ({ config, events, from, reply }) => {
-    const channel = teamsChannel({ credentials: { webhookVerifier: () => true }, ...config });
+    const channel = teamsChannel({
+      admit: () => true,
+      credentials: { webhookVerifier: () => true },
+      ...config,
+    });
 
     const { response } = await firePost(channel, press(from), {
       resolveSession: async () => (events === undefined ? undefined : sessionWith(events)),

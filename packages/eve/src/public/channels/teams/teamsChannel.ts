@@ -41,6 +41,14 @@ import {
   type TeamsPostedActivity,
 } from "#public/channels/teams/api.js";
 import {
+  createTeamsActivityAdmitRequest,
+  createTeamsSendAdmitRequest,
+  defaultTeamsAdmit,
+  isTeamsRequestAdmitted,
+  type TeamsAdmit,
+  type TeamsAdmitKind,
+} from "#public/channels/teams/admit.js";
+import {
   answerTeamsAuthorizationReveal,
   readTeamsAuthorizationReveal,
   type TeamsAuthorizationReveal,
@@ -217,6 +225,20 @@ export interface TeamsChannelConfig {
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
 
+  /**
+   * Decides whether a Teams request may reach the agent. eve calls it before
+   * any hook for messages, approval, question, and sign-in card answers, and
+   * `onInvoke` activities, and before a `receive` posts into a conversation.
+   * Return `false`, or throw, to drop the request: no turn, and an answer's
+   * request stays open. A refused send throws.
+   *
+   * Defaults to {@link defaultTeamsAdmit}, which refuses conversations that
+   * include another tenant, guest and anonymous accounts, and conversations
+   * and users Teams can't classify. Call it from your own function to narrow
+   * or widen that policy, or pass `() => true` to admit every request.
+   */
+  readonly admit?: TeamsAdmit;
+
   /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */
   onMessage?(
     ctx: TeamsInboundMessageContext,
@@ -308,10 +330,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     turnPolicy: config.turnPolicy,
     uploadPolicy: config.files?.uploadPolicy,
     state: initialTeamsState(),
-    fetchFile: createTeamsFetchFile(filesPolicy, {
-      ...config.api,
-      credentials: config.credentials,
-    }),
+    fetchFile: createTeamsFetchFile(filesPolicy, teamsApiOptions(config)),
     metadata: (state) => ({
       channelId: state.channelId,
       conversationType: state.conversationType,
@@ -438,6 +457,24 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
         teamId: readNonEmptyString(receiveTarget.teamId) ?? null,
         tenantId: readNonEmptyString(receiveTarget.tenantId) ?? null,
       };
+
+      const admitted = await isTeamsRequestAdmitted(
+        config.admit ?? defaultTeamsAdmit,
+        createTeamsSendAdmitRequest({
+          api: teamsApiOptions(config),
+          // Inbound requests name the conversation without its thread suffix too.
+          conversationId: normalizeTeamsContinuationAddress({ conversationId }).conversationId,
+          conversationType: conversationType ?? undefined,
+          raw: receiveTarget,
+          teams: buildTeamsHandle({ config, state }),
+          tenantId: state.tenantId ?? undefined,
+        }),
+      );
+      if (!admitted) {
+        throw new Error(
+          `teamsChannel().receive: the admit hook refused to post in Teams conversation ${conversationId}. By default eve posts only into conversations whose target.tenantId is set and, when credentials.tenantId is configured, matches it.`,
+        );
+      }
 
       if (initialMessage !== undefined) {
         const ctx = buildTeamsBinding({ config, state });
@@ -646,6 +683,7 @@ async function dispatchMessage(input: {
 }): Promise<void> {
   const state = stateFromActivity(input.activity);
   const binding = buildTeamsBinding({ config: input.config, state });
+  if (!(await admitActivity("message", input.activity, input.config, binding))) return;
   const continuationToken = stateToken(state);
   const ctx: TeamsInboundMessageContext = {
     ...binding,
@@ -717,6 +755,7 @@ async function handleInvoke(input: {
 
   if (input.config.onInvoke === undefined) return teamsOk();
   const ctx = buildTeamsBinding({ config: input.config, state: stateFromActivity(input.activity) });
+  if (!(await admitActivity("invoke", input.activity, input.config, ctx))) return teamsOk();
   const result = await input.config.onInvoke(ctx, input.activity);
   if (result instanceof Response) return result;
   if (result && typeof result === "object") return Response.json(result);
@@ -735,7 +774,10 @@ async function revealAuthorization(input: {
   const ctx = buildTeamsBinding({ config: input.config, state });
   let auth: SessionAuthContext | null = null;
   try {
-    auth = (await input.onAnswers(ctx, input.activity))?.auth ?? null;
+    // Someone `admit` refuses is told the sign-in isn't theirs.
+    if (await admitActivity("answer", input.activity, input.config, ctx)) {
+      auth = (await input.onAnswers(ctx, input.activity))?.auth ?? null;
+    }
   } catch (error) {
     log.error("Teams sign-in press authorization failed", { error });
   }
@@ -768,6 +810,7 @@ async function dispatchAnswers(input: {
   if (answers.length === 0) return undefined;
   const state = stateFromActivity(input.activity);
   const ctx = buildTeamsBinding({ config: input.config, state });
+  if (!(await admitActivity("answer", input.activity, input.config, ctx))) return undefined;
   let result: TeamsAnswerResult;
   try {
     result = await input.onAnswers(ctx, input.activity);
@@ -798,6 +841,27 @@ async function dispatchAnswers(input: {
     },
     log,
   );
+}
+
+function admitActivity(
+  kind: Exclude<TeamsAdmitKind, "send">,
+  activity: TeamsMessageActivity | TeamsInvokeActivity,
+  config: TeamsChannelConfig,
+  binding: TeamsContext,
+): Promise<boolean> {
+  return isTeamsRequestAdmitted(
+    config.admit ?? defaultTeamsAdmit,
+    createTeamsActivityAdmitRequest({
+      kind,
+      activity,
+      api: teamsApiOptions(config),
+      teams: binding.teams,
+    }),
+  );
+}
+
+function teamsApiOptions(config: TeamsChannelConfig): TeamsApiOptions {
+  return { ...config.api, credentials: config.credentials };
 }
 
 function stateFromActivity(
