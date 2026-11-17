@@ -383,6 +383,7 @@ export class SessionStore {
     this.#attached = false;
     this.#streamingWhenDetached = this.#conversationClient.streaming;
     this.#stop();
+    this.#publish();
   }
 
   newSession(): void {
@@ -514,7 +515,9 @@ export class SessionStore {
     });
     if (opening) {
       const publishCaughtUp = () => {
-        if (lifetime === this.#controller) this.#publish();
+        if (lifetime !== this.#controller) return;
+        this.#publish();
+        if (lifetime === this.#controller) this.#conversationClient.reconcileFollowing();
       };
       void stream.caughtUp.then(publishCaughtUp, publishCaughtUp);
     }
@@ -562,12 +565,12 @@ export class SessionStore {
     for (const check of this.#turnWaiters) check();
     this.#callbacks.onSessionChange?.(this.#sessionState);
     if (lifetime !== this.#controller) return;
-    // Catch-up publishes once when its stream reaches the tail or stops; a notification per historical line
-    // would force one React commit per line within a single task and trip React's nested update limit.
-    if (!historical) this.#publish();
-    if (lifetime !== this.#controller) return;
-    this.#conversationClient.reconcileFollowing();
-    if (lifetime !== this.#controller) return;
+    if (!historical) {
+      this.#publish();
+      if (lifetime !== this.#controller) return;
+      this.#conversationClient.reconcileFollowing();
+      if (lifetime !== this.#controller) return;
+    }
     this.#closeStreamWhenIdle();
   }
 

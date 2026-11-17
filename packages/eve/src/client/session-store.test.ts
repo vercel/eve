@@ -478,32 +478,54 @@ describe("SessionStore acceptance and observation", () => {
     expect(server.reads).toHaveLength(1);
   });
 
-  it("publishes a live stream's catch-up once instead of once per historical line", async () => {
-    // A notification per replayed line forces one React commit per line inside a single task,
-    // which trips React's nested update limit past ~50 lines, as in #3862 for resume.
+  it.each([false, true])(
+    "publishes a live stream's catch-up once instead of once per historical line (followAgents: %s)",
+    async (followAgents) => {
+      const server = agent();
+      for (let index = 0; index < 8; index += 1)
+        server.append(testTurnFacts(index, `Earlier ${index}.`, [`earlier_${index}`]));
+      const backlog = server.log.length;
+      const current = store({ initialSession, followAgents });
+      const onEvent = vi.fn();
+      const onSessionChange = vi.fn();
+      current.setCallbacks({ onEvent, onSessionChange });
+      const published: number[] = [];
+      current.subscribe(() => published.push(current.snapshot.events.length));
+
+      await current.send({ message: "later." });
+      await vi.waitFor(() => expect(current.snapshot.events).toHaveLength(backlog));
+
+      expect(onEvent).toHaveBeenCalledTimes(backlog);
+      expect(onSessionChange.mock.calls.length).toBeGreaterThanOrEqual(backlog);
+      expect(published.filter((count) => count > 0 && count < backlog)).toEqual([]);
+
+      const live = testTurnFacts(8, "Later.", ["d_0"]);
+      for (const event of live) server.append([event]);
+      await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+      expect(published).toContain(backlog + 1);
+      expect(current.snapshot.events).toHaveLength(backlog + live.length);
+    },
+  );
+
+  it("keeps a stopped catch-up's events in the snapshot after observation restarts", async () => {
     const server = agent();
     for (let index = 0; index < 8; index += 1)
       server.append(testTurnFacts(index, `Earlier ${index}.`, [`earlier_${index}`]));
-    const backlog = server.log.length;
-    const current = store({ initialSession });
-    const onEvent = vi.fn();
-    const onSessionChange = vi.fn();
-    current.setCallbacks({ onEvent, onSessionChange });
-    const published: number[] = [];
-    current.subscribe(() => published.push(current.snapshot.events.length));
-
-    await current.send({ message: "later." });
-    await vi.waitFor(() => expect(current.snapshot.events).toHaveLength(backlog));
-
-    expect(onEvent).toHaveBeenCalledTimes(backlog);
-    expect(onSessionChange.mock.calls.length).toBeGreaterThanOrEqual(backlog);
-    expect(published.filter((count) => count > 0 && count < backlog)).toEqual([]);
-
-    const live = testTurnFacts(8, "Later.", ["d_0"]);
-    for (const event of live) server.append([event]);
-    await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
-    expect(published).toContain(backlog + 1);
-    expect(current.snapshot.events).toHaveLength(backlog + live.length);
+    const current = store({ initialSession, followWhile: () => false });
+    const detached = Promise.withResolvers<void>();
+    let seen = 0;
+    current.setCallbacks({
+      onEvent: () => {
+        seen += 1;
+        if (seen !== 20) return;
+        detachSessionStore(current);
+        detached.resolve();
+      },
+    });
+    void current.send({ message: "later." }).catch(() => {});
+    await detached.promise;
+    attachSessionStore(current);
+    expect(current.snapshot.events).toHaveLength(20);
   });
 
   it.each([2, 4])(
