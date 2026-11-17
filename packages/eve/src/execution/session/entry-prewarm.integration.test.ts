@@ -201,7 +201,6 @@ describe("idle timer of a session created without a message", () => {
         await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]), {
           timeout: 10_000,
         });
-        // The prewarm holds; the waiting session has no timer step beside it.
         expect(await stepNames(run.runId)).not.toContain("startSessionTimeoutStep");
 
         await resumeHook(token, handoffFollowUp("dpl_inline", "Say hello.", "timer-first-turn"));
