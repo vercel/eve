@@ -82,7 +82,7 @@
     "./browser-benchmark-dashboard": "./evals/browser/dashboard/index.ts"
   },
   "name": "local-vault-assistant",
-  "packageManager": "pnpm@12.17.0",
+  "packageManager": "pnpm@12.21.0",
   "scripts": {
     "bench:ab": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/run-browser-ab.ts",
     "bench:browser": "eve eval browser",
