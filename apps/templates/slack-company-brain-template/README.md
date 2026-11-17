@@ -14,20 +14,14 @@ specialists (subagents).
 agent/
   agent.ts                       # model selection
   instructions.md                # grounding, citations, source routing, and Slack style
-  instructions/github.ts         # how to connect GitHub; delete once connected
-  instructions/notion.ts         # how to connect Notion; delete once connected
-  instructions/linear.ts         # how to connect Linear; delete once connected
-  instructions/pagerduty.ts      # how to connect PagerDuty; delete once connected
-  connections/notion.ts          # Notion wiki, on once its connector exists
-  connections/linear.ts          # Linear issues and projects, on once its connector exists
-  connections/pagerduty.ts       # on-call and incidents, on once its connector exists
+  instructions/[connection].ts   # how to connect each source; delete once connected
+  connections/[connection].ts    # Notion, Linear, and PagerDuty, each on once its connector exists
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   channels/eve.ts                # HTTP API access, with tool stubs for local evals
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
   extensions/skills.ts           # skills people teach the agent, for themselves or a channel
-  memory/personal.ts             # private notes per person, in DMs and outside Slack
-  memory/channel.ts              # shared notes per Slack channel
+  memory/[slot].ts               # private notes per person and shared notes per Slack channel
   schedules/tasks.ts             # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
@@ -45,12 +39,6 @@ evals/                           # checks for answer length, citations, and thre
 - **Grounded answers.** The instructions tell the agent to answer
   company-specific questions only from sources it retrieved, link the source
   inline, and say when nothing answers the question or a source failed.
-- **Answer length.** A short answer for a simple question and 75–200 words for
-  a comparison, analysis, or multi-part question, unless the person asks for
-  something else. The instructions also cover what to tell a specialist and
-  how to combine what specialists return.
-- **Thread context.** Each mention also sees the replies posted since the agent
-  last spoke, with sender names.
 - **Followed threads.** Once someone brings the agent into a thread, it sees
   later replies without a mention and answers only when a reply is meant for
   it. Otherwise it calls `no_reply` and leaves no trace. Top-level channel
@@ -61,11 +49,9 @@ evals/                           # checks for answer length, citations, and thre
   to find relevant messages in public channels, best match first, with
   permalinks the agent cites, and `read_slack_conversation` reads a match's
   thread or a named channel. See [Slack search](#slack-search).
-- **Workspace gate.** Workspace guests (multi- and single-channel) and
-  deactivated accounts can't start a conversation or answer approvals and
-  questions. The agent reads Slack with the bot's access, which reaches
-  channels a guest can't see. With `SLACK_TEAM_ID` set, people from other
-  companies in Slack Connect channels can't either.
+- **Your own sources.** Add any knowledge source as a connection, from the
+  eve registry, an MCP server, or an OpenAPI spec, or as a tool, and give a
+  domain its own subagent. See [Grow the brain](#grow-the-brain).
 - **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
   private one per person, and a shared one per Slack channel. See
   [Memory](#memory).
@@ -86,8 +72,6 @@ evals/                           # checks for answer length, citations, and thre
   connector's GitHub App is installed on, and a `pr` skill for opening draft
   pull requests. See
   [Connect GitHub](#connect-github).
-- **Built-in eve Slack behavior.** Threads are sessions, the thread status shows
-  progress, and approvals and questions appear as buttons.
 
 ## Get started
 
