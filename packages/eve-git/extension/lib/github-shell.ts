@@ -7,6 +7,7 @@ import type { ToolAuthProvider, ToolContext } from "eve/tools";
 import {
   attributeCommand,
   coAuthorTrailer,
+  commentFooter,
   isAttributable,
   type GitHubCoAuthor,
 } from "./attribution.ts";
@@ -45,7 +46,9 @@ interface GitHubConfigBase {
   /**
    * Resolves who the current turn publishes for. When it returns a person,
    * `gh-signed-commit` messages and `gh pr create` bodies end with their
-   * `Co-authored-by` trailer. Return `null` to publish without one. It
+   * `Co-authored-by` trailer, and comments, reviews, and review replies end
+   * with their `commentFooter` when they have one. Return `null` to publish
+   * without either. It
    * receives the `gh` tool's context, so `ctx.getToken` can resolve the
    * requester's linked accounts.
    */
@@ -217,7 +220,6 @@ export async function executeGitHubShell(
     workingDirectory = repositoryRoot.root;
   }
   const invocationId = crypto.randomUUID();
-  const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const auth = dependencies.auth ?? null;
   let userAuth: ToolAuthProvider | undefined;
   let token: string;
@@ -255,26 +257,35 @@ export async function executeGitHubShell(
     config.attribution && dependencies.context && isAttributable(argv)
       ? await config.attribution(dependencies.context)
       : null;
-  const commandArgv = coAuthor
-    ? await attributeCommand(argv, coAuthorTrailer(coAuthor), sandbox, workingDirectory, bodyFile)
-    : argv;
-  if (!Array.isArray(commandArgv)) {
-    throw new GitHubCommandInputError(
-      `Pull request body file ${JSON.stringify(commandArgv.missingBodyFile)} not found.`,
-    );
-  }
-
-  const executable = executablePath(commandArgv[0]!);
-  const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${commandArgv
-    .slice(1)
-    .map(shellQuote)
-    .join(" ")}`;
   const authorization = `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
   const placeholder = `eve-github-${invocationId}`;
   const githubConfig = `/tmp/eve-code-gh-${invocationId}`;
   const placeholderAuthorization = `Basic ${Buffer.from(`x-access-token:${placeholder}`).toString("base64")}`;
+  const bodyFiles: string[] = [];
   let result: Awaited<ReturnType<SandboxSession["run"]>>;
   try {
+    const commandArgv = coAuthor
+      ? await attributeCommand(
+          argv,
+          { footer: commentFooter(coAuthor), trailer: coAuthorTrailer(coAuthor) },
+          {
+            read: (path) => sandbox.readTextFile({ path }),
+            async write(content) {
+              const path = `/tmp/eve-git-body-${invocationId}-${bodyFiles.length}.md`;
+              bodyFiles.push(path);
+              await sandbox.writeTextFile({ content, path });
+              return path;
+            },
+          },
+          workingDirectory,
+        )
+      : argv;
+    if (!Array.isArray(commandArgv)) throw new GitHubCommandInputError(commandArgv.refused);
+    const executable = executablePath(commandArgv[0]!);
+    const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${commandArgv
+      .slice(1)
+      .map(shellQuote)
+      .join(" ")}`;
     result = await withGitHubCredentialLease(
       sandbox,
       dependencies,
@@ -306,7 +317,7 @@ export async function executeGitHubShell(
     );
   } finally {
     await sandbox.removePath({ path: githubConfig, recursive: true, force: true });
-    await sandbox.removePath({ path: bodyFile, force: true });
+    for (const path of bodyFiles) await sandbox.removePath({ path, force: true });
   }
   if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
     dependencies.requireAuth!(userAuth);
