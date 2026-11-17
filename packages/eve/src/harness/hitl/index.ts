@@ -6,11 +6,18 @@ import type { ModelMessage } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
-import { fail } from "#harness/session-machine/transitions.js";
+import { commitOf, committedMessages, saveTransition } from "#harness/session-machine/commit.js";
+import { callSignIns, callSignInsSettled, fail } from "#harness/session-machine/transitions.js";
 import { readTurnState } from "#harness/session-machine/state.js";
-import type { Step } from "#harness/step/context.js";
+import { failSignIn, type Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
+import {
+  handleAuthorizationError,
+  isScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
+import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { signInFailureOf } from "./approved-calls.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
@@ -64,20 +71,51 @@ export async function askStepApprovals(
   await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 
-export async function stopForToolSignIn(
+type SignInInterrupt = NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>;
+
+export async function stopForSignIn(
   step: Step,
-  interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
+  signIn: Pick<SignInInterrupt, "challenges"> & Partial<Pick<SignInInterrupt, "calls">>,
 ): Promise<StepResult> {
   await applyEndingSignIns(
     step,
     requireSignIn(step.view(), {
-      calls: interrupt.calls,
-      challenges: interrupt.challenges,
+      calls: signIn.calls,
+      challenges: signIn.challenges,
       callsBack: stepCallsBack(step),
     }),
     step.session.history,
   );
   return park(step);
+}
+
+export async function pauseForSignIn(step: Step, error: unknown): Promise<StepResult> {
+  if (!isScopedAuthorizationRequiredError(error)) {
+    return await failSignIn(step, error, {
+      scope: isConnectionAuthorizationFailedError(error) ? error.connectionName : "",
+    });
+  }
+  try {
+    return await stopForSignIn(step, await handleAuthorizationError(error));
+  } catch (refused) {
+    return await failSignIn(step, refused, error.scoped);
+  }
+}
+
+export async function settleModelSignIns(step: Step, failure?: unknown): Promise<boolean> {
+  const view = step.view();
+  const byCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
+  const signIns = (step.config.signInCompletions ?? []).filter(
+    (challenge) => challenge.candidateId === undefined && !byCalls.has(signInAttemptKey(challenge)),
+  );
+  const events = callSignInsSettled(
+    view,
+    { signIns },
+    failure === undefined ? undefined : signInFailureOf(failure),
+  );
+  if (events.length === 0) return false;
+  await step.apply(commitOf(events));
+  return true;
 }
 
 export async function enforceBudget(

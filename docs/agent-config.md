@@ -170,6 +170,63 @@ The function returns a Gateway model ID, a model instance such as an AI SDK lang
 The `session.started` runtime identity does not include a model ID for a dynamic agent. Each public
 `model.started` event reports the concrete model selected for that model call.
 
+### Run the model on each person's credential
+
+Some agents call the model with a credential that belongs to the person using them, such as an API key each person brings or a token [Vercel Connect](https://vercel.com/docs/connect) issues. `defineModel` from `eve/models` puts a connection-style `auth` on a model. eve resolves the credential before each model call and passes it to `create`, which builds the provider model.
+
+```ts title="agent/agent.ts"
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { connect } from "@vercel/connect/eve";
+import { defineAgent } from "eve";
+import { defineDynamic, defineModel } from "eve/models";
+
+const ownClaude = defineModel({
+  id: "anthropic/claude-sonnet-5",
+  auth: connect("anthropic/myagent"),
+  create: ({ token }) => createAnthropic({ apiKey: token })("claude-sonnet-5"),
+});
+
+export default defineAgent({
+  model: defineDynamic((ctx) =>
+    ctx.session.auth.current?.attributes.plan === "byo" ? ownClaude : "anthropic/claude-sonnet-5",
+  ),
+});
+```
+
+| Field     | Purpose                                                                                                                                                                                                                           |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`      | The model ID eve reports on `model.started` and as `ctx.model.id`, and looks up in the AI Gateway model catalog for the context window. For an ID outside the catalog, set `modelContextWindowTokens` where you select the model. |
+| `auth`    | The credential strategy, in the shapes a connection's `auth` accepts: `connect(...)`, `defineInteractiveAuthorization(...)`, or `{ getToken }`. It takes no per-caller function; choose per caller in `defineDynamic`.            |
+| `authKey` | Keys the credential for the sign-in, the token cache, and the rule against asking twice in a turn. Required when `auth` has no Vercel Connect connector. Definitions with one key share one sign-in and one token.                |
+| `create`  | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                                                 |
+
+A `ModelDefinition` goes wherever a session's turn model goes: `defineAgent({ model })`, a dynamic model's result, and `auto()` and `agent({ models })` options. `compaction.model`, `auto()`'s decision model, and a dynamic subagent's config take a model ID or instance, because their calls can't hold the turn for a sign-in.
+
+When the caller has no credential, eve opens the same sign-in as a connection, with the turn as its subject and before `model.requested`, and continues the turn after the callback under the same `turnId`. The sign-in's name is `eve__model__` followed by `authKey`, or by the cleaned connector, so `connect("anthropic/myagent")` signs in as `eve__model__anthropic_myagent`. The card shows `auth.displayName`, then the challenge's `displayName`.
+
+- A message during the sign-in withdraws it, and the step runs again with the message in the turn.
+- When the provider answers a model call with `401`, eve drops the token, calls `auth.evict`, resolves the credential again, and retries the call once. A second `401` asks the person to sign in again. When the provider rejects the credential right after that sign-in, the turn fails with reason `token_rejected_after_authorization`.
+- A turn without a credential fails with `MODEL_AUTHORIZATION_FAILED`. Its `details.reason` is the connection sign-in reason: `sign_in_cancelled` after a decline or a withdrawal, `sign_in_unavailable` in a scheduled turn, `principal_required` without a signed-in user, and `authorization_required` for an `auth` without a sign-in flow. The session stays open, and the next turn asks again.
+- After a sign-in ends without a credential, eve settles its card and runs the dynamic functions once more, so a dynamic `model` can read the outcome from `ctx.view` and answer with another model:
+
+```ts
+import { defineDynamic } from "eve/models";
+import { interactions } from "eve/events";
+
+const model = defineDynamic((ctx) => {
+  const refused = interactions(ctx.view).some(
+    (asked) =>
+      asked.turnId === ctx.turn?.id &&
+      asked.request.signIn?.grant === "anthropic/myagent" &&
+      asked.status === "settled" &&
+      asked.outcome !== "accepted",
+  );
+  return refused ? "anthropic/claude-sonnet-5" : ownClaude;
+});
+```
+
+Compaction's summary call runs on the turn's model, so it reuses the credential the turn resolved. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
+
 ## Reasoning effort
 
 `reasoning` sets the model's reasoning effort through AI SDK's provider-agnostic

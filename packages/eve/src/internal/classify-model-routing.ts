@@ -1,12 +1,16 @@
-import type { EveLanguageModel, ModelRouting } from "#shared/agent-definition.js";
+import { isModelDefinition } from "#models/definition.js";
+import type { ModelRouting, PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 const GATEWAY_PROVIDER = "gateway";
 
 export function classifyModelRouting(
-  model: string | EveLanguageModel,
+  model: PublicAgentStaticModelDefinition,
   providerOptions?: Record<string, JsonObject>,
 ): ModelRouting {
+  if (isModelDefinition(model)) {
+    return { kind: "external", provider: gatewayTarget(model.id) };
+  }
   if (typeof model === "string") {
     const routing: ModelRouting = { kind: "gateway", target: gatewayTarget(model) };
     const byok = readByokProvider(providerOptions);

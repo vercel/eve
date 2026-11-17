@@ -21,6 +21,7 @@ import {
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import { isModelDefinition, type ModelDefinition } from "#models/definition.js";
 import { selectionModel } from "#models/options.js";
 import { readAgentToolModels } from "#tools/agent-models.js";
 import {
@@ -53,32 +54,32 @@ export interface RuntimeModelResolutionScope {
   readonly nodeId: string | undefined;
 }
 
+export type RuntimeModel = LanguageModel | ModelDefinition;
+
 export interface ResolvedRuntimeModelSelection {
-  readonly model?: LanguageModel;
+  readonly model?: RuntimeModel;
   readonly reference: RuntimeModelReference;
 }
 
 export async function resolveRuntimeModelReference(
   reference: RuntimeModelReference,
   scope?: RuntimeModelResolutionScope,
-): Promise<LanguageModel> {
+): Promise<RuntimeModel> {
   const bootstrapModel = resolveBootstrapRuntimeModel(reference);
 
   if (bootstrapModel !== null) {
     return bootstrapModel;
   }
 
-  const mockModel = resolveMockAuthoredRuntimeModel(reference);
-
-  if (mockModel !== null) {
-    return mockModel;
-  }
-
   if (isSourceBackedRuntimeModelReference(reference)) {
-    return await loadSourceBackedRuntimeModelReference(reference, scope);
+    const model = await loadSourceBackedRuntimeModelReference(reference, scope);
+    if (isModelDefinition(model)) return model;
+    return resolveMockAuthoredRuntimeModel(reference) ?? model;
   }
 
-  return localGatewayModel(reference.id) ?? reference.id;
+  return (
+    resolveMockAuthoredRuntimeModel(reference) ?? localGatewayModel(reference.id) ?? reference.id
+  );
 }
 
 async function loadSourceBackedRuntimeModelReference(
@@ -86,7 +87,7 @@ async function loadSourceBackedRuntimeModelReference(
     readonly source: NonNullable<RuntimeModelReference["source"]>;
   },
   scope: RuntimeModelResolutionScope | undefined,
-): Promise<LanguageModel> {
+): Promise<RuntimeModel> {
   if (scope === undefined) {
     throw new Error(
       `Expected a compiled module-map scope to resolve the authored runtime model "${reference.id}".`,
@@ -123,14 +124,14 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  return toAiSdkLanguageModel(model);
+  return isModelDefinition(model) ? model : toAiSdkLanguageModel(model);
 }
 
 function agentToolOptionModel(
   definition: unknown,
   key: string,
   source: NonNullable<RuntimeModelReference["source"]>,
-): LanguageModel {
+): RuntimeModel {
   const option = readAgentToolModels(definition)?.get(key);
   if (option === undefined) {
     throw new Error(
@@ -143,7 +144,7 @@ function agentToolOptionModel(
       `Expected the agent({ models }) option "${key}" in "${source.logicalPath}" to hold a provider model.`,
     );
   }
-  return toAiSdkLanguageModel(model);
+  return isModelDefinition(model) ? model : toAiSdkLanguageModel(model);
 }
 
 function isSourceBackedRuntimeModelReference(
@@ -233,11 +234,31 @@ export async function resolveRuntimeModelSelection(input: {
     };
   }
 
-  validateRuntimeLanguageModel(selectedModel);
+  if (!isModelDefinition(selectedModel)) validateRuntimeLanguageModel(selectedModel);
   if (input.durability === "durable") {
     throw new InvalidRuntimeModelSelectionError(
-      'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "beforeModel" model resolver.',
+      "Dynamic model selection returned a model object, but durable model selections must be serializable. Return a model id string.",
     );
+  }
+
+  if (isModelDefinition(selectedModel)) {
+    const contextWindowTokens =
+      selection.modelContextWindowTokens ??
+      (
+        await lookupModelMetadata(input.modelMetadata, selectedModel.id, (metadata) =>
+          lookupCatalogModelBySlug(metadata, selectedModel.id),
+        )
+      ).contextWindowTokens;
+    return {
+      model: selectedModel,
+      reference: {
+        id: selectedModel.id,
+        contextWindowTokens,
+        promptCache,
+        providerOptions,
+        reasoning: selection.reasoning,
+      },
+    };
   }
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
@@ -370,7 +391,7 @@ function isModelSelectionDefinition(value: unknown): value is PublicAgentModelSe
 function validateRuntimeLanguageModel(model: unknown): asserts model is LanguageModel {
   if (!isRuntimeLanguageModel(model)) {
     throw new InvalidRuntimeModelSelectionError(
-      "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, or { model, modelContextWindowTokens?, modelOptions? }.",
+      "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, a defineModel value, or { model, modelContextWindowTokens?, modelOptions? }.",
     );
   }
 }

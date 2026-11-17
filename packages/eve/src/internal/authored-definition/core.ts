@@ -24,10 +24,11 @@ import {
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
-  type PublicAgentStaticModelDefinition,
+  type PublicAgentModelHandle,
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
+import { isModelDefinition } from "#models/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -332,7 +333,12 @@ function normalizeAgentCompactionDefinition(
         `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
       );
     }
-    normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
+    if (isModelDefinition(record.model)) {
+      throw new Error(
+        `${message} "compaction.model" takes a model ID or a model instance. A defineModel value needs a credential, and the summary call can't hold the turn for a sign-in.`,
+      );
+    }
+    normalizedDefinition.model = record.model as PublicAgentModelHandle;
   }
 
   if (record.modelContextWindowTokens !== undefined) {

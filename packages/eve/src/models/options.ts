@@ -1,4 +1,5 @@
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
+import { isModelDefinition } from "#models/definition.js";
 import type {
   PublicAgentDynamicModelResult,
   PublicAgentModelSelectionDefinition,
@@ -31,7 +32,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isStaticModel(value: unknown): value is PublicAgentStaticModelDefinition {
-  return typeof value === "string" ? value.trim().length > 0 : isRuntimeLanguageModel(value);
+  return typeof value === "string"
+    ? value.trim().length > 0
+    : isRuntimeLanguageModel(value) || isModelDefinition(value);
 }
 
 export function isModelSelection(value: unknown): value is ModelOptionSelection {
@@ -63,7 +66,7 @@ export function isModelOptions(value: unknown): value is ModelOptions {
 export function normalizeModelSelection(
   selection: ModelOptionSelection,
 ): PublicAgentDynamicModelResult {
-  if (typeof selection === "string" || isRuntimeLanguageModel(selection)) return selection;
+  if (!isSelectionObject(selection)) return selection;
   const { model, ...settings } = selection;
   return Object.values(settings).every((value) => value === undefined) ? model : selection;
 }
@@ -77,12 +80,21 @@ export function normalizeModelOptions(options: ModelOptions): NormalizedModelOpt
 }
 
 export function selectionModel(selection: ModelOptionSelection): PublicAgentStaticModelDefinition {
-  return typeof selection === "string" || isRuntimeLanguageModel(selection)
-    ? selection
-    : selection.model;
+  return isSelectionObject(selection) ? selection.model : selection;
+}
+
+function isSelectionObject(
+  selection: ModelOptionSelection,
+): selection is PublicAgentModelSelectionDefinition {
+  return (
+    typeof selection !== "string" &&
+    !isRuntimeLanguageModel(selection) &&
+    !isModelDefinition(selection)
+  );
 }
 
 export function selectionLogIdentity(selection: ModelOptionSelection): string {
   const model = selectionModel(selection);
-  return typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
+  if (typeof model === "string") return model;
+  return isModelDefinition(model) ? model.id : `${model.provider}/${model.modelId}`;
 }

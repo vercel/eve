@@ -20,6 +20,7 @@ import {
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
+import { credentialedModel } from "#harness/model-call/credential.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -96,7 +97,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change,
       compact: true,
       messages,
-      model: resolvedModel.model,
+      model: await credentialedModel(resolvedModel.model, resolvedModel.choice.reference),
       promptMessages: messages,
       requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
@@ -363,7 +364,10 @@ async function summaryExecutor(
   const { config, session } = step;
   const turnReference = stepReference(step);
   const reference = agentSettings(step).compactionModel ?? turnReference;
-  const model = reference === turnReference ? input.model : await config.resolveModel(reference);
+  const model =
+    reference === turnReference
+      ? input.model
+      : await credentialedModel(await config.resolveModel(reference), reference);
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,

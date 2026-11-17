@@ -2,6 +2,7 @@ export { auto } from "#models/auto.js";
 
 export type { AutoConfig } from "#models/auto.js";
 export type { EveLanguageModel } from "#shared/agent-definition.js";
+export { defineModel, type ModelDefinition } from "#models/definition.js";
 export {
   defineDynamic,
   type DynamicModelResult,

@@ -186,7 +186,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/instrumentation`                                                             | `defineInstrumentation`, `disableInstrumentation`, `InstrumentationEvent<K>`, lifecycle provider types            |
 | `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy, span processor, and exporter types   |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                     |
-| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`, `EveLanguageModel`                                                         |
+| [`eve/models`](../guides/decide)                                                  | `auto`, `defineModel`, `ModelDefinition`, `EveLanguageModel`                                                      |
 | `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                               |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                       |
 | [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                               |

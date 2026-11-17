@@ -2,6 +2,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { ModelDefinition } from "#models/definition.js";
 import {
   isDynamicSentinel,
   type DynamicModelContext,
@@ -85,8 +86,14 @@ export interface EveLanguageModel {
   doStream(options: never): PromiseLike<unknown>;
 }
 
-/** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
-export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
+/** A model eve calls as it is: an AI Gateway model id string or an {@link EveLanguageModel}. */
+export type PublicAgentModelHandle = string | EveLanguageModel;
+
+/**
+ * A concrete model: an AI Gateway model id string, an {@link EveLanguageModel}, or a
+ * {@link ModelDefinition} that runs on the caller's own credential.
+ */
+export type PublicAgentStaticModelDefinition = PublicAgentModelHandle | ModelDefinition;
 
 /**
  * A model together with settings that apply only when it is selected, such as reasoning effort
@@ -156,9 +163,10 @@ export interface PublicAgentCompactionDefinition {
   /**
    * Optional model used only for generating compaction summaries.
    *
-   * When omitted, eve uses the active turn model for the summary call.
+   * When omitted, eve uses the active turn model for the summary call. A summary call can't hold
+   * the turn for a sign-in, so it takes no `defineModel` value.
    */
-  readonly model?: PublicAgentStaticModelDefinition;
+  readonly model?: PublicAgentModelHandle;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *

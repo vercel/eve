@@ -8,6 +8,7 @@ import { isDynamicSentinel } from "#dynamic/definition.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
+import { isModelDefinition } from "#models/definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -236,6 +237,25 @@ async function normalizeAuthoredModelReference(input: {
     );
   }
 
+  const sourceRef = {
+    exportName: source.exportName,
+    sourceKind: "module" as const,
+    logicalPath: source.logicalPath,
+    sourceId: source.sourceId,
+  };
+
+  if (isModelDefinition(input.value)) {
+    const reference: CompiledRuntimeModelReference = {
+      id: input.value.id,
+      source: sourceRef,
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing: classifyModelRouting(input.value, input.providerOptions),
+    };
+    if (input.sourceField !== undefined) reference.sourceField = input.sourceField;
+    if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    return await withCompiledRuntimeModelLimits(reference, input);
+  }
+
   const languageModel = input.value;
   const specificationVersion = languageModel.specificationVersion;
 
@@ -264,12 +284,7 @@ async function normalizeAuthoredModelReference(input: {
   rejectGatewayPromptCache(input, routing);
   const sourceBackedModel: CompiledRuntimeModelReference = {
     id: formatLanguageModelGatewayId(languageModel),
-    source: {
-      exportName: source.exportName,
-      sourceKind: "module" as const,
-      logicalPath: source.logicalPath,
-      sourceId: source.sourceId,
-    },
+    source: sourceRef,
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
     routing,
   };

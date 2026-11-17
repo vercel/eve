@@ -115,7 +115,7 @@ Return content read from the sandbox as a user instruction. It comes from the wo
 
 ## Dynamic models
 
-The agent's `model` field accepts a dynamic function that returns a model ID, a provider instance, or a selection containing `model` and optional model settings. A missing or invalid model fails the turn. `ctx.model` is unavailable here.
+The agent's `model` field accepts a dynamic function that returns a model ID, a provider instance, a [`defineModel` value](/docs/agent-config#run-the-model-on-each-persons-credential) that runs on the caller's own credential, or a selection containing `model` and optional model settings. A missing or invalid model fails the turn. `ctx.model` is unavailable here.
 
 ```ts title="agent/agent.ts"
 import { defineAgent, defineDynamic } from "eve";

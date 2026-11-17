@@ -197,22 +197,30 @@ export class ModelCaller {
     return reportModelCallFailure(this.step, error);
   }
 
+  async abandonForSignIn(): Promise<readonly ModelMessage[]> {
+    return await this.discard("retried");
+  }
+
   async steered(): Promise<StepResult> {
-    const { step } = this;
-    throwIfTurnAborted(step.config.abortSignal);
+    throwIfTurnAborted(this.step.config.abortSignal);
     this.input.generation.end();
+    return {
+      next: this.step.runStep,
+      session: changeHistory(this.step.session, { extend: await this.discard("steered") }),
+      steered: true,
+    };
+  }
+
+  private async discard(ending: "retried" | "steered"): Promise<readonly ModelMessage[]> {
+    const { step } = this;
     step.ctx.set(HistoryStateKey, this.request.historyState);
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
-        discardAttempt(step.view(), { ending: "steered", runId, usage: this.takeUnkeptUsage() }),
+        discardAttempt(step.view(), { ending, runId, usage: this.takeUnkeptUsage() }),
       );
     }
-    return {
-      next: step.runStep,
-      session: changeHistory(step.session, { extend: this.request.history }),
-      steered: true,
-    };
+    return this.request.history;
   }
 
   takeUnkeptUsage(): Usage | undefined {

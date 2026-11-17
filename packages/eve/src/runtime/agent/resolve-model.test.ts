@@ -152,10 +152,10 @@ describe("dynamic runtime model resolution", () => {
 
     const model = await resolveRuntimeModelReference({ id: "eve-mock/dynamic-subagent" });
 
-    expect(typeof model).toBe("object");
-    if (typeof model === "string") throw new Error("expected a mock model instance");
-    expect(model.provider).toBe("eve-runtime-mock");
-    expect(model.modelId).toBe("eve-mock/dynamic-subagent");
+    expect(model).toMatchObject({
+      modelId: "eve-mock/dynamic-subagent",
+      provider: "eve-runtime-mock",
+    });
   });
 
   it("loads resolver-only definitions and normalizes explicit metadata", async () => {

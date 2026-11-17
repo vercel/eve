@@ -716,7 +716,7 @@ function signInCallbackFacts(
 
 export function callSignInsSettled(
   view: Pick<SessionView, "projection">,
-  call: ApprovedCall,
+  call: Pick<ApprovedCall, "signIns">,
   failure?: { readonly reason?: string; readonly retryable?: boolean },
 ): SessionEvent[] {
   const tables = view.projection.view;
@@ -742,7 +742,10 @@ export function completeSignIn(
   return unchanged(
     view,
     input.completions
-      .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
+      .filter(
+        (challenge) =>
+          challenge.candidateId !== undefined && !reportedByCalls.has(signInAttemptKey(challenge)),
+      )
       .flatMap((challenge) => signInCallbackFacts(tables, challenge, { outcome: "accepted" })),
   );
 }

@@ -206,6 +206,10 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
   return false;
 }
 
+export function rejectsCredential(error: unknown): boolean {
+  return readModelCallErrorSignals(error).statusCode === 401;
+}
+
 export function classifyModelCallError(error: unknown): "retry" | "recoverable" | "terminal" {
   if (isTurnCancellation(error)) {
     return "terminal";
