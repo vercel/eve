@@ -93,10 +93,13 @@ eve rejects it where it calls a model outside a turn's own run, or needs a seria
   that selection with the session, so it must be a model ID. `ctx.model.id` is the `id`, so
   passing it on selects the AI Gateway model with that ID on the project's credential.
 
-Three more rules:
+More rules:
 
 - `auth` doesn't take the per-caller function form that a connection's `auth` does. Choose per
   caller in `defineDynamic`.
+- `auth` is a plain definition, so an author adjusts it by spreading it, as connections do for
+  `displayName`. Wrapping `startAuthorization` this way can add a parameter to the sign-in link.
+  The spread keeps the Vercel Connect connector, so the sign-in name stays the same.
 - An `id` the catalog doesn't list needs `modelContextWindowTokens`, set where any other model
   instance sets it.
 - `DynamicModelContext` gains no token methods, and `anthropic()` and `openai()` from
@@ -181,13 +184,14 @@ connection rule and doesn't ask again in that turn.
 
 Some turns never ask:
 
-| Case                                                   | `details.reason`                     |
-| ------------------------------------------------------ | ------------------------------------ |
-| A scheduled turn                                       | `sign_in_unavailable`                |
-| No signed-in user for `principalType: "user"`          | `principal_required`                 |
-| No callback URL for the run                            | `authorization_callback_unavailable` |
-| `auth` has no `startAuthorization`                     | `authorization_required`             |
-| `getToken` throws `ConnectionAuthorizationFailedError` | That error's `reason`                |
+| Case                                                                           | `details.reason`                     |
+| ------------------------------------------------------------------------------ | ------------------------------------ |
+| A scheduled turn                                                               | `sign_in_unavailable`                |
+| No signed-in user for `principalType: "user"`                                  | `principal_required`                 |
+| No callback URL for the run                                                    | `authorization_callback_unavailable` |
+| `auth` has no `startAuthorization`                                             | `authorization_required`             |
+| `getToken` or `startAuthorization` throws `ConnectionAuthorizationFailedError` | That error's `reason`                |
+| Either throws another error, such as an unreachable credential service         | None                                 |
 
 A turn left without the credential fails with a new code, `MODEL_AUTHORIZATION_FAILED`, whether
 its sign-in ended without one or was never asked. Its `details.reason` is the reason code
@@ -225,6 +229,13 @@ This retry is new for model calls. Today the harness treats a `401` as terminal,
 retries are inside clients: MCP connections, eve's local-development AI Gateway transport, and
 `chatgpt()`. eve recognizes the `401` by the `statusCode` it already reads from model-call errors,
 so it needs nothing specific to a provider.
+
+Only a `401` takes this path. Any other status, such as `402` or `403`, fails the call as it does
+today. A turn that can't ask, such as a scheduled one, fails with the reason listed under
+[When no credential arrives](#when-no-credential-arrives).
+
+`create` can return a wrapped model, such as one with AI SDK middleware. A wrapper that replaces a
+`401` error hides it from this path.
 
 ### Subagents, copies, and other model calls
 
@@ -365,6 +376,7 @@ E2E evals run on a fixture whose `model` is a `defineModel` value over a determi
   again.
 - A dynamic function falls back to another model after a decline.
 - A scheduled turn fails without asking.
+- An `auth` that throws an unexpected error fails the turn and leaves the session open.
 - A message sent during the sign-in withdraws it. The fallback model answers, or the turn fails
   when there is no fallback.
 - A declared subagent's sign-in, and a copy's, reach the root session.
