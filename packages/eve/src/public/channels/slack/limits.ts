@@ -1,3 +1,4 @@
+import { plainStatusText } from "#channel/reasoning-status.js";
 import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
 
 export const SLACK_TYPING_STATUS_MAX_LENGTH = 50;
@@ -21,7 +22,7 @@ export const SLACK_CONTAINER_TITLE_MAX_LENGTH = 150;
 export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;
 
 export function truncateTypingStatus(status: string): string {
-  const normalized = stripTypingStatusMarkdown(status).trim().replace(/\s+/gu, " ");
+  const normalized = plainStatusText(status);
   if (normalized.length <= SLACK_TYPING_STATUS_MAX_LENGTH) return normalized;
   const cut = normalized.slice(0, SLACK_TYPING_STATUS_MAX_LENGTH - 3);
   const space = cut.lastIndexOf(" ");
@@ -58,14 +59,4 @@ export function truncateContainerTitle(value: string): string {
 
 export function truncateModalTitle(value: string): string {
   return truncateWithEllipsis(value, SLACK_MODAL_TITLE_MAX_LENGTH);
-}
-
-function stripTypingStatusMarkdown(status: string): string {
-  return status
-    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
-    .replace(/`([^`]+)`/gu, "$1")
-    .replace(/~~([^~]+)~~/gu, "$1")
-    .replace(/(^|[^\p{L}\p{N}])(\*\*|__)([^*_]+)\2(?=$|[^\p{L}\p{N}])/gu, "$1$3")
-    .replace(/(^|[^\p{L}\p{N}*])\*([^*_]+)\*(?=$|[^\p{L}\p{N}*])/gu, "$1$2")
-    .replace(/(^|[^\p{L}\p{N}_])_([^*_]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1$2");
 }

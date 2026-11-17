@@ -152,9 +152,9 @@ describe("statusMessage", () => {
       scope: { runId: "run-1", turnId: "turn-1" },
     },
   });
-  const completed = (partId: string, kind: string, value: string) => ({
+  const completed = (partId: string, kind: string, value: string, phase = "narration") => ({
     type: "content.completed",
-    data: { kind, partId, phase: "narration", runId: "run-1", value },
+    data: { kind, partId, phase, runId: "run-1", value },
     scope: { runId: "run-1", turnId: "turn-1" },
   });
 
@@ -216,23 +216,24 @@ describe("statusMessage", () => {
     ).resolves.toBe("I should check the Snowflake revenue tables for last quarter.");
   });
 
-  it("keeps the turn's completed reasoning between model steps", async () => {
+  it("keeps the turn's completed reasoning until new reasoning is long enough", async () => {
     await expect(
       statusMessageOf(
         completed("r-1", "reasoning", "**Checking Snowflake sources**\n\nLooking at tables."),
         call("c-1", { kind: "tool", name: "query" }),
         started("c-1"),
         settled("c-1"),
+        delta("r-2", "Now", "reasoning"),
       ),
     ).resolves.toBe("Checking Snowflake sources");
   });
 
-  it("says it is writing a reply once reply text streams", async () => {
+  it.each([
+    ["streams", delta("t-1", "word ".repeat(60), "text")],
+    ["has completed", completed("t-1", "text", "Done.", "reply")],
+  ])("says it is writing a reply once reply text %s", async (_, reply) => {
     await expect(
-      statusMessageOf(
-        completed("r-1", "reasoning", "**Checking Snowflake sources**"),
-        delta("t-1", "word ".repeat(60), "text"),
-      ),
+      statusMessageOf(completed("r-1", "reasoning", "**Checking Snowflake sources**"), reply),
     ).resolves.toBe("Writing a reply...");
   });
 
