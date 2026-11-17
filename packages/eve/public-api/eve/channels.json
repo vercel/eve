@@ -25,6 +25,12 @@
   "ChannelRespondOptions",
   "ChannelSendOptions",
   "ChannelSource",
+  "CommandContext",
+  "CommandDefinition",
+  "CommandDefinitions",
+  "CommandInput",
+  "CommandResult",
+  "CommandSession",
   "CommittedLine",
   "ConversationContext",
   "ConversationEnvironment",
@@ -76,6 +82,7 @@
   "attachmentError",
   "createWebSocketUpgradeServer",
   "defineChannel",
+  "defineCommand",
   "disableRoute",
   "isChannel"
 ]
