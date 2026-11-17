@@ -25,13 +25,9 @@ agent/
     code.ts                 # eve's code extension: files and code in a sandbox
     git.ts                  # eve's git extension: GitHub access and pull requests
     skills.ts               # skills people teach the agent, for themselves or a channel
-  memory/
-    [slot].ts               # private notes per person and shared notes per Slack channel
-  schedules/
-    tasks.ts                # schedules people create by asking in Slack
-  skills/
-    company-context/
-      SKILL.md              # fill in your teams, glossary, and sources
+  memory/[slot].ts          # private notes per person and shared notes per Slack channel
+  schedules/tasks.ts        # schedules people create by asking in Slack
+  skills/company-context/SKILL.md # fill in your teams, glossary, and sources
   tools/
     no_reply.ts             # lets the agent stay quiet in followed threads
     post_slack_file.ts      # posts a sandbox file, such as a chart or CSV, in the thread
@@ -71,7 +67,7 @@ evals/                      # checks for answer length, citations, and thread re
   run in a Vercel Sandbox, with GitHub App tokens scoped to one repository per
   command. `tools/post_slack_file.ts` posts files the agent makes, such as a
   chart or CSV, back in the thread. See [Connect GitHub](#connect-github).
-- **Optional and custom connections.** The agent tells people how to connect
+- **Optional custom connections.** The agent tells people how to connect
   Notion, Linear, PagerDuty, and GitHub until each one works. Add your own
   sources as connections, tools, or subagents. See
   [Grow the brain](#grow-the-brain).
@@ -213,7 +209,7 @@ carries. The Slack docs cover common next steps:
 
 ## Get started
 
-The easiest way to start is the **Deploy with Vercel** button above. It creates
+The easiest way to start is [Deploy with Vercel](https://vercel.com/new/clone?connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22private%22%7D%5D&project-name=slack-company-brain&repository-name=slack-company-brain&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Fslack-company-brain-template). It creates
 the Vercel project, the Slack connector, and the memory Blob store for you. To
 set it up by hand instead:
 
