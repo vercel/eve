@@ -12,6 +12,10 @@ Every eval here is deterministic in every world. Sessions select the scripted
 AI SDK approval part. eve runs approved calls itself, so a passing run also shows
 that history has no such part.
 
+The model sign-in evals select `own-credential` or `own-credential-fallback`.
+Both run a `defineModel` over a fixture sign-in
+([`agent/lib/model-sign-in.ts`](../../agent/lib/model-sign-in.ts)).
+
 People are named by the fixture's `x-eve-fixture-user` header: Alice asks, Bob
 is someone else in the session, and `e2e-approval-responder` is the release
 manager whom the fixture's response policies allow. `x-eve-fixture-flag` lets a
@@ -56,6 +60,9 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | Cancel declines an authorization                                                   | [cancel-declines-authorization](./authorizations/cancel-declines-authorization.eval.ts)                                 |
 | An approved call that needs an authorization                                       | [approved-call-needs-authorization](./authorizations/approved-call-needs-authorization.eval.ts)                         |
 | A sibling sign-in is emitted beside an approval; newer attempts replace older ones | [newer-attempt-supersedes](./authorizations/newer-attempt-supersedes.eval.ts)                                           |
+| A model without the caller's credential asks, then answers in the same turn        | [sign-in-resumes-the-same-turn](./model-sign-in/sign-in-resumes-the-same-turn.eval.ts)                                  |
+| A declined model sign-in fails the turn, and the next turn asks again              | [decline-fails-the-turn](./model-sign-in/decline-fails-the-turn.eval.ts)                                                |
+| A dynamic model falls back to another model after a declined model sign-in         | [fallback-after-decline](./model-sign-in/fallback-after-decline.eval.ts)                                                |
 
 The rule that the model never runs while a request is open is checked inside
 the evals above by `expectNoModelCallWhileOpen` and

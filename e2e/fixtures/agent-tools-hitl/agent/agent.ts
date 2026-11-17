@@ -4,6 +4,7 @@ import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 import { continuationModel } from "./lib/continuation/model.ts";
 import { humanInputModel } from "./lib/hitl/model.ts";
+import { declinedModelSignIn, ownCredentialModel, projectModel } from "./lib/model-sign-in.ts";
 
 const AUTH_PROBE_DIRECTIVE = /call the auth-probe tool exactly once with marker "([^"]+)"/iu;
 const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
@@ -93,6 +94,13 @@ export default defineAgent({
         return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
       case "hitl":
         return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
+      case "own-credential":
+        return { model: ownCredentialModel, modelContextWindowTokens: 1_000_000 };
+      case "own-credential-fallback":
+        return {
+          model: declinedModelSignIn(ctx) ? projectModel : ownCredentialModel,
+          modelContextWindowTokens: 1_000_000,
+        };
       default:
         return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
     }

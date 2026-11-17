@@ -112,6 +112,28 @@ describe("a model that needs the caller's credential", () => {
     );
   });
 
+  it("answers with the new selection when it changes before the callback", async () => {
+    const billing = billingProvider();
+    let switched = false;
+    await withAgent(
+      "model-sign-in-switched",
+      defineAgent({
+        model: defineDynamic(() => ({
+          model: switched ? plainModel() : billing.model,
+          modelContextWindowTokens: 200_000,
+        })),
+      }),
+      async (session) => {
+        const asked = await session.asked();
+        switched = true;
+        const answered = await session.callBack();
+        expect(turnSettled(answered)).toMatchObject({ outcome: "completed" });
+        expect(cardOutcome(answered, asked)).toBe("interrupted");
+        expect(billing.tokensSeen).toEqual([]);
+      },
+    );
+  });
+
   it("fails a scheduled turn without asking", async () => {
     const billing = billingProvider();
     await withSession(
