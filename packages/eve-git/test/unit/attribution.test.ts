@@ -78,8 +78,17 @@ test("skips the footer only when the body already ends with it", () => {
   assert.equal(withFooter("", FOOTER), FOOTER);
   assert.equal(withFooter("Done.\n", FOOTER), `Done.\n\n${FOOTER}`);
   assert.equal(withFooter(`Done.\n\n${FOOTER}\n`, FOOTER), `Done.\n\n${FOOTER}\n`);
-  const quoted = `> Fixed.\n>\n> ${FOOTER}\n\nThanks.`;
-  assert.equal(withFooter(quoted, FOOTER), `${quoted}\n\n${FOOTER}`);
+  assert.equal(withFooter(FOOTER, FOOTER), FOOTER);
+  assert.equal(withFooter(`Done.\n${FOOTER}`, FOOTER), `Done.\n${FOOTER}`);
+  for (const body of [
+    `> Fixed.\n>\n> ${FOOTER}\n\nThanks.`,
+    `> ${FOOTER}`,
+    `> Fixed.\n>\n> ${FOOTER}`,
+    `Done. ${FOOTER}`,
+    `x${FOOTER}`,
+  ]) {
+    assert.equal(withFooter(body, FOOTER), `${body}\n\n${FOOTER}`, body);
+  }
 });
 
 test("adds the trailer to signed commit bodies", async () => {
@@ -392,6 +401,33 @@ test("refuses comments the footer cannot be added to", async () => {
     ),
     /REST/u,
   );
+  const escaped =
+    '{"query":"mutation { add\\u0043omment(input: {subjectId: \\"I\\", body: \\"hi\\"}) { clientMutationId } }"}';
+  assert.equal(JSON.parse(escaped).query.includes("addComment"), true);
+  assert.match(
+    await refusal(
+      ["gh", "api", "graphql", "--input", "q.json"],
+      files({ "/workspace/repo/q.json": escaped }),
+    ),
+    /REST/u,
+  );
+  const duplicated = `{"query":${JSON.stringify(reply)},"query":"{ viewer { login } }"}`;
+  assert.match(
+    await refusal(
+      ["gh", "api", "graphql", "--input", "q.json"],
+      files({ "/workspace/repo/q.json": duplicated }),
+    ),
+    /REST/u,
+  );
+  for (const content of ["mutation { addComment }", "[]", '{"query":1}']) {
+    assert.match(
+      await refusal(
+        ["gh", "api", "graphql", "--input", "q.json"],
+        files({ "/workspace/repo/q.json": content }),
+      ),
+      /JSON object whose query is a string/u,
+    );
+  }
   assert.match(await refusal(["gh", "api", "graphql", "-F", "query=@-"]), /-f query=/u);
 });
 

@@ -101,6 +101,8 @@ const STDIN_COMMENT_REFUSAL =
   "A comment body read from standard input can't carry the attribution footer. Pass the body with --body, or write it to a file and pass --body-file <path>.";
 const STDIN_API_REFUSAL =
   "A comment body read from standard input can't carry the attribution footer. Pass it with -f body=<text>, or write it to a file and pass -F body=@<path> or --input <path>.";
+const GRAPHQL_INPUT_REFUSAL =
+  "A GraphQL --input file must be a JSON object whose query is a string, so the attribution hook can check it for comment mutations.";
 const REVIEW_EVENTS_REFUSAL =
   "Submitting a pending review through .../reviews/<id>/events can't carry the attribution footer. Create and submit the review in one call instead: gh api repos/<owner>/<repo>/pulls/<number>/reviews -f event=COMMENT -f body=<text>, adding inline comments with -f 'comments[][path]=<file>' -F 'comments[][line]=<n>' -f 'comments[][body]=<text>'.";
 const GRAPHQL_REFUSAL =
@@ -142,7 +144,11 @@ export function withTrailer(body: string, trailer: string): string {
 
 export function withFooter(body: string, footer: string): string {
   const trimmed = body.trimEnd();
-  if (trimmed.endsWith(footer)) return body;
+  if (
+    trimmed === footer ||
+    (/\r?\n$/u.test(trimmed.slice(0, -footer.length)) && trimmed.endsWith(footer))
+  )
+    return body;
   return trimmed ? `${trimmed}\n\n${footer}` : footer;
 }
 
@@ -347,8 +353,10 @@ async function refuseGraphqlComment(
     let query: string | null = null;
     if (flag.name === "--input") {
       if (flag.value === "-") return STDIN_GRAPHQL_REFUSAL;
-      query = await files.read(resolve(flag.value));
-      if (query === null) return `Input file ${JSON.stringify(flag.value)} not found.`;
+      const content = await files.read(resolve(flag.value));
+      if (content === null) return `Input file ${JSON.stringify(flag.value)} not found.`;
+      query = graphqlInputQuery(content);
+      if (query === null) return GRAPHQL_INPUT_REFUSAL;
     } else if (API_FIELD_FLAGS.has(flag.name) && flag.value.startsWith("query=")) {
       const value = flag.value.slice("query=".length);
       if (!API_TYPED_FIELD_FLAGS.has(flag.name) || !value.startsWith("@")) query = value;
@@ -361,6 +369,21 @@ async function refuseGraphqlComment(
     if (query !== null && GRAPHQL_COMMENT_MUTATION.test(query)) return GRAPHQL_REFUSAL;
   }
   return null;
+}
+
+function graphqlInputQuery(content: string): string | null {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  if (!isRecord(payload)) return null;
+  if (payload.query !== undefined && typeof payload.query !== "string") return null;
+  const decoded = content.replace(/\\u([0-9a-fA-F]{4})/gu, (_, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
+  return `${payload.query ?? ""}\n${decoded}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
