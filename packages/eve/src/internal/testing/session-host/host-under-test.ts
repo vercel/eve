@@ -8,11 +8,7 @@ import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
-import {
-  currentTestWorld,
-  type CrashedWait,
-  type StoredWait,
-} from "#internal/testing/workflow-test-world.js";
+import { currentTestWorld, type StoredWait } from "#internal/testing/workflow-test-world.js";
 import { cancelRun } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { WorkflowBody } from "#tools/workflow-body.js";
@@ -53,7 +49,6 @@ export interface HostUnderTest {
   restart?(options?: { readonly beforeStart?: () => Promise<void> }): Promise<void>;
   cancelRunOutsideEve?(sessionId: string): Promise<void>;
   storedWaits?(): Promise<StoredWait[]>;
-  crashBeforeNextWaitEvent?(dueWithinMs: number, timeoutMs: number): Promise<CrashedWait>;
   runStatus?(runId: string): Promise<string>;
   runSpecVersion?(runId: string): Promise<number | undefined>;
   rewriteRunAttributes?(runId: string, patch: Record<string, string | undefined>): Promise<void>;
@@ -163,8 +158,6 @@ async function makeWorkflowHost(setup: HostSetup = {}): Promise<HostUnderTest> {
       await cancelRun(testWorld.world, sessionId);
     },
     storedWaits: () => testWorld.storedWaits(),
-    crashBeforeNextWaitEvent: (dueWithinMs, timeoutMs) =>
-      testWorld.crashBeforeNextWaitEvent(dueWithinMs, timeoutMs),
     runStatus: async (runId) =>
       (await testWorld.world.runs.get(runId, { resolveData: "none" })).status,
     runSpecVersion: async (runId) =>

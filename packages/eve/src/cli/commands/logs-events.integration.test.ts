@@ -14,11 +14,20 @@ import { readDevSessionEvents } from "./logs-events.js";
 
 describe("readDevSessionEvents", () => {
   const roots: string[] = [];
+  const worlds: ReturnType<typeof createWorld>[] = [];
 
   afterEach(async () => {
+    await Promise.all(worlds.map((world) => world.close?.()));
+    worlds.length = 0;
     await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
     roots.length = 0;
   });
+
+  function openWorld(root: string): ReturnType<typeof createWorld> {
+    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(root) });
+    worlds.push(world);
+    return world;
+  }
 
   it("returns an empty list without creating a store when none exists", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-logs-events-"));
@@ -40,7 +49,7 @@ describe("readDevSessionEvents", () => {
   it("skips runs without session streams via the listStreams prefilter", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-logs-events-"));
     roots.push(root);
-    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(root) });
+    const world = openWorld(root);
     await world.events.create(null, {
       eventType: "run_created",
       eventData: {
@@ -64,7 +73,7 @@ describe("readDevSessionEvents", () => {
     const logs = captureLogRecords();
     const root = await mkdtemp(join(tmpdir(), "eve-logs-events-"));
     roots.push(root);
-    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(root) });
+    const world = openWorld(root);
     setWorld(world);
     const at = new Date().toISOString();
     const startRun = async (lines: readonly string[]) => {

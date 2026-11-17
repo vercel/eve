@@ -1,5 +1,6 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { createWorld } from "@workflow/world-local";
@@ -25,14 +26,8 @@ export interface TestWorld {
   restart(options?: { readonly beforeStart?: () => Promise<void> }): Promise<string[]>;
   activeRunIds(): Promise<string[]>;
   storedWaits(): Promise<StoredWait[]>;
-  crashBeforeNextWaitEvent(dueWithinMs: number, timeoutMs: number): Promise<CrashedWait>;
   rewriteRunAttributes(runId: string, patch: Record<string, string | undefined>): Promise<void>;
   close(): Promise<void>;
-}
-
-export interface CrashedWait {
-  readonly runId: string;
-  readonly waitId: string;
 }
 
 export interface StoredWait {
@@ -57,13 +52,6 @@ export async function openTestWorld(options: TestWorldOptions): Promise<TestWorl
   let world = await startWorld(options, deliveries, {});
   await world.clear();
 
-  const runFile = async (runId: string) => {
-    const runs = join(options.dataDir, "runs");
-    const name = (await readdir(runs)).find((file) => file.startsWith(`${runId}.`));
-    if (name === undefined) throw new Error(`The World stored no run "${runId}".`);
-    return join(runs, name);
-  };
-
   const testWorld: TestWorld = {
     get world() {
       return world;
@@ -86,66 +74,28 @@ export async function openTestWorld(options: TestWorldOptions): Promise<TestWorl
     },
     activeRunIds: () => activeRunIds(world),
     async storedWaits() {
-      const directory = join(options.dataDir, "waits");
-      const files = await readdir(directory).catch(() => []);
-      return await Promise.all(
-        files
-          .filter((file) => file.endsWith(`.${options.tag}.json`))
-          .map(
-            async (file) => JSON.parse(await readFile(join(directory, file), "utf8")) as StoredWait,
-          ),
+      return withWorldDatabase(options.dataDir, (db) =>
+        db
+          .prepare("SELECT waits.doc FROM waits JOIN runs USING (run_id) WHERE runs.tag = ?")
+          .all(options.tag)
+          .map(({ doc }) => JSON.parse(String(doc), decodeStoredDate) as StoredWait),
       );
     },
-    crashBeforeNextWaitEvent(dueWithinMs, timeoutMs) {
-      return new Promise<CrashedWait>((resolve, reject) => {
-        const create = world.events.create.bind(world.events);
-        const crashing = world;
-        const timer = setTimeout(() => {
-          crashing.events.create = create;
-          reject(new Error(`No wait due within ${dueWithinMs}ms was created in ${timeoutMs}ms.`));
-        }, timeoutMs);
-        crashing.events.create = (async (...args: Parameters<typeof create>) => {
-          const [runId, event] = args;
-          if (
-            event.eventType !== "wait_created" ||
-            new Date(event.eventData.resumeAt).getTime() - Date.now() > dueWithinMs
-          )
-            return await create(...args);
-          clearTimeout(timer);
-          crashing.events.create = create;
-          const waitId = `${runId}-${event.correlationId}`;
-          const locks = join(options.dataDir, ".locks", "waits");
-          await mkdir(locks, { recursive: true });
-          await writeFile(join(locks, `${waitId}.created.${options.tag}`), "", { flag: "wx" });
-          const now = new Date();
-          await writeFile(
-            join(options.dataDir, "waits", `${waitId}.${options.tag}.json`),
-            JSON.stringify({
-              createdAt: now,
-              resumeAt: event.eventData.resumeAt,
-              runId,
-              specVersion: event.specVersion,
-              status: "waiting",
-              updatedAt: now,
-              waitId,
-            }),
-          );
-          resolve({ runId, waitId });
-          throw new Error("The process exited before the wait's event was written.");
-        }) as typeof create;
-      });
-    },
     async rewriteRunAttributes(runId, patch) {
-      const path = await runFile(runId);
-      const run = JSON.parse(await readFile(path, "utf8")) as {
-        attributes?: Record<string, string>;
-      };
-      const attributes = { ...run.attributes };
-      for (const [key, value] of Object.entries(patch)) {
-        if (value === undefined) delete attributes[key];
-        else attributes[key] = value;
-      }
-      await writeFile(path, JSON.stringify({ ...run, attributes }));
+      withWorldDatabase(options.dataDir, (db) => {
+        const row = db.prepare("SELECT doc FROM runs WHERE run_id = ?").get(runId);
+        if (row === undefined) throw new Error(`The World stored no run "${runId}".`);
+        const run = JSON.parse(String(row.doc)) as { attributes?: Record<string, string> };
+        const attributes = { ...run.attributes };
+        for (const [key, value] of Object.entries(patch)) {
+          if (value === undefined) delete attributes[key];
+          else attributes[key] = value;
+        }
+        db.prepare("UPDATE runs SET doc = ? WHERE run_id = ?").run(
+          JSON.stringify({ ...run, attributes }),
+          runId,
+        );
+      });
     },
     async close() {
       await deliveries.close();
@@ -157,6 +107,21 @@ export async function openTestWorld(options: TestWorldOptions): Promise<TestWorl
   };
   (globalThis as { [CURRENT]?: TestWorld })[CURRENT] = testWorld;
   return testWorld;
+}
+
+function withWorldDatabase<T>(dataDir: string, use: (db: DatabaseSync) => T): T {
+  const db = new DatabaseSync(join(dataDir, "world.db"));
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    return use(db);
+  } finally {
+    db.close();
+  }
+}
+
+function decodeStoredDate(_key: string, value: unknown): unknown {
+  const tagged = value as { __type?: unknown; value?: unknown } | null;
+  return tagged?.__type === "Date" ? tagged.value : value;
 }
 
 async function startWorld(
@@ -225,7 +190,7 @@ function newRealm(): void {
     | { bootedAt: number }
     | undefined;
   if (boot !== undefined) boot.bootedAt = Date.now();
-  const singleFlight = store[Symbol.for("@workflow/core//stepSingleFlight/v1")] as
+  const singleFlight = store[Symbol.for("@workflow/core//stepSingleFlight/v2")] as
     | { inFlight: Map<string, unknown> }
     | undefined;
   singleFlight?.inFlight.clear();

@@ -39,19 +39,23 @@ export async function readDevSessionEvents(
   runtime.setWorld(world);
 
   const lines: DevSessionEventLine[] = [];
-  for (const run of await listRunsOverlappingWindow(world, window)) {
-    const text = await drainRunStream(runtime, world, run.runId);
-    const runLines = parseSessionEventLines(text, run, window);
-    if (runLines === undefined) {
-      log.warn(
-        `Skipped run ${run.runId} in the local workflow store: it was recorded by eve < 27, ` +
-          "whose session events this version cannot read. Inspect this run with the eve " +
-          "version that recorded it.",
-        { runId: run.runId },
-      );
-      continue;
+  try {
+    for (const run of await listRunsOverlappingWindow(world, window)) {
+      const text = await drainRunStream(runtime, world, run.runId);
+      const runLines = parseSessionEventLines(text, run, window);
+      if (runLines === undefined) {
+        log.warn(
+          `Skipped run ${run.runId} in the local workflow store: it was recorded by eve < 27, ` +
+            "whose session events this version cannot read. Inspect this run with the eve " +
+            "version that recorded it.",
+          { runId: run.runId },
+        );
+        continue;
+      }
+      lines.push(...runLines);
     }
-    lines.push(...runLines);
+  } finally {
+    await world.close?.();
   }
   return lines.sort((a, b) => a.at.localeCompare(b.at));
 }
