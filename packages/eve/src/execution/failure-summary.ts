@@ -1,5 +1,5 @@
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { formatError } from "#internal/logging.js";
+import { errorClassName, formatError } from "#internal/logging.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -17,6 +17,7 @@ export function summarizeFailure(
   if (summary !== null) {
     const curated = {
       ...formatted,
+      errorName: errorClassName(error),
       message: summary.message,
       name: summary.name,
       semanticErrorId: summary.id,

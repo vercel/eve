@@ -5,7 +5,7 @@ import {
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
 import type { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { createErrorId, createLogger, formatError } from "#internal/logging.js";
+import { createErrorId, createLogger, errorClassName, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
 import type { StepResult } from "#harness/types.js";
@@ -75,6 +75,7 @@ export async function reportModelCallFailure(
     summary !== null
       ? {
           errorId,
+          errorName: errorClassName(error),
           message: summary.message,
           name: summary.name,
           semanticErrorId: summary.id,
@@ -82,7 +83,13 @@ export async function reportModelCallFailure(
           ...(summary.hint !== undefined && { hint: summary.hint }),
         }
       : rejection !== null
-        ? { errorId, message: toErrorMessage(error), name: rejection.name, ...diagnostics }
+        ? {
+            errorId,
+            errorName: errorClassName(error),
+            message: toErrorMessage(error),
+            name: rejection.name,
+            ...diagnostics,
+          }
         : { ...formatError(error, errorId), ...diagnostics };
   const terminal = classifyModelCallError(error) === "terminal";
   if (terminal && summary !== null) {

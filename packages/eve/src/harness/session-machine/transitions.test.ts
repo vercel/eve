@@ -227,7 +227,7 @@ function settledBy(events: readonly SessionEvent[]): Record<string, string> {
 describe("closing what a turn leaves open", () => {
   it("fails the turn with its run and calls, keeping the task that outlives it", () => {
     const events = committed(viewOf(busyTurn()), (view) =>
-      fail(view, { code: "BOOM", message: "It broke." }),
+      fail(view, { code: "BOOM", details: { name: "BoomError" }, message: "It broke." }),
     );
 
     // The failing model run keeps the error; its unfinished calls are interrupted.
@@ -240,7 +240,7 @@ describe("closing what a turn leaves open", () => {
     expect(events.some((event) => event.type === "task.ended")).toBe(false);
     for (const type of ["model.settled", "turn.settled"]) {
       expect(events.find((event) => event.type === type)).toMatchObject({
-        data: { error: { code: "BOOM", message: "It broke." } },
+        data: { error: { code: "BOOM", message: "It broke.", name: "BoomError" } },
       });
     }
   });
