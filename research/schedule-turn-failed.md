@@ -1,4 +1,5 @@
 ---
+issue: https://github.com/vercel/eve/pull/6552
 status: proposed
 last_updated: "2026-11-17"
 ---
@@ -46,7 +47,7 @@ export default defineDynamicSchedules({
 
 | Field        | Type                         | Purpose                                                                           |
 | ------------ | ---------------------------- | --------------------------------------------------------------------------------- |
-| `error`      | `ErrorInfo`                  | The error on the failed turn's `turn.settled`, with its `code` and `message`.     |
+| `error`      | `ErrorInfo`                  | The failure's error: from `turn.settled`, or from `session.ended` when terminal.  |
 | `occurrence` | `ScheduleOccurrenceIdentity` | The occurrence that started the turn. Its `executionId` keys idempotent effects.  |
 | `auth`       | `SessionAuthContext`         | The occurrence's auth, as the definition's `auth` resolved it.                    |
 | `payload`    | `TPrepared`                  | The schedule's stored payload when `turnFailed` runs, including any later update. |
@@ -84,9 +85,12 @@ already advise for `run`.
 
 ### Where it runs
 
-eve runs `turnFailed` in the session's workflow, after it saves the `turn.settled` line, at the
-point where hooks see the same event ([hooks guide][hooks]). A replayed step doesn't call it a
-second time.
+eve runs `turnFailed` in the session's workflow, at the point where hooks see the failure
+([hooks guide][hooks]). A failure that leaves the session open settles the turn, and eve calls
+`turnFailed` after it saves the `turn.settled` line. A terminal failure, such as a gateway
+configuration error ([`errors.ts`][terminal]), emits no `turn.settled`: `fail()` saves
+`session.ended` with the error and `cause: { turnId }` ([`facts.ts`][ended]), and eve calls
+`turnFailed` after that line. A replayed step doesn't call it a second time.
 
 If `turnFailed` throws, eve logs the error and doesn't retry. The turn has already failed, and the
 next occurrence fires as scheduled. This matches how eve treats a hook that throws between turns.
@@ -98,12 +102,17 @@ record, and `turnFailed` can notify the person either way.
 
 ## Design
 
-eve already has every piece except the call:
+eve has most of the pieces already:
 
-1. **Provenance.** The turn's context holds the collection and the instance. eve adds the
-   schedule's provider namespace to the same scope, since the provider needs it to act on the
-   schedule. Today eve derives the namespace from the stored scope at dispatch
-   ([`dispatch-occurrence.ts`][namespace]), and the turn can't reach that scope.
+1. **Provenance.** The turn's context holds the collection, the instance, and the occurrence's
+   `executionId` ([`channel/schedule.ts`][keys]). `ScheduleOccurrenceIdentity` also requires
+   `name`, `scheduleId`, and `scheduledAt` ([`subscription.ts`][occurrence-identity]). eve adds the
+   provider namespace, `scheduleId`, and `scheduledAt` to the same scope at dispatch, and carries
+   them through `delivery.schedule` and `RunInput.schedule` to the turn. The provider needs the
+   namespace to act on the schedule; today eve derives it from the stored scope at dispatch
+   ([`dispatch-occurrence.ts`][namespace]), and the turn can't reach that scope. `ScheduleRecord`
+   has no per-occurrence time ([`subscription.ts`][record]), so `scheduledAt` can only come from
+   dispatch.
 2. **The definition.** eve loads the collection's definition from the bundle by collection id, as
    the occurrence consumer does.
 3. **The handle.** eve builds `disable()` and `delete()` as it does for `run`
@@ -169,3 +178,7 @@ import cycle. Lazy imports break the cycle and add a second path to the same han
 [dispatch-handle]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/runtime/schedules/dispatch-occurrence.ts#L51-L58
 [namespace]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/runtime/schedules/dispatch-occurrence.ts#L74-L90
 [hooks]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/docs/guides/hooks.md#what-happens-when-a-hook-throws
+[terminal]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/model-call/errors.ts#L222-L228
+[ended]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/facts.ts#L43-L65
+[occurrence-identity]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/public/schedules/subscription.ts#L75-L91
+[record]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/public/schedules/subscription.ts#L139-L148
