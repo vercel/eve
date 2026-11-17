@@ -12,6 +12,7 @@ import { appliedSession, saveSessionProjection } from "#harness/session-machine/
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/eve/agent-trace-context-store.js";
+import { markSandboxRunning } from "#sandbox/state.js";
 
 const log = createLogger("execution.cancelled-turn");
 
@@ -65,6 +66,7 @@ export async function createCancelledModelCallBatchResult(input: {
   readonly checkpoint: CompletedModelCallCheckpoint | undefined;
   readonly ctx: ContextContainer;
   readonly initialSession: HarnessSession;
+  readonly sandboxIdleTimeoutMs: number | undefined;
   readonly stepInput: HarnessStepInput | undefined;
 }): Promise<DurableStepResult> {
   const interruptedContext = serializeContext(input.ctx);
@@ -84,6 +86,11 @@ export async function createCancelledModelCallBatchResult(input: {
       preserveSerializedAgentTraceState(checkpointContext, interruptedContext),
       interruptedContext,
     ),
-    ...createDurableSessionValues(saveSessionProjection(cancelledSession, input.ctx)),
+    ...createDurableSessionValues(
+      saveSessionProjection(
+        markSandboxRunning(cancelledSession, input.sandboxIdleTimeoutMs),
+        input.ctx,
+      ),
+    ),
   };
 }

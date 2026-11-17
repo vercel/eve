@@ -194,7 +194,40 @@ The model keeps seeing attachments from earlier turns. Each call sends the same 
 
 ## Custom providers
 
-To run sandboxes on a backend eve doesn't ship, define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. It implements a connection to one sandbox (`spawn`, `readFile`, `writeFiles`, `removePath`, and `stop`) and the methods `prepare`, `start`, `resume`, and `onSessionEnd`. See [Custom sandbox providers](/docs/sandbox/custom-providers) for a complete example.
+To run sandboxes on a backend eve doesn't ship, define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. It implements a connection to one sandbox (`spawn`, `readFile`, `writeFiles`, `removePath`, and `stop`) and the methods `prepare`, `start`, `resume`, and `onSessionEnd`, and optionally `onSessionIdle` to stop idle sandboxes. See [Custom sandbox providers](/docs/sandbox/custom-providers) for a complete example.
+
+## Stop an idle sandbox
+
+eve stops a session's sandbox once the session has been idle for the environment's `idleTimeoutMs`, 5 minutes by default. Files persist, running processes end, and the next turn that uses the sandbox resumes it.
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  // optional: how long the sandbox keeps running after the session goes idle
+  idleTimeoutMs: 0,
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+| `idleTimeoutMs` | Result                                                      |
+| --------------- | ----------------------------------------------------------- |
+| Omitted         | The sandbox stops 5 minutes after the session goes idle.    |
+| `0`             | The sandbox stops as soon as the session goes idle.         |
+| `false`         | eve never stops it, and the provider's own timeout applies. |
+
+- A session is idle when it has no open turn, no running task, and no queued message. A turn waiting for an approval or an answer is still open.
+- With `0`, the sandbox keeps running between queued messages and into a turn that a hook starts with `ctx.continue()`.
+- The window starts when the session goes idle, or when its sandbox starts if that comes later. A new turn ends the window.
+- eve never starts or resumes a sandbox to stop it. A later turn resumes the sandbox only if it uses it, so a longer window lets a follow-up turn reuse the running sandbox.
+- A process that the `defineSandbox()` definition started, such as a local server, doesn't come back after the stop, because resuming the sandbox doesn't run the definition again. Start the process again from the tool that needs it, or set `idleTimeoutMs: false` to keep it running.
+- Only the session that owns the sandbox stops it. A subagent that shares its parent's sandbox doesn't.
+- A [prewarmed session's](/docs/guides/frontend/use-eve-agent#prewarming) sandbox stops if no message arrives within the window. With `0`, prewarming doesn't start the sandbox.
+- The provider's own timeout still applies, including during a turn.
+
+Vercel Sandbox and Docker stop idle sandboxes, and `DefaultSandbox.environment()` takes `idleTimeoutMs` at its top level. just-bash has no compute to stop. A [custom provider](/docs/sandbox/custom-providers#onsessionidle) stops idle sandboxes when it implements `onSessionIdle()`.
 
 ## Lifecycle
 
@@ -203,6 +236,7 @@ Each session's sandbox persists across turns and deployments while the provider 
 | Event                                                                                                          | Result                                                                                                          |
 | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `sandbox.stop()`                                                                                               | Compute stops and files persist. The next access resumes it.                                                    |
+| The session stays idle for `idleTimeoutMs`                                                                     | Compute stops and files persist, as with `sandbox.stop()`. See [Stop an idle sandbox](#stop-an-idle-sandbox).   |
 | `sandbox.delete()`                                                                                             | The sandbox and its files are deleted. The next `ctx.getSandbox()` runs the selector again for a fresh sandbox. |
 | The native sandbox is gone on resume, such as after a removed container or deleted just-bash session directory | The session continues in a fresh sandbox, without the lost files.                                               |
 | The session's sandbox came from another provider or state version, such as after you change providers          | The session continues in a fresh sandbox. eve doesn't delete the old one.                                       |

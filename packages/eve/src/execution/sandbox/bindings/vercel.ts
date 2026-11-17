@@ -119,6 +119,19 @@ export function createVercelSandbox(
         signal,
       });
     },
+    async onSessionIdle(context, state, { signal }) {
+      const sandbox = await getNamedVercelSandbox({
+        createOptions: signal === undefined ? createOptions : { ...createOptions, signal },
+        sandboxModule: await loadSandboxModule(),
+        sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
+      });
+      if (sandbox === null) return;
+      try {
+        await stopVercelSandbox(sandbox, signal);
+      } catch (error) {
+        if (!isVercelSandboxMissingError(error)) throw error;
+      }
+    },
     async prepare(context) {
       if (context.isEmpty && createOptions.source === undefined) return {};
       try {

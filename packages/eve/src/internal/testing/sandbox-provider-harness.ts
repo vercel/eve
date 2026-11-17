@@ -17,6 +17,7 @@ import {
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
 } from "#shared/sandbox-environment.js";
+import { resolveRecordedSandboxProvider } from "#sandbox/state.js";
 import type { SandboxProviderResourceFile } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
@@ -82,6 +83,23 @@ export function createSandboxEnvironmentHarness<
           signal: input.signal,
           reason: input.reason ?? "completed",
         },
+      );
+    },
+    async idleSession(input: {
+      readonly appRoot: string;
+      readonly sandboxName: string;
+      readonly signal?: AbortSignal;
+      readonly state: State | null;
+    }): Promise<void> {
+      const recorded = await resolveRecordedSandboxProvider(
+        runtime,
+        input.state,
+        async () => preparedArtifact,
+      );
+      await recorded?.implementation.onSessionIdle?.(
+        sessionContext(input.appRoot, input.sandboxName),
+        recorded.state,
+        { signal: input.signal },
       );
     },
     async prepare(input: {

@@ -13,6 +13,7 @@ import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-err
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
+import type { SandboxState } from "#sandbox/state.js";
 
 vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
@@ -21,12 +22,15 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
 function fixture(
   options: {
     readonly closable?: boolean;
+    readonly idleTimeoutMs?: number | false;
     readonly returnCopy?: boolean;
     readonly setup?: () => void;
+    readonly stopsIdle?: boolean;
   } = {},
 ) {
   const { returnCopy = false, setup } = options;
   const onSessionEnd = vi.fn(async () => {});
+  const onSessionIdle = vi.fn(async (_context: SandboxSessionContext, _state: unknown) => {});
   const stopSandbox = vi.fn(async () => {});
   const closeSandbox = vi.fn(async () => {});
   const create = vi.fn(async () => {
@@ -40,9 +44,17 @@ function fixture(
   }));
   const provider = defineSandboxProvider({
     name: "test",
-    environment: () => ({ onSessionEnd, prepare: async () => null, start, resume }),
+    environment: () => ({
+      onSessionEnd,
+      ...(options.stopsIdle === true && { onSessionIdle }),
+      prepare: async () => null,
+      start,
+      resume,
+    }),
   });
-  const environment = provider.environment();
+  const environment = provider.environment(
+    options.idleTimeoutMs === undefined ? undefined : { idleTimeoutMs: options.idleTimeoutMs },
+  );
   const selector = defineSandbox(async () => {
     const sandbox = await environment.open();
     setup?.();
@@ -62,7 +74,16 @@ function fixture(
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { closeSandbox, create, onSessionEnd, registry, resume, start, stopSandbox };
+  return {
+    closeSandbox,
+    create,
+    onSessionEnd,
+    onSessionIdle,
+    registry,
+    resume,
+    start,
+    stopSandbox,
+  };
 }
 function upsertingFixture() {
   const live = new Map<string, ReturnType<typeof mockSandbox>>();
@@ -105,6 +126,7 @@ async function open(
   id = "session-1",
   state: Parameters<typeof ensureSandboxAccess>[0]["state"] = null,
   nodeId = "__root__",
+  ownsSandbox?: boolean,
 ) {
   const context = new ContextContainer();
   context.set(SessionKey, {
@@ -116,6 +138,7 @@ async function open(
     const access = await ensureSandboxAccess({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId,
+      ownsSandbox,
       registry,
       sessionId: id,
       state,
@@ -645,5 +668,118 @@ describe("ensureSandboxAccess", () => {
 
     expect(onSessionEnd).not.toHaveBeenCalled();
     expect(value.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("idle stop marker", () => {
+  function unopened(
+    registry: RuntimeSandboxRegistry,
+    state: SandboxState | null,
+    ownsSandbox?: boolean,
+  ) {
+    return ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      ownsSandbox,
+      registry,
+      sessionId: "session-1",
+      state,
+    });
+  }
+
+  it("records that the sandbox may be running once a step opens it, with this deployment's window", async () => {
+    const value = fixture({ idleTimeoutMs: 60_000, stopsIdle: true });
+    const untouched = await unopened(value.registry, null);
+    await expect(untouched.captureState()).resolves.toEqual({ session: null });
+
+    const { access } = await open(value.registry);
+    const recorded = await access.captureState();
+    expect(recorded).toEqual({
+      running: { idleTimeoutMs: 60_000 },
+      session: expect.objectContaining({ providerName: "test" }),
+    });
+
+    const later = await unopened(fixture({ idleTimeoutMs: 0, stopsIdle: true }).registry, recorded);
+    await expect(later.captureState()).resolves.toEqual({
+      ...recorded,
+      running: { idleTimeoutMs: 0 },
+    });
+    for (const off of [
+      fixture({ idleTimeoutMs: false, stopsIdle: true }),
+      fixture({ idleTimeoutMs: 0, stopsIdle: false }),
+    ]) {
+      const dropped = await unopened(off.registry, recorded);
+      await expect(dropped.captureState()).resolves.toEqual({ session: recorded.session });
+    }
+  });
+
+  it("reads a session recorded before the marker existed as clear", async () => {
+    const value = fixture({ stopsIdle: true });
+    const { access } = await open(value.registry);
+    const { session } = await access.captureState();
+
+    const legacy = await unopened(value.registry, { session });
+    await expect(legacy.captureState()).resolves.toEqual({ session });
+  });
+
+  it("never records the marker for a session that shares another session's sandbox", async () => {
+    const value = fixture({ idleTimeoutMs: 0, stopsIdle: true });
+    const owner = await open(value.registry);
+    const shared = await open(
+      value.registry,
+      "session-1",
+      await owner.access.captureState(),
+      "__root__",
+      false,
+    );
+
+    await expect(shared.access.captureState()).resolves.not.toHaveProperty("running");
+  });
+
+  it("clears the marker when the session stops or deletes its sandbox", async () => {
+    const value = fixture({ idleTimeoutMs: 0, stopsIdle: true });
+    const stopped = await open(value.registry);
+    await stopped.access.stop();
+    await expect(stopped.access.captureState()).resolves.not.toHaveProperty("running");
+    await stopped.access.get();
+    await expect(stopped.access.captureState()).resolves.toHaveProperty("running");
+
+    const deleted = await open(value.registry, "session-2");
+    await deleted.access.delete?.();
+    await expect(deleted.access.captureState()).resolves.toEqual({ session: null });
+  });
+
+  it("stops the recorded sandbox without opening it", async () => {
+    const value = fixture({ idleTimeoutMs: 0, stopsIdle: true });
+    const { access } = await open(value.registry);
+    const recorded = await access.captureState();
+    await access.release();
+    value.start.mockClear();
+
+    const idle = await unopened(value.registry, recorded);
+    const { signal } = new AbortController();
+    await idle.stopIdle({ signal });
+
+    expect(value.onSessionIdle).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        kind: "session",
+        session: expect.objectContaining({ id: "session-1" }),
+      }),
+      { key: "session-1" },
+      { signal },
+    );
+    expect(value.start).not.toHaveBeenCalled();
+    expect(value.resume).not.toHaveBeenCalled();
+  });
+
+  it("leaves the sandbox alone when this deployment turned the idle stop off", async () => {
+    const value = fixture({ idleTimeoutMs: false, stopsIdle: true });
+    const recorded = { running: { idleTimeoutMs: 0 }, session: null };
+
+    await (
+      await unopened(value.registry, recorded)
+    ).stopIdle({ signal: new AbortController().signal });
+
+    expect(value.onSessionIdle).not.toHaveBeenCalled();
   });
 });

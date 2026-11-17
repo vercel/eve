@@ -11,7 +11,8 @@ import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { sessionProvider } from "#context/providers/session.js";
 import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
-import { sandboxProvider } from "#context/providers/sandbox.js";
+import { sandboxProvider, sessionSandboxIdleTimeoutMs } from "#context/providers/sandbox.js";
+import { markSandboxRunning } from "#sandbox/state.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -271,6 +272,13 @@ async function runSessionStepBody(
     ...hydrateDurableSession(durableSession),
     history: validateHarnessModelMessages(input.history),
   };
+  const sandboxIdleTimeoutMs = (session: HarnessSession) =>
+    sessionSandboxIdleTimeoutMs({
+      agent,
+      channelState: ctx.get(ChannelKey)?.state,
+      sandboxState: session.sandboxState,
+      sessionId: durableSession.sessionId,
+    });
   const instrumentation = bindSessionInstrumentation({
     agentName: agent.id,
     ctx,
@@ -534,6 +542,10 @@ async function runSessionStepBody(
       })());
     };
     if (interrupted !== undefined) {
+      initialSession = markSandboxRunning(
+        initialSession,
+        await sandboxIdleTimeoutMs(initialSession),
+      );
       const recovered = await recoverInterruptedStep({
         admission: admissionFacts(runtimeIdentity),
         attempt: interrupted,
@@ -682,6 +694,9 @@ async function runSessionStepBody(
         checkpoint: completedModelCall,
         ctx,
         initialSession,
+        sandboxIdleTimeoutMs: await sandboxIdleTimeoutMs(
+          completedModelCall?.result.session ?? initialSession,
+        ),
         stepInput: resolved,
       });
     }

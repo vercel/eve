@@ -1,5 +1,5 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
-import type { SandboxProviderRuntime, SandboxSessionContext } from "#sandbox/provider.js";
+import type { SandboxProviderRuntime } from "#sandbox/provider.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
 
@@ -12,8 +12,28 @@ export interface SandboxSessionState {
   readonly stateProtocolVersion: number;
 }
 
+export interface SandboxRunning {
+  readonly idleTimeoutMs: number;
+}
+
 export interface SandboxState {
   readonly session: SandboxSessionState | null;
+  readonly running?: SandboxRunning;
+}
+
+export function clearSandboxRunning(state: SandboxState | undefined): SandboxState | undefined {
+  return state?.running === undefined ? state : { session: state.session };
+}
+
+export function markSandboxRunning<Session extends { readonly sandboxState?: SandboxState }>(
+  session: Session,
+  idleTimeoutMs: number | undefined,
+): Session {
+  if (idleTimeoutMs === undefined) return session;
+  return {
+    ...session,
+    sandboxState: { session: session.sandboxState?.session ?? null, running: { idleTimeoutMs } },
+  };
 }
 
 export function isRetiredSandboxSessionState(state: SandboxSessionState): boolean {
@@ -51,29 +71,44 @@ export function resolvePersistedSandboxSessionState(
       };
 }
 
-type SandboxSessionEndWithArtifact = (
-  context: SandboxSessionContext,
+interface RecordedSandboxProvider {
+  readonly implementation: SandboxProviderRuntime["implementation"];
+  readonly state: SandboxPreparedArtifact | null;
+}
+
+type RecordedSandboxProviderLookup = (
   state: SandboxPreparedArtifact | null,
-  options: {
-    readonly artifact: SandboxPreparedArtifact | undefined;
-    readonly reason: SandboxSessionEndReason;
-  },
-) => Promise<void>;
+  artifact: SandboxPreparedArtifact | undefined,
+) => RecordedSandboxProvider | undefined;
 
-const sessionEndsWithArtifact = new WeakMap<object, SandboxSessionEndWithArtifact>();
+const recordedSandboxProviderLookups = new WeakMap<object, RecordedSandboxProviderLookup>();
 
-export function withSessionEndArtifact<Implementation extends object>(
+export function withRecordedSandboxProvider<Implementation extends object>(
   implementation: Implementation,
-  onSessionEnd: SandboxSessionEndWithArtifact,
+  lookup: RecordedSandboxProviderLookup,
 ): Implementation {
-  sessionEndsWithArtifact.set(implementation, onSessionEnd);
+  recordedSandboxProviderLookups.set(implementation, lookup);
   return implementation;
 }
 
-export function getSessionEndWithArtifact(
-  implementation: object,
-): SandboxSessionEndWithArtifact | undefined {
-  return sessionEndsWithArtifact.get(implementation);
+export async function resolveRecordedSandboxProvider(
+  provider: Pick<SandboxProviderRuntime, "implementation">,
+  state: SandboxPreparedArtifact | null,
+  loadArtifact: () => Promise<SandboxPreparedArtifact | undefined>,
+): Promise<RecordedSandboxProvider | undefined> {
+  const lookup = recordedSandboxProviderLookups.get(provider.implementation);
+  if (lookup === undefined) return { implementation: provider.implementation, state };
+  return lookup(state, await loadArtifact());
+}
+
+export function recordedSandboxStopsIdle(
+  provider: Pick<SandboxProviderRuntime, "implementation">,
+  recorded: SandboxSessionState | null | undefined,
+): boolean {
+  if (recorded === null || recorded === undefined) return true;
+  const lookup = recordedSandboxProviderLookups.get(provider.implementation);
+  const resolved = lookup === undefined ? provider : lookup(recorded.state, undefined);
+  return resolved === undefined || resolved.implementation.onSessionIdle !== undefined;
 }
 
 export type SandboxPreparation = (open: () => Promise<SandboxSession>) => Promise<void>;

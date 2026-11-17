@@ -825,6 +825,28 @@ describe("createVercelSandbox", () => {
       );
     });
 
+    it("lets DefaultSandbox stop the Vercel sandbox it selected, from recorded state or from its prepared artifact", async () => {
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");
+      vi.stubEnv("VERCEL_TEAM_ID", "team_golden");
+      vi.stubEnv("VERCEL_TOKEN", "token_golden");
+      const fake = createFakeVercelProvider();
+      sdk.module = fake.sandboxModule;
+      const provider = createSandboxEnvironmentHarness(DefaultSandbox.environment());
+      await provider.prepare({ appRoot });
+      const { state } = await provider.start({ appRoot, sandboxName: "session_golden" });
+      const [sandbox] = fake.sandboxes.values();
+
+      const { signal } = new AbortController();
+      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state });
+      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state: null });
+
+      expect(sandbox?.stop).toHaveBeenCalledTimes(2);
+      expect(sandbox?.stop).toHaveBeenNthCalledWith(1, { signal });
+      expect(sandbox?.stop).toHaveBeenNthCalledWith(2, { signal });
+      expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledOnce();
+    });
+
     it("resumes state and a prepared snapshot recorded by an earlier release", async () => {
       const sandboxName = "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317";
       const fake = createFakeVercelProvider();
@@ -920,7 +942,17 @@ describe("createVercelSandbox", () => {
         });
       const end = (state: { readonly sandboxName: string; readonly version: 3 } | null) =>
         provider.endSession({ appRoot: "/tmp/test-app-root", sandboxName: "session-key", state });
-      return { end, fake, start };
+      const idle = (
+        state: { readonly sandboxName: string; readonly version: 3 } | null,
+        signal?: AbortSignal,
+      ) =>
+        provider.idleSession({
+          appRoot: "/tmp/test-app-root",
+          sandboxName: "session-key",
+          signal,
+          state,
+        });
+      return { end, fake, idle, start };
     }
 
     it("keeps one sandbox per session key across concurrent starts, open options, and deployments", async () => {
@@ -932,6 +964,27 @@ describe("createVercelSandbox", () => {
       expect(fake.sandboxes.size).toBe(1);
       expect(second.state).toEqual(first.state);
       expect(later.state).toEqual(first.state);
+    });
+
+    it("stops a running session sandbox on idle without resuming it, and leaves a stopped or missing one alone", async () => {
+      const { fake, idle, start } = session();
+      const { state } = await start();
+      const sandbox = fake.sandboxes.get(state.sandboxName)!;
+
+      const { signal } = new AbortController();
+      await idle(state, signal);
+      expect(sandbox.stop).toHaveBeenCalledExactlyOnceWith({ signal });
+      expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
+        expect.objectContaining({ name: state.sandboxName, resume: false, signal }),
+      );
+
+      sandbox.status = "stopped";
+      await idle(null);
+      expect(sandbox.stop).toHaveBeenCalledOnce();
+
+      fake.sandboxes.clear();
+      await expect(idle(null)).resolves.toBeUndefined();
+      expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledOnce();
     });
 
     it("deletes the session's sandbox by key when no state was recorded, and succeeds once it is gone", async () => {
