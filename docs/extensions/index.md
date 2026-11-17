@@ -429,6 +429,8 @@ Local `eve dev` mounts the bundled self-modification extension by default, witho
 
 eve checks the eve version that built an extension before it loads the extension's code. A built extension needs that eve release or a later one. Build with the oldest release you want to support, and test with newer agents. An agent can't rebuild an installed extension that ships without source.
 
+Sessions saved by eve 0.68 or earlier store extension state per package, not per mount. When such a session moves to a newer deployment, eve gives each value to the one mount that defines it and drops values that no mount defines.
+
 ### Troubleshooting
 
 | What you see                                                                                 | What to do                                                                                                                               |

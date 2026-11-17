@@ -57,7 +57,7 @@ interface ScheduleHandlerArgs {
 }
 ```
 
-A `content` schedule runs only at build time. A `run` schedule also runs at runtime when the schedule fires. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+A `content` schedule's module runs only at build time; eve sends its prompt when the schedule fires. A `run` schedule's module also loads at runtime so its handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 `cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. Set `timezone` to an IANA timezone to keep a local time across daylight saving changes:
 

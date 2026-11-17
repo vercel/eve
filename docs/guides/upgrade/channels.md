@@ -27,7 +27,7 @@ This page is part of [Upgrade to 1.0](/docs/guides/upgrade).
 - Authored channel identity is `channel:<name>`, including route-only channels and the default `channel:eve`, which replaces `http`. Update visibility and authorization rules that match the old names.
 - Move visibility classification from `metadata().audience` to `audience(input)`. Without it, the audience is `unknown`.
 - Channel context factories take `context(state, channel)`. Continuation aliases live on `channel.continuation`.
-- Channel message hooks receive typed `ChannelDelivery` payloads and return replacements. Use `channel.state` for state changes. Remove `kindHint`.
+- Channel `deliver` hooks receive typed `ChannelDelivery` payloads and return replacements. Use `channel.state` for state changes. Remove `kindHint`.
 - Rename the CORS options `allowedHeaders`, `exposedHeaders`, and `preflightStatus` to `allowHeaders`, `exposeHeaders`, and `preflight.statusCode`.
 - Sends, channels, and schedules accept `MessageContent`; send images as file parts. In Chat SDK channels, rename `messageToUserContent` to `messageContentOf`.
 

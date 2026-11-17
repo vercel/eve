@@ -269,6 +269,18 @@ each task's start and end instead. See
 
 ## Ownership and limits
 
-- **Ownership.** Tasks belong to the session's open turn rather than to a specific caller. Any later turn in the session can continue an idle resumable task by `taskId` or cancel it with `eve__task_cancel`, and a continued `serve` task keeps state from earlier calls. In shared conversations, [key per-caller data on the caller's identity](/docs/tools/workflows#resumable-tasks-serve) and enforce access checks inside the tool.
-- **Working tasks.** A session runs at most 32 working tasks concurrently; idle resumable tasks don't count toward the limit.
-- **No time limits.** Tasks have no built-in timeout, and `limits.sessionTimeoutMs` (30 idle days by default) starts counting only after the turn and its working tasks finish. Race `sleep` against task work when you need a deadline.
+- **Ownership.** Tasks belong to the session's open turn, not to the caller that started them. A
+  session has at most one open turn, so `eve__task_wait`, `eve__task_cancel`, task results, and the
+  `[Tasks]` note cover every task in the session. Any later turn can continue an idle resumable task
+  by its `taskId`, and that call runs with its own caller's auth. Only the turn's own caller steers
+  it; anonymous callers share one identity. eve doesn't check which caller started a task. In a session with several people, such as a
+  shared Slack thread, the model working for one person can continue or `eve__task_cancel` another
+  person's task. A continued `serve` task keeps the state its body built for earlier calls.
+  [Key per-caller data on the caller's identity](/docs/tools/workflows#resumable-tasks-serve) and enforce
+  per-person access inside the tool.
+- **Working tasks.** A session runs at most 32 working tasks at once. An idle resumable task doesn't
+  count, and a call that makes it work again does.
+- **No time limits.** Tasks have no timeout of their own, and the session timeout does not bound
+  them. A turn held open while its tasks work keeps the session open, and
+  `limits.sessionTimeoutMs` (30 idle days by default) counts from when that turn ends. A body
+  that needs a deadline races `sleep` against its work.

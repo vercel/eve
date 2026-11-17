@@ -27,7 +27,7 @@ Every local `agent.ts`, root or subagent, must export the value `defineAgent` re
 
 A gateway model ID string routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a model instance. eve types it as `EveLanguageModel`, exported from `eve` and `eve/models`, and every AI SDK language model satisfies it.
 
-With a static Gateway model, `agent.ts` runs only at build time. A dynamic model or model instance also runs at runtime so eve can resolve the model for each call. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+With a static Gateway model, `agent.ts` runs only at build time. A dynamic model or model instance also loads `agent.ts` at runtime so eve can resolve the model. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 
@@ -214,7 +214,7 @@ base input price, against 1.25x for 5 minutes, and applies to every cached
 breakpoint, including the conversation's, so it pays off only when the cached
 prefix is read again after the 5-minute cache has expired.
 
-On an Anthropic model through Gateway, `5m` uses Gateway's automatic caching and anchors the shared base system prompt so sessions share its cache. `1h` disables Gateway's automatic caching (including `gateway.caching: "auto"`) and sets 1-hour cache breakpoints directly. eve rejects `promptCache` on non-Anthropic Gateway models; use `providerOptions.gateway.caching` instead.
+On an Anthropic model through Gateway, `5m` uses Gateway's automatic caching and sets `providerOptions.gateway.cacheAnchorMessageIndex` to `0` so sessions that share a base system prompt share its cache. `1h` disables Gateway's automatic caching (including `gateway.caching: "auto"`) and sets 1-hour cache breakpoints directly. eve rejects `promptCache` on non-Anthropic Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
@@ -249,9 +249,23 @@ export default defineAgent({
 });
 ```
 
-`sessionTimeoutMs` sets how long a session (including a delegated session) may sit idle between turns before eve completes it (`session.ended` with `outcome: "completed"`) and releases its channel addresses. Omit it for 30 days, or set `false` to disable it. A session never expires while a turn is open, and process restarts don't reset the window.
+`sessionTimeoutMs` sets how long any session, including a delegated session,
+may sit idle before eve completes it. Omit it for 30 days, or set it to `false`
+to disable the timeout. The idle window starts when the session is created. It
+restarts each time a turn ends, including turns that clear or compact the
+context or are cancelled. A session never expires while a turn is open, such as while its
+[tasks](./tools/tasks) work or it waits for a person to answer. Process restarts
+don't change the window.
 
-`sessionUsage` receives `{ total, window }` (`TokenUsage`, exported from `eve`), where `total` is lifetime session usage and `window` is usage since the session's own budget prompt was last approved (equal to `total` before the first approval):
+When the window elapses, eve emits `session.ended` with `outcome: "completed"`
+and releases the channel addresses, such as a Slack thread, that route messages
+to the session. The next message at that address starts a new session. To carry the earlier conversation over, pass it as
+[prior history](./channels/eve#start-from-prior-history). A session with
+[zero retention](#run-data-retention) loses its stored payloads when it ends.
+
+`sessionUsage` gets two `TokenUsage` records, a type exported from `eve`. `total` is everything the session has
+spent, and `window` is what it spent since the last approved continuation. Each
+record has these fields:
 
 | Field              | Meaning                                                                                                                                            |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -261,7 +275,21 @@ export default defineAgent({
 | `outputTokens`     | Generated output.                                                                                                                                  |
 | `costUsd`          | Model token cost in US dollars that AI Gateway reports with each step. Excludes tool and infrastructure spend. Unset when no step reported a cost. |
 
-Omit `sessionUsage` to stop at `40_000_000` new input tokens per window (`window.inputTokens - window.cacheReadTokens >= 40_000_000`), or set `sessionUsage: false` to leave sessions uncapped. `sessionUsage` can also raise its threshold after each approval:
+`window` is `total` minus the session's
+[total](./concepts/sessions-runs-and-streaming#replies-and-narration) when its
+own budget prompt was last accepted. Before the first approval, it equals
+`total`. Accepting a budget prompt that a subagent passed up starts the
+subagent's window, not the parent's. The window survives redeploys and
+replays.
+
+Omit `sessionUsage` to stop at `40_000_000` new input tokens per window:
+
+```ts
+({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000;
+```
+
+`sessionUsage` can raise its threshold after each approval. This limit asks
+at 20,000 new input tokens, then at 40,000, 80,000, and so on:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -408,7 +436,7 @@ the session starts:
 Without a custom policy, public conversations and development sessions use the
 World's default. Private and unknown-audience sessions outside development
 request `0`, even without an OpenTelemetry destination. Destination
-export filters and event-handler policies don't change the decision.
+export filters and instrumentation-file `tracePolicy` decisions don't change the decision.
 
 Set `experimental.workflow.retention` to `0` to always request deletion, or to
 `"default"` to always keep run data for the World's default period. This

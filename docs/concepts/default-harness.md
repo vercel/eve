@@ -22,7 +22,7 @@ When history passes the threshold, eve summarizes the older turns. eve measures 
 
 The summary prompt asks the compaction model to separate completed progress and decisions from remaining work. It also asks the model to keep the constraints, preferences, data, and references needed to continue. A later compaction passes the previous summary in full and replaces it with an updated one. Omit `compaction.model` to summarize with the active turn model.
 
-After compacting, the harness keeps the summary plus recent messages (up to 20,000 tokens or half the threshold, with tool results shortened to 2,000 characters). If keeping full recent messages would exceed half the context window, the harness keeps only their text, or only the summary. The current user message is always kept; if it exceeds the budget on its own, the harness keeps its beginning and end and summarizes the middle.
+After compacting, the harness keeps the summary plus recent messages (up to 20,000 tokens or half the threshold, whichever is smaller, with tool results shortened to 2,000 characters). If keeping full recent messages would exceed half the context window, the harness keeps only their text, or only the summary. The current user message is always kept; if it exceeds the budget on its own, the harness keeps its beginning and end and summarizes the middle.
 
 If the agent's instructions, tools, and memory already exceed `compaction.threshold`, eve logs a warning and compacts only when the request exceeds the model's full context window. Shorten instructions, tools, or memory, or raise `compaction.threshold`, to restore threshold headroom.
 

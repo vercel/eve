@@ -131,7 +131,7 @@ A streamed tool input's `call.input` records precede its `call.requested`. The c
 
 `call.progress` carries one complete preliminary output snapshot from an authored async-generator tool. Treat snapshots for a `callId` as last-write-wins; `call.settled` carries the final output. Provider-executed tool progress and MCP progress notifications don't appear as `call.progress`.
 
-A call through [`eve__tool` or `eve__skill`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported as a call to the entry it names. Its `call.requested` carries that entry's name and input, such as `linear__list_issues`. An `eve__skill` call has `capability: { kind: "skill", name }`. The task controls `eve__task_wait` and `eve__task_cancel` have `kind: "control"`, and activity views usually leave them out, as they do calls with `hidden: true`. `showsActivity(call)` from `eve/events` applies both rules. A `call.input` record includes `kind` alongside `name`. Calls through `eve__tool` or `eve__skill` do not emit `call.input` records because the target entry is resolved only after its input is complete.
+A call through [`eve__tool` or `eve__skill`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported as a call to the entry it names. Its `call.requested` carries that entry's name and input, such as `linear__list_issues`. An `eve__skill` call has `capability: { kind: "skill", name }`. The task controls `eve__task_wait` and `eve__task_cancel` have `kind: "control"`, and activity views usually leave them out, as they do calls with `hidden: true`. `showsActivity(call)` from `eve/events` applies both rules. The first `call.input` record for a call includes `kind` alongside `name`. Calls through `eve__tool` or `eve__skill` do not emit `call.input` records because the target entry is resolved only after its input is complete.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning content in your application.
 
@@ -158,7 +158,7 @@ A delivery is anything that reaches a session: a message, an answer, a control s
 
 Ending a stranded session records the end's `delivery.admitted` and `delivery.settled` before the session ends, with `session.ended.data.cause.deliveryId` naming that delivery. The recorded control is `source: { control: "reset" }`.
 
-If a session does not support a control, the delivery ends with `outcome: "failed"` and a `reason` naming the control.
+If a session does not support a control, the delivery ends with `outcome: "failed"` and a `reason` naming the control. Sessions started by eve versions without this check drop the control, and its delivery never finishes.
 
 When someone other than the turn's caller sends an answer and a message together, they become separate deliveries. The answer reaches the waiting turn, and the message keeps the receipt and waits. Follow the answer through the request it answers.
 
@@ -198,7 +198,7 @@ A call to a tool that runs as a task keeps working after the model gets a receip
 
 `child.opened` announces a child session. Ending a call doesn't end that session; later calls with the same `taskId` can reach it. The turn keeps running while its tasks work. See [Tasks](/docs/tools/tasks#turns-wait-for-their-tasks).
 
-`child.sent` is an informational event recorded when a child session accepts a delivery from a parent call. The delivery's events appear on the child's stream under `childDeliveryId`, and the parent call finishes with `call.settled`.
+`child.sent` is an informational event recorded when a child session accepts a delivery from a parent call. The delivery's events appear on the child's stream under `childDeliveryId`, and the parent call finishes with `call.settled`. A remote agent on an earlier protocol doesn't return a receipt, so its deliveries omit `child.sent`.
 
 ### Failures and cancellation
 
@@ -332,9 +332,15 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/end \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes history without adding a user message (queued if a turn is active) and emits `context.started` and `context.settled` with `kind: "compaction"`. Clear cancels any active turn and working tasks, withdraws pending approvals and sign-ins, and removes model-message history in place (`kind: "clear"`) while keeping the session identity, system-role instructions, tools, skills, [`defineState`](./state) values, limits, and sandbox. Neither deletes external memory-provider data, and user-role instructions are re-inserted before the next model call.
+Compaction summarizes history without adding a user message. If a turn is active, eve queues the request until that turn ends. User-role instructions are ordinary history and may be summarized, and eve adds them again before the next model call; system-role instructions stay outside it. Recalled [memory](../memory) stays outside history, so the summary never includes it, and a memory provider can capture history before compaction rewrites it. On the stream, compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the compaction ends `failed` and the session keeps its previous history.
 
-`cancel` stops turns, not a running compaction or clear, and controls sent to a prewarmed session before its first message end `ignored`. `end` permanently retires the session ID (including on a [stranded session](./execution-model-and-durability#stranded-sessions), where `clear` and `compact` are rejected). Inactive targets throw `SessionNotActiveError` or return `409 session_not_active`.
+Clear removes model-message history in place, including static and dynamic user-role instructions. It keeps the session identity, system-role instructions, tools, skills, [`defineState`](./state) values, limits, and sandbox. eve adds user-role instructions again before the next model call. Clear doesn't delete data from a memory provider's external store, and the next turn recalls again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn. Unlike a compaction, clear doesn't wait for a running turn. It cancels the turn, which ends `cancelled`, stops the calls it waits on, and ends working tasks with `task.ended`. A stopped task never reports into the cleared conversation. On the stream, clear is a context change with `kind: "clear"`.
+
+A cancel stops turns, not a compaction or clear. A cancel that arrives while either runs ends `ignored`, and the compaction or clear finishes. A cancel, clear, or compact sent to a prewarmed session before its first message ends `ignored` once the session starts.
+
+End permanently retires the session ID; create another session for a fresh conversation. Every control returns a delivery receipt when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
+
+A [stranded session](./execution-model-and-durability#stranded-sessions) can't run commands, so clear and compact can't repair it. End still works: eve retires the stranded session and returns the end's delivery receipt. The delivery ends after the session is retired and its addresses are released.
 
 ## Reconnect and rewind
 

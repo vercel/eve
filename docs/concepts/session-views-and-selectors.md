@@ -36,7 +36,7 @@ Check that `current` is defined before filtering, because an omitted or `undefin
 | [Completed eval turns](../evals/cases#the-drive-api)                           | `turn.view`                                           | Fixed session snapshot captured when the eval driver returns the turn |
 | [In-flight eval turns](../evals/cases#in-flight-turns)                         | `live.view`                                           | Initial session snapshot plus events the live reader has observed     |
 | [Hooks](../guides/hooks#hook-structure-and-context)                            | `ctx.view`                                            | The whole recorded line containing the handler's event                |
-| [Channel event handlers](../channels/custom)                                   | `ctx.view`                                            | The whole recorded line being handled                                 |
+| [Channel event and `committed` handlers](../channels/custom)                   | `ctx.view`                                            | The whole recorded line being handled                                 |
 | [Dynamic capabilities](../guides/dynamic-capabilities#context-and-memoization) | `ctx.view`                                            | The session snapshot supplied when eve computes the definition        |
 | [Frontend bindings](../guides/frontend#derive-your-own-state)                  | `agent.view` in React and Svelte; `view.value` in Vue | The binding's observed session state                                  |
 | [Custom readers](#fold-a-stream-yourself)                                      | A view built with `foldEvents`                        | The events you have supplied to the fold                              |
@@ -109,7 +109,7 @@ Prefer a scoped assertion such as `turn.calledTool(...)` when it already express
 
 See [Assert on session state with selectors](../evals/assertions#assert-on-session-state-with-selectors) for examples that check task outcomes and which requests a parked turn waits on.
 
-`turn.view` is a snapshot of the whole session at the end of that turn, so collection queries can include earlier turns. Use explicit IDs and supported filters when your check is turn-specific. `activeTurn` finds an open turn, not a completed one; use an ID observed in the events or a retained turn observation to inspect a completed turn.
+`turn.view` is a snapshot of the whole session taken when the eval driver returned that turn, so collection queries can include earlier turns. Use explicit IDs and supported filters when your check is turn-specific. `activeTurn` finds an open turn, not a completed one; use an ID observed in the events or a retained turn observation to inspect a completed turn.
 
 Run-level assertions on `t` can cover multiple sessions. A `SessionView` covers one session, so inspect each session's view separately for custom cross-session checks.
 

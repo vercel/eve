@@ -69,7 +69,7 @@ After a cold start, eve runs the function again. The memo returns the saved tabl
 | `ctx.session.id`       | Once per session, until a deployment change |
 | A caller or tenant ID  | When that key changes                       |
 
-A saved result is cleared only when the key changes, not when context values read by the callback change.
+The key sets a saved result's lifetime. A change in context values that the callback reads doesn't clear it.
 
 ### Memo rules
 
@@ -217,7 +217,9 @@ export default defineDynamic((ctx) =>
 );
 ```
 
-The entry point can also reference a top-level `"use workflow"` function in the same module or an imported module (checked when the tool is offered). An inline body is compiled under `<constName>$<entryPoint>`, so renaming the `const` changes the workflow ID. Started workflow calls and tasks continue running even if a later model call stops offering the tool, though a task result arriving after the tool is withdrawn skips `toModelOutput`. Built-in workflow tools such as `agent({ models })` must be defined statically.
+The entry point can also reference a top-level `async function` that starts with `"use workflow"`, in the same module or an imported one. eve compiles an inline body as a top-level function named after the `const` and the entry point, such as `escalate$execute`, so renaming the `const` changes the workflow's ID, as renaming a static tool's entry point does.
+
+A workflow can't read the variables around it, so a `defineWorkflowTool()` created inside the dynamic function, and an entry point without `"use workflow"`, fail the build. eve checks an imported entry point when offering the tool and fails the turn with an error naming the tool if it isn't a compiled workflow. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn; while its task runs, the model keeps `eve__task_wait` and `eve__task_cancel`. A task's result that arrives after the function stops returning the tool skips the tool's `toModelOutput`, so the model reads the raw output. eve's built-in workflow tools, such as `agent({ models })`, only work as static tools, so returning one fails the turn.
 
 ### Author replayable callbacks
 
