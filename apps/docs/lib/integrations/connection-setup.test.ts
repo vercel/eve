@@ -251,6 +251,25 @@ describe("Nimble extension setup", () => {
   });
 });
 
+describe("Sanity Context extension setup", () => {
+  it("documents the organization-token mount and links the Sanity connection", () => {
+    const integration = getIntegration("sanity-context")!;
+
+    expect(integration.type).toBe("extension");
+    expect(integration.install).toContain("eve add extension/sanity-context");
+    expect(integration.quickStart).toContain("SANITY_CONTEXT_MCP_URL");
+    expect(integration.quickStart).toContain("SANITY_ORGANIZATION_TOKEN");
+    expect(integration.quickStart).toContain('import sanityContext from "@sanity/context-eve"');
+    expect(integration.quickStart).toContain("agent/extensions/sanity-context.ts");
+    expect(integration.relatedResources?.map((resource) => resource.href)).toContain(
+      "/integrations/sanity",
+    );
+    expect(getIntegration("sanity")!.relatedResources?.map((resource) => resource.href)).toContain(
+      "/integrations/sanity-context",
+    );
+  });
+});
+
 describe("Vercel MCP connection setup", () => {
   it("offers user OAuth and shared app credential setup", () => {
     const integration = getIntegration("vercel")!;

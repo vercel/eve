@@ -93,6 +93,7 @@ minimumReleaseAgeExclude:
   - nitro
   - "@memco/eve@0.2.0"
   - "@memco/memcoai@0.4.0"
+  - "@sanity/context-eve@0.1.0"
   - "@stripe/link-integrations-eve@0.5.0"
   - "@stripe/link-sdk@3.1.0"
   - "claude-mem@15.18.1"
