@@ -646,7 +646,14 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { channel } = ctx;
     // Task replies settle their calls, not their reusable task. The next model run reads them.
     const { taskId, turnId } = event.scope ?? {};
-    if (taskId !== undefined && turnId !== undefined && data.outcome !== "interrupted") {
+    // A call a background program made settles inside the program's task; only the program's
+    // own call brings a result the model reads.
+    if (
+      taskId !== undefined &&
+      turnId !== undefined &&
+      data.outcome !== "interrupted" &&
+      !madeInsideCall(ctx.view, data.callId)
+    ) {
       const task = sessionTables(ctx.view).tasks[taskId];
       const pending = channel.state.pendingTaskResults;
       const names = pending?.turnId === turnId ? pending.names : [];

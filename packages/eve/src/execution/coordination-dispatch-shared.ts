@@ -1,5 +1,6 @@
 /** Shared owner-side dispatch context preparation. */
 
+import { undispatched } from "#execution/session/pending-turn-state.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { type ChannelAdapter, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { SandboxState } from "#sandbox/state.js";
@@ -102,13 +103,15 @@ export async function prepareCoordinationDispatch(input: {
   const durableSession = readDurableSession(input.sessionState);
   const waiting = runtimeWait(durableSession.state);
   if (waiting === undefined) return undefined;
-  const requests = waiting.tasks;
-  if (requests.length === 0) return undefined;
-  const turnId =
-    waiting.event.turnId || activeTurnId(turnPosition(storedProjection(durableSession.state)));
+  const requests = undispatched(durableSession.state, waiting.tasks);
+  const first = requests[0];
+  if (first === undefined) return undefined;
+  // The step that made the first of these calls: an older batch may still wait beside them.
+  const event = waiting.taskEvents[waiting.tasks.indexOf(first)] ?? waiting.event;
+  const turnId = event.turnId || activeTurnId(turnPosition(storedProjection(durableSession.state)));
   const ctx = await deserializeContext(input.serializedContext);
   const prepared = await prepareActionDispatch({
-    batch: { event: { ...waiting.event, turnId }, requests },
+    batch: { event: { ...event, turnId }, requests },
     ctx,
     durableSession,
     plan: () => requests,

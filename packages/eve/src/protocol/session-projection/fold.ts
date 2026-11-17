@@ -397,8 +397,20 @@ function foldLifecycle(
       rows[id] = { ...introduced, ...data, ...status };
       return true;
     case "updates":
-      if (row === undefined || (rule.from !== undefined ? row.status !== rule.from : closed(row)))
+      if (row === undefined || (rule.from !== undefined ? row.status !== rule.from : closed(row))) {
+        // A call that already runs can be handed to a task, which serves it from then on: a
+        // program that moves to the background. Nothing else about the call changes.
+        if (
+          fact.type === "call.started" &&
+          row?.status === "running" &&
+          typeof data.taskId === "string" &&
+          (row as { readonly taskId?: unknown }).taskId === undefined
+        ) {
+          rows[id] = Object.assign({}, row, { taskId: data.taskId });
+          return true;
+        }
         return false;
+      }
       rows[id] = { ...row, ...data, ...status };
       return true;
     case "terminal":

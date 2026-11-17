@@ -552,7 +552,7 @@ const review = await tools.reviewer({
 - Without `outputSchema`, the call resolves to the agent's reply text.
 - Each call starts a new child session. A call with `taskId` throws, so a program can't continue an earlier child.
 - An [`agent({ models })`](#agent) tool also accepts `model`.
-- The child sessions belong to the `eve__execute` call, which holds the turn until the program returns. They aren't tasks, so `eve__task_wait` and `eve__task_cancel` don't see them.
+- The child sessions belong to the `eve__execute` call, which holds the turn until the program returns. They aren't tasks, so `eve__task_wait` and `eve__task_cancel` don't see them. The program itself becomes one task when it [moves to the background](#a-new-message-moves-the-program-to-the-background).
 - A failed child turn throws at its call.
 - A program can't call an agent with `tool: false`. Set [`tool: "deferred"`](/docs/subagents#declared-subagents) to keep an agent out of the tool list while programs call it.
 
@@ -595,9 +595,26 @@ A result over 10,000 estimated tokens reaches the model as its head and tail, wi
 Calls that can finish right away run as the program makes them, up to 32 at a time. A call that has to wait pauses the program: a person's approval, a sign-in, a workflow tool, an agent, or a question. A paused program holds no compute and survives restarts. It resumes when every call it paused on has a result, and calls that already finished don't run again.
 
 - **Approvals.** Each call goes through its own tool's `approval` and the agent-wide policy, and `eve__execute` itself never asks. See [Approve calls from a program](/docs/human-in-the-loop#approve-calls-from-a-program).
-- **New messages.** A steering message, the default for a new message, stops a running or paused program. Finished calls keep their results, and no new call starts. The model reads `{ error: "Stopped early because a new message arrived.", calls, notCompleted? }`, then the message.
+- **New messages.** A steering message, the default for a new message, doesn't stop a program. See [A new message moves the program to the background](#a-new-message-moves-the-program-to-the-background).
 - **Cancellation.** Cancelling the turn cancels the `eve__execute` call and everything it started.
 - **Crashes.** The program runs again as the same call, and finished calls return their recorded results. See [Programs after a crash](./execution-model-and-durability#programs-after-a-crash).
+
+#### A new message moves the program to the background
+
+A steering message that arrives before a program finishes doesn't stop it. The program becomes a [task](/docs/tools/tasks) and keeps going:
+
+1. The `eve__execute` call answers the model with a receipt: `A new message arrived, so this program keeps running in the background as task <id>. Its result will arrive in a <task_result> message.`
+2. The model reads the message and replies or calls other tools. The program's calls keep running. Its own steps run between the model's, after the model has read what it was waiting for.
+3. The program's result arrives in a `task.result` message, as the same `{ result, logs?, calls, notCompleted? }` value. A program that fails reports its error, followed by its counts and logs.
+4. The turn doesn't end before the program does.
+
+While the program runs in the background:
+
+- **The model can wait for it or stop it.** eve adds `eve__task_wait` and `eve__task_cancel` while the task is working. `eve__task_cancel` stops the program and the workflow tools and agents it waits on. Calls that already finished are not undone.
+- **A message that arrives while the program runs tool calls waits for that step.** It is read when the step ends, which takes at most the 5 minutes a step may run. A program that is waiting moves to the background at once.
+- **Approvals still ask.** A call that needs approval asks the person, and the turn pauses for the answer. A message sent instead of an answer withdraws the approval, as it does for a call the model made, and the program reads that call as rejected. That includes an approval that was open when the program moved to the background.
+- **The program shares the sandbox with the model.** Its calls and the model's own don't run at the same moment, but they can touch the same files.
+- **Clients see a task.** The stream reports `task.started` with `name: "eve__execute"` and `task.ended`, the `eve__execute` call stays open until the program ends, and the program's calls keep `owner: { callId }`.
 
 #### Program limits
 

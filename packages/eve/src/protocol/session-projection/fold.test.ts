@@ -460,6 +460,45 @@ describe("the shared fold", () => {
     ]);
   });
 
+  it("hands a running call to a task that starts later, as a program moving to the background", () => {
+    const [admitted, started] = turnLines(0, { opensSession: true });
+    const scope = { runId: "run_0", turnId: "turn_0" };
+    const view = folded([
+      admitted!,
+      started!,
+      {
+        at,
+        facts: [
+          {
+            data: {
+              callId: "c_0",
+              capability: { kind: "tool", name: "eve__execute" },
+              input: { code: "return 1" },
+              owner: { runId: "run_0" },
+            },
+            scope,
+            type: "call.requested",
+          },
+          { data: { callId: "c_0" }, type: "call.started" },
+          {
+            data: {
+              kind: "tool",
+              name: "eve__execute",
+              startedBy: { callId: "c_0" },
+              taskId: "t_0",
+            },
+            type: "task.started",
+          },
+          { data: { callId: "c_0", taskId: "t_0" }, type: "call.started" },
+          // A task serves a call once: another task can't take it over.
+          { data: { callId: "c_0", taskId: "t_1" }, type: "call.started" },
+        ],
+      },
+    ]);
+
+    expect(view.calls.c_0).toMatchObject({ status: "running", taskId: "t_0" });
+  });
+
   it("keeps an idle task without the call that started it, so its payloads don't pile up", () => {
     const [admitted, started] = turnLines(0, { opensSession: true });
     const scope = { runId: "run_0", turnId: "turn_0" };

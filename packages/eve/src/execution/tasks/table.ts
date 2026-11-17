@@ -94,6 +94,11 @@ export interface TaskRecord {
   readonly run?: TaskRun;
   /** Commands issued before the run could take them, sent in order once it reports started. */
   readonly held?: readonly TaskRunCommand[];
+  /**
+   * A program an `eve__execute` call runs, moved to the background: the session's own steps do
+   * its work, so it never has a run.
+   */
+  readonly program?: true;
 }
 
 export interface TaskTable {
@@ -255,6 +260,50 @@ export function createTask(
     name: input.name,
     results: [],
     resumable: input.resumable,
+  };
+  return { table: { ...table, tasks: [...table.tasks, record] }, taskId };
+}
+
+/**
+ * The id of the task a program becomes when it moves to the background. It comes from the
+ * program's call id, so a step that runs again names the same task.
+ */
+export function programTaskId(callId: string): string {
+  // FNV-1a, folded to the task-id alphabet.
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < callId.length; index += 1) {
+    hash = Math.imul(hash ^ callId.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  let suffix = "";
+  for (let index = 0; index < TASK_ID_SUFFIX_LENGTH; index += 1) {
+    suffix += TASK_ID_ALPHABET[hash % 32];
+    hash = Math.floor(hash / 32);
+  }
+  return `program-${suffix}`;
+}
+
+/** Records the task of a program that moved to the background, unless it is already there. */
+export function createProgramTask(
+  table: TaskTable,
+  input: { readonly callId: string; readonly name: string; readonly turnId: string },
+): { readonly table: TaskTable; readonly taskId: string } {
+  const taskId = programTaskId(input.callId);
+  const existing = findTask(table, taskId);
+  if (existing !== undefined) {
+    // A step that runs again finds its own record. Anything else under the id is a collision.
+    const own =
+      existing.program === true && existing.calls.some((call) => call.callId === input.callId);
+    if (!own) throw new Error(`Task id "${taskId}" already names another task.`);
+    return { table, taskId };
+  }
+  const record: TaskRecord = {
+    calls: [{ callId: input.callId, turnId: input.turnId }],
+    id: taskId,
+    kind: "tool",
+    name: input.name,
+    program: true,
+    results: [],
+    resumable: false,
   };
   return { table: { ...table, tasks: [...table.tasks, record] }, taskId };
 }
@@ -454,9 +503,12 @@ function updateTask(
   };
 }
 
-/** A task the session never started reported no `task.started`, so it settles nothing. */
+/**
+ * A task the session never started reported no `task.started`, so it settles nothing. A
+ * program's task has no run and started when the program moved to the background.
+ */
 function cancelledCalls(record: TaskRecord): readonly TaskCall[] {
-  return record.run === undefined ? [] : record.calls;
+  return record.run === undefined && record.program !== true ? [] : record.calls;
 }
 
 function toRunAddress(run: TaskRun): TaskRunAddress {
@@ -519,6 +571,7 @@ function isTaskRecord(value: unknown): value is TaskRecord {
     Array.isArray(value.results) &&
     Array.from(value.results as unknown[]).every(isTaskResult) &&
     (value.run === undefined || isTaskRun(value.run)) &&
+    (value.program === undefined || value.program === true) &&
     (value.held === undefined ||
       (Array.isArray(value.held) && Array.from(value.held as unknown[]).every(isTaskRunCommand)))
   );

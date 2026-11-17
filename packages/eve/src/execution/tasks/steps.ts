@@ -45,8 +45,18 @@ import type { Transition } from "#harness/session-machine/commit.js";
 import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
 import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
-import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
+import {
+  programCallRuns,
+  stopRuns,
+  waitedCallRuns,
+  type RunStopTarget,
+} from "#execution/stop-runs.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
+import type { SessionStateMap } from "#harness/types.js";
+import {
+  getBlockingWorkflowToolRuns,
+  removeBlockingWorkflowToolRuns,
+} from "#harness/workflow-tool-runs.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
 
 /** The messages a task's run sends that change its record. */
@@ -186,6 +196,19 @@ async function cancelTasks(
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   const targets: RunStopTarget[] = [];
   const calls = input.turnCalls === true ? waitedCallRuns(session) : [];
+  // A background program has no run of its own: cancelling its task stops the runs its calls
+  // wait on, and the turn's next step drops the program.
+  const programCallIds =
+    input.turnCalls === true
+      ? []
+      : input.taskIds.flatMap((taskId) => {
+          const record = findTask(table, taskId);
+          return record?.program === true ? record.calls.map((call) => call.callId) : [];
+        });
+  const programCalls = programCallIds.length === 0 ? [] : programCallRuns(session, programCallIds);
+  // The runs are told to stop, and nothing waits on them any more.
+  const stopped =
+    programCallIds.length === 0 ? session : forgetProgramRuns(session, programCallIds);
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
@@ -206,7 +229,7 @@ async function cancelTasks(
   }
   const committed = await commitTaskDecisions(
     input,
-    saveTable(input.sessionState, session, table),
+    saveTable(input.sessionState, stopped, table),
     { settles, withdraws },
   );
   const [cancelledOutright] = await Promise.all([
@@ -221,6 +244,13 @@ async function cancelTasks(
       { waitForEnd: false },
     ),
     stopRuns(calls, { kind: "cancel", reason: TURN_CANCEL_REASON }),
+    programCalls.length === 0
+      ? []
+      : stopRuns(
+          programCalls,
+          { kind: "cancel", reason: TASK_CANCEL_REASON },
+          { waitForEnd: false },
+        ),
   ]);
   if (cancelledOutright.length === 0) return committed;
   const current = readDurableSession(committed.sessionState);
@@ -280,7 +310,31 @@ function taskSettled(
   outcome: TaskOutcome,
 ): readonly Decision[] {
   if (record === undefined) return [];
-  return [(view) => settleTask(view, { calls, outcome })];
+  // A call the stream already shows settled stays as it settled: a program's step that ended
+  // its task and was then interrupted leaves the table a step behind.
+  return [
+    (view) =>
+      settleTask(view, {
+        calls: calls.filter(
+          (call) => view.projection.view.calls[call.callId]?.status !== "settled",
+        ),
+        outcome,
+      }),
+  ];
+}
+
+/** `session` without the blocking runs the calls of the programs in `programCallIds` wait on. */
+function forgetProgramRuns<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  programCallIds: readonly string[],
+): T {
+  let next = session;
+  for (const run of getBlockingWorkflowToolRuns(session.state)) {
+    if (programCallIds.some((callId) => run.callId.startsWith(`${callId}/`))) {
+      next = removeBlockingWorkflowToolRuns(next, run.origin.turnId, run.callId);
+    }
+  }
+  return next;
 }
 
 /**

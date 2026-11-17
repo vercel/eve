@@ -13,7 +13,11 @@ import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { resolveTurnPrincipal } from "#execution/session/principal.js";
-import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
+import {
+  isBetweenTurns,
+  storedProjection,
+  type ProgramBatchWait,
+} from "#harness/session-machine/view.js";
 import { renderTaskWaitResult } from "#execution/tasks/render.js";
 import {
   answerTaskCancel,
@@ -126,6 +130,14 @@ export interface SessionExecutionInput {
 export class SessionExecution {
   private readonly input: SessionExecutionInput;
   private observedHandoverAttemptKey: string | undefined;
+  /**
+   * Results of the turn's runs that no wait took. A program's batch outlives the wait that
+   * started its runs: the model runs while a background program waits, and a result that
+   * arrives then is kept for the wait that follows.
+   */
+  private readonly unclaimed: UnclaimedResults = new Map();
+  /** When each parked `eve__task_wait` call began, so a wait that resumes keeps its deadline. */
+  private readonly taskWaitStarts = new Map<string, number>();
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
@@ -175,6 +187,8 @@ export class SessionExecution {
         ...(turn.compacted && { compacted: true }),
       };
     } finally {
+      this.unclaimed.clear();
+      this.taskWaitStarts.clear();
       turn.dispose();
     }
   }
@@ -196,7 +210,10 @@ export class SessionExecution {
       if (!isAppliedRunMessage(message)) {
         await this.applyRunMessages(applied, turn);
         applied = [];
-        await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
+        this.keep(
+          await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message }),
+          message,
+        );
       } else if (!ending || !isAgentSessionMessage(message)) {
         applied.push(message);
       }
@@ -214,6 +231,30 @@ export class SessionExecution {
       this.input.host.applyRunMessages({ ...state, canCancelTurn: turn !== undefined, messages }),
     );
     if (cancelled) turn?.abort();
+  }
+
+  /** Keeps a run's result until a wait on its call takes it. */
+  private keep(result: RuntimeActionResult | undefined, message?: WorkflowToolRunMessage): void {
+    if (result === undefined) return;
+    const usage = message?.kind === "outcome" ? message.usage : undefined;
+    this.unclaimed.set(result.callId, {
+      acceptedAtMs: Date.now(),
+      result,
+      ...(usage !== undefined && { usage }),
+    });
+  }
+
+  /** Keeps inbox results of runs the turn recorded until a wait on their calls takes them. */
+  private keepInbox(results: readonly RuntimeActionResult[]): void {
+    const snapshot = this.input.cursor.sessionState.snapshot.session.state;
+    for (const result of results) {
+      if (
+        result.kind === "tool-result" &&
+        isInboxToolResultFromRecordedWorkflowToolRun(snapshot, result)
+      ) {
+        this.keep(result);
+      }
+    }
   }
 
   private async runTurnSteps(
@@ -358,10 +399,11 @@ export class SessionExecution {
         if (steering !== undefined) return { delivery: steering };
       }
       if (
-        paused.on === "tasks" &&
+        (paused.on === "tasks" || (paused.on === "calls" && paused.heldOnTasks === true)) &&
         taskWaitResult(sessionTaskTable(this.input.cursor), { interrupted, timedOut: false }) !==
           undefined
       ) {
+        calls?.release();
         return await this.withSteering(turn, {});
       }
       const runtimeResults = await calls?.ready(interrupted);
@@ -379,11 +421,13 @@ export class SessionExecution {
           calls?.timedOut(next.callId);
           continue;
         case "runtime-action-result":
-          calls?.acceptInbox(next.results);
+          if (calls === undefined) this.keepInbox(next.results);
+          else calls.acceptInbox(next.results);
           continue;
         case "workflow": {
           const result = await this.handleWorkflowMessage(next.message, turn);
-          if (result !== undefined) calls?.acceptRun(result, next.message);
+          if (calls === undefined) this.keep(result, next.message);
+          else if (result !== undefined) calls.acceptRun(result, next.message);
           continue;
         }
         case "input":
@@ -397,7 +441,7 @@ export class SessionExecution {
     paused: Extract<TurnPause, { readonly on: "calls" }>,
   ): Promise<CallWait> {
     const dispatched = paused.dispatch ? await this.dispatchRuns() : [];
-    const wait = new CallWait(this.input, paused.callIds, dispatched);
+    const wait = new CallWait(this.input, paused, dispatched, this.unclaimed, this.taskWaitStarts);
     await wait.answerTaskToolCalls(paused.taskToolCalls);
     return wait;
   }
@@ -478,6 +522,10 @@ class CallWait {
   private readonly cursor: SessionStateCursor;
   private readonly until: SessionTurnHost["until"];
   private readonly callIds: readonly string[];
+  /** The calls programs wait on, one batch each: each batch's results resume its program. */
+  private readonly batches: readonly ProgramBatchWait[];
+  private readonly unclaimed: UnclaimedResults;
+  private readonly taskWaitStarts: Map<string, number>;
   private readonly results: RuntimeActionResult[] = [];
   private readonly acceptedAtMs = new Map<string, number>();
   /** By call id, so an outcome delivered twice counts once. */
@@ -486,28 +534,62 @@ class CallWait {
 
   constructor(
     session: Pick<SessionExecutionInput, "cursor" | "host">,
-    callIds: readonly string[],
+    paused: Pick<Extract<TurnPause, { readonly on: "calls" }>, "batches" | "callIds">,
     dispatched: readonly RuntimeActionResult[],
+    unclaimed: UnclaimedResults,
+    taskWaitStarts: Map<string, number>,
   ) {
+    this.taskWaitStarts = taskWaitStarts;
     this.cursor = session.cursor;
     this.until = session.host.until;
-    this.callIds = callIds;
+    this.callIds = paused.callIds;
+    this.batches = paused.batches ?? [];
+    this.unclaimed = unclaimed;
     const acceptedAtMs = Date.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
+    // Results that arrived while nothing waited on these calls.
+    for (const callId of this.callIds) {
+      const kept = unclaimed.get(callId);
+      if (kept === undefined) continue;
+      unclaimed.delete(callId);
+      if (this.acceptedAtMs.has(callId)) continue;
+      this.accept(kept.result, kept.acceptedAtMs);
+      if (kept.usage !== undefined) this.delegatedUsage.set(callId, kept.usage);
+    }
   }
 
-  /** Every call's result, once each has one. */
+  /**
+   * The results the next step reads: every call's, once each has one. A background program's
+   * batch doesn't wait for the rest, and after a new message neither does anything wait for a
+   * program's batch: the program moves to the background.
+   */
   async ready(interrupted: boolean): Promise<RuntimeActionResultStepInput | undefined> {
     this.taskWaits = await this.resolveTaskWaits(interrupted);
-    const ready = resolveRuntimeActionResultsForCallIds({
-      pendingCallIds: this.callIds,
-      results: this.results,
-    });
-    if (ready === undefined) return undefined;
+    const has = (callId: string) => this.acceptedAtMs.has(callId);
+    const batched = new Set(this.batches.flatMap((batch) => batch.callIds));
+    const others = this.callIds.filter((callId) => !batched.has(callId));
+    const settled = [
+      ...(others.every(has) ? [others] : []),
+      ...this.batches.flatMap((batch) => (batch.callIds.every(has) ? [batch.callIds] : [])),
+    ];
+    const all = settled.length === this.batches.length + 1;
+    // Beside a background program nothing waits for anything else: the model's calls and each
+    // program's batch reach the next step as they settle.
+    const independent =
+      this.batches.some((batch) => batch.background) &&
+      settled.some((callIds) => callIds.length > 0);
+    if (!all && !independent && !(interrupted && others.every(has))) return undefined;
+    const ready =
+      resolveRuntimeActionResultsForCallIds({
+        pendingCallIds: settled.flat(),
+        results: this.results,
+      }) ?? [];
     const delegatedUsage = ready.flatMap((result) => {
       const usage = this.delegatedUsage.get(result.callId);
       return usage === undefined ? [] : [[result.callId, usage] as const];
     });
+    const taken = new Set(ready.map((result) => result.callId));
+    this.release(taken);
     return {
       acceptedAtMsByCallId: Object.fromEntries(
         ready.map((result) => [result.callId, this.acceptedAtMs.get(result.callId)!]),
@@ -515,6 +597,19 @@ class CallWait {
       ...(delegatedUsage.length > 0 && { delegatedUsage: Object.fromEntries(delegatedUsage) }),
       results: ready,
     };
+  }
+
+  /** Keeps the results the step doesn't read for the wait that follows it. */
+  release(taken: ReadonlySet<string> = new Set()): void {
+    for (const result of this.results) {
+      if (taken.has(result.callId) || !this.callIds.includes(result.callId)) continue;
+      const usage = this.delegatedUsage.get(result.callId);
+      this.unclaimed.set(result.callId, {
+        acceptedAtMs: this.acceptedAtMs.get(result.callId) ?? Date.now(),
+        result,
+        ...(usage !== undefined && { usage }),
+      });
+    }
   }
 
   /** The host's sleeps for the parked `eve__task_wait` calls. */
@@ -550,11 +645,15 @@ class CallWait {
     }
   }
 
-  /** Aborts the `abortSignal` of every workflow tool call without a result yet. */
+  /**
+   * Aborts the `abortSignal` of every workflow tool call without a result yet. A program's calls
+   * keep running: a new message moves the program to the background instead of stopping it.
+   */
   async interrupt(): Promise<void> {
     const state = this.cursor.sessionState.snapshot.session.state;
+    const batched = new Set(this.batches.flatMap((batch) => batch.callIds));
     const runs = this.callIds.flatMap((callId) => {
-      if (this.acceptedAtMs.has(callId)) return [];
+      if (this.acceptedAtMs.has(callId) || batched.has(callId)) return [];
       const run = findBlockingWorkflowToolRun(state, callId);
       return run === undefined ? [] : [run.address];
     });
@@ -570,10 +669,14 @@ class CallWait {
    */
   async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {
     const waits: TaskWait[] = [];
-    const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
-    for (const call of calls) {
+    // A wait that returned early already answered some of these, and began the rest.
+    const unanswered = calls.filter((call) => !this.acceptedAtMs.has(call.callId));
+    const starting = unanswered.filter((call) => !this.taskWaitStarts.has(call.callId));
+    const startedAtMs = starting.length === 0 ? 0 : await startTaskToolCallsStep();
+    for (const call of starting) this.taskWaitStarts.set(call.callId, startedAtMs);
+    for (const call of unanswered) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
-        waits.push(startTaskWait(call, startedAtMs, this.until));
+        waits.push(startTaskWait(call, this.taskWaitStarts.get(call.callId)!, this.until));
         continue;
       }
       this.accept(await answerTaskCancel(this.cursor, call));
@@ -603,6 +706,16 @@ class CallWait {
     return waiting;
   }
 }
+
+/** Runs' results no wait has taken, by call id. */
+type UnclaimedResults = Map<
+  string,
+  {
+    readonly acceptedAtMs: number;
+    readonly result: RuntimeActionResult;
+    readonly usage?: TokenUsage;
+  }
+>;
 
 /**
  * One `eve__task_wait` call the turn is parked on. Its timeout is the host's `until` (durable,

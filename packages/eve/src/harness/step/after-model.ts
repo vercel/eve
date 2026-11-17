@@ -1,3 +1,4 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
@@ -36,7 +37,7 @@ import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-author
 import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
 import { isExecuteTool } from "#execution/catalog/catalog-tools.js";
-import { newProgram, savePrograms } from "#harness/session-machine/programs.js";
+import { newProgram, runnableProgram, savePrograms } from "#harness/session-machine/programs.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -211,6 +212,13 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       normalizedProviderHistory.outcomeEndsResponse ||
       hasQueuedTurnInput(step.view()));
   if (continueLoop) return { next: step.runStep, session: step.session };
+  // A background program that can run does, before the turn waits on its task.
+  if (
+    workingTasks.length > 0 &&
+    runnableProgram(step.view().turn, activeTurnIdOf(step.view().projection)) !== undefined
+  ) {
+    return { next: step.runStep, session: step.session };
+  }
   // No turn ends while its tasks work: the session waits for one to settle, then calls the model
   // again in the same turn.
   if (workingTasks.length > 0) {

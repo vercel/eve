@@ -49,6 +49,7 @@ const EXECUTE_TOOL_DESCRIPTION = [
   "Start calls that don't depend on each other together with `Promise.all`, so any that need approval are asked at once.",
   "There is no fetch, file system, timers, or imports.",
   "`console.log` output is returned with the result.",
+  "A new message doesn't stop a program: if one arrives first, the program keeps running as a task and its result reaches you later.",
 ].join(" ");
 
 const EXECUTE_LABEL = {

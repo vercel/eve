@@ -10,6 +10,7 @@ import type { ModelMessage, ToolCallPart } from "ai";
 import { TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/approval-outcome.js";
 import { truncateNotedInput, MAX_NOTED_CALLS } from "#harness/interrupted-attempt.js";
 import { toJsonValue } from "#harness/call-facts.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { JsonValue } from "#shared/json.js";
 import type {
   ProgramCallResult,
@@ -230,20 +231,64 @@ export function endProgram(view: SessionView, callId: string): Transition {
   return transition({ events: [], turn: withoutPrograms(view.turn, new Set([callId])) });
 }
 
+/** The batch marker of `program`: a background program's batch doesn't keep the model waiting. */
+export function batchOf(
+  program: Pick<ProgramRun, "background" | "callId">,
+): NonNullable<SuspendedStep["program"]> {
+  return program.background === undefined
+    ? { callId: program.callId }
+    : { background: true, callId: program.callId };
+}
+
 /**
- * The batch `program` waits on stops before its calls settled: each call without a result
- * counts as `stopped`, and the batch leaves the turn.
+ * A program moves to the background as `taskId`: the task starts and serves the program's
+ * `eve__execute` call from now on, so the call and the calls inside it stay open while the model
+ * runs. The model's history gets the task's receipt separately.
  */
-export function stopProgramBatch(
+export function moveProgramToBackground(
   view: SessionView,
-  program: Pick<ProgramRun, "callId">,
-  stopped: ProgramCallResult,
+  input: { readonly callId: string; readonly name: string; readonly taskId: string },
 ): Transition {
-  const batch = programBatch(view.turn, program);
-  if (batch === undefined) return transition({ events: [], turn: view.turn });
-  const suspended = view.turn.suspended.filter((step) => step !== batch);
+  const program = programOf(view.turn, input.callId);
+  if (program === undefined) return transition({ events: [], turn: view.turn });
+  const tables = view.projection.view;
+  const events: SessionEvent[] = [];
+  if (tables.tasks[input.taskId] === undefined) {
+    events.push({
+      data: {
+        kind: "tool",
+        name: input.name,
+        startedBy: { callId: input.callId },
+        taskId: input.taskId,
+      },
+      type: "task.started",
+    });
+  }
+  if (tables.calls[input.callId]?.taskId === undefined) {
+    events.push({ data: { callId: input.callId, taskId: input.taskId }, type: "call.started" });
+  }
+  const background: ProgramRun = { ...program, background: { taskId: input.taskId } };
+  const turn = withProgram(view.turn, background);
   return transition({
-    events: [],
-    turn: resumePrograms({ ...view.turn, suspended }, [batch], () => stopped),
+    events,
+    turn: {
+      ...turn,
+      suspended: turn.suspended.map((step) =>
+        step.program?.callId === input.callId ? { ...step, program: batchOf(background) } : step,
+      ),
+    },
   });
+}
+
+/**
+ * A background program ended, or its task was cancelled: it leaves the turn with whatever batch
+ * it still waited on. The task's own facts report how it ended.
+ */
+export function programsWithoutTask(
+  turn: Pick<TurnState, "programs">,
+  working: ReadonlySet<string>,
+): readonly ProgramRun[] {
+  return programsOf(turn).filter(
+    (program) => program.background !== undefined && !working.has(program.background.taskId),
+  );
 }

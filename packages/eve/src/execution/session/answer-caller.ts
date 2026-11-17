@@ -1,8 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import { principalOf } from "#execution/session/principal.js";
 import { openRequests } from "#protocol/session-projection/reader.js";
-import { storedProjection } from "#harness/session-machine/view.js";
-import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import { ownedBySession, storedProjection } from "#harness/session-machine/view.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 
 /**
@@ -32,7 +31,7 @@ export function attributeAnswers(input: {
   // The session's own requests; a relayed one belongs to the run that asked.
   const own = new Map(
     open.flatMap((row) =>
-      row.origin === undefined && interactionOwner(view, row).taskId === undefined
+      row.origin === undefined && ownedBySession(view, row)
         ? [[row.interactionId, row.request.kind] as const]
         : [],
     ),

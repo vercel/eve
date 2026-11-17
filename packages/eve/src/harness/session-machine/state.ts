@@ -87,7 +87,11 @@ export interface SuspendedStep {
    * step's messages are those calls alone, never a model response: once each has a result the
    * results resume the program, and nothing of the step reaches history.
    */
-  readonly program?: { readonly callId: string };
+  readonly program?: {
+    readonly callId: string;
+    /** The program runs in the background: the batch doesn't keep the model from running. */
+    readonly background?: true;
+  };
 }
 
 /** How one of a program's calls came out, as the program reads it when it resumes. */
@@ -147,6 +151,11 @@ export interface ProgramRun {
   readonly unfinished: readonly ProgramUnfinishedCall[];
   /** What an interrupted program step published about the program's calls, by call id. */
   readonly recovered?: Readonly<Record<string, RecoveredProgramCall>>;
+  /**
+   * The task the program became when a new message arrived while it was unfinished. Its
+   * `eve__execute` call was answered with the task's receipt, and its result is the task's.
+   */
+  readonly background?: { readonly taskId: string };
 }
 
 export interface TurnState {

@@ -3,6 +3,8 @@ import { defineAgent } from "eve";
 
 /** What a parent's program sends to make this agent ask a question; shared with the parent. */
 const CHILD_QUESTION_REQUEST = "PROGRAM-CHILD-QUESTION";
+/** What a parent's program sends to make this agent complete a work item; shared with the parent. */
+const CHILD_WORK_REQUEST = "PROGRAM-CHILD-WORK";
 
 export default defineAgent({
   description: "Waits until its delegated turn is cancelled.",
@@ -29,6 +31,12 @@ export default defineAgent({
               ],
             }
           : `CHILD_ANSWER=${JSON.stringify(answer.output)}`;
+      }
+      if (lastUserMessage?.includes(CHILD_WORK_REQUEST) === true) {
+        const work = toolResults.find((result) => result.id === "child-work");
+        return work === undefined
+          ? { toolCalls: [{ id: "child-work", input: {}, name: "complete-work" }] }
+          : `CHILD_WORK=${String(work.output)}`;
       }
       return {
         toolCalls: [

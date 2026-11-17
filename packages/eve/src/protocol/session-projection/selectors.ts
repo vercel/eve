@@ -321,7 +321,7 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
     !signInHolds &&
     calls.some(
       (entry) =>
-        entry.taskId === undefined &&
+        callTask(view, entry) === undefined &&
         entry.capability.name !== "eve__task_wait" &&
         !asked.has(entry.callId),
     )

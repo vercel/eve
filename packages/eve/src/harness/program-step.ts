@@ -19,6 +19,14 @@ import {
 } from "#execution/catalog/catalog-tools.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
+import { workingTaskIds } from "#execution/tasks/model-step.js";
+import { renderProgramTaskReceipt } from "#execution/tasks/render.js";
+import {
+  createProgramTask,
+  readTaskTable,
+  settleTaskCalls,
+  writeTaskTable,
+} from "#execution/tasks/table.js";
 import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
@@ -43,25 +51,27 @@ import { requestCall, settleCall, startCall } from "#harness/session-machine/cal
 import {
   batchCall,
   batchMessages,
+  batchOf,
   endProgram,
+  moveProgramToBackground,
   programCallId,
-  programOf,
   programResultOf,
+  programsWithoutTask,
   savePrograms,
-  stopProgramBatch,
-  withSettledCall,
   type ProgramCallResult,
   type ProgramRun,
+  withSettledCall,
 } from "#harness/session-machine/programs.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import type { ToolResultPart } from "#harness/session-machine/suspended-steps.js";
 import {
+  endBackgroundProgram,
   interruptedProgramCall,
   settle,
   suspendStep,
 } from "#harness/session-machine/transitions.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
+import { blocked, park } from "#harness/step/park.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { checkToolCallInput } from "#harness/tool-call-io.js";
 import { decideApproval, isRunnableTool } from "#harness/tools.js";
@@ -83,9 +93,11 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 // run, or an agent, interrupts the program; the step ends with the program's continuation saved
 // and those calls in a batch the session settles like a model response's, and the step that
 // follows the batch resumes the program with their results.
-
-/** What the model reads when a new message stops a program. */
-export const PROGRAM_STEERED_MESSAGE = "Stopped early because a new message arrived.";
+//
+// A new message never stops a program. The step it arrives in moves each unfinished program to
+// the background: the program becomes a task, its `eve__execute` call is answered with the task's
+// receipt so the model can read the message, and the program's later steps run between the
+// model's. Its result is the task's result.
 
 /** A call the program stopped on, with what the session needs to settle it. */
 type ParkedCall = { readonly call: ToolCallPart } & (
@@ -107,8 +119,6 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
   const parked = new Map<number, ParkedCall>();
   const inline = createLimiter(PROGRAM_MAX_INLINE_CALLS);
   const telemetry = attemptTelemetry(step, program.callId);
-  const steering = step.config.steeringSignal;
-  const stopped = () => steering?.aborted === true;
   const settled = async (
     call: { readonly toolName: string; readonly input: unknown },
     result: ProgramCallResult,
@@ -134,7 +144,6 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
         interruptedProgramCall(asInterruptedCall(recovered)),
       );
     }
-    if (stopped()) throw new ProgramCallError(PROGRAM_STEERED_MESSAGE);
     if (request.index > PROGRAM_MAX_CALLS) throw new ProgramCallError(callLimitMessage(name));
 
     const resolved = programEntry(catalog.callable, name);
@@ -193,8 +202,6 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
     }
 
     const outcome = await inline(async () => {
-      // A message that arrived while the call waited its turn stops it before it starts.
-      if (stopped()) throw new ProgramCallError(PROGRAM_STEERED_MESSAGE);
       return await executeToolCall(
         action,
         {
@@ -227,7 +234,6 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
   };
 
   const search = async (request: ProgramRequest, input: unknown): Promise<JsonValue> => {
-    if (stopped()) throw new ProgramCallError(PROGRAM_STEERED_MESSAGE);
     if (request.index > PROGRAM_MAX_CALLS) throw new ProgramCallError(callLimitMessage("search"));
     try {
       return toJsonValue(await programSearch(catalog.callable, input));
@@ -263,30 +269,50 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
   }
   throwIfTurnAborted(step.config.abortSignal);
 
-  // A message that arrived while the program ran stops it: the calls it ran keep their results,
-  // and whatever it parked on never starts.
-  if (stopped()) return finishProgram(step, catalog, current, { error: PROGRAM_STEERED_MESSAGE });
   if (outcome.status !== "interrupted") return finishProgram(step, catalog, current, outcome);
   return parkProgram(step, catalog, current, outcome, parked);
 }
 
 /**
- * Stops a program a new message steers past: its `eve__execute` call settles with what its calls
- * did so far, and the writer closes whatever it still waited on.
+ * Moves an unfinished program to the background, in the step a new message arrives in: the
+ * program becomes a task that serves its `eve__execute` call, and the call is answered with the
+ * task's receipt, so the response that made it commits and the model reads the message.
  */
-export async function stopProgram(step: Step, program: ProgramRun): Promise<void> {
+export async function moveToBackground(step: Step, program: ProgramRun): Promise<void> {
   const catalog = await stepCatalog(step);
   await startProgram(step, program, catalog);
-  // The calls it still waited on count as interrupted: none of them ran.
+  const created = createProgramTask(readTaskTable(step.session.state), {
+    callId: program.callId,
+    name: EXECUTE_TOOL_NAME,
+    turnId: program.event.turnId,
+  });
+  step.session = writeTaskTable(step.session, created.table);
   await step.apply(
-    stopProgramBatch(step.view(), program, {
-      error: PROGRAM_STEERED_MESSAGE,
-      outcome: "interrupted",
-      status: "failed",
+    moveProgramToBackground(step.view(), {
+      callId: program.callId,
+      name: EXECUTE_TOOL_NAME,
+      taskId: created.taskId,
     }),
   );
-  const stopped = programOf(step.view().turn, program.callId) ?? program;
-  await finishProgram(step, catalog, stopped, { error: PROGRAM_STEERED_MESSAGE });
+  // The receipt is model history only: the call stays open until the program ends.
+  const part: ToolResultPart = {
+    output: { type: "text", value: renderProgramTaskReceipt(created.taskId) },
+    toolCallId: program.callId,
+    toolName: EXECUTE_TOOL_NAME,
+    type: "tool-result",
+  };
+  await step.apply(settle(step.view(), { results: [{ part }] }));
+}
+
+/**
+ * Drops each background program whose task no longer works: `eve__task_cancel` or the turn's end
+ * cancelled it, and the cancel already settled its call and the calls inside it.
+ */
+export async function dropCancelledPrograms(step: Step): Promise<void> {
+  const working = new Set(workingTaskIds(step.session));
+  for (const program of programsWithoutTask(step.view().turn, working)) {
+    await step.apply(endProgram(step.view(), program.callId));
+  }
 }
 
 /** The `eve__execute` call starts with its first program step, cleared like any ungated call. */
@@ -378,7 +404,7 @@ async function parkProgram(
   const batch = {
     event: program.event,
     messages: batchMessages(calls.map(({ call }) => call)),
-    program: { callId: program.callId },
+    program: batchOf(program),
     tasks: collectProgramWorkflowCalls(
       calls.flatMap((call) =>
         call.kind === "dispatch"
@@ -404,6 +430,20 @@ async function parkProgram(
     signIns: calls.flatMap((call) => (call.kind === "sign-in" ? [call.signIn] : [])),
   });
   const result = signIn === undefined ? park(step) : await stopForToolSignIn(step, signIn);
+  // The model had ended its reply when a background program ran, so the turn is held on its
+  // tasks again: another task's result resumes it, as well as this batch's.
+  if (
+    program.background !== undefined &&
+    result.next === null &&
+    result.held === undefined &&
+    !blocked(step.view(), step.session.state)
+  ) {
+    return {
+      ...result,
+      checkpoint: true,
+      held: { kind: "tasks", taskIds: workingTaskIds(step.session) },
+    };
+  }
   return { ...result, checkpoint: true };
 }
 
@@ -425,7 +465,7 @@ async function finishProgram(
     ...(failed
       ? {
           error:
-            completed > 0 && outcome.error !== PROGRAM_STEERED_MESSAGE
+            completed > 0
               ? `${outcome.error} Calls that completed before this are not undone.`
               : outcome.error,
         }
@@ -436,6 +476,7 @@ async function finishProgram(
       notCompleted: program.unfinished.map((call) => ({ ...call })),
     }),
   };
+  if (program.background !== undefined) return finishInBackground(step, program, output, failed);
   // The program leaves the turn before its call settles: nothing runs it again.
   await step.apply(endProgram(step.view(), program.callId));
   // A step that runs again after its attempt settled the call replays to the same result, which
@@ -464,6 +505,39 @@ async function finishProgram(
     type: "tool-result",
   };
   await step.apply(settle(step.view(), { results: [{ part }] }));
+  return { checkpoint: true, next: step.runStep, session: step.session };
+}
+
+/**
+ * A background program ended: its result is its task's, which the model reads in a
+ * `task.result` message, and the `eve__execute` call settles with the task.
+ */
+async function finishInBackground(
+  step: Step,
+  program: ProgramRun,
+  output: JsonObject,
+  failed: boolean,
+): Promise<StepResult> {
+  const { taskId } = program.background!;
+  // A failed task carries one message, so what the program logged and counted goes with it.
+  const { error, ...rest } = output;
+  const outcome = failed
+    ? ({ error: `${String(error)}\n${JSON.stringify(rest)}`, status: "failed" } as const)
+    : ({ output, status: "completed" } as const);
+  const settled = settleTaskCalls(readTaskTable(step.session.state), {
+    callIds: [program.callId],
+    outcome,
+    taskId,
+  });
+  step.session = writeTaskTable(step.session, settled.table);
+  // A step that runs again after its attempt ended the task replays to the same result.
+  if (step.view().projection.view.calls[program.callId]?.status === "settled") {
+    await step.apply(endProgram(step.view(), program.callId));
+  } else {
+    await step.apply(
+      endBackgroundProgram(step.view(), { callId: program.callId, outcome, taskId }),
+    );
+  }
   return { checkpoint: true, next: step.runStep, session: step.session };
 }
 

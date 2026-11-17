@@ -1,4 +1,8 @@
-import { runtimeWait, type SessionView, ownOpenRequestIds } from "#harness/session-machine/view.js";
+import {
+  type SessionView,
+  ownOpenRequestIds,
+  waitsInForeground,
+} from "#harness/session-machine/view.js";
 import type { HarnessStepInput, StepResult } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -46,7 +50,7 @@ export function hasQueuedTurnInput(view: SessionView): boolean {
 
 /** Whether anything open stops the turn from calling the model. */
 export function blocked(view: SessionView, state: Step["session"]["state"]): boolean {
-  return resumesOnPerson(view) || runtimeWait(state) !== undefined;
+  return resumesOnPerson(view) || waitsInForeground(state);
 }
 
 /**

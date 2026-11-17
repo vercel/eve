@@ -198,21 +198,37 @@ session it opens. A program that returns settles its call with
 so an eval finds the return value in `output.result` of the `eve__execute`
 call.
 
-| Eval                       | Fixture              | Model | Covers                                                                                              |
-| -------------------------- | -------------------- | ----- | --------------------------------------------------------------------------------------------------- |
-| `program-agent-calls`      | `agent-subagents`    | mock  | Agent calls one at a time and together, the session each call owns, and an agent with `tool: false` |
-| `program-in-child-session` | `agent-subagents`    | mock  | A program that asks a copy of the agent, which runs a program of its own in its turn                |
-| `program-fan-out`          | `agent-subagents`    | real  | A model-written program that asks two sessions at once                                              |
-| `software-factory-program` | `agent-subagents`    | real  | A model-written program whose `outputSchema` replies feed a later agent call                        |
-| `program-child-question`   | `agent-cancellation` | mock  | A question from the called agent reaches the parent session, and its answer resumes the program     |
-| `cancel-subagent`          | `agent-cancellation` | mock  | Cancelling the turn a program holds stops the program and cancels the child session                 |
+A steering message that arrives while a program waits moves the program to
+the background instead of stopping it. The `eve__execute` call is answered
+with a receipt that names a `program-…` task, `task.started` reports the task
+with `name: "eve__execute"`, and the call stays open until the program ends:
+`call.settled` and `task.ended` then publish together, and the model reads the
+result in a `<task_result>` message before the turn settles.
+`eve__task_cancel` on that task stops the program and the agent it waits on.
+The eval driver's `send` and `start` default to `turnPolicy: "queue"`, so
+these evals send the second message with `turnPolicy: "steer"`.
+
+| Eval                         | Fixture              | Model | Covers                                                                                                                                              |
+| ---------------------------- | -------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `program-agent-calls`        | `agent-subagents`    | mock  | Agent calls one at a time and together, the session each call owns, and an agent with `tool: false`                                                 |
+| `program-in-child-session`   | `agent-subagents`    | mock  | A program that asks a copy of the agent, which runs a program of its own in its turn                                                                |
+| `program-fan-out`            | `agent-subagents`    | real  | A model-written program that asks two sessions at once                                                                                              |
+| `software-factory-program`   | `agent-subagents`    | real  | A model-written program whose `outputSchema` replies feed a later agent call                                                                        |
+| `program-child-question`     | `agent-cancellation` | mock  | A question from the called agent reaches the parent session, and its answer resumes the program                                                     |
+| `cancel-subagent`            | `agent-cancellation` | mock  | Cancelling the turn a program holds stops the program and cancels the child session                                                                 |
+| `program-background-message` | `agent-cancellation` | mock  | A message during a program's agent call moves the program to the background; the model answers it, then reads the program's result in the same turn |
+| `program-background-cancel`  | `agent-cancellation` | mock  | `eve__task_cancel` on a background program stops the program and cancels the one child session it waits on                                          |
 
 A mock model cannot write a program, so the fixture scripts it. In
 `agent-subagents`, the marker `E2E_PROGRAM_AGENT_CALLS` selects a scripted
 model that runs the `js` fence in the eval's message unchanged with
 `eve__execute`. In `agent-cancellation`, "ask the sleeper agent from one
-program" selects a scripted `eve__execute` call. No eval reaches a program's
-limit of 128 agent calls.
+program" selects a scripted `eve__execute` call, and the two background evals'
+second messages select a scripted model that reads the task id from the
+receipt. In `program-background-message` the sleeper stays busy in its
+10-second `complete-work` call, so the message has to be answered inside that
+window; a slower run publishes no `task.started` and fails. No eval reaches a
+program's limit of 128 agent calls.
 
 `agent-tool-discovery` is the real-model gate for how models use the catalog
 tools: a catalog of 70 deferred tools (60 in the `sre`, `d0`, `index`, and
