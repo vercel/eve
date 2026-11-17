@@ -180,6 +180,7 @@ export function otelIntegration(options: OtelIntegrationOptions = {}): OtelInteg
   return createOtelIntegration(options);
 }
 
+/** @internal */
 export function managedOtelIntegration(options: OtelIntegrationOptions = {}): OtelIntegration {
   return createOtelIntegration(options);
 }
@@ -212,6 +213,7 @@ function createOtelIntegration(options: OtelIntegrationOptions): OtelIntegration
   };
 }
 
+/** @internal */
 export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelIntegration {
   assertNoRemovedContentOptions(options);
   return {
@@ -264,6 +266,7 @@ export interface CollectedOtel {
   readonly settings: OtelHarnessSettings;
 }
 
+/** @internal */
 export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   const spanProcessors: SpanProcessorSetting[] = [];
   const metricReaders: MetricReader[] = [];

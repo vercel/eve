@@ -32,6 +32,7 @@ export async function inspectVerifiedRemoteAgent(input: {
   readonly workspaceRoot: string;
   readonly prompter?: Prompter;
   readonly signal?: AbortSignal;
+  /** @internal */
   readonly deps?: Partial<InspectVerifiedRemoteAgentDeps>;
 }): Promise<VerifiedRemoteAgentInspection> {
   const deps = { ...defaultDeps, ...input.deps };

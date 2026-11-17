@@ -406,6 +406,7 @@ function formatChallenge(challenge: UnauthorizedChallenge): string {
   return `${challenge.scheme} ${renderedParameters}`;
 }
 
+/** @internal */
 export function escapeAuthChallengeParameter(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
@@ -569,6 +570,7 @@ export function oauthResource(
   return wrapped;
 }
 
+/** @internal */
 export function readOAuthResourceOptions(
   auth: AuthFn<Request> | readonly AuthFn<Request>[],
 ): OAuthResourceOptions | undefined {
@@ -787,6 +789,7 @@ export function localDev(): AuthFn<Request> {
   return authenticate;
 }
 
+/** @internal */
 export function isLocalDevAuth(fn: AuthFn<never>): boolean {
   return (
     (fn as Partial<Record<typeof LOCAL_DEV_AUTH_SYMBOL, true>>)[LOCAL_DEV_AUTH_SYMBOL] === true

@@ -321,6 +321,7 @@ export interface SessionCapabilities {
 
 export interface RunInput {
   readonly idempotencyKey?: string;
+  /** @internal */
   readonly toolStubs?: StubScope;
   readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly adapter: ChannelAdapter<any>;

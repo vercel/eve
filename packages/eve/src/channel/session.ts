@@ -318,6 +318,7 @@ function namespaceContinuationToken(currentToken: string, rawToken: string): str
   return `${currentToken.slice(0, separatorIndex + 1)}${rawToken}`;
 }
 
+/** @internal */
 export function sessionCallbackToTurnCaller(
   callback: SessionCallback | undefined,
 ): TurnCaller | undefined {

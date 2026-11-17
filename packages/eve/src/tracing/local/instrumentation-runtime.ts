@@ -14,6 +14,7 @@ import {
   type TraceCapturePolicy,
 } from "#tracing/eve/otel-declaration.js";
 
+/** @internal */
 export const localTracePolicy: TraceCapturePolicy = () => true;
 
 export function installLocalInstrumentationRuntime(input: {

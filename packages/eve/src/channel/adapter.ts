@@ -24,6 +24,7 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> extends
 
   readonly ctx: ContextAccessor;
 
+  /** @internal */
   readonly inputSource?: string;
 
   readonly position?: FactPosition;
@@ -66,6 +67,7 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
 
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
 
+  /** @internal */
   createAdapterContext?(base: ChannelAdapterContext<StateOf<TCtx>>): TCtx;
 
   readonly fetchFile?: FetchFileFunction;

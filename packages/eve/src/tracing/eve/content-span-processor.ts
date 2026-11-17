@@ -15,6 +15,7 @@ import {
 } from "#tracing/eve/span-export-policy.js";
 import { channelAudienceFromContext } from "#tracing/eve/channel-audience-context.js";
 
+/** @internal */
 export function contentFilteringProcessor(
   downstream: SpanProcessor,
   exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],

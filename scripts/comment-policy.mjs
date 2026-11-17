@@ -17,6 +17,9 @@ const SOURCE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const COMMENT_MESSAGE =
   "Comment outside the public API. Comments may only be JSDoc on declarations a published package entry exports, tool directives (@ts-expect-error, oxlint-disable, /// <reference>, @__PURE__), or license notices (/*! ... */, @license, SPDX-License-Identifier). Delete it. If it states an invariant, enforce it in code instead: a named assert that throws, a type, or a guard rule.";
 
+const INTERNAL_MESSAGE =
+  "Comment outside the public API that carries `@internal`. Replace it with a bare `/** @internal */`: the declaration build uses that tag (stripInternal) to keep this declaration out of the published types.";
+
 const DIRECTIVE_RES = [
   /^@ts-(?:expect-error|ignore|nocheck|check)\b/,
   /^(?:oxlint|eslint)-(?:disable|enable)/,
@@ -386,7 +389,12 @@ export async function checkComments() {
   const { comments, undocumented, issues } = await collectCommentState();
   for (const [file, found] of comments)
     for (const comment of found)
-      issues.push({ rule: 66, file, line: comment.line, message: COMMENT_MESSAGE });
+      issues.push({
+        rule: 66,
+        file,
+        line: comment.line,
+        message: /@internal\b/.test(comment.text) ? INTERNAL_MESSAGE : COMMENT_MESSAGE,
+      });
   for (const item of undocumented.values())
     issues.push({
       rule: 67,

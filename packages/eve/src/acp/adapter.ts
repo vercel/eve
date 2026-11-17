@@ -100,6 +100,7 @@ export interface EveAcpAdapterOptions {
   readonly headers?: ClientOptions["headers"];
   readonly serverUrl: string;
   readonly workspaceRoot?: string;
+  /** @internal */
   readonly client?: AdapterClient;
 }
 

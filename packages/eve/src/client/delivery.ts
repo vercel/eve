@@ -4,6 +4,7 @@ import { throwIfAborted } from "#client/abort-signal.js";
 import type { Delivery, DeliveryReadOptions, DeliveryResult } from "#shared/delivery.js";
 export type { Delivery } from "#shared/delivery.js";
 
+/** @internal */
 export interface ClientSendReceipt {
   readonly deliveryId?: string;
   readonly startedAt: number;
@@ -77,6 +78,7 @@ export class StreamDelivery<TOutput = unknown> implements Delivery<TOutput> {
   }
 }
 
+/** @internal */
 export function getDeliveryReceipt(delivery: Delivery): ClientSendReceipt | undefined {
   return sendReceipts.get(delivery);
 }

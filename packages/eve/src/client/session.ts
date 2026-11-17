@@ -339,6 +339,7 @@ export class ClientSession {
   }
 }
 
+/** @internal */
 export function followClientSession(
   session: ClientSession,
   options: FollowSessionOptions,

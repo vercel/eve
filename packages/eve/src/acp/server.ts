@@ -12,6 +12,7 @@ export interface RunAcpServerOptions {
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
   readonly workspaceRoot?: string;
+  /** @internal */
   readonly client?: EveAcpAdapterOptions["client"];
 }
 

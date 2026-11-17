@@ -15,6 +15,7 @@ export interface LocalTracesProcessor extends SpanProcessor {
   releaseConversation(conversationId: string): Promise<boolean>;
 }
 
+/** @internal */
 export function hasConversationRelease(
   processor: SpanProcessor,
 ): processor is LocalTracesProcessor {
@@ -63,6 +64,7 @@ export function createLocalTracesProcessor(
   };
 }
 
+/** @internal */
 export function resolveLocalTracesExportPolicy(
   exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],
 ): SpanExportPolicy | readonly SpanExportPolicy[] | undefined {

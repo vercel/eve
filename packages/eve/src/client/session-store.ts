@@ -684,10 +684,12 @@ export class SessionStore {
   }
 }
 
+/** @internal */
 export function detachSessionStore(store: SessionStore): void {
   store[detachStore]();
 }
 
+/** @internal */
 export function attachSessionStore(store: SessionStore): void {
   store[attachStore]();
 }

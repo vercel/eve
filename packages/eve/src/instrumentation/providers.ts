@@ -48,6 +48,7 @@ export function seedInstrumentationProviders(): void {
   }
 }
 
+/** @internal */
 export async function registerInstrumentationProvider(input: {
   readonly agentName: string;
   readonly slot: string;
@@ -74,12 +75,14 @@ export async function registerInstrumentationProvider(input: {
   await input.value.setup?.(createInstrumentationSetupContext(input.agentName));
 }
 
+/** @internal */
 export function getInstrumentationProviders(): readonly RegisteredInstrumentationProvider[] {
   return [...providerRegistry()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([slot, provider]) => ({ provider, slot }));
 }
 
+/** @internal */
 export function finalizeInstrumentationProviders(input: {
   readonly serviceName: string;
 }): InstrumentationRuntime {

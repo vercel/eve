@@ -5,6 +5,7 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { InstrumentationSetupContext } from "#public/instrumentation/provider.js";
 
+/** @internal */
 export function createInstrumentationSetupContext(agentName: string): InstrumentationSetupContext {
   const evaluationRunId = resolveEveEvaluationRunId();
   return {

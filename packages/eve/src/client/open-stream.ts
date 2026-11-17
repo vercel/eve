@@ -75,6 +75,7 @@ interface FollowStreamInput {
   readonly baseUrl: string;
   readonly resolveReconnectPolicy?: () => false | ReconnectOptions | undefined;
   readonly reconnect?: false | ReconnectOptions;
+  /** @internal */
   readonly streamReadIdleTimeoutMs?: number;
   readonly resolveHeaders: () => Promise<Headers>;
   readonly redirect?: ClientRedirectPolicy;

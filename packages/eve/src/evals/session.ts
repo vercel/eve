@@ -284,6 +284,7 @@ export class EvalSessionDriver implements EveEvalSession {
     );
   }
 
+  /** @internal */
   recordSend(kind: EveEvalSendTiming["kind"], receipt: ClientSendReceipt | undefined): void {
     if (receipt !== undefined) this.#sends.push({ kind, ...receipt });
   }
