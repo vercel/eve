@@ -233,6 +233,10 @@ variables to it yourself in that case. Set `SLACK_CONNECTOR` and
 pnpm exec eve deploy
 ```
 
+Either way, finish with the steps below. The button sets neither
+`SLACK_TEAM_ID` nor the extra Slack events and scopes. Set `SLACK_TEAM_ID` in
+the Vercel project's environment and redeploy.
+
 To follow threads without a mention, the Slack app also needs the
 `message.channels` event and `channels:history` scope (and `message.groups` and
 `groups:history` for private channels). With Vercel Connect, add them in the
