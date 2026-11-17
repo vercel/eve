@@ -292,6 +292,31 @@
       ]
     },
     {
+      "name": "extension/sanity-context",
+      "type": "registry:item",
+      "title": "Sanity Context",
+      "description": "Answer from your Sanity content.",
+      "dependencies": [
+        "@sanity/context-eve"
+      ],
+      "envVars": {
+        "SANITY_CONTEXT_MCP_URL": "",
+        "SANITY_ORGANIZATION_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=1.0.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/sanity-context.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/sanity-context.ts"
+        }
+      ]
+    },
+    {
       "name": "memory/file",
       "type": "registry:item",
       "title": "File memory",

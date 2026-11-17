@@ -463,6 +463,9 @@ importers:
       '@posthog/ai':
         specifier: 8.19.2
         version: 8.19.2(3c6b5700900e9e34d4d35c197eec712b)
+      '@sanity/context-eve':
+        specifier: 0.1.0
+        version: 0.1.0(eve@packages+eve)
       '@stripe/link-integrations-eve':
         specifier: ^0.5.0
         version: 0.5.0(eve@packages+eve)
@@ -6740,6 +6743,12 @@ packages:
   '@rushstack/ts-command-line@5.3.18':
     resolution: {integrity: sha512-acP68tGx/DJEIQgTqj/xStBRaghN7axV+uAjNasDjVXgHgHaLQ1f16/bbXtw6mNLjURhTORD4fdfbOZM7kyWcw==}
     engines: {node: '>=20.9.0'}
+
+  '@sanity/context-eve@0.1.0':
+    resolution: {integrity: sha512-pkz6vPMsaEjZcUQzIy9chTFRknjBEziyluzncElJJb47MFfpgs2sulz8Gimrkn4Orliz3E2cSp+/ncPrvaWK6g==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      eve: '*'
 
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
@@ -19998,6 +20007,11 @@ snapshots:
       string-argv: 0.3.2
     transitivePeerDependencies:
       - '@types/node'
+
+  '@sanity/context-eve@0.1.0(eve@packages+eve)':
+    dependencies:
+      eve: link:packages/eve
+      zod: 4.6.7
 
   '@sec-ant/readable-stream@0.4.1': {}
 
