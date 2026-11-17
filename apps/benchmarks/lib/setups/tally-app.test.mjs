@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { tallyAppSetup } from "./tally-app.ts";
@@ -15,6 +16,14 @@ test("installs the Tally app in the project directory with eve pinned to the can
 
   const packageJson = JSON.parse(writes.get("package.json"));
   assert.equal(packageJson.dependencies.eve, "https://pkg.eve.dev/commit/eve.tgz");
+  const eve = JSON.parse(
+    readFileSync(new URL("../../../../packages/eve/package.json", import.meta.url)),
+  );
+  assert.equal(eve.peerDependencies.ai, "catalog:");
+  const catalog = readFileSync(new URL("../../../../pnpm-workspace.yaml", import.meta.url), "utf8");
+  const minimum = catalog.match(/^  ai: "\^(\d+\.\d+\.\d+)"$/m)?.[1];
+  assert.ok(minimum, "The workspace catalog must specify an ai peer minimum");
+  assert.equal(packageJson.dependencies.ai, minimum);
   for (const file of ["lib/session.ts", "lib/invoices.ts", "app/(dashboard)/layout.tsx"]) {
     assert.ok(writes.has(file), file);
   }

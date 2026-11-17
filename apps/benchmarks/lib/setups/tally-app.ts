@@ -5,6 +5,14 @@ import { fileURLToPath } from "node:url";
 import type { AuthoringSetup } from "../authoring-case.js";
 
 const fixtureRoot = fileURLToPath(new URL("../../fixtures/tally/", import.meta.url));
+const workspaceCatalog = readFileSync(
+  new URL("../../../../pnpm-workspace.yaml", import.meta.url),
+  "utf8",
+);
+const aiVersion = workspaceCatalog.match(/^  ai: "\^(\d+\.\d+\.\d+)"$/m)?.[1];
+if (aiVersion === undefined) {
+  throw new Error("The Tally benchmark needs a pinned ai version from the workspace catalog.");
+}
 
 /** The Tally app's source files, keyed by their path inside the app. */
 export function tallyAppFiles(): Record<string, string> {
@@ -33,7 +41,7 @@ export function tallyPackageJson(packageSpec: string): string {
       typecheck: "tsc --noEmit",
     },
     dependencies: {
-      ai: "7.0.137",
+      ai: aiVersion,
       eve: packageSpec,
       next: "16.3.8",
       react: "19.2.6",
