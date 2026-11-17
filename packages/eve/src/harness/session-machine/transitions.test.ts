@@ -425,6 +425,7 @@ describe("controls and callbacks as deliveries", () => {
     const session = waitingTurn();
     const { events } = completeSignIn(viewOf(session), {
       completions: [{ ...GITHUB_CALLBACK, candidateId: "answer-1" }],
+      refusals: new Map(),
     });
 
     expect(events.map((event) => event.type)).toEqual([
@@ -445,15 +446,31 @@ describe("controls and callbacks as deliveries", () => {
     expect(accepted(session, events)).toEqual([]);
   });
 
-  it("leaves a model call's sign-in to the turn that goes ahead with the model call", () => {
+  it("leaves a model call's completed sign-in to its completion", () => {
     expect(
-      completeSignIn(viewOf(waitingTurn()), { completions: [GITHUB_CALLBACK] }).events,
+      completeSignIn(viewOf(waitingTurn()), {
+        completions: [GITHUB_CALLBACK],
+        refusals: new Map(),
+      }).events,
     ).toEqual([]);
+  });
+
+  it("settles a model call's sign-in declined from a refused callback", () => {
+    const { events } = completeSignIn(viewOf(waitingTurn()), {
+      completions: [GITHUB_CALLBACK],
+      refusals: new Map([[GITHUB_CALLBACK.attemptId, "access_denied"]]),
+    });
+    expect(events.map((event) => event.type)).toContain("interaction.settled");
+    expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
+      outcome: "declined",
+      reason: "access_denied",
+    });
   });
 
   it("ignores a callback for a sign-in that already ended", () => {
     const { events } = completeSignIn(viewOf(BASE), {
       completions: [GITHUB_CALLBACK],
+      refusals: new Map(),
     });
     expect(events).toEqual([]);
   });
@@ -581,7 +598,9 @@ describe("calls a sign-in stopped", () => {
       ...view,
       signIns: matchSignIns(view, { attemptIds: ["google-1"] }).signIns!,
     };
-    expect(completeSignIn(matched, { completions: [signIn("google")] }).events).toEqual([]);
+    expect(
+      completeSignIn(matched, { completions: [signIn("google")], refusals: new Map() }).events,
+    ).toEqual([]);
     expect(runnable(matched)).toEqual(["call-1"]);
 
     const [first, second] = step.approved!;

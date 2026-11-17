@@ -168,7 +168,7 @@ describe("a model sign-in that ends without a credential", () => {
     });
   });
 
-  it("lets the dynamic model fall back after a decline", async () => {
+  it("settles a declined callback declined and lets the dynamic model answer with another model", async () => {
     const billing = billingProvider();
     await withAgent(
       "model-sign-in-fallback",

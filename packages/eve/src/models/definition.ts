@@ -9,8 +9,6 @@ import {
 const MODEL_DEFINITION: unique symbol = Symbol.for("eve.model-definition");
 const MODEL_SIGN_IN_PREFIX = "eve__model__";
 
-const defined = new Map<string, ModelDefinition>();
-
 /**
  * A model that runs on the caller's own credential. eve resolves `auth` before each model call,
  * opens the same sign-in as a connection when the caller has none, and passes the credential to
@@ -79,7 +77,6 @@ export function defineModel(definition: ModelDefinition): ModelDefinition {
     id: definition.id,
   };
   Object.defineProperty(model, MODEL_DEFINITION, { value: true });
-  defined.set(modelSignInName(model), model);
   return model;
 }
 
@@ -91,8 +88,4 @@ export function isModelDefinition(value: unknown): value is ModelDefinition {
 
 export function modelSignInName(definition: ModelDefinition): string {
   return `${MODEL_SIGN_IN_PREFIX}${definition.authKey ?? sanitizeScopeSegment(definition.auth.vercelConnect!.connector)}`;
-}
-
-export function definedModel(signInName: string): ModelDefinition | undefined {
-  return defined.get(signInName);
 }

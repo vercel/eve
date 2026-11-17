@@ -735,18 +735,32 @@ export function callSignInsSettled(
 
 export function completeSignIn(
   view: SessionView,
-  input: { readonly completions: readonly AuthorizationChallenge[] },
+  input: {
+    readonly completions: readonly AuthorizationChallenge[];
+    readonly refusals: ReadonlyMap<string | undefined, string>;
+  },
 ): Transition {
   const tables = view.projection.view;
   const reportedByCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
   return unchanged(
     view,
     input.completions
-      .filter(
-        (challenge) =>
-          challenge.candidateId !== undefined && !reportedByCalls.has(signInAttemptKey(challenge)),
-      )
-      .flatMap((challenge) => signInCallbackFacts(tables, challenge, { outcome: "accepted" })),
+      .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
+      .flatMap((challenge) => {
+        const refusal = input.refusals.get(challenge.attemptId);
+        if (challenge.candidateId !== undefined) {
+          return signInCallbackFacts(tables, challenge, { outcome: "accepted" });
+        }
+        if (refusal === undefined) return [];
+        return callSignInsSettled(
+          view,
+          { signIns: [challenge] },
+          {
+            reason: refusal,
+            retryable: refusal === SIGN_IN_DECLINED ? false : undefined,
+          },
+        );
+      }),
   );
 }
 

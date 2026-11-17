@@ -6,18 +6,20 @@ import type { ModelMessage } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { commitOf, committedMessages, saveTransition } from "#harness/session-machine/commit.js";
-import { callSignIns, callSignInsSettled, fail } from "#harness/session-machine/transitions.js";
+import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
+import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState } from "#harness/session-machine/state.js";
-import { failSignIn, type Step } from "#harness/step/context.js";
+import { failTurn, type Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   handleAuthorizationError,
   isScopedAuthorizationRequiredError,
 } from "#runtime/connections/scoped-authorization.js";
-import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
-import { signInFailureOf } from "./approved-calls.js";
+import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
+import type { AuthorizationDefinition } from "#shared/connection-types.js";
+import type { SessionView } from "#harness/session-machine/view.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
@@ -45,6 +47,7 @@ export {
   type HumanInputIntake,
 } from "./intake.js";
 export { openDeferredApprovals, queueInput } from "./approvals.js";
+export { signInReports } from "./approved-calls.js";
 export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
 
@@ -102,20 +105,49 @@ export async function pauseForSignIn(step: Step, error: unknown): Promise<StepRe
   }
 }
 
-export async function settleModelSignIns(step: Step, failure?: unknown): Promise<boolean> {
-  const view = step.view();
-  const byCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
-  const signIns = (step.config.signInCompletions ?? []).filter(
-    (challenge) => challenge.candidateId === undefined && !byCalls.has(signInAttemptKey(challenge)),
+async function failSignIn(
+  step: Step,
+  error: unknown,
+  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
+): Promise<StepResult> {
+  const name = providerName(step.view(), signIn);
+  return await failTurn(
+    step,
+    error,
+    "MODEL_AUTHORIZATION_FAILED",
+    signInFailureMessage(name, error),
   );
-  const events = callSignInsSettled(
-    view,
-    { signIns },
-    failure === undefined ? undefined : signInFailureOf(failure),
+}
+
+function signInFailureMessage(name: string, error: unknown): string {
+  if (!isConnectionAuthorizationFailedError(error)) return `The turn got no ${name} credential.`;
+  switch (error.reason) {
+    case SIGN_IN_DECLINED:
+    case "sign_in_cancelled":
+      return `The ${name} sign-in ended without a credential.`;
+    case "sign_in_unavailable":
+      return `A scheduled turn can't ask for the ${name} sign-in.`;
+    case "principal_required":
+      return `The ${name} credential needs a signed-in user.`;
+    case "token_rejected_after_authorization":
+      return `${name} rejected the credential from the sign-in.`;
+    case "app_not_installed":
+    case "authorization_callback_unavailable":
+      return `The turn got no ${name} credential.`;
+    default:
+      return `${name}: ${error.message}`;
+  }
+}
+
+function providerName(
+  view: SessionView,
+  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
+): string {
+  const cards = Object.values(view.projection.view.interactions).flatMap(
+    (row) => row.request.signIn ?? [],
   );
-  if (events.length === 0) return false;
-  await step.apply(commitOf(events));
-  return true;
+  const card = cards.findLast((asked) => asked.name === signIn.scope);
+  return signIn.authorization?.displayName ?? card?.displayName ?? displayProperName(signIn.scope);
 }
 
 export async function enforceBudget(

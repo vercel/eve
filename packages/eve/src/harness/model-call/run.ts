@@ -10,10 +10,9 @@ import {
   enforceBudget,
   humanInputContext,
   pauseForSignIn,
-  settleModelSignIns,
+  signInReports,
 } from "#harness/hitl/index.js";
-import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import { isModelDefinition, modelSignInName } from "#models/definition.js";
+import { SignInCompletedKey } from "#harness/authorization.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import {
   requestRun as requestRunFact,
@@ -72,10 +71,9 @@ export async function runModelStep(
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
 
-  const resolved = await resolveModel(step, prompt);
+  const resolved = await resolveModel(step);
   if ("failed" in resolved) return resolved.failed;
   if ("signIn" in resolved) return await pauseForSignIn(step, resolved.signIn);
-  await settleModelSignIns(step);
   const requested = await requestRun(step, prompt);
   if (requested !== undefined) return requested;
   const projectedMessages = projectPrompt(prompt);
@@ -141,26 +139,11 @@ export async function runModelStep(
   return stepResult;
 }
 
-type ResolvedModel =
-  | { readonly model: LanguageModel }
-  | { readonly failed: StepResult }
-  | { readonly signIn: unknown; readonly credential: string | undefined };
-
-async function resolveModel(step: Step, prompt: Prompt): Promise<ResolvedModel> {
-  const first = await resolveCredentialedModel(step);
-  if (
-    !("signIn" in first) ||
-    !isConnectionAuthorizationFailedError(first.signIn) ||
-    !(await settleModelSignIns(step, first.signIn))
-  )
-    return first;
-  const failed = await prepareModelCall(step, prompt);
-  if (failed !== undefined) return { failed };
-  const again = await resolveCredentialedModel(step);
-  return "signIn" in again && again.credential === first.credential ? first : again;
-}
-
-async function resolveCredentialedModel(step: Step): Promise<ResolvedModel> {
+async function resolveModel(
+  step: Step,
+): Promise<
+  { readonly model: LanguageModel } | { readonly failed: StepResult } | { readonly signIn: unknown }
+> {
   let resolved: Awaited<ReturnType<typeof resolveEffectiveRuntimeModel>>;
   try {
     resolved = await resolveEffectiveRuntimeModel(step);
@@ -168,15 +151,19 @@ async function resolveCredentialedModel(step: Step): Promise<ResolvedModel> {
     return { failed: await failModelSelection(step, error) };
   }
   step.model = resolved.choice;
+  const reports = signInReports({ publish: step.publish, view: () => step.view() });
+  step.ctx.setVirtualContext(
+    SignInCompletedKey,
+    reports.completed(step.config.signInCompletions ?? []),
+  );
   try {
     return { model: await credentialedModel(resolved.model, resolved.choice.reference) };
   } catch (error) {
     if (isTurnCancellation(error)) throw error;
     if (!isSignInError(error)) return { failed: await reportModelCallFailure(step, error) };
-    return {
-      credential: isModelDefinition(resolved.model) ? modelSignInName(resolved.model) : undefined,
-      signIn: error,
-    };
+    return { signIn: error };
+  } finally {
+    step.ctx.delete(SignInCompletedKey);
   }
 }
 

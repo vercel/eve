@@ -34,7 +34,7 @@ import {
   withdrawUnavailable,
 } from "./approvals.js";
 import { runApprovedCalls, signInReports } from "./approved-calls.js";
-import { SignInCompletedKey } from "#harness/authorization.js";
+import { getAuthorizationResults, SignInCompletedKey } from "#harness/authorization.js";
 import { publishDenial, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
@@ -67,7 +67,14 @@ export async function admitHumanInput(
 ): Promise<HumanInputIntake> {
   const { config } = step;
   const completions = config.signInCompletions ?? [];
-  if (completions.length > 0) await step.apply(completeSignIn(step.view(), { completions }));
+  if (completions.length > 0) {
+    const refusals = new Map(
+      getAuthorizationResults().flatMap(({ attemptId, callback }) =>
+        callback.params.error === undefined ? [] : [[attemptId, callback.params.error] as const],
+      ),
+    );
+    await step.apply(completeSignIn(step.view(), { completions, refusals }));
+  }
   const weighed = await weighResponders(step.view(), {
     now: Date.now(),
     tools: () => toolsOf(step),
@@ -250,7 +257,10 @@ async function runApproved(
   );
   if (calls.length === 0) return undefined;
   const signIns = signInReports({ publish: step.publish, view: () => step.view() });
-  step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
+  step.ctx.setVirtualContext(
+    SignInCompletedKey,
+    signIns.completed(calls.flatMap((call) => call.signIns ?? [])),
+  );
   const groups = await Promise.allSettled(
     local.map(async ({ approvals, tools }) => {
       if (approvals.length === 0) return { settled: [], signIns: [] };

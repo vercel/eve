@@ -207,23 +207,7 @@ When the caller has no credential, eve opens the same sign-in as a connection, w
 - A message during the sign-in withdraws it, and the step runs again with the message in the turn.
 - When the provider answers a model call with `401`, eve drops the token, calls `auth.evict`, resolves the credential again, and retries the call once. A second `401` asks the person to sign in again. When the provider rejects the credential right after that sign-in, the turn fails.
 - A turn without a credential fails with `MODEL_AUTHORIZATION_FAILED`, and its `message` says why: the person declined, a message withdrew the sign-in, a scheduled turn can't ask, the session has no signed-in user, or the provider rejected the credential right after the sign-in. The sign-in card settles with the connection reason, such as `access_denied`. The session stays open, and the next turn asks again.
-- After a sign-in ends without a credential, eve settles its card and runs the dynamic functions once more, so a dynamic `model` can read the outcome from `ctx.view` and answer with another model:
-
-```ts
-import { defineDynamic } from "eve/models";
-import { interactions } from "eve/events";
-
-const model = defineDynamic((ctx) => {
-  const refused = interactions(ctx.view).some(
-    (asked) =>
-      asked.turnId === ctx.turn?.id &&
-      asked.request.signIn?.grant === "anthropic/myagent" &&
-      asked.status === "settled" &&
-      asked.outcome !== "accepted",
-  );
-  return refused ? "anthropic/claude-sonnet-5" : ownClaude;
-});
-```
+- A declined sign-in settles its card before the dynamic functions run, so a dynamic `model` can read it from `ctx.view` with `interactions` from `eve/events` and answer with another model.
 
 Compaction's summary call runs on the turn's model, so it reuses the credential the turn resolved. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
 

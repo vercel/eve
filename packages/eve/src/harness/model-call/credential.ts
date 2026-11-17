@@ -1,14 +1,8 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { type LanguageModel, wrapLanguageModel } from "ai";
 
-import { getAuthorizationResults } from "#harness/authorization.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
-import {
-  definedModel,
-  isModelDefinition,
-  type ModelDefinition,
-  modelSignInName,
-} from "#models/definition.js";
+import { isModelDefinition, type ModelDefinition, modelSignInName } from "#models/definition.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveMockAuthoredRuntimeModel } from "#runtime/agent/mock-model-adapter.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
@@ -20,15 +14,12 @@ import {
 import type { TokenResult } from "#shared/connection-types.js";
 import { rejectsCredential } from "./errors.js";
 
-type Execution = ReturnType<typeof createAuthorizationExecution>;
-
 export async function credentialedModel(
   model: RuntimeModel,
   reference: RuntimeModelReference,
 ): Promise<LanguageModel> {
   if (!isModelDefinition(model)) return model;
   const execution = createAuthorizationExecution();
-  await completeModelSignIns(execution);
   const scoped = scopedAuthorization(model);
   const create = async () => createdModel(model, await execution.getToken(scoped), reference);
   let current = await create();
@@ -55,13 +46,6 @@ export async function credentialedModel(
     },
     model: current,
   });
-}
-
-async function completeModelSignIns(execution: Execution): Promise<void> {
-  for (const { name } of getAuthorizationResults()) {
-    const definition = definedModel(name);
-    if (definition !== undefined) await execution.complete(scopedAuthorization(definition));
-  }
 }
 
 function scopedAuthorization(definition: ModelDefinition): ScopedAuthorization {

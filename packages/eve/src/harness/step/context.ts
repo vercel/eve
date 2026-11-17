@@ -15,11 +15,7 @@ import { isDynamicModelSelectionError } from "#definitions/model.js";
 import { DefinitionFailedError } from "#definitions/kernel.js";
 import { evaluateStepValues } from "#definitions/step.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import { settleModelSignIns } from "#harness/hitl/index.js";
-import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
-import { displayProperName } from "#protocol/session-projection/display-name.js";
 import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
-import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -169,48 +165,13 @@ export function isSignInError(error: unknown): boolean {
   return isScopedAuthorizationRequiredError(error) || isConnectionAuthorizationFailedError(error);
 }
 
-const EVE_SIGN_IN_FAILURES: Readonly<Record<string, (name: string) => string>> = {
-  [SIGN_IN_DECLINED]: (name) => `The ${name} sign-in ended without a credential.`,
-  app_not_installed: (name) => `The agent has no ${name} credential.`,
-  authorization_callback_unavailable: (name) =>
-    `The run has no callback URL for the ${name} sign-in.`,
-  principal_required: (name) => `The ${name} credential needs a signed-in user.`,
-  sign_in_cancelled: (name) => `The ${name} sign-in ended without a credential.`,
-  sign_in_unavailable: (name) => `A scheduled turn can't ask for the ${name} sign-in.`,
-  token_rejected_after_authorization: (name) => `${name} rejected the credential from the sign-in.`,
-};
-
-export async function failSignIn(
-  step: Step,
-  error: unknown,
-  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
-): Promise<StepResult> {
-  await settleModelSignIns(step, error);
-  const name = providerName(step.view(), signIn);
-  const message = isConnectionAuthorizationFailedError(error)
-    ? (EVE_SIGN_IN_FAILURES[error.reason ?? ""]?.(name) ?? `${name}: ${error.message}`)
-    : `The turn got no ${name} credential.`;
-  return await failTurn(step, error, "MODEL_AUTHORIZATION_FAILED", message);
-}
-
-function providerName(
-  view: SessionView,
-  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
-): string {
-  const cards = Object.values(view.projection.view.interactions).flatMap(
-    (row) => row.request.signIn ?? [],
-  );
-  const card = cards.findLast((asked) => asked.name === signIn.scope);
-  return signIn.authorization?.displayName ?? card?.displayName ?? displayProperName(signIn.scope);
-}
-
 export async function failTurnForEffect(step: Step): Promise<StepResult | undefined> {
   const reason = takeTurnFailure(step.ctx as ContextContainer);
   if (reason === undefined) return undefined;
   return failTurn(step, new Error(reason), "HOOK_FAILED");
 }
 
-async function failTurn(
+export async function failTurn(
   step: Step,
   error: unknown,
   code: string,
