@@ -14,6 +14,7 @@ import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
 import type { ClientRedirectPolicy, ReconnectOptions } from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
+import { waitWithSignal } from "#shared/wait-with-signal.js";
 
 interface ResolvedStreamReconnectPolicy {
   readonly reconnect: boolean;
@@ -84,6 +85,7 @@ interface FollowStreamInput {
   readonly signal?: AbortSignal;
   readonly startIndex: number;
   readonly follow?: boolean;
+  readonly opened?: PendingStream;
 }
 
 interface OpenStreamInput extends FollowStreamInput {
@@ -116,16 +118,25 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
     return input.follow === false && passedTail();
   };
 
+  let opened = input.opened;
   while (true) {
     const retryPolicy = resolvePolicy();
+    const requestTailIndex = (bounded || startIndex < 0) && tailIndex === undefined;
+    const early = opened;
+    opened = undefined;
     let connection: OpenedStream;
     try {
-      connection = await openStreamBody({
-        ...input,
-        retryPolicy,
-        startIndex,
-        requestTailIndex: (bounded || startIndex < 0) && tailIndex === undefined,
-      });
+      const adopted =
+        early === undefined
+          ? undefined
+          : requestTailIndex
+            ? void early.cancel()
+            : await waitWithSignal(early.opened, input.signal).catch((error: unknown) => {
+                early.cancel();
+                throw error;
+              });
+      connection =
+        adopted ?? (await openStreamBody({ ...input, retryPolicy, startIndex, requestTailIndex }));
     } catch (error) {
       if (input.signal?.aborted) return;
       throw error;
@@ -244,7 +255,12 @@ export async function* followStreamIterable(
   }
 }
 
-interface OpenedStream {
+export interface PendingStream {
+  readonly opened: Promise<OpenedStream | undefined>;
+  cancel(): void;
+}
+
+export interface OpenedStream {
   readonly headers: Headers;
   readonly body: ReadableStream<Uint8Array>;
   close(): void;

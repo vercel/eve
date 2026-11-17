@@ -14,7 +14,11 @@ import { basename } from "node:path";
 
 import { createTextWithFileContent } from "#client/file-parts.js";
 import { getDeliveryReceipt, type ClientSendReceipt } from "#client/delivery.js";
-import { followClientSession, type ClientSession } from "#client/session.js";
+import {
+  followClientSession,
+  sendFollowedClientSession,
+  type ClientSession,
+} from "#client/session.js";
 import type {
   ClientSessionState,
   SendTurnInput,
@@ -264,22 +268,22 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
-    const { answers, message, ...options } = attachSignal(input, this.#signal);
+    const payload = attachSignal(input, this.#signal);
     const startIndex = this.#session.state.streamIndex;
-    const response =
-      answers === undefined
-        ? await this.#session.send(message!, options)
-        : await this.#session.respond(answers, options);
-    this.recordSend(answers === undefined ? "message" : "respond", getDeliveryReceipt(response));
+    const response = await sendFollowedClientSession(this.#session, payload);
+    this.recordSend(
+      payload.answers === undefined ? "message" : "respond",
+      getDeliveryReceipt(response),
+    );
     const deliveryId = response.deliveryId;
     return this.consume(
       followClientSession(this.#session, {
         startIndex,
-        signal: options.signal,
-        headers: options.headers,
-        reconnect: options.reconnect,
+        signal: payload.signal,
+        headers: payload.headers,
+        reconnect: payload.reconnect,
       }),
-      message,
+      payload.message,
       { deliveryId },
     );
   }
