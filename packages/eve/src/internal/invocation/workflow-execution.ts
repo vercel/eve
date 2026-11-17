@@ -364,9 +364,12 @@ function statusMessage(view: SessionView, previews: SessionPreviews): string | u
       typeof part.value === "string" &&
       partTurn(view, part) === turnId,
   );
+  const maxLength = STATUS_MESSAGE_MAX_LENGTH;
   const reasoning =
-    (live === undefined ? undefined : reasoningStatus(live.text)) ??
-    (typeof done?.value === "string" ? reasoningStatus(done.value, { complete: true }) : undefined);
+    (live === undefined ? undefined : reasoningStatus(live.text, { maxLength })) ??
+    (typeof done?.value === "string"
+      ? reasoningStatus(done.value, { complete: true, maxLength })
+      : undefined);
   return reasoning === undefined ? "Thinking..." : truncate(reasoning, STATUS_MESSAGE_MAX_LENGTH);
 }
 

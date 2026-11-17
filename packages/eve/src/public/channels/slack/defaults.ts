@@ -33,7 +33,10 @@ import { refusedAnswerOf, requestBatchOf } from "#channel/interaction-prompts.js
 import { signInOf, type SignIn } from "#channel/sign-in.js";
 import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
-import { truncateTypingStatus } from "#public/channels/slack/limits.js";
+import {
+  SLACK_TYPING_STATUS_MAX_LENGTH,
+  truncateTypingStatus,
+} from "#public/channels/slack/limits.js";
 import type {
   SlackApprovalChannelResolver,
   SlackChannelConfig,
@@ -100,7 +103,10 @@ async function showReasoning(
   stream: StepStream,
   options?: { readonly complete?: boolean },
 ): Promise<void> {
-  const piece = reasoningStatus(stream.reasoning, options);
+  const piece = reasoningStatus(stream.reasoning, {
+    complete: options?.complete,
+    maxLength: SLACK_TYPING_STATUS_MAX_LENGTH,
+  });
   if (piece === undefined) return;
   if (truncateTypingStatus(piece) === channel.state.threadStatus?.text) return;
   const now = Date.now();

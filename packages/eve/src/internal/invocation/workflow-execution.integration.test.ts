@@ -211,7 +211,7 @@ describe("statusMessage", () => {
     await expect(
       statusMessageOf(
         delta("r-1", "I should check the Snowflake revenue tables for last quarter. ", "reasoning"),
-        delta("r-1", "Then compare"),
+        delta("r-1", "Then compare them against the forecast numbers from the fin"),
       ),
     ).resolves.toBe("I should check the Snowflake revenue tables for last quarter.");
   });
