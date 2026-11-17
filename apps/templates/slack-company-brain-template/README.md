@@ -12,66 +12,204 @@ specialists (subagents).
 
 ```text
 agent/
-  agent.ts                       # model selection
-  instructions.md                # grounding, citations, source routing, and Slack style
-  instructions/[connection].ts   # how to connect each source; delete once connected
-  connections/[connection].ts    # Notion, Linear, and PagerDuty, each on once its connector exists
-  channels/slack.ts              # mentions, DMs, followed threads, workspace gate
-  channels/eve.ts                # HTTP API access, with tool stubs for local evals
-  extensions/code.ts             # eve's code extension: work with files and code in a sandbox
-  extensions/git.ts              # eve's git extension: GitHub access and pull requests
-  extensions/skills.ts           # skills people teach the agent, for themselves or a channel
-  memory/[slot].ts               # private notes per person and shared notes per Slack channel
-  schedules/tasks.ts             # schedules people create by asking in Slack
-  skills/company-context/SKILL.md # fill in your teams, glossary, and sources
-  tools/no_reply.ts              # lets the agent stay quiet in followed threads
-  tools/search_slack.ts          # searches public Slack channels
-  tools/read_slack_conversation.ts # reads a public channel or thread
-  tools/post_slack_file.ts       # posts a sandbox file, such as a chart or CSV, in the thread
-  sandbox.ts                     # Vercel Sandbox with coding tools installed
-  lib/slack.ts                   # shared Slack credentials and workspace check
-  lib/connect.ts                 # connector detection and setup notes
-  lib/github.ts                  # GitHub connector and firewall credential broker
-  lib/conversation.ts            # tells private conversations from shared channels
-evals/                           # checks for answer length, citations, and thread replies
+  agent.ts                  # model selection
+  instructions.md           # grounding, citations, source routing, and Slack style
+  instructions/
+    [connection].ts         # how to connect each source; delete once connected
+  channels/
+    eve.ts                  # HTTP API access, with tool stubs for local evals
+    slack.ts                # mentions, DMs, followed threads, workspace gate
+  connections/
+    [connection].ts         # Notion, Linear, and PagerDuty, each on once its connector exists
+  extensions/
+    code.ts                 # eve's code extension: files and code in a sandbox
+    git.ts                  # eve's git extension: GitHub access and pull requests
+    skills.ts               # skills people teach the agent, for themselves or a channel
+  memory/
+    [slot].ts               # private notes per person and shared notes per Slack channel
+  schedules/
+    tasks.ts                # schedules people create by asking in Slack
+  skills/
+    company-context/
+      SKILL.md              # fill in your teams, glossary, and sources
+  tools/
+    no_reply.ts             # lets the agent stay quiet in followed threads
+    post_slack_file.ts      # posts a sandbox file, such as a chart or CSV, in the thread
+    read_slack_conversation.ts # reads a public channel or thread
+    search_slack.ts         # searches public Slack channels
+  lib/
+    connect.ts              # connector detection and setup notes
+    conversation.ts         # tells private conversations from shared channels
+    github.ts               # GitHub connector and firewall credential broker
+    slack.ts                # shared Slack credentials and workspace check
+  sandbox.ts                # Vercel Sandbox with coding tools installed
+evals/                      # checks for answer length, citations, and thread replies
 ```
 
-- **Grounded answers.** The instructions tell the agent to answer
-  company-specific questions only from sources it retrieved, link the source
-  inline, and say when nothing answers the question or a source failed.
-- **Followed threads.** Once someone brings the agent into a thread, it sees
-  later replies without a mention and answers only when a reply is meant for
-  it. Otherwise it calls `no_reply` and leaves no trace. Top-level channel
-  messages still need a mention. This needs extra Slack events; see
-  [Get started](#get-started).
-- **Slack search.** `search_slack` uses Slack's
+- **Evidence-based answers.** `instructions.md` has the agent answer
+  company-specific questions only from sources it retrieved and cite them
+  inline. `skills/company-context` is a stub to fill in with your teams,
+  glossary, and sources.
+- **Natural Slack behavior.** `channels/slack.ts` follows threads the agent is
+  already in without a mention, and calls `no_reply` when a reply isn't for it.
+  This needs extra Slack events; see [Get started](#get-started).
+- **Slack search.** `tools/search_slack.ts` uses Slack's
   [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api)
-  to find relevant messages in public channels, best match first, with
-  permalinks the agent cites, and `read_slack_conversation` reads a match's
-  thread or a named channel. See [Slack search](#slack-search).
-- **Your own sources.** Add any knowledge source as a connection, from the
-  eve registry, an MCP server, or an OpenAPI spec, or as a tool, and give a
-  domain its own subagent. See [Grow the brain](#grow-the-brain).
-- **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
-  private one per person, and a shared one per Slack channel. See
-  [Memory](#memory).
-- **Custom skills.** People teach the agent their own skills by asking, such
-  as a release checklist or how they like standup notes. Personal skills
-  follow their owner everywhere; channel skills apply to everyone in a Slack
-  channel. See [Custom skills](#custom-skills).
-- **Scheduled tasks.** People can ask for recurring or one-time work, such as
-  "every Monday at 9, summarize last week's open questions here". Results post
-  in the conversation where the schedule was created. See
-  [Scheduled tasks](#scheduled-tasks).
-- **Code and files.** The [code extension](https://eve.dev/docs/code-extension)
-  lets the agent run scripts, analyze attached files such as CSVs or logs, and
-  read or write code in a sandbox. `post_slack_file` posts what it makes, such
-  as a chart or a cleaned-up CSV, back in the thread.
-- **GitHub.** With a GitHub connector, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
-  adds a `git__gh` tool for reading repositories, issues, and pull requests the
-  connector's GitHub App is installed on, and a `pr` skill for opening draft
-  pull requests. See
-  [Connect GitHub](#connect-github).
+  to search public channels, and `tools/read_slack_conversation.ts` reads a
+  public channel or thread the bot is in.
+- **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots:
+  `personal`, per person and only in private conversations, and `channel`, one
+  shared document per Slack channel. See [Memory](#memory).
+- **Custom skills.** `extensions/skills.ts` lets people teach the agent their
+  own skills by asking. Personal skills follow their owner everywhere; channel
+  skills apply to everyone in a Slack channel. See
+  [Custom skills](#custom-skills).
+- **User-defined workflows.** `schedules/tasks.ts` lets people ask for recurring
+  or one-time tasks. See [Scheduled tasks](#scheduled-tasks).
+- **Code and GitHub.** The [code extension](https://eve.dev/docs/code-extension)
+  and [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
+  run in a Vercel Sandbox, with GitHub App tokens scoped to one repository per
+  command. `tools/post_slack_file.ts` posts files the agent makes, such as a
+  chart or CSV, back in the thread. See [Connect GitHub](#connect-github).
+- **Optional and custom connections.** The agent tells people how to connect
+  Notion, Linear, PagerDuty, and GitHub until each one works. Add your own
+  sources as connections, tools, or subagents. See
+  [Grow the brain](#grow-the-brain).
+
+## Grow the brain
+
+Start with `agent/skills/company-context/SKILL.md`. Replace the examples with
+your teams, glossary, and where information lives. Until you do, the agent says
+the company context hasn't been filled in.
+
+Then add capabilities one at a time. After each one, ask the agent a question
+the new capability should answer, and check that it picks the right source.
+
+### Connect a knowledge source
+
+Connections give the agent tools from an MCP server or an OpenAPI spec. The
+template ships three sources, each off until its Vercel Connect connector
+exists. Create the ones you use from the linked project:
+
+```bash
+vercel connect create notion --connection-method mcp --name company-brain
+vercel connect create linear --connection-method mcp --name company-brain
+vercel connect create pagerduty --connection-method mcp --name company-brain --data @pagerduty.json
+```
+
+- **Notion** (`agent/connections/notion.ts`): search and read pages.
+- **Linear** (`agent/connections/linear.ts`): issues, projects, and cycles.
+- **PagerDuty** (`agent/connections/pagerduty.ts`): on-call schedules,
+  incidents, and services. Connect needs your own PagerDuty OAuth app: a
+  PagerDuty admin registers one under **Integrations > Developer Tools > App
+  Registration**, then saves its client ID and secret as `pagerduty.json`
+  (`{ "clientId": "…", "clientSecret": "…" }`) for the command above.
+
+Keep the name `company-brain`. It gives each connector the UID
+`<service>/company-brain`, which the template looks for
+(`agent/lib/connect.ts`). The agent picks up a new connector within a few
+minutes, without a redeploy. Until then, the matching file in
+`agent/instructions/` tells people who ask how to connect it. Delete a note once
+its source works, and delete the connection or tool file of a source you don't
+want.
+
+For other sources, the eve registry has ready-made connections:
+
+```bash
+pnpm exec eve registry search docs       # find a connection
+pnpm exec eve add connection/datadog     # writes agent/connections/datadog.ts
+```
+
+Connections connect through Vercel Connect. By default each person signs in with
+their own account the first time the agent needs it, so the agent sees only what
+that person can see. To share one service account with everyone instead, switch
+the connection to app-scoped auth with `connect(uid, { principalType: "app" })`. Only do that
+for content everyone who can reach the agent may read: the agent answers in
+shared threads.
+
+Write a precise `description` on each connection. The agent uses it to decide
+which source owns a question. For a read-only knowledge source, also limit its
+tools, as `agent/connections/notion.ts` does with
+`tools: { allow: ["notion-search", "notion-fetch"] }`.
+
+See [Connections](https://eve.dev/docs/connections) and
+[Add Integrations](https://eve.dev/docs/install-integrations).
+
+### Add a skill
+
+A skill is a procedure the agent loads only when a task needs it, such as "how
+we answer access requests" or "how to summarize an incident". Add a markdown
+file under `agent/skills/`:
+
+```md title="agent/skills/access-requests/SKILL.md"
+---
+description: How to answer requests for access to tools and systems.
+---
+
+1. Ask which system and what level of access the person needs.
+2. Look up the owning team in company-context.
+3. ...
+```
+
+Skills in `agent/skills/` apply to everyone. For skills people save themselves,
+see [Custom skills](#custom-skills). You can also install published skills with
+`eve add`. See
+[Skills](https://eve.dev/docs/skills).
+
+### Add a specialist subagent
+
+When a domain needs its own prompt, tools, or model, give it a subagent. The
+root agent sees only the subagent's `description`, so write it as a routing
+contract:
+
+```ts title="agent/subagents/support/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-5",
+  description:
+    "Support specialist. Owns: customer tickets, escalation status, and known issues. " +
+    'Use for: "what is the status of ticket 123?", "has anyone reported X?". ' +
+    "Pass: ticket IDs, customer names, and absolute dates. " +
+    "Returns: findings with links to the tickets it read. " +
+    "Not for: internal policies (use the wiki) or engineering roadmaps.",
+});
+```
+
+Put the subagent's own `instructions.md`, `connections/`, `tools/`, and
+`skills/` in its directory, so only it carries them. Subagents never see the
+parent conversation, so tell them in their instructions that the message they
+receive is the whole task. See [Subagents](https://eve.dev/docs/subagents).
+
+### Add a tool
+
+Write a tool when you need logic that no connection provides, such as calling
+an internal API. Add a file under `agent/tools/`; its name comes from the file
+name. See [Tools](https://eve.dev/docs/tools).
+
+### Mount an extension
+
+Extensions bundle tools, skills, subagents, and instructions into one package
+you mount under `agent/extensions/`. This template already mounts
+`eve/extensions/code`, `eve/extensions/git`, and
+`eve/experimental/extensions/custom-skills`. Delete their files under
+`agent/extensions/` (and `agent/sandbox.ts`) if your brain shouldn't run code.
+Browse more with `pnpm exec eve registry list`. See
+[Extensions](https://eve.dev/docs/extensions).
+
+### Change Slack behavior
+
+`agent/channels/slack.ts` decides who reaches the agent and what each message
+carries. The Slack docs cover common next steps:
+
+- [Join new conversations](https://eve.dev/docs/channels/slack#reply-without-a-mention)
+  in channels you choose, using a decision model to screen messages.
+- [Restrict access](https://eve.dev/docs/channels/slack#restrict-access) to
+  specific people or channels.
+- [Start conversations proactively](https://eve.dev/docs/channels/slack#start-conversations-proactively)
+  from a schedule, such as a weekly digest.
+- [Customize rendering](https://eve.dev/docs/channels/slack#customize-rendering)
+  of replies and approval cards.
 
 ## Get started
 
@@ -111,27 +249,6 @@ files back, add `files:read` and `files:write`.
 
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
-
-## Slack search
-
-`agent/tools/search_slack.ts` calls Slack's `assistant.search.context` with the
-app's bot token. It searches public channels only, even ones the agent hasn't
-joined, and never private channels or DMs.
-
-Slack only allows this with the short-lived `action_token` from the message
-that started the turn, so search works in turns started by a mention or DM. It
-doesn't work in scheduled tasks, followed-thread replies without a mention, or
-non-Slack channels, and the token expires a few minutes after the message. The
-tool tells the agent when search is unavailable so it reports the gap instead
-of claiming nothing was found.
-
-`agent/tools/read_slack_conversation.ts` reads one public channel's recent
-messages, or one thread, with the bot token. It needs no action token, so it
-also works in scheduled tasks, but Slack only lets the bot read channels it has
-been invited to. It refuses private channels and DMs.
-
-The Slack channel's `defaultSlackAuth` copies the token into each turn's auth
-as the `action_token` attribute.
 
 ## Memory
 
@@ -273,141 +390,6 @@ To add another kind of schedule, such as one that always posts to a fixed team
 channel, add another file under `agent/schedules/` with its own `inputSchema`
 and `preparePayload`.
 
-## Grow the brain
-
-Start with `agent/skills/company-context/SKILL.md`. Replace the examples with
-your teams, glossary, and where information lives. Until you do, the agent says
-the company context hasn't been filled in.
-
-Then add capabilities one at a time. After each one, ask the agent a question
-the new capability should answer, and check that it picks the right source.
-
-### Connect a knowledge source
-
-Connections give the agent tools from an MCP server or an OpenAPI spec. The
-template ships three sources, each off until its Vercel Connect connector
-exists. Create the ones you use from the linked project:
-
-```bash
-vercel connect create notion --connection-method mcp --name company-brain
-vercel connect create linear --connection-method mcp --name company-brain
-vercel connect create pagerduty --connection-method mcp --name company-brain --data @pagerduty.json
-```
-
-- **Notion** (`agent/connections/notion.ts`): search and read pages.
-- **Linear** (`agent/connections/linear.ts`): issues, projects, and cycles.
-- **PagerDuty** (`agent/connections/pagerduty.ts`): on-call schedules,
-  incidents, and services. Connect needs your own PagerDuty OAuth app: a
-  PagerDuty admin registers one under **Integrations > Developer Tools > App
-  Registration**, then saves its client ID and secret as `pagerduty.json`
-  (`{ "clientId": "…", "clientSecret": "…" }`) for the command above.
-
-Keep the name `company-brain`. It gives each connector the UID
-`<service>/company-brain`, which the template looks for
-(`agent/lib/connect.ts`). The agent picks up a new connector within a few
-minutes, without a redeploy. Until then, the matching file in
-`agent/instructions/` tells people who ask how to connect it. Delete a note once
-its source works, and delete the connection or tool file of a source you don't
-want.
-
-For other sources, the eve registry has ready-made connections:
-
-```bash
-pnpm exec eve registry search docs       # find a connection
-pnpm exec eve add connection/datadog     # writes agent/connections/datadog.ts
-```
-
-Connections connect through Vercel Connect. By default each person signs in with
-their own account the first time the agent needs it, so the agent sees only what
-that person can see. To share one service account with everyone instead, switch
-the connection to app-scoped auth with `connect(uid, { principalType: "app" })`. Only do that
-for content everyone who can reach the agent may read: the agent answers in
-shared threads.
-
-Write a precise `description` on each connection. The agent uses it to decide
-which source owns a question. For a read-only knowledge source, also limit its
-tools, as `agent/connections/notion.ts` does with
-`tools: { allow: ["notion-search", "notion-fetch"] }`.
-
-See [Connections](https://eve.dev/docs/connections) and
-[Add Integrations](https://eve.dev/docs/install-integrations).
-
-### Add a skill
-
-A skill is a procedure the agent loads only when a task needs it, such as "how
-we answer access requests" or "how to summarize an incident". Add a markdown
-file under `agent/skills/`:
-
-```md title="agent/skills/access-requests/SKILL.md"
----
-description: How to answer requests for access to tools and systems.
----
-
-1. Ask which system and what level of access the person needs.
-2. Look up the owning team in company-context.
-3. ...
-```
-
-Skills in `agent/skills/` apply to everyone. For skills people save themselves,
-see [Custom skills](#custom-skills). You can also install published skills with
-`eve add`. See
-[Skills](https://eve.dev/docs/skills).
-
-### Add a specialist subagent
-
-When a domain needs its own prompt, tools, or model, give it a subagent. The
-root agent sees only the subagent's `description`, so write it as a routing
-contract:
-
-```ts title="agent/subagents/support/agent.ts"
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: "anthropic/claude-sonnet-5",
-  description:
-    "Support specialist. Owns: customer tickets, escalation status, and known issues. " +
-    'Use for: "what is the status of ticket 123?", "has anyone reported X?". ' +
-    "Pass: ticket IDs, customer names, and absolute dates. " +
-    "Returns: findings with links to the tickets it read. " +
-    "Not for: internal policies (use the wiki) or engineering roadmaps.",
-});
-```
-
-Put the subagent's own `instructions.md`, `connections/`, `tools/`, and
-`skills/` in its directory, so only it carries them. Subagents never see the
-parent conversation, so tell them in their instructions that the message they
-receive is the whole task. See [Subagents](https://eve.dev/docs/subagents).
-
-### Add a tool
-
-Write a tool when you need logic that no connection provides, such as calling
-an internal API. Add a file under `agent/tools/`; its name comes from the file
-name. See [Tools](https://eve.dev/docs/tools).
-
-### Mount an extension
-
-Extensions bundle tools, skills, subagents, and instructions into one package
-you mount under `agent/extensions/`. This template already mounts
-`eve/extensions/code`, `eve/extensions/git`, and
-`eve/experimental/extensions/custom-skills`. Delete their files under
-`agent/extensions/` (and `agent/sandbox.ts`) if your brain shouldn't run code.
-Browse more with `pnpm exec eve registry list`. See
-[Extensions](https://eve.dev/docs/extensions).
-
-### Change Slack behavior
-
-`agent/channels/slack.ts` decides who reaches the agent and what each message
-carries. The Slack docs cover common next steps:
-
-- [Join new conversations](https://eve.dev/docs/channels/slack#reply-without-a-mention)
-  in channels you choose, using a decision model to screen messages.
-- [Restrict access](https://eve.dev/docs/channels/slack#restrict-access) to
-  specific people or channels.
-- [Start conversations proactively](https://eve.dev/docs/channels/slack#start-conversations-proactively)
-  from a schedule, such as a weekly digest.
-- [Customize rendering](https://eve.dev/docs/channels/slack#customize-rendering)
-  of replies and approval cards.
-
 ## Evals
 
 `evals/` checks the reply behavior in `agent/instructions.md`: answer length,
@@ -426,30 +408,6 @@ They run over eve's HTTP API, not Slack, so `evals/lib/slack.ts` builds
 messages in the format the Slack channel gives the model, and the message a
 scheduled run sends. When you change the instructions, add a case under
 `evals/` for the behavior you changed. See [Evals](https://eve.dev/docs/evals).
-
-## Before you roll it out
-
-- **Shared threads are public to their members.** Anything the agent retrieves
-  can appear in a thread other people read. Prefer per-person auth for
-  connections, and use app-scoped auth only for content everyone may see.
-- **Set `SLACK_TEAM_ID`.** Without it, full members of other workspaces in
-  Slack Connect channels can start a conversation or answer an approval.
-  Workspace guests are always refused.
-- **The sandbox has open egress.** Like eve's coding agent template, code the
-  agent runs can reach any host; only GitHub credentials are held back at the
-  firewall. Don't put other credentials in the sandbox, and narrow the network
-  policy in `agent/sandbox.ts` and `lib/github.ts` if you need to restrict
-  egress. See [Sandbox](https://eve.dev/docs/sandbox).
-- **Channel memory is shared.** Anyone who can reach the agent in a channel
-  benefits from, and can add to, that channel's notes. Review the channel
-  memory description if your channels hold sensitive discussions.
-- **Channel skills change everyone's answers.** A channel skill joins the
-  prompt for everyone in that channel, so it needs a second person to approve
-  it. To limit channel skills to admins, set `approval.request` in
-  `agent/extensions/skills.ts`.
-- **Keep checks in sensitive tools.** The channel gate decides who can start a
-  turn or answer an approval. A tool that reads or changes sensitive data should check
-  `ctx.session.auth` itself.
 
 ## Learn more
 
