@@ -236,6 +236,12 @@ Invariants:
 - **`defineModel` is stable.** It ships in `eve/models` under eve's semantic-versioning promise,
   not under `eve/experimental`. Connection definitions name their protocol because eve has
   several. A model has one target, `EveLanguageModel`, so `defineModel` takes no qualifier.
+- **`defineDynamic` stays the only way to vary behavior.** `defineModel` varies nothing. It is
+  the definition a dynamic `model` function returns, as `defineTool` and
+  `defineMcpClientConnection` are for tools and connections. Models were the one dynamic kind
+  with no eve definition: the function returns a model ID or an SDK instance, and neither can
+  declare auth. Dynamic connections already work this way. Their function returns a definition
+  that carries `auth`, and eve runs `auth` when it makes the call.
 - **The sign-in name comes from the credential, not the model.** The name keys the token cache,
   the callback match, and the rule against asking twice. All three belong to a credential, so two
   definitions with one `id` and different `auth` must not share it. eve can't detect that clash
@@ -281,6 +287,11 @@ what else eve must build:
 | Token lifetime              | The function returns a provider model with the token inside it. eve keeps that live value in a per-session process cache and reuses it until the next evaluation. The function's documented idiom is also to save network results with `ctx.memo`.                                                         | The live value is the definition. The token is in the step's token cache and in the model that `create` returns for one call. `create` has no `ctx`. |
 | Recover from a `401`        | A tool's `execute` sees its own `401` and calls `ctx.requireAuth()`. Here the `401` reaches eve's model call after the function has returned. eve must record which providers the function read, evict them, and run the function again.                                                                   | `auth` and `create` stay linked at the call, so eve evicts the token, resolves again, and rebuilds the model.                                        |
 | Suspend the turn            | Needs a path through definition evaluation that tells a missing credential from `REACTION_FAILED`.                                                                                                                                                                                                         | Happens in the model-call stage, where eve already holds a turn for a runtime limit.                                                                 |
+
+`defineModel` also can't be sugar for a `defineDynamic` that calls `ctx.getToken()`. A dynamic
+value can't be returned from a dynamic function, so one function couldn't choose between a
+credentialed model and a Gateway model ID, and the value couldn't be an `auto()` or
+`agent({ models })` option. It has to be a value the function returns.
 
 `defineModel` gives up two things. The credential eve resolves can't inform the choice of model.
 And other dynamic values, such as instructions, can't ask for a sign-in. That second one is a
