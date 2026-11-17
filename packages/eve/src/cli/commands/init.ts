@@ -586,7 +586,11 @@ export async function runInitCommand(
   const startOnboarding = startDevelopment
     ? async (projectPath: string) => {
         onboarding = await dependencies
-          .startInitOnboarding({ projectPath, telemetry: onboardingTelemetry })
+          .startInitOnboarding({
+            projectPath,
+            preamble: [initProgressLine(projectPath), ""],
+            telemetry: onboardingTelemetry,
+          })
           .catch((error: unknown) => {
             initLog.debug("onboarding could not open; eve dev will run it", { error });
             return undefined;
@@ -637,7 +641,6 @@ export async function runInitCommand(
   }
 
   trackStep?.("handoff");
-  let onboardingCancelled = false;
   let carriedInput: InitCarriedInput = {};
   const summary: { readonly text: string; readonly error?: true }[] = [];
   if (result.kind === "created") {
@@ -672,15 +675,13 @@ export async function runInitCommand(
 
   let handedOff = false;
   if (onboarding !== undefined) {
-    onboardingCancelled = (await onboarding.finished).cancelled;
+    await onboarding.finished;
     if (onboarding.interrupted.aborted) {
       carriedInput = await onboarding.close();
     } else {
       // eve dev starts next and paints over the onboarding screen, which stays up meanwhile
-      // so the terminal never goes blank between the two. The summary lands above it.
-      if (onboardingCancelled) {
-        summary.push({ text: pc.dim("Connect a model with /login when you’re ready.") });
-      }
+      // so the terminal never goes blank between the two. The summary replaces the screen's
+      // preamble, so the screen doesn't move; eve dev points to /login if no model is connected.
       summary.push({ text: "" });
       const rows = summary.flatMap(({ text }) => text.split("\n"));
       carriedInput = await onboarding.close({ rows });
@@ -754,6 +755,11 @@ export async function runInitCommand(
   if (!resultSucceeded(devResult)) {
     throw new Error(`Development server exited unsuccessfully in "${result.projectPath}".`);
   }
+}
+
+/** Holds the place of the "Created" summary above the onboarding screen until init finishes. */
+function initProgressLine(projectPath: string): string {
+  return pc.dim(`○ Creating an eve agent in ${projectPath}`);
 }
 
 function resolveInitEvePackageOverride(): EvePackageContract | undefined {

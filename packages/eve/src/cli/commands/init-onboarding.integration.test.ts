@@ -137,12 +137,21 @@ describe("startInitOnboarding", () => {
 
   it("keeps its screen up under init's summary when it hands the terminal to eve dev", async () => {
     const projectPath = await mkdtemp(join(tmpdir(), "eve-init-onboarding-handoff-"));
-    const onboarding = await startInitOnboarding({ projectPath });
+    const onboarding = await startInitOnboarding({
+      projectPath,
+      preamble: ["○ Creating an eve agent in /tmp/alice", ""],
+    });
     await screen.waitForText("Connect a model");
     input.enter();
     await onboarding.finished;
     onboarding.setInstalling(false);
     input.type("Help Alice");
+    const headerRow = () =>
+      screen
+        .snapshot()
+        .split("\n")
+        .findIndex((row) => row.includes("☰eve"));
+    const openRow = headerRow();
 
     await onboarding.close({ rows: ["✓ Created an eve agent in /tmp/alice", ""] });
 
@@ -161,6 +170,9 @@ describe("startInitOnboarding", () => {
     );
     expect(kept).toContain("Help Alice");
     expect(kept).toContain("Starting agent…");
+    // The summary took the preamble's place, so the screen didn't move.
+    expect(kept).not.toContain("Creating an eve agent");
+    expect(headerRow()).toBe(openRow);
 
     // eve dev's first paint lands on the kept screen's first row and replaces it in place.
     new LiveRegion({ write: (chunk) => screen.write(chunk) }).update(["eve dev"]);

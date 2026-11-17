@@ -1733,15 +1733,21 @@ describe("runInitCommand", () => {
     });
   });
 
-  it("points to /login when onboarding during the install was cancelled", async () => {
+  it("prints the summary in place of the onboarding screen's preamble", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-cancel-"));
+    const projectPath = join(parentDirectory, "my-agent");
     const output = logger();
     const deps = dependencies();
     deps.startInitOnboarding.mockResolvedValue(fakeOnboarding({ cancelled: true }));
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
-    expect(await handedOffRows(deps)).toContain("Connect a model with /login when you’re ready.");
+    const preamble = deps.startInitOnboarding.mock.calls[0]?.[0].preamble?.map(stripAnsi);
+    expect(preamble).toEqual([`○ Creating an eve agent in ${projectPath}`, ""]);
+    // As many rows as the preamble, so the screen beneath doesn't move. A skipped connection is
+    // eve dev's to point at /login, as a setup issue on its own screen.
+    const rows = await handedOffRows(deps);
+    expect(rows).toEqual([`✓ Created an eve agent in ${projectPath} in 0ms`, ""]);
     expect(deps.spawnPackageManager.mock.calls[0]?.[2]).toContain("--onboarded");
   });
 

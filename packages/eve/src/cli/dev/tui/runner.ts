@@ -711,6 +711,8 @@ export class EveTUIRunner {
       this.#renderer.setStartupPhase?.("connecting");
       startupOutcome = await this.#runInitialAgentOnboarding(title);
     }
+    // `eve init` ran onboarding on its own screen; a model still unconnected shows as a setup issue.
+    if (this.#startupOnboarding?.reported === true) await this.#renderSetupIssues(this.#agentInfo);
 
     let initialDraft = this.#finishStartup();
     if (startupOutcome?.cancelled || startupOutcome?.failed) {

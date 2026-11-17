@@ -22,7 +22,8 @@ import { MockScreen } from "./lib/tui.ts";
  * Regression: eve 1.0.1 erased init's onboarding screen when the install
  * finished, printed "Created an eve agent", and showed a "Starting your agent"
  * row while `eve dev` loaded, so the agent's screen appeared, vanished, and
- * came back.
+ * came back. Printing that summary above a kept screen instead pushed the
+ * screen down, so the header must also stay on one row throughout.
  *
  * Needs no agent server and no model credentials: onboarding is skipped with
  * Escape. Network: the scaffold's install resolves eve's declared dependencies
@@ -156,10 +157,18 @@ function assertSmoothJourney(frames: readonly string[], workRoot: string): void 
     );
   }
 
+  const headerRow = (frame: string) =>
+    frame.split("\n").findIndex((line) => STARTUP_HEADER.test(line));
   let lastStatus = -1;
   for (let index = firstScreen; index < frames.length; index += 1) {
     const frame = frames[index]!;
     const visible = frame.split("\n").slice(-ROWS);
+    check(
+      headerRow(frame) === headerRow(frames[firstScreen]!),
+      "The agent's header moved.",
+      frames,
+      index,
+    );
     check(
       visible.some((line) => STARTUP_HEADER.test(line)),
       "The agent's screen disappeared before eve dev's chat prompt.",
@@ -221,7 +230,7 @@ function assertSmoothJourney(frames: readonly string[], workRoot: string): void 
     frames.length - 1,
   );
   check(
-    final.includes("Connect a model with /login when you’re ready."),
+    /setup issue: .*\/login/u.test(final),
     "The skipped connection was not pointed at /login.",
     frames,
     frames.length - 1,

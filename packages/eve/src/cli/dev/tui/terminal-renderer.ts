@@ -450,6 +450,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #handingOff = false;
   /** The handed-off frame stays on screen for the next process; nothing repaints it. */
   #frameKept = false;
+  /** Rows shown above the startup header; see {@link beginStartupDraft}. */
+  #startupPreamble: readonly string[] = [];
   /** Rows the next paint commits above the live region, ahead of settled blocks. */
   #pendingCommittedRows: string[] = [];
   /**
@@ -689,12 +691,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     title: string;
     /** The first status shown; `eve init` opens the screen while it installs. */
     phase?: "installing" | "starting";
+    /**
+     * Rows above the startup header, such as `eve init`'s progress line. They
+     * hold the place of the rows {@link handOff} commits, so the header stays put.
+     */
+    preamble?: readonly string[];
   }): void {
     for (const message of options.queued ?? []) this.#startupQueue.enqueue(message);
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
     this.#startupPhase = options.phase ?? "starting";
+    this.#startupPreamble = options.preamble ?? [];
     this.#startupHeader = { name: options.title };
     this.#startupStartedAt = Date.now();
     let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
@@ -2835,6 +2843,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#partingLinePrinted = true;
     if (committedRows === undefined) return;
     this.#composerPending = false;
+    this.#startupPreamble = [];
     this.#pendingCommittedRows.push(...committedRows);
     this.#paint();
     this.#frameKept = true;
@@ -3385,7 +3394,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
+    const startupHeader =
+      this.#startupHeader === undefined
+        ? []
+        : [
+            ...this.#startupPreamble.map((row) => clip(row, width)),
+            ...this.#renderAgentHeaderRows(),
+          ];
     const maxBlockRows = Math.max(0, this.#height() - startupHeader.length - footer.length);
     const committed: string[] = this.#pendingCommittedRows.splice(0);
     let previous = this.#lastCommitted;

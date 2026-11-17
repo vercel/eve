@@ -43,6 +43,11 @@ export interface InitOnboardingTelemetry {
  */
 export async function startInitOnboarding(input: {
   readonly projectPath: string;
+  /**
+   * Rows above the screen until it closes. `close()` commits its handoff rows in their place,
+   * so the same number of rows keeps the screen from moving.
+   */
+  readonly preamble?: readonly string[];
   readonly telemetry?: InitOnboardingTelemetry;
 }): Promise<InitOnboarding> {
   const [{ startDevelopmentTuiStartup }, { runStartupOnboarding }, { resolveTuiDisplayOptions }] =
@@ -57,6 +62,7 @@ export async function startInitOnboarding(input: {
     ...resolveTuiDisplayOptions({}),
     appRoot: input.projectPath,
     phase: "installing",
+    preamble: input.preamble,
     // `close()` cancels onboarding with a synthetic Ctrl-C; only a real one interrupts init.
     onExitRequest: () => {
       if (!closing) interrupt.abort();
