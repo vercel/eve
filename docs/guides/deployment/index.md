@@ -12,7 +12,7 @@ Deploy eve to Vercel or run it as a Node service on your own infrastructure. Bot
 | [Vercel](/docs/guides/deployment/vercel)             | `.vercel/output`       | You want Vercel to operate the runtime services                 |
 | [Self-hosting](/docs/guides/deployment/self-hosting) | `.output/` Node server | You run Node services on your own servers or container platform |
 
-You can also deploy eve beside a Next.js, Nuxt, SvelteKit, TanStack Start, or other Vite application that routes browser requests to the agent. See [Frontend integrations](/docs/guides/frontend).
+You can also deploy eve alongside a Next.js, Nuxt, SvelteKit, TanStack Start, or other Vite application that routes browser requests to the agent. See [Frontend integrations](/docs/guides/frontend).
 
 ## Backends
 
@@ -50,7 +50,7 @@ Each file under `agent/`, and everything it imports, ships in the deployed funct
 - **Keep shared modules light.** A module that many tools, hooks, or instrumentation files import adds its imports to all of them.
 - **Use one version of each dependency.** Two versions of the same package ship and load twice. Align versions across your app's packages, and check with `pnpm why <package>`.
 - **Keep instrumentation lean.** eve loads instrumentation files first and bundles each one separately, so keep their imports small. Enable only the OpenTelemetry instrumentations you use, and import exporters that only development or evals use with `await import()`.
-- **Do no work at module scope.** Create clients, formatters, and other objects on first use, not when the module loads.
+- **Initialize objects on first use.** Create clients, formatters, and other objects when needed rather than at module scope.
 
 Loading on first use moves the cost to the first call that needs it. It helps most for code that only some invocations reach.
 

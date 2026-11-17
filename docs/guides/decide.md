@@ -158,7 +158,7 @@ The choice above is typed as `"billing" | "support"`. Each answer appears under 
 
 `decide` accepts `model`, `state`, `questions`, `maxRetries`, `signal`, and `providerOptions`; pass `signal: ctx.abortSignal` to cancel with the tool call. Import `DecisionModel`, `DecisionState`, `DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`, and `DecisionResult` from `eve/ai` to type reusable configs and handlers.
 
-A model instance must implement decision model specification `v4`, the version AI SDK 7 supports. A matching `provider`, `modelId`, and `specificationVersion` alone is not enough. If the installed `ai` package does not export a decision API, `decide` throws an error that names the missing export. Validation, retries, and provider errors follow AI SDK semantics.
+A model instance must implement decision model specification `v4`, the version AI SDK 7 supports, including its methods. If the installed `ai` package does not export a decision API, `decide` throws an error that names the missing export. Validation, retries, and provider errors follow AI SDK semantics.
 
 `decide` also works outside a tool and doesn't need an active eve session.
 
@@ -193,6 +193,6 @@ guide for an end-to-end walkthrough.
 
 `auto` decides once per turn, before the first model call. The choice holds for the turn's later model calls, including in a fresh process. A new turn makes a new choice, and child sessions route from their own prompts.
 
-The decider receives the turn's opening text and up to seven earlier user and assistant text messages, subject to the decision provider's input limits. Larger inputs can increase decision cost and latency. A request without user text fails before provider I/O.
+The decider receives the turn's opening text and up to seven earlier user and assistant text messages, subject to the decision provider's input limits. Larger inputs can increase decision cost and latency. A request without user text fails before eve contacts the provider.
 
-Without `fallback`, a decider error fails the turn; with it, eve uses the fallback model for the rest of the turn. Cancelling the turn aborts the decision and keeps no routed or fallback choice. Validation, retries, provider errors, and model resolution follow AI SDK semantics.
+Without `fallback`, a decider error fails the turn; with it, eve uses the fallback model for the rest of the turn. Cancelling the turn aborts the decision without saving a selected or fallback model. Validation, retries, provider errors, and model resolution follow AI SDK semantics.

@@ -34,7 +34,7 @@ The default eve channel serves these routes:
 
 Create a session, then put its returned ID in every follow-up, control, and stream path.
 
-`POST /eve/v1/session/:sessionId` with no body or `{}` prepares an existing session to answer from the serving deployment. It checks the channel's auth policy, but calls no `onMessage` and sends no message. Preparation keeps the session ID, stream, history, and expiry, and doesn't interrupt running work. It returns `{ ok: true, status }`:
+`POST /eve/v1/session/:sessionId` with no body or `{}` prepares an existing session to answer from the serving deployment. It checks the channel's auth policy without calling `onMessage` or sending a message. Preparation keeps the session ID, stream, history, and expiry, and doesn't interrupt running work. It returns `{ ok: true, status }`:
 
 | `status`            | HTTP | Meaning                                                            |
 | ------------------- | ---- | ------------------------------------------------------------------ |
@@ -49,7 +49,7 @@ A non-empty body is a message or answer, validated in full. eve rejects empty or
 
 ### Request validation
 
-Session creation, follow-up and input-response requests, and session controls reject unknown top-level JSON fields with `400 Bad Request`. The error names the unknown fields and lists the route's accepted fields. Field names are case-sensitive (`outputschema` is not `outputSchema`), and each route has its own set: `operationId` is accepted on session creation but rejected on follow-ups. A rejected request creates no session, sends no message, and applies no control. Correct the field or upgrade the server; don't strip behavior-changing options and retry.
+Session creation, follow-up and input-response requests, and session controls reject unknown top-level JSON fields with `400 Bad Request`. The error names the unknown fields and lists the route's accepted fields. Field names are case-sensitive (`outputschema` is not `outputSchema`), and each route has its own set: `operationId` is accepted on session creation but rejected on follow-ups. eve rejects the request before creating a session, sending a message, or applying a control operation. Correct the field or upgrade the server; don't strip behavior-changing options and retry.
 
 Request bodies can't contain eve's own attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`). A request that does returns `400 Bad Request`.
 
@@ -232,7 +232,7 @@ Choose **Configure authentication myself** (`web-authentication=custom`) to keep
 
 ## CORS
 
-The eve channel sends no CORS headers by default. When browser clients call the channel directly, pass `cors: true` for permissive CORS with preflight handling, or an options object to narrow origins, methods, and headers. Route auth still runs on the session requests.
+The eve channel doesn't send CORS headers by default. When browser clients call the channel directly, pass `cors: true` for permissive CORS with preflight handling, or an options object to narrow origins, methods, and headers. Route auth still runs on the session requests.
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -295,7 +295,7 @@ export default eveChannel({
   },
   events: {
     "turn.settled"(event, ctx) {
-      console.log("eve turn settled", {
+      console.log("eve turn finished", {
         outcome: event.data.outcome,
         sessionId: ctx.session.id,
       });
@@ -375,7 +375,7 @@ Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an o
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 
-The stream records the entries in `data.history` on the `delivery.consumed` of the message that brought them. History from `create()` is recorded with the first accepted message. When one turn takes in several messages, the model reads all their history first. `transcriptOf()` from `eve/client` returns entries in that order as `{ role, text }` messages you can pass back as `history` to branch a session.
+The stream records imported entries in `data.history` on the importing message's `delivery.consumed` event. History from `create()` is recorded with the first accepted message. When one turn takes in several messages, the model reads all their history first. `transcriptOf()` from `eve/client` returns entries in that order as `{ role, text }` messages you can pass back as `history` to branch a session.
 
 Frontend `messages` show imported entries before their message, with `metadata.imported` set and your `id` in `metadata.historyId`. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one. Their message ids stay unique even when a later call reuses an `id`. Compaction, `clear()`, and handoffs treat them like any other history.
 

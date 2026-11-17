@@ -108,9 +108,8 @@ An eve agent lives in [your repository](/docs/concepts/project-structure), so it
     link="Workflow tools"
   >
     Tools are typed TypeScript functions the model chooses when to call. When a process must run the
-    same way every time, use a workflow tool instead. Its code fixes the order of steps, calls
-    subagents exactly where you say, and waits for approvals or webhooks between steps, even across
-    restarts.
+    same way every time, use a workflow tool instead. It runs steps in a fixed order, calls
+    subagents at specific points, and waits for approvals or webhooks between steps across restarts.
   </Capability>
   <Capability
     icon="sandbox"
@@ -180,8 +179,8 @@ Each end user gets their own [sessions](/docs/concepts/sessions-runs-and-streami
     href="/docs/schedules"
     link="Schedules"
   >
-    Fixed cron schedules power digests and monitors with no user present. Experimental dynamic
-    schedules let users and agents create their own recurring or one-time runs at runtime.
+    Fixed cron schedules run digests and monitors without a user. Experimental dynamic schedules let
+    users and agents create their own recurring or one-time runs at runtime.
   </Capability>
   <Capability
     icon="observability"
@@ -202,9 +201,9 @@ Each end user gets their own [sessions](/docs/concepts/sessions-runs-and-streami
   </Capability>
   <Capability
     icon="durability"
-    title="Keep long-running sessions durable"
+    title="Resume long-running sessions across restarts"
     href="/docs/concepts/execution-model-and-durability"
-    link="Durable sessions"
+    link="Sessions and durability"
   >
     Each user's session checkpoints every step, parks while it waits, and resumes on the next
     message, even days later.

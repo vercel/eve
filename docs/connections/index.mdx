@@ -186,7 +186,7 @@ Some connection tools create, modify, delete, transmit, purchase, message, or ac
 
 ### Send the approver to the server
 
-[Approval is consent only](/docs/human-in-the-loop): it never changes who the turn runs as. An approved connection call keeps the requester's identity, so `ctx.session.auth.current` and the connection's `auth` token stay the requester's, and later calls in the turn are unaffected. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, with access to their credentials. That's a separate identity your code explicitly sends to the server, not a replacement for the requester:
+[Approval](/docs/human-in-the-loop) preserves the requester's identity for the turn. An approved connection call keeps the requester's identity, so `ctx.session.auth.current` and the connection's `auth` token stay the requester's, and later calls in the turn are unaffected. While an approved call runs, its `headers` and `toolCall.providedArguments` callbacks also receive `ctx.approval.responder`, the person who approved it, with access to their credentials. Your code can explicitly send the approver's identity or credentials alongside the requester's:
 
 ```ts title="agent/connections/gateway.ts"
 import { defineMcpClientConnection } from "eve/connections";
@@ -210,9 +210,9 @@ export default defineMcpClientConnection({
 });
 ```
 
-`ctx.approval.responder.getToken(provider)` resolves the approver's token as it does in a [`defineTool` tool](/docs/human-in-the-loop): it never starts a sign-in, and throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"` when the approver has no token. `headers` can't set `Authorization` when the connection also sets `auth`, so send the approver's token in another header, or omit `auth` and set `Authorization` yourself.
+As in a [`defineTool` tool](/docs/human-in-the-loop), `ctx.approval.responder.getToken(provider)` returns the approver's token without starting sign-in. If no token is available, it throws `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"`. `headers` can't set `Authorization` when the connection also sets `auth`, so send the approver's token in another header, or omit `auth` and set `Authorization` yourself.
 
-`ctx.approval` is absent for calls that needed no approval, and while eve connects to the server and lists its tools. The approver's identity reaches only the requests of the call they approved. Pair it with an `approval.response` policy so only people whose access the call may use can approve it.
+`ctx.approval` is absent for calls that needed no approval, and while eve connects to the server and lists its tools. The approver's identity reaches only the requests of the call they approved. Use an `approval.response` policy to restrict approval to people whose credentials the call is allowed to use.
 
 ## Interactive OAuth via Vercel Connect
 
@@ -247,7 +247,7 @@ eve gets the current user's token before each tool call. If that user hasn't sig
 
 `eve__search` never asks for sign-in. When a server refuses to list tools without a token, search shows the connection as one result named after it, such as `linear`. Calling that name or any of its tools asks for sign-in. See [When eve asks for sign-in](/docs/connections/mcp#when-eve-asks-for-sign-in).
 
-A sign-in keeps the turn open until the user connects, the turn is cancelled, or the user sends another message. That message steers the turn: the sign-in ends as `withdrawn`, and the model reads the message next. Messages from other people in a shared thread wait until the turn ends. A completed sign-in continues the turn as the person who started it.
+A sign-in keeps the turn open until the user connects, the turn is cancelled, or the user sends another message. That message steers the turn and ends sign-in as `withdrawn`, and the model reads the message next. Messages from other people in a shared thread wait until the turn ends. A completed sign-in continues the turn as the person who started it.
 
 When a local subagent at any depth needs sign-in, the root session's channel gets it as the parent's own `interaction.opened`. Completing it continues the child, and the parent's turn continues under the same `turnId` after the subagent returns.
 
@@ -326,7 +326,7 @@ Omit `retryable` to allow retries. Set it to `false` when retrying can't help, s
 
 A sign-in that ends without being completed, such as one cancelled because the user sent a new message while it was open, works the same way. Later calls in that turn that need the same grant fail with `reason: "sign_in_cancelled"` and tell the model to say the action needs that access. The next turn asks again.
 
-A turn a schedule started never asks for a sign-in, because no one asked for the work and the prompt would repeat on every firing. Calls that need one fail with `reason: "sign_in_unavailable"`, and the model is told to say the action needs that access. A scheduled send into an existing conversation counts as scheduled too.
+Schedule-started turns don't prompt for sign-in. Calls that need one fail with `reason: "sign_in_unavailable"`, and the model is told to say the action needs that access. A scheduled send into an existing conversation counts as scheduled too.
 
 ```ts
 import { ConnectionAuthorizationFailedError } from "eve/connections";

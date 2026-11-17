@@ -1,6 +1,6 @@
 ---
 title: "Instructions"
-description: "Add system context or durable user context with instructions.md or instructions.ts."
+description: "Add system prompts or user-role context with instructions.md or instructions.ts."
 ---
 
 Instructions are text you write for the model in `agent/instructions.md` or `agent/instructions.ts`. Use system-role instructions for the agent's identity and standing rules. Use user-role instructions for application context that belongs in the conversation history, such as an imported brief or retrieved memory.
@@ -35,26 +35,25 @@ export default defineInstructions({
 });
 ```
 
-The module, including its ESM and [asset imports](./reference/typescript-api#asset-imports) such as a prompt imported with `?raw`, runs once at build time and never at runtime. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+The module, including its ESM and [asset imports](./reference/typescript-api#asset-imports) such as a prompt imported with `?raw`, runs once at build time. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 ## Split instructions across a directory
 
 For more than one file, add an `agent/instructions/` directory. eve reads its `.md` files and `.ts` modules, but not subdirectories. A `.ts` file can export `defineInstructions` or `defineDynamic`. Static system and user entries apply in alphabetical filename order (`localeCompare`).
 
-A root `agent/instructions.md` (or `.ts`) can sit beside the directory, and the root file comes first. Having both `instructions.md` and `instructions.ts` at the root is a build error.
+You can use a root `agent/instructions.md` (or `.ts`) alongside `agent/instructions/`; the root file applies first. Having both `instructions.md` and `instructions.ts` at the root is a build error.
 
 ## Dynamic instructions
 
 To compute instructions from auth, tenant, channel, or external data, use `defineDynamic((ctx) => ...)` and return `defineInstructions(...)` or `null`. The function runs before each ordinary model call, not once per turn, so wrap every fetch, database query, and API call in `ctx.memo(key, fn)` to run it once per key. See [Dynamic capabilities](./guides/dynamic-capabilities#choose-a-lifetime) to choose a key.
 
-A dynamic system instruction applies, outside history, while the function returns it.
+A dynamic system instruction applies outside conversation history for every call where the function returns it.
 
-A dynamic user instruction joins the conversation history only when its content changes:
+A dynamic user instruction is appended to conversation history only when its content changes:
 
-- Before a turn's first model call, it joins ahead of the turn's input.
-- During a turn, a change appends at the current position.
-- Returning `null` adds nothing and resets change tracking, so a later return of the earlier text adds it again.
-- Existing history is not removed.
+- Before a turn's first model call, it is placed ahead of the turn's input.
+- During a turn, a change appends at the current position without removing earlier messages.
+- Returning `null` resets change tracking, so returning the same text later appends it again.
 - Change tracking survives deployments. A compaction or clear that removes the instruction from the history adds it again.
 
 See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior.
@@ -63,11 +62,11 @@ A session that replaced a [stranded session](./concepts/execution-model-and-dura
 
 ## History controls and prompt caching
 
-[Compaction](./concepts/sessions-runs-and-streaming#compact-clear-and-end) and clear rewrite the conversation history. When the rewrite removes a user-role instruction, as a clear or a summary does, eve adds it again before the next model call. A compaction that only shortens old tool results keeps it, so it isn't added twice. System-role instructions remain, because they are outside history.
+When [compaction or clear](./concepts/sessions-runs-and-streaming#compact-clear-and-end) removes a user-role instruction from history, eve adds it again before the next model call.
 
 Keep system-role content stable and ahead of frequently changing context when you can, so providers can reuse the prompt prefix. Cache behavior and billing depend on the provider, and eve doesn't promise a cache hit.
 
-User-role instructions only append, so they keep the earlier prompt prefix the same. eve's notes about available skills and parked agents follow the same rule: a changed note appends after earlier steps, and eve skips an unchanged one until a clear or compaction removes it.
+User-role instructions only append, preserving the earlier prompt prefix for provider caching.
 
 ## Instructions vs skills
 
@@ -79,7 +78,7 @@ Instructions and [skills](./skills) both add text to the model's context, at dif
 | User-role instructions   | Once, and again on each change                        | Application context that belongs in conversation history |
 | `agent/skills/*`         | On demand, when the model loads one with `eve__skill` | Optional procedures that should not bloat every turn     |
 
-Keep instructions short and stable. Put long or situational procedures in [skills](./skills). Put typed behavior that runs code in a [tool](./tools), because static instructions never run code at runtime.
+Keep instructions short and stable. Put long or situational procedures in [skills](./skills). Put actions that run code at runtime in a [tool](./tools).
 
 ## Disclaimer
 
@@ -89,7 +88,7 @@ Where an eve agent communicates with people, law may require you to disclose tha
 
 ## What to read next
 
-- [Tools](./tools): typed actions, the next capability to add
+- [Tools](./tools): typed actions the model can call
 - [Context control](./concepts/context-control): all the levers for what the model sees
 - [Skills](./skills): on-demand procedures, the counterpart to always-on instructions
 - [Memory](./memory): provider-backed context that outlives a session, recalled before each turn

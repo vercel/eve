@@ -33,7 +33,7 @@ export default defineChannel({
 
 A route's `path` is its app URL, without a channel-name prefix. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Give each route a unique method and path outside `/eve/v1/*`, which eve reserves.
 
-A request with a method that its path doesn't declare gets `405 Method Not Allowed`, with an `Allow` header that lists the methods the path declares. `HEAD` works differently: a path answers it only through a route you declare with `HEAD()`. A `HEAD` request to a path that declares `GET` but not `HEAD` gets `405`, and the `GET` handler doesn't run. A `HEAD` request to a path with neither route gets `404`.
+An unsupported method returns `405 Method Not Allowed` with an `Allow` header listing the path's supported methods. Declare `HEAD()` explicitly; `HEAD` requests don't run `GET` handlers. A `HEAD` request returns `405` for a GET-only path and `404` when neither route exists.
 
 Each route handler receives:
 
@@ -130,9 +130,9 @@ A route handler can also describe the agent and run its tools without a conversa
 - `listSkillFiles(skill)` resolves to the skill's regular files, each with its `path` under the skill root and `size` in bytes, sorted by path. It rejects a skill the agent doesn't have.
 - `readSkill(skill, path?)` resolves to one skill file's raw bytes as a `Uint8Array`; decode text yourself, for example with `new TextDecoder().decode(bytes)`. `path` is relative to the skill root, such as `references/api.md`; omit it to read `SKILL.md`. It rejects absolute paths, paths with `.`, `..`, or empty segments, files the skill doesn't list, and files over 512 KiB.
 
-`describe()` carries no skill file contents, paths, config, or inspection detail, so a channel can publish it to callers. It leaves out tools that need a turn: framework tools, workflow and provider tools, and tools without `execute`. It also leaves out tools and skills that dynamic resolvers or subagents add.
+A channel can publish `describe()` to callers because it excludes skill file contents, paths, configuration, and inspection details. It leaves out tools that need a turn: framework tools, workflow and provider tools, and tools without `execute`. It also leaves out tools and skills that dynamic resolvers or subagents add.
 
-`invokeTool()` runs no model, turn, or workflow run. Authored state starts from its initial value and isn't kept. It returns one of these outcomes:
+`invokeTool()` doesn't call a model or start a turn or workflow run. Each call starts with the authored initial state and discards state changes. It returns one of these outcomes:
 
 - `"completed"` with output.
 - `"failed"` with an error, including for invalid input.
@@ -178,7 +178,7 @@ await session.end({ reason: "Retire this session" });
 for await (const event of session.stream({ startIndex: 12 })) render(event);
 ```
 
-Attaching does no lookup; the first operation reports whether the ID is active. A following `stream()` rejects on its first read when the session doesn't exist or its history has expired. A route can read once before sending headers, as the example above does, to answer with an error status.
+Attaching doesn't look up the session; the first operation reports whether the ID is active. A following `stream()` rejects on its first read when the session doesn't exist or its history has expired. A route can read once before sending headers, as the example above does, to answer with an error status.
 
 For a stranded session, `Session.send()`, `Session.respond()`, and a following `Session.stream()` throw `SessionStrandedError` from `eve/channels` and send nothing. `stream({ follow: false })` still reads the recorded history up to the current tail. `error.owner.eveVersion` names the eve release that built the session, when recorded. Call `end()` to retire the stranded session, then start a new one:
 
@@ -193,7 +193,7 @@ try {
 }
 ```
 
-`respond()` accepts exact response literals. Validate responses already widened to `Answer[]`, for example decoded from a platform payload, with `parseAnswers`; the validated type carries that proof across channel wrappers:
+`respond()` accepts exact response literals. Validate responses already widened to `Answer[]`, for example decoded from a platform payload, with `parseAnswers`; the validated type remains accepted by channel wrappers:
 
 ```ts
 import { parseAnswers } from "eve/client";
@@ -209,7 +209,7 @@ Every `send()` and `respond()` passes its `state` option to the channel's `deliv
 The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, `answerText`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
 
 - Return nothing to keep it unchanged.
-- Return a replacement with `message`, `answers`, `context`, `outputSchema`, or `answerText` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`. A replacement without `answerText` keeps the delivery's.
+- Return a replacement with `message`, `answers`, `context`, `outputSchema`, or `answerText` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`. If the replacement omits `answerText`, eve keeps the original value.
 - Return `{}` to ignore it.
 
 The `state` you pass to `defineChannel(...)` is the starting value of every session's `channel.state`, and must be plain JSON-like data. eve restores any top-level field from it that a session's state is missing, so a field you add in a later deploy also appears in existing sessions, including in `context(state)` and event handlers. A field you `delete` comes back the same way; to clear one, set it to `null` or `undefined`. eve doesn't merge nested objects: a saved object replaces the starting object whole.
@@ -398,7 +398,7 @@ See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage
 
 ## Cross-channel hand-off
 
-A cross-channel hand-off starts or resumes a conversation on another channel from a route handler with `ctx.to(channel, target).send(message, { auth })`. The agent runs and replies on the destination channel. The source channel starts no session and returns only its HTTP response.
+A cross-channel hand-off starts or resumes a conversation on another channel from a route handler with `ctx.to(channel, target).send(message, { auth })`. The agent runs and replies on the destination channel. The source channel returns its HTTP response without starting a session.
 
 This webhook filters incoming events and asks the agent to investigate in Slack. Import the destination channel's default export; `verifyAndParseEvent` is your own helper.
 
@@ -466,7 +466,7 @@ For notifications that don't need an agent turn, use the platform's API instead.
 
 ## CORS
 
-Custom HTTP channels send no CORS headers by default. Pass `cors: true` for permissive browser access with preflight handling, or a serializable options object to narrow origins, methods, and headers:
+Custom HTTP channels don't send CORS headers by default. Pass `cors: true` for permissive browser access with preflight handling, or a serializable options object to narrow origins, methods, and headers:
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
@@ -503,9 +503,9 @@ export default defineChannel({
 
 A `WS()` route registers for `GET`, the method an upgrade request uses. A path can also declare `GET()`: upgrade requests go to the `WS()` handler and other requests to the `GET()` handler. Both routes must use the same parameter names, or `eve build` fails.
 
-### Node upgrade server escape hatch
+### Node upgrade server
 
-Use `createWebSocketUpgradeServer()` only when a third-party SDK or framework expects to bind to a Node `http.Server` with `server.on("upgrade", ...)`. Otherwise, use the `WS()` lifecycle hooks.
+Use `createWebSocketUpgradeServer()` only when a third-party SDK or framework expects to bind to a Node `http.Server` with `server.on("upgrade", ...)`. Otherwise, use the `WS()` connection hooks.
 
 ```ts
 import { defineChannel, WS, createWebSocketUpgradeServer } from "eve/channels";
@@ -561,7 +561,7 @@ export default defineChannel({
 });
 ```
 
-eve recomputes the metadata when channel event handlers change state. A dynamic tool's or skill's `select` reads it as `ctx.channel.metadata` and narrows it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
+eve recomputes the metadata when channel event handlers change state. A dynamic tool's or skill's `select` reads it as `ctx.channel.metadata` and narrows it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for examples of using this metadata.
 
 ### Conversation audience
 
@@ -583,7 +583,7 @@ export default defineChannel({
 
 The input, typed `AudienceContext<TState>`, contains the channel's `state`, `caller`, `channel`, and `environment`. An authenticated caller (`caller.type === "principal"`) omits `principalId`, `issuer`, and `subject`. Its `attributes` come from route auth and can still identify the person.
 
-Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel can't tell; traces treat it as non-public. A missing, throwing, asynchronous, or malformed `audience` function also falls back to `"unknown"`. An `audience` field returned from `metadata()` sets nothing.
+Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel can't tell; traces treat it as non-public. A missing, throwing, asynchronous, or malformed `audience` function also falls back to `"unknown"`. Returning `audience` from `metadata()` doesn't set the session's audience.
 
 The audience is fixed when the session is created, so turns from a different caller don't change it. A local subagent inherits its parent's audience, and eve forwards the parent's custom channel metadata separately.
 
@@ -675,7 +675,7 @@ Tokens must be nonempty. A session supports up to 256 addresses, including its s
 
 Spread a channel value into a new object with replaced `routes`. The copy keeps the channel's adapter, events, and build metadata, such as the Slack app manifest, so `{ ...channel, routes }` compiles and runs like the original.
 
-The built-in Slack, Teams, and Telegram channels, and the Chat SDK bridge's `send`, hand every inbound message to `from(address).send(message, options)`. A wrapper that replaces `send` on the source from `from(address)` sees each inbound message, and a rejected delivery reaches it as an error:
+The built-in Slack, Teams, and Telegram channels, and the Chat SDK bridge's `send`, pass every inbound message to `from(address).send(message, options)`. A wrapper that replaces `send` on the source from `from(address)` sees each inbound message, and a rejected message causes its `send` call to throw:
 
 ```ts title="agent/channels/slack.ts"
 import type { RouteHandlerArgs } from "eve/channels";

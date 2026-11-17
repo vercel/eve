@@ -22,7 +22,7 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-- Put the file at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, put the definition there. A root `agent/sandbox.ts` beside that folder is a build error.
+- If `agent/sandbox/` exists, put the definition at `agent/sandbox/sandbox.ts`. This includes agents with [workspace seeds](#managed-workspace-and-skills) or a Dockerfile. Also defining `agent/sandbox.ts` causes a build error.
 - `environment.open()` starts the sandbox for the current session.
 - The selector runs until it succeeds once. After that, later workflow steps and process restarts resume the same sandbox without running the selector again.
 - Commands start and relative paths resolve from the workspace root, `/workspace` on every built-in provider.
@@ -121,7 +121,7 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-`prepare` runs once per reusable template, not once per session. The template is a Vercel snapshot, a Docker image, or a just-bash filesystem template.
+`prepare` runs once per reusable template. The template is a Vercel snapshot, a Docker image, or a just-bash filesystem template.
 
 `eve build` prepares every environment. During `eve dev`, the first sandbox access after startup or a rebuild prepares all environments in the build, including those of subagents and extensions. That access can be slow, and a later access retries a failed preparation.
 

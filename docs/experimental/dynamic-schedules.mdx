@@ -72,7 +72,7 @@ export default defineDynamicSchedules({
 
 A definition's name comes from its path under `agent/schedules/`: `agent/schedules/billing/requests.ts` is `billing/requests`. eve stores each schedule under that name, and uses it in the management tool names, `occurrence.collection`, and `ctx.session.schedule.definition`. Renaming or moving the file changes the name, so schedules created under the old name are no longer listed or run.
 
-Set `id` to fix the name whatever the path. To move a file and keep its schedules, set `id` to the old name:
+Set `id` to keep the same name regardless of the file path. To move a file without losing its existing schedules, set `id` to the old name:
 
 ```ts title="agent/schedules/workflows.ts"
 export default defineDynamicSchedules({
@@ -104,7 +104,7 @@ Set `tool` to choose how the model reaches these operations:
 | `"deferred"`     | The same tools, names, schemas, approval policies, and authorization checks, discovered with `eve__search` and called with `eve__tool`. See [Dynamic capabilities](../guides/dynamic-capabilities#dynamic-tools). |
 | `false`          | No tools; code-only scheduling.                                                                                                                                                                                   |
 
-By default, reads need no approval and changes need user approval. Set top-level `approval`, keyed by operation, with ordinary request and response policies. Each operation's `once()` grants are independent.
+By default, read operations do not require approval and write operations require user approval. Set top-level `approval`, keyed by operation, with request and response policies. Each operation tracks `once()` grants independently.
 
 ```ts
 approval: {
@@ -120,7 +120,7 @@ approval: {
 
 ### Declare named scopes
 
-Some schedules have more than one owner: a person's own, and the ones a channel shares. Declare each owner as a named scope with `scopes`, in place of `scope`:
+Use `scopes` instead of `scope` when a definition supports multiple schedule scopes, such as personal schedules and shared channel schedules:
 
 ```ts title="agent/schedules/workflows.ts"
 export default defineDynamicSchedules({
@@ -137,24 +137,24 @@ export default defineDynamicSchedules({
 });
 ```
 
-The definition still offers one set of tools, named for the file: `schedule__workflows__create`, `schedule__workflows__list`, and so on. Each takes a `scope` input, here `"personal"` or `"channel"`, and the model sees each scope's `description` beside its name. The named scope's resolver authorizes the call, as `scope` does for a definition without names.
+The definition still generates one set of tools named after the file, such as `schedule__workflows__create` and `schedule__workflows__list`. Each tool takes a `scope` input (`"personal"` or `"channel"` here) and shows each scope's `description` alongside its name. The selected scope's resolver authorizes the call.
 
-A scope is a resolver function, or an object that also says what the scope does differently:
+Each entry in `scopes` can be a resolver function or an object that overrides settings for that scope:
 
 | Field            | Purpose                                                                                                           |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `resolve`        | Required. Authorizes each operation and returns the namespace, as `scope` does.                                   |
-| `description`    | Tells the model what the scope holds, beside its name. Without it, only the name is shown.                        |
+| `description`    | Explains the scope to the model alongside its name in the `scope` input schema.                                   |
 | `id`             | The name the scope's schedules are stored under. Defaults to `<definition>/<scope>`, such as `workflows/channel`. |
 | `preparePayload` | Replaces the definition's `preparePayload` for this scope. It returns the same shape.                             |
 | `run`            | Replaces the definition's `run` for this scope.                                                                   |
 | `approval`       | Policies that replace the definition's for this scope, operation by operation.                                    |
 
-The definition's `description` is added to every management tool as common instructions. A scope's `description` explains only that scope, beside its name in the tool's `scope` input.
+The definition's `description` is added to every management tool, while a scope's `description` documents only that option in the `scope` parameter.
 
-`inputSchema`, `auth`, `events`, `tool`, and `provider` are the definition's, for every scope. A shared `preparePayload` or `scope` resolver reads which scope it acts for from `context.scopeName`.
+`inputSchema`, `auth`, `events`, `tool`, and `provider` are shared across all scopes in the definition. A shared `preparePayload` or `resolve` callback can read the active scope name from `context.scopeName`.
 
-Each scope stores its schedules apart, so `occurrence.collection` is the scope's stored name. To turn two existing definitions into one, set each scope's `id` to the old definition's name, and the schedules already stored there keep running:
+Each scope stores its schedules separately, and `occurrence.collection` is set to the scope's storage `id`. To merge two existing definitions into one, set each scope's `id` to the previous definition's name so existing schedules continue running:
 
 ```ts
 scopes: {
@@ -169,7 +169,7 @@ scopes: {
 | A response policy   | Decides who answers that scope's approvals. A scope without one keeps the default: only the requester answers. Once any scope sets one for an operation, each answer to that tool needs an authenticated responder. |
 | Replacing the tools | The tool file named for the definition, `agent/tools/schedule__workflows.ts`, replaces or disables the set.                                                                                                         |
 | The client          | `schedules(definition, { scope: "channel" })` binds one scope.                                                                                                                                                      |
-| Names that clash    | The build fails when a scope's stored name, or the definition's tool name, is already another definition's.                                                                                                         |
+| Name collisions     | The build fails if a scope's `id` or the definition's tool name collides with another schedule definition.                                                                                                          |
 
 ## Use the authenticated client
 
@@ -196,7 +196,7 @@ Receipts and reads return that unique `name`, which management calls take, plus 
 
 Generated tools and the client check `scope` on every operation, including in scheduled turns and local delegated work. Scheduled sessions have no one present, so tools that change schedules and need human approval can't wait for it. Authorize these operations with `approval` policies, or use the client in your own code. Neither one bypasses `scope` checks.
 
-Your tools, hooks, and channel events can read `ctx.session.schedule`. It is `undefined` for ordinary work. Scheduled work, including static schedules that run as a user, gets `{ definition, instance?, occurrenceId? }`. It records where the work came from, not who is authorized. A custom `scope` function can read `context.session.schedule` to restrict scheduled callers. A new ordinary inbound message clears it; approval and input responses keep it.
+Tools, hooks, and channel events can read `ctx.session.schedule`. It is `undefined` during normal turns and `{ definition, instance?, occurrenceId? }` during scheduled turns, including static schedules that run as a user. A custom `scope` function can inspect `context.session.schedule` to restrict what scheduled runs can manage. A new inbound user message clears `ctx.session.schedule`, while approval and question responses preserve it.
 
 ## Set timing
 
@@ -228,7 +228,7 @@ await client.update(created.name, {
 
 `get` and `list` return identity, timing, state, and timestamps, not payload or creator data. New schedules are always active. Use `disable` to pause future runs.
 
-`client.update(name, patch)` changes timing, replaces the whole payload, or both. Timing-only updates keep the stored payload and creator and skip `preparePayload`. Payload replacement isn't a merge. It validates the complete new input, reruns preparation, and makes the updating caller the new creator. In a shared `scope`, permission to replace the payload is also permission to change who the schedule runs as.
+`client.update(name, patch)` updates the timing, replaces the entire payload, or both. Timing-only updates keep the stored payload and creator and skip `preparePayload`. Replacing the payload validates the complete new input, reruns `preparePayload`, and sets the updating caller as the new creator. In a shared `scope`, any caller allowed to replace the payload also becomes the creator that future occurrences run as.
 
 Updates keep the management name, schedule ID, state, and destination. An update doesn't activate an inactive or completed schedule; use `enable` or `disable` to change state.
 
@@ -276,7 +276,7 @@ For fixed cron jobs without runtime management, use [Schedules](../schedules).
 
 `run` receives `payload`, `occurrence`, `auth`, `schedule`, `to`, and `waitUntil`. It can start any number of sessions or do application work directly.
 
-`to(channel, target).send(message, options)` runs as the resolved creator and takes no auth argument. `options` takes `context`, `history`, `idempotencyKey`, `outputSchema`, and `title`, as on a route handler's [`to().send()`](../channels/custom#cross-channel-hand-off). It takes no `turnPolicy`, because a send only reaches sessions the schedule started. It always starts a new session with no one present, through one of your channels, even when the target names an existing thread. Those sessions can't wait for approvals or questions, so configure tools to match.
+`to(channel, target).send(message, options)` runs as the resolved creator. `options` accepts `context`, `history`, `idempotencyKey`, `outputSchema`, and `title`, like a route handler's [`to().send()`](../channels/custom#cross-channel-hand-off), but does not accept `turnPolicy` or `auth`. Each call starts a new unattended session on the target channel, even when targeting an existing thread. Because no user is present to answer approvals or questions, configure your tools accordingly.
 
 `schedule` controls the schedule that fired the occurrence. `schedule.disable()` pauses its future runs, and `schedule.delete()` deletes it. Neither one calls `scope`, because an occurrence has no caller to authorize. Neither one stops the current run. On Vercel, a deleted schedule's occurrence isn't retried, so call `schedule.delete()` after the work that must finish. The handle's type, `ScheduleHandle`, is exported from `eve/experimental/schedules`.
 
@@ -295,7 +295,7 @@ After the callback and its `waitUntil` promises finish, eve calls `occurrence.di
 
 Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback. Deduplicate your own side effects with `occurrence.executionId` plus the schedule or resource identity.
 
-A retried callback doesn't start its sessions again. eve keys each send by the occurrence, the target, and the message, so a repeat of the same send reaches the session the first attempt started. A message that differs between attempts, such as one that includes the current time, starts another session; pass your own `idempotencyKey`, such as `` `${occurrence.executionId}:digest` ``, to keep it to one. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
+Retrying a callback does not start duplicate sessions for identical sends. eve deduplicates each send by occurrence, target, and message, so a retry reconnects to the session started by the first attempt. If the message text changes between attempts (for example, when it includes a timestamp), pass a stable `idempotencyKey` such as `` `${occurrence.executionId}:digest` `` so retries reuse the same session. Keys are scoped to the schedule and follow the [standard idempotency limits](../channels/custom#retried-deliveries).
 
 `occurrence.failed` reports an occurrence that won't run: a permanent failure, such as `auth` returning `null`, or a provider that ran out of retries. Its `reason` says why.
 

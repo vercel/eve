@@ -4,7 +4,7 @@ description: "Slack channel options, credentials, inbound hooks, code channels, 
 type: reference
 ---
 
-This page documents every part of `slackChannel` from `eve/channels/slack`. For setup and common tasks, start with [Slack](/docs/channels/slack).
+Import `slackChannel` from `eve/channels/slack`. For setup and common tasks, see [Slack](/docs/channels/slack).
 
 The Slack channel connects your agent to a Slack workspace through `agent/channels/slack.ts`. It answers mentions, DMs, slash commands, shortcuts, and button clicks, replies in threads, and shows approvals and questions as buttons. See [Channels](/docs/channels) for what every channel shares.
 
@@ -176,16 +176,16 @@ Alice, I can take the rollback.
 </slack_message>
 ```
 
-Guidance stays with its message when several messages join one turn. `context` doesn't: it goes before all of the turn's messages. eve skips guidance that is empty or only whitespace.
+When several messages join one turn, each message keeps its guidance. `context` appears before all messages in the turn. eve skips guidance that is empty or only whitespace.
 
-The model reads guidance as eve's own annotation, outside the message content. eve encodes the `<` of its own block tags, such as `</content>` or `<guidance>`, inside message text, so a person can't close `<content>` or forge a guidance block. Never put user-controlled text, such as message text or profile names, in guidance.
+The model reads guidance as eve's own annotation, outside the message content. Message text can't close `<content>` or create a guidance block. Never put user-controlled text, such as message text or profile names, in guidance.
 
 #### Message edits
 
 When a person edits one of their messages in a thread that already has a session, eve sends the edit to that session:
 
 - The edit follows the channel's [`turnPolicy`](#control-overlapping-turns) like any message. By default it joins a running turn, and if the agent already replied, it starts a new turn. With `turnPolicy: "queue"`, it waits behind the message it edits.
-- eve skips the `received` acknowledgement for the edit. A turn the edit starts shows no status until its first tool call finishes, so an agent that ends the turn with [`no_reply`](/docs/concepts/built-in-tools#no_reply) leaves no trace in the thread.
+- eve skips the `received` acknowledgement for the edit. A turn started by an edit shows its status only after its first tool call finishes, so ending the turn with [`no_reply`](/docs/concepts/built-in-tools#no_reply) before then doesn't post a reply or status.
 - The edit adds no thread context or files, and doesn't answer an open approval or question.
 - eve ignores edits by bots and apps, link previews added to a message, and edits in threads without a session.
 
@@ -366,7 +366,7 @@ export default defineTool({
 });
 ```
 
-Each message carries its own token, and Slack rejects a token once it expires. Slack also rejects a token sent with another app's bot token, so a remote agent that receives it with a forwarded principal can't search with it.
+Each message carries its own token, and Slack rejects a token once it expires. Slack also rejects a token sent with another app's bot token, so a remote agent that receives it with a forwarded user identity can't search with it.
 
 #### Continue conversations without repeated mentions
 
@@ -404,19 +404,19 @@ export default slackChannel({
 | Mention, code channel, or DM      | These are addressed to the agent, so they get a plain `{ auth }`.                                       |
 | `message.threadTs !== message.ts` | Top-level messages start their own thread, so they still need a mention.                                |
 | `ctx.edit`                        | An edit only reaches a thread that has a session, so it's followed like a reply, root message included. |
-| `ctx.isSubscribed()`              | The thread has an active eve session, so the agent follows only threads it was brought into.            |
+| `ctx.isSubscribed()`              | The thread has an active eve session, so the agent follows only threads with an existing session.       |
 
 - Without `onAppMention` and `onDirectMessage`, mentions and DMs reach `onMessage` too, so the hook answers them first.
 - The DM check reads `channel_type`. `ctx.isDMOrPrivateChannel()` returns `true` for DMs, group DMs, and private channels, and also when it can't tell, such as on a missing scope or API error.
 - The agent needs the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool to stay quiet. See [Status and guidance](#status-and-guidance) for what `status` and `guidance` do.
-- `defaultSlackAuth` gives each Slack user their own identity, so by default only the person whose message led to an approval can answer it. With `{ auth: null }`, messages carry no identity, and anyone in the thread can answer it.
+- `defaultSlackAuth` gives each Slack user their own identity, so by default only the person whose message led to an approval can answer it. With `{ auth: null }`, messages are anonymous, so anyone in the thread can answer the approval.
 - A reply from the person a pending question or approval is waiting on can still answer it, even when the reply is meant for someone else, because eve matches answers by identity before the model sees the message.
 
 Thread replies need extra subscriptions. With Vercel Connect, open **Advanced** when creating the connector. Add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels also need `message.groups` and `groups:history`.
 
 ##### Classify ambient replies with a decision model
 
-Use [`decide`](/docs/guides/decide#decide-inside-a-tool) to let the agent join conversations nobody brought it into. Keep the checks above first, so addressed messages and followed threads cost no decision call. Then ask a decision model about other messages in the channels you choose:
+Use [`decide`](/docs/guides/decide#decide-inside-a-tool) to let the agent join conversations without a mention. Run the checks above first to handle addressed messages and followed threads without calling the decision model, then ask a decision model about other messages in the channels you choose:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -622,7 +622,7 @@ Replies up to 12,000 characters post inline. A longer reply uploads as an `eve-r
 The final reply can still fail: the upload fails, Slack returns another error, or a renderer throws. eve then posts this notice in the thread: `I finished, but couldn't deliver my answer in Slack (error id ...). Please ask me to resend it.`
 
 - The error ID matches the `final reply was not delivered to Slack` line in the Vercel runtime logs.
-- The notice carries no reply content. eve never re-sends the reply or retries the model.
+- The notice excludes the reply text. eve doesn't resend the reply or retry the model.
 - The next message tells the model its reply wasn't delivered.
 - Other failed posts, such as status updates, are logged and skipped.
 
@@ -640,7 +640,7 @@ Each row shows:
 
 - **Title:** the tool's [`label.start`](/docs/tools#label-tool-activity), or the tool name in words without its namespace, so `crm__sync_accounts` shows as `Sync accounts`. A connection call shows as `Linear: List issues`. An agent task shows the agent name plus the first sentence of its brief, as in `Researcher: Find the incidents behind the checkout spike`. Set `label.start` for exact casing, because `github` shows as `Github`.
 - **Waiting:** `Waiting for approval`, or the matching text for an answer or sign-in. In a DM or private channel, the row also shows the request's prompt.
-- **Done:** the first sentence of the result, cut to about 100 characters. A task that ran a second or more adds its duration: `Done in 1m 14s: Found three incidents.`
+- **Done:** the first sentence of the result, cut to about 100 characters. For tasks lasting at least one second, the row also shows the duration: `Done in 1m 14s: Found three incidents.`
 - **Failed:** `Failed`, or `Failed after 3m`. In a DM or private channel, the row adds the error's first sentence, as in `Failed: Rate limited`.
 - **Stopped:** `Stopped early since it was no longer needed` when the model cancelled it with `eve__task_cancel`, `Stopped by request` when the turn was [cancelled](#message-hooks), `Stopped when the turn ended`, or `Stopped`. Only the model-cancelled row shows a success check.
 
@@ -676,7 +676,7 @@ export default slackChannel({
 });
 ```
 
-The callback receives the request (an `Interaction`) and the `SessionContext`. Omit it to keep every request in the thread. For `"ephemeral"` and `"direct-message"`, the thread shows a `Waiting on` note naming the person instead of the request. If eve can't find the Slack user, it logs the request and posts nothing, so private requests fail closed. `onAnswers` or the tool's approval policy still decides who may answer.
+The callback receives the request (an `Interaction`) and the `SessionContext`. Omit it to keep every request in the thread. For `"ephemeral"` and `"direct-message"`, the thread shows a `Waiting on` note naming the person instead of the request. If eve can't find the Slack user, it logs the request without posting it. `onAnswers` or the tool's approval policy still decides who may answer.
 
 Slack can't edit an ephemeral message after posting it, so an ephemeral card changes only when the person uses it. Their click replaces the card with eve's answered line, not an `interactionCard` rendering. If a policy refuses the answer, eve posts the card again. When the request ends without a click, only the thread note changes. Slack doesn't keep ephemeral messages across reloads, so use `"direct-message"` for a request the person may answer later.
 
@@ -747,7 +747,7 @@ Without `codeChannels`, eve treats a code channel like any other channel.
 
 #### Open a code channel from a thread
 
-You can give the agent a tool that calls `openCodeChannel()` so it can move multi-step work out of a thread. The new code channel starts with the conversation so far, and the original thread stays available for quick follow-ups:
+You can give the agent a tool that calls `openCodeChannel()` so it can move multi-step work out of a thread. The new code channel starts with the conversation so far, and the original thread remains available for follow-ups:
 
 ```ts title="agent/tools/open_code_channel.ts"
 import { openCodeChannel } from "eve/channels/slack";
@@ -818,7 +818,7 @@ export default slackChannel({
 });
 ```
 
-`ctx.openCodeChannel()` copies no conversation by default. Pass `history` to `send` to include earlier messages. It throws without `codeChannels: true`, inside a code channel, and when Slack refuses to create the channel.
+`ctx.openCodeChannel()` doesn't copy conversation history by default. Pass `history` to `send` to include earlier messages. It throws without `codeChannels: true`, inside a code channel, and when Slack refuses to create the channel.
 
 #### How eve serves code channels
 
@@ -935,7 +935,7 @@ Start a Slack conversation from a [webhook on another channel](/docs/channels/cu
 | `codeChannel`        | Open a [code channel](#open-a-code-channel-from-a-thread) from a message in `channelId` and start the session there. Needs `codeChannels: true`.               |
 | `audience`           | Set the destination's visibility. Defaults to `unknown`.                                                                                                       |
 
-A send with an `idempotencyKey` and no `threadTs` or `initialMessage` picks the new thread's session from the key. A retry with the same key then reaches the same session instead of starting a second thread. Two different sends that reuse a key land in the same thread, and the second is ignored. Use a key that identifies the message across every sender to this channel, not only across retries of one sender.
+A send with an `idempotencyKey` and no `threadTs` or `initialMessage` picks the new thread's session from the key. A retry with the same key then reaches the same session instead of starting a second thread. Two sends using the same key target the same thread, and eve ignores the second message. Use a key that identifies the message across every sender to this channel, not only across retries of one sender.
 
 `initialMessage` takes the same inputs as `thread.post`, including cards and optional files. eve posts the root message, then uploads files into its thread. A retried proactive send repeats the root post and its uploads, so don't use it as an exactly-once notification. For example, start a thread with a Markdown root:
 
@@ -1161,7 +1161,7 @@ export default slackChannel({
 | `interaction` | The request, with its `status`, `outcome`, `call` (including the tool `input`), and `answer`. While the request is open, `answer` is the latest accepted answer, if any. Once it ends, `answer` is the one that decided it. |
 | `destination` | `"thread"`, `"ephemeral"`, or `"direct-message"`, as [`approvalChannel`](#human-in-the-loop-hitl) decided. In a code channel, `"thread"` is the code channel itself.                                                        |
 | `audience`    | Who reads the message. An ephemeral or direct-message request is always `private`; a thread request has the thread's audience.                                                                                              |
-| `answeredBy`  | The Slack user ID whose answer stands or decided the request, when known.                                                                                                                                                   |
+| `answeredBy`  | The Slack user ID associated with the latest accepted answer, or the final answer after the request ends, when known.                                                                                                       |
 | `view`        | The session snapshot, for the selectors from `eve/events`.                                                                                                                                                                  |
 
 It returns `controls`, the message with eve's buttons or select, and an optional `details` message that eve posts before the controls. Each is a `SlackCardMessage` with `blocks` and `text`, the shape `taskCard` returns. Slack sends the whole controls message back with every click, so put long content in `details`. eve's default approval card keeps the tool input it shows short: up to 10 top-level fields, 500 characters per value, and 1,500 characters in all. Requests asked together share one details message, which eve deletes once its last open request ends. This renderer shows a `plan-create` tool's steps as the approval's details:
@@ -1196,7 +1196,7 @@ eve still routes, groups, and posts the messages, and owns the controls' action 
 - `details` never holds eve controls.
 - A message holds at most 50 blocks, including requests eve grouped with yours. An update over that limit uses eve's default for the changed request, then only the block with eve's controls, so an open request always shows them.
 
-If `interactionCard` throws or breaks these rules, eve logs it and renders that request with its default, because a request nobody can answer would hold the turn. If Slack refuses a message's content, such as with `invalid_blocks` or `msg_too_long`, eve sends it once more with its defaults. eve doesn't resend after other failures, such as a timeout or `rate_limited`, because the first message may have posted.
+If `interactionCard` throws or breaks these rules, eve logs the error and uses its default rendering. If Slack refuses a message's content, such as with `invalid_blocks` or `msg_too_long`, eve sends it once more with its defaults. eve doesn't resend after other failures, such as a timeout or `rate_limited`, because the first message may have posted.
 
 ### Show your own tool on the task card
 
@@ -1295,9 +1295,9 @@ Use them to test a custom renderer against eve's Slack payloads, or to post eve'
 - eve doesn't track controls you post, so update or remove them in your renderer's `interaction.settled` handler.
 - To pass `response` to `respond()` yourself, validate it with `parseAnswers` from `eve/client`.
 
-For a sign-in, a renderer's handler gets a private-only `ctx.channel` with `postEphemeral`, `postDirectMessage`, and `state`. It gets no public `post` or raw API access. `postDirectMessage` needs the `im:write` scope.
+For a sign-in, a renderer's handler gets a private-only `ctx.channel` with `postEphemeral`, `postDirectMessage`, and `state`, without public `post` or raw API access. `postDirectMessage` needs the `im:write` scope.
 
-`audience.principalIds` lists the eve identities (`principalId` values) of the people the sign-in is for. `state.slackUsersByPrincipal` maps each identity seen in the thread to its Slack user ID. An identity without an entry gets no private sign-in. Skip `next()` to deliver the sign-in yourself:
+`audience.principalIds` lists the eve identities (`principalId` values) of the people the sign-in is for. `state.slackUsersByPrincipal` maps each identity seen in the thread to its Slack user ID; if an identity is not in that map, eve skips the private sign-in. Skip `next()` to deliver the sign-in yourself:
 
 ```ts
 renderers: [

@@ -27,7 +27,7 @@ Every local `agent.ts`, root or subagent, must export the value `defineAgent` re
 
 A gateway model ID string routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a model instance. eve types it as `EveLanguageModel`, exported from `eve` and `eve/models`, and every AI SDK language model satisfies it.
 
-With a static Gateway model, `agent.ts` needs no code at runtime. A dynamic model or a model instance keeps `agent.ts` loaded at runtime, because eve resolves it while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+With a static Gateway model, `agent.ts` runs only at build time. A dynamic model or model instance also loads `agent.ts` at runtime so eve can resolve the model. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 
@@ -57,9 +57,7 @@ wins and is sent unchanged.
 | `providerOptions.gateway.sessionId`                                                    | AI Gateway calls                                | The Agent Runs `gen_ai.conversation.id`, shared by every turn, delegated subagent, and compaction call in the conversation.                                                                           |
 | `providerOptions.openai.promptCacheKey`                                                | Direct OpenAI and `chatgpt()` calls             | SHA-256 hash of the session ID, unique per subagent session.                                                                                                                                          |
 
-The safety identifier never contains the caller's raw identity fields or attributes. It
-follows the current caller when a later turn changes users. AI Gateway hashes
-session IDs longer than 256 characters.
+The safety identifier never contains raw identity fields or attributes, and it updates when a later turn runs as a different caller. AI Gateway hashes session IDs longer than 256 characters.
 
 The Gateway session ID groups the conversation's generations into one session in
 the AI Gateway logs Sessions view. It also drives
@@ -121,8 +119,8 @@ export default defineAgent({
   native tool-calling support. `gpt-oss:20b`, `qwen3`, and `gemma4` are good
   starting points on Ollama.
 - **Usage.** `includeUsage: true` lets token usage reach eve's
-  [session limits](#runtime-limits). Local models report no cost, so
-  `costUsd` stays unset in a `sessionUsage` check.
+  [session limits](#runtime-limits). Local models do not report cost, so
+  `costUsd` is unset in `sessionUsage`.
 - **Other servers.** Change `baseURL`, for example to
   `http://localhost:1234/v1` for LM Studio. Pass `apiKey` for a remote
   OpenAI-compatible server that requires one.
@@ -135,8 +133,7 @@ provider model when you deploy.
 To select a model from the incoming prompt with an AI SDK decision model, use
 [`auto` from `eve/models`](./guides/decide).
 
-`model` also accepts `defineDynamic(fn)` from `eve/models` or `eve`. The function returns the
-model, and a dynamic model has no compiled default.
+`model` also accepts `defineDynamic(fn)` from `eve/models` or `eve` to resolve the model at runtime:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -157,14 +154,13 @@ The function returns a Gateway model ID, a model instance such as an AI SDK lang
 - **When it changes.** eve runs the function before each ordinary model call. A memo keyed by
   `ctx.turn?.id ?? null` keeps a choice for the turn; `ctx.session.id` keeps it until a deployment
   change. Switching models can reduce prompt-cache reuse.
-- **Failures stop the turn.** A thrown error or invalid selection fails the turn before the
-  provider call. `null` is not a model. Missing credentials fail at request time.
+- **Failures stop the turn.** Throwing an error or returning `null` or an invalid selection fails the turn before the
+  provider call. Missing credentials fail at request time.
 - **Serialization.** Only memo results must be JSON. The function can return a live provider
   instance built from those results. `ctx.model` is unavailable during model selection.
 - **Selection object.** `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`.
-  Omit `modelContextWindowTokens` to read it from the AI Gateway model catalog that `eve build` or
-  `eve dev` recorded, without a network request. A model that catalog doesn't list fails the turn. Set
-  `modelContextWindowTokens` for an unlisted, custom, or newly published model, or rebuild. Dynamic agents cannot set sibling `modelContextWindowTokens` or
+  Omit `modelContextWindowTokens` to use the value recorded from the AI Gateway model catalog during `eve build` or
+  `eve dev`. If the model is not in that catalog, set `modelContextWindowTokens` or rebuild to refresh the catalog, or the turn fails. Dynamic agents cannot set sibling `modelContextWindowTokens` or
   `modelOptions` fields; return per-model values from the function.
 
 The `session.started` runtime identity does not include a model ID for a dynamic agent. Each public
@@ -218,16 +214,7 @@ base input price, against 1.25x for 5 minutes, and applies to every cached
 breakpoint, including the conversation's, so it pays off only when the cached
 prefix is read again after the 5-minute cache has expired.
 
-On an Anthropic model through Gateway, the default `5m` keeps Gateway's
-automatic caching, and eve sets `providerOptions.gateway.cacheAnchorMessageIndex`
-to `0` so sessions that share a system prompt share its cache. eve sends
-the base part of the system prompt as its own message first, and the sections
-that differ by session, such as dynamic instructions, tasks and approvals,
-after it, so those sessions share the base. With `1h`, eve
-turns Gateway's automatic caching off, including a `gateway.caching: "auto"` you set,
-because Gateway ignores a 1-hour TTL under it, and places its own breakpoints, all for 1 hour, as it does on a directly
-called model. eve rejects `promptCache` on other
-Gateway models; use `providerOptions.gateway.caching` instead.
+On an Anthropic model through Gateway, `5m` uses Gateway's automatic caching and sets `providerOptions.gateway.cacheAnchorMessageIndex` to `0` so sessions that share a base system prompt share its cache. `1h` disables Gateway's automatic caching (including `gateway.caching: "auto"`) and sets 1-hour cache breakpoints directly. eve rejects `promptCache` on non-Anthropic Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
@@ -327,52 +314,43 @@ once the window has usage. The model call that crosses a limit finishes, because
 exact usage arrives after the call completes. Before the next model call, eve
 pauses the turn (`turn.paused`) and sends a continuation prompt:
 
-| Option       | Result                                                                                                                                                                         |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Continue** | Starts a new window and resumes the same turn.                                                                                                                                 |
-| **Stop**     | Cancels the turn (`turn.settled` with `outcome: "cancelled"`), not an error. The session stays resumable, but because it is still over budget, the next message prompts again. |
+| Option       | Result                                                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Continue** | Starts a new window and resumes the same turn.                                                                                                                           |
+| **Stop**     | Cancels the turn (`turn.settled` with `outcome: "cancelled"`). The session stays resumable, and the next message prompts again because the session is still over budget. |
 
 Declining a delegated child's prompt cancels the root turn and the whole
 delegation tree, so the parent never receives an error result it could retry.
 
-A message that answers neither option waits behind the open prompt. It starts
-no second prompt or turn. After **Continue**, the paused turn receives it
-(`delivery.consumed`).
-
-If an earlier deployment showed the continuation prompt, that turn has already
-ended. A message that answers neither option waits behind the prompt and emits
-no event until **Continue**. **Continue** starts a new turn that receives the
-waiting message once.
+A message that does not answer the prompt waits until the user selects **Continue**, then joins the resumed turn (`delivery.consumed`). If the prompt came from an earlier deployment whose turn already ended, **Continue** starts a new turn with the waiting message.
 
 Some sessions can't request input from a human, such as markdown schedules and
 delegated runs without input proxying. They skip the prompt and fail the next
-model call with `SESSION_USAGE_LIMIT_REACHED`. Its details carry the `total` and
-`window` usage the check saw.
+model call with `SESSION_USAGE_LIMIT_REACHED`. The error details include the `total` and
+`window` usage.
 
-Each subagent session checks its own usage against its own `sessionUsage`, or
-the root agent's when it authors none. A dynamic subagent always uses the root
+Each subagent session uses its own `sessionUsage`, or inherits the root
+agent's when omitted. A dynamic subagent always uses the root
 agent's. Remote agents run under their own deployment's limits.
 
 A child's usage, including its own subagents', also counts in the parent's
 usage. Approving a continuation starts a new window without erasing `total`.
 The parent counts delegated usage at these points:
 
-| Delegated work                                           | Counts against the parent                                                                                                           |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Agent task                                               | With each reply. A turn with no reply, such as a cancelled one, counts with the next reply, or when the turn ends if no call waits. |
-| `ctx.agent` session from any other `serve` workflow tool | The same way as an agent task.                                                                                                      |
-| `ctx.agent` session from an `execute` or `task` tool     | When the tool finishes.                                                                                                             |
-| Remote agent                                             | The same way as an agent task, cost included.                                                                                       |
+| Delegated work                                           | Counts against the parent                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Agent task                                               | With each reply. Usage from a turn without a reply, such as a cancelled turn, is added to the next reply or when the turn ends. |
+| `ctx.agent` session from any other `serve` workflow tool | The same way as an agent task.                                                                                                  |
+| `ctx.agent` session from an `execute` or `task` tool     | When the tool finishes.                                                                                                         |
+| Remote agent                                             | The same way as an agent task, cost included.                                                                                   |
 
 Some delegated usage doesn't count against the parent:
 
 - A `ctx.agent` turn still running when its workflow tool finishes or is cancelled.
 - The `ctx.agent` usage of an `execute` tool whose parent turn is cancelled while it waits.
-- What a cancelled agent task's own subagents spend after the task reports its cancelled turn.
+- Subagent usage incurred by a cancelled agent task after it reports its cancellation.
 
-A cancelled agent task ends and sends no further reply. Usage the cancelled run
-reported up to that point still counts against the parent when its usage report
-or final outcome arrives.
+A cancelled agent task ends without another reply, and any usage it reported before cancellation still counts against the parent.
 
 ## Workflow world
 
@@ -452,14 +430,13 @@ the session starts:
 
 - When the policy allows both inputs and outputs, eve uses the World's default
   retention period.
-- When the policy drops the trace or excludes either content direction, eve
+- When the policy drops the trace or excludes either inputs or outputs, eve
   requests deletion when the run ends (Workflow's `experimental_retention: 0`).
-  Workflow can't delete inputs and outputs separately.
 
 Without a custom policy, public conversations and development sessions use the
 World's default. Private and unknown-audience sessions outside development
-request `0`, even with no OpenTelemetry destination installed. Destination
-export filters and lifecycle-provider policies don't change the decision.
+request `0`, even without an OpenTelemetry destination. Destination
+export filters and instrumentation-file `tracePolicy` decisions don't change the decision.
 
 Set `experimental.workflow.retention` to `0` to always request deletion, or to
 `"default"` to always keep run data for the World's default period. This

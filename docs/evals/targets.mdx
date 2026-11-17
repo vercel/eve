@@ -29,17 +29,17 @@ export default defineEval({
 - `session.nextTurn()` reads and records the session's next turn. Its events feed both the session's assertions and the run-level assertions. Each read continues where the last one stopped.
 - `session.watch()` starts reading right away and returns a [live turn](./cases#in-flight-turns) with `waitForEvent(...)`, `cancel()`, and `result()`. Pass `{ until }` to stop at a matching event instead of the end of a turn, such as `context.settled` for a context change between turns.
 
-Attached sessions are full `EveEvalSession`s. Send them messages and assert on them directly, as in `session.succeeded()` or `session.calledTool(...)`. Query `session.view` or a returned turn's `.view` with [selectors](./assertions#assert-on-session-state-with-selectors) for custom state checks. A later `startIndex` can omit earlier facts from those views; read from `0` when your check needs the full recorded prefix. Assertions on `t` cover the whole run, including every attached session.
+Attached sessions are full `EveEvalSession`s. Send them messages and assert on them directly, as in `session.succeeded()` or `session.calledTool(...)`. Query `session.view` or a returned turn's `.view` with [selectors](./assertions#assert-on-session-state-with-selectors) for custom state checks. A later `startIndex` can exclude earlier events from those views; read from `0` when your check needs the full recorded prefix. Assertions on `t` cover the whole run, including every attached session.
 
 To create sessions and send messages, use the [drive API](./cases#the-drive-api).
 
 ## Authentication
 
-Requests to a local target carry no credentials, because `eve eval` started that server.
+Local requests omit credentials because `eve eval` starts the target server.
 
 For a remote `--url`, eve finds the expected Vercel team and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are nonblank. Otherwise it reads the local Vercel project link: `.vercel/project.json`, or the matching project in `.vercel/repo.json` for a linked monorepo.
 
-With a project, eve looks up the exact HTTPS origin under that team, regardless of the Vercel CLI's current team. It sends your Vercel credentials only when the deployment's project ID matches. Without a project, eve checks the URL under the Vercel CLI's current team. A URL that Vercel can't verify gets no credentials.
+With a project, eve looks up the exact HTTPS origin under that team, regardless of the Vercel CLI's current team. It sends your Vercel credentials only when the deployment's project ID matches. Without a project, eve checks the URL under the Vercel CLI's current team. eve sends credentials only to URLs Vercel verifies.
 
 After verification, eve sends the available Vercel credentials:
 

@@ -59,7 +59,7 @@ const sandbox = await ctx.getSandbox();
 const result = await sandbox.run({ command: "npm test" });
 ```
 
-The accessor is asynchronous because eve may need to attach or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
+The accessor is asynchronous because eve may need to attach or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Stopping and deleting a sandbox](../sandbox#lifecycle) for their behavior.
 
 Pass the exported environment object to get methods specific to that environment. Provider-specific methods such as `setNetworkPolicy()` are not available from the no-argument accessor:
 
@@ -89,7 +89,7 @@ Declare reusable definitions and state handles at module scope, but call their c
 
 ## How it works
 
-eve sets up session data and per-step resources before your code runs. They stay available across asynchronous work in the same call chain. eve saves state changes at the end of the step.
+Session data and resources remain available throughout asynchronous work in the same call chain. eve saves state changes at the end of the step.
 
 ## What to read next
 

@@ -64,4 +64,4 @@ When a message has an audio attachment (`Attached file ... (audio/...)`), such a
 
 ## When transcription fails
 
-When `execute` throws, the model receives the error as a tool error and can relay it to the user. See [When a tool throws](../tools#when-a-tool-throws). A file eve can't download reaches the agent as a short note instead of a file. So does a file over the channel's upload limit, which is 25 MB by default.
+When `execute` throws, the model receives the error as a tool error and can relay it to the user. See [When a tool throws](../tools#when-a-tool-throws). eve sends the agent a short note for files it can't download or that exceed the channel's upload limit, which defaults to 25 MB.

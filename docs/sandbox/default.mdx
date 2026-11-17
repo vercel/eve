@@ -23,7 +23,7 @@ eve prepares the sandbox during `eve build`, or during `eve dev` the first time 
 | `eve dev` or `eve eval`                                                      | [just-bash](/docs/sandbox/just-bash)          |
 | A production `eve build`                                                     | None: opening the sandbox fails with an error |
 
-Production builds never fall back to just-bash, because just-bash runs no native processes and provides no network isolation. Without a provider, `eve build` succeeds and logs that no provider is available. The first session that opens the sandbox then fails. The error asks you to start Docker and rebuild, deploy to Vercel, or select a provider in your sandbox file. See [Sandbox troubleshooting](/docs/sandbox/troubleshooting#defaultsandbox-has-no-sandbox-provider-for-this-build).
+Production builds don't fall back to just-bash because it can't run native processes or isolate network access. Without a provider, `eve build` succeeds and logs that no provider is available. The first session that opens the sandbox then fails. The error asks you to start Docker and rebuild, deploy to Vercel, or select a provider in your sandbox file. See [Sandbox troubleshooting](/docs/sandbox/troubleshooting#defaultsandbox-has-no-sandbox-provider-for-this-build).
 
 ## The build records the choice
 
@@ -57,7 +57,7 @@ export default defineSandbox(() => environment.open());
 | `vercel`   | Vercel is selected    | The options of [`VercelSandbox.environment()`](/docs/sandbox/vercel), such as `region`, `resources`, and credentials.                                               |
 | `justBash` | just-bash is selected | `autoInstall` and `prepare`. Use [`JustBashSandbox.environment()`](/docs/sandbox/just-bash#experimental-options) for experimental `customCommands` or `filesystem`. |
 
-Keep a shared `prepare` callback portable, because it runs on whichever provider eve selects. Commands such as `apt-get` fail on just-bash, which runs no native binaries.
+Keep a shared `prepare` callback portable, because it runs on whichever provider eve selects. Commands such as `apt-get` fail on just-bash because it can't run native binaries.
 
 On Vercel, eve skips the snapshot when the environment has no `prepare` callback, workspace seed, skill files, or `source`. Each session sandbox then starts directly from the configured `image`, or from eve's base image when none is set. See [Vercel Sandbox](/docs/sandbox/vercel#snapshot-preparation).
 

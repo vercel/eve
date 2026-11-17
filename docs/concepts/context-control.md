@@ -58,15 +58,13 @@ See [Dynamic capabilities](../guides/dynamic-capabilities) for the context, memo
 
 ## Compaction and clear
 
-Before each model call, eve measures the history together with the system instructions and advertised tool schemas against the compaction threshold. When switching back to a model, eve compares counts based on that model's last reported usage and the latest available measurement. Both counts include estimates for messages added since their measurement and any increase in instructions or tools. eve uses the larger count to avoid delaying compaction when an older measurement underestimates added messages.
-
-A model without a measurement of the current history uses the latest available measurement instead. Its first call can still reveal that compaction is needed before the next step. Rewriting history clears these measurements.
+Before each model call, eve checks the combined size of the conversation history, system instructions, and advertised tool schemas against the compaction threshold.
 
 Compaction reserves space for those instructions and tools and reduces only conversation history. It can't shrink the instructions or tool catalog, so keep them within the selected model's context window.
 
 User-role instructions are part of history. Compaction and clear rewrite them with the rest of history, and eve adds each again before the next model call. System-role instructions remain outside history and continue to apply after either operation.
 
-Recalled memory stays outside history too. eve recalls before the first model call of each turn, and every later model call reads that turn's recall just ahead of the turn's input. Compaction doesn't summarize it, and a provider can capture before compaction rewrites history. Clear drops what earlier turns recalled, though not the provider's external data, and the next turn recalls again.
+Recalled memory stays outside history too. eve recalls memory before the first model call of each turn and places those messages immediately before the turn's input on every model call in that turn. Compaction doesn't summarize it, and a provider can capture before compaction rewrites history. Clear drops what earlier turns recalled, though not the provider's external data, and the next turn recalls again.
 
 ## What to read next
 

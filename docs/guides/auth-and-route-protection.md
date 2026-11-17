@@ -73,7 +73,7 @@ export default eveChannel({
 });
 ```
 
-Put your own providers ahead of the catch-all helpers, and `localDev()` last. A `vercelOidc()` before `localDev()` lets a local Vercel OIDC bearer resolve a real user instead of the stand-in `local-dev` caller. On non-Vercel hosts, omit `vercelOidc()` unless you want to accept Vercel-issued tokens.
+Put your own providers ahead of the catch-all helpers, and `localDev()` last. Place `vercelOidc()` before `localDev()` so a local request with a Vercel OIDC token authenticates as its user rather than `local-dev`. On non-Vercel hosts, omit `vercelOidc()` unless you want to accept Vercel-issued tokens.
 
 To reject with a precise status instead of skipping, throw:
 
@@ -285,7 +285,7 @@ export default eveChannel({
 
 `assertion.principal` holds the `current` and `initiator` contexts the forwarder claims, already stamped with `eve:forwarded-by`. `initiator` equals `current` when the sender omits it. The forwarder supplies attributes too, so check any attribute your tools trust.
 
-`initiator` takes effect only when the session is created. On a follow-up request, the predicate still sees the claimed `initiator`, but the session keeps its original initiator. Checking `initiator` on a follow-up doesn't change that original value.
+`initiator` takes effect only when the session is created. On follow-up requests, the predicate sees the claimed `initiator`, but the session's original `initiator` remains unchanged.
 
 `assertion.principal` is absent when a request forwards the parent session chain without an identity. A predicate that requires `assertion.principal` accepts that forwarder's session chain only alongside an identity it accepts. The `ForwardedAssertion` and `TrustedForwarders` types are exported from `eve/channels/eve` for named predicates.
 
@@ -295,7 +295,7 @@ The receiver always overwrites the `eve:forwarded-by` attribute on accepted cont
 
 A trusted parent session chain fills `ctx.session.parent` and keeps the same root session across every hop. eve ignores an untrusted chain. The root session's normal token cap still applies to an accepted chain.
 
-A remote delegation request carries a callback body and a valid sampled `traceparent`. On such a request, an accepted `trustedForwarders` result can also admit an origin audience and input and output content limits from one W3C Baggage member. These values grant no authorization. The receiver's own trace policy also decides, using the origin audience. eve keeps only what both decisions allow, and later hops forward only that narrowed result. A malformed, partial, unsampled, or mixed-version value falls back to metadata-only tracing. The caller supplies the callback and headers, so trust rests only on the verified caller identity and `trustedForwarders`. See [Preserving trace content](./remote-agents#preserving-trace-content).
+A remote delegation request carries a callback body and a valid sampled `traceparent`. On such a request, an accepted `trustedForwarders` result can also admit an origin audience and input and output content limits from one W3C Baggage member. These values grant no authorization. The receiver also applies its trace policy to the origin audience, records only content both policies allow, and forwards those limits to later deployments. A malformed, partial, unsampled, or mixed-version value falls back to metadata-only tracing. The caller supplies the callback and headers, so trust rests only on the verified caller identity and `trustedForwarders`. See [Preserving trace content](./remote-agents#preserving-trace-content).
 
 W3C `traceparent`, `tracestate`, and the forwarded conversation ID are correlation metadata. They don't require `trustedForwarders`, link sessions, or grant session access.
 
@@ -320,7 +320,7 @@ The caller stays the same for the whole turn; only its claims can change:
 
 Use the caller on `auth.current` (or `auth.initiator`) to limit tools, choose [dynamic tools, skills, and other definitions](./dynamic-capabilities) per user, or enforce tenant boundaries.
 
-Route auth doesn't check who may use a session, and eve adds no per-session access list. If multiple users or tenants can reach the same route, implement the per-user, per-tenant, or per-session authorization your application requires.
+Route auth authenticates requests without enforcing per-session access permissions. If multiple users or tenants can reach the same route, implement the per-user, per-tenant, or per-session authorization your application requires.
 
 ## Tool replacement permission
 
@@ -347,7 +347,7 @@ Later messages, approvals, controls, and result reads use normal channel authent
 
 ## Agent info access
 
-`GET /eve/v1/info` returns authored instructions and server paths, so it serves only operators by default: `service` and `runtime` principals, plus callers `localDev()` admits when the channel's `auth` includes it. Other callers get `403` with code `info_forbidden`. An eve-channel authenticator can decide for its caller instead: `allowAgentInfo: true` grants access, and `false` denies it even to an operator. Like `allowToolStubs`, the flag applies only to the current request and is never persisted or forwarded.
+`GET /eve/v1/info` returns authored instructions and server paths, so it serves only operators by default: callers with `principalType: "service"` or `principalType: "runtime"`, plus callers authenticated by `localDev()` when it appears in the channel's `auth` configuration. Other callers get `403` with code `info_forbidden`. An eve-channel authenticator can decide for its caller instead: `allowAgentInfo: true` grants access, and `false` denies it even to an operator. Like `allowToolStubs`, the flag applies only to the current request and is never persisted or forwarded.
 
 ```ts
 import type { EveAuthFn } from "eve/channels/eve";
@@ -405,7 +405,7 @@ export default eveChannel({
 });
 ```
 
-Keep `principalId` stable for the same person, and include an `issuer` when the app accepts users from multiple identity providers. eve keys user credentials by issuer and principal ID, so two identity providers can't share a grant.
+Keep `principalId` stable for the same person, and include an `issuer` when the app accepts users from multiple identity providers. eve identifies user credentials by `issuer` and `principalId`, preventing users from different identity providers from sharing a grant.
 
 Built-in platform channels that identify a human sender attach a user identity for that sender by default. These include Slack, Discord, Teams, Telegram, Twilio, Linear, and GitHub. A Slack mention, DM, or button click can authorize a user-scoped connection for that Slack user without a browser-session auth function.
 

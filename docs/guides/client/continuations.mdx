@@ -1,6 +1,6 @@
 ---
 title: "Session State"
-description: "Persist and resume eve client sessions with durable session IDs and stream cursors."
+description: "Save and resume eve client sessions using session IDs and stream cursors."
 ---
 
 A `ClientSession` is a handle on one session ID, used for messages, controls,
@@ -24,7 +24,6 @@ The state holds the ID, the cursor, and an optional routing handle:
 
 ```ts
 interface ClientSessionState {
-  inbox?: string; // opaque; save and restore it unchanged
   sessionId: string;
   streamIndex: number;
   /** Opaque; persist it and pass it back unchanged. eve may extend it. */
@@ -32,8 +31,8 @@ interface ClientSessionState {
 }
 ```
 
-It is a stream cursor, not a transcript. Save events separately when your
-application renders chat history.
+The saved state tracks your stream position. Save events separately to render
+chat history.
 
 ## Resume a saved session
 
@@ -50,14 +49,14 @@ console.log((await response.result()).reply);
 ```
 
 Pass the whole saved state so its optional [`inbox`](/docs/guides/client#faster-sends-with-inbox) value
-reaches later sends. `attach()` performs no request. Every later operation targets exactly
-`saved.sessionId` and never creates a replacement.
+reaches later sends. `attach()` creates a local handle without making a request. Later operations target
+`saved.sessionId`; they cannot create a replacement session.
 
 `send()` returns the response to the message the server accepted. If the saved
 cursor is behind, the response skips earlier turns, even while another turn is
 active or queued. You don't need to read the rest of the stream first. `send()`
-throws when the server's reply has no delivery ID, so upgrade the server with
-the client.
+throws if the server's reply omits `deliveryId`, so upgrade the server when
+upgrading the client.
 
 If a reconnect limit you set ends the stream before the turn finishes or pauses,
 `result()` throws instead of returning a partial result.

@@ -73,10 +73,10 @@ Keep code that enforces your own rules. That includes archive storage and cursor
 
 ### Attribute results to the right message
 
-- **Bind each outcome to its delivery.** Use `delivery.result()` or that delivery's own turn, not the session's latest turn or every event after a polling cursor. Otherwise a queued or concurrent turn can claim another turn's output.
-- **Follow child sessions by link.** For a child session that several calls reuse, follow the `child.sent` links from a call, for example with `agentCallActivity(state, callId)` from `eve/client`. Don't count `delivery.consumed` on the child's stream, because answers to the child's questions are deliveries too. See [Child agents](/docs/guides/frontend/use-eve-agent#child-agents).
+- **Match each outcome to its request.** Use `delivery.result()` or the turn associated with that request, not the session's latest turn or every event after a polling cursor. Otherwise a queued or concurrent turn can claim another turn's output.
+- **Follow child sessions by link.** For a child session that several calls reuse, follow the `child.sent` links from a call, for example with `agentCallActivity(state, callId)` from `eve/client`. Don't count `delivery.consumed` on the child's stream, because answers to the child's questions also produce `delivery.consumed` events. See [Child agents](/docs/guides/frontend/use-eve-agent#child-agents).
 - **Identify runs by ID.** A steering message adds a run to the same turn. A model retry before any output reuses its run ID, but a retry after output starts a new run with a new ID. Use `turn.started` for once-per-turn work, and `runId` with `turnId` for a specific run.
-- **Treat acceptance as admission.** When an outcome is unconfirmed, read it again instead of resending after a timeout. Use `operationId` for create requests you retry; see [the eve channel](/docs/channels/eve).
+- **Check the outcome before resending.** When an outcome is unconfirmed, read it again instead of resending after a timeout. Use `operationId` for create requests you retry; see [the eve channel](/docs/channels/eve).
 - **Read payloads by their documented shape.** `turn.settled.data.reply` lists the reply's part IDs, not its text. Use `reply(ctx.view, turnId)` in hooks and channels, or `messages` in the frontend.
 
 ## Verify migrated history

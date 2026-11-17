@@ -53,7 +53,7 @@ To turn off the token-usage limit, including one inherited from a parent agent, 
 
 ## Replace `agentWithModel`
 
-`eve/tools/agent` exports no `agentWithModel`. Replace `export { agentWithModel as default } from "eve/tools/agent"` with `agent({ models })`, and list the models the built-in `agent` tool may run a root-copy task on. The model can choose only those keys.
+`agentWithModel` is not exported from `eve/tools/agent`. Replace `export { agentWithModel as default } from "eve/tools/agent"` with `agent({ models })`, and list the models available to tasks that use a copy of the root agent. The model can choose only those keys.
 
 ```ts title="agent/tools/agent.ts"
 import { agent } from "eve/tools/agent";
@@ -121,7 +121,7 @@ eve's authoring and configuration types don't expose AI SDK, zod, OpenTelemetry,
 
 ## Use `defineDynamic` for dynamic capabilities
 
-Define a dynamic model, tool, skill, subagent, or instruction as `defineDynamic(ctx => value)`, a function eve calls to resolve the value at runtime. Replace lifecycle event maps with that function.
+Define a dynamic model, tool, skill, subagent, or instruction as `defineDynamic(ctx => value)`, a function eve calls to resolve the value at runtime. Replace event-handler maps with that function.
 
 - Replace `defineDurableCallback` and `defineDurableSchema` wrappers with ordinary functions and schemas.
 - Cache results from external services with `ctx.memo(key, fn)`. The result must be JSON.
@@ -164,7 +164,7 @@ See [Control access with `authorize`](/docs/code-extension#control-access-with-a
 
 ## Remove the code extension's `worker` option
 
-The code extension adds no `code__worker` subagent, and `code()` rejects a `worker` option. Remove `worker` from your code extension mount. To hand a slice of work to a child agent, use the built-in `agent` tool. If an `agent/tools/agent.ts` override disables that tool so delegation goes to `code__worker`, delete the override.
+The code extension doesn't include `code__worker`, and `code()` rejects the `worker` option. Remove `worker` from your code extension mount. Use the built-in `agent` tool to delegate work to a child agent. If an `agent/tools/agent.ts` override disables that tool so delegation goes to `code__worker`, delete the override.
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
@@ -189,13 +189,13 @@ export default disableTool();
 
 ## Add a `grep` tool to code extension agents
 
-The code extension adds no `code__grep` tool, and the `eve/extensions/code/tools` entry point is removed. To give the agent a structured search tool, run `eve add tool/grep`. It writes `agent/tools/grep.ts`, which re-exports the default tool from `eve/tools/grep`. Import `grep` from `eve/tools/grep` wherever your code imported it from `eve/extensions/code/tools`.
+The code extension doesn't include `code__grep`, and the `eve/extensions/code/tools` entry point is removed. To give the agent a structured search tool, run `eve add tool/grep`. It writes `agent/tools/grep.ts`, which re-exports the default tool from `eve/tools/grep`. Import `grep` from `eve/tools/grep` wherever your code imported it from `eve/extensions/code/tools`.
 
 An `agent/tools/code__grep.ts` file that only disables the old tool fails `eve build` with `disables a slot with no lower-precedence source`. Delete that file.
 
 ## Workflow imports
 
-Workflow tools import the Workflow SDK through eve. Import durable primitives from `eve/workflow` and run and hook operations from `eve/workflow/api`. Bare `workflow` and `workflow/*` imports fail the build.
+Workflow tools import the Workflow SDK through eve. Import workflow helpers from `eve/workflow` and run and hook operations from `eve/workflow/api`. Bare `workflow` and `workflow/*` imports fail the build.
 
 ```ts
 import { createHook, sleep, FatalError } from "workflow"; // [!code --]
@@ -207,7 +207,7 @@ import { start, getRun, resumeHook } from "eve/workflow/api"; // [!code ++]
 `eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, and `getWorkflowMetadata`. `eve/workflow/api` exports `start`, `getRun`, and `resumeHook`. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
 
 - `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, then resume the hook with `resumeHook(token, payload)`, which resolves to `void`.
-- `start(workflow, args?)` takes a `"use workflow"` function, not a source string. It takes no options such as `deploymentId` or `world`, because eve runs the workflow on the agent's own queue and deployment.
+- `start(workflow, args?)` takes a `"use workflow"` function, not a source string. Options such as `deploymentId` and `world` aren't supported; the workflow uses the agent's queue and deployment.
 - `start` and `getRun` return a `WorkflowRun` with only `runId`, `status`, `returnValue`, and `cancel()`.
 - `agent` and `ask` aren't exported. Use `defineWorkflowTool()` from `eve/tools`, and call `ctx.agent(name).send(message)` or `ctx.ask(request)` in its executor.
 

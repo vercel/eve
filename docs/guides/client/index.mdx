@@ -136,13 +136,13 @@ Per-request headers override client-level headers with the same name. For exampl
 
 ## Faster sends with `inbox`
 
-`session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. A missing, stale, or rejected value only costs a slower lookup. Each server instance also remembers the sessions it looked up recently, so a send without a handle skips the lookup when it reaches the same instance.
+`session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. If the value is missing, stale, or rejected, the server performs the usual session lookup. Sends without a handle may also skip the lookup when they reach a server instance that recently handled the session.
 
 Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret, at least 32 characters, on every deployment that shares sessions. Omit it to disable handles. The server verifies a handle's signature before using it. After a secret rotation, the server ignores old handles and looks the session up as usual.
 
-eve validates handles with the bundled Workflow SDK's hook schema. Reusing a handle also requires a world adapter that declares `deploymentAffinity` and `resolvedHookResume`, and a backend that supports guarded, deduplicated hook resumes. Without that support, sends use the normal lookup path even with the secret set.
+eve validates each handle before using it. Reusing a handle also requires a world adapter that declares `deploymentAffinity` and `resolvedHookResume`, and a backend that supports guarded, deduplicated hook resumes. Without that support, sends use the normal lookup path even with the secret set.
 
-Handles contain no user metadata, short-lived runtime access, or trace data. The signature proves a handle is authentic but doesn't hide its contents.
+Handles exclude user metadata, temporary runtime credentials, and trace data. The signature proves a handle is authentic but doesn't hide its contents.
 
 A handle can't route a message to a session other than the one requested. When a handle is stale, the server looks up the current session again. When a write's outcome is uncertain, the request reports an error instead of delivering the message twice.
 
@@ -195,7 +195,7 @@ await session.end({ reason: "User requested a fresh session" });
 
 Each handle stores the session ID, stream cursor, and optional `inbox` value. Every method calls a `/eve/v1/session/:sessionId/...` route for that ID. Sending to an unknown or ended session fails instead of creating a new one. After `end()`, the handle keeps pointing at the retired ID; call `client.sessions.create()` to start a different session. A server must serve `/end` before a client can call `end()` on it.
 
-One client can run many independent sessions at once:
+One client can run multiple independent sessions concurrently:
 
 ```ts
 const { session: alice, delivery: aliceDelivery } = await client.sessions.create({

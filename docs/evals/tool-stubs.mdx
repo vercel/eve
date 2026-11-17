@@ -65,7 +65,7 @@ export default defineEval({
 
 Use your agent's actual tool names and response shapes. The client accepts the same option on `client.sessions.create({ stubs })` or `client.sessions.create({ message, stubs })`.
 
-Responses are a fixed sequence, not a simulated database: the second `list_tasks` call returns two tasks even if `complete_task` never ran. The assertions check only that the agent asked for the write. To test a real update, use the real tool.
+Responses follow the configured sequence; the second `list_tasks` call returns two tasks regardless of whether `complete_task` ran. The assertions check only that the agent asked for the write. To test a real update, use the real tool.
 
 ## Permit tool replacement
 
@@ -140,7 +140,7 @@ const stubs = [
 ];
 ```
 
-A call for milk receives success; other valid calls receive the fallback. Reversed, the unconditional rule wins every time. If no rule matches, eve runs the real tool.
+A call for milk receives success; other valid calls receive the fallback. If you reverse the rules, the unconditional rule matches every call. If no rule matches, eve runs the real tool.
 
 Every property listed in `match` must exist and satisfy its constraint. Extra top-level properties are allowed:
 
@@ -232,7 +232,7 @@ turn.calledTool("list_tasks", { status: "failed", count: 1 });
 
 Stubs replace the execution of existing ordinary, dynamic, and workflow tools. The real tool's input schema, approvals, and output processing still apply. A stub doesn't add a tool or show one to the model.
 
-An ordinary tool with stub rules can emit an extra `call.progress` event containing the final response, even when no rule matches. Assert final results on `call.settled`, which stays correct.
+An ordinary tool with stub rules can emit an extra `call.progress` event containing the final response, even when no rule matches. Use `call.settled` to assert the final result.
 
 ### Subagents
 
@@ -264,10 +264,10 @@ Tools the model provider runs, such as provider-hosted web search, can't be stub
 
 ## Troubleshooting
 
-| What you see                                                           | What to do                                                                                                          |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `403` with `Tool stubbing is not permitted for this caller.`           | Grant `allowToolStubs: true` to the eval runner's subject; see [Permit tool replacement](#permit-tool-replacement). |
-| `Tool stub "<id>" names an unknown or unsupported tool path "<tool>".` | Fix the tool name or subagent path. For a remote agent, stub the whole remote agent tool.                           |
-| `Persistent tool "<tool>" requires an unconditional stub.`             | Remove `match` from every rule for that tool, or set it to `{}`.                                                    |
-| Warning `Tool stubs did not match any calls: <ids>.`                   | Check the rule order, the `match` constraints, and the tool name. eve ran the real tool for calls no rule matched.  |
-| `Tool stub session exceeded 10,000 calls. Start a new eval session.`   | Split the eval into several sessions.                                                                               |
+| What you see                                                           | What to do                                                                                                                       |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `403` with `Tool stubbing is not permitted for this caller.`           | Grant `allowToolStubs: true` to the eval runner's subject; see [Permit tool replacement](#permit-tool-replacement).              |
+| `Tool stub "<id>" names an unknown or unsupported tool path "<tool>".` | Fix the tool name or subagent path. For a remote agent, stub the whole remote agent tool.                                        |
+| `Persistent tool "<tool>" requires an unconditional stub.`             | Remove `match` from every rule for that tool, or set it to `{}`.                                                                 |
+| Warning `Tool stubs did not match any calls: <ids>.`                   | Check the rule order, the `match` constraints, and the tool name. eve ran the real tool for calls that didn't match a stub rule. |
+| `Tool stub session exceeded 10,000 calls. Start a new eval session.`   | Split the eval into several sessions.                                                                                            |

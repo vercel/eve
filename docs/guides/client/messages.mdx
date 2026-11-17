@@ -29,7 +29,7 @@ Import `Delivery`, `DeliveryReadOptions`, and `DeliveryResult` from `eve/session
 
 | Field          | Meaning                                                                                                  |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
-| `reply`        | The request's reply text, from the parts `turn.settled.reply` lists.                                     |
+| `reply`        | Reply text assembled from the parts listed in `turn.settled.reply`.                                      |
 | `status`       | `awaiting-input`, `completed`, `failed`, or `cancelled` for this request.                                |
 | `sessionEnded` | Whether the session ended when this request finished.                                                    |
 | `deliveryId`   | The ID of the accepted message or control.                                                               |
@@ -165,8 +165,8 @@ const result = await response.result();
 Each read covers the request from when the server accepts it until it finishes, independently of other readers.
 Repeated and concurrent reads are supported, and each may open another HTTP stream.
 
-Pass `{ signal }` to `stream()` or `result()` to abort that read. An aborted or failed read doesn't
-consume the handle or cancel the work, so retry the same delivery instead of sending again. Use
+Pass `{ signal }` to `stream()` or `result()` to abort that read. After an aborted or failed read,
+read the same receipt again rather than resending the request; the server-side work continues. Use
 `session.cancel()` to cancel work. A signal passed to `send()` covers only submission, so pass it
 to the read too when a timeout must cover both.
 

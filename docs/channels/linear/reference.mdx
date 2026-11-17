@@ -1,14 +1,14 @@
 ---
 title: "Linear Reference"
-description: "Linear channel options, credentials, webhook verification, Agent Activity delivery, human-in-the-loop, custom hooks, proactive sessions, and API helpers."
+description: "Linear channel options, credentials, webhook verification, posting Agent Activities, human-in-the-loop, custom hooks, proactive sessions, and API helpers."
 type: reference
 ---
 
-This page documents every part of `linearChannel` from `eve/channels/linear`. For setup and common tasks, start with [Linear](/docs/channels/linear).
+Import `linearChannel` from `eve/channels/linear`. For setup and common tasks, see [Linear](/docs/channels/linear).
 
 The Linear channel lets people delegate issues to your agent, or mention it, in Linear. It lives in `agent/channels/linear.ts` and uses Linear Agent Sessions. The agent shows its progress and answers as native Agent Activities: `thought`, `action`, `elicitation`, `response`, and `error`.
 
-[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the Linear app, its token, and webhook checks, so you hold no API key or webhook secret. See [Channels](/docs/channels) for what all channels share.
+[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the Linear app, its token, and webhook checks, so you don't need to store an API key or webhook secret. See [Channels](/docs/channels) for what all channels share.
 
 ## Guided Connect setup
 

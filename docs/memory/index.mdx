@@ -1,6 +1,6 @@
 ---
 title: "Memory"
-description: "Give an agent context that outlives a session: eve owns the memory slots, scope, and lifecycle; a provider owns the storage and retrieval."
+description: "Carry facts and preferences across sessions with scoped memory slots and pluggable storage providers."
 url: /memory
 ---
 
@@ -161,10 +161,7 @@ how they capture it.
 
 ### File memory
 
-`fileMemory()` from `eve/memory/file` keeps one bounded document per scope. The
-model decides what to save with the `save_memory` and `remove_memory` tools. It
-needs no external service in `eve dev`. When you deploy to Vercel with Blob
-configured, it stores to Vercel Blob.
+`fileMemory()` from `eve/memory/file` keeps one bounded document per scope, which the model edits with the `save_memory` and `remove_memory` tools. It uses in-memory storage during `eve dev` and Vercel Blob on Vercel when Blob is configured.
 
 Read [File memory](/docs/memory/file) for size limits, storage backends, and options.
 
@@ -367,7 +364,7 @@ function:
 
 ```ts
 export default defineMemory({
-  namespace: "acme-support-v1", // used as is; eve adds no suffix
+  namespace: "acme-support-v1", // used verbatim without a suffix
   provider: fileMemory(),
   scope: byPrincipal,
 });
@@ -397,10 +394,10 @@ future sessions. Never save passwords, access tokens, payment data, private
 keys, or one-time codes. Tell the user when you save or delete a memory.
 ```
 
-Provider tools are ordinary eve tools, so they follow approvals and
-`toModelOutput`. To replace a slot's tools, create `agent/tools/<slot>.ts`.
-Export `disableTool()` there to remove them. eve's built-in tools don't replace
-them: a slot named `web_search` offers its tools beside the built-in `web_search`.
+Provider tools are ordinary eve tools and support `approval` and
+`toModelOutput`. To replace a slot's tools, create `agent/tools/<slot>.ts`, or
+export `disableTool()` from that file to disable them. A slot named `web_search`
+exposes `web_search__<tool>` alongside the built-in `web_search` tool.
 
 ## Troubleshooting
 
@@ -418,8 +415,8 @@ them: a slot named `web_search` offers its tools beside the built-in `web_search
 session, such as a plan or a counter, and ends with the session. Use memory for data that later sessions need.
 
 Calling `clear()` on a session removes its recalled messages and resets its
-scopes. The provider's store stays as it is, and a later turn recalls from it
-again.
+scopes without modifying the provider's store. The next turn recalls from the
+provider again.
 
 ## What to read next
 

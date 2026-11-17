@@ -212,7 +212,7 @@ export default defineTool({
 });
 ```
 
-The call's `capability` carries `hidden: true` and no label. Channels show no status for it, the same way they treat `eve__task_wait` and `eve__task_cancel`, and the call doesn't end a quiet turn's silence, such as a Slack message delivered with `status: "deferred"`. Use `showsActivity(call)` from `eve/events` to apply the same rule in your own renderer. It accepts a call, its `capability`, or a message part from `eve/react`, `eve/vue`, or `eve/svelte`, which also carries `hidden: true`. The call stays in the session's events and history. If the tool needs [approval](#gate-a-tool-on-human-approval), people are still asked, and the default prompt names the tool in readable form, such as `Approve React?`.
+The call's `capability` carries `hidden: true` and no label. Channels hide its status, as they do for `eve__task_wait` and `eve__task_cancel`, and the call preserves silence on deferred turns, such as Slack turns with `status: "deferred"`. Use `showsActivity(call)` from `eve/events` to apply the same rule in your own renderer. It accepts a call, its `capability`, or a message part from `eve/react`, `eve/vue`, or `eve/svelte`, which also carries `hidden: true`. The call stays in the session's events and history. If the tool needs [approval](#gate-a-tool-on-human-approval), people are still asked, and the default prompt names the tool in readable form, such as `Approve React?`.
 
 The provided `bash`, `edit_file`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
 
@@ -262,7 +262,7 @@ Progress snapshots never enter model history. Only the final output does.
 
 ### End the turn after a tool call
 
-Set `endsTurn: true` when a successful call is the whole answer, such as reacting to a message. eve ends the turn without calling the model again, so channels post no reply:
+Set `endsTurn: true` when a successful call is the whole answer, such as reacting to a message. eve ends the turn without another model call or a channel reply:
 
 ```ts title="agent/tools/react.ts"
 export default defineTool({
@@ -301,7 +301,7 @@ export default defineTool({
 
 If the function throws or rejects, eve logs a warning and treats the result as `false`. With an `outputSchema`, `output` takes that schema's type wherever `endsTurn` appears. eve doesn't add the sentence for a function, so say in `description` when the call ends the turn.
 
-The turn ends when any tool call in the step can end the turn, succeeds, and passes any `endsTurn` function. Other calls in the same step still run, including ones that wait for an approval, a sign-in, or a workflow, and the turn ends once they all settle, whatever their outcome; the model doesn't see their results. eve runs every successful call's `endsTurn` function. A provider-executed tool whose result would only arrive in the model's next response is closed without that result. When no call ends the turn, the model gets the results and continues. Channels don't post text the model wrote before the call as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
+A successful call ends the turn if its `endsTurn` is `true` or its `endsTurn` function returns `true`. Other calls in the step still run, including calls waiting for approval, sign-in, or a workflow. The turn ends after all calls finish, regardless of outcome, and the model doesn't receive their results. eve runs every successful call's `endsTurn` function. A provider-executed tool whose result would only arrive in the model's next response is closed without that result. When no call ends the turn, the model gets the results and continues. Channels don't post text the model wrote before the call as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
 
 eve ignores `endsTurn` in delegated sessions, which must reply to their caller, and on turns that request structured output. There, the model doesn't see the sentence, and eve doesn't call the function.
 
@@ -345,7 +345,7 @@ The option works with `defineTool` and `defineWorkflowTool`. Copies of the root 
 
 ### Start channel sessions: `ctx.to`
 
-`ctx.to(channel, target).send(message, options)` starts a session on one of the agent's channels, or continues the session at that target. It's the same call, with the same options, as a route handler's [cross-channel hand-off](/docs/channels/custom#cross-channel-hand-off). It returns the delivery, whose `sessionId` names the session. Use it when work should continue where people can follow it, such as a new Slack thread:
+`ctx.to(channel, target).send(message, options)` starts a session on one of the agent's channels, or continues the session at that target. It's the same call, with the same options, as a route handler's [cross-channel hand-off](/docs/channels/custom#cross-channel-hand-off). The returned object's `sessionId` identifies the session. Use it when work should continue where people can follow it, such as a new Slack thread:
 
 ```ts title="agent/tools/escalate.ts"
 import { defineTool } from "eve/tools";
@@ -388,7 +388,7 @@ A tool call with an `execute` function finishes before the model continues. The 
 | `defineTool`         | No; the executor runs inside the step that started it.   | Executor output after it finishes. |
 | `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes. |
 
-A workflow tool that defines `task(input, ctx)` instead runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task). The call returns a receipt at once, and the output arrives later in a `task.result` message. One that defines `serve(receive, ctx)` runs a [resumable task](/docs/tools/workflows#resumable-tasks-serve), which takes more calls by its `taskId`.
+A workflow tool that defines `task(input, ctx)` instead runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task). The call returns a receipt immediately, and the output arrives later in a `task.result` message. One that defines `serve(receive, ctx)` runs a [resumable task](/docs/tools/workflows#resumable-tasks-serve), which accepts additional calls addressed by its `taskId`.
 
 Subagent tools, whether built-in, declared, or remote, run as resumable tasks, so the child's reply also arrives in `task.result`. In an authored workflow, awaiting a [`ctx.agent` session's `response.result()`](/docs/tools/workflows#delegate-work-ctxagent) waits for the child's turn to end instead.
 

@@ -129,7 +129,7 @@ See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for 
 
 ## The isolation boundary
 
-A declared subagent inherits nothing from the root agent. It has only what you put under `agent/subagents/<name>/`, and anything it doesn't define falls back to eve's default, never to the root's version.
+A declared subagent uses only the files under `agent/subagents/<name>/`. Any setting you omit falls back to eve's default rather than the root agent's configuration.
 
 | What         | Copy from the built-in `agent` tool | Declared subagent                      |
 | ------------ | ----------------------------------- | -------------------------------------- |
@@ -146,7 +146,7 @@ A declared subagent inherits nothing from the root agent. It has only what you p
 
 To share a procedure between subagents, package the skill in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount it in each. Share typed helpers through `lib/`.
 
-The parent passes only the `message` to a child. Don't include sensitive data unless the child's tools, connections, sandbox, and telemetry are fit for it. Delegation isn't an approval boundary: protect sensitive tools with `approval`, connection approval, or route and session authorization wherever they can be called.
+The parent sends only `message` to the child. Do not include sensitive data unless the child's tools, connections, sandbox, and telemetry are configured to handle it. Protect sensitive child tools with `approval`, connection approval, or route and session authorization.
 
 ## Agent messaging
 
@@ -156,7 +156,7 @@ After it answers, a child waits with its conversation intact. To continue it in 
 - **Cancel:** call `eve__task_cancel` with the `taskId`, or cancel the turn that called the child. Start a new task to delegate again.
 - **Find a child:** a `[Tasks]` note in the conversation lists working and idle tasks by `taskId` and tool.
 
-Each message runs with the sender's auth. eve shuts down each child when the parent session ends or the task is cancelled. Shutdown is best effort: an unreachable child can keep running. For [remote agents](./guides/remote-agents), continuing and shutting down a child need both deployments to run an eve version that supports them.
+Each message runs with the sender's auth. eve shuts down each child on a best-effort basis when the parent session ends or the task is cancelled; an unreachable remote child may continue running. For [remote agents](./guides/remote-agents), continuing and shutting down a child require a compatible eve version on both deployments.
 
 See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels tasks.
 
@@ -180,15 +180,15 @@ Each child has its own session and stream. The parent stream records:
 
 Later calls with the same `taskId` reach the same child without another `child.opened`, so match calls to a child by `taskId`. To follow a child's progress from a client, pass its `child.opened` event to [`session.agent()`](./guides/client/streaming#follow-a-subagent) and call `stream()`. For a remote child, the stream is proxied and authenticated by the parent. Channels that show activity list a child's tool calls under its progress item, on a best-effort basis.
 
-A child's model calls retry temporary provider failures up to three times. A retry repeats only the failed model call; earlier tool results and sandbox work stay. With [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching), a retry can also repeat the tool calls in the current batch. When retries run out, the call fails once.
+A child's model calls retry temporary provider failures up to three times. A retry repeats only the failed model call and keeps earlier tool results and sandbox changes, except when [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching) repeats the tool calls in the current batch. If all retries fail, the subagent call fails.
 
 ## The built-in `agent` tool
 
 The root session gets an `agent` tool by default. It starts a copy of the root agent, or continues one with `taskId`, using the same `{ message, taskId? }` input as a declared subagent.
 
-A copy uses the root's instructions, connections, auth, tools (except `agent`), and sandbox, so the root sees its file writes immediately. It starts with an empty conversation and state. Several copies can run at once, so give parallel copies separate files to write.
+A copy shares the root agent's instructions, connections, auth, tools (except `agent`), and sandbox, so the root sees its file writes immediately. Each copy starts with an empty conversation and state. Because multiple copies can run in parallel on the same sandbox, have parallel copies write to separate files.
 
-Only the root session has `agent`: copies and declared subagents can't call it. To run a copy on another model, call it from a workflow with [`ctx.agent("agent", { model })`](./tools/workflows#delegate-work-ctxagent), or export [`agent({ models })`](./concepts/built-in-tools#agent) from `agent/tools/agent.ts`, which lets the model choose one of the models you list.
+Only the root session can call `agent`; copies and declared subagents cannot. To run a copy on another model, call it from a workflow with [`ctx.agent("agent", { model })`](./tools/workflows#delegate-work-ctxagent), or export [`agent({ models })`](./concepts/built-in-tools#agent) from `agent/tools/agent.ts`, which lets the model choose one of the models you list.
 
 To turn the tool off, set `tool: false` on the root agent:
 

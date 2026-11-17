@@ -69,7 +69,7 @@ After a cold start, eve runs the function again. The memo returns the saved tabl
 | `ctx.session.id`       | Once per session, until a deployment change |
 | A caller or tenant ID  | When that key changes                       |
 
-The key sets a lifetime, not a dependency list. A change in context that the callback reads doesn't clear a saved result.
+The key sets a saved result's lifetime. A change in context values that the callback reads doesn't clear it.
 
 ### Memo rules
 
@@ -78,8 +78,8 @@ The key sets a lifetime, not a dependency list. A change in context that the cal
 - Identity includes the session and mounted definition. Separate files do not share memo results.
 - Give multiple memos distinct keys, usually tuples such as `["tables", tenantId]` and `["flags", ctx.turn?.id ?? null]`. Reusing a key in one run of the function throws.
 - eve keeps only the keys that the latest successful run used. A skipped branch loses its saved results; returning to it runs the callback again.
-- A failing memo keeps no result. Successful memos survive a later error in the definition if they fit alongside its earlier memo results. If they don't fit within 4 MB, eve keeps the earlier results, and the new memos run again next time.
-- Deployment changes discard memos. Memos are a cache, not a record of side effects.
+- Failed memos are not cached. Successful memos survive a later error in the definition if they fit within the 4 MB limit alongside earlier memo results; otherwise, eve keeps the earlier results and reruns the new memos next time.
+- Deployment changes discard saved memos.
 - Memos can run concurrently with `Promise.all`, but cannot nest. Await every memo before returning.
 - Memo results are saved privately with the session and never appear on the stream.
 - Key a dynamic tool's memos on the turn or the session. If a key changes within a turn, such as a key on a call ID, eve can refuse an approved call to the tool after a restart, and the model has to request the call again.
@@ -109,7 +109,7 @@ export default defineDynamic(async (ctx) => {
 });
 ```
 
-Reading `ctx.view` doesn't touch the sandbox, so the function starts no sandbox before the first checkout, and reads the file once per checkout after that. A run after a cold start reuses the saved result instead of reading the sandbox again. The memo doesn't notice later edits to the file, such as a `bash` or `write_file` call; add those calls to the key when edits matter.
+Reading `ctx.view` doesn't access the sandbox, so the sandbox isn't started before the first checkout, and the file is read once per checkout after that. After a cold start, eve reuses the saved result instead of reading the sandbox again. Later edits from `bash` or `write_file` calls don't invalidate the memo unless you include those calls in the key.
 
 Return content read from the sandbox as a user instruction. It comes from the workspace rather than from the agent's own instructions, and a user instruction joins the conversation only when its content changes, which keeps the prompt cached.
 
@@ -156,7 +156,7 @@ The child's tools, instructions, skills, and nested subagents still build from t
 
 A single-file remote subagent returns `defineRemoteAgent(...)` or `null`. Compute the URL string in the function. Credentials can use memo results, and later requests to the same child rebuild them from the session as it was when the child opened. See [Dynamic remote agents](/docs/guides/remote-agents#dynamic-remote-agents) for the rebuild rules.
 
-Hiding a subagent doesn't authorize anything: sensitive child tools still need authorization and approval checks.
+Sensitive child tools still need their own authorization and approval checks, even when the subagent is conditionally hidden.
 
 ## Dynamic connections
 
@@ -219,15 +219,15 @@ export default defineDynamic((ctx) =>
 
 The entry point can also reference a top-level `async function` that starts with `"use workflow"`, in the same module or an imported one. eve compiles an inline body as a top-level function named after the `const` and the entry point, such as `escalate$execute`, so renaming the `const` changes the workflow's ID, as renaming a static tool's entry point does.
 
-A workflow can't read the variables around it, so a `defineWorkflowTool()` created inside the dynamic function, and an entry point without `"use workflow"`, fail the build. An imported entry point is checked when the tool is offered: if it isn't a compiled workflow, the turn fails with an error that names the tool. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn; while its task runs, the model keeps `eve__task_wait` and `eve__task_cancel`. A task's result that arrives after the function stops returning the tool skips the tool's `toModelOutput`, so the model reads the raw output. eve's built-in workflow tools, such as `agent({ models })`, only work as static tools, so returning one fails the turn.
+A workflow can't read the variables around it, so a `defineWorkflowTool()` created inside the dynamic function, and an entry point without `"use workflow"`, fail the build. eve checks an imported entry point when offering the tool and fails the turn with an error naming the tool if it isn't a compiled workflow. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn; while its task runs, the model keeps `eve__task_wait` and `eve__task_cancel`. A task's result that arrives after the function stops returning the tool skips the tool's `toModelOutput`, so the model reads the raw output. eve's built-in workflow tools, such as `agent({ models })`, only work as static tools, so returning one fails the turn.
 
 ### Author replayable callbacks
 
-Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()` and `Date.now()` in declarations unless memoized; use `ctx.now` for commit time.
+Build callbacks and schemas with ordinary code. Save external reads in memos when a new process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid unmemoized `Math.random()` and `Date.now()` in declarations; use `ctx.now` for the latest recorded event time.
 
 ### Create dynamic tools in a package
 
-Packages can return ordinary `defineTool` values, including callbacks made by factories. Prefer an [extension](/docs/extensions) when distributing a namespaced collection of capabilities.
+Packages can return ordinary `defineTool` values, including callbacks created by factories. Prefer an [extension](/docs/extensions) when distributing a namespaced collection of tools, skills, and connections.
 
 ### Identity and redeploys
 
@@ -243,7 +243,7 @@ Names use ASCII letters, digits, underscores, and dashes, start with a letter, a
 
 ### Conflicts
 
-A dynamic connection or skill overrides a static one of the same kind and name. Two dynamic connection definitions can't emit the same name. A tool name belongs to one tool: when a dynamic tool returns the name of a static tool or of another dynamic tool, the first keeps it and eve logs an error for the other. Static tools come first. The same rule applies to duplicate dynamic skill names. To replace a built-in or extension tool, add `agent/tools/<name>.ts` instead. Dynamic tools can't take the names of static workflow tools or subagents. Other invalid results and name conflicts fail the turn.
+A dynamic connection or skill overrides a static one of the same kind and name. Two dynamic connection definitions can't emit the same name. Static tools take precedence over dynamic tools of the same name; when a dynamic tool collides with a static tool or an earlier dynamic tool, the first keeps the name and eve logs an error for the duplicate. The same rule applies to duplicate dynamic skill names. To replace a built-in or extension tool, add `agent/tools/<name>.ts` instead. Dynamic tools can't take the names of static workflow tools or subagents. Other invalid results and name conflicts fail the turn.
 
 <span id="events"></span>
 
@@ -255,7 +255,7 @@ Because eve runs dynamic functions before every model call, they see a steering 
 
 Hooks finish first, then model selection, then instructions, connections, subagents, tools, and skills. Don't depend on the order in which files run; each definition computes its own value.
 
-Because hooks finish first, [state](/docs/concepts/state) a `turn.started` hook writes is what the turn's dynamic functions read, from its first model call on. See [Hooks](/docs/guides/hooks#execution-order).
+Because hooks run first, dynamic functions can read [state](/docs/concepts/state) written by a `turn.started` hook starting on the turn's first model call. See [Hooks](/docs/guides/hooks#execution-order).
 
 A tool with `deferred: true` stays out of the model's tool list. It is found with `eve__search` and called with `eve__tool`, like a [static deferred tool](/docs/tools#keep-a-tool-out-of-the-tool-list).
 
@@ -298,7 +298,7 @@ export default defineDynamic(async (ctx) => {
 });
 ```
 
-Before a turn's first model call, new user content joins just before the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier content later adds it again, but it doesn't remove earlier history. Unchanged content isn't added again after a deployment, or after a compaction that keeps it in the history; a clear or compaction that removes it adds it again.
+Before a turn's first model call, new user content is placed immediately before the turn's input; mid-turn changes append at the current position without removing earlier history. Returning `null` resets change tracking, so returning the same content later appends it again. Unchanged content isn't added again after a deployment, or after a compaction that keeps it in the history; a clear or compaction that removes it adds it again.
 
 ## Errors and recovery
 
@@ -311,5 +311,5 @@ With `EVE_LOG_LEVEL=debug`, eve logs each memo run with its file, key digest, re
 - [Hooks](/docs/guides/hooks) for effects and cancellation
 - [Subagents](/docs/subagents) and [Remote agents](/docs/guides/remote-agents)
 - [Connections](/docs/connections), [Tools](/docs/tools), and [Skills](/docs/skills)
-- [State](/docs/concepts/state) for durable application state
+- [State](/docs/concepts/state) for session-scoped application state
 - [Memory](/docs/memory) for cross-session recall and provider tools

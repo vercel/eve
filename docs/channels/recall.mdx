@@ -8,7 +8,7 @@ type: integration
   The Recall.ai channel is experimental. Its API and defaults may change in a patch release.
 </Callout>
 
-The Recall.ai channel puts your agent in a video meeting as a bot. [Recall.ai](https://www.recall.ai) runs the bot in Zoom, Google Meet, or Microsoft Teams. It sends the meeting's live transcript and chat to your agent as webhooks, and the agent replies in the meeting chat. Each bot's meeting is one eve session, and each participant is their own principal. See [Channels](/docs/channels) for the contract this builds on.
+The Recall.ai channel puts your agent in a video meeting as a bot. [Recall.ai](https://www.recall.ai) runs the bot in Zoom, Google Meet, or Microsoft Teams. It sends the meeting's live transcript and chat to your agent as webhooks, and the agent replies in the meeting chat. Each bot's meeting uses one eve session, with a separate user identity for each participant. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Add the channel
 
@@ -41,7 +41,7 @@ Recall sends a bot's real-time speech and chat events to the webhook URL set whe
 
 ### From eve
 
-Hand a request to the channel with its `{ meetingUrl, metadata? }` target. The channel creates the bot and starts the session with your message. This example runs from a schedule; a route handler uses the same target through `ctx.to(...)`.
+Send a request to the channel with a `{ meetingUrl, metadata? }` target. The channel creates the bot and starts the session with your message. This example runs from a schedule; a route handler uses the same target through `ctx.to(...)`.
 
 ```ts title="agent/schedules/standup.ts"
 import { defineSchedule } from "eve/schedules";
@@ -92,7 +92,7 @@ Two hooks decide what reaches the agent:
 - `onMeetingEvent(ctx, event)` runs in the webhook route and decides which events enter the session and as whom. Return `{ auth }` to deliver the event, optionally with `message` to replace the line the model sees, or `null` to drop it. The default delivers speech, chat, joins, and leaves, each as its participant, and drops bot status changes.
 - `shouldRespond({ event, line, transcript, botName })` runs in the session and decides whether a delivered line starts a turn. The default answers every chat message and any speech that names the bot. A throw falls back to the default.
 
-A line that `shouldRespond` declines costs no model call. The channel keeps the last 60 declined lines and gives them to the next turn as recent transcript, so the agent knows what "can you file that?" refers to. A declined line also doesn't cancel a pending approval or question.
+A line rejected by `shouldRespond` doesn't trigger an agent model call. The channel keeps the last 60 declined lines and gives them to the next turn as recent transcript, so the agent knows what "can you file that?" refers to. A declined line also doesn't cancel a pending approval or question.
 
 The model sees speech as `Alice: ...` and chat as `Alice (in chat):` followed by the message. Each turn also gets the bot id and the speaker's participant id, name, and host flag.
 
@@ -123,9 +123,9 @@ export default recallChannel({
 
 ### Identity
 
-Each participant is the principal `recall:<botId>:<participantId>` with `principalType: "user"`. Participant ids are scoped to one bot, so nothing carries over between meetings. Display names, host flags, and emails come from the meeting platform, and anyone can set their display name, so don't use them for authorization.
+Each participant has the user identity `recall:<botId>:<participantId>` with `principalType: "user"`. Participant IDs apply only to that bot, so identities don't carry over between meetings. Display names, host flags, and emails come from the meeting platform, and anyone can set their display name, so don't use them for authorization.
 
-To treat the whole meeting as one principal instead, return `recallMeetingAuth(event)` from `onMeetingEvent`. With one principal, the `queue` turn policy can batch a burst of lines from different speakers into one turn.
+Return `recallMeetingAuth(event)` from `onMeetingEvent` to give all participants one shared identity. The `queue` turn policy can then combine lines from different speakers into one turn.
 
 ```ts
 import { recallChannel, recallMeetingAuth } from "@eve/recall";
@@ -189,5 +189,5 @@ For example, you may be required to tell meeting participants that the meeting i
 ## What to read next
 
 - [Channels overview](/docs/channels): the channel contract and every built-in channel
-- [Auth & route protection](/docs/guides/auth-and-route-protection): principals and authorization
-- [Custom channels](/docs/channels/custom#cross-channel-hand-off): hand a request from another channel into a meeting
+- [Auth & route protection](/docs/guides/auth-and-route-protection): user identities and authorization
+- [Custom channels](/docs/channels/custom#cross-channel-hand-off): send a request from another channel to a meeting

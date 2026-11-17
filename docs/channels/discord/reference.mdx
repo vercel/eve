@@ -1,14 +1,14 @@
 ---
 title: "Discord Reference"
-description: "Discord channel options, setup, the Gateway relay, session grouping, command hooks, delivery, human-in-the-loop, sign-ins, and proactive sessions."
+description: "Discord channel options, setup, the Gateway relay, session grouping, command hooks, replies, approvals and questions, sign-ins, and proactive sessions."
 type: reference
 ---
 
-This page documents every part of `discordChannel` from `eve/channels/discord`. For setup and common tasks, start with [Discord](/docs/channels/discord).
+Import `discordChannel` from `eve/channels/discord`. For setup and common tasks, see [Discord](/docs/channels/discord).
 
 The Discord channel lets people reach your agent from Discord slash commands, buttons, selects, and modals. It lives in `agent/channels/discord.ts`. To also answer DMs, mentions, and thread replies, add the experimental [Gateway relay](#reply-to-dms-and-mentions-experimental).
 
-Discord requires an answer within three seconds, so the channel acknowledges each command at once and runs the agent in the background. [Vercel Connect](/docs/guides/auth-and-route-protection) holds the bot token and checks Discord's signature before it forwards a request to eve.
+Discord requires an answer within three seconds, so the channel acknowledges each command immediately and runs the agent in the background. [Vercel Connect](/docs/guides/auth-and-route-protection) holds the bot token and checks Discord's signature before it forwards a request to eve.
 
 ## Set up Discord
 
@@ -32,7 +32,7 @@ Setup asks whether people reach the agent through **DMs, mentions, and threads**
 
 The slash command defaults to `/ask` with the description **Ask the eve agent**, and you can edit both during setup. Discord global commands can take up to an hour to appear. A bot that answers messages can also take slash commands, as in [Configure Discord manually](#configure-discord-manually).
 
-In a non-interactive run, answer `discord-messages` with `"gateway"` for DMs, mentions, and threads, or `"commands"` for a slash command. `--yes` picks the slash command, because the relay is experimental and runs as an always-on Vercel Daemon. If your project configures Vercel in `vercel.ts`, setup leaves it alone and prints the `daemons` entry to add.
+In a non-interactive run, answer `discord-messages` with `"gateway"` for DMs, mentions, and threads, or `"commands"` for a slash command. `--yes` picks the slash command, because the relay is experimental and runs as an always-on Vercel Daemon. If your project configures Vercel in `vercel.ts`, setup preserves that file and prints the `daemons` entry to add.
 
 The generated channel looks like this:
 
@@ -108,7 +108,7 @@ A press, select, or modal submission answers as the Discord user who made it, wi
 
 `onAnswers(ctx, interaction)` decides who an answer comes from. Return `{ auth }` to accept the answer, or `null` (or throw) to drop it and keep the request open. `ctx.defaultAuth` is the presser's `defaultDiscordAuth`. It identifies the presser but doesn't authorize them.
 
-If you customize `onCommand`, eve drops every press and submission, with a warning, until you also set `onAnswers`. Otherwise requester-only approvals would refuse the requester, and people your `onCommand` turns away could answer. Give both hooks the same mapping and checks:
+If you customize `onCommand`, eve drops every press and submission, with a warning, until you also set `onAnswers`. Use the same identity mapping and access checks for both commands and answers:
 
 ```ts
 import { discordChannel } from "eve/channels/discord";
@@ -196,16 +196,7 @@ export default discordChannel({
 });
 ```
 
-Each forwarded message names its author, so whoever passes `gateway.auth` can send messages as any Discord user. The default accepts only `localDev()` and Vercel OIDC tokens from the same project and environment, so a preview deployment can't call production. Keep a custom `gateway.auth` as narrow.
-
-| `gateway` option          | Default                                              | What it does                                                                                                    |
-| ------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `auth`                    | `localDev()` and same-environment Vercel OIDC tokens | Accepts a relay that [runs outside Vercel](#run-the-relay-outside-vercel).                                      |
-| `route`                   | `/eve/v1/discord/gateway`                            | Path of the relay route.                                                                                        |
-| `onMessage(ctx, message)` | Answers [addressed messages](#who-the-bot-answers)   | Returns `{ auth }` to run the agent, or `null` to ignore the message.                                           |
-| `startThread`             | `true`                                               | Answers a mention in a text channel in a [new thread](#reply-in-threads). Set `false` to answer in the channel. |
-
-Omit `credentials` to read `DISCORD_APPLICATION_ID` and `DISCORD_BOT_TOKEN` in the channel and `DISCORD_BOT_TOKEN` in the relay.
+Each forwarded message names its author, so whoever passes `gateway.auth` can send messages as any Discord user. The default accepts only `localDev()` and Vercel OIDC tokens from the same project and environment, so a preview deployment can't call production. Keep a custom `gateway.auth` as narrow. Omit `credentials` to read `DISCORD_APPLICATION_ID` and `DISCORD_BOT_TOKEN` in the channel and `DISCORD_BOT_TOKEN` in the relay.
 
 ### Run the relay as a Vercel Daemon
 

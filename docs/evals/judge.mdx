@@ -17,7 +17,7 @@ export default defineEval({
 });
 ```
 
-The judge needs no configuration, only credentials for the judge model; see [Configuring the judge model](#configuring-the-judge-model).
+Provide credentials for the judge model; the default judge works without additional configuration. See [Configuring the judge model](#configuring-the-judge-model).
 
 ## The graders
 
@@ -131,7 +131,7 @@ Model settings resolve in this order:
 3. Project default: `defineEvalConfig({ judge: { model, modelOptions } })`.
 4. The default model used by `decide`, currently `typesafe-ai/jev`.
 
-A per-eval `judge` replaces the project's judge configuration, and per-call fields override both. Evals that never call `t.judge` make no judge requests.
+A per-eval `judge` replaces the project's judge configuration, and per-call fields override both. Only evals that call `t.judge` send judge requests.
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";

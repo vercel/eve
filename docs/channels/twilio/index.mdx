@@ -4,7 +4,7 @@ description: "Reach your agent over SMS and speech-transcribed phone calls with 
 type: integration
 ---
 
-A Twilio agent lives on a phone number. People can text it, or call it and talk: eve transcribes the caller's speech, and the transcript joins the same session as their texts. Replies go out as SMS, and approvals arrive as numbered options. [Set up](#set-up) connects a Twilio number.
+A Twilio agent lives on a phone number. People can text or call it; eve transcribes calls and adds the transcript to the same session as the caller's texts. Replies go out as SMS, and approvals arrive as numbered options. [Set up](#set-up) connects a Twilio number.
 
 For information on all configuration and customization options, see the [Twilio reference](/docs/channels/twilio/reference).
 
@@ -51,7 +51,7 @@ export default twilioChannel({
 });
 ```
 
-## Human-in-the-loop interactions
+## Approvals and questions
 
 By default, eve sends each approval or question as a text with numbered options, since SMS has no buttons. Replying `1` or `approve` runs an approval-gated tool, and `2` or `deny` stops it. Callers get these prompts by SMS too.
 
@@ -86,4 +86,4 @@ As the deployer, you're responsible for complying with applicable laws. You may 
 
 ## Reference
 
-The [Twilio reference](/docs/channels/twilio/reference) covers options, credentials, routes, inbound hooks, proxies, delivery, human-in-the-loop, proactive sessions, and media downloads.
+The [Twilio reference](/docs/channels/twilio/reference) covers options, credentials, routes, inbound hooks, proxies, replies, human-in-the-loop, proactive sessions, and media downloads.

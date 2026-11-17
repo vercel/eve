@@ -101,11 +101,11 @@ eve add tool/no_reply
 ```
 
 - Without `onAppMention` and `onDirectMessage`, mentions and DMs reach `onMessage` too, so the hook answers them first. It checks `channel_type` because `ctx.isDMOrPrivateChannel()` is also `true` in private channels.
-- `ctx.isSubscribed()` is `true` once the thread has a session, so the agent follows only threads it was brought into. Top-level messages still need a mention.
+- `ctx.isSubscribed()` is `true` once the thread has a session, so the agent follows only threads with an existing session. Top-level messages still need a mention.
 - `ctx.edit` is set for an edit, which only reaches a thread that has a session. The hook follows it like a reply, including an edit to the thread's first message.
-- `status: "deferred"` shows no thread status until the agent calls a tool, so a reply the agent ends with `no_reply` leaves no trace in the thread.
+- `status: "deferred"` delays the thread status until a tool call. A turn ending with `no_reply` doesn't post a reply or status.
 - `guidance` tells the model how to treat this one message. See [Status and guidance](/docs/channels/slack/reference#status-and-guidance).
-- `defaultSlackAuth` gives each Slack user their own identity, so by default only the person whose message led to an approval can answer it. With `{ auth: null }`, messages carry no identity, and anyone in the thread can answer it.
+- `defaultSlackAuth` gives each Slack user their own identity, so by default only the person whose message led to an approval can answer it. With `{ auth: null }`, messages are anonymous, so anyone in the thread can answer the approval.
 - A reply from the person a pending question or approval is waiting on can still answer it, even when the reply is meant for someone else, because eve matches answers by identity before the model sees the message.
 
 Slack sends un-mentioned channel messages only when the app subscribes to them:
@@ -123,7 +123,7 @@ In [Slack app settings](https://api.slack.com/apps), subscribe to the `message.c
 </TabContent>
 </TabsWithChildren>
 
-To join new conversations too, add a decision model with [`decide`](/docs/guides/decide) after the checks that cost nothing. This hook answers addressed messages and followed threads without a model call. It asks `decide` about other messages in the channels you choose, and ignores the rest:
+To join new conversations too, add a decision model with [`decide`](/docs/guides/decide) after the checks that don't call a model. This hook answers addressed messages and followed threads without a model call. It asks `decide` about other messages in the channels you choose, and ignores the rest:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -235,7 +235,7 @@ export default slackChannel({
 
 This adds the `users:read` scope, plus `users:read.email` with `email: true`, so reinstall the Slack app after enabling it. It's off by default because names and emails then reach model context, session history, and traces. See [Add sender names and emails](/docs/channels/slack/reference#add-sender-names-and-emails) for caching and custom lookups.
 
-## Human-in-the-loop interactions
+## Approvals and questions
 
 By default, [tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
 
@@ -405,6 +405,6 @@ The [Slack reference](/docs/channels/slack/reference) covers:
 - Setup: portable credentials, preview branches, a different Slack API host, and troubleshooting
 - Inbound hooks: handler order, sender profiles, decision-model replies, session operations on `ctx`, ending a conversation, and Events API callbacks
 - Code channels: detection, privacy, and building your own code channel tool
-- Delivery: the thread status, task card, renderers, and reply fallbacks
+- Replies and progress: the thread status, task card, renderers, and reply fallbacks
 - Human-in-the-loop: approval cards, sign-ins, and HITL helpers
 - Cards, proactive targets, attachments, and audience

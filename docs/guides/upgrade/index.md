@@ -42,9 +42,9 @@ eve 0.84 and later already use v27 session events, so skip the session event and
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
 | `agentWithModel` from `eve/tools/agent` is removed                 | [Replace `agentWithModel`](/docs/guides/upgrade/agent-files#replace-agentwithmodel).                                          |
 | A dynamic tool can't take the name of a static tool                | [Keep tool names unique](/docs/guides/upgrade/agent-files#keep-tool-names-unique-across-static-and-dynamic-tools).            |
-| The code extension adds no `code__worker` subagent                 | [Remove the `worker` option](/docs/guides/upgrade/agent-files#remove-the-code-extensions-worker-option).                      |
-| The code extension adds no `code__apply_patch` tool                | [Move to `edit_file`](/docs/guides/upgrade/agent-files#replace-the-code-extensions-apply_patch-tool).                         |
-| The code extension adds no `code__grep` tool                       | [Add a `grep` tool](/docs/guides/upgrade/agent-files#add-a-grep-tool-to-code-extension-agents).                               |
+| The code extension doesn't include `code__worker`                  | [Remove the `worker` option](/docs/guides/upgrade/agent-files#remove-the-code-extensions-worker-option).                      |
+| The code extension doesn't include `code__apply_patch`             | [Move to `edit_file`](/docs/guides/upgrade/agent-files#replace-the-code-extensions-apply_patch-tool).                         |
+| The code extension doesn't include `code__grep`                    | [Add a `grep` tool](/docs/guides/upgrade/agent-files#add-a-grep-tool-to-code-extension-agents).                               |
 | The Postgres world needs `@workflow/world-postgres` 5.1.1 or later | Upgrade it and run its `bootstrap` command before you deploy; see [Workflow worlds](/docs/guides/deployment/workflow-worlds). |
 
 ## Existing sessions
@@ -61,7 +61,7 @@ On Vercel, callbacks go to the current production deployment, but a workflow too
 - A reply from a remote agent. The remote agent stops retrying after a few seconds, and the call keeps waiting.
 - A sign-in that a `"use step"` function in a workflow tool asked for. The sign-in page answers `404`, and the step keeps waiting.
 
-That covers a call in flight when you deploy, anything a session starts while it stays on the old deployment, and an idle task that a session from eve 0.84 or later keeps when it moves. A task stays affected for as long as it lives, so finishing its current call doesn't help. If your agent calls remote agents or signs in from workflow steps, end its sessions after production runs 1.0, and start new ones. A session that moves to the new deployment with no task from before the upgrade isn't affected. A sign-in that an ordinary tool or connection asked for isn't affected.
+That covers a call in flight when you deploy, anything a session starts while it stays on the old deployment, and an idle task that a session from eve 0.84 or later keeps when it moves. The task remains affected until it ends, even after its current call finishes. If your agent calls remote agents or signs in from workflow steps, end its sessions after production runs 1.0, and start new ones. A session that moves to the new deployment with no task from before the upgrade isn't affected. A sign-in that an ordinary tool or connection asked for isn't affected.
 
 For a session from eve 0.81.1 through 0.83, an idle resumable task, such as a subagent that already answered, doesn't keep the session on the old deployment. When the session moves, eve ends the task's run on the old deployment, and the model starts a new task on the new deployment the next time it needs one. The new task doesn't continue the old task's conversation.
 
@@ -78,7 +78,7 @@ On worlds without deployment routing, follow the [stranded-session recovery guid
 5. Run a recorded v27 stream through each event consumer, and check that hooks, dashboards, and UI show the expected output.
 6. If your application stores history, test the paths it supports; see [Verify migrated history](/docs/guides/upgrade/saved-history#verify-migrated-history).
 7. Call `client.info()` with an operator credential if your tooling uses it.
-8. Test proactive Slack messages and durable workflow waits your project defines.
+8. Test proactive Slack messages and any workflow waits that must survive restarts.
 
 Review [run-data retention](/docs/agent-config#run-data-retention) before you rely on a finished transcript staying readable. Outside development, the default trace policy for private and unknown-audience sessions requests deletion when the session ends; whether data is deleted depends on the backend.
 

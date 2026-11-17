@@ -17,7 +17,7 @@ The stream is still newline-delimited JSON, but its structure changed:
 - **A stored line holds a group of events.** One state change writes one line with all the events it produced, so a turn ending and the message it answered arrive together. Streamed text and tool-input deltas arrive separately, each as a progress record on its own line.
 - **Positions replace event IDs.** Each event carries `meta.position`: the zero-based `line` it was stored in and its `index` within that line. `startIndex` and saved cursors count lines, not events. Store events keyed on `(sessionId, line, index)`, so reading a stream again doesn't create duplicates.
 - **Each event names what it belongs to.** An event's `scope` holds the IDs of its turn, run, or task.
-- **One event ends each item, with an `outcome`.** Instead of separate `turn.completed`, `turn.failed`, and `turn.cancelled` events, a turn ends with `turn.settled` and an `outcome` of `completed`, `failed`, or `cancelled`. Calls, tasks, deliveries, and requests for input follow the same pattern.
+- **One event ends each item, with an `outcome`.** Instead of separate `turn.completed`, `turn.failed`, and `turn.cancelled` events, a turn ends with `turn.settled` and an `outcome` of `completed`, `failed`, or `cancelled`. Calls, tasks, messages and controls, and requests for input follow the same pattern.
 - **Errors share one shape:** `error: { code, message, id?, hint? }`.
 - **Token usage has its own event.** Read it from `usage.recorded`, not from turn or session events.
 - **Only a person pauses a turn.** A turn that waits on background tasks keeps running. A turn pauses, with `turn.paused`, only while it waits for an approval, a question, a sign-in, or a budget prompt.
@@ -98,7 +98,7 @@ Approvals, questions, sign-ins, and budget prompts are all requests for input, a
 
 The approve and deny choices are `APPROVE_OPTION_ID` (`"approve"`) and `DENY_OPTION_ID` (`"deny"`) from `eve/events`, for approvals and budget prompts. Replace checks for a `"cancel"` decision with `"deny"`. Buttons that eve already posted to Slack or another platform keep working.
 
-To learn whether a person approved a tool call, read the interaction's `outcome`, not the call's state:
+To learn whether a person approved a tool call, read `outcome` on the approval request; the call's state doesn't indicate approval:
 
 | `outcome`                  | Meaning                                                                               |
 | -------------------------- | ------------------------------------------------------------------------------------- |
@@ -111,7 +111,7 @@ See [Interactions](/docs/guides/frontend/use-eve-agent#interactions).
 
 Channel `events` handlers take `(event, ctx)` instead of `(eventData, channel, ctx)`. Read the payload from `event.data`, the turn or call it belongs to from `event.scope`, and the channel from `ctx.channel`. To update a status or card once per stored line instead of once per event, use `committed(line, ctx)`.
 
-Slack renderers take `(event, ctx, next)`. Call `next(event)` to hand the event to the default rendering. See [Custom channels](/docs/channels/custom) and [Slack rendering](/docs/channels/slack/reference#customize-rendering).
+Slack renderers take `(event, ctx, next)`. Call `next(event)` to run the default renderer. See [Custom channels](/docs/channels/custom) and [Slack rendering](/docs/channels/slack/reference#customize-rendering).
 
 ## Instrumentation
 

@@ -48,8 +48,9 @@ environment. The store uses the project's first configured function region, or
 
 Before each turn, the provider gives the model the whole document as one
 message. The model edits the document with two tools, `file__save_memory` and
-`file__remove_memory`, where `file` is the slot name. The provider saves nothing
-unless the model calls a tool.
+`file__remove_memory`, where `file` is the slot name. The provider does not
+capture turns automatically; it only saves entries when the model calls
+`file__save_memory`.
 
 - Each saved entry gets a permanent number. The model removes an entry by that
   number.
@@ -109,9 +110,7 @@ provider: fileMemory({ backend: inMemory() });
 
 Setup connects the store with the `EVE_MEMORY_BLOB` prefix, so file memory
 doesn't use an application's own Blob store. The connection sets
-`EVE_MEMORY_BLOB_STORE_ID` and `EVE_MEMORY_BLOB_WEBHOOK_PUBLIC_KEY` without a
-read-write token. File memory needs only the store ID, because Vercel supplies
-the OIDC token. File memory doesn't use the webhook public key.
+`EVE_MEMORY_BLOB_STORE_ID` and authenticates on Vercel with OIDC.
 
 `fileMemory()` checks Vercel configuration in this order:
 
@@ -120,7 +119,7 @@ the OIDC token. File memory doesn't use the webhook public key.
 3. `BLOB_STORE_ID` with Vercel OIDC from the environment or request context
 4. `BLOB_READ_WRITE_TOKEN`
 
-Prefer OIDC on Vercel, which needs no read-write token or copied
+Prefer OIDC on Vercel so you don't need to manage a read-write token or copy
 `VERCEL_OIDC_TOKEN`. Use the generic `BLOB_*` variables for a store you attach
 manually. Redeploy after you connect the store, because project environment
 variable changes apply only to new deployments.
@@ -132,11 +131,9 @@ command doesn't reinstall the memory definition:
 eve integration setup file-memory
 ```
 
-Setup repairs the unconnected private store that a partial run left. It reuses
-a complete `EVE_MEMORY_BLOB` connection. It never adopts an arbitrary
-application store, changes a `BLOB_*` connection, or replaces a public or
-incompatible store. If the project moves to another primary region, setup keeps
-the existing store and warns about the difference.
+Re-running setup finishes connecting a store created by an interrupted run or
+reuses an existing `EVE_MEMORY_BLOB` connection, without modifying existing
+`BLOB_*` variables or other stores.
 
 Use `vercelBlob()` from `eve/memory/file/vercel` to set credentials or an object
 prefix in code instead of from the environment:
@@ -193,12 +190,12 @@ expose the same signal as `ctx.abortSignal`.
 
 ## Troubleshooting
 
-| What you see                                                            | What to do                                                                                                                      |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `fileMemory() requires Vercel Blob storage.`                            | Run `eve integration setup file-memory`, then redeploy. Or pass `fileMemory({ backend })`.                                      |
-| `fileMemory() requires an explicit backend outside Vercel and eve dev.` | Pass `fileMemory({ backend })`, because only Vercel and `eve dev` have a default backend.                                       |
-| `Memory would exceed the configured 4,000-character limit.`             | Have the model remove outdated entries, or raise `maxCharacters`.                                                               |
-| Setup reports that a store has an incompatible eve file-memory prefix   | Reconnect the store in Vercel with the `EVE_MEMORY_BLOB` prefix and OIDC, then redeploy. Keeping the store keeps its documents. |
+| What you see                                                            | What to do                                                                                                                  |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `fileMemory() requires Vercel Blob storage.`                            | Run `eve integration setup file-memory`, then redeploy. Or pass `fileMemory({ backend })`.                                  |
+| `fileMemory() requires an explicit backend outside Vercel and eve dev.` | Pass `fileMemory({ backend })`, because only Vercel and `eve dev` have a default backend.                                   |
+| `Memory would exceed the configured 4,000-character limit.`             | Have the model remove outdated entries, or raise `maxCharacters`.                                                           |
+| Setup reports that a store has an incompatible eve file-memory prefix   | Reconnect the existing store in Vercel with the `EVE_MEMORY_BLOB` prefix and OIDC, then redeploy to preserve its documents. |
 
 ## Choose another provider
 

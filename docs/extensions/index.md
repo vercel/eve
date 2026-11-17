@@ -1,6 +1,6 @@
 ---
 title: "Extensions"
-description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
+description: "Package reusable tools, skills, channels, and subagents, and mount them from npm or a monorepo workspace."
 ---
 
 An extension is a package of eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An agent installs the package as a dependency and mounts it with a file under `agent/extensions/`. Use an extension to share the same tools and skills across agents, from npm or from a monorepo workspace.
@@ -171,7 +171,7 @@ A workspace-only extension uses the same package contract without publishing; se
 
 ## Consumer: install and mount an extension
 
-A mount gives the extension's tools, channels, and other files a name prefix in your agent. eve copies nothing into your agent, so updating the package updates the mounted extension.
+Mounting an extension prefixes its tools, channels, and other contributions with the mount name. Because the agent imports the extension from its package instead of copying files, updating the package updates the extension.
 
 ### Install the package
 
@@ -287,7 +287,7 @@ Each agent chooses its own mount name and configuration. For example, `shared.ts
 
 ### Override a contribution
 
-Use a directory mount to keep overrides beside the mount declaration in `extension.ts`:
+Use a directory mount to place overrides alongside `extension.ts`:
 
 ```
 agent/extensions/crm/
@@ -370,7 +370,7 @@ import desktop from "@eve/agent-desktop";
 export default desktop({});
 ```
 
-The tools don't install anything at tool time; when agent-desktop is missing or on a different minor version, they fail with setup guidance. They start a headless desktop on display `:100` when a session needs one, so the extension can be mounted beside `eve/extensions/computer-use`, which uses `:99`. The agent gets `desktop__launch`, `desktop__snapshot`, `desktop__click`, and other namespaced tools, with instructions for the observe, act, and verify loop.
+The tools do not install packages when called; if `agent-desktop` is missing or on a different minor version, they fail with setup instructions. When a session needs a display, the extension starts a headless desktop on `:100`, so it can run alongside `eve/extensions/computer-use` on `:99`. Mounting it as `desktop` adds `desktop__launch`, `desktop__snapshot`, `desktop__click`, and other namespaced tools, along with instructions for the observe, act, and verify loop.
 
 Headless actions use accessibility APIs by default. Set `headed: true` only when the agent may use physical pointer and keyboard input. The tools preserve agent-desktop's retry guidance when an action fails.
 
@@ -395,7 +395,7 @@ export default browser({
 
 Configure an [agent sandbox](/docs/sandbox) with real process execution, such as Vercel Sandbox or Docker. On first use, the extension installs agent-browser, Chromium, and its system libraries. System dependency installation requires apt or dnf and sudo. For prepared templates, call `installAgentBrowser` from `@eve/agent-browser/sandbox` in the environment's `prepare` callback.
 
-The filename supplies the namespace: this mount adds `browser__open`, `browser__snapshot`, `browser__click`, and the other browser tools. Core tools are listed every turn; additional inspection and interaction tools are deferred and discoverable through `eve__search`. With `contentBoundaries: true`, results retain the CLI's boundary metadata and model output includes page-content markers. Cookie, storage, and saved-auth-state commands aren't exposed to the model.
+The mount filename sets the prefix, so `browser.ts` adds `browser__open`, `browser__snapshot`, `browser__click`, and the remaining browser tools. Core tools are included on every turn, while additional inspection and page-action tools are deferred and discoverable through `eve__search`. With `contentBoundaries: true`, results retain the CLI's boundary metadata and model output includes page-content markers. Cookie, storage, and saved-auth-state commands aren't exposed to the model.
 
 See [sandbox environment preparation](/docs/sandbox#prepare-a-reusable-environment) for template setup and the [package README](https://github.com/vercel/eve/tree/main/packages/eve-agent-browser) for configuration, screenshots, version matching, and tool overrides.
 
@@ -429,17 +429,17 @@ Local `eve dev` mounts the bundled self-modification extension by default, witho
 
 eve checks the eve version that built an extension before it loads the extension's code. A built extension needs that eve release or a later one. Build with the oldest release you want to support, and test with newer agents. An agent can't rebuild an installed extension that ships without source.
 
-Sessions saved by eve 0.68 or earlier store extension state per package, not per mount. When such a session moves to a newer deployment, eve gives each value to the one mount that defines it. It drops values that no mount defines.
+Sessions saved by eve 0.68 or earlier store extension state per package, not per mount. When such a session moves to a newer deployment, eve gives each value to the one mount that defines it and drops values that no mount defines.
 
 ### Troubleshooting
 
-| What you see                                                                                 | What to do                                                                                                                                                                                            |
-| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Extension "<package>" was built with eve <version>.`                                        | Upgrade eve to that version or later, or install an extension built with your eve version.                                                                                                            |
-| `Extension "<package>" requires distribution contract <n>, which this eve does not support.` | Rebuild the extension with your eve version, or install a compatible extension release.                                                                                                               |
-| `Extension "<package>" has no valid compatibility manifest`                                  | Rebuild or reinstall the extension.                                                                                                                                                                   |
-| The agent build stops with an error that names an extension package and its directory        | Fix the reported error, or run `eve extension build` in that package directory to build it on its own.                                                                                                |
-| `Incompatible context state layout for key "<key>".`                                         | Continue the session on its original deployment, or start a new session. The session stays on its deployment because two or more mounts of one package define that state, so eve can't pick an owner. |
+| What you see                                                                                 | What to do                                                                                                                               |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `Extension "<package>" was built with eve <version>.`                                        | Upgrade eve to that version or later, or install an extension built with your eve version.                                               |
+| `Extension "<package>" requires distribution contract <n>, which this eve does not support.` | Rebuild the extension with your eve version, or install a compatible extension release.                                                  |
+| `Extension "<package>" has no valid compatibility manifest`                                  | Rebuild or reinstall the extension.                                                                                                      |
+| The agent build stops with an error that names an extension package and its directory        | Fix the reported error, or run `eve extension build` in that package directory to build it on its own.                                   |
+| `Incompatible context state layout for key "<key>".`                                         | Continue the session on its original deployment, or start a new session, because two or more mounts of the same package define that key. |
 
 ## What to read next
 

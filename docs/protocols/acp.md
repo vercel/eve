@@ -52,9 +52,9 @@ ACP clients receive:
 
 When the development server rebuilds, work already running finishes on its original build. The next turn uses the newest successful build.
 
-## Security and capability limits
+## Security and ACP limits
 
-ACP mode gives the agent no access to the editor's host filesystem or terminal. `session/new.cwd` identifies the eve application being launched and isn't mounted into the agent sandbox.
+ACP mode doesn't grant the agent access to the editor's host filesystem or terminal. `session/new.cwd` identifies the eve application being launched and isn't mounted into the agent sandbox.
 
 eve's ACP adapter doesn't support:
 

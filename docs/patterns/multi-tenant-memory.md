@@ -8,9 +8,9 @@ return a scope built from the signed-in tenant and user. eve passes the
 resulting key to every [memory provider](../memory) call, so each tenant and
 user gets separate memory.
 
-The example below uses the built-in `fileMemory()` provider. You can swap in
-Supermemory or a custom provider without changing `scope`, because tenant
-isolation lives in the memory definition, not the store.
+The example below uses the built-in `fileMemory()` provider. You can use
+Supermemory or a custom provider with the same `scope`. The memory definition
+determines the tenant-specific key passed to the provider.
 
 ## Derive scope from authenticated context
 
@@ -23,7 +23,7 @@ import { byPrincipal } from "eve/memory/scope";
 import { fileMemory } from "eve/memory/file";
 
 export default defineMemory({
-  description: "Remember durable facts for the authenticated tenant user.",
+  description: "Remember information about the authenticated tenant user across sessions.",
   provider: fileMemory(),
 
   scope(ctx) {
@@ -53,15 +53,14 @@ Use `auth.current` for the caller of the active turn. If only the person who
 started a conversation may use it, use `auth.initiator` and enforce that rule
 at the channel boundary.
 
-## Understand the locked provider boundary
+## Restrict provider access by memory key
 
 eve derives an opaque `memory.scope.key` from the namespace and scope tuple.
 The provider receives that key in every recall, capture, and tools call.
 
-The model never supplies or changes the key. Provider tools are locked to the
-key, so a tool cannot redirect itself to another tenant or caller. A provider
-must keep that boundary by using `memory.scope.key` in every read and write to
-its store.
+eve fixes the key for provider tools, preventing the model from selecting
+another tenant or caller. Use `memory.scope.key` in every provider read and
+write.
 
 For semantic retrieval, filter by the key in the database or service query
 itself, not after a global search. For custom capture, use the provider's

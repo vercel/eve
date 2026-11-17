@@ -71,8 +71,8 @@ ended. Read `outcome` to tell an applied control from an ignored one. To inspect
 `delivery(view, deliveryId)` and, when it has a `turnId`, `turn(view, turnId)` from `eve/events`.
 
 Results don't collect an `events` array. To keep a request log, append events from
-`response.stream()` to your own collection. Reads don't share a cursor, so a later
-`response.result()` still reads the whole delivery.
+`response.stream()` to your own collection. Reads have independent cursors, so a later
+`response.result()` still reads the complete request.
 
 `result()` closes its HTTP stream, even when fetch instrumentation clones the response. The
 session stays available for follow-up turns.
@@ -131,20 +131,20 @@ function handleEvent(event: SessionStreamEvent) {
 
 The most common UI events are:
 
-| Event                 | Use                                                                                                                      |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `delivery.consumed`   | Confirm the user message landed; `data.parts` includes text and file metadata, and `data.history` any imported history.  |
-| `content.delta`       | Render text and reasoning deltas as they stream.                                                                         |
-| `content.completed`   | A finished part. `phase` tells a `"reply"` from `"narration"`; `kind: "result"` is [structured output](./output-schema). |
-| `call.input`          | Accumulate raw tool-input deltas before validation completes.                                                            |
-| `call.requested`      | Show tool calls as the model requests them, before execution.                                                            |
-| `call.progress`       | Update a generator tool's provisional output snapshot.                                                                   |
-| `call.settled`        | Show a call's result, error, or rejection.                                                                               |
-| `task.started`        | Show a task; `kind: "agent"` marks agents. Its calls carry its `taskId` on `call.started`.                               |
-| `interaction.opened`  | Pause the UI for an approval, question, budget prompt, or sign-in.                                                       |
-| `interaction.settled` | Record how a request was decided.                                                                                        |
-| `turn.settled`        | The turn ended: enable the composer.                                                                                     |
-| `session.ended`       | Mark the conversation terminal or failed.                                                                                |
+| Event                 | Use                                                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `delivery.consumed`   | Confirm the turn received the user message; `data.parts` contains text and file metadata, and `data.history` imported turns. |
+| `content.delta`       | Render text and reasoning deltas as they stream.                                                                             |
+| `content.completed`   | A finished part. `phase` tells a `"reply"` from `"narration"`; `kind: "result"` is [structured output](./output-schema).     |
+| `call.input`          | Accumulate raw tool-input deltas before validation completes.                                                                |
+| `call.requested`      | Show tool calls as the model requests them, before execution.                                                                |
+| `call.progress`       | Update a generator tool's provisional output snapshot.                                                                       |
+| `call.settled`        | Show a call's result, error, or rejection.                                                                                   |
+| `task.started`        | Show a task; `kind: "agent"` marks agents. Its calls carry its `taskId` on `call.started`.                                   |
+| `interaction.opened`  | Pause the UI for an approval, question, budget prompt, or sign-in.                                                           |
+| `interaction.settled` | Record how a request was decided.                                                                                            |
+| `turn.settled`        | Enable the composer when the turn ends.                                                                                      |
+| `session.ended`       | Mark the conversation terminal or failed.                                                                                    |
 
 For the complete catalog, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
 
@@ -325,13 +325,13 @@ try {
 }
 ```
 
-Creating a store doesn't start any reads. `observe()` starts observation and returns a cleanup function that is safe to call more than once. Observation is reference-counted, so it stops after every caller cleans up. Streaming the root also starts following children, and framework bindings start observation on mount. While observation is active, admitted children keep refreshing even after `followWhile` closes the root stream. No call waits for the whole tree to catch up.
+Creating a store doesn't start any reads. `observe()` starts observation and returns a cleanup function that is safe to call more than once. Observation is reference-counted, so it stops after every caller cleans up. Streaming the root also starts following children, and framework bindings start observation on mount. While observation is active, admitted children keep refreshing even after `followWhile` closes the root stream. Calls return without waiting for every child session to catch up.
 
 `followAgents: true` recursively follows all eligible recorded children within fixed depth, admission, and request limits. A predicate such as `({ depth }) => depth === 1` selects only immediate children. See [child agents](../frontend/use-eve-agent#child-agents) for limits, states, and cursor semantics. Each child conversation shows the child's whole session. Use the parent's call results, not the child's messages, as the outcome of a call.
 
 When the signed-in user or tenant changes, stop the old observation and create a new store. Token callbacks run again for each request without changing the observation key. For a cross-origin browser connection, expose `x-eve-observation-key` in the channel's CORS configuration alongside the stream version and tail headers.
 
-To archive nested conversations, save their messages and each child's position in your own versioned format. `SessionView` is opaque and isn't an archive format. Children can advance while the root position stays the same. A failed observation keeps its last recorded data, so don't replace an existing archive with an empty failed read.
+To archive nested conversations, save their messages and each child's position in your own versioned format, separate from the opaque `SessionView`. Children can advance while the root position stays the same. A failed observation keeps its last recorded data, so don't replace an existing archive with an empty failed read.
 
 ## Abort a request
 

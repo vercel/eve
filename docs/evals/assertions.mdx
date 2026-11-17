@@ -7,12 +7,12 @@ An assertion grades what an eval's `test(t)` function produced. Each assertion r
 
 ## Scoped assertions
 
-Scoped assertions take no value and are gates by default. Call them on `t` to check the whole run after `test` finishes. Call them on a session to check that session so far, or on a turn to check one reply. A run is **parked** when it stopped to wait on an approval or question that nobody answered (human-in-the-loop, or HITL, input).
+Scoped assertions use the run, session, or turn as their subject and are gates by default. Call them on `t` to check the whole run after `test` finishes. Call them on a session to check that session so far, or on a turn to check one reply. A run is **parked** when it stopped to wait on an approval or question that nobody answered (human-in-the-loop, or HITL, input).
 
 | Assertion                                             | Asserts                                                                       |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `t.succeeded()`                                       | The run did not fail and did not park on unanswered HITL input                |
-| `t.awaitingInput()`                                   | The run cleanly parked on HITL input                                          |
+| `t.awaitingInput()`                                   | The run paused for human input without failing                                |
 | `t.messageIncludes(token)`                            | Joined assistant text contains `token` (string or RegExp)                     |
 | `turn.outputEquals(value)` / `.outputMatches(schema)` | Deep equality or Standard Schema validation of turn/session structured output |
 | `t.calledTool(name, opts?)`                           | A matching tool call completed (`input`, `output`, `status`, `count`)         |
@@ -25,11 +25,11 @@ Scoped assertions take no value and are gates by default. Call them on `t` to ch
 | `t.calledAgent(name, opts?)`                          | A subagent delegation happened (identity, remote, output, status, count)      |
 | `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
 | `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                          |
-| `t.eventsSatisfy(label, predicate)`                   | Escape hatch: any predicate over the typed event stream                       |
+| `t.eventsSatisfy(label, predicate)`                   | Checks a custom predicate against the typed event stream                      |
 
 `succeeded()` passes when the session ended or is waiting for the next message. It fails when the run failed, an event reports an error, or the run is parked. Structured output assertions exist only on turns and sessions, where one output is unambiguous (see the [output schema guide](../guides/client/output-schema)).
 
-`awaitingInput()` passes whenever the run parked, whatever it waits for. To check what it waits for, [select the open interactions from its view](#check-what-a-parked-turn-waits-for).
+`awaitingInput()` passes whenever the run parked, whatever it waits for. To check what it waits for, [select the open requests for input from its view](#check-what-a-parked-turn-waits-for).
 
 ```ts
 await t.send("What is the weather in Brooklyn?");
@@ -57,7 +57,7 @@ The tool-name assertions and `turn.requireToolCall` throw a `TypeError` for `eve
 
 ## Assert on session state with selectors
 
-Whenever an eval has a view and needs to know what is happening in the session, use selectors from `eve/events`. Read `turn.view`, `session.view`, or `live.view`, select the facts you need, and grade them with `t.check`, `t.require`, or `t.score`. These are the same selectors used in hooks, channels, dynamic capabilities, and clients, not an eval-specific API.
+Whenever an eval has a view and needs to know what is happening in the session, use selectors from `eve/events`. Read `turn.view`, `session.view`, or `live.view`, select the session state you need, and grade it with `t.check`, `t.require`, or `t.score`. Hooks, channels, dynamic definitions, and clients use these selectors too.
 
 Keep scoped assertions such as `turn.calledTool(...)` when they already express the check. Selectors let you compose checks over calls, tasks, replies, interactions, usage, and other recorded state without rebuilding it from events. For example, this eval requires at least one task and checks that every observed task ended successfully:
 
@@ -111,7 +111,7 @@ if (turn.status === "awaiting-input") {
 }
 ```
 
-Keep the `rows.length > 0` check: `every` passes on an empty list, and the list is empty when the eval didn't read the events that opened the requests. Open doesn't mean unanswered: a request can already have an `answer` while eve still processes it.
+Keep the `rows.length > 0` check: `every` passes on an empty list, and the list is empty when the eval didn't read the events that opened the requests. A request can remain open while eve processes its submitted `answer`.
 
 ## Value assertions with `t.check`
 
@@ -144,7 +144,7 @@ For example, a failed labeled equality check prints:
 ✗ equals [status] (0% < 100%): expected {"status":"active"}; received {"status":"disabled"}
 ```
 
-Pick the cheapest builder that captures "correct". Use `similarity` when an exact match is too strict, and the [judge](./judge) for nuanced grading.
+Choose the least costly assertion that checks the behavior you need. Use `similarity` when an exact match is too strict, and the [judge](./judge) for nuanced grading.
 
 ## Scores with `t.score`
 
@@ -232,7 +232,7 @@ const request = session.requireInteraction({
 });
 ```
 
-## Run state and derived facts
+## Run state and recorded events
 
 For custom checks about where the session stands, [query a view with selectors](#assert-on-session-state-with-selectors). Use event assertions when an event's presence, payload, count, or ordering is itself the contract under test:
 
@@ -306,7 +306,7 @@ Every assertion returns a handle. Chain one of these to set its severity:
 
 - `.gate(threshold?)` is hard. A miss marks the eval `failed` and `eve eval` exits non-zero.
 - `.soft(threshold?)` is recorded in reports. A miss below the threshold marks the eval `scored`, which fails the run only under `--strict`. With no threshold, it never fails.
-- `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
+- `.atLeast(threshold)` sets a soft threshold (equivalent to `.soft(threshold)`).
 - `.label(key)` adds a stable name when an eval records several assertions of the same kind. Braintrust and Datadog keep one score per name. `eve eval` warns when soft assertions in one eval share a name but have different scores.
 
 Scoped methods and `includes`, `equals`, `matches`, and `satisfies` are gates; `similarity`, `t.judge(...)`, and `t.score(...)` are soft. Chain a severity only to change the default:

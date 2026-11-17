@@ -17,7 +17,7 @@ Important naming note:
 | Create a project, or understand the file layout          | [Getting Started](./getting-started.mdx)                                         |
 | Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                      |
 | Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                               |
-| Give the agent a typed capability it can call            | [Tools](./tools/index.mdx)                                                       |
+| Give the agent a typed action it can call                | [Tools](./tools/index.mdx)                                                       |
 | Require approval, or ask the user something mid-turn     | [Human in the Loop](./tools/human-in-the-loop.md)                                |
 | Call an external HTTP API or MCP server                  | [Connections](./connections/index.mdx)                                           |
 | Add a messaging surface (Slack, Discord, iMessage, …)    | [Channels](./channels/index.mdx)                                                 |
@@ -75,7 +75,7 @@ For a full picture rather than a single task, read in this order:
 
 ## The public mental model
 
-eve is a filesystem-first framework for durable backend agents.
+eve is a filesystem-first framework for backend agents whose sessions survive restarts and redeploys.
 
 You author an agent as files on disk:
 
@@ -95,28 +95,26 @@ eve then gives you:
 - a stable HTTP message route
 - optional channel webhook routes
 - a reconnectable session stream
-- durable session state across turns
+- session state that persists across turns
 - a per-agent sandbox with a shared runtime workspace
 - typed runtime helpers accessed through `ctx` (`ctx.session`, `ctx.getSandbox()`)
 
 ## The runtime shape
 
-The public surface stays filesystem-first, but the implementation model underneath is still useful to
-know:
+At runtime:
 
-- channels normalize inbound transport input and map platform addresses to sessions
-- the harness does one unit of AI work and decides whether to continue, wait, or finish
-- the runtime persists session state, streams events, and owns workflow orchestration
+- channels verify inbound requests and map platform addresses to sessions
+- the harness runs model and tool steps and decides whether to continue, wait, or finish
+- the runtime persists session state and streams events
 
-The default HTTP API exposes one durable `sessionId` for messages, controls, and
-streaming. Platform channels additionally own channel-local continuation
-addresses so a Slack thread or custom conversation ID can point at its current
-session without leaking that routing identity into the HTTP client contract.
+The default HTTP API addresses a session by `sessionId` for messages, controls, and
+streaming. Platform channels also map conversation addresses, such as a Slack
+thread, to the active session.
 
 ## How to use these docs
 
 - Start with the authored filesystem shape and `agent.ts`.
 - Then add runtime surfaces in this order: skills, tools, workspace, sandbox, channels.
-- Then learn the durable runtime model: HITL, session context, sessions, streaming, and
-  ID-addressed follow-ups and channel address routing.
+- Then learn the session runtime model: HITL, session context, sessions, streaming,
+  ID-addressed follow-ups, and channel address routing.
 - Then add advanced features: subagents, schedules, route protection, deployment.

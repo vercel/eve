@@ -63,11 +63,11 @@ export async function decideTenantApproval(
 
 For authored tools, `ctx.toolName` is the path-derived name such as `transfer_funds`. For connection tools, it includes the connection name, such as `billing__updateSubscription` or `support__add_internal_note`. Your policy service can match exact names, patterns for a whole connection, roles, amounts, environments, or any other rule the tenant sets.
 
-The function runs for every call, so `"user-approval"` asks for a separate decision on each action. [`once()`](/docs/human-in-the-loop#remember-approval-for-a-tool) remembers approval for the tool across all inputs in the session. It does not create grants for a tenant.
+The function runs for every call, so `"user-approval"` asks for a separate decision on each action. [`once()`](/docs/human-in-the-loop#remember-approval-for-a-tool) remembers approval for the tool across all inputs in the session; authorize access to the tenant separately.
 
 ## Apply it to an authored tool
 
-Approval runs before `execute`. `execute` must still read and enforce the tenant, because approval is a gate, not authorization:
+Approval runs before `execute`. Inside `execute`, read the caller's tenant and authorize the operation for that tenant:
 
 ```ts title="agent/tools/transfer_funds.ts"
 import { defineTool } from "eve/tools";

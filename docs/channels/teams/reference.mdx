@@ -1,10 +1,10 @@
 ---
 title: "Microsoft Teams Reference"
-description: "Teams channel options, credentials, dispatch, Connector security, delivery, Adaptive Card human-in-the-loop, sign-ins, and attachments."
+description: "Teams channel options, credentials, dispatch, Connector security, replies, Adaptive Card human-in-the-loop, sign-ins, and attachments."
 type: reference
 ---
 
-This page documents every part of `teamsChannel` from `eve/channels/teams`. For setup and common tasks, start with [Microsoft Teams](/docs/channels/teams).
+Import `teamsChannel` from `eve/channels/teams`. For setup and common tasks, see [Microsoft Teams](/docs/channels/teams).
 
 The Teams channel runs your agent as a Microsoft Teams bot. It lives in `agent/channels/teams.ts`. It checks each incoming Bot Framework Activity's Bot Connector bearer JWT and `serviceurl` claim. It replies through the Bot Framework Connector REST API. Approvals and questions render as Adaptive Cards.
 

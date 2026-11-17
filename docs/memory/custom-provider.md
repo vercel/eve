@@ -73,8 +73,9 @@ prepended to its description.
 
 ## The provider contract
 
-`defineMemoryProvider()` accepts three surfaces. Omit any optional handler the
-provider doesn't need; `fileMemory()`, for example, has no capture.
+`defineMemoryProvider()` takes `recall` and optional `capture` and `tools`
+handlers. Omit any optional handler your provider does not use; for example,
+`fileMemory()` omits `capture`.
 
 | Surface   | Handlers                                     | Responsibility                                        |
 | --------- | -------------------------------------------- | ----------------------------------------------------- |
@@ -126,17 +127,17 @@ return {
 eve adds each message to model calls as a user-role message attributed to the
 slot, never as system instructions.
 
-What a turn recalls stays for the rest of the session, just before that turn's
-input in every later model call. The `id` decides what a later recall does with
-it:
+What a turn recalls stays for the rest of the session, immediately before that
+turn's input in every later model call. The `id` decides what a later recall
+does with it:
 
 | Message           | Effect                                                                                                                      |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `{ content, id }` | Replaces the message an earlier turn recalled with the same `id`. The same content changes nothing; the earlier copy stays. |
+| `{ content, id }` | Replaces any earlier recalled message with the same `id`, or keeps the existing message in place if `content` is unchanged. |
 | `{ content }`     | Adds a message. A later recall can't replace or remove it.                                                                  |
 
-A result of `null`, `undefined`, or `{ messages: [] }` adds nothing and keeps
-what earlier turns recalled. Give every message a stable `id` when the provider
+Returning `null`, `undefined`, or `{ messages: [] }` leaves messages recalled on
+earlier turns unchanged. Give every message a stable `id` when the provider
 returns its current state each turn, as `fileMemory()` does, or each turn adds
 another copy. Records that differ each turn accumulate for the session and
 count toward every model call's context. The `id` also identifies the record in
@@ -156,7 +157,7 @@ tools and recall use the same scope. A new turn or a new caller resolves it
 again. After a restart within the same turn, eve calls `tools()` again with the
 same scope.
 
-## Lifecycle
+## When handlers run
 
 | Phase                  | Handler                           | `messages` contains                                                           |
 | ---------------------- | --------------------------------- | ----------------------------------------------------------------------------- |
@@ -167,10 +168,10 @@ same scope.
 eve recalls before the first model call of each turn, and again when the
 session's caller changes. Recalled messages stay outside history, so
 compaction never summarizes them. When compaction summarizes a turn, that
-turn's recalled messages move to just after the summary.
+turn's recalled messages move immediately after the summary.
 
-Before compaction rewrites history, eve calls `capture["compaction.requested"]`
-and waits for it, so a provider can keep detail the summary will lose.
+Before compaction summarizes history, eve awaits `capture["compaction.requested"]`
+so the provider can save details before they are summarized.
 
 Calling `clear()` on a session removes its history and recalled messages but
 not the provider's store, so the next turn recalls again. A new scope, such as
@@ -187,9 +188,8 @@ another caller's, also starts over.
   like any other [dynamic tool](../guides/dynamic-capabilities#errors-and-recovery).
 - A throwing `capture["turn.completed"]` is logged after the response and does
   not rewrite the completed turn.
-- A throwing `capture["compaction.requested"]` fails the compaction before it
-  rewrites history, which stays as it was. Like a failed summary, a compaction
-  that fails during a turn fails the turn.
+- A throwing `capture["compaction.requested"]` aborts compaction before history
+  is rewritten. If compaction was triggered during a turn, the turn also fails.
 
 ## Requirements
 

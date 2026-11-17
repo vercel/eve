@@ -29,7 +29,7 @@ Save events and the cursor as they arrive, not only when a turn ends, so a turn 
 
 ## Replace `reset()` with `end()`
 
-Rename `reset()` to `end()` on client sessions, `SessionStore`, the React, Vue, and Svelte bindings, channel session handles, `ChannelSource` from `eve/channels`, and the Slack handler context (`ctx.end()`). `end()` resolves with a delivery.
+Rename `reset()` to `end()` on client sessions, `SessionStore`, the React, Vue, and Svelte bindings, channel session handles, `ChannelSource` from `eve/channels`, and the Slack handler context (`ctx.end()`). `end()` resolves with a `Delivery` receipt.
 
 ```ts
 await session.reset({ reason: "Conversation finished" }); // [!code --]
@@ -57,9 +57,9 @@ await session.send("Start a new conversation.");
 
 See [Session controls](/docs/guides/client#sessions).
 
-## Read results from a delivery
+## Read results from a request receipt
 
-A `Delivery` is the receipt for one message or control. `send()` and the session controls return it as soon as the server accepts the request, before the agent runs. Read the rest from the delivery:
+A `Delivery` is the receipt for one message or control. `send()` and the session controls return it as soon as the server accepts the request, before the agent runs. Use the receipt to read the outcome and events:
 
 - `delivery.result()` waits for the outcome. Its `status` is `completed`, `awaiting-input`, `failed`, or `cancelled`, and it describes this request, not the session. Check `sessionEnded` to learn whether the session ended.
 - `delivery.stream()` yields the events for this request.
