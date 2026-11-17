@@ -1,4 +1,4 @@
-import type { LanguageModel, ModelMessage } from "ai";
+import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
@@ -10,14 +10,9 @@ import {
   enforceBudget,
   humanInputContext,
   settleModelSignIns,
-  stopForSignIn,
+  pauseForSignIn,
 } from "#harness/hitl/index.js";
 import { changeHistory } from "#harness/session-machine/history.js";
-import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import {
-  handleAuthorizationError,
-  isScopedAuthorizationRequiredError,
-} from "#runtime/connections/scoped-authorization.js";
 import {
   requestRun as requestRunFact,
   startRun as startRunFact,
@@ -27,7 +22,6 @@ import { nextRunId } from "#protocol/session-projection.js";
 import {
   failBoundaryEvent,
   failModelSelection,
-  failSignIn,
   isSignInError,
   prepareModelCall,
   type Step,
@@ -85,8 +79,10 @@ export async function runModelStep(
   const preparation = await prepareModelCall(step, prepared);
   if (preparation.kind === "failed") return preparation.result;
   const prompt = commitTurnInput(step, prepared);
-  if (preparation.kind === "sign-in")
-    return await pauseForSignIn(step, prompt.messages, preparation.error);
+  if (preparation.kind === "sign-in") {
+    step.session = changeHistory(step.session, { extend: prompt.messages });
+    return await pauseForSignIn(step, preparation.error);
+  }
   await settleModelSignIns(step);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
@@ -122,8 +118,11 @@ export async function runModelStep(
     throwIfTurnAborted(step.config.abortSignal);
     // A compaction summary runs on the turn's model, so its sign-in pauses the turn too.
     const signInError = signInErrorIn(error);
-    if (signInError !== undefined)
-      return await pauseForSignIn(step, await caller.abandonForSignIn(), signInError);
+    if (signInError !== undefined) {
+      const messages = await caller.abandonForSignIn();
+      step.session = changeHistory(step.session, { extend: messages });
+      return await pauseForSignIn(step, signInError);
+    }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
@@ -189,28 +188,6 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   if (runId === undefined) return;
   const modelId = stepReference(step).id;
   await step.apply(startRunFact({ attempt, modelId, runId }));
-}
-
-/**
- * Keeps the step's `messages` in history, then pauses the turn for a sign-in when `error` asks for
- * one. The turn fails with `SIGN_IN_FAILED` when the sign-in failed or eve can't ask, as in a
- * scheduled turn.
- */
-async function pauseForSignIn(
-  step: Step,
-  messages: readonly ModelMessage[],
-  error: unknown,
-): Promise<StepResult> {
-  step.session = changeHistory(step.session, { extend: messages });
-  if (!isScopedAuthorizationRequiredError(error)) {
-    const scope = isConnectionAuthorizationFailedError(error) ? error.connectionName : "";
-    return await failSignIn(step, error, { scope });
-  }
-  try {
-    return await stopForSignIn(step, await handleAuthorizationError(error));
-  } catch (refused) {
-    return await failSignIn(step, refused, error.scoped);
-  }
 }
 
 /** Finds a sign-in error in `error`'s cause chain: a wrapper, such as a compaction failure, keeps it. */

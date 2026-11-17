@@ -10,7 +10,12 @@ import { commitOf, committedMessages, saveTransition } from "#harness/session-ma
 import { callSignInsSettled, fail } from "#harness/session-machine/transitions.js";
 import { signInFailureOf } from "./approved-calls.js";
 import { readTurnState } from "#harness/session-machine/state.js";
-import type { Step } from "#harness/step/context.js";
+import { failSignIn, type Step } from "#harness/step/context.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
+import {
+  handleAuthorizationError,
+  isScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
 import { modelSignIns, park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
@@ -96,6 +101,19 @@ export async function stopForSignIn(
     step.session.history,
   );
   return park(step);
+}
+
+/** Handles an auth interruption using the shared sign-in flow, or fails the turn if refused. */
+export async function pauseForSignIn(step: Step, error: unknown): Promise<StepResult> {
+  if (!isScopedAuthorizationRequiredError(error)) {
+    const scope = isConnectionAuthorizationFailedError(error) ? error.connectionName : "";
+    return await failSignIn(step, error, { scope });
+  }
+  try {
+    return await stopForSignIn(step, await handleAuthorizationError(error));
+  } catch (refused) {
+    return await failSignIn(step, refused, error.scoped);
+  }
 }
 
 type SignInInterrupt = NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>;
