@@ -13,11 +13,17 @@ const KEY = "3f2b8c1e-6a4d-4e9f-8b7a-1c2d3e4f5a6b";
 async function requestStream() {
   const stream = voiceRoutes().find((route) => route.path.endsWith("/voice/stream"))!;
   const resolveSession = vi.fn();
-  const response = await (stream as { handler: Function }).handler(
+  const { handler } = stream as unknown as {
+    handler: (
+      request: Request,
+      args: { resolveSession: typeof resolveSession },
+    ) => Promise<Response>;
+  };
+  const response = await handler(
     new Request(`https://agent.test/eve/v1/recall/voice/stream?key=${KEY}`),
     { resolveSession },
   );
-  return { resolveSession, response: response as Response };
+  return { resolveSession, response };
 }
 
 afterEach(() => {
