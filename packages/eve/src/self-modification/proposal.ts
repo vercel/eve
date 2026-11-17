@@ -29,7 +29,6 @@ export interface SelfModificationProposal {
 
 type ProposalSandbox = Pick<SandboxSession, "run">;
 
-/** Captures and validates the worktree before any publication credential is resolved. */
 export async function captureSelfModificationProposal(input: {
   readonly sandbox: ProposalSandbox;
   readonly workspace: PreparedSelfModificationWorkspace;
@@ -101,7 +100,6 @@ export async function captureSelfModificationProposal(input: {
   return { baseSha: input.workspace.baseSha, baseTreeSha, changedBytes, changes, proposedTreeSha };
 }
 
-/** Reads an already captured blob and verifies its Git object id before upload. */
 export async function readProposalBlob(input: {
   readonly change: ProposalChange;
   readonly sandbox: ProposalSandbox;

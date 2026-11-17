@@ -85,9 +85,7 @@ export async function readDefaultConnection(): Promise<ModelConnectionSelection 
     );
     if (isObject(value) && (isModelConnection(value.selected) || value.selected === "vercel-cli"))
       return value.selected;
-  } catch {
-    /* A missing preference does not require authentication. */
-  }
+  } catch {}
   return undefined;
 }
 

@@ -22,10 +22,7 @@ const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories({ scope: "file" });
 const DEPLOYABLE_BUILD_OPTIONS = { skipSandboxPrewarm: false } as const;
 
-/** Every `.mjs`/`.js` file under `rootDirectory`, keyed by path. */
 async function readJavaScriptModules(rootDirectory: string): Promise<Map<string, string>> {
-  // `withFileTypes` so directories named like modules (for example the
-  // traced `sql.js` package directory) are not read as files.
   const entries = await readdir(rootDirectory, { recursive: true, withFileTypes: true });
   const modules = new Map<string, string>();
   for (const entry of entries) {
@@ -196,8 +193,6 @@ describe("self-hosted production output", () => {
   });
 
   it("leaves out the generated JavaScript sandbox and just-bash when nothing selects them", async () => {
-    // The just-bash engine resolves in this workspace (it is an eve
-    // devDependency), but resolvability is not opt-in.
     const tracedDependencies = await readTracedDependencies(outputDir);
     const serverEntries = await readdir(join(outputDir, "server"), { recursive: true });
 
@@ -299,11 +294,6 @@ describe("hosted Vercel output", () => {
   it("serves health without local-only runtime infrastructure", async () => {
     const runtimeSource = await readJavaScriptSource(join(outputDir, "functions"));
     expectNoLocalRuntimeInfrastructure(runtimeSource);
-    // The world-local canary is its log prefix, not names other packages
-    // legitimately mention without bundling world-local code: the
-    // semantic-error catalog embeds error-class names like
-    // `DataDirAccessError`, and @workflow/core's runtime world factory
-    // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
     expect(runtimeSource).not.toContain("[world-local]");
     expect(runtimeSource).not.toContain("[Unprintable QuickJS value]");
 
@@ -333,7 +323,6 @@ describe("hosted Vercel output", () => {
     );
 
     expect(instrumentationModule).toBeDefined();
-    // A fresh process: sibling tests may already have evaluated this chunk in-process.
     const probe = spawnSync(
       process.execPath,
       [
@@ -382,7 +371,6 @@ describe("a just-bash sandbox config", () => {
     const appRoot = await writeApp({
       label: "just-bash",
       files: {
-        // The compiled sandbox config is the opt-in signal.
         "agent/sandbox.ts": [
           'import { defineSandbox } from "eve/sandbox";',
           'import { JustBashSandbox } from "eve/sandbox/just-bash";',
@@ -393,7 +381,6 @@ describe("a just-bash sandbox config", () => {
         ].join("\n"),
       },
     });
-    // Authored modules resolve `eve/sandbox` through the app's node_modules.
     await mkdir(join(appRoot, "node_modules"), { recursive: true });
     await symlink(EVE_PACKAGE_ROOT, join(appRoot, "node_modules", "eve"), "dir");
 

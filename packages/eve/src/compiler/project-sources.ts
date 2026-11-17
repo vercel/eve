@@ -163,11 +163,6 @@ export function projectAgentSources(input: {
   return { candidates, resources, subagents };
 }
 
-/**
- * Lists the application module files a compile may evaluate, across local
- * subagents, so they can be bundled as one shared graph. Extension mounts load
- * with their own scope and are left out.
- */
 export function listApplicationModulePaths(manifest: AgentSourceManifest): string[] {
   const sources: readonly { readonly logicalPath: string; readonly sourceKind: string }[] = [
     ...(manifest.configModule === undefined ? [] : [manifest.configModule]),
@@ -353,7 +348,6 @@ function projectManifest(input: {
     input.manifest.resolvedExtensions.map((mount) => mount.namespace),
   );
   for (const source of input.manifest.extensions) {
-    // An unresolved mount already failed discovery; binding its declaration would mask that error.
     if (!resolvedNamespaces.has(mountRefNamespace(source.logicalPath))) continue;
     pushModule(source, undefined, input.declarationMountIds?.get(source.sourceId));
   }

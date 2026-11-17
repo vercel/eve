@@ -29,7 +29,6 @@ const tools: readonly ConnectionToolMetadata[] = [
   { description: "List issues.", inputSchema: { type: "object" }, name: "list_issues" },
 ];
 
-/** Bob's tracker connection, whose approval policy records each context it receives. */
 function setup(
   getToolMetadata: ConnectionClient["getToolMetadata"] = async () => tools,
   decide: ApprovalPolicy = () => "user-approval",
@@ -135,10 +134,6 @@ describe("connection tool call", () => {
     name: "subscribe_issues",
   };
 
-  /**
-   * Alice's tracker call. Its provided arguments read who approved it and their token; an event
-   * action, which sends no arguments, reports who its headers say approved it.
-   */
   function call(responder?: SessionAuthContext, toolName = "delete_issue") {
     const connection = {
       connectionName: "tracker",
@@ -230,7 +225,6 @@ describe("connection tool call", () => {
 
 describe("connection tool calls", () => {
   it("runs a call whose omitted argument defaults to null", async () => {
-    // Pydantic publishes `query: str = None` as a string property that defaults to null.
     const search: ConnectionToolMetadata = {
       description: "Search issues.",
       inputSchema: { properties: { query: { default: null, type: "string" } }, type: "object" },
@@ -261,7 +255,6 @@ describe("connection tool calls", () => {
     };
     const entry = connectionEntry(registry, connection, "search_issues");
 
-    // The harness validates the model's input, then runs the tool on the validated value.
     await contextStorage.run(new ContextContainer(), async () => {
       const checked = await (entry.inputSchema as ToolSchema)["~standard"].validate({});
       expect(checked).toEqual({ value: {} });

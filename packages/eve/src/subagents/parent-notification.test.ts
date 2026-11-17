@@ -353,7 +353,6 @@ describe("turn caller notification", () => {
     });
 
     it("leaves the session alive when the caller already took the result or stopped waiting", async () => {
-      // A delivery whose 202 was lost: the caller applied it, so its repeat finds nothing pending.
       fetchMock.mockImplementation(async () => notPending());
       const notified = notify();
       await vi.runAllTimersAsync();

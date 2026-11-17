@@ -115,7 +115,6 @@ describe("authenticateLocalWorkflowDeliveries", () => {
     const { enqueued, recovery, secured, start, listRuns } = createFakeWorld();
     await secured.start?.();
     expect(start).toHaveBeenCalledTimes(1);
-    // A run enqueued before its release would defer to the dead process's steps.
     expect(recovery).toEqual([
       "release wrun_1",
       "enqueue wrun_1",
@@ -125,7 +124,6 @@ describe("authenticateLocalWorkflowDeliveries", () => {
     expect(enqueued).toEqual([
       {
         name: "__evetest_wkf_workflow_entry",
-        // The local queue lost the run's step messages and wait timers.
         message: { runId: "wrun_1", runSpecVersion: 9, recovery: true },
         headers: { [LOCAL_WORKFLOW_DELIVERY_HEADER]: SECRET },
       },

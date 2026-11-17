@@ -30,10 +30,6 @@ import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-/**
- * Compiles the agent-level configuration (model, compaction, build,
- * workspace) for one authored agent node.
- */
 export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
@@ -58,7 +54,6 @@ export async function compileAgentConfig(
         }),
         source: configModule,
       });
-  // A defineDynamic() export gets normalizeAgentDefinition's more specific error.
   if (!isDefinedAgent(authored) && !isDynamicSentinel(authored)) {
     throw new Error(`Export defineAgent({...}) from "${configModulePath}".`);
   }
@@ -116,7 +111,6 @@ export async function compileAgentConfig(
     compiledConfig.description = definition.description;
   }
 
-  // A function can't enter the manifest; the runtime loads it from the agent config module.
   if (definition.approval !== undefined) {
     compiledConfig.approval = true;
   }
@@ -243,7 +237,6 @@ async function normalizeAuthoredModelReference(input: {
     );
   }
 
-  // While in TypeScript `input.value` is safe to use, we still validate below against runtime input.
   const languageModel = input.value;
   const specificationVersion = languageModel.specificationVersion;
 
@@ -285,7 +278,6 @@ async function normalizeAuthoredModelReference(input: {
   if (input.promptCache !== undefined) sourceBackedModel.promptCache = input.promptCache;
 
   if (input.contextWindowTokens === undefined) {
-    // Codex models have no Gateway catalog entry, so use eve's known context limit.
     if (isChatGptModelRouting(sourceBackedModel.routing)) {
       return {
         ...sourceBackedModel,
@@ -293,7 +285,6 @@ async function normalizeAuthoredModelReference(input: {
       };
     }
 
-    // Mock models have no catalog entry or real limit; a large window keeps compaction opt-in.
     if (isMockModel(languageModel)) {
       return {
         ...sourceBackedModel,
@@ -314,9 +305,7 @@ async function normalizeAuthoredModelReference(input: {
           contextWindowTokens: providerResult.contextWindowTokens,
         };
       }
-    } catch {
-      // The slug lookup below resurfaces the catalog error.
-    }
+    } catch {}
   }
 
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);

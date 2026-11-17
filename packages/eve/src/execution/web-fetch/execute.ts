@@ -3,58 +3,32 @@ import { truncateHead } from "#execution/sandbox/truncate-output.js";
 import { convertHtmlToMarkdown, extractTextFromHtml } from "#execution/web-fetch/html.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 
-const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5 MB
-const DEFAULT_TIMEOUT_MS = 30_000; // 30 seconds
-const MAX_TIMEOUT_MS = 120_000; // 2 minutes
+const MAX_RESPONSE_SIZE = 5 * 1024 * 1024;
+const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 120_000;
 
-/**
- * Browser-like User-Agent used for the initial request so servers return
- * full-fidelity content rather than bot-degraded pages.
- */
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 
 type Format = "html" | "markdown" | "text";
 
-/**
- * Typed input accepted by {@link executeWebFetchTool}.
- */
 export interface WebFetchInput {
   readonly format?: Format;
   readonly timeout?: number;
   readonly url: string;
 }
 
-/** Per-call options accepted by {@link executeWebFetchTool}. */
 interface WebFetchExecuteOptions {
-  /** Signal combined with the request timeout. */
   readonly abortSignal?: AbortSignal;
 }
 
-/**
- * Structured result returned from {@link executeWebFetchTool}.
- */
 interface WebFetchResult {
-  /** Response body, bounded to the shared tool-output limits. */
   readonly content: string;
-  /** Response `Content-Type` header. */
   readonly contentType: string;
-  /** Fetched URL. */
   readonly url: string;
-  /** True when {@link content} was shortened to fit the output budget. */
   readonly truncated: boolean;
 }
 
-/**
- * Executes the `web_fetch` framework tool.
- *
- * Fetches the content at the given URL and returns it in the requested
- * format. HTML responses are automatically converted to Markdown or
- * plain text when the caller requests those formats. Responses up to
- * 5 MB are accepted, and the returned {@link WebFetchResult.content}
- * is capped at the shared tool-output budget (50 KB / 2000 lines) so
- * large pages do not exhaust the model's context window.
- */
 export async function executeWebFetchTool(
   args: WebFetchInput,
   options?: WebFetchExecuteOptions,
@@ -79,9 +53,6 @@ export async function executeWebFetchTool(
     signal,
   });
 
-  // Cloudflare may reject browser-like UA strings from Node.js runtimes
-  // because the TLS fingerprint does not match a real browser. Retry with
-  // an honest UA to bypass the challenge.
   const response =
     initial.status === 403 && initial.headers.get("cf-mitigated") === "challenge"
       ? await requestPublicUrl(url, {

@@ -4,8 +4,6 @@ import type ddTrace from "dd-trace";
 
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
-// eve-owned seam over the dd-trace LLM Observability experiments API.
-
 export type DatadogJsonValue =
   | string
   | number
@@ -119,7 +117,6 @@ export interface DatadogEvaluationMetricInput {
   source?: string;
 }
 
-/** Options used when eve initializes `dd-trace` itself. */
 export interface DatadogClientConfig {
   readonly client?: DatadogExperimentsClient;
   readonly service?: string;
@@ -137,7 +134,6 @@ export const MISSING_DATASET_API_MESSAGE = [
   "Update to a release compatible with dd-trace@6.13.0.",
 ].join("\n");
 
-/** Pulls the named dataset, creating it when Datadog has no dataset with that name. */
 export async function getDatadogDataset(
   client: DatadogExperimentsClient,
   name: string,
@@ -152,7 +148,6 @@ export async function getDatadogDataset(
       maxWaitMs: DATASET_PULL_MAX_WAIT_MS,
     });
   } catch (error) {
-    // dd-trace reports a missing dataset only through this message.
     if (!(error instanceof Error) || !error.message.startsWith(`Dataset '${name}' not found`)) {
       throw error;
     }
@@ -160,7 +155,6 @@ export async function getDatadogDataset(
   return client.createDataset(name, options);
 }
 
-/** Returns `config.client`, or initializes `dd-trace` and returns its experiments API. */
 export async function resolveDatadogClient(
   config: DatadogClientConfig,
   projectName: string,

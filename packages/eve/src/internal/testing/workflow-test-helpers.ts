@@ -8,11 +8,6 @@ import {
   type WorkflowFunction,
 } from "#internal/workflow/runtime.js";
 
-/**
- * Starts a session owner run stamped with the running eve version, as
- * `createSession` does. Ingress on single-deployment Worlds treats an owner
- * without the stamp as stranded, so a bare `start` would never accept input.
- */
 export async function startSessionOwner<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult>,
   args: TArgs,
@@ -39,9 +34,6 @@ interface WorkflowHookLike {
   readonly token: string;
 }
 
-/**
- * Waits for a Workflow hook in integration tests.
- */
 export async function waitForHook(
   run: WorkflowRunLike,
   options: { pollInterval?: number; timeout?: number; token?: string } = {},
@@ -81,7 +73,6 @@ export async function waitForHook(
   );
 }
 
-/** Waits until some run holds the hook `token`, and resolves that run. */
 export async function waitForHookOwner(
   token: string,
   timeout = 30_000,

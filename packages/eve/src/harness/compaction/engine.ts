@@ -17,33 +17,15 @@ import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig, CompactionState } from "#harness/types.js";
 
-/**
- * Most of the conversation kept word for word next to a compaction summary.
- * A fixed budget, not a share of the context window: the history after a
- * compaction is the summary plus at most this much, however far the character
- * estimate sits below the provider's count (about 1.6x on URL- and JSON-heavy
- * text), so the next compaction is far off.
- */
 const KEPT_TAIL_TOKENS = 20_000;
 
-/**
- * Element type of a non-string `ModelMessage.content` array.
- */
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 
-// Static envelope estimate stays valid because createCompactionPrompt bounds
-// its transcript to the caller's threshold budget, so the summarization call
-// itself never grows past threshold + envelope + checkpoint.
 const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
 
-/**
- * Best available input-token count: the model-reported count from the last
- * step, plus a rough character-based estimate of whatever messages have been
- * appended since.
- */
 export function getInputTokenCount(
   messages: readonly ModelMessage[],
   config: CompactionState,
@@ -71,16 +53,11 @@ export function getInputTokenCount(
   );
 }
 
-/** The settings without the last measured prompt, which a rewritten history no longer matches. */
 export function withoutPromptMeasurement(config: CompactionState): CompactionState {
   const { lastKnownInputTokens: _input, lastKnownPromptMessageCount: _count, ...rest } = config;
   return rest;
 }
 
-/**
- * The settings with a model-reported prompt measurement and the envelope around it. Without a
- * usable measurement, the next count is an estimate, and no envelope baseline applies.
- */
 export function withPromptMeasurement(
   config: CompactionState,
   measured: {
@@ -101,10 +78,6 @@ export function withPromptMeasurement(
   };
 }
 
-/**
- * Returns true when the message history and fixed compaction-prompt envelope
- * exceed the compaction threshold.
- */
 export function shouldCompact(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
@@ -119,13 +92,11 @@ export function shouldCompact(
   );
 }
 
-/** Summarizes one compaction prompt with the compaction model, returning the summary text. */
 export type CompactionSummarizer = (prompt: {
   readonly messages: ModelMessage[];
   readonly system: string;
 }) => Promise<string>;
 
-/** Conversation regions and config handed to each compaction heuristic. */
 interface CompactionHeuristicInput {
   readonly config: CompactionConfig;
   readonly older: readonly ModelMessage[];
@@ -136,31 +107,14 @@ interface CompactionHeuristicInput {
   readonly tokenEstimateAdjustment: number;
 }
 
-/**
- * A heuristic either produces a complete replacement history that fits the
- * threshold, or signals that the next strategy must run. Heuristics have no
- * failure channel — anything exceptional throws.
- */
 type CompactionHeuristicOutcome =
   | { readonly messages: ModelMessage[]; readonly type: "within-limit" }
   | { readonly type: "insufficient" };
 
 type CompactionHeuristic = (input: CompactionHeuristicInput) => CompactionHeuristicOutcome;
 
-/**
- * Model-free heuristics tried in order before falling back to LLM
- * summarization. Each is a pure transformation of the split conversation;
- * composing a new strategy (pruning variants, protect-lists) means adding an
- * entry here.
- */
 const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolResultCapHeuristic];
 
-/**
- * Caps oversized tool-result outputs in the older region while every message
- * — including its tool calls and the recent tail — stays structurally
- * verbatim. Most history bulk is a handful of large tool outputs, so this
- * usually suffices with no model call and no rewriting.
- */
 function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
   const checkpointHead: ModelMessage[] =
     input.previousCheckpoint === undefined
@@ -172,10 +126,6 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
   const kept = [...checkpointHead, ...capToolResults(input.older), ...input.recent];
   const capped = input.resume ? resumeAfter(kept, input.replay, input.config.threshold) : kept;
 
-  // Evaluate on the same ruler shouldCompact uses (envelope included):
-  // capping can be a near no-op when the older region holds few large
-  // results, and accepting one on a looser ruler would let shouldCompact
-  // re-fire every step without compaction ever making progress.
   const evaluation = evaluateThreshold(
     capped,
     input.config,
@@ -187,12 +137,6 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
     : { type: "insufficient" };
 }
 
-/**
- * Measures a candidate history against the compaction threshold.
- * The "should-compact" ruler includes the fixed prompt-envelope overhead that
- * {@link shouldCompact} adds, so a history accepted on it cannot immediately
- * re-trigger compaction; "estimate" is the bare history size.
- */
 function evaluateThreshold(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
@@ -207,22 +151,12 @@ function evaluateThreshold(
   };
 }
 
-/**
- * Compacts messages by escalation: try each {@link CompactionHeuristic} in
- * order, then fall back to summarizing the older region with the compaction
- * model — keeping the recent tail verbatim when it fits, degrading it to
- * text-only, then shrinking the window.
- */
 export async function compactMessages(
   messages: ModelMessage[],
   config: CompactionConfig,
   summarize: CompactionSummarizer,
   forceSummary = false,
   historyInputTokenCount?: number,
-  /**
-   * Whether a request is waiting on the next model call. Between turns every request has its
-   * answer, and the next turn's input follows the summary: nothing is replayed or prompted.
-   */
   resume = true,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
@@ -231,8 +165,6 @@ export async function compactMessages(
   const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
 
-  // The current request is replayed after every compaction. One over the tail
-  // budget keeps its start and end; the cut-out middle goes to the summarizer.
   const planTail = (history: readonly ModelMessage[]) => {
     const index = resume ? findLastRealUserIndex(history) : -1;
     const current = history[index];
@@ -240,7 +172,6 @@ export async function compactMessages(
     const replay = fit?.replay ?? current;
     let keep = selectRecentWindowSize(history, recentConfig, budget);
     if (replay !== undefined && index < history.length - keep) {
-      // The window leaves the request out, so it is replayed after the summary.
       keep = selectRecentWindowSize(
         history,
         recentConfig,
@@ -257,9 +188,6 @@ export async function compactMessages(
       return keepNonToolResultMessages(recent);
     }
 
-    // Capping preserves most of the measured prompt. Retain any known
-    // underestimate while crediting only the estimated tokens it removes.
-    // A new summary replaces that prompt, so it uses its own estimate below.
     const tokenEstimateAdjustment = Math.max(
       0,
       (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
@@ -280,15 +208,12 @@ export async function compactMessages(
     }
   }
 
-  // Tool results in the kept tail are shortened on this path only: one large
-  // file read would otherwise take the whole tail budget.
   const cappedConversation = capToolResults(conversation);
   const summaryPlan = planTail(cappedConversation);
   const { currentIndex, fit, keep, replay } = summaryPlan;
 
   const current = currentIndex < 0 ? undefined : cappedConversation[currentIndex];
   const noFiles = current === undefined ? undefined : omitFiles(current);
-  // The least a compaction can be: the checkpoint and the request, or its cut to a note if that is shorter.
   const floorCut = noFiles === undefined ? undefined : fitCurrentMessage(noFiles, 1)?.replay;
   const floorRequest =
     noFiles !== undefined &&
@@ -322,10 +247,6 @@ export async function compactMessages(
   const fits = (candidate: readonly ModelMessage[]) =>
     evaluateThreshold(candidate, config, "estimate").type === "within-limit";
 
-  // Prefer keeping the recent tail verbatim — surviving tool results are the
-  // model's evidence that work already ran. Degrade to text-only, then drop
-  // the tail, then clip the summary, then cut the request: never summarize
-  // again, since a smaller tail does not make the summary smaller.
   const verbatim = withResumptionGuard(
     [...checkpointHead(summary), ...recent],
     replay,
@@ -350,8 +271,6 @@ export async function compactMessages(
     return noTail;
   }
 
-  // Last, the summary is clipped to the largest piece that fits beside the
-  // request; undefined when the request leaves it no room at all.
   const withClippedSummary = (request: ModelMessage | undefined): ModelMessage[] | undefined => {
     const build = (chars: number) =>
       withResumptionGuard(
@@ -384,8 +303,6 @@ export async function compactMessages(
     return clipped;
   }
 
-  // The request itself is over: a file it carries gives way to a note first,
-  // then its text is cut to the room that is left.
   const requestBudget =
     config.threshold -
     estimateTokens(withResumptionGuard(checkpointHead(""), undefined, config.threshold));
@@ -406,18 +323,6 @@ const CAPPED_RESULT_ANNOTATION =
   "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
 const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
 
-/**
- * Caps oversized tool-result outputs in place, keeping message structure and
- * tool_use/tool_result pairing untouched. The cap matches the transcript
- * payload clip, so a later summarization sees the same content the model
- * kept — capping never destroys material the summarizer would need, unlike
- * dropping results outright. The cap keeps the head and tail of the output,
- * where failures and exit codes usually are.
- *
- * Capping is idempotent: the capped value, annotation included, fits the
- * same limit it was measured against, and a text output is measured by its
- * value, so a later compaction leaves an already-capped part as it is.
- */
 function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
     if (message.role !== "tool" || typeof message.content === "string") {
@@ -429,9 +334,6 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       if (part.type !== "tool-result") {
         return part;
       }
-      // File parts of a content output reduce to their text stubs before the
-      // size check: serializing raw payloads into a prefix cap would keep
-      // bytes the model cannot read while cutting the text it can.
       const output = stubContentOutputFileParts(part.output) as typeof part.output;
       const serialized = serializeToolResultOutput(output);
       if (serialized.length <= TRANSCRIPT_PAYLOAD_LIMIT) {
@@ -446,7 +348,6 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       return {
         ...part,
         output: {
-          // A capped failure stays a failure for the model.
           type: output.type === "error-text" ? ("error-text" as const) : ("text" as const),
           value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,
         },
@@ -457,15 +358,6 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
   });
 }
 
-/**
- * Providers that don't support assistant prefill reject a request that ends on
- * assistant content, so compaction must resume from a user turn. Rather than
- * a contentless framework prompt, replay the conversation's last real user
- * message when compaction folded it away — the model resumes against its
- * actual instruction, with the checkpoint as background. Falls back to
- * "Continue." when the last real user message still survives in the kept
- * messages (the model was mid-work on it) or none exists.
- */
 function resumeAfter(
   messages: ModelMessage[],
   replay: ModelMessage | undefined,
@@ -477,9 +369,6 @@ function resumeAfter(
     messages.some((message) => message.role === "user" && message.content === replay.content);
 
   if (lastRole !== undefined && lastRole !== "assistant") {
-    // A retained tool tail must not displace a task that can fit in the budget.
-    // Including it here lets tail selection make room before accepting a candidate.
-    // A provider tool's pending result must directly follow the tail, so nothing joins it.
     if (
       lastRole === "tool" &&
       replay !== undefined &&
@@ -500,21 +389,11 @@ function resumeAfter(
   ];
 }
 
-/**
- * Splits `message` when it exceeds the tail budget, or returns `undefined`
- * when it already fits. `replay` keeps the start (a fifth of the budget) and
- * the end of its text, behind a note where the middle was cut; `cut` is that
- * middle, which the summarizer receives in full. Instructions sit at the
- * start or the end of a request and bulk pasted text in the middle. Non-text
- * parts (files) stay on the replay.
- */
 function fitCurrentMessage(
   message: ModelMessage,
   budget: number,
 ): { readonly cut: ModelMessage; readonly replay: ModelMessage } | undefined {
   const text = messageText(message);
-  // The replay keeps the message's file parts, so when they alone take the
-  // budget, cutting its text frees nothing.
   if (text === undefined || budget <= 0 || estimateTokens([message]) <= budget) {
     return undefined;
   }
@@ -544,7 +423,6 @@ function fitCurrentMessage(
   return split(0, text.length);
 }
 
-/** Below this the clip marker would not fit: the summary keeps only its start. */
 const MIN_CLIP_CHARS = 40;
 
 const OMITTED_FILE_NOTE =
@@ -557,7 +435,6 @@ function checkpointHead(summary: string): ModelMessage[] {
   ];
 }
 
-/** Replaces every non-text part of a message with one note. */
 function omitFiles(message: ModelMessage): ModelMessage {
   if (typeof message.content === "string") {
     return message;
@@ -575,7 +452,6 @@ function omitFiles(message: ModelMessage): ModelMessage {
   return noted ? ({ ...message, content: parts } as ModelMessage) : message;
 }
 
-/** The text a user message can be cut by: its string content, or its text parts joined in order. */
 function messageText(message: ModelMessage): string | undefined {
   if (typeof message.content === "string") {
     return message.content;
@@ -586,11 +462,6 @@ function messageText(message: ModelMessage): string | undefined {
 
 type MessagePart = Exclude<ModelMessage["content"], string>[number];
 
-/**
- * Cuts characters `start` to `end` of {@link messageText}: `cut` keeps only
- * that middle, `replay` keeps the rest with `note` at the cut. Non-text parts
- * stay on both.
- */
 function splitMessageText(
   message: ModelMessage,
   start: number,
@@ -673,14 +544,6 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
   };
 }
 
-/**
- * Returns the kept tail for a compacted history: recent messages with tool
- * activity removed. Tool-result messages are dropped, and assistant messages are
- * reduced to their text content (tool-call and reasoning parts stripped) so the
- * rebuilt history never carries a tool_use without its matching result.
- * Assistant messages with no remaining text are dropped; user messages are kept
- * verbatim.
- */
 function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMessage[] {
   const kept: ModelMessage[] = [];
 
@@ -703,10 +566,6 @@ function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMess
   return kept;
 }
 
-/**
- * Concatenated text content of an assistant message, ignoring tool-call,
- * reasoning, and other non-text parts.
- */
 function assistantMessageText(message: ModelMessage): string {
   if (typeof message.content === "string") {
     return message.content.trim();
@@ -766,10 +625,6 @@ function splitMessagesForCompaction(
     };
   }
 
-  // The recent tail survives verbatim, so it must not open with tool results
-  // whose tool calls fall in the older region — providers reject a tool_result
-  // without its preceding tool_use. Snap such messages into the older region,
-  // including a response that opens with a deferred provider tool result.
   let split = messages.length - keep;
   while (split < messages.length && opensWithEarlierResult(messages[split]!)) {
     split += 1;

@@ -47,11 +47,6 @@ async function resolveChatGptAuthState(): Promise<ChatGptAuthState> {
   }
 }
 
-/**
- * Mirrors the AI Gateway credential selection order. The Vercel OIDC SDK owns
- * request-context, environment, and linked-project token resolution; lookup
- * failure means the gateway is unavailable and must not break agent inspection.
- */
 async function resolveGatewayCredentialPresence(
   routing: ModelRouting,
 ): Promise<GatewayCredentialPresence> {
@@ -84,9 +79,6 @@ async function resolveGatewayCredentialPresence(
   }
 }
 
-/**
- * Builds the package-owned JSON inspection response for the current agent.
- */
 export async function handleAgentInfoRequest(input: NitroArtifactsConfig): Promise<Response> {
   return new Response(JSON.stringify(await createAgentInfoPayload(input)), {
     headers: {

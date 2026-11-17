@@ -7,13 +7,6 @@ import { EveTUIRunner, FakeEveServer, MockScreen, MockUserInput } from "./lib/tu
 
 import { theme } from "./lib/theme.ts";
 
-/**
- * Drives sign-in interaction opening and settlement through the runner and renderer. The fake
- * server supplies a callback after the parked challenge, covering its URL, code, instructions,
- * successful completion, and a failed sign-in's reason without interactive OAuth.
- */
-
-/** A turn that opens a sign-in for `name` and pauses on it, leaving its delivery open. */
 function signInTurn(input: {
   readonly deliveryId: string;
   readonly turnId: string;
@@ -69,7 +62,6 @@ function signInTurn(input: {
   ];
 }
 
-/** The sign-in's callback: it settles the interaction, and the turn resumes and completes. */
 function callbackTurn(input: {
   readonly turnId: string;
   readonly name: string;
@@ -168,8 +160,6 @@ void (async () => {
   try {
     await screen.waitForIdlePrompt(5_000);
 
-    // ---- Turn 1: stub-mcp, ends in `authorized` ----
-
     input.type("turn 1, drive stub-mcp through required → authorized");
     input.enter();
 
@@ -193,7 +183,6 @@ void (async () => {
     );
     console.log(theme.muted("[states] URL, code, and instructions all rendered"));
 
-    // The browser completes the grant; the callback resumes the parked session.
     server.emit(firstCallbackTurn);
 
     await waitForCondition(() => screen.snapshot().includes("authorized"), {
@@ -222,11 +211,7 @@ void (async () => {
     );
     console.log(theme.muted("[states] completed authorization body replaced the challenge"));
 
-    // Let the first turn settle so the next message starts a new turn
-    // instead of steering this one.
     await screen.waitForIdlePrompt(5_000);
-
-    // ---- Turn 2: other-mcp, ends in `failed` with a reason ----
 
     input.type("turn 2, drive other-mcp through required → failed");
     input.enter();
@@ -248,8 +233,6 @@ void (async () => {
     });
     console.log(theme.muted("[states] failure reason surfaced"));
 
-    // The turn is complete; wait until the runner is back at the prompt so
-    // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
     await screen.waitForIdlePrompt(10_000);
     input.ctrlC();
     input.ctrlC();
@@ -258,7 +241,6 @@ void (async () => {
   } catch (error) {
     input.ctrlC();
     input.ctrlC();
-    // A runner stuck mid-turn may ignore Ctrl+C; don't let that mask the failure.
     await Promise.race([runPromise.catch(() => undefined), sleep(2_000)]);
     throw error;
   }

@@ -115,7 +115,6 @@ describe("resolveDevelopmentClientOptions", () => {
     expect(options.baseUrl).toBe("https://verified.example.com");
     expect(options.redirect).toBe("manual");
     expect(options.headers).toBe(credentials.resolveBypassHeaders);
-    // The token flows through the higher-level vercelOidc auth, never headers.
     expect(options.auth).toEqual({ vercelOidc: { token: expect.any(Function) } });
   });
 

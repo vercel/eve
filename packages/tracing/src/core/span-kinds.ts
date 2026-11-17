@@ -246,7 +246,6 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
         attributes: {
           ...context.attributes,
           ...frameworkAttributes(context.identity.framework),
-          // A wait the turn holds belongs to no step.
           ...(options.callId === undefined
             ? { "agent.turn.id": context.attempt.turnId }
             : attemptAttributes(context)),
@@ -284,7 +283,6 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
         name: decisionName(options.modelId),
         kind: "CLIENT",
         attributes: {
-          // A decision made outside any run has no run identity to record.
           ...(context.identity.runId === "" ? undefined : context.attributes),
           ...namingAttributes(decisionName(options.modelId), "decision"),
           "gen_ai.agent.name": context.identity.agentName,
@@ -363,7 +361,6 @@ export function completeScope(
   serializer: ContentSerializer,
 ): void {
   const outcome = result.outcome ?? (result.failed ? "failed" : "completed");
-  // A failure is always recorded; otherwise an unknown outcome leaves the span without one.
   const known = result.outcomeUnknown !== true || result.failed === true;
   if ((data.type === "activation" || data.type === "approval") && known)
     applyAttributes(span, {

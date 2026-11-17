@@ -7,14 +7,11 @@ import {
 } from "#setup/verified-remote-client.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-/** Result of inspecting an authenticated remote eve agent. */
 export interface VerifiedRemoteAgentInspection {
   readonly info: AgentInfoResult;
-  /** Verified Vercel scope to retain when reconnecting to the same deployment. */
   readonly vercelScope?: string;
 }
 
-/** Dependencies for testing verified remote inspection. */
 export interface InspectVerifiedRemoteAgentDeps {
   readonly createClient: (options: ClientOptions) => Pick<Client, "info">;
   readonly resolveVerifiedRemoteDevelopmentClient: (
@@ -29,19 +26,12 @@ const defaultDeps: InspectVerifiedRemoteAgentDeps = {
   runRemoteAuthFlow,
 };
 
-/**
- * Inspects a remote eve agent using the same exact-origin credential boundary
- * as remote development clients. When a verified Vercel target needs login or
- * Trusted Sources configuration, an optional prompter completes that flow
- * before inspection is retried.
- */
 export async function inspectVerifiedRemoteAgent(input: {
   readonly headers?: Readonly<Record<string, string>>;
   readonly serverUrl: string;
   readonly workspaceRoot: string;
   readonly prompter?: Prompter;
   readonly signal?: AbortSignal;
-  /** @internal Test seam. */
   readonly deps?: Partial<InspectVerifiedRemoteAgentDeps>;
 }): Promise<VerifiedRemoteAgentInspection> {
   const deps = { ...defaultDeps, ...input.deps };

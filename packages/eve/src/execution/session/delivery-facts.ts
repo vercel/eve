@@ -8,28 +8,17 @@ import type { Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
 import type { DeliveryRow } from "#protocol/session-projection/tables.js";
 
-// A delivery's facts at the step that admits it: every payload is admitted, a payload the
-// channel's `deliver` hook ignored settles `ignored` at once, and the rest go on to the turn,
-// which consumes them. Deliveries are admitted at step boundaries, since only steps write.
-
-/**
- * What one step admits: the deliveries it records first, and each consumed payload's input,
- * carrying its delivery and each answer bound to the response it submits.
- */
 export interface DeliveryAdmission {
   readonly deliveries: readonly AdmittedDelivery[];
   readonly inputs: readonly HarnessStepInput[];
 }
 
 export function planAdmission(input: {
-  /** The delivery as the session accepted it. */
   readonly delivery: DeliverHookPayload;
-  /** The payloads left once sign-in callbacks were matched out, with what `deliver` made of each. */
   readonly payloads: readonly {
     readonly payload: DeliverPayload;
     readonly input: StepInput | undefined;
   }[];
-  /** The delivery's recorded status, including facts an interrupted attempt already wrote. */
   readonly status?: (deliveryId: string) => DeliveryRow["status"] | undefined;
   readonly channelKind: string;
 }): DeliveryAdmission {
@@ -50,8 +39,6 @@ export function planAdmission(input: {
       hook: metadata.hook,
       scheduleId: delivery.schedule?.definition,
     });
-    // Turn context stays out of facts: stream readers may see it, and the turn reads it from
-    // the payload and its private state instead.
     const status = input.status?.(deliveryId);
     if (stepInput === undefined) {
       if (status !== "settled")
@@ -92,7 +79,6 @@ export function planAdmission(input: {
   return { deliveries, inputs };
 }
 
-/** Who sent a delivery, as the wire names them. */
 export function principalOf(auth: SessionAuthContext | null | undefined): Principal | undefined {
   if (auth === undefined || auth === null) return undefined;
   return defined({ id: auth.principalId, issuer: auth.issuer, type: auth.principalType });

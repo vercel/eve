@@ -18,76 +18,25 @@ import { discoverMarkdownSource } from "#discover/markdown.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
 import { collectNamedSlotCandidates } from "#discover/slots.js";
 
-/**
- * Shared input shape for {@link discoverNamedSourceDirectory}.
- *
- * The walker collects authored `.ts/.cts/.mts/.js/.cjs/.mjs` modules under
- * one named root (e.g. `tools/`, `channels/`, `hooks/`) and — when
- * `allowMarkdown` is set — also `.md` files lowered through
- * `markdownLowerer` (e.g. `schedules/`). The walker emits a
- * `DISCOVER_SLOT_COLLISION` when a slot has both a markdown and module
- * file of the same base name.
- */
 interface DiscoverNamedSourceDirectoryBaseInput {
-  /**
-   * Top-level directory name relative to `rootPath`
-   * (eg. `"tools"`, `"channels"`, `"hooks"`).
-   */
   directoryName: string;
-  /**
-   * Diagnostic code emitted when `directoryName` exists but is not a
-   * directory.
-   */
   invalidDirectoryCode: string;
-  /**
-   * Diagnostic message emitted when `directoryName` exists but is not a
-   * directory.
-   */
   invalidDirectoryMessage: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
   source: ProjectSource;
-  /**
-   * Whether to descend into subdirectories. When `false`, only leaf files
-   * directly inside `directoryName` are considered.
-   */
   recursive: boolean;
-  /**
-   * Validates each path segment encountered during the walk. Called for
-   * every leaf slot name and, when `recursive`, every subdirectory name.
-   * Failed segments produce a diagnostic and the candidate is dropped.
-   */
   validateSegment?: (segment: string, sourcePath: string) => DiscoverDiagnostic | null;
-  /**
-   * When set, emit this diagnostic for any leaf file that is neither a
-   * supported authored module nor (when allowed) a markdown file. When
-   * unset, unrecognized leaf files are silently ignored — used by
-   * `tools/`, `channels/`, `hooks/`, and `lib/` so authors can drop
-   * incidental files (or JSON data imported by a module) into those
-   * directories without build errors.
-   */
   unsupportedFileCode?: string;
   unsupportedFileMessage?: (sourcePath: string, directoryName: string) => string;
-  /**
-   * When set, emit this diagnostic for any directory entry that is neither
-   * a regular file nor a directory (sockets, FIFOs, etc.). Pairs with
-   * `unsupportedFileCode` for callers that want strict leaf checking.
-   */
   unsupportedEntryCode?: string;
   unsupportedEntryMessage?: (sourcePath: string, directoryName: string) => string;
 }
 
-/**
- * Module-only walker input. Markdown leaves are not collected.
- */
 export interface DiscoverNamedSourceDirectoryModuleInput extends DiscoverNamedSourceDirectoryBaseInput {
   allowMarkdown?: false;
 }
 
-/**
- * Module-or-markdown walker input. Markdown leaves are lowered through
- * the supplied `markdownLowerer`.
- */
 export interface DiscoverNamedSourceDirectoryWithMarkdownInput<
   TDefinition,
 > extends DiscoverNamedSourceDirectoryBaseInput {
@@ -95,18 +44,6 @@ export interface DiscoverNamedSourceDirectoryWithMarkdownInput<
   markdownLowerer: (markdown: string, input: { name: string }) => TDefinition;
 }
 
-/**
- * Discovers one named directory of authored sources, supporting flat or
- * recursive walks and (optionally) markdown leaves alongside modules.
- *
- * Used by the `tools/` (flat), `channels/` (recursive), `hooks/`
- * (recursive), `lib/` (recursive), and `schedules/` (recursive,
- * markdown-or-module) slots.
- *
- * Returned `sources` preserve depth-first walk order: subdirectories are
- * traversed before leaf files at each level, and entries are alphabetically
- * sorted within each level.
- */
 export async function discoverNamedSourceDirectory(
   input: DiscoverNamedSourceDirectoryModuleInput,
 ): Promise<{
@@ -179,21 +116,9 @@ interface WalkNamedSourceDirectoryInput<TDefinition> {
   markdownLowerer?: (markdown: string, input: { name: string }) => TDefinition;
   projectSource: ProjectSource;
   recursive: boolean;
-  /**
-   * Logical path prefix used when constructing source ref `logicalPath`s.
-   * Always begins with the user-supplied root directory name
-   * (eg. `channels` or `hooks`).
-   */
   relativeDirectory: string;
-  /**
-   * Absolute path to the root of the slot tree on disk.
-   */
   rootDirectoryPath: string;
   sources: (MarkdownSourceRef<TDefinition> | ModuleSourceRef)[];
-  /**
-   * Subpath beneath `rootDirectoryPath` for the directory currently being
-   * walked. Empty at the top of the walk.
-   */
   subdirectoryRelative: string;
   unsupportedEntryCode?: string;
   unsupportedEntryMessage?: (sourcePath: string, directoryName: string) => string;
@@ -211,9 +136,6 @@ async function walkNamedSourceDirectory<TDefinition>(
       : join(input.rootDirectoryPath, input.subdirectoryRelative);
   const directoryEntries = await readSortedDirectoryEntries(input.projectSource, absoluteDirectory);
 
-  // Recurse into subdirectories first so deeply-nested files appear in a
-  // stable, depth-first order. Skipped entirely when `recursive` is false
-  // (eg. flat `tools/` slot).
   if (input.recursive) {
     await walkSubdirectories(input, directoryEntries, absoluteDirectory);
   }
@@ -379,7 +301,6 @@ async function collectLeafSources<TDefinition>(
       const markdownLogicalPath = normalizeLogicalPath(join(input.relativeDirectory, fileSubpath));
 
       if (input.markdownLowerer === undefined) {
-        // Defensive: should never happen because allowMarkdown gates lower.
         continue;
       }
 

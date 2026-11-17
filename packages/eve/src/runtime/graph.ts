@@ -4,22 +4,10 @@ import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import type { ResolvedAgent, ResolvedChannelDefinition } from "#runtime/types.js";
 
-/**
- * Stable node id used by the runtime-owned graph bundle for the root agent.
- */
 export const ROOT_RUNTIME_AGENT_NODE_ID = "__root__";
 
-/**
- * One resolved runtime-owned agent node in the recursive compiled graph.
- */
 export interface ResolvedRuntimeAgentNode {
   readonly agent: ResolvedAgent;
-  /**
-   * The merged set of channels (framework defaults + authored overrides
-   * minus authored disables) that the Nitro mounting loop should mount.
-   * Computed by `resolve-agent-graph.ts` so the host plumbing never has to
-   * combine framework defaults with the resolved-agent's authored channels.
-   */
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly nodeId: string;
   readonly sandboxRegistry: RuntimeSandboxRegistry;
@@ -29,18 +17,11 @@ export interface ResolvedRuntimeAgentNode {
   readonly turnAgent: RuntimeTurnAgent;
 }
 
-/**
- * Recursive runtime-owned compiled graph bundle shared across root and child
- * subagent execution.
- */
 export interface ResolvedAgentGraphBundle {
   readonly nodesByNodeId: ReadonlyMap<string, ResolvedRuntimeAgentNode>;
   readonly root: ResolvedRuntimeAgentNode;
 }
 
-/**
- * Resolves one runtime-owned agent node from the compiled recursive graph.
- */
 export function getResolvedRuntimeAgentNode(
   bundle: ResolvedAgentGraphBundle,
   nodeId: string | undefined,

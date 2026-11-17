@@ -28,8 +28,6 @@ describe("local world stream reads", () => {
     await writeFile(join(chunkDir, `${name}.bin`), Buffer.from(eof ? [1] : [0, 120]));
   }
 
-  // Back-date the directory past the listing cache's mtime margin, as for a stream
-  // that has not been written to for a few seconds.
   async function settle(): Promise<void> {
     const past = new Date(Date.now() - 60_000);
     await utimes(chunkDir, past, past);
@@ -84,8 +82,6 @@ describe("local world stream reads", () => {
     const streams = createWorld({ dataDir }).streams;
     await streams.getInfo(RUN_ID, STREAM);
 
-    // Sorts between chunk 9 and chunk 10, like a close() whose id was taken before
-    // later writes landed, or the all-zero purge tombstone.
     await writeChunk(`${chunkName(9)}0`, true);
     resetCounts();
 

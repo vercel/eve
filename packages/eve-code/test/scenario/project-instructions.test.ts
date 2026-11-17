@@ -13,12 +13,10 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-/** Runs the reader's one command with local bash against a temporary workspace. */
 async function withWorkspace(
   files: Readonly<Record<string, string>>,
   check: (read: () => Promise<ProjectInstructionsFile | null>, root: string) => Promise<void>,
 ): Promise<void> {
-  // A quote in the root path proves the command quotes its paths.
   const root = await mkdtemp(join(tmpdir(), "eve-code-project's-"));
   try {
     for (const [name, content] of Object.entries(files)) await writeFile(join(root, name), content);

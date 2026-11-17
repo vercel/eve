@@ -21,7 +21,6 @@ describe("answersIdempotencyKey", () => {
     const key = await answersIdempotencyKey(delivery("d-1"), "child-a");
     expect(key).toMatch(/^eve-answers:[0-9a-f]{64}$/);
     await expect(answersIdempotencyKey(delivery("d-1"), "child-a")).resolves.toBe(key);
-    // Another child, or another delivery, is another set of answers.
     await expect(answersIdempotencyKey(delivery("d-1"), "child-b")).resolves.not.toBe(key);
     await expect(answersIdempotencyKey(delivery("d-2"), "child-a")).resolves.not.toBe(key);
   });

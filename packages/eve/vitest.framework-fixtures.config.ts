@@ -1,12 +1,5 @@
 import { defineConfig } from "vitest/config";
 
-/**
- * Framework fixture smoke builds.
- *
- * Builds the example apps under `apps/frameworks` against the workspace eve
- * dist. These run in their own CI job, apart from the scenario tier, and
- * require a prebuilt workspace (`pnpm build`).
- */
 export default defineConfig({
   resolve: {
     alias: [

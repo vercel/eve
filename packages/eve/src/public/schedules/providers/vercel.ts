@@ -19,14 +19,12 @@ import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.
 const DEVELOPMENT_PROVIDER = inMemoryScheduleProvider();
 const CLIENT_OPTIONS = new WeakMap<ScheduleProvider, VercelScheduleProviderOptions>();
 
-/** Client options of a Vercel provider, so delivery verification talks to the same endpoint. */
 export function readVercelScheduleClientOptions(
   provider: ScheduleProvider,
 ): VercelScheduleProviderOptions | undefined {
   return CLIENT_OPTIONS.get(provider);
 }
 
-/** Sent with every Schedules API request so Vercel Schedules can attribute eve's traffic. */
 export const VERCEL_SCHEDULES_CLIENT_HEADERS: Readonly<Record<string, string>> = {
   "x-vss-framework": "eve",
 };

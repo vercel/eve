@@ -139,7 +139,6 @@ describe("bootInitialOwner", () => {
 
     const boot = await bootPromise;
     expect(boot?.session.initialTurnControl).toBeDefined();
-    // The session loop starts the timer, once ownership is confirmed.
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     await boot!.session.sessionTimeoutControl!.start();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();

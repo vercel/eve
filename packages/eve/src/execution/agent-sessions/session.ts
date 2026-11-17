@@ -39,11 +39,6 @@ type AgentTurnEnd =
   | { readonly kind: "ended"; readonly result: AgentMessageResult<unknown> }
   | { readonly kind: "failed"; readonly error: unknown };
 
-/**
- * Opens `ctx.agent` sessions for a workflow run. A handle's position in the
- * run names its session, so replay reaches the same one, and `close` ends
- * every session the run opened, cancelling any turn still running.
- */
 export function createAgentSessions(
   run: WorkflowToolRunContext,
   usage: RunUsageTally,
@@ -69,10 +64,6 @@ export function createAgentSessions(
   };
 }
 
-/**
- * A sent message awaiting its reply. The reply, and the questions asked while
- * the agent works on the message, arrive on the message's own hook.
- */
 interface AwaitedReply {
   readonly ended: Promise<AgentTurnEnd>;
   readonly hook: Hook<AgentTurnReply>;
@@ -84,19 +75,11 @@ class RunAgentSession implements AgentSession {
   readonly #name: string;
   readonly #options: AgentSessionOptions;
   readonly #run: WorkflowToolRunContext;
-  /** Every session the run opened, which it ends when it finishes. */
   readonly #sessions: OpenedAgentSession[];
-  /** What the run's sessions spent, which the run reports to its calling session. */
   readonly #usage: RunUsageTally;
   #opened: Promise<OpenedAgentSession> | undefined;
   #opener: WorkflowToolRunContext["from"] | undefined;
-  /** Oldest first: the order the messages were sent, which is the order the agent admits them. */
   readonly #awaited: AwaitedReply[] = [];
-  /**
-   * The handle's last delivery, settled or not. Each message is delivered only after the one
-   * sent before it was accepted, so the agent admits messages in the order `#awaited` lists
-   * their replies. A turn's end settles a prefix of `#awaited`, which is correct only then.
-   */
   #delivered: Promise<void> = Promise.resolve();
 
   constructor(input: {
@@ -120,17 +103,10 @@ class RunAgentSession implements AgentSession {
     options: AgentSendOptions<TOutput> = {},
   ): Promise<AgentResponse<TOutput>> {
     message = normalizeAgentMessage(message);
-    // The reply's shape and the child's output mode must agree on whether a
-    // schema was requested, and an empty one requests none.
     const outputSchema = normalizeRequestedOutputSchema(
       serializeOutputSchema(options.outputSchema),
     );
-    // Unlike hooks the session can answer at once, this one isn't registered
-    // before its token goes out: the child resumes it only after booting and
-    // finishing a turn, long after this suspension writes the hook.
     const reply = this.#awaitReply(outputSchema !== undefined);
-    // The run's auth, call, and context follow the call it serves now; a queued message keeps
-    // those of the call it was sent for.
     const sender: AgentSessionSender = { context: this.#run.agentContext, from: this.#run.from };
     const sending: AgentSessionMessage = {
       auth: this.#run.auth,
@@ -139,7 +115,6 @@ class RunAgentSession implements AgentSession {
       replyTo: reply.hook.token,
     };
     const delivery = this.#delivered.then(() => this.#deliver(sending, sender));
-    // A failed delivery fails only its own send; the next message is still delivered.
     this.#delivered = delivery.catch(() => undefined);
     try {
       await delivery;
@@ -165,11 +140,6 @@ class RunAgentSession implements AgentSession {
     return reply;
   }
 
-  /**
-   * Forwards the turn's questions up to the session and returns its end. The
-   * turn's usage is tallied before its end settles any reply, so the reply the
-   * body sends with the turn's result carries it.
-   */
   async #readTurn(hook: Hook<AgentTurnReply>, expectsData: boolean): Promise<AgentTurnEnd> {
     try {
       for await (const reply of hook) {
@@ -191,7 +161,6 @@ class RunAgentSession implements AgentSession {
                           resolverId: address.resolverId,
                           url: address.url,
                           sessionId: address.sessionId,
-                          // Answers go back in the protocol the child speaks.
                           ...(address.earlierProtocol !== undefined && {
                             earlierProtocol: address.earlierProtocol,
                           }),
@@ -223,12 +192,6 @@ class RunAgentSession implements AgentSession {
     }
   }
 
-  /**
-   * A turn reports to the latest message it read, and the messages sent before
-   * it that still await a reply joined the same turn, so its end settles them
-   * all. A message the agent reads only after its turn ended starts the next
-   * turn and gets that turn's reply.
-   */
   async #settleThrough(reply: AwaitedReply, end: AgentTurnEnd): Promise<void> {
     const index = this.#awaited.indexOf(reply);
     if (index < 0) return;
@@ -238,26 +201,18 @@ class RunAgentSession implements AgentSession {
     }
   }
 
-  /**
-   * Delivers one message after every message sent before it, and records the accepted
-   * delivery for the call it was sent for. Serialized sends behave as sequential ones: a send
-   * queued behind a failed open opens the session itself.
-   */
   async #deliver(message: AgentSessionMessage, sender: AgentSessionSender): Promise<void> {
     const { from } = sender;
     let receipt: AgentSessionReceipt;
     if (this.#opened === undefined) {
       const opening = this.#open(message, sender);
       this.#opened = opening.then(({ opened }) => opened);
-      // `opening` reports a failed open to this send.
       this.#opened.catch(() => undefined);
       ({ receipt } = await opening);
     } else {
       const opened = await this.#opened;
       receipt = await sendAgentSessionMessageStep({ ...message, ...opened });
       if (receipt.sessionId !== opened.address.sessionId) {
-        // The replacement is announced once, before any delivery is linked to it; later
-        // messages are delivered to it.
         const redirected = {
           ...opened,
           address: { ...opened.address, sessionId: receipt.sessionId },
@@ -281,11 +236,6 @@ class RunAgentSession implements AgentSession {
     });
   }
 
-  /**
-   * Opens the session as a child of the call the opening message was sent for.
-   * Its lineage and trace come from that call, and its later messages keep them
-   * even when the run serves another call by then; each message carries its own auth.
-   */
   async #open(
     message: AgentSessionMessage,
     { context, from }: AgentSessionSender,
@@ -313,7 +263,6 @@ class RunAgentSession implements AgentSession {
     }
   }
 
-  /** Aborting cancels only the turn the message went to, never a later one. */
   #cancelTurnOnAbort(reply: AwaitedReply, signal: AbortSignal): void {
     const cancel = (): void => {
       if (!this.#awaited.includes(reply) || this.#opened === undefined) return;
@@ -327,7 +276,6 @@ class RunAgentSession implements AgentSession {
   }
 }
 
-/** The call a message was sent for: the lineage a session it opens binds, and its delivery record. */
 interface AgentSessionSender {
   readonly context: WorkflowToolRunContext["agentContext"];
   readonly from: WorkflowToolRunContext["from"];
@@ -336,9 +284,7 @@ interface AgentSessionSender {
 async function releaseHook(hook: Hook<AgentTurnReply>): Promise<void> {
   try {
     await disposeHook(hook);
-  } catch {
-    // The reply already has its outcome; releasing its hook is best effort.
-  }
+  } catch {}
 }
 
 function unwrapTurnEnd(end: AgentTurnEnd): AgentMessageResult<unknown> {

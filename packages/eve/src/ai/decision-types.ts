@@ -1,5 +1,3 @@
-// Question and answer shapes adapted from AI SDK 7.0.137 (Apache-2.0).
-// eve owns these contracts; AI SDK remains the runtime validation boundary.
 import type { HistoryMessage } from "#shared/history-message.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 

@@ -339,7 +339,6 @@ export class ClientSession {
   }
 }
 
-/** @internal Follow continuously while the frontend owns the session. */
 export function followClientSession(
   session: ClientSession,
   options: FollowSessionOptions,

@@ -1,9 +1,3 @@
-/**
- * eve's Slack cards for approvals, questions, and budget prompts: a commit's requests post as one
- * batch, and each card updates as its request is answered and settles. Renderers choose the
- * blocks through `interactionCard`; this module owns routing, batching, and the messages.
- */
-
 import {
   interaction as interactionOf,
   type Interaction,
@@ -57,10 +51,6 @@ const log = createLogger("slack.request-cards");
 type RequestCardContext = ChannelEventContext<SlackEventContext>;
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-/**
- * Posts a commit's requests: each `approvalChannel` sends to the thread joins one batch, details
- * first, then controls, grouped under Slack's 50-block cap; each sent to a DM posts there alone.
- */
 export async function postRequestCards(
   batch: RequestBatch,
   ctx: RequestCardContext,
@@ -103,7 +93,6 @@ async function postThreadCards(
     });
     return;
   }
-  // A card in a code channel sits outside any thread, so its clicks carry the session's address.
   const route = channel.slack.codeChannel ? slackSessionTargetOf(channel.slack) : undefined;
   const entries = requests.map((request): CardEntry => ({
     interactionId: request.interactionId,
@@ -116,7 +105,6 @@ async function postThreadCards(
   await postGroups(entries, "details", post, (parts, ts) => {
     for (const part of parts) detailsTs.set(part.interactionId, ts);
   });
-  // Each controls message is recorded as it posts, so a later group's failure keeps it tracked.
   await postGroups(entries, "controls", post, (parts, ts) => {
     const record: Mutable<SlackInteractionCardRecord> = {
       channelId,
@@ -131,10 +119,6 @@ async function postThreadCards(
   });
 }
 
-/**
- * Posts each group of `kind` messages. A group whose content Slack refuses posts again with each
- * request's default, regrouped, since the defaults can need more blocks than the rendered ones.
- */
 async function postGroups(
   entries: readonly CardEntry[],
   kind: "controls" | "details",
@@ -233,10 +217,6 @@ async function postDirectMessageCard(
   }
 }
 
-/**
- * Shows an open request's changed answer: an admitted one, or the controls again once it was
- * refused. A request already settled in the commit is left to `interaction.settled`.
- */
 export async function showAnswerChange(
   interactionId: string,
   ctx: RequestCardContext,
@@ -249,13 +229,6 @@ export async function showAnswerChange(
   replace(ctx.channel.state, record, await writeRequests(ctx, chain, record, [interactionId]));
 }
 
-/**
- * Writes a settled request's card. Every request of its message that settled in the same commit
- * without its settled rendering written joins the one update, since the commit's view already
- * shows them settled. Then deletes each details message whose requests have all written their
- * settled rendering, reports the outcome in a DM request's thread note, and forgets the message
- * once every request in it has.
- */
 export async function settleRequestCard(
   interactionId: string,
   ctx: RequestCardContext,
@@ -309,13 +282,6 @@ interface RequestChange {
   readonly compact: SlackCardMessage;
 }
 
-/**
- * Renders `ids` again and updates the message once if their blocks changed. The message must
- * stay within Slack's 50 blocks, so eve uses the renderers' output if it fits, else eve's
- * defaults, else the defaults at their smallest, which always fit, since every request held at
- * least one block when posted. When Slack refuses the content, eve sends the next of those once
- * more. Returns the record as Slack now shows it.
- */
 async function writeRequests(
   ctx: RequestCardContext,
   chain: SlackInteractionCardChain,
@@ -383,7 +349,6 @@ async function writeRequests(
   return (await update(retry)) === "ok" ? { ...record, requests: retry.requests } : record;
 }
 
-/** Deletes a details message once every request it covers has written its settled rendering. */
 async function retireDetails(
   channel: SlackEventContext,
   record: SlackInteractionCardRecord,
@@ -393,7 +358,6 @@ async function retireDetails(
   const covered = records.flatMap((candidate) =>
     candidate.requests.filter((request) => request.detailsTs === detailsTs),
   );
-  // None covered means an earlier request of the same commit already deleted it.
   if (covered.length === 0 || covered.some((request) => request.settled !== true)) return;
   await callSlack(channel, "chat.delete", detailsTs, { channel: record.channelId, ts: detailsTs });
   channel.state.interactionCards = records.map((candidate) => ({
@@ -406,10 +370,6 @@ async function retireDetails(
   }));
 }
 
-/**
- * Makes one Slack call, never throwing: `refused` when Slack refused the message's content, so
- * eve's default is worth sending, and `failed` for anything else, which must not resend.
- */
 async function callSlack(
   channel: SlackEventContext,
   operation: "chat.delete" | "chat.update",
@@ -465,11 +425,6 @@ function cardRequest(
   return request;
 }
 
-/**
- * The request as it stands, with the response behind its answer. A settled request keeps the
- * answer that decided it. While open, only the latest admitted answer stands: a submitted one
- * may still be refused by a response policy, a check, or a sign-in.
- */
 function standingOf(
   tables: SessionView,
   interaction: Interaction,
@@ -495,10 +450,6 @@ function standingOf(
   };
 }
 
-/**
- * Forgets messages whose requests all settled in earlier commits, such as ones whose settled
- * rendering eve never wrote because a renderer's `interaction.settled` skipped `next()`.
- */
 function forgetSettledCards(ctx: RequestCardContext): void {
   const { state } = ctx.channel;
   const records = state.interactionCards;
@@ -527,25 +478,18 @@ function remember(state: SlackChannelState, record: SlackInteractionCardRecord):
   state.interactionCards = [...(state.interactionCards ?? []), record];
 }
 
-/** Replaces the record of `record`'s message with `next`, or forgets it. */
 function replace(
   state: SlackChannelState,
   record: SlackInteractionCardRecord,
   next: SlackInteractionCardRecord | undefined,
 ): void {
   const records = state.interactionCards ?? [];
-  // Match by message, since `retireDetails` may already have replaced the record's object.
   state.interactionCards = records.flatMap((candidate) => {
     if (candidate.ts !== record.ts || candidate.channelId !== record.channelId) return [candidate];
     return next === undefined ? [] : [next];
   });
 }
 
-/**
- * A responder an approval's policy or check refused hears why privately. A pending answer gets
- * no notice: an ephemeral cannot be removed once the approval settles, and the card itself
- * reports the outcome moments later.
- */
 export async function notifyRefusedResponder(
   refused: RefusedAnswer,
   channel: SlackEventContext,

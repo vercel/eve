@@ -7,7 +7,6 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export type LinearFetch = typeof fetch;
 
-/** Shared Agent Session selection for the create-on-issue and create-on-comment mutations. */
 const AGENT_SESSION_FIELDS = `
   fragment AgentSessionFields on AgentSession {
     id
@@ -206,7 +205,6 @@ export async function updateLinearAgentSession(input: {
   return { success: data.agentSessionUpdate?.success === true };
 }
 
-/** Creates a proactive Agent Session attached to a Linear issue. */
 export async function createLinearAgentSessionOnIssue(input: {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
@@ -246,7 +244,6 @@ export async function createLinearAgentSessionOnIssue(input: {
   return normalizeAgentSessionRecord(data.agentSessionCreateOnIssue?.agentSession);
 }
 
-/** Creates a proactive Agent Session attached to a Linear root comment. */
 export async function createLinearAgentSessionOnComment(input: {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
@@ -355,11 +352,6 @@ function normalizeAgentSessionRecord(value: unknown): LinearAgentSessionRecord {
   return record;
 }
 
-/**
- * Reads the `id` from a nested Linear relation selected as `{ id }`. Returns
- * `null` when the relation is present but null (Linear's representation of an
- * absent association), and `undefined` when the field was not returned.
- */
 function relationId(value: unknown): string | null | undefined {
   if (value === null) return null;
   if (isObject(value) && typeof value.id === "string") return value.id;

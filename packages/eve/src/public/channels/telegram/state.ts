@@ -25,7 +25,6 @@ export function stateFromTelegramMessage(
   };
 }
 
-/** How a Telegram user is named on a message everyone in the chat reads. */
 export function telegramUserName(user: TelegramUser): string | undefined {
   const name = [user.firstName, user.lastName].filter((part) => part !== undefined && part !== "");
   if (name.length > 0) return name.join(" ");

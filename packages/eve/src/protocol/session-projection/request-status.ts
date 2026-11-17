@@ -4,7 +4,6 @@ import type { SessionOutcome } from "#protocol/session-events/families/session.j
 /** A settled delivery's result, separate from whether its session can accept more input. */
 export type RequestStatus = "awaiting-input" | "completed" | "failed" | "cancelled";
 
-/** Shared by complete views and response readers that joined a turn after its introduction. */
 export function deliveryStatus(
   outcome: DeliveryOutcome | undefined,
   turn: TurnOutcome | undefined,

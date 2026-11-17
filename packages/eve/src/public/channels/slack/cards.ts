@@ -1,4 +1,3 @@
-/** eve-owned Slack card data contracts. Chat SDK classes retain their identity at eve/channels/chat-sdk. */
 import * as chat from "#compiled/chat/index.js";
 declare const _Actions: ActionsComponent;
 interface ActionsComponent {

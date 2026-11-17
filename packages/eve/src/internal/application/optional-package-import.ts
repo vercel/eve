@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-/** Imports an optional engine from the application without installing it. */
 export async function importInstalledEnginePackage<T>(input: {
   readonly appRoot: string;
   readonly packageName: string;
@@ -12,10 +11,6 @@ export async function importInstalledEnginePackage<T>(input: {
   return (await import(entrypointHref)) as T;
 }
 
-/**
- * Loads an optional engine without installing it: from eve's own resolution
- * first, then from the application. Fails with `missingMessage`.
- */
 export async function importOptionalEnginePackage<T>(input: {
   readonly appRoot: string;
   readonly importModule: () => Promise<T>;
@@ -53,7 +48,6 @@ export async function resolveInstalledEnginePackageEntrypointHref(input: {
   return pathToFileURL(join(packageRoot, entry)).href;
 }
 
-/** Reads the version of an optional package installed in the application. */
 export async function readInstalledPackageVersion(input: {
   readonly appRoot: string;
   readonly packageName: string;

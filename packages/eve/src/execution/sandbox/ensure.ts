@@ -49,63 +49,29 @@ import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session
 interface EnsureSandboxAccessInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
-  /** `false` when the sandbox outlives this access: it may neither delete nor end it. */
   readonly ownsSandbox?: boolean;
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
   readonly state: SandboxState | null;
-  /**
-   * How long the server-shutdown registry, which holds one connection per
-   * session, keeps this access's connection. `"session"`, the default for a
-   * session's own steps, keeps a connection without `close()` after release,
-   * so shutdown still stops the session's sandbox. `"call"` drops it at
-   * release, for a keyed tool call, whose sandbox no session ends. `"none"`
-   * never registers it, for a workflow step that borrows a session's sandbox
-   * outside its turns and must not replace or drop the session's own.
-   */
   readonly shutdownTracking?: "call" | "none" | "session";
 }
 
-/** The access `ensureSandboxAccess` builds, with what the opener may do beyond the sandbox API. */
 export interface EnsuredSandboxAccess extends SandboxAccess {
-  /**
-   * Permanently releases what the provider keeps under this access's key
-   * when the owning session ends, even when its last checkpoint recorded no
-   * sandbox. Waits for this access's open still in flight first.
-   */
   end(reason: SandboxSessionEndReason): Promise<void>;
-  /**
-   * Lets go of the connection this access opened, if any, when the step that
-   * opened it ends: closes it without stopping or deleting the sandbox.
-   * Waits for an open still in flight, so a caller that finished early never
-   * leaves that connection behind.
-   */
   release(): Promise<void>;
-  /**
-   * Resumes the sandbox the session recorded, in the background, so a turn
-   * that needs it waits only for the rest. Never starts one: does nothing
-   * when nothing is recorded, and leaves a gone sandbox for `get()`.
-   */
   resumeRecorded(): void;
-  /** Waits for the work `prepare()` and `resumeRecorded()` queued; never throws. */
   settle(): Promise<void>;
 }
 
-/** A connection this access opened, with the lifecycle eve maps onto it. */
 interface OpenedSandbox {
   readonly closable: boolean;
   readonly providerName: string;
   readonly sandbox: RuntimeSandboxSession;
   close(): Promise<void>;
   delete(options?: SandboxDeleteOptions): Promise<void>;
-  /** Releases compute, then closes the connection. */
   stop(): Promise<void>;
 }
 
-// Parent and subagent sessions that share a sandbox each build their own
-// access. `start` is an upsert, so concurrent first use is safe, but in one
-// process late arrivals resume from the winner's state instead of running
-// the selector again.
 const pendingSandboxStarts = new Map<string, Promise<SandboxSessionState | null>>();
 
 const log = createLogger("execution.sandbox");
@@ -113,10 +79,8 @@ const log = createLogger("execution.sandbox");
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
 ): Promise<EnsuredSandboxAccess> {
-  // Production always registers a sandbox; test runtimes without one cast a null registry.
   const registered = input.registry.sandbox;
   const persistedOwner = registered === null ? undefined : owningSandboxDefinition(registered);
-  // A retired record cannot resume, so let the selector start a fresh sandbox.
   let persisted = resolvePersistedSandboxSessionState(
     input.state?.session,
     persistedOwner?.kind === "independent"
@@ -124,7 +88,6 @@ export async function ensureSandboxAccess(
       : undefined,
   );
   let opened: OpenedSandbox | undefined;
-  // A stopped connection without `close()` resumes on its next use, so shutdown keeps it until the session lets go.
   let stopped: OpenedSandbox | undefined;
   let opening: Promise<OpenedSandbox> | undefined;
   let requiring: Promise<OpenedSandbox> | undefined;
@@ -248,8 +211,6 @@ export async function ensureSandboxAccess(
   async function resumePersisted(context: SandboxSessionContext) {
     if (persisted === null) throw new Error("Sandbox session state is missing.");
     const provider = getSandboxEnvironmentRuntime(activeDefinition().environment);
-    // State another provider or protocol recorded cannot resume here, for example
-    // after the app switches providers or rolls back eve, so start a fresh sandbox.
     if (persisted.providerName !== provider.providerName) {
       throw new SandboxSessionGoneError(
         `This session's sandbox was created by provider "${persisted.providerName}", but the agent now selects provider "${provider.providerName}". ` +
@@ -307,9 +268,7 @@ export async function ensureSandboxAccess(
       }
     }
 
-    // Apps hosted in one process can reuse a node id and a tool session id.
     const startKey = [appRoot, ownerNodeId, input.sessionId].join("\0");
-    // A failed start wakes every waiter at once; re-check so only one retries.
     let concurrentStart = pendingSandboxStarts.get(startKey);
     while (concurrentStart !== undefined) {
       persisted = await concurrentStart;
@@ -332,11 +291,6 @@ export async function ensureSandboxAccess(
     }
   }
 
-  /**
-   * Runs the owning sandbox definition, which for a subagent that shares its
-   * parent's sandbox is the parent's: whichever session opens the sandbox
-   * first creates it with the same options and initialization.
-   */
   async function startOpened(context: SandboxSessionContext) {
     const definition = activeDefinition();
     try {
@@ -351,8 +305,6 @@ export async function ensureSandboxAccess(
         throw new Error(`Sandbox "${definition.logicalPath}" must return the sandbox it opens.`);
       }
     } catch (error) {
-      // The sandbox stays: another session or call may share it, and the
-      // next access runs the selector again on it. Session end removes it.
       await opened?.close().catch(() => undefined);
       opened = undefined;
       opening = undefined;
@@ -372,20 +324,15 @@ export async function ensureSandboxAccess(
     return requiring;
   }
 
-  /** Opens the sandbox, starting a fresh one when a background resume found it gone. */
   async function openSession(): Promise<RuntimeSandboxSession> {
     try {
       return (await requireOpened()).sandbox;
     } catch (error) {
-      // Joined a resume-only open from `resumeRecorded()`; this one may start a sandbox.
       if (!SandboxSessionGoneError.is(error)) throw error;
       return (await requireOpened()).sandbox;
     }
   }
 
-  // Background work runs in order and shares one open. A failed job is retried
-  // once before later work runs, so work never lands out of order; a job that
-  // fails again is dropped. Its owner must leave a record that redoes it later.
   let preparations: Promise<void> = Promise.resolve();
 
   function enqueue(job: () => Promise<unknown>, options = { retry: true }): void {
@@ -422,7 +369,6 @@ export async function ensureSandboxAccess(
     return current;
   }
 
-  /** The sandbox is gone, so shutdown has nothing left to stop for the session. */
   function forgetSandbox(providerName: string) {
     forgetOpened();
     stopped = undefined;
@@ -448,18 +394,13 @@ export async function ensureSandboxAccess(
       if (input.ownsSandbox === false) return;
       await preparations;
       if (requiring !== undefined) await requiring.catch(() => undefined);
-      // A failed close of a process-local resource must not block deleting the sandbox.
       await opened?.close().catch((error: unknown) => {
         log.warn("failed to close a sandbox connection at session end", {
           error,
           sessionId: input.sessionId,
         });
       });
-      // A failed step or process loss can create a sandbox without committing
-      // any state. The previous checkpoint cannot prove that the key is unused.
       const provider = getSandboxEnvironmentRuntime(activeDefinition().environment);
-      // State another provider or protocol recorded is no use here; the key still finds
-      // what this provider keeps.
       const state =
         persisted?.providerName === provider.providerName &&
         persisted.stateProtocolVersion === provider.stateProtocolVersion
@@ -488,8 +429,6 @@ export async function ensureSandboxAccess(
       enqueue(work === undefined ? requireOpened : () => work(openSession));
     },
     resumeRecorded() {
-      // Not retried: a gone sandbox stays gone, and a retry would hand a
-      // consumer waiting on this open another resume-only attempt.
       if (persisted !== null) {
         enqueue(() => requireOpened({ resumeOnly: true }), { retry: false });
       }
@@ -499,10 +438,8 @@ export async function ensureSandboxAccess(
     },
     async release() {
       await preparations;
-      // A failed open left nothing to let go of.
       if (requiring !== undefined) await requiring.catch(() => undefined);
       const current = forgetOpened();
-      // A keyed call never ends, so it drops a connection it stopped instead of keeping it for shutdown.
       if (stopped !== undefined && tracking !== "session") {
         untrackActiveSandboxConnection({
           connection: stopped,
@@ -511,7 +448,6 @@ export async function ensureSandboxAccess(
         });
         stopped = undefined;
       }
-      // Without `close()` there is nothing to free, and shutdown still stops the session's sandbox.
       if (current === undefined || (tracking === "session" && !current.closable)) return;
       untrackActiveSandboxConnection({
         connection: current,
@@ -529,7 +465,6 @@ export async function ensureSandboxAccess(
         stopped = current;
         return;
       }
-      // A closed connection cannot resume, so shutdown has nothing left to stop.
       untrackActiveSandboxConnection({
         connection: current,
         providerName: current.providerName,
@@ -556,8 +491,6 @@ export async function ensureSandboxAccess(
       });
       throw error;
     }
-    // A stopped connection can resume on its next use, so a later stop runs
-    // again; only a stop already in flight is shared. Close runs once.
     const stopCompute = shared(() => connection.stop());
     const close = once(async () => await connection.close?.());
     const current: OpenedSandbox = {
@@ -591,7 +524,6 @@ export async function ensureSandboxAccess(
   }
 }
 
-/** Runs `run` at most once at a time; a later call after it settles runs it again. */
 function shared(run: () => Promise<void>): () => Promise<void> {
   let running: Promise<void> | undefined;
   return () =>
@@ -600,7 +532,6 @@ function shared(run: () => Promise<void>): () => Promise<void> {
     }));
 }
 
-/** Runs `run` at most once while it succeeds; a failed run can be retried. */
 function once(run: () => Promise<void>): () => Promise<void> {
   let running: Promise<void> | undefined;
   return () =>

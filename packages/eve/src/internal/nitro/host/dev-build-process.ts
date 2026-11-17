@@ -13,7 +13,6 @@ import {
 } from "#internal/nitro/host/dev-build-operations.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 
-// IPC disconnect is the dev server's death signal: it fires however that process exits.
 process.once("disconnect", () => process.exit(0));
 
 process.on("message", async (request: Partial<DevelopmentBuildRequest> | null) => {
@@ -21,13 +20,10 @@ process.on("message", async (request: Partial<DevelopmentBuildRequest> | null) =
     return;
   }
 
-  // Also carries an earlier build's Docker probe result, which the probe adopts.
   if (request.environment !== undefined) {
     replaceEnvironment(request.environment);
   }
 
-  // While a build runs, only its own work keeps this process alive. A build that
-  // can never settle then exits the process and fails, instead of hanging.
   process.channel?.unref();
   let outcome: DevelopmentBuildOutcome;
 
@@ -53,7 +49,6 @@ process.on("message", async (request: Partial<DevelopmentBuildRequest> | null) =
   process.send?.(response);
 });
 
-// Each build sees exactly the dev server's environment, and nothing an earlier build set.
 function replaceEnvironment(environment: Readonly<Record<string, string | undefined>>): void {
   for (const key of Object.keys(process.env)) {
     if (environment[key] === undefined) delete process.env[key];

@@ -11,13 +11,10 @@ interface CliInfoLogger {
   log(message: string): void;
 }
 
-/** Options accepted by {@link printApplicationInfo}. */
 export interface PrintApplicationInfoOptions {
-  /** Emit a machine-readable JSON document instead of the human table. */
   json?: boolean;
 }
 
-/** Machine-readable view of an application inspection, emitted by `eve info --json`. */
 export interface ApplicationInfoJson {
   appRoot: string;
   agentRoot: string | null;
@@ -28,14 +25,8 @@ export interface ApplicationInfoJson {
   instructions: string | null;
   skills: string[];
   tools: string[];
-  /** Each static tool's input schema as eve sends it to a model, keyed by tool name. */
   toolInputSchemas: {
-    /** The root agent's tools, including tools from mounted extensions. */
     root: Record<string, JsonObject>;
-    /**
-     * Each declared subagent's own tools, keyed by the subagent's path of names
-     * from the root agent, such as `researcher` or `researcher/reviewer`.
-     */
     subagents: Record<string, Record<string, JsonObject>>;
   };
   subagents: string[];
@@ -57,11 +48,6 @@ function formatInstructions(instructions: readonly CompiledInstructionsDefinitio
     .join(", ");
 }
 
-/**
- * Projects a structured inspection into the stable `eve info --json` contract.
- * Tools and channels an agent relies on to verify setup come straight from the
- * compiled manifest, so this stays in sync with what the runtime actually serves.
- */
 export function buildApplicationInfoJson(inspection: ApplicationInspection): ApplicationInfoJson {
   const { application: info, compiledState, messaging } = inspection;
   return {
@@ -111,7 +97,6 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
   };
 }
 
-/** Provider-managed tools, such as `web_search`, have no eve input schema and are omitted. */
 function modelInputSchemas(tools: readonly CompiledToolDefinition[]): Record<string, JsonObject> {
   return Object.fromEntries(
     tools.flatMap((tool) =>
@@ -120,7 +105,6 @@ function modelInputSchemas(tools: readonly CompiledToolDefinition[]): Record<str
   );
 }
 
-/** Subagent names are unique only among siblings, so each entry is keyed by its path from the root. */
 function subagentModelInputSchemas(
   subagents: readonly CompiledSubagentNode[],
 ): Record<string, Record<string, JsonObject>> {
@@ -153,9 +137,6 @@ function resolveCompileTone(status: string): "danger" | "success" | "warning" {
   }
 }
 
-/**
- * Writes resolved application details and the active message-route contract.
- */
 export async function printApplicationInfo(
   logger: CliInfoLogger,
   appRoot: string,
@@ -171,7 +152,6 @@ export async function printApplicationInfo(
   logger.log(renderApplicationInfo(inspection));
 }
 
-/** Renders the human-readable `eve info` report for CLI and TUI surfaces. */
 export function renderApplicationInfo(inspection: ApplicationInspection): string {
   const compiledState = inspection.compiledState;
   const info = inspection.application;

@@ -1,12 +1,3 @@
-/**
- * Serializes and rebuilds workflow errors across hook and step
- * boundaries.
- */
-
-/**
- * Reduces an arbitrary throwable to a shape that survives the
- * serialization the workflow devkit performs on step inputs.
- */
 export function normalizeSerializableError(error: unknown): unknown {
   if (!(error instanceof Error)) {
     return error;
@@ -23,10 +14,6 @@ export function normalizeSerializableError(error: unknown): unknown {
   };
 }
 
-/**
- * What a step that failed every attempt threw. The workflow reports exhaustion as a
- * `FatalError` naming the step and its retries, with the last attempt's error as its cause.
- */
 export function exhaustedStepError(error: unknown): unknown {
   return isRecord(error) &&
     error.name === "FatalError" &&
@@ -39,10 +26,6 @@ export function exhaustedStepError(error: unknown): unknown {
     : error;
 }
 
-/**
- * Rebuilds an {@link Error} from the normalized hook payload sent by a
- * child workflow.
- */
 export function rebuildSerializableError(error: unknown): Error {
   if (!isRecord(error)) {
     return new Error(String(error));

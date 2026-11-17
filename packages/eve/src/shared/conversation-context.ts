@@ -36,7 +36,6 @@ export interface AudienceContext<TState> {
   readonly environment: ConversationEnvironment;
 }
 
-/** Safe projection for durable sessions created before `eve.conversation` existed. */
 export const UNKNOWN_CONVERSATION_CONTEXT: ConversationContext = {
   audience: "unknown",
   channel: { kind: "unknown" },
@@ -51,11 +50,6 @@ interface ConversationContextFallback {
   readonly principalType?: string;
 }
 
-/**
- * Reconstructs a durable conversation when its key predates the key itself.
- * All callers must use this helper so legacy sessions resolve privacy fields
- * from one source of truth.
- */
 export function resolveConversationContext(
   stored: ConversationContext | undefined,
   fallback: ConversationContextFallback,

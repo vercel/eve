@@ -1,19 +1,11 @@
 import { isObject } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
 
-/**
- * The session's one record of running work, in its private state: the workflow runs a turn waits
- * on, by the call each serves, and the tasks, each with the calls it serves. The stop path, the
- * session's end, and handoff read every run from here. Each part has one owner module that
- * decodes and writes it: `workflow-tool-runs.ts` for calls, `execution/tasks/table.ts` for tasks.
- */
 const RUNNING_WORK_STATE_KEY = "eve.work";
 const RUNNING_WORK_VERSION = 1;
 
 export interface RunningWork {
-  /** Workflow runs a turn waits on, as `workflow-tool-runs.ts` encodes them. */
   readonly calls: readonly unknown[];
-  /** Tasks, as `execution/tasks/table.ts` encodes them. */
   readonly tasks: readonly unknown[];
 }
 
@@ -34,7 +26,6 @@ export function readRunningWork(state: SessionStateMap | undefined): RunningWork
   };
 }
 
-/** Replaces one part of the record; the record leaves the state once nothing runs. */
 export function writeRunningWork(
   state: SessionStateMap | undefined,
   part: Partial<RunningWork>,

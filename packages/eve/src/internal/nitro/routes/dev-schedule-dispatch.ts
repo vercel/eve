@@ -5,30 +5,10 @@ import {
 import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
-/**
- * Matches the path portion of `EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN`.
- *
- * Kept in sync with the protocol constant by construction so a future
- * prefix change touches one place. The capture group is the URL-encoded
- * schedule id; trailing path segments are intentionally rejected to keep
- * the surface narrow.
- */
 const DEV_DISPATCH_SCHEDULE_PATH_PATTERN = new RegExp(
   `^${EVE_ROUTE_PREFIX.replace(/\//g, "\\/")}\\/dev\\/schedules\\/([^/]+)$`,
 );
 
-/**
- * Builds the dev-only dispatch response for one authored schedule.
- *
- * Only mounted by `host-routes.ts` when Nitro is running in
- * dev mode — production builds never see this handler. The handler reads
- * the schedule id straight off the request URL, hands off to
- * `dispatchScheduleInDev` for the production-equivalent dispatch path,
- * and returns `{ scheduleId, sessionIds }` so callers can subscribe to
- * the existing per-session stream route for each id.
- *
- * Auth: none. The dev server is local-only and the route is dev-only.
- */
 export async function handleDevScheduleDispatchRequest(
   input: DevelopmentNitroArtifactsConfig,
   request: Request,

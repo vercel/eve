@@ -190,7 +190,6 @@ async function scaffoldProject(
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
-  // A fresh nested target such as `apps/my-agent` may name parents that do not exist yet.
   await mkdir(parentPath, { recursive: true });
   const stagingDirectory =
     createInPlace && overwriteExisting ? undefined : await mkdtemp(join(parentPath, ".eve-init-"));
@@ -590,8 +589,6 @@ export async function runInitCommand(
     return;
   }
 
-  // Strictly the eve binary, never the project's dev script, which in an
-  // existing app may start unrelated processes.
   const freshScaffold = result.kind === "created";
   const devArguments = [
     ...(result.packageManager === "pnpm" ? ["--reporter=silent"] : []),

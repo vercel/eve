@@ -20,7 +20,6 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
 
-// Calls create_issue, which asks for a sign-in; after the steering message, calls it again.
 const script: readonly ({ readonly tool: string } | { readonly text: string })[] = [
   { tool: "create_issue" },
   { tool: "create_issue" },
@@ -53,7 +52,6 @@ const scriptedModel = markMockModel(
 );
 
 describe("workflowEntry cancelled sign-in", () => {
-  // a message that cancels an open sign-in does not lead to a second sign-in card.
   it("does not ask again in the turn for a sign-in a new message cancelled", async () => {
     scriptIndex = 0;
     let starts = 0;
@@ -130,8 +128,6 @@ describe("workflowEntry cancelled sign-in", () => {
         )!.data;
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        // A new message arrives while the card is up: it cancels the sign-in, and the model's
-        // next create_issue call gets that cancellation instead of a second card.
         await send(run.runId, "Also add a label.");
         const resumed = await stream.nextUntil(
           "turn after the cancelled sign-in",
@@ -159,7 +155,6 @@ describe("workflowEntry cancelled sign-in", () => {
           "ended without being completed in this turn",
         );
 
-        // The next turn may ask once, because the user's follow-up can still need it.
         await send(run.runId, "Try again, I'll sign in.");
         const nextTurn = await stream.nextUntil("next turn's sign-in", isSignInOpened);
         expect(nextTurn.filter(isSignInOpened)).toHaveLength(1);

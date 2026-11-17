@@ -69,11 +69,6 @@ async function runGitStage(
   }
 }
 
-/**
- * Initializes a Git repository and records the generated files in an initial
- * commit. Missing Git and parent repositories are skips. Repository metadata
- * is retained when a later step fails so eve never destroys useful Git state.
- */
 export async function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
   const gitPath = join(projectPath, ".git");
   const gitMetadataExists = await stat(gitPath).then(

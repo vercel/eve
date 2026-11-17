@@ -34,7 +34,6 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
-// Content a tool sees or produces. It reaches a span only when content capture is on.
 const SENTINEL = "sentinel-7f3a-content";
 const CLIENT_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const CLIENT_SPAN_ID = "00f067aa0ba902b7";
@@ -69,14 +68,12 @@ const tools = [
   tool(
     "lookup",
     async ({ text }) =>
-      // A span the tool opens nests under the tool span.
       await apiTrace.getTracer("test.tool").startActiveSpan("nested lookup", async (span) => {
         span.end();
         return { echoed: text, status: "ok" };
       }),
   ),
   tool("explode", async ({ text }) => {
-    // Logged failures record on the active span; their text must not be captured.
     logError(log, "the tool failed", new Error(`logged ${text}`));
     throw new Error(`thrown ${text}`);
   }),
@@ -125,7 +122,6 @@ function useTracing(tracePolicy?: TraceCapturePolicy, capturesContent = false): 
 }
 
 beforeEach(() => {
-  // Content is captured for a private audience only in development.
   vi.stubEnv("EVE_DEV", "1");
   exporter = new InMemorySpanExporter();
   provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
@@ -230,7 +226,6 @@ function parentSpanId(span: ReadableSpan): string | undefined {
   return span.parentSpanContext?.spanId;
 }
 
-/** Everything an exporter would ship for a span, events and status included. */
 function exported(span: ReadableSpan): string {
   return JSON.stringify({
     attributes: span.attributes,
@@ -316,7 +311,6 @@ describe("mcpChannel tool trace context", () => {
     for (const span of finished()) {
       expect(JSON.stringify(span.attributes)).not.toContain("attacker");
     }
-    // The policy allows content, but the declaration does not capture it.
     expectNoContent();
   });
 });

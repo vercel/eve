@@ -98,7 +98,6 @@ describe("renderToolSignature", () => {
   });
 
   it("keeps every property name when long descriptions overflow the cap", () => {
-    // Like Linear's `save_issue`: dozens of documented fields whose names alone fit easily.
     const names = Array.from({ length: 40 }, (_, index) => `field${index}`);
     const properties = Object.fromEntries(
       names.map((name) => [
@@ -115,8 +114,6 @@ describe("renderToolSignature", () => {
   });
 
   it("bounds the work for schemas whose shared refs expand exponentially", () => {
-    // Each definition has ten properties pointing at the next: about 10^6 nodes
-    // within the depth limit if every reference were expanded.
     const $defs = Object.fromEntries(
       Array.from({ length: 8 }, (_, level) => [
         `L${level}`,

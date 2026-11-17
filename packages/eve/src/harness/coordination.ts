@@ -24,7 +24,6 @@ import type { HarnessSession, HarnessToolLookup } from "#harness/types.js";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-/** Rejects a batch before any result or side effect can bind ambiguously by call id. */
 export function assertUniqueCoordinationCallIds(
   requests: readonly { readonly callId: string }[],
 ): void {
@@ -37,10 +36,6 @@ export function assertUniqueCoordinationCallIds(
   }
 }
 
-/**
- * Forgets the workflow runs whose results arrived. Nobody can answer what a finished run asked,
- * so its relayed requests are returned for the machine to withdraw.
- */
 export function forgetFinishedRuns(
   session: HarnessSession,
   results: readonly RuntimeActionResult[],
@@ -60,7 +55,6 @@ export function forgetFinishedRuns(
   return { requestIds, session: next };
 }
 
-/** Each runtime result as the model reads it, beside the result the stream reports. */
 export async function runtimeResultCalls(
   results: readonly RuntimeActionResult[],
   tools: HarnessToolLookup | undefined,
@@ -68,7 +62,6 @@ export async function runtimeResultCalls(
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
     switch (result.kind) {
-      // A skill load is always an `eve__skill` call in history.
       case "load-skill-result":
         settled.push({
           part: toolResult(result, SKILL_TOOL_NAME, toToolResultOutput(result)),
@@ -105,11 +98,6 @@ function toolResult(
   return { output, toolCallId: result.callId, toolName, type: "tool-result" };
 }
 
-/**
- * Turns a step's workflow tool calls into workflow runs, committing a task
- * record for each call that starts a task. Task tool calls stay in the
- * response alone: the session reads them from there.
- */
 export function collectWorkflowCalls(input: {
   readonly session: HarnessSession;
   readonly toolCalls: readonly CoordinationToolCall[];
@@ -147,16 +135,12 @@ export function collectWorkflowCalls(input: {
   return { session, workflowRequests };
 }
 
-/** The parts of a model tool call that coordination turns into a runtime request. */
 export interface CoordinationToolCall {
   readonly input: unknown;
   readonly toolCallId: string;
   readonly toolName: string;
 }
 
-/**
- * Projects one AI SDK tool call into the eve runtime-action contract.
- */
 export function createRuntimeActionRequestFromToolCall(input: {
   readonly toolCall: CoordinationToolCall;
   readonly tools: HarnessToolLookup;
@@ -197,10 +181,6 @@ export function createRuntimeActionRequestFromToolCall(input: {
   return definition?.workflowId === undefined ? action : markRuntimeWorkflowToolAction(action);
 }
 
-/**
- * Projects one workflow tool call into a workflow run request. The input is
- * the tool's own, without anything eve added to its model input.
- */
 export function createCoordinationRequestFromToolCall(input: {
   readonly entry: WorkflowToolCallEntry;
   readonly input: JsonObject;
@@ -222,15 +202,6 @@ export function createCoordinationRequestFromToolCall(input: {
   };
 }
 
-/**
- * Coerces an AI SDK tool-call `input` into the runtime-action `JsonObject`
- * contract, throwing a `TypeError` (with the original as `cause`) that names
- * the offending tool when the payload is not a JSON object.
- *
- * String inputs are parsed as JSON first: the model protocol carries tool
- * arguments as text, and provider-executed tool calls can surface that raw
- * string — or an empty string when the model sends no arguments.
- */
 export function resolveToolCallInputObject(
   value: unknown,
   context: { readonly callId: string; readonly toolName: string },
@@ -246,9 +217,6 @@ export function resolveToolCallInputObject(
   try {
     return parseJsonObject(typeof value === "string" ? JSON.parse(value) : value);
   } catch (error) {
-    // This module is bundled into the workflow driver body, which cannot
-    // import the logger, so enrich the error (and keep the original as
-    // `cause`) for whatever catch site does the logging.
     const detail = error instanceof Error ? error.message : String(error);
     throw new TypeError(
       `Failed to parse tool-call arguments for "${context.toolName}" (${context.callId}): ${detail}`,
@@ -257,12 +225,10 @@ export function resolveToolCallInputObject(
   }
 }
 
-/** Errors bypass `toModelOutput`, as they do for local execution. */
 async function projectToolResultOutput(
   result: Extract<RuntimeActionResult, { kind: "tool-result" }>,
   definition: HarnessToolDefinition | undefined,
 ): Promise<ToolResultPart["output"]> {
-  // A task tool's call result is its receipt; `toModelOutput` projects the task's result.
   if (
     result.isError === true ||
     definition?.toModelOutput === undefined ||
@@ -284,7 +250,6 @@ function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output
     return { type: result.isError === true ? "error-text" : "text", value: result.output };
   return {
     type: result.isError === true ? "error-json" : "json",
-    // Runtime results are already JSON; detach them for the SDK's mutable message types.
     value: structuredClone(result.output) as JSONValue,
   };
 }

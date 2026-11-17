@@ -24,9 +24,6 @@ const oidcDiscoveryDocumentCache = new Map<
 >();
 const oidcJwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
-/**
- * Verifies one bearer token against a resolved OIDC strategy.
- */
 export async function authenticateOidcStrategy(input: {
   readonly token: string;
   readonly strategy: ResolvedOidcAuthStrategy;
@@ -106,12 +103,6 @@ export async function authenticateOidcStrategy(input: {
           }),
         };
       }
-
-      /*
-       * A same-project development credential for a different current
-       * environment identifies the project, not the embedded local user.
-       * Let the generic service path below authenticate it via `sub`.
-       */
     }
 
     if (typeof verified.payload.sub !== "string" || verified.payload.sub.length === 0) {
@@ -202,12 +193,6 @@ async function getOidcDiscoveryDocument(
   return await discoveryPromise;
 }
 
-/**
- * Returns whether a verified JWT was minted by Vercel OIDC for the
- * current Vercel project (any environment). Used by the verifier to
- * unconditionally accept tokens from the deployment's own project on
- * top of any author-supplied `subjects`/`claims` matchers.
- */
 function isCurrentVercelProjectToken(input: {
   readonly issuer: string;
   readonly payload: JWTPayload;
@@ -228,13 +213,6 @@ function isCurrentVercelProjectToken(input: {
   );
 }
 
-/**
- * Returns whether the token's `project_id` claim matches the configured
- * current project. Fails closed when that project is absent, so a user token
- * cannot authenticate without an explicit project bind. Mirrors the
- * fail-closed {@link isCurrentVercelProjectToken} used by the
- * service/runtime branch.
- */
 function currentVercelProjectMatches(input: {
   readonly payload: JWTPayload;
   readonly strategy: ResolvedOidcAuthStrategy;
@@ -250,12 +228,6 @@ function currentVercelProjectMatches(input: {
   );
 }
 
-/**
- * Returns whether a verified JWT's `environment` claim matches the configured
- * current Vercel environment. Combined with
- * {@link isCurrentVercelProjectToken} to upgrade `principalType` from
- * `"service"` to `"runtime"` when the caller is the deployment itself.
- */
 function isCurrentVercelEnvironmentToken(input: {
   readonly payload: JWTPayload;
   readonly strategy: ResolvedOidcAuthStrategy;
@@ -271,11 +243,6 @@ function isCurrentVercelEnvironmentToken(input: {
   );
 }
 
-/**
- * Returns whether the token's `environment` claim matches the configured
- * current Vercel environment. Fails closed when that environment is absent,
- * so a user token cannot authenticate without an explicit environment bind.
- */
 function currentVercelEnvironmentMatches(input: {
   readonly payload: JWTPayload;
   readonly strategy: ResolvedOidcAuthStrategy;

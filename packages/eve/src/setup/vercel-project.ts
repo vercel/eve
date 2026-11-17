@@ -43,24 +43,16 @@ const VercelProjectReferenceSchema = z.object({
 });
 
 interface PickProjectOptions extends VercelProjectOperationOptions {
-  /** Whether an empty project list may fall back to entering a name to create. */
   allowCreateWhenEmpty?: boolean;
-  /**
-   * Searches the team for a project with this name before the list opens and
-   * suggests the best match: floated to the top, cursor on it, marked
-   * "suggested". Best-effort — a failed lookup falls back to the plain list.
-   */
   suggestedName?: string;
 }
 
 interface PickTeamOptions extends VercelProjectOperationOptions {
   teamRequirement?: VercelTeamRequirement;
-  /** Builds the team selector heading from the current team's display name. */
   selectMessage?: (currentTeam: string) => string;
 }
 
 export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {
-  /** Configure 100% trace sampling when creating a Vercel project. Defaults to true. */
   traceSampling?: boolean;
 }
 
@@ -76,7 +68,6 @@ function parseProjectReference(stdout: string, description: string): VercelProje
   return { projectId: parsed.data.id, projectName: parsed.data.name };
 }
 
-/** Resolves one project by exact name or id through the Vercel API. */
 export async function resolveProjectByNameOrId(
   projectRoot: string,
   team: string,
@@ -121,12 +112,6 @@ export async function assertNewProjectNameAvailable(
   }
 }
 
-/**
- * Throws the login action. When the underlying `vercel whoami` failure is
- * known, its diagnostic is folded into the reason: without it the agent only
- * ever hears "log in", even when the real fault is a missing CLI or a transient
- * API error and the user is already authenticated.
- */
 function requireVercelLogin(failure?: VercelCaptureFailure): never {
   const base =
     "The Vercel CLI is not logged in to an account with access to this project. Run `vercel login`.";
@@ -137,18 +122,8 @@ function requireVercelLogin(failure?: VercelCaptureFailure): never {
   throw new HumanActionRequiredError({ kind: "vercel-login", command: "vercel login", reason });
 }
 
-/**
- * Bound on a read-only `vercel whoami` probe so a network hang — or a CLI that
- * tries to start an interactive flow despite stdin being closed — can never
- * wedge boot or a setup command.
- */
 const WHOAMI_TIMEOUT_MS = 10_000;
 
-/**
- * Structured `vercel whoami --format json` output. A missing saved token is
- * `{ loggedIn: false }`; newer CLIs also report rejected credentials as an
- * agent error with a `reason`. Logged in, it carries the principal.
- */
 const WhoamiJsonSchema = z.object({
   loggedIn: z.boolean().optional(),
   reason: z.string().optional(),
@@ -162,7 +137,6 @@ const LOGIN_REQUIRED_REASONS = new Set([
   "scope_not_accessible",
 ]);
 
-/** Reads whoami's JSON, tolerating CLIs that print it after a banner line or not at all. */
 function parseWhoamiJson(stdout: string): z.infer<typeof WhoamiJsonSchema> | undefined {
   const start = stdout.indexOf("{");
   const end = stdout.lastIndexOf("}");
@@ -182,11 +156,6 @@ type WhoamiProbe =
       failure: VercelCaptureFailure;
     };
 
-/**
- * Runs the bounded, read-only `vercel whoami` probe shared by the auth checks.
- * A linked team project is the user's explicit scope choice, so authenticate
- * against that owner instead of whichever account scope the CLI last selected.
- */
 async function probeWhoami(
   projectRoot: string,
   options: VercelProjectOperationOptions,
@@ -208,13 +177,6 @@ async function probeWhoami(
   return { status: classifyWhoamiFailure(result.failure), failure: result.failure };
 }
 
-/**
- * Classifies a failed `whoami`. ENOENT means the binary isn't installed. The
- * CLI's structured JSON is authoritative for a logged-out session; only when it
- * gives none (rejected tokens on some CLI versions, CLIs without JSON output)
- * do we fall back to recognizing the diagnostic text. Anything unrecognized is
- * a transient fault (DNS, network, API error, timeout), never a login prompt.
- */
 function classifyWhoamiFailure(
   failure: VercelCaptureFailure,
 ): Exclude<VercelAuthStatus, "authenticated"> {
@@ -229,11 +191,6 @@ function classifyWhoamiFailure(
   return isLoggedOutDiagnostic(failure) ? "logged-out" : "unavailable";
 }
 
-/**
- * Text fallback for CLIs that report a rejected or missing login without JSON.
- * Vercel reports an invalid stored token directly, but a linked team can mask
- * that diagnostic with `scope-not-accessible`; both require a fresh login.
- */
 function isLoggedOutDiagnostic(failure: VercelCaptureFailure): boolean {
   const text = `${failure.stdout} ${failure.stderr}`.toLowerCase();
   return (
@@ -247,12 +204,6 @@ function isLoggedOutDiagnostic(failure: VercelCaptureFailure): boolean {
   );
 }
 
-/**
- * Throws the right outcome for a failed `vercel whoami`: a missing CLI and a
- * logged-out session are each their own action; anything else is a transient
- * fault surfaced as a plain error, so the caller reports "try again" rather
- * than mislabeling it "log in".
- */
 function requireVercelAuth(probe: Exclude<WhoamiProbe, { status: "authenticated" }>): never {
   const { failure } = probe;
   if (probe.status === "cli-missing") {
@@ -269,12 +220,6 @@ function requireVercelAuth(probe: Exclude<WhoamiProbe, { status: "authenticated"
   );
 }
 
-/**
- * The Vercel auth state, read-only. `cli-missing` (ENOENT) and `unavailable` (a
- * transient network/API fault) are each kept distinct from `logged-out` so a
- * caller never tells the user to log in when the real cause is a missing CLI or
- * an unreachable network.
- */
 export type VercelAuthStatus = "authenticated" | "logged-out" | "cli-missing" | "unavailable";
 
 export async function getVercelAuthStatus(
@@ -284,11 +229,6 @@ export async function getVercelAuthStatus(
   return (await probeWhoami(projectRoot, options)).status;
 }
 
-/**
- * Ensures Vercel authentication before any provisioning. `vercel whoami` exits
- * non-zero when not logged in; any other failure (a missing CLI, a transient
- * API error) is surfaced verbatim rather than mislabeled as a login problem.
- */
 export async function requireAuth(
   projectRoot: string,
   prompter?: Prompter,
@@ -305,11 +245,6 @@ export async function requireAuth(
   await withSpinner(prompter, whimsyFor("auth"), check);
 }
 
-/**
- * Non-throwing auth probe: whether the Vercel CLI has a logged-in user. Used
- * where authentication changes a decision (e.g. adopting an existing link)
- * rather than being a precondition to enforce.
- */
 export async function isVercelAuthenticated(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
@@ -317,7 +252,6 @@ export async function isVercelAuthenticated(
   return (await getVercelAuthStatus(projectRoot, options)) === "authenticated";
 }
 
-/** The current scope identifier (team slug or personal username) from `vercel whoami`. */
 async function whoamiScope(
   projectRoot: string,
   options: VercelProjectOperationOptions,
@@ -328,10 +262,6 @@ async function whoamiScope(
   return json?.username ?? json?.app?.id ?? probe.stdout.trim();
 }
 
-/**
- * Resolves a passed team slug, or the current scope when unset, to a concrete
- * slug so every provisioning command can pass an explicit `--scope`.
- */
 export async function resolveTeam(
   projectRoot: string,
   team: string | undefined,
@@ -342,17 +272,6 @@ export async function resolveTeam(
   return teams.find((entry) => entry.current)?.slug ?? (await whoamiScope(projectRoot, options));
 }
 
-/**
- * Validates a passed team slug against the account's teams, failing fast.
- *
- * When the slug is provided and the account's teams are listable, an unknown
- * slug throws so the run stops before any project mutation. When Vercel returns
- * an empty list, validation does not block and the later scoped command
- * surfaces any real scope error itself.
- *
- * `prompter` is accepted so callers can pass it uniformly across the team
- * resolution helpers; it is unused now that an invalid slug throws.
- */
 export async function validateTeam(
   prompter: Prompter,
   projectRoot: string,
@@ -369,12 +288,6 @@ export async function validateTeam(
   }
 }
 
-/**
- * Picks the Vercel team (scope). A passed slug is validated and resolved; with
- * zero or one team the current scope is used without prompting; otherwise the
- * user filters and chooses from the list with a single-selection picker. Flows
- * with a team requirement always show the picker and disable ineligible teams.
- */
 export async function pickTeam(
   prompter: Prompter,
   projectRoot: string,
@@ -510,11 +423,6 @@ async function findProjectSearchResults(
   return await searchProjects(projectRoot, team, search, { ...options, next });
 }
 
-/**
- * Finds the project to suggest for `name`: an exact hit in the already-listed
- * recents, or the team's best name-search match. Best-effort — failures mean
- * "no suggestion", never an aborted picker.
- */
 async function findSuggestedProject(
   projectRoot: string,
   team: string,
@@ -533,7 +441,6 @@ async function findSuggestedProject(
   }
 }
 
-/** Picks an existing project under a team, or a name to create when none exist. */
 export async function pickProject(
   prompter: Prompter,
   projectRoot: string,
@@ -658,7 +565,6 @@ export async function pickProject(
   }
 }
 
-/** Returns a project name for a new Vercel project, prompting when the default exists. */
 export async function pickNewProjectName(
   prompter: Prompter,
   projectRoot: string,
@@ -675,11 +581,6 @@ export async function pickNewProjectName(
       await prompter.text({
         message: "New project name",
         defaultValue: `${projectName}-2`,
-        // A notice, not a persistent log line: the collision matters only
-        // while the question is open, so it vanishes once a free name lands.
-        // Yellow segments around blue names: nesting a color inside pc.yellow
-        // closes with default-foreground and would strip the yellow from the
-        // rest of the sentence, so the names are styled as their own spans.
         notices: [
           {
             tone: "warning",
@@ -700,14 +601,6 @@ export async function pickNewProjectName(
   return projectName;
 }
 
-/**
- * Ensures the concrete project exists (creating it for a `new` plan) and links
- * this directory to it. Acts on a fully-resolved spec — never prompts for a
- * team or project. A newly created project keeps a detected host framework
- * when the matching eve integration import is present; otherwise missing,
- * unsupported, or rejected framework detections are switched back to eve.
- * Returns the linked project, or undefined if `vercel link` did not complete.
- */
 export async function linkProject(
   prompter: Prompter,
   projectRoot: string,
@@ -755,13 +648,6 @@ export async function linkProject(
       runVercel(["link", "--project", project.projectId, ...scope, "--yes"], {
         cwd: projectRoot,
         onOutput,
-        // The plan already names the team and project, so the link needs no
-        // input. eve strips the coding-agent env markers (so the CLI does not
-        // mis-react to the agent driving it), which also stops the CLI from
-        // auto-enabling its agent non-interactive default — left with an
-        // inherited TTY it would prompt (e.g. the MCP/plugin setup question)
-        // and read stdin, wedging the dev TUI. Force non-interactive: it both
-        // passes `--non-interactive` and closes the child's stdin.
         nonInteractive: true,
         signal: options.signal,
       }),

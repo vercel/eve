@@ -1,7 +1,6 @@
 const SECOND_MS = 1_000;
 const MINUTE_MS = 60 * SECOND_MS;
 
-/** Formats elapsed milliseconds with the smallest useful unit breakdown. */
 export function formatElapsed(milliseconds: number): string {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) {
     throw new RangeError("Elapsed time must be a finite, non-negative number.");

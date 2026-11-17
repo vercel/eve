@@ -161,9 +161,6 @@ describe("startProductionServer", () => {
   );
 
   it("keeps inherited variables that change how the built server listens or shuts down out of it", async () => {
-    // srvx skips graceful shutdown, and so Nitro's close hooks, when CI or
-    // TEST is set, and SERVER_SHUTDOWN_TIMEOUT would outlast eve's kill
-    // grace; a socket path would replace the port eve waits on.
     vi.stubEnv("CI", "1");
     vi.stubEnv("NITRO_UNIX_SOCKET", "/tmp/eve.sock");
     vi.stubEnv("SERVER_SHUTDOWN_TIMEOUT", "60");

@@ -1,15 +1,4 @@
-/**
- * Options for {@link buildNodeEsmCompatBanner} and
- * {@link createNodeEsmCompatBannerPlugin}.
- *
- * Bundle output that re-declares one of the CJS path globals at the top
- * level would otherwise collide with the banner, producing
- * `SyntaxError: Identifier '__dirname' has already been declared` at load
- * time. The banner builder omits any line whose binding the chunk already
- * provides.
- */
 interface NodeEsmCompatBannerOptions {
-  /** Whether to expose a CommonJS `require` shim alongside the path globals. */
   readonly includeRequire?: boolean;
 }
 
@@ -52,13 +41,6 @@ const REQUIRE_LINE: BannerLine = {
   bindingName: "require",
 };
 
-/**
- * Builds the ESM CommonJS-compatibility banner appropriate for a parsed
- * bundle chunk. Identifiers the chunk already binds in a top-level variable
- * declaration are skipped so the prepended banner never re-declares them.
- *
- * Returns an empty string when the chunk already provides every binding.
- */
 export function buildNodeEsmCompatBanner(
   program: ParsedProgram,
   options: NodeEsmCompatBannerOptions = {},
@@ -89,7 +71,6 @@ export function buildNodeEsmCompatBanner(
   }
 
   if (chunkProvidesFilename && !chunkProvidesDirname) {
-    // The chunk's binding is initialized after this prepended banner.
     imports.unshift(FILENAME_BANNER_LINE.importLine);
   }
 
@@ -139,11 +120,6 @@ interface SourceMap {
   readonly mappings: string;
 }
 
-/**
- * Creates a bundler plugin that prepends the Node ESM compatibility
- * banner to each output chunk, skipping any banner line whose binding
- * the chunk already provides. Compatible with both Rollup and Rolldown.
- */
 export function createNodeEsmCompatBannerPlugin(
   options: NodeEsmCompatBannerOptions = {},
 ): BannerPlugin {
@@ -171,16 +147,8 @@ export function createNodeEsmCompatBannerPlugin(
   };
 }
 
-// A block comment body must not be able to span `*/`: a lazy `[\s\S]*?`
-// lets a failed match re-end the comment at every later `*/`, which
-// backtracks catastrophically on large JSDoc-heavy chunks.
 const DECLARATION_TRIVIA = String.raw`(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
-// A keyword directly after a quote can only be string content. This plugin's
-// own banner templates are bundled into every dev host, so without the
-// lookbehind they would force a full parse of eve's largest chunk.
 const DECLARATION_START = String.raw`(?:(?<![\w$"'\x60])(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}`;
-// `\b` would accept bundler-deconflicted names such as `__filename$1`, which
-// force a full parse of eve's largest vendor chunk on every hosted build.
 const BINDING_END = String.raw`(?![\w$])`;
 const PATH_BINDING_DECLARATION = new RegExp(
   String.raw`${DECLARATION_START}(?:__filename|__dirname)${BINDING_END}`,
@@ -199,10 +167,6 @@ function mayDeclareCompatibilityBinding(
   code: string,
   options: NodeEsmCompatBannerOptions,
 ): boolean {
-  // This is only a negative filter: comments/strings can cause extra parsing,
-  // never a missed declaration. Nearly every large bundle contains `\u` in
-  // strings or regexes, so escaped names are decoded rather than treated as a
-  // reason to parse the whole chunk.
   return (
     PATH_BINDING_DECLARATION.test(code) ||
     (options.includeRequire === true && REQUIRE_BINDING_DECLARATION.test(code)) ||

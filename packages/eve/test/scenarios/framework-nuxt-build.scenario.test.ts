@@ -59,14 +59,6 @@ describe("framework-nuxt build", () => {
   it("emits the eve service and route into the Vercel Build Output", async () => {
     const app = await scenarioApp(NUXT_EVE_SERVICE_DESCRIPTOR);
 
-    // Build the Nuxt app directly with the env a real Vercel build container
-    // always provides. `VERCEL` triggers both Nitro's Vercel preset (via
-    // std-env provider detection) and the eve module's service generation;
-    // `NITRO_PRESET` pins the preset so the assertion does not depend on
-    // detection heuristics. `vercel build` is intentionally not used here: run
-    // unauthenticated it strips these system env vars, so Nitro would fall back
-    // to the node-server preset and emit no Build Output. Vercel's own
-    // assembly of the generated service is covered by the Next.js scenario.
     await runPnpmCommand({
       args: ["exec", "nuxt", "build"],
       cwd: app.appRoot,

@@ -11,7 +11,6 @@ interface TelegramManagementDeps {
 
 const defaultDeps: TelegramManagementDeps = { fetch };
 
-/** Validates a BotFather token with `getMe` and returns the bot's username. */
 export async function fetchTelegramBotUsername(
   botToken: string,
   signal?: AbortSignal,

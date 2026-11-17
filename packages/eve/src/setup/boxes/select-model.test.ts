@@ -54,7 +54,6 @@ const CATALOG: GatewayCatalogModel[] = [
     tags: ["reasoning"],
     reasoningEfforts: [],
   },
-  // Filtered out: not a language model.
   {
     id: "openai/dall-e-3",
     name: "DALL-E 3",
@@ -62,7 +61,6 @@ const CATALOG: GatewayCatalogModel[] = [
     owned_by: "openai",
     reasoningEfforts: [],
   },
-  // Filtered out: missing the web-search tag.
   {
     id: "google/gemma-2",
     name: "Gemma 2",
@@ -103,7 +101,6 @@ describe("modelOptionsFromCatalog", () => {
   });
 
   it("orders the curated shortlist first and marks only it featured", () => {
-    // The curated order keeps the default ahead of the newer Opus entry.
     const options = modelOptionsFromCatalog([
       {
         id: "anthropic/claude-opus-4.8",

@@ -34,7 +34,6 @@ export async function getVercelSandboxCredentials(
   return getVercelSandboxCredentialsFromOidcToken(oidcToken);
 }
 
-/** Credentials when eve can resolve them; otherwise `{}` so the SDK falls back to its own resolution. */
 export async function resolveVercelSandboxCredentials(
   createOptions: VercelCreateOptions,
 ): Promise<VercelSandboxCredentials | Record<string, never>> {

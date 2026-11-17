@@ -54,7 +54,6 @@ interface ExactEdit {
   readonly newText: string;
 }
 
-/** Applies unique, non-overlapping replacements matched against the original content. */
 export function applyExactEdits(content: string, edits: readonly ExactEdit[]): string {
   if (edits.length === 0) {
     throw new Error("edits must contain at least one replacement.");

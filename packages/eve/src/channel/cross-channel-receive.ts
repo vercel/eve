@@ -30,11 +30,6 @@ export type CrossChannelToFn = <TChannel extends ChannelReference<unknown>>(
   target: InferReceiveTarget<TChannel>,
 ) => CrossChannelTargetHandle;
 
-/**
- * Channel record consumed by the receiver — keeps the public-facing
- * `definition` reference so callers can identify a target by value
- * (the same module-default they imported in their route file).
- */
 export interface CrossChannelTarget {
   readonly name: string;
   readonly definition: CompiledChannel;
@@ -43,16 +38,8 @@ export interface CrossChannelTarget {
   readonly turnPolicy?: CompiledChannel["turnPolicy"];
 }
 
-/** What a forwarded delivery inherits from the caller; the target channel supplies its own name. */
 type CrossChannelDeliverySource = Omit<ChannelDeliverySource, "channelKind" | "channelName">;
 
-/**
- * Projects an agent's resolved channels into the receiver-input shape.
- *
- * Framework-internal fetch-only channels carry no `definition` reference
- * and are filtered out at this boundary — only authored channels backed
- * by a `defineChannel` value can be receive targets.
- */
 export function toCrossChannelTargets(
   channels: readonly ResolvedChannelDefinition[],
 ): readonly CrossChannelTarget[] {
@@ -71,10 +58,6 @@ export function toCrossChannelTargets(
   );
 }
 
-/**
- * Builds the `ctx.to(channel, target)` closure used by route and schedule
- * handlers and tools.
- */
 export function createCrossChannelToFn(
   runtime: Runtime,
   channels: readonly CrossChannelTarget[],
@@ -108,7 +91,6 @@ interface InvokeChannelReceiveInput {
   readonly turnPolicy?: TurnPolicy;
 }
 
-/** Shared authored `receive(input, ctx)` invocation behind every `ctx.to()`. */
 async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Delivery> {
   const { name } = args.target;
   if (!args.target.receive) {

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 
-// Skip the real backoff between attempts.
 vi.mock("node:timers/promises", () => ({ setTimeout: async () => {} }));
 
 const session = { sessionId: "session-alice", turnId: "turn-1" };

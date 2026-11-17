@@ -72,17 +72,11 @@ interface AdapterClient {
 interface AcpSession {
   client?: AdapterClientSession;
   active?: ActivePrompt;
-  /** The session's lifecycle, folded from every event it streams. */
   view: SessionView;
   readonly tools: Map<string, ToolCall>;
   readonly parts: Map<string, "text" | "reasoning">;
 }
 
-/**
- * A call's ACP status, from the tables: pending until it starts or while its approval is open, in
- * progress while it runs. ACP v1 has no statuses for denied or stopped calls, so they report
- * `failed`.
- */
 function acpStatus(view: SessionView, callId: string): ToolCallStatus | undefined {
   switch (callState(view, callId)) {
     case undefined:
@@ -100,25 +94,15 @@ function acpStatus(view: SessionView, callId: string): ToolCallStatus | undefine
   }
 }
 
-/** Configuration for translating one ACP client connection to an eve server. */
 export interface EveAcpAdapterOptions {
   readonly eveVersion: string;
   readonly auth?: ClientOptions["auth"];
   readonly headers?: ClientOptions["headers"];
   readonly serverUrl: string;
-  /** Local workspace root to enforce; omit when connecting to a remote deployment. */
   readonly workspaceRoot?: string;
-  /** @internal Test seam for the public eve client boundary. */
   readonly client?: AdapterClient;
 }
 
-/**
- * Translates stable ACP v1 sessions onto the public eve HTTP client.
- *
- * The adapter owns only process-local ACP identities. Conversation durability,
- * event cursors, cancellation, and session retirement remain owned by
- * {@link ClientSession}.
- */
 export class EveAcpAdapter {
   readonly #client: AdapterClient;
   readonly #eveVersion: string;
@@ -265,7 +249,6 @@ export class EveAcpAdapter {
           if (event.type === "turn.settled" && event.data.outcome === "cancelled") cancelled = true;
           failure = failureOf(event) ?? failure;
           await this.#projectEvent(params.sessionId, session, event, client);
-          // The projection rebuilds the request with the call it's about.
           if (event.type === "interaction.opened") {
             const request = interaction(session.view, event.data.interactionId);
             if (request !== undefined && request.request.kind !== "sign-in")
@@ -276,7 +259,6 @@ export class EveAcpAdapter {
         if (active.protocolCancelled) {
           throw RequestError.requestCancelled({ sessionId: params.sessionId });
         }
-        // A session that fails ends its turn cancelled: its error, not the cancel, is the stop.
         if (active.cancelRequested || (cancelled && failure === undefined))
           return { stopReason: "cancelled" };
         if (failure !== undefined) {
@@ -390,13 +372,7 @@ export class EveAcpAdapter {
     }
     foldReceivedEvent(session.view, event);
     await this.#projectContent(sessionId, session, event, client);
-    // `tool_call` announced the request. Only an announced call gets updates: an approval
-    // reaches the client through its permission request.
     if (event.type === "call.requested") return;
-    // Each announced call reports when the tables' status differs from the one it last
-    // reported: a task call runs until its task settles, and a stopped or denied call ends when
-    // the stream says so. A result reports its content even when its call had already settled,
-    // such as the reason for a denial that `interaction.settled` decided first.
     const resultCallId = event.type === "call.settled" ? event.data.callId : undefined;
     for (const [callId, call] of session.tools) {
       const status = acpStatus(session.view, callId);
@@ -414,10 +390,6 @@ export class EveAcpAdapter {
     }
   }
 
-  /**
-   * A failed turn's server cancels the tasks it left running only after the response ends, so
-   * their calls end with the turn here.
-   */
   async #failRunningCalls(
     sessionId: string,
     session: AcpSession,
@@ -675,14 +647,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** A result's completion label retitles its call, such as a search reporting what it found. */
 function resultTitle(event: SessionStreamEvent, callId: string): { title?: string } {
   const title =
     event.type === "call.settled" && event.data.callId === callId ? event.data.label : undefined;
   return title === undefined ? {} : { title };
 }
 
-/** The output an event carries for a call, if it reports one. */
 function callOutput(event: SessionStreamEvent, callId: string, view: SessionView) {
   if (event.type !== "call.settled" || event.data.callId !== callId) return {};
   const outputOf = event.data.outputOf;

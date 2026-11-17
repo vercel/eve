@@ -35,7 +35,6 @@ describe("workflowEntry sign-ins", () => {
         const asked = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        // The provider redirects back with a denial: there is nothing to complete.
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [weatherCallback(signInId(asked), { error: "access_denied" })],
@@ -71,8 +70,6 @@ describe("workflowEntry sign-ins", () => {
         });
         const afterSignIn = await stream.nextUntil("turn after sign-in", isTurnSettled);
 
-        // The call that stopped for sign-in is the call that runs: its sign-in settles with it,
-        // and the model is not asked to decide again between them.
         const signedInAt = afterSignIn.findIndex(
           (event) =>
             event.type === "interaction.settled" &&
@@ -88,14 +85,12 @@ describe("workflowEntry sign-ins", () => {
           "model calls between the sign-in's settlement and the call's",
         ).toHaveLength(0);
 
-        // One model call asks for the tool, one reads its result.
         const events = [...beforeSignIn, ...afterSignIn];
         expect(
           filterEventsByType(events, "model.requested"),
           "model calls in the turn",
         ).toHaveLength(2);
         expect(filterEventsByType(events, "call.requested")).toHaveLength(1);
-        // The tool runs once, with the arguments of the original call.
         expect(executions()).toEqual([{ city: "Lisbon" }]);
       } finally {
         stream.dispose();
@@ -163,7 +158,6 @@ describe("workflowEntry sign-ins", () => {
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           payload: { message: "Never mind that, just say hello." },
         });
-        // A sign-in nobody completed does not stand between the user and an answer.
         const answered = await stream.nextUntil("answer to the steering message", isTurnSettled);
         expect(filterEventsByType(answered, "interaction.settled")).toMatchObject([
           { data: { interactionId: signInId(asked), outcome: "withdrawn" } },
@@ -191,7 +185,6 @@ function isTurnSettled(event: SessionStreamEvent): boolean {
   return event.type === "turn.settled";
 }
 
-/** The sign-in interaction `events` opened, which is its attempt. */
 function signInId(events: readonly SessionStreamEvent[]): string {
   const opened = filterEventsByType(events, "interaction.opened").find(
     (event) => event.data.request.kind === "sign-in",
@@ -237,7 +230,6 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
       return { token: "weather-token" };
     },
   };
-  // Both tools sign in to the same connection, so one callback serves a step that calls both.
   const weatherTool = (name: string): ResolvedToolDefinition => ({
     description: `${name} for a city.`,
     execute: createToolExecuteWithAuth({

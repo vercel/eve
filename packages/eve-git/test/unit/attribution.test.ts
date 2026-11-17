@@ -40,7 +40,6 @@ test("appends the trailer once", () => {
 test("extends an existing trailer block so earlier co-authors still count", () => {
   const existing = "Fix it.\n\nCo-authored-by: A <a@x.y>\n";
   assert.equal(withTrailer(existing, TRAILER), `Fix it.\n\nCo-authored-by: A <a@x.y>\n${TRAILER}`);
-  // A lone `Key: value` paragraph is the subject or prose, not a trailer block.
   assert.equal(withTrailer("Note: details", TRAILER), `Note: details\n\n${TRAILER}`);
   assert.equal(
     withTrailer("Fix it.\n\nSee: this is prose\nacross lines", TRAILER),

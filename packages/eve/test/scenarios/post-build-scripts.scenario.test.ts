@@ -99,7 +99,6 @@ describe("post-build scripts", () => {
                 "fs.cp = (source, destination, options) => copy(source, destination, {",
                 "  ...options,",
                 "  filter: async (source, destination) => {",
-                // Release the lock after cp has enumerated it, before it stats the entry.
                 "    if (source === lockPath) await fs.rm(lockPath, { recursive: true });",
                 "    return options.filter?.(source, destination) ?? true;",
                 "  },",

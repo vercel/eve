@@ -41,7 +41,6 @@ export async function readVercelCliTeam(): Promise<string | undefined> {
   return (await readCliConfiguration())?.teamId;
 }
 
-/** Read-only: Vercel CLI retains ownership of its credentials and token rotation. */
 export async function readVercelCliConnection(): Promise<
   { token: string; teamId: string } | undefined
 > {
@@ -51,7 +50,6 @@ export async function readVercelCliConnection(): Promise<
   return token === undefined ? undefined : { token, teamId: configuration.teamId };
 }
 
-/** Read a CLI token without requiring a selected team (personal accounts have none). */
 export async function readVercelCliToken(): Promise<string | undefined> {
   return readCliToken(await readCliConfiguration());
 }
@@ -93,7 +91,6 @@ export async function refreshVercelCliConnection(): Promise<void> {
   }
 }
 
-// Use the CLI's own native adapter: just-secrets intentionally uses a different key encoding.
 async function readCliKeyring(name: string): Promise<string | undefined> {
   for (const directory of (process.env.PATH ?? "").split(delimiter)) {
     try {
@@ -105,16 +102,12 @@ async function readCliKeyring(name: string): Promise<string | undefined> {
         require = createRequire(require.resolve("vercel/package.json"));
       try {
         require = createRequire(require.resolve("@vercel/cli-auth/package.json"));
-      } catch {
-        // Older CLI installs may expose the native adapter directly.
-      }
+      } catch {}
       const keyring = require("@napi-rs/keyring") as {
         Entry: new (service: string, account: string) => { getPassword(): string | null };
       };
       return new keyring.Entry("com.vercel.vercel-cli", name).getPassword() ?? undefined;
-    } catch {
-      // Other PATH entries may contain the installed CLI and its native adapter.
-    }
+    } catch {}
   }
   return undefined;
 }

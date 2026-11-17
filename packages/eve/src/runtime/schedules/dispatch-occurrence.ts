@@ -8,7 +8,6 @@ import type {
 import type { ScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
-/** Dispatches an at-least-once callback and reports the sessions it started, if any. */
 export async function dispatchScheduledOccurrence(input: {
   readonly bundle: Pick<CompiledRuntimeAgentBundle, "compiledArtifactsSource" | "graph">;
   readonly collection: string;

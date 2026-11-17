@@ -57,12 +57,6 @@ interface PackageManagerCall {
   cwd: string;
 }
 
-/**
- * These scenarios spawn the real CLI, and the test runner itself is often
- * launched by a coding agent whose markers would flip `eve init` onto the
- * agent path. Human-path scenarios start from a scrubbed environment;
- * agent-path scenarios add `AI_AGENT` back explicitly.
- */
 function withoutCodingAgentMarkers(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const scrubbed = { ...env };
   for (const marker of CODING_AGENT_ENV_MARKERS) {
@@ -125,7 +119,6 @@ describe("eve init smoke", () => {
     const scratch = await createScratchDirectory("eve-init-release-age-");
     const eveTarball = `file:${await ensureScenarioEveTarballPath()}`;
     const pnpmfile = join(scratch, "scaffold-pnpmfile.cjs");
-    // The package under test need not have reached npm; registry dependencies still use the policy.
     await writeFile(
       pnpmfile,
       [
@@ -142,7 +135,6 @@ describe("eve init smoke", () => {
     );
     const env = {
       ...withoutCodingAgentMarkers(process.env),
-      // Exercise the package-manager dev handoff separately without opening a TUI.
       AI_AGENT: "claude",
       CI: "true",
       PNPM_CONFIG_GLOBAL_PNPMFILE: pnpmfile,
@@ -160,8 +152,6 @@ describe("eve init smoke", () => {
       "minimumReleaseAgeStrict: true",
     );
 
-    // pnpm checks the installed lockfile before exec/run and may reinstall.
-    // A one-time install flag must not leave the next command rejecting it.
     const devArguments = ["--reporter=silent", ...eveDevArguments("pnpm")];
     const dev = await runFile("pnpm", [...devArguments, "--help"], {
       cwd: projectDir,
@@ -179,8 +169,6 @@ describe("eve init smoke", () => {
       runFile("pnpm", ["install", "--frozen-lockfile"], { cwd: projectDir, env }),
     ).resolves.toMatchObject({ stdout: expect.any(String) });
 
-    // Exercise the unpublished eve override independently of the initial
-    // scaffold install's release-age bypass.
     const manifestPath = join(projectDir, "package.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       dependencies: Record<string, string>;

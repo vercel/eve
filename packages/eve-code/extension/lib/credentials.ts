@@ -20,7 +20,6 @@ export interface BrokeredCredentialOptions {
   ) => Promise<void>;
 }
 
-// Keyed by session object because eve sessions expose no sandbox identity.
 const headersBySandbox = new WeakMap<SandboxSession, Map<string, Record<string, string>>>();
 const policyQueues = new WeakMap<SandboxSession, Promise<void>>();
 const environmentQueues = new WeakMap<SandboxSession, Promise<void>>();

@@ -52,7 +52,6 @@ const pointerDurationMs = z
   .optional()
   .describe("optional cursor travel duration for recorded demos; use about 600ms");
 const precisionMovementStyle = z.literal("precision").optional();
-// Object-only coordinates keep the generated JSON Schema portable.
 const dragPoint = z.object({
   x: coordinate.max(SCREEN_WIDTH - 1),
   y: coordinate.max(SCREEN_HEIGHT - 1),
@@ -260,8 +259,6 @@ export default defineTool({
     "Use those coordinates for the next action. Use launch with app firefox and an optional HTTP(S) URL for the browser. Use launch with app xterm and instance primary or secondary for up to two managed terminals. Use focus to activate an existing app without changing its geometry. Use arrange_pair for common 50/50 terminal/browser or two-terminal layouts. Use arrange_windows for custom one-to-four-window scenes with proportional regions; it resolves every managed selector before moving any window, rejects overlap and unreadable geometry, waits boundedly for newly opened windows, and verifies the applied scene. Use window_layout with app desktop only for a single active window. Do not launch either application through a shell command. The action shape follows the " +
     "OpenAI computer tool: screenshot, click, double_click, triple_click, drag, keypress, move, scroll, type, clipboard_read, clipboard_write, and wait, plus constrained layout, launch, and recording lifecycle actions. arrange_windows is available inside sequence for a deterministic mid-demo transition after an interaction opens Firefox. Use sequence for a rehearsed recording so up to 30 actions execute in one sandbox round trip with only one final screenshot. " +
     "Pointer movement remains direct when movementStyle is omitted, preserving faithful exploratory and bug-repro interaction. For polished recordings, explicitly use movementStyle natural for confident curved moves/clicks and precision for drags; precision approaches the drag start naturally, pauses briefly around mouse-down, makes one subtle undershoot and exact correction while held, then pauses before mouse-up. Natural duration is distance-based and deliberately brisk; durationMs can override styled moves, clicks, and drags when exact timing matters. Recording actions return the sandbox path of the MP4 file; recordings stop automatically after five minutes. Requests have a two-minute deadline including queue time. Typing is limited to 10000 characters total per request; paced typing additionally allows at most 1000 graphemes and 30000ms of planned delay across the whole sequence. Omit typingStyle and typingDelayMs for longer text. Paced typing timings retain only the final driver result and grapheme count.",
-  // Claude rejects a model request when any tool's input schema has a root union, so the
-  // action union is nested under an object property.
   inputSchema: z.object({ request: inputSchema }),
   approval: never(),
   async execute({ request: input }, ctx) {

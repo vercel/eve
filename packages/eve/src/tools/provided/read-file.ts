@@ -112,9 +112,6 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
     outputSchema: READ_FILE_OUTPUT_SCHEMA,
     async toModelOutput(output) {
       if (output.file === undefined) return toolOutput.json(output);
-      // The bytes load here rather than in `execute`, so `call.settled` never
-      // carries them. The harness then stages this file part under its own name
-      // as a sandbox ref before it enters history.
       const sandbox = await contextStorage.getStore()?.get(SandboxKey)?.get();
       const bytes =
         sandbox === undefined || sandbox === null
@@ -123,7 +120,6 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
               path: await resolveAbsoluteFilePath(sandbox, output.path),
             });
       if (bytes === null) return toolOutput.text(`${output.content} The file could not be loaded.`);
-      // A file replaced after `execute` would otherwise skip its size cap.
       if (bytes.byteLength !== output.file.size) {
         return toolOutput.text(
           `${output.content} The file changed after it was read; read it again.`,

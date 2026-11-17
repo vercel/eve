@@ -15,7 +15,6 @@ export interface PackageDependencyMutation {
   readonly scripts: readonly string[];
 }
 
-/** Adds missing or outdated runtime dependencies to an existing package.json. */
 export async function ensurePackageDependencies(
   options: EnsurePackageDependenciesOptions,
 ): Promise<readonly PackageDependencyMutation[]> {

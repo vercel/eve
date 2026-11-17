@@ -7,21 +7,16 @@ import {
   resolveEvePackageContract,
 } from "#setup/scaffold/create/project.js";
 
-/** Name of the Vercel Daemon that holds the Discord Gateway connection. */
 export const DISCORD_DAEMON_NAME = "discord-gateway";
 
-/** Directory of the relay, relative to the project root. */
 export const DISCORD_DAEMON_ROOT = "daemon";
 
-// Exactly one instance: each Gateway connection receives every message.
 function discordDaemon(region: string) {
   return { root: DISCORD_DAEMON_ROOT, entrypoint: "Dockerfile", instances: { [region]: 1 } };
 }
 
-/** Vercel's default function region, for projects that don't set one. */
 const DEFAULT_REGION = "iad1";
 
-/** The relay's files, by path relative to {@link DISCORD_DAEMON_ROOT}. */
 export function discordDaemonFiles(
   connectorUid: string,
   options: { readonly messageContent: boolean } = { messageContent: false },
@@ -61,16 +56,10 @@ await runDiscordGatewayRelay({
   };
 }
 
-/** The `daemons` entry to add by hand to a project configured through `vercel.ts`. */
 export function discordDaemonEntry(): string {
   return `daemons: ${JSON.stringify({ [DISCORD_DAEMON_NAME]: discordDaemon(DEFAULT_REGION) })}`;
 }
 
-/**
- * `vercel.json` with the relay's daemon added, given its current contents or
- * `undefined` when there is none. Returns `undefined` when a daemon of the same
- * name already exists, so the file is left as it is.
- */
 export function withDiscordDaemon(vercelJson: string | undefined): string | undefined {
   let config: Record<string, unknown> = { $schema: "https://openapi.vercel.sh/vercel.json" };
   if (vercelJson !== undefined) {
@@ -90,7 +79,6 @@ export function withDiscordDaemon(vercelJson: string | undefined): string | unde
   }
   const daemons = isObject(config.daemons) ? config.daemons : {};
   if (daemons[DISCORD_DAEMON_NAME] !== undefined) return undefined;
-  // Run beside the project's functions, so forwarding stays in one region.
   const region =
     Array.isArray(config.regions) && typeof config.regions[0] === "string"
       ? config.regions[0]
@@ -99,7 +87,6 @@ export function withDiscordDaemon(vercelJson: string | undefined): string | unde
   return `${JSON.stringify({ ...config, daemons: { ...daemons, [DISCORD_DAEMON_NAME]: daemon } }, null, 2)}\n`;
 }
 
-/** Reads a text file, or `undefined` when there is none. */
 export async function readTextFile(path: string): Promise<string | undefined> {
   try {
     return await readFile(path, "utf8");

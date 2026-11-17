@@ -23,7 +23,6 @@ import { emptySessionView, foldReceivedEvent } from "#protocol/session-projectio
 import { idle, waiting } from "#protocol/session-projection/selectors.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 
-/** What a v27 reader reads from stored v26 records, with the checker's verdict on every line. */
 function read(records: readonly unknown[]) {
   const history = createV26HistoryReader();
   const checker = createStreamChecker();
@@ -39,7 +38,6 @@ function read(records: readonly unknown[]) {
   return { events: read, violations };
 }
 
-/** A message as a person sees it: who wrote it, the text, and each call with its outcome. */
 function shown(message: EveMessage): string {
   const parts = message.parts.flatMap((part) => {
     switch (part.type) {
@@ -60,11 +58,9 @@ function shown(message: EveMessage): string {
 }
 
 describe("createV26HistoryReader", () => {
-  // The expected messages are what v27 shows for the same conversation recorded by v27.
   it("reads a v26 conversation as v27 records it, without breaking a lifecycle rule", () => {
     const { events, violations } = read(KITCHEN_SINK);
     expect(violations).toEqual([]);
-    // A clear hides what came before it, so the turns before it read from the stream up to it.
     const clear = events.findIndex(
       (event) => event.type === "context.settled" && event.data.selects === null,
     );
@@ -100,7 +96,6 @@ describe("createV26HistoryReader", () => {
       "assistant: Echo: hello after compact",
     ]);
     expect(idle(sessionTables(state.view))).toBe(true);
-    // A transcript starts over at the clear, as v27's does.
     expect(transcriptOf(events).messages.map(({ text }) => text)).toEqual([
       "hello after clear",
       "Echo: hello after clear",
@@ -164,7 +159,6 @@ describe("createV26HistoryReader", () => {
   });
 
   it("reads the end a v27 deployment appends to a stranded v26 session as it was written", () => {
-    // What a v27 deployment writes when Alice resets the session Bob left waiting on an approval.
     const recorded = emptySessionView();
     for (const event of read(PENDING_APPROVAL).events) foldReceivedEvent(recorded, event);
     const ended: SessionEvent = {
@@ -199,9 +193,7 @@ describe("v26LineStream", () => {
     });
     const out: unknown[] = [];
     for await (const value of v26LineStream(records, 5)) out.push(value);
-    // One output per stored record from the cursor on, so positions keep counting stored lines.
     expect(out).toHaveLength(KITCHEN_SINK.length - 5);
-    // The first session.waiting reads as no line: the turn before it already settled.
     expect(out[8 - 5]).toEqual({ $eve: "position", next: 9 });
   });
 });
@@ -224,7 +216,6 @@ describe("convertLegacyEvents", () => {
   });
 
   it("leaves events saved mid-turn unfinished, at the positions they were stored", () => {
-    // Saved while the second turn streamed its reply: the last event is a delta.
     const delta = {
       data: { messageDelta: "It is", sequence: 1, stepIndex: 0, turnId: "turn_1" },
       meta: { at: "2026-10-01T00:00:00.000Z" },
@@ -233,7 +224,6 @@ describe("convertLegacyEvents", () => {
     const saved = [...KITCHEN_SINK.slice(0, 13), delta];
     const events = convertLegacyEvents(saved);
     const lines = events.map((event) => event.meta.position.line);
-    // Each event keeps its stored line; the trailing delta reads as none, so the last is earlier.
     expect(lines).toEqual(lines.toSorted((a, b) => a - b));
     expect(lines.at(-1)).toBe(12);
     expect(events.at(-1)?.meta.next).toBe(saved.length);

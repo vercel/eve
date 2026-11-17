@@ -109,10 +109,6 @@ describe("dynamic tool source edits across a restart", () => {
         expect(waiting.status).toBe("awaiting-input");
         expect(waiting.interactions).toHaveLength(2);
 
-        // Edit the callback module while approvals are parked: pad the top of
-        // the file (shifting every byte offset below — the old identity scheme
-        // resolved parked calls by those offsets) and bump the built-in
-        // constant so the edited body is observable.
         await writeFile(
           join(app.appRoot, "agent", "lib", "editable-factory.ts"),
           "// padding line\n// another padding line\n\n" + editableFactorySource(2),
@@ -145,9 +141,6 @@ describe("dynamic tool source edits across a restart", () => {
         ).result();
         expect(resumed.status).toBe("completed");
 
-        // Pending approvals make the session ineligible for deployment
-        // handoff. Each parked call must run its own tool — never the other
-        // one — using the generation that created the approval.
         const alpha = await readExecuteMarker(app.appRoot, "alpha");
         const beta = await readExecuteMarker(app.appRoot, "beta");
         expect(alpha).toMatchObject({ build: 1, key: "alpha", version: "v1" });

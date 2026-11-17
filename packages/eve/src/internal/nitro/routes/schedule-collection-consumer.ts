@@ -32,7 +32,6 @@ import { parseSchedulePayload } from "#runtime/schedules/payload.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
-/** Receives verified Vercel Schedules occurrences and dispatches at-least-once callbacks. */
 export async function handleScheduleCollectionConsumer(
   config: NitroArtifactsConfig,
   request: Request,
@@ -41,7 +40,6 @@ export async function handleScheduleCollectionConsumer(
   return await handleCallback(handler, { retry })(request);
 }
 
-/** Shares occurrence verification and dispatch between hosted callbacks and local queue polling. */
 export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): {
   readonly handler: MessageHandler<unknown>;
   readonly retry: RetryHandler;
@@ -106,7 +104,6 @@ export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): 
             ),
         });
       } catch (error) {
-        // Report failure only when the provider stops retrying this callback.
         const final =
           error instanceof PermanentScheduleMessageError ||
           metadata.deliveryCount >= EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES;
@@ -133,7 +130,6 @@ export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): 
   };
 }
 
-/** Reads the delivered schedule with the collection provider's own client options. */
 async function getSchedule(
   definition: DynamicSchedulesDefinition<unknown>,
   queue: VerifiedScheduleMessage,

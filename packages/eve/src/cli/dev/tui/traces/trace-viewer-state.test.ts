@@ -41,7 +41,6 @@ function trace(spans: readonly LocalTraceSpan[], traceId = "t".repeat(32)): Loca
   };
 }
 
-/** A turn with a user message, an assistant reply, and a tool call. */
 function conversationTrace(options: { readonly longReply?: boolean } = {}): LocalTrace {
   const turn = span({
     name: "agent.turn",
@@ -199,11 +198,9 @@ describe("reduceTraceViewerKey", () => {
     const assistantIndex = state.conversationItems.findIndex((item) => item.kind === "assistant");
     state = { ...state, selectedRow: assistantIndex };
 
-    // A short reply fits the cap: ←/→ is a no-op, nothing to expand.
     state = reduceTraceViewerKey(state, key("right"), ENV).state;
     expect(state.expandedItems.has(assistantIndex)).toBe(false);
 
-    // A long reply truncates: it can expand, and collapses back.
     state = applyLoadedTrace(state, conversationTrace({ longReply: true }));
     state = reduceTraceViewerKey(state, key("right"), ENV).state;
     expect(state.expandedItems.has(assistantIndex)).toBe(true);
@@ -218,9 +215,6 @@ describe("reduceTraceViewerKey", () => {
       conversationLineCounts: state.conversationItems.map(() => 6),
     };
     const assistantIndex = state.conversationItems.findIndex((item) => item.kind === "assistant");
-    // Cards occupy 7 lines each (6 + separator); assistant starts at line
-    // assistantIndex*7. Click one row into it (y=4 is first body row — three
-    // header rows — so bodyRow = clickY-4 maps to line scrollRow+bodyRow).
     const clickY = 4 + assistantIndex * 7 + 1;
     const click = (): void => {
       state = reduceTraceViewerKey(
@@ -242,7 +236,6 @@ describe("reduceTraceViewerKey", () => {
     click();
     expect(state.expandedItems.has(assistantIndex)).toBe(false);
 
-    // A press alone (a drag may follow) is not a click.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 0, x: 10, y: clickY },
@@ -256,8 +249,6 @@ describe("reduceTraceViewerKey", () => {
     const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
     state = reduceTraceViewerKey(state, key("enter"), env).state;
     expect(state.panelOpen).toBe(true);
-    // Press right of the cards (contentWidth 80 + separator): drawer cell
-    // columns are relative to the drawer's content area.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 0, x: 85, y: 5 },
@@ -304,7 +295,6 @@ describe("reduceTraceViewerKey", () => {
     const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
     state = reduceTraceViewerKey(state, key("enter"), env).state;
     expect(state.panelOpen).toBe(true);
-    // Pointer right of the conversation (contentWidth 80): the drawer scrolls.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 65, x: 90, y: 5 },
@@ -312,14 +302,12 @@ describe("reduceTraceViewerKey", () => {
     ).state;
     expect(state.panelScroll).toBe(3);
     expect(state.scrollRow).toBe(0);
-    // Wheel back up clamps at the top.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 64, x: 90, y: 5 },
       env,
     ).state;
     expect(state.panelScroll).toBe(0);
-    // Over the conversation, the wheel scrolls the cards as before.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 65, x: 10, y: 5 },
@@ -347,7 +335,6 @@ describe("reduceTraceViewerKey", () => {
       region: "conversation",
     });
 
-    // Motion with the left button held (SGR button 32) extends the selection.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 32, x: 20, y: 7 },
@@ -372,7 +359,6 @@ describe("reduceTraceViewerKey", () => {
       region: "conversation",
     });
     expect(result.state.textSelection).toBeUndefined();
-    // The drag did not toggle any card.
     expect(result.state.expandedItems.size).toBe(0);
   });
 
@@ -392,7 +378,6 @@ describe("reduceTraceViewerKey", () => {
 
   it("scrolls the viewport on mouse wheel events", () => {
     let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
-    // 10 cards, each 5 lines + separator; viewport holds 12 lines.
     const items = Array.from({ length: 10 }, (_, index) => ({
       ...state.conversationItems[state.conversationItems.length - 1]!,
       span: {
@@ -407,16 +392,13 @@ describe("reduceTraceViewerKey", () => {
       conversationLineCounts: items.map(() => 5),
     };
     expect(state.scrollRow).toBe(0);
-    // Wheel down (button 65): scroll forward.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 65, x: 10, y: 5 },
       env,
     ).state;
     expect(state.scrollRow).toBe(3);
-    // The selection stays on the same card even when it scrolls out of view.
     expect(state.selectedRow).toBe(0);
-    // Wheel up (button 64): scroll back.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 64, x: 10, y: 5 },
@@ -424,7 +406,6 @@ describe("reduceTraceViewerKey", () => {
     ).state;
     expect(state.scrollRow).toBe(0);
     expect(state.selectedRow).toBe(0);
-    // Clamps at the end.
     for (let i = 0; i < 20; i += 1) {
       state = reduceTraceViewerKey(
         state,
@@ -432,14 +413,12 @@ describe("reduceTraceViewerKey", () => {
         env,
       ).state;
     }
-    // Total lines = 10*6 = 60; max scroll = 60-12 = 48.
     expect(state.scrollRow).toBe(48);
     expect(state.selectedRow).toBe(0);
   });
 
   it("scrolls the conversation by line offset, including separators, to fit the last card", () => {
     let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
-    // Pretend the trace holds several turns' worth of cards by cloning items.
     const items = Array.from({ length: 10 }, (_, index) => ({
       ...state.conversationItems[state.conversationItems.length - 1]!,
       span: {
@@ -448,7 +427,6 @@ describe("reduceTraceViewerKey", () => {
       },
     }));
     state = { ...state, conversationItems: items };
-    // Each card is 5 lines + 1 separator; the viewport holds 12 lines.
     const env = {
       ...ENV,
       timelineViewportRows: 12,
@@ -458,10 +436,7 @@ describe("reduceTraceViewerKey", () => {
       state = reduceTraceViewerKey(state, key("down"), env).state;
     }
     expect(state.selectedRow).toBe(9);
-    // Card 9 starts at line 9*6=54; it ends at 54+5=59. To fit 59 in a
-    // 12-line viewport, scroll to 59-12=47 (line offset into all cards).
     expect(state.scrollRow).toBe(47);
-    // One more down at the end is a no-op but keeps the card in view.
     state = reduceTraceViewerKey(state, key("down"), env).state;
     expect(state.scrollRow).toBe(47);
   });
@@ -491,8 +466,6 @@ describe("applyTraceList", () => {
   });
 
   it("selects the preferred trace even when a fallback is already viewed", () => {
-    // The viewer opened with a fallback trace because the preferred one
-    // hadn't appeared yet. Once it shows up, the preference must win.
     let state = applyTraceList(createTraceViewerState(), [entry("a".repeat(32))]);
     expect(state.traceIndex).toBe(0);
     state = applyTraceList(state, [entry("a".repeat(32)), entry("b".repeat(32))], {
@@ -521,8 +494,6 @@ describe("applyTraceList", () => {
 
 describe("applyLoadedTrace", () => {
   it("keeps the conversation selection when cards share one span", () => {
-    // System and the first assistant both point at the model span; matching
-    // on span id alone used to jump the selection to system on every poll.
     let state = applyLoadedTrace(
       createTraceViewerState(),
       trace([
@@ -562,7 +533,6 @@ describe("applyLoadedTrace", () => {
     state = reduceTraceViewerKey(state, key("down"), ENV).state;
     state = reduceTraceViewerKey(state, key("down"), ENV).state;
     expect(state.selectedRow).toBe(2);
-    // Simulate a poll: the selection must stay on the assistant card.
     state = applyLoadedTrace(state, state.trace!);
     expect(state.selectedRow).toBe(2);
     expect(state.conversationItems[state.selectedRow]?.kind).toBe("assistant");

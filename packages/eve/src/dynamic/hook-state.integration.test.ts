@@ -24,9 +24,6 @@ import { defineState } from "#public/definitions/state.js";
 import { otelIntegration } from "#tracing/eve/otel-declaration.js";
 import { defineTool } from "#tools/definition.js";
 
-// A turn.started hook can decide something for the turn, such as which model it runs or a
-// feature flag, and keep it in state. These pin that the turn's own readers see that decision.
-
 type Choice = "first" | "second";
 
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
@@ -44,7 +41,6 @@ function caller(plan: string) {
   };
 }
 
-/** Each turn calls `lookup` once and then replies, so it makes two model calls. */
 function scriptedModel(name: Choice, served: Choice[]) {
   return markMockModel(
     new MockLanguageModelV4({
@@ -64,10 +60,6 @@ function scriptedModel(name: Choice, served: Choice[]) {
   );
 }
 
-/**
- * Two turns of two model calls each. The hook picks the second model for a turn that asks for
- * it, after a pause like a remote lookup's; the dynamic model runs what the hook picked.
- */
 async function runTwoTurns(): Promise<readonly Choice[]> {
   const served: Choice[] = [];
   const models = { first: scriptedModel("first", served), second: scriptedModel("second", served) };
@@ -125,7 +117,6 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
       },
     ]);
     try {
-      // The second message must start its own turn, not steer the first one.
       await waitForParkedTurnStep(run.runId);
       await resumeHook(sessionInboxHookToken(continuationToken), {
         auth: caller("team"),

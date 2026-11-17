@@ -3,10 +3,6 @@ import { withTaskTools } from "#execution/tasks/model-step.js";
 import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
 import { type Definition, once, section, SECTION_ORDER, type ToolEntry } from "./definition.js";
 
-/**
- * What eve adds for its own features, seeing everything the agent declares: the task tools and
- * their note when the session offers tasks.
- */
 export const builtins: Definition = {
   contribute: ({ container, step }) => ({
     arrange: (draft) => {

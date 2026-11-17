@@ -38,7 +38,6 @@ const reply = (text: string): StreamPart[] => [
   { finishReason: { raw: undefined, unified: "stop" }, type: "finish", usage },
 ];
 
-/** A provider overloaded mid-stream, which eve retries and the AI SDK doesn't. */
 const overloaded = (before: readonly StreamPart[] = []): StreamResult =>
   streamOf([
     { type: "stream-start", warnings: [] },
@@ -104,7 +103,6 @@ describe("model attempts", () => {
     const doStream = vi
       .fn<MockLanguageModelV3["doStream"]>()
       .mockResolvedValueOnce(
-        // The call it announced is output: a retry can't take it back.
         overloaded([{ input: "{}", toolCallId: "call_0", toolName: "lookup", type: "tool-call" }]),
       )
       .mockImplementation(async () => streamOf(reply("Here it is.")));
@@ -165,7 +163,6 @@ describe("run attributes", () => {
 
 describe("a failed model call", () => {
   it("keeps the person's message in history", async () => {
-    // The input joins history before the call, so a call that fails can't lose it.
     vi.spyOn(console, "error").mockImplementation(() => {});
     const events: SessionEvent[] = [];
     const message = "Alice asks for the weekly summary.";

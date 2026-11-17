@@ -1,7 +1,3 @@
-// The runtime catalog: every fact and progress type, what family it belongs to, its role in that
-// family's lifecycle, and the closed outcome sets. Plain data with no dependencies, so the client
-// fold, the checker, and hooks share it without loading schemas.
-
 import type { CallOutcome } from "./families/call.js";
 import type { ContextOutcome } from "./families/context.js";
 import type { DeliveryOutcome } from "./families/delivery.js";
@@ -160,27 +156,22 @@ export const PROGRESS_CATALOG: { readonly [TType in Progress["type"]]: ProgressD
 export type FactType = Fact["type"];
 export type ProgressType = Progress["type"];
 
-/** True for a fact type this version knows. Readers ignore the others. */
 export function isFactType(type: unknown): type is FactType {
   return typeof type === "string" && Object.hasOwn(FACT_CATALOG, type);
 }
 
-/** True for a progress type this version knows. Readers ignore the others. */
 export function isProgressType(type: unknown): type is ProgressType {
   return typeof type === "string" && Object.hasOwn(PROGRESS_CATALOG, type);
 }
 
-/** True for a terminal fact type. */
 export function isTerminalType(type: unknown): type is TerminalType {
   return typeof type === "string" && Object.hasOwn(TERMINAL_OUTCOMES, type);
 }
 
-/** True when a terminal's outcome belongs to its closed set. */
 export function isKnownOutcome(type: TerminalType, outcome: unknown): boolean {
   return typeof outcome === "string" && TERMINAL_OUTCOMES[type].includes(outcome);
 }
 
-/** A content part's phase, with unknown values read as narration. */
 export function contentPhase(phase: unknown): "narration" | "reply" {
   return phase === "reply" ? "reply" : "narration";
 }

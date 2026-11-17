@@ -6,7 +6,6 @@ import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 
-/** A duplicate starts no work, but its distinct receipt must still settle. */
 export async function settleDuplicateDeliveryStep(
   input: SessionStepState & { readonly delivery: DeliverHookPayload },
 ) {
@@ -20,7 +19,6 @@ export async function settleDuplicateDeliveryStep(
         const metadata = input.delivery.deliveryMetadata?.find(
           (entry) => entry.payloadIndex === index,
         );
-        // Reforwarding the very same receipt must not retire its original work.
         return metadata !== undefined && view.deliveries[metadata.deliveryId] !== undefined
           ? []
           : [{ payload, input: undefined }];

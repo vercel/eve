@@ -7,35 +7,18 @@ import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-hi
 import { isV26Line } from "#protocol/v26-lines.js";
 import { isStoredLine, type StoredLine } from "#protocol/session-events/envelope.js";
 
-/** Options for {@link streamSessionEvents}. */
 export interface SessionEventStreamOptions {
-  /**
-   * Position of the first line to read. Negative values count back from the
-   * durable tail (`-1` is the latest line). Defaults to `0`.
-   */
   readonly startIndex?: number;
-  /**
-   * Whether to keep following lines recorded after the read opens. When
-   * `false`, the read ends at the durable tail observed when it opens.
-   * Defaults to `true`.
-   */
   readonly follow?: boolean;
-  /** Stops the read and releases the underlying stream reader. */
   readonly signal?: AbortSignal;
 }
 
-/** One stored line and its position. A line this version can't read has `line: undefined`. */
 export interface PositionedLine {
   readonly position: number;
   readonly line: StoredLine | undefined;
-  /** The line as stored, parsed. */
   readonly record: unknown;
 }
 
-/**
- * Reads one session's stored records from `startIndex`, one per line, as parsed JSON. Negative
- * `startIndex` values count back from the tail. Callers count positions: one per record.
- */
 export function readSessionRecords(
   sessionId: string,
   startIndex?: number,
@@ -43,10 +26,6 @@ export function readSessionRecords(
   return parseNdjsonStream<unknown>(() => getRun(sessionId).getReadable({ startIndex }));
 }
 
-/**
- * Reads one session's events, following new lines as they're written. Records of types this
- * version doesn't know, including a pre-v27 session's, are skipped.
- */
 export function readSessionEventStream(
   sessionId: string,
   startIndex?: number,
@@ -74,18 +53,12 @@ export function readSessionEventStream(
       }
     },
     async cancel() {
-      // A prefetched next() may be waiting on the live tail; unblock it before return().
       cancellation.abort();
       await lines.return(undefined);
     },
   });
 }
 
-/**
- * Reads one session's recorded events up to the durable tail observed when
- * the read opens, then ends. Negative `startIndex` values count back from
- * that tail.
- */
 export function readSessionEventHistory(
   sessionId: string,
   startIndex?: number,
@@ -104,10 +77,6 @@ export function readSessionEventHistory(
   });
 }
 
-/**
- * Reads one session's stored records up to the durable tail observed when the read opens, then
- * ends. Negative `startIndex` values count back from that tail.
- */
 export function readSessionRecordHistory(
   sessionId: string,
   startIndex?: number,
@@ -142,9 +111,7 @@ export function readSessionRecordHistory(
   });
 }
 
-/** Returns the position of the last durably recorded line, or `-1` before the first. */
 export async function readSessionStreamTailIndex(sessionId: string): Promise<number> {
-  // The readable is never consumed; cancel it so the unread source does not linger.
   const readable = getRun(sessionId).getReadable();
   try {
     const [, tailIndex] = await Promise.all([
@@ -157,15 +124,9 @@ export async function readSessionStreamTailIndex(sessionId: string): Promise<num
   }
 }
 
-/**
- * Throws when the session's run does not exist or its recorded history has
- * passed retention. Cheaper than {@link readSessionStreamTailIndex}, whose
- * lookup on the local world opens every chunk file.
- */
 export async function assertSessionHistoryReadable(sessionId: string): Promise<void> {
   const world = await getWorld();
   const run = await world.runs.get(sessionId, { resolveData: "none" });
-  // Purging can leave chunk records behind; their count does not imply readable data.
   if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
     throw new RunExpiredError(
       "Session history is no longer available.",
@@ -176,11 +137,6 @@ export async function assertSessionHistoryReadable(sessionId: string): Promise<v
   }
 }
 
-/**
- * Iterates one session's stored lines in process, without the HTTP stream route, with each
- * line's position. A bounded read stops at the tail it observed when it opened: the writer
- * stores one chunk per line, so positions are chunk indexes.
- */
 export async function* streamSessionLines(
   sessionId: string,
   options: SessionEventStreamOptions = {},
@@ -216,11 +172,6 @@ export async function* streamSessionLines(
   }
 }
 
-/**
- * Iterates one session's events in process, from the lines {@link streamSessionLines} reads.
- * A session an eve before v27 recorded reads as the v27 commits its v26 lines record; see
- * `#execution/v26-history.js`.
- */
 export async function* streamSessionEvents(
   sessionId: string,
   options: SessionEventStreamOptions = {},
@@ -230,7 +181,6 @@ export async function* streamSessionEvents(
   for await (const { line, position, record } of streamSessionLines(sessionId, options)) {
     if (history === undefined && isV26Line(record)) {
       history = createV26HistoryReader();
-      // Each v26 line reads in light of those before it.
       if (position > 0) await readV26Prefix(history, sessionId, position, options.signal);
     }
     const read = history === undefined ? line : history.read(record, position);

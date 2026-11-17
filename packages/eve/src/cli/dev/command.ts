@@ -93,7 +93,6 @@ function addTerminalDisplayOptions(command: Command): Command {
     .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode);
 }
 
-/** Registers an interactive client for existing eve agents. */
 export function registerRemoteCommands(input: {
   applicationContext: CliApplicationContext;
   logger: DevelopmentCommandLogger;
@@ -214,7 +213,6 @@ export function registerRemoteCommands(input: {
   );
 }
 
-/** Registers the local development server command. */
 export function registerDevelopmentCommand(input: {
   applicationContext: CliApplicationContext;
   logger: DevelopmentCommandLogger;

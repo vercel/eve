@@ -6,7 +6,6 @@ import { ToolStubPlaybackKey, type ToolStubPlayback } from "#context/providers/t
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 
-/** Tool inputs and approvals have already been checked before a stub can replace execution. */
 export function executeWithToolStub(
   tool: string,
   input: unknown,
@@ -52,7 +51,6 @@ function contextStubCall(tool: string, input: unknown, callId: string) {
   };
 }
 
-/** Record errors converting stub responses so eval verification can detect them. */
 export async function recordToolStubFailure(
   tool: string,
   callId: string | undefined,
@@ -71,7 +69,6 @@ export async function recordToolStubFailure(
     );
 }
 
-/** Record stub failures even when the caller recovers with fallback output. */
 export async function observeToolOutput<T>(
   tool: string,
   calls: readonly { readonly callId: string; readonly turnId?: string }[],

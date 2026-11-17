@@ -391,11 +391,7 @@ describe("rule engine", () => {
   });
 
   it("allOf requires all predicates on the same link", () => {
-    const signals = extractErrorSignals(
-      // `name` matches the outer link, `message` only the inner one — no
-      // single link satisfies both.
-      named("Split", "outer", { cause: new Error("target") }),
-    );
+    const signals = extractErrorSignals(named("Split", "outer", { cause: new Error("target") }));
     const rule = {
       id: "x",
       name: "x",

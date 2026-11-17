@@ -75,7 +75,6 @@ export function agentToolSession(
   );
 }
 
-/** Direct model calls served by this task, in call order. */
 export function taskCalls(view: SessionView, taskId: string): readonly CallRow[] {
   return Object.values(sessionTables(view).calls).filter((call) => call.taskId === taskId);
 }

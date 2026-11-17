@@ -4,7 +4,6 @@ import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.j
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 
-/** A hook export's handlers, by the event they handle: `{ events?: { [event]: handler } }`. */
 export function normalizeHookHandlers(
   value: unknown,
   source: Pick<ModuleSourceRef, "exportName" | "logicalPath">,

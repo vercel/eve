@@ -37,8 +37,6 @@ describe("parseForwardedPrincipal", () => {
   });
 
   it("keeps authenticator and principalType open for channel-produced contexts", () => {
-    // The flagship use case: a Slack-authenticated user forwarded by a router
-    // deployment. The wire schema must not mirror the runtime enum schema.
     const result = parseForwardedPrincipal({
       current: {
         attributes: {},

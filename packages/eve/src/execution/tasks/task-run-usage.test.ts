@@ -34,7 +34,6 @@ vi.mock("#execution/stop-runs.js", () => ({
   waitedCallRuns: () => [],
 }));
 
-// A task step's commit folds what it decides into the session's saved view, as the writer does.
 vi.mock("#execution/publish-session-events.js", async () => {
   const { readDurableSession, replaceDurableSessionSnapshot } =
     await import("#execution/durable-session-store.js");
@@ -73,10 +72,6 @@ function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };
 }
 
-/**
- * A session that has spent `ownInputTokens` itself, with one
- * agent task, `name`, whose run is working on a call.
- */
 function sessionWithTask(input: {
   readonly name: string;
   readonly ownInputTokens: number;
@@ -274,13 +269,11 @@ describe("delegated agent usage", () => {
       output: "The plan looks ready.",
       usage: usage(300, 0.25),
     };
-    // The reply is delivered twice.
     await alice.execution.handleWorkflowMessage(reply);
     await alice.execution.handleWorkflowMessage(reply);
 
     expect(spent(alice.cursor)).toEqual(usage(400, 0.25));
 
-    // Alice cancels the reviewer's next turn; no reply carries its usage.
     await alice.execution.handleWorkflowMessage({ from, kind: "usage", usage: usage(600, 0.5) });
 
     expect(spent(alice.cursor)).toEqual(usage(700, 0.5));
@@ -300,7 +293,6 @@ describe("delegated agent usage", () => {
       result: { output: "Reviewed.", status: "completed" as const },
       usage: usage(900, 0.75),
     };
-    // The outcome is delivered twice too; the second arrives after the task's run finished.
     await alice.execution.handleWorkflowMessage(outcome);
     await alice.execution.handleWorkflowMessage(outcome);
 

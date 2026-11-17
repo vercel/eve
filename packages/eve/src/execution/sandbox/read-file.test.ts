@@ -57,7 +57,6 @@ describe("read_file images", () => {
         readFile.toModelOutput?.(output),
       );
 
-      // The raw output feeds action.result, so it carries metadata only.
       expect(output.file).toEqual({
         height: 32,
         mediaType: "image/png",
@@ -83,7 +82,6 @@ describe("read_file images", () => {
     const png = pngBytes(16, 16);
     const sandbox = mockSandbox();
 
-    // MCP image blocks reach eve as file parts without a filename.
     const [message] = await contextStorage.run(sandboxContext(sandbox), () =>
       stageToolResultMedia([
         toolResultMessage({

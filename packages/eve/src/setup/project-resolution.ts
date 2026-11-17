@@ -5,10 +5,8 @@ import { readVercelProjectLink, type VercelProjectLink } from "#internal/vercel/
 import { readVercelResourceName } from "#internal/vercel/api-resource.js";
 import { captureVercel } from "./primitives/run-vercel.js";
 
-/** Link and production-deployment status for a Vercel project directory. */
 export type DeploymentState = "unlinked" | "linked" | "deployed";
 
-/** Vercel project data resolved from local link metadata and the API. */
 export interface DeploymentInfo {
   state: DeploymentState;
   projectId?: string;
@@ -16,10 +14,8 @@ export interface DeploymentInfo {
   productionUrl?: string;
 }
 
-/** Validated Vercel owner and project identifiers. */
 export type VercelProjectReference = VercelProjectLink;
 
-/** Rejects Vercel's unsupported legacy link directory before link mutation. */
 export async function assertNoLegacyProjectLinkDirectory(projectRoot: string): Promise<void> {
   try {
     if (!(await stat(join(projectRoot, ".now"))).isDirectory()) return;
@@ -33,7 +29,6 @@ export async function assertNoLegacyProjectLinkDirectory(projectRoot: string): P
   );
 }
 
-/** Reads a validated project reference from Vercel's link metadata directory. */
 export async function readProjectLink(
   projectPath: string,
 ): Promise<VercelProjectReference | undefined> {
@@ -45,7 +40,6 @@ interface VercelApiProject {
   targets?: { production?: { alias?: unknown } };
 }
 
-/** Cancellation options shared by Vercel project read/operation helpers. */
 export interface VercelProjectOperationOptions {
   readonly signal?: AbortSignal;
 }
@@ -83,9 +77,6 @@ async function fetchProductionAlias(
   }
 }
 
-/**
- * Reads local Vercel link metadata and checks whether the linked project has a production alias.
- */
 export async function detectDeployment(
   projectPath: string,
   options: VercelProjectOperationOptions = {},
@@ -109,14 +100,11 @@ export async function detectDeployment(
   };
 }
 
-/** Human-readable identity of a linked Vercel project, for the dashboard status bar. */
 export interface ProjectIdentity {
   projectName: string;
-  /** The team's display name; absent for a personal-account project. */
   teamName?: string;
 }
 
-/** Reads a `name` (or `slug` fallback) off a Vercel API resource, or undefined. */
 async function fetchVercelName(
   apiPath: string,
   orgId: string,
@@ -135,17 +123,6 @@ async function fetchVercelName(
   }
 }
 
-/**
- * Resolves a linked project's human-readable name and team for the dashboard
- * status bar, from local Vercel link metadata plus the Vercel API. A
- * personal-account project (a non-`team_` org) carries no team, so `teamName`
- * is absent; the project name falls back to its id if the API call fails.
- *
- * Returns `undefined` when the directory is not linked. Network-bound: callers
- * render a loading affordance and cache the result.
- *
- * @param projectPath Absolute path of the linked project directory.
- */
 export async function detectProjectIdentity(
   projectPath: string,
   options: VercelProjectOperationOptions = {},
@@ -154,8 +131,6 @@ export async function detectProjectIdentity(
   const link = await readProjectLink(projectPath);
   if (link === undefined) return undefined;
 
-  // Independent lookups; fetched concurrently because this read gates the
-  // first paint of every surface that names the link (/model, the dashboard).
   const [projectName, teamName] = await Promise.all([
     fetchVercelName(
       `/v9/projects/${link.projectId}?teamId=${link.orgId}`,
@@ -190,10 +165,6 @@ export function projectResolutionFromDeployment(deployment: DeploymentInfo): Pro
   return { kind: "linked", projectId: deployment.projectId };
 }
 
-/**
- * Side-effect-free fact gathering after a link: reads local Vercel link
- * metadata to resolve the project. The on-disk link is the single source of truth.
- */
 export async function detectProjectResolution(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},

@@ -7,8 +7,6 @@ import { markMockModel } from "#internal/mock-model-identity.js";
 import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
 import { isPendingApprovalsNotice } from "#harness/hitl/approval-prompt.js";
 
-// A V4 model receives the prompt as the AI SDK builds it; a V3 model gets a
-// downgraded copy where tool-result files become legacy `file-data` parts.
 type GenerateOptions = Parameters<MockLanguageModelV4["doGenerate"]>[0];
 type GenerateResult = Awaited<ReturnType<MockLanguageModelV4["doGenerate"]>>;
 type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
@@ -51,17 +49,10 @@ export interface MockModelToolResult {
   readonly isError: boolean;
 }
 
-/** How many call ids this process derived, so each derived id is new. */
 let derivedCallIds = 0;
 
-/** How often each session's mock model emitted each authored call id. */
 const emittedCallIds = new Map<string, Map<string, number>>();
 
-/**
- * A session's call ids never repeat, so an authored id the session's model already emitted, as
- * when it calls a tool again after a sign-in dropped the first call, takes `<id>#<n>`. Outside a
- * session the id is used as given.
- */
 function sessionCallId(id: string): string {
   const sessionId = contextStorage.getStore()?.get(SessionIdKey);
   if (sessionId === undefined) return id;
@@ -209,7 +200,6 @@ function createRequest(options: GenerateOptions): MockModelRequest {
   };
 }
 
-/** Framework-injected listings and task results, which no one authored. */
 function isFrameworkScaffolding(message: string): boolean {
   const text = message.trim();
   return (
@@ -314,8 +304,6 @@ function createGenerateResult(
   for (const [index, toolCall] of toolCalls.entries()) {
     content.push({
       input: JSON.stringify(toolCall.input ?? {}),
-      // Call ids name calls for the whole session, so a derived one never repeats: a model asked
-      // again after a sign-in dropped its call sees the same prompt and makes a new call.
       toolCallId:
         (toolCall.id === undefined ? undefined : sessionCallId(toolCall.id)) ??
         `mock-tool-call-${countUserMessages(options)}-${countToolResults(options)}-${index + 1}-${++derivedCallIds}`,

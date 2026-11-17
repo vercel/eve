@@ -15,22 +15,6 @@ import {
 } from "#tracing/eve/span-export-policy.js";
 import { channelAudienceFromContext } from "#tracing/eve/channel-audience-context.js";
 
-/**
- * Puts one destination's content policy in front of it.
- *
- * Accepted traces carry content before they reach destination policies. This
- * cannot strip an attribute in place: the span object is shared with every
- * processor in the pipeline, and editing it would strip the attribute
- * everywhere. So it gives the destination a facade whose attributes omit what
- * its policy redacted.
- *
- * One facade follows the original from start through end. This preserves the
- * object identity stateful processors key on without ever exposing the original
- * span or its attribute map. Methods stay bound to the original, so private SDK
- * state remains reachable without eve knowing that SDK's concrete span shape.
- *
- * @internal
- */
 export function contentFilteringProcessor(
   downstream: SpanProcessor,
   exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],

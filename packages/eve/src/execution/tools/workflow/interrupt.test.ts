@@ -18,7 +18,6 @@ beforeEach(() => {
 });
 
 it("interrupts a run that registers its control hook after the turn is steered", async () => {
-  // Alice steers the turn just as it starts the run, before the run's first suspension.
   mocks.resumeHook
     .mockRejectedValueOnce(new HookNotFoundError("hold-control"))
     .mockRejectedValueOnce(new HookNotFoundError("hold-control"))
@@ -43,7 +42,6 @@ it("leaves a run that already ended alone", async () => {
 it("fails instead of dropping the interrupt when the run registers its hook after the deadline", async () => {
   vi.useFakeTimers();
   try {
-    // Bob's deploy run is slow to start and registers its control hook only after 40 seconds.
     const registeredAt = Date.now() + 40_000;
     mocks.resumeHook.mockImplementation(async () => {
       if (Date.now() < registeredAt) throw new HookNotFoundError("hold-control");
@@ -57,7 +55,6 @@ it("fails instead of dropping the interrupt when the run registers its hook afte
     await vi.advanceTimersByTimeAsync(31_000);
     await attempt;
 
-    // The runtime retries the failed step, which delivers the interrupt once the hook exists.
     await vi.advanceTimersByTimeAsync(10_000);
     await interruptWorkflowToolRun(run);
     expect(mocks.resumeHook).toHaveBeenLastCalledWith("hold-control", { kind: "interrupt" });

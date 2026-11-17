@@ -9,25 +9,8 @@ import type {
 } from "#execution/session/state-delta.js";
 import { diffValue, snapshotValue } from "#shared/value-delta.js";
 
-// Steps only: the workflow body applies what this returns with `applySessionStateDelta`, and
-// can't import the session's publication.
-
 const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as const;
 
-/**
- * Runs a session step's work and returns its result with the session values
- * it produced replaced by their delta from the values the step was given.
- *
- * Workflow replay reads every step's output but no step's input, so a step
- * that returns only what changed keeps both replay and storage from carrying
- * the whole session once per step. The workflow body applies the delta to the
- * values it passed in; see `applySessionStateDelta`.
- *
- * The input is snapshotted before `work` runs because step code may edit it
- * in place, as a channel adapter does with its state. A retried step's state
- * follows every line its interrupted attempt wrote; see
- * {@link followInterruptedAttempt}.
- */
 export async function withSessionStateDelta<
   I extends Partial<SessionStateValues>,
   R extends Partial<SessionStateValues>,

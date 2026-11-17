@@ -227,7 +227,6 @@ export interface SandboxProvider<
   ): SandboxEnvironment<OpenOptions, Session>;
 }
 
-/** What core runs for one environment: the provider's lifecycle with its types erased. */
 export interface SandboxProviderRuntime {
   readonly implementation: SandboxProviderImplementation<
     object | undefined,
@@ -235,7 +234,6 @@ export interface SandboxProviderRuntime {
     SandboxJson,
     object
   >;
-  /** The authored `prepare` option, which eve runs in `ctx.populate()`. */
   readonly prepare: ((sandbox: SandboxSession) => void | Promise<void>) | undefined;
   readonly providerName: string;
   readonly stateProtocolVersion: number;
@@ -267,7 +265,6 @@ export function defineSandboxProvider<
     environment(options?: WithPrepareOption<EnvironmentOptions, Session>) {
       const { prepare, ...environmentOptions } = options ?? {};
       return createSandboxEnvironment<OpenOptions, Session>({
-        // The provider's own types are erased: core passes it only what it returned.
         implementation: definition.environment(
           environmentOptions as EnvironmentOptions,
         ) as SandboxProviderRuntime["implementation"],

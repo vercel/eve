@@ -18,10 +18,6 @@ function writePackage(root: string, files: Record<string, string>): void {
   for (const [file, content] of Object.entries(files)) writeFileSync(join(root, file), content);
 }
 
-/**
- * An app whose generated entry imports an installed package by its resolved path, as hosted
- * builds' generated modules do. The package and one of its dependencies import text assets.
- */
 function createHostBundledPackageApp(): { entry: string; packageRoot: string; appRoot: string } {
   const appRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-assets-")));
   scratchRoots.push(appRoot);
@@ -56,11 +52,6 @@ function createHostBundledPackageApp(): { entry: string; packageRoot: string; ap
   return { appRoot, entry, packageRoot };
 }
 
-/**
- * An app whose generated entry imports a store-installed TypeScript source package by its
- * resolved path, outside the app package as in a workspace's pnpm store. The package resolves
- * `~/*` through its own tsconfig `paths`.
- */
 function createHostBundledAliasApp(): { entry: string; packageRoot: string; appRoot: string } {
   const appRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-aliases-")));
   const storeRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-alias-store-")));

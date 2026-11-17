@@ -2,7 +2,6 @@ import type { Attachment, Message } from "#compiled/chat/index.js";
 
 const IMESSAGE_PLATFORM = "iMessage";
 
-/** The part of a Spectrum message eve reads to find each attachment's id. */
 interface SpectrumContent {
   readonly content?: SpectrumContent;
   readonly id?: unknown;
@@ -10,16 +9,10 @@ interface SpectrumContent {
   readonly type?: unknown;
 }
 
-/** An attachment iMessage's `getAttachment` resolves, as spectrum-ts wraps it. */
 interface SpectrumAttachment {
   read(): Promise<Buffer>;
 }
 
-/**
- * The slice of a spectrum-ts app that holds each platform's runtime. It is
- * what `imessage(app)` reads to bind iMessage's instance actions, such as
- * `getAttachment`.
- */
 interface SpectrumApp {
   readonly __internal: {
     readonly platforms: ReadonlyMap<
@@ -42,22 +35,12 @@ interface SpectrumApp {
   };
 }
 
-/** The adapter that owns the spectrum-ts app eve downloads attachments through. */
 interface PhotonAdapter {
   readonly app: unknown;
-  /** Asks Photon for the message by id; webhook deliveries are never cached, so this refetches. */
   fetchMessage(threadId: string, messageId: string): Promise<Message | null>;
   rehydrateAttachment?(attachment: Attachment): Attachment;
 }
 
-/**
- * Lets eve download each file a person sent over iMessage. The Spectrum
- * webhook lists an attachment's name and type but never its bytes, so this
- * records each attachment's id in its `fetchMetadata` and gives it a
- * `fetchData`; the channel downloads it later, in the step, through
- * {@link addPhotonAttachmentRehydration}. The webhook omits the id for some
- * files, such as voice notes, so those come from the message refetched by id.
- */
 export async function addPhotonAttachmentDownloads(
   message: Message,
   adapter: PhotonAdapter,
@@ -65,7 +48,6 @@ export async function addPhotonAttachmentDownloads(
   const attachments = message.attachments ?? [];
   if (attachments.length === 0) return;
   const raw = message.raw as { readonly content?: SpectrumContent; readonly space?: unknown };
-  // The adapter lists attachments in the order it walks the content, so their ids line up.
   const ids = contentAttachmentIds(raw.content);
   if (attachments.some((_, index) => ids[index] === undefined)) {
     const refetched = await refetchedAttachmentIds(adapter, message);
@@ -82,11 +64,6 @@ export async function addPhotonAttachmentDownloads(
   });
 }
 
-/**
- * Gives the adapter a `rehydrateAttachment`, which the iMessage adapter lacks,
- * so the channel can rebuild an attachment's download from its `fetchMetadata`
- * after the message crosses the queue.
- */
 export function addPhotonAttachmentRehydration(adapter: PhotonAdapter): void {
   adapter.rehydrateAttachment = (attachment) => {
     const { id, phone } = attachment.fetchMetadata ?? {};
@@ -95,7 +72,6 @@ export function addPhotonAttachmentRehydration(adapter: PhotonAdapter): void {
   };
 }
 
-/** Attachment ids from the message as Photon serves it by id; empty when it can't. */
 async function refetchedAttachmentIds(
   adapter: PhotonAdapter,
   message: Message,
@@ -105,7 +81,6 @@ async function refetchedAttachmentIds(
     const raw = refetched?.raw as { readonly content?: SpectrumContent } | undefined;
     return contentAttachmentIds(raw?.content);
   } catch {
-    // An attachment without an id reaches the agent as a note.
     return [];
   }
 }
@@ -125,7 +100,6 @@ async function downloadAttachment(app: unknown, id: string, phone?: string): Pro
   return await found.read();
 }
 
-/** Walks content the way the adapter does, so the result lines up with `message.attachments`. */
 function contentAttachmentIds(content: SpectrumContent | undefined): (string | undefined)[] {
   if (content === undefined) return [];
   if (content.type === "attachment" || content.type === "voice") {

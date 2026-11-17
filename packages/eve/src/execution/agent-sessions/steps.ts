@@ -68,14 +68,12 @@ const log = createLogger("execution.agent-sessions");
 
 const RUN_FINISHED_REASON = "The workflow run that opened this session finished.";
 
-/** Where a session a run opened lives, for its later sends, cancels, and end. */
 export type AgentSessionAddress =
   | {
       readonly kind: "local";
       readonly name: string;
       readonly nodeId: string;
       readonly sessionId: string;
-      /** Names the session to whichever run holds its inbox. */
       readonly continuationToken: string;
     }
   | {
@@ -84,43 +82,26 @@ export type AgentSessionAddress =
       readonly forwardPrincipal?: boolean;
       readonly name: string;
       readonly nodeId: string;
-      /** Keys the authored credential functions, as on `child.opened`. */
       readonly resolverId?: string;
-      /**
-       * A dynamic remote agent's binding, which its credentials are built from again: the child
-       * keeps the session it was opened with, whatever the parent's session becomes. Private.
-       */
       readonly dynamicBinding?: DynamicRemoteBinding;
       readonly sessionId: string;
       readonly url: string;
-      /** The child's remote agent protocol, when it speaks an earlier one than this deployment. */
       readonly earlierProtocol?: number;
     };
 
 type RemoteAgentSessionAddress = Extract<AgentSessionAddress, { readonly kind: "remote" }>;
 
-/** A session a run opened, with the context of the call that opened it: its lineage. */
 export interface OpenedAgentSession {
   readonly address: AgentSessionAddress;
   readonly context: AgentSessionContext;
-  /** Names the session within its run, as when it opened. */
   readonly key: string;
 }
 
-/**
- * A message a session accepted. An earlier-protocol remote agent names no delivery, so
- * nothing records it.
- */
 export interface AgentSessionReceipt {
   readonly sessionId: string;
   readonly deliveryId?: string;
 }
 
-/**
- * One message to a session, as the call that sends it: the session runs the
- * message with that call's auth. Its turn's result and questions arrive on
- * `replyTo`.
- */
 export interface AgentSessionMessage {
   readonly auth: SessionAuth;
   readonly message: MessageContent<string | URL>;
@@ -128,18 +109,12 @@ export interface AgentSessionMessage {
   readonly replyTo: string;
 }
 
-/**
- * Opens a run's session with its first message, as a child of the call whose
- * `context` it binds. `key` names the handle within the run, so a retried step
- * reaches the same session instead of a second one.
- */
 export async function openAgentSessionStep(
   input: AgentSessionMessage & {
     readonly context: AgentSessionContext;
     readonly key: string;
     readonly model?: AgentSessionModelSelection;
     readonly name: string;
-    /** The workflow tool whose run opens the session. */
     readonly toolName?: string;
   },
 ): Promise<{ readonly address: AgentSessionAddress; readonly deliveryId?: string }> {
@@ -225,7 +200,6 @@ interface AgentModelsTool {
   readonly models: NonNullable<ReturnType<typeof readAgentToolModels>>;
 }
 
-/** The `agent({ models })` tool whose run opens the session, if that is what opens it. */
 async function loadAgentModelsTool(
   bundle: CompiledBundle,
   toolName: string | undefined,
@@ -234,7 +208,6 @@ async function loadAgentModelsTool(
     toolName === undefined
       ? undefined
       : bundle.resolvedAgent.tools.find((candidate) => candidate.name === toolName);
-  // Only a workflow tool's run opens sessions, and only `agent({ models })` carries models.
   if (definition?.behavior?.handling?.kind !== "workflow-tool") return undefined;
   const models = readAgentToolModels(
     await loadResolvedModuleExport({
@@ -247,11 +220,6 @@ async function loadAgentModelsTool(
   return models === undefined ? undefined : { definition, models };
 }
 
-/**
- * An `agent({ models })` tool names its model by option key. A live model's reference points
- * back at the tool and key, so the child reads the model again from its own module map, and
- * replay opens the same option.
- */
 async function resolveAgentToolModel(
   bundle: CompiledBundle,
   { definition, models }: AgentModelsTool,
@@ -291,10 +259,6 @@ async function resolveAgentToolModel(
   };
 }
 
-/**
- * Sends a later message; it joins the session's running turn or starts the
- * next. It keeps the session's lineage and carries its own auth.
- */
 export async function sendAgentSessionMessageStep(
   input: AgentSessionMessage & OpenedAgentSession,
 ): Promise<AgentSessionReceipt> {
@@ -315,7 +279,6 @@ export async function sendAgentSessionMessageStep(
         ),
       },
       earlierProtocol: address.earlierProtocol,
-      // The step's own identity, so its retry repeats the same delivery, as a local child's does.
       idempotencyKey: agentDeliveryId("send", address.sessionId),
       message: input.message,
       outputSchema: input.outputSchema,
@@ -350,7 +313,6 @@ export async function sendAgentSessionMessageStep(
   return { deliveryId, sessionId: result.sessionId };
 }
 
-/** Cancels a session's running turn; the turn still reports, as cancelled. */
 export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Promise<void> {
   "use step";
 
@@ -373,7 +335,6 @@ export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Pro
   }
 }
 
-/** Ends a run's sessions when the run finishes, cancelling any turn still running. */
 export async function endAgentSessionsStep(input: {
   readonly sessions: readonly OpenedAgentSession[];
 }): Promise<void> {
@@ -382,7 +343,6 @@ export async function endAgentSessionsStep(input: {
   await Promise.all(input.sessions.map(endAgentSession));
 }
 
-/** Best-effort cleanup for a late address whose cancelled run cannot own it. */
 export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Promise<void> {
   "use step";
   if (opened.address.kind === "remote") {
@@ -396,8 +356,6 @@ export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Prom
     deliveryId: agentDeliveryId("reset", sessionId),
   } as const;
   try {
-    // Waiting for a booting inbox would hold the parent's next turn. A child
-    // whose start claimed its address takes the reset there before it boots.
     try {
       await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), reset);
     } catch (error) {
@@ -441,12 +399,6 @@ type LocalAgentSession = OpenedAgentSession & {
   readonly address: Extract<AgentSessionAddress, { readonly kind: "local" }>;
 };
 
-/**
- * Sends a command to a local session. Its start claimed its address, so it
- * takes commands before it boots and a refusal means it ended. A session
- * opened by an earlier eve may have lost its address to a duplicate start,
- * and the command then goes to the session holding its continuation.
- */
 async function commandLocalSession<TCommand extends SessionCommand>(
   opened: LocalAgentSession,
   command: TCommand,
@@ -517,8 +469,6 @@ async function startLocalSession(
         toolStubs: childToolStubs,
       }),
   );
-  // The start claims the child's address, so a retried attempt is refused and
-  // names the run an earlier attempt started.
   return {
     address: {
       continuationToken: childContinuationToken,
@@ -592,7 +542,6 @@ function createParentContext(context: AgentSessionContext, replyTo: string): Sub
   };
 }
 
-/** A remote session keeps running where it was opened, even after the registry moves on. */
 async function resolveSessionRemote(
   context: AgentSessionContext,
   address: Extract<AgentSessionAddress, { readonly kind: "remote" }>,
@@ -600,7 +549,6 @@ async function resolveSessionRemote(
   const bundle = await loadAgentSessionBundle(context);
   const selection = context.dynamicSelections[address.nodeId];
   const resolved = resolveRemoteAgentForAction({
-    // Credentials come from the binding the child was opened with, and go only to its destination.
     credentials: await credentialsOf(bundle, address.nodeId, address.dynamicBinding, address),
     dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
     nodeId: address.nodeId,
@@ -610,7 +558,6 @@ async function resolveSessionRemote(
   return { ...resolved, url: address.url };
 }
 
-/** The binding a dynamic remote agent with credentials keeps for a child opened now. */
 function bindingFor(
   context: AgentSessionContext,
   nodeId: string,
@@ -621,10 +568,6 @@ function bindingFor(
     : undefined;
 }
 
-/**
- * A dynamic remote agent's credentials, built from `binding` for `destination`. `undefined` for
- * one without credentials, which keeps no binding.
- */
 async function credentialsOf(
   bundle: CompiledBundle,
   nodeId: string,

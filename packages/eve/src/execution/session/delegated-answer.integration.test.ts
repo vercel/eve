@@ -98,7 +98,6 @@ describe("delegated agent approval answers", () => {
           }),
         ).resolves.toMatchObject({ sessionId: child.runId, status: "accepted" });
 
-        // The parent's message steers the held turn, so it withdraws the approval instead of answering it.
         const resumed = await withTimeout(stream.nextTurn(), "delegated approval answer");
         const outcomes = filterEventsByType(resumed, "interaction.settled")
           .filter(({ data }) => data.interactionId === approval!.data.interactionId)

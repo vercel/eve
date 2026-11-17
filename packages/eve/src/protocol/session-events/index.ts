@@ -1,6 +1,3 @@
-// The client-safe face of the contract: types, the runtime catalog, and guards. No schemas, so
-// nothing here loads Zod.
-
 export * from "./catalog.js";
 export * from "./envelope.js";
 export * from "./guards.js";

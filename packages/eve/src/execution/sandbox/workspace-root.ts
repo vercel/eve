@@ -1,10 +1,5 @@
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 
-/**
- * The single containment check for sandbox paths that tools read or write.
- * The workspace root differs by provider (`/workspace`, `/app`, ...), so the
- * boundary is the real path of `resolvePath("")`, never a literal prefix.
- */
 export interface WorkspaceSandbox {
   resolvePath(path: string): string;
   run(input: {
@@ -15,7 +10,6 @@ export interface WorkspaceSandbox {
 
 const MAX_ERROR_DETAIL_CHARS = 2_000;
 
-/** NUL-delimited output keeps paths that contain newlines unambiguous. */
 async function sandboxRealPath(
   sandbox: WorkspaceSandbox,
   path: string,
@@ -37,10 +31,6 @@ async function sandboxRealPath(
   return realPath;
 }
 
-/**
- * Resolves `path` (default: the workspace root) to a real path inside the real
- * workspace. Symlinks are followed before the check, so a link cannot escape.
- */
 export async function resolveInWorkspace(
   sandbox: WorkspaceSandbox,
   path: string | undefined,

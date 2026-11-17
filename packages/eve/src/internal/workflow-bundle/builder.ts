@@ -46,9 +46,7 @@ import {
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
-/** The workflow directory one build wrote, as the host build consumes it. */
 export interface WorkflowArtifacts {
-  /** Absolute paths of the modules the step entry imports; the host bundles them in step mode. */
   readonly stepTargets: readonly string[];
   readonly stepsPath: string;
   readonly workflowsPath: string;
@@ -75,7 +73,6 @@ export class WorkflowBundleBuilder {
     }
     this.config = {
       dirs,
-      // Keep package-version workflow ids stable across bundling targets.
       projectRoot: options.appRoot,
       workingDir: options.rootDir,
     };
@@ -146,7 +143,6 @@ export class WorkflowBundleBuilder {
     return this.config.projectRoot ?? this.config.workingDir;
   }
 
-  /** The authored package; a workspace member without its own package.json shares the enclosing one. */
   protected get authoredPackageRoot(): string {
     return findAuthoredPackageRoot(this.transformProjectRoot) ?? this.transformProjectRoot;
   }
@@ -220,11 +216,6 @@ export class WorkflowBundleBuilder {
     return { manifest };
   }
 
-  /**
-   * One driver layer, without registry banner or entrypoint wrapper so
-   * `composeWorkflowDriverCode` can concatenate layers. `""` when the layer has
-   * nothing to bundle, the common case for an app with no workflow tools.
-   */
   async #buildDriverChunk(options: {
     label: string;
     manifest: WorkflowManifest;
@@ -244,8 +235,6 @@ export class WorkflowBundleBuilder {
     ].join("\n");
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
-      // Checked before the dependency-warning filter, which would otherwise
-      // drop an unresolved import raised inside node_modules.
       onLog(level, log, defaultHandler) {
         if (level === "warn" && log.code === "UNRESOLVED_IMPORT") {
           throw new Error(`Cannot build workflow bundle: ${log.message}`);
@@ -269,7 +258,6 @@ export class WorkflowBundleBuilder {
           sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
           workingDir: this.config.workingDir,
         }),
-        // After the transform, so stubbed step bodies' node:* imports are already gone.
         createWorkflowNodeBuiltinGuardPlugin(),
       ],
       resolve: {
@@ -313,7 +301,6 @@ export class WorkflowBundleBuilder {
   }
 }
 
-/** App step modules register with the framework's server steps; driver inputs stay per-layer. */
 function mergeStepEntries(
   framework: WorkflowBundleDiscoveredEntries,
   app: AuthoredWorkflowModules,

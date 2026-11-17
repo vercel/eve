@@ -6,9 +6,6 @@ import type {
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
-/**
- * Prepares a fresh Vercel sandbox for use by the framework.
- */
 export async function ensureVercelSandboxBaseRuntime(sandbox: VercelSandbox): Promise<void> {
   await runSandboxInitializationStep(sandbox, {
     failureMessage: "Failed to initialize Vercel sandbox base runtime.",
@@ -39,7 +36,6 @@ export function createVercelNetworkPolicySetter(
   };
 }
 
-/** eve's policy is the SDK's shape with readonly members, and the SDK never mutates it. */
 export function toVercelNetworkPolicy(
   policy: SandboxNetworkPolicy,
 ): NonNullable<VercelCreateOptions["networkPolicy"]> {

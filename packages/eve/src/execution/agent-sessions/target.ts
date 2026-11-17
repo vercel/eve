@@ -21,14 +21,12 @@ const log = createLogger("execution.agent-target");
 
 export type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSubagentSelection>>;
 
-/** One message to an agent, addressed by its invocation name. */
 export interface AgentActionInput {
   readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly target: string;
 }
 
-/** Where a new session with an agent starts: in this deployment, or at a remote agent. */
 export type SubagentStartTarget =
   | {
       readonly kind: "local";
@@ -42,10 +40,6 @@ export type SubagentStartTarget =
       readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
     };
 
-/**
- * Resolves an agent name against the calling agent's registry, its dynamic
- * selections, and the built-in root copy, as a dispatch request.
- */
 export function resolveAgentAction(input: {
   readonly bundle: CompiledBundle;
   readonly callId: string;
@@ -94,10 +88,6 @@ function findAgentDefinition(
   return undefined;
 }
 
-/**
- * Plans a fresh child for a dispatch request. A dynamic agent whose selection
- * changed and a root copy outside the root session can't start.
- */
 export function resolveAgentStartTarget(input: {
   readonly action: RuntimeAgentDispatchRequest;
   readonly bundle: CompiledBundle;

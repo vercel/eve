@@ -46,13 +46,6 @@ import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;
 
-/**
- * Creates the harness step: one step of a session, backed by the AI SDK's `ToolLoopAgent`.
- *
- * A step settles what earlier steps parked and takes its delivery's answers, opens or joins the
- * turn, runs the work those answers approved, then makes one model step and acts on its response.
- * Every lifecycle change goes through the session machine (`Step.apply`).
- */
 export function createKernel(config: KernelConfig): StepFn {
   config.instrumentation?.installAiSdkWarningLogger();
 
@@ -72,7 +65,6 @@ export function createKernel(config: KernelConfig): StepFn {
       });
       try {
         const result = await executeStepBody(ctx, current, generation, live, input, scope);
-        // The step saves the lifecycle it published with the state that follows it.
         return { ...result, session: saveProjection(result.session, live.read()) };
       } finally {
         generation.dispose();
@@ -102,8 +94,6 @@ export function createKernel(config: KernelConfig): StepFn {
     const publish: Publish = async (publication, messages) => {
       const events = eventsOf(publication);
       for (const event of events) generation.beforeEvent(event);
-      // The publish sink folds what it publishes; without a sink, the step does, so lifecycle
-      // never depends on whether a caller listens.
       if (emit !== undefined) await emit(publication, messages);
       if (emit === undefined) live.record(publication);
     };
@@ -118,7 +108,6 @@ export function createKernel(config: KernelConfig): StepFn {
       session: initialSession,
     });
 
-    // Model calls the step's own code makes (decide()) count as the step's usage.
     return await withUsageSink(publish, () => runStages(step, input, generation));
   }
 
@@ -130,9 +119,6 @@ export function createKernel(config: KernelConfig): StepFn {
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
 
-    // A step takes what arrived, in order: the runtime's results, then people's answers, then
-    // the delivery's input. Then it acts: a hook that failed during the turn fails it, or what
-    // the answers approved runs, or the turn waits on people, or the model runs.
     const runtime = await runtimeResults(step, input);
     if ("ended" in runtime) return runtime.ended;
     const answered = await answers(step, runtime);
@@ -144,9 +130,6 @@ export function createKernel(config: KernelConfig): StepFn {
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
     if (blocked(step.view(), step.session.state)) return park(step);
-    // Read input held behind approved calls before the model can ask for more work. The step's
-    // own input waits as this step prepared it, its attachments already staged. A provider tool's
-    // deferred result comes first: only the model's next response can bring it.
     if (hasQueuedTurnInput(step.view()) && !awaitsProviderToolResult(step.session.history)) {
       const prepared = answered.input && { ...answered.input, message: turn.message };
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
@@ -161,15 +144,10 @@ export function createKernel(config: KernelConfig): StepFn {
   return runStep;
 }
 
-/** A stage's result when the step ends there. */
 interface Ended {
   readonly ended: StepResult;
 }
 
-/**
- * Results the runtime ran for parked steps settle first, and approvals deferred behind the tasks
- * that settled open; queued input waits for all of them.
- */
 async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
   const runtime = await settleRuntimeWork(step, input);
   if (runtime === undefined) return { ended: { next: null, session: step.session } } as Ended;
@@ -177,14 +155,6 @@ async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
   return runtime;
 }
 
-/**
- * The delivery's answers are admitted, then decide what they answer. The model reads what they
- * decided before the delivery's own input, as the AI SDK ran it, so that input waits a step; and
- * when nothing they decided can run, it waits, unreceived, behind them. Input that steers a turn
- * also waits a step while history ends on local results beside a provider tool's unanswered call:
- * Anthropic opens the next response with that result, and rejects a request that adds anything
- * after them. A new turn's input doesn't wait for a stale call; the prompt closes it instead.
- */
 async function answers(
   step: Step,
   runtime: NonNullable<Awaited<ReturnType<typeof settleRuntimeWork>>>,
@@ -210,17 +180,12 @@ async function answers(
   return { decided, input, intake, message };
 }
 
-/**
- * The delivery's input opens the turn, or joins the one its answers resume. Input that opened no
- * turn and found none open, such as a stale answer eve dropped, settled and leaves nothing to run.
- */
 async function turnInput(
   step: Step,
   input: HarnessStepInput | undefined,
   { input: received, intake, message }: Exclude<Awaited<ReturnType<typeof answers>>, Ended>,
 ) {
   const turn = await prepareTurnInput(step, received, { consumedMessage: intake.consumedMessage });
-  // A delivery an earlier step queued joins with the input the queue carried it in.
   const deliveries = deliveriesOf(input, received);
   if (intake.opensTurn) {
     const failed = await openTurn(step, {
@@ -238,20 +203,13 @@ async function turnInput(
   return turn;
 }
 
-/**
- * `session.clear()`: the machine withdraws what the cleared history asked, and history empties.
- * Task results the cleared history never read are dropped with it. The control is a delivery,
- * applied in the same commit as the clear.
- */
 async function clearContext(step: Step): Promise<StepResult> {
   const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
   await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
-  // The clear's transition emptied history; task results it never read go with it.
   const unread = takeTaskResults(readTaskTable(step.session.state)).table;
   return { next: null, session: writeTaskTable(step.session, unread) };
 }
 
-/** The deliveries a step's input and the queue it took in carry, each once. */
 function deliveriesOf(
   ...inputs: readonly (HarnessStepInput | undefined)[]
 ): HarnessStepInput["deliveries"] {
@@ -262,7 +220,6 @@ function deliveriesOf(
   return byId.size === 0 ? undefined : [...byId.values()];
 }
 
-/** Whether the input carries user-facing turn input. */
 function hasStepInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.answers?.length ?? 0) > 0;

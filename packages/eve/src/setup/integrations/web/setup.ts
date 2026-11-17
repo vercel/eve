@@ -86,7 +86,6 @@ const TANSTACK_PEER_SERVICE_VERCEL_CONFIG = peerServiceVercelConfig(
   "node ../../node_modules/vite/bin/vite.js build",
 );
 
-/** Every `vercel.ts` the installer has written, so switching frameworks may replace it. */
 const INSTALLER_VERCEL_CONFIGS = [
   NEXT_PEER_SERVICE_VERCEL_CONFIG,
   LEGACY_NEXT_PEER_SERVICE_VERCEL_CONFIG,
@@ -143,7 +142,6 @@ export async function prepareWebSetup(
   deps: WebSetupDeps = defaultWebSetupDeps,
 ): Promise<WebSetupPlan> {
   const project = await resolveWebChatProject(context.appRoot, deps);
-  // `eve add channel/web` installed the framework's files, so they decide it.
   const framework =
     (await detectWebChatFramework(join(project.environmentRoot, "apps", "web"), deps.pathExists)) ??
     "next";
@@ -151,13 +149,11 @@ export async function prepareWebSetup(
     framework === "next" &&
     (await deps.pathExists(join(project.environmentRoot, "app", "eve-agent.ts"))) &&
     !(await deps.pathExists(join(project.environmentRoot, "apps", "web", "app", "eve-agent.ts")));
-  // `eveTanStack()` mounts one agent, so a TanStack workspace member deploys as a peer service.
   const hosting = rootWebChat
     ? "next"
     : framework === "tanstack" && project.agentName !== undefined
       ? "vercel"
       : await context.asker.ask(hostingQuestion(framework));
-  // Sign in with Vercel ships as Next.js files.
   const authentication =
     framework === "next" ? await context.asker.ask(WEB_AUTHENTICATION_QUESTION) : "custom";
   const authProject =

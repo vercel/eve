@@ -3,7 +3,6 @@ import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.
 import { readGatewayRouting } from "#shared/gateway-routing.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
-/** Returns an immutable event projection with conversation content removed. */
 export function withoutInstrumentationContent(event: InstrumentationEvent): InstrumentationEvent {
   return withInstrumentationDecision(event, {
     action: "record",
@@ -12,7 +11,6 @@ export function withoutInstrumentationContent(event: InstrumentationEvent): Inst
   });
 }
 
-/** Inputs enter the agent; responses, requests for a person, metadata and errors leave it. */
 export function withInstrumentationDecision(
   event: InstrumentationEvent,
   decision: Extract<InstrumentationDecision, { action: "record" }>,
@@ -71,7 +69,6 @@ export function withInstrumentationDecision(
   }
 }
 
-/** Provider metadata fields that describe cost, identity, or routing rather than content. */
 export function structuralProviderMetadata(
   metadata: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {

@@ -53,7 +53,6 @@ function written(line: number, type = "turn.started", data: object = {}, progres
 
 type Evaluate = (ctx: DynamicContext) => unknown;
 
-/** A session whose bundle declares one dynamic tool definition, and optionally hooks and more. */
 function session(
   evaluate: Evaluate,
   hooks: readonly { readonly slug: string; readonly events: object }[] = [],
@@ -95,12 +94,10 @@ function session(
   return ctx;
 }
 
-/** Runs a commit's reactions inside the session's context, which hooks read. */
 async function commit(ctx: ContextContainer, input: Parameters<typeof runEffects>[1]) {
   await contextStorage.run(ctx, async () => await runEffects(ctx, input));
 }
 
-/** Evaluates the values before a model call, inside the session's context. */
 async function beforeCall(ctx: ContextContainer, conversation: readonly ModelMessage[] = []) {
   return await contextStorage.run(ctx, async () => await evaluateValues(ctx, { conversation }));
 }
@@ -112,7 +109,6 @@ const countTool = (count: unknown) =>
     inputSchema: {},
   });
 
-/** A definition whose memo, keyed by the conversation's length, logs each run. */
 function counted(runs: unknown[], evaluations: unknown[] = []): Evaluate {
   return async (ctx) => {
     const length = (await ctx.messages()).length;
@@ -128,7 +124,6 @@ function counted(runs: unknown[], evaluations: unknown[] = []): Evaluate {
 
 const noTools: Evaluate = () => null;
 
-// A projection whose session started and whose turn-1 is running.
 const turnRunning = (ctx: ContextContainer) => {
   const projection = initialSessionProjection();
   foldLine(
@@ -454,7 +449,6 @@ describe("evaluateValues", () => {
   });
 
   it("caps one scope's stored memo map, digest keys included, at 4 MB across failed evaluations", async () => {
-    // Four results just under a quarter of the cap fit by value alone; their keys push the map over.
     const row = "x".repeat(MEMOS_CAP / 4 - 14);
     const perRow = session(async (ctx) => {
       for (let index = 0; index < 4; index += 1) await ctx.memo(["row", index], () => row);
@@ -534,7 +528,6 @@ describe("evaluateValues", () => {
     const taken = async () => await announcedNext(ctx);
 
     expect(await taken()).toHaveLength(1);
-    // The same content, evaluated again, adds nothing.
     expect(await taken()).toEqual([]);
     brief = "Tomorrow's brief.";
     expect(await taken()).toHaveLength(1);
@@ -681,7 +674,6 @@ describe("runEffects", () => {
       { data: { outcome: "completed", turnId: "turn-1" }, type: "turn.settled" },
     ];
 
-    // A session whose turn-1 settled, and a hook that continued it.
     async function continued() {
       const ctx = session(noTools, [
         {
@@ -701,7 +693,6 @@ describe("runEffects", () => {
       );
       enterSessionProjectionAt(ctx, projection);
       await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
-      // The delivery carries what the hook passed, and no sender; intake adds the note.
       const { continuation } = readDefinitionsState(ctx);
       expect(continuation?.turnId).toBe("turn-1");
       expect(continuation?.delivery).toMatchObject({
@@ -725,7 +716,6 @@ describe("runEffects", () => {
         },
       ]);
       ctx.set(ChannelKey, { kind: "http" } as never);
-      // Alice cancelled turn-1 through `session.cancel()`, so no hook stopped it.
       const cancelled = { outcome: "cancelled", turnId: "turn-1" };
       const projection = initialSessionProjection();
       foldLine(

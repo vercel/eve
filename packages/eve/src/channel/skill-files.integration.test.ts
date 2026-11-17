@@ -14,11 +14,6 @@ describe("createDiskSkillFileSource", () => {
   let root: string;
   let source: SkillFileSource;
 
-  // `skills/triage` holds regular files beside a symlinked file and a
-  // symlinked directory; `skills/linked` is a symlinked skill root; and the
-  // source itself is opened through `alias`, a symlink to `skills`, since a
-  // real deployment's compile directory can sit behind one (macOS's tmpdir
-  // does), so containment must compare real paths.
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "eve-skill-files-"));
     const skills = join(root, "skills");

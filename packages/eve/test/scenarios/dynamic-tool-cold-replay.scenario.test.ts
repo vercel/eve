@@ -200,15 +200,11 @@ describe("dynamic tool cold replay", () => {
           expect(response.pid).not.toBe(firstRequest.pid);
           expect(execute.pid).toBe(response.pid);
           expect(execute.serviceCreatedInPid).toBe(execute.pid);
-          // The call's input was validated when the model made it; the code that runs it is the
-          // fresh process's own, rendered there.
           expect(execute.label).toBe("STRUCTURED-OUTPUT:original");
           expect(execute.suffix).toBe(":changed");
           expect(projection.pid).toBe(execute.pid);
         }
 
-        // The fresh process has no live tools, so it renders them again from what the session
-        // recorded: callbacks are code, never snapshotted.
         const resolverRunsAfterRestart = (
           await readFile(join(app.appRoot, ".dynamic-resolver-runs"), "utf8")
         )

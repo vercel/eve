@@ -94,7 +94,6 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
   return manifest;
 }
 
-/** Adds `child` as an application subagent of `root`. */
 function withSubagent(root: CompiledAgentManifest, child: CompiledAgentManifest) {
   const { kind: _kind, subagents: _subagents, version: _version, ...agent } = child;
   root.subagents = [
@@ -228,7 +227,6 @@ describe("createHostSpec", () => {
     expect(externals.checkedExternals).toEqual(
       expect.arrayContaining(["fixture-external", "sharp", "subagent-external"]),
     );
-    // Nitro externalizes without tracing in dev.
     expect(spec(manifest, DEVELOPMENT).externals).toMatchObject({
       checkedExternals: [],
       traceDeps: [],

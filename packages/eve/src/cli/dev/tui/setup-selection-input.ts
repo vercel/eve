@@ -11,14 +11,12 @@ import {
 
 import type { TerminalKey } from "./stream-format.js";
 
-/** Shared navigation grammar for setup selects, actions, and editable selects. */
 type SetupSelectionIntent =
   | { kind: "cancel" }
   | { kind: "move"; direction: "up" | "down" }
   | { kind: "repaint" }
   | { kind: "submit" };
 
-/** Maps terminal keys to the intents every setup selection surface shares. */
 export function setupSelectionIntent(
   key: TerminalKey,
   options: { textNavigation?: boolean } = {},
@@ -154,7 +152,6 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
   }
 }
 
-/** Pure key transition for a setup select; rendering and lifecycle stay outside. */
 export function reduceSetupSelectInput(input: SetupSelectInputState): SetupSelectInputResult {
   const intent = setupSelectionIntent(input.key, { textNavigation: !isSearchableSelect(input) });
   switch (intent?.kind) {

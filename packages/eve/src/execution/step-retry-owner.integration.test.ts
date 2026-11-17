@@ -26,10 +26,6 @@ import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { deployServiceWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 
-// A turn step that published and then lost its checkpoint runs again from the checkpoint. The
-// harness loses each step's completion once, right after the step published the fact named,
-// as a process that exits before its checkpoint saves does.
-
 vi.setConfig({ testTimeout: 90_000 });
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
@@ -56,16 +52,11 @@ async function withInterruptedSession(
     readonly tools: readonly {
       readonly name: string;
       readonly approval?: boolean;
-      /** Runs as a workflow, whose result the turn waits on. */
       readonly workflow?: true;
     }[];
-    /** What the model answers each call, from the prompt it reads. */
     readonly respond: (prompt: string, call: number) => StreamResult;
-    /** The step that publishes the `nth` of these facts loses its completion once. */
     readonly interruptAfter?: { readonly type: string; readonly nth?: number };
-    /** Which turn-step completions, counted from 1, are lost. */
     readonly loseTurnStep?: (completion: number) => boolean;
-    /** How many turn-step attempts, from the first, fail their first session write. */
     readonly failTurnStepWrites?: number;
   },
   body: (session: Session) => Promise<void>,
@@ -244,7 +235,6 @@ async function withInterruptedSession(
       await run.cancel().catch(() => {});
     }
   });
-  // Every line follows the one before it, and no fact is written twice.
   const lines = [...new Set(events.map(({ meta }) => meta.position.line))];
   expect(lines).toEqual(Array.from({ length: lines.length }, (_, index) => index + lines[0]!));
   const ids = {
@@ -288,7 +278,6 @@ it("keeps a turn that settled before its checkpoint was lost, and the session go
   );
   expect(ran).toEqual(["lookup"]);
   expect(prompts).toHaveLength(3);
-  // The next turn reads the settled turn's input and reply.
   expect(prompts[2]).toContain("Help Alice with her account.");
   expect(prompts[2]).toContain("Alice's record is ready.");
 });
@@ -321,8 +310,6 @@ it("does not run an approved call again when the step that ran it is interrupted
   const { prompts, ran } = await withInterruptedSession(
     "retry-approved",
     {
-      // The step that runs the approved deploy asks for a notify approval, then loses its
-      // checkpoint.
       interruptAfter: { nth: 2, type: "interaction.opened" },
       respond: (_prompt, call) =>
         call === 1
@@ -341,7 +328,6 @@ it("does not run an approved call again when the step that ran it is interrupted
       await session.answer(deploy!.data.interactionId, "approve");
       await session.next("notify approval");
       await vi.waitFor(() => expect(session.interrupted()).toBe(1));
-      // The retry closes the approval its attempt asked for, and the model asks again.
       await session.next("notify approval again");
       const opened = ofType(session.events(), "interaction.opened").map(
         (event) => event.data.interactionId,
@@ -362,7 +348,6 @@ it("does not run an approved call again when the step that ran it is interrupted
   );
   expect(ran).toEqual(["deploy", "notify"]);
   expect(prompts).toHaveLength(4);
-  // The model reads that deploy ran, and doesn't read the applied approval again as new input.
   expect(prompts[2]).toContain("result was lost");
   expect(prompts[2]).not.toContain("earlier interactive prompt");
 });
@@ -371,7 +356,6 @@ it("hands a workflow's result to the step again when the step that read it is in
   const { prompts, ran } = await withInterruptedSession(
     "retry-workflow-result",
     {
-      // The step that reads the deploy's result runs lookup, then loses its checkpoint.
       interruptAfter: { nth: 2, type: "call.settled" },
       respond: (_prompt, call) =>
         call === 1
@@ -396,7 +380,6 @@ it("hands a workflow's result to the step again when the step that read it is in
   );
   expect(ran).toEqual(["lookup"]);
   expect(prompts).toHaveLength(3);
-  // The retry reads the workflow's result, and that lookup may already have run.
   expect(prompts[2]).toContain("plan:billing");
   expect(prompts[2]).toContain("result was lost");
 });
@@ -406,13 +389,11 @@ it("fails the turn, not the session, when its steps are interrupted too many tim
   const { ran, prompts } = await withInterruptedSession(
     "retry-too-often",
     {
-      // Each of the first turn's steps loses its first completion; its retry completes.
       loseTurnStep: (completion) => completion % 2 === 1 && completion <= 7,
       respond: (prompt, call) =>
         prompt.includes("Try again")
           ? textStreamResult("Done.")
-          : // Providers name each call afresh: the turn's lost calls never reach history.
-            toolCallStreamResult({
+          : toolCallStreamResult({
               input: JSON.stringify({ operation: `lookup-${call}` }),
               toolCallId: `lookup-${call}`,
               toolName: "lookup",
@@ -461,7 +442,6 @@ it("keeps an approved call's recorded outcome in history after retry exhaustion"
         const events = await session.next("approval retry or failed turn");
         if (ofType(events, "turn.settled").length > 0) break;
       }
-      // No attempt threw; the workflow's own exhaustion error is the failure.
       expect(ofType(session.events(), "turn.settled")).toMatchObject([
         { data: { error: { code: "FatalError", id: expect.any(String) }, outcome: "failed" } },
       ]);
@@ -475,7 +455,6 @@ it("keeps an approved call's recorded outcome in history after retry exhaustion"
 });
 
 it("fails the turn, not the session, when a step fails every attempt", async () => {
-  // A failed attempt waits this long for its stream's writes before it retries.
   vi.stubEnv("WORKFLOW_STEP_STREAM_DRAIN_TIMEOUT_MS", "500");
   onTestFinished(() => {
     vi.unstubAllEnvs();
@@ -483,7 +462,6 @@ it("fails the turn, not the session, when a step fails every attempt", async () 
   const { observed } = await withInterruptedSession(
     "retry-exhausted",
     {
-      // Every attempt of the first step fails to write; the recovery step's write succeeds.
       failTurnStepWrites: 4,
       respond: (_prompt, call) =>
         call === 1
@@ -493,7 +471,6 @@ it("fails the turn, not the session, when a step fails every attempt", async () 
     },
     async (session) => {
       const turn = await session.next("failed turn");
-      // The turn reports what the last attempt threw, under an id its log line carries.
       expect(ofType(turn, "turn.settled")).toMatchObject([
         {
           data: {

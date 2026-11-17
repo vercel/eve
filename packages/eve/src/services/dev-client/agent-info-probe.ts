@@ -21,11 +21,6 @@ function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-/**
- * Reads best-effort inspection data from a server whose lifecycle belongs to
- * another process. Transient transport and server failures can occur while
- * that process reloads, but auth and schema failures cannot be fixed by retry.
- */
 export async function probeAgentInfo(input: {
   readonly client: Pick<Client, "info">;
   readonly timeoutMs?: number;
@@ -40,7 +35,6 @@ export async function probeAgentInfo(input: {
     }, input.timeoutMs ?? 5000);
   });
   try {
-    // The deadline also bounds user-provided credential callbacks, which may ignore abort.
     return await Promise.race([readAgentInfo(input.client, controller.signal), deadline]);
   } finally {
     clearTimeout(timer);

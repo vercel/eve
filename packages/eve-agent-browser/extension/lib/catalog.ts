@@ -7,11 +7,6 @@ import { runMcpTool, type BrowserToolContext, type ContentBoundary } from "./bro
 
 const PREFIX = "agent_browser_";
 
-/**
- * Catalog arguments the model never sees: the ones the extension sets from its
- * config, and `extraArgs`, the raw CLI flag escape hatch, which repeats a long
- * description on every tool.
- */
 const APP_OWNED_ARGUMENTS = new Set([
   "allowedDomains",
   "caCert",

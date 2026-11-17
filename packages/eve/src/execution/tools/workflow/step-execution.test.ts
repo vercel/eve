@@ -70,12 +70,6 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   }),
 }));
 
-/**
- * A provider whose `start` upserts a sandbox by session id and whose
- * `onSessionEnd` deletes by it, as the provider contract requires. Each open
- * hands out its own connection over the shared sandbox; `stopped` and
- * `closed` record which connections eve stopped and closed.
- */
 function upsertSandboxes() {
   const live = new Map<string, ReturnType<typeof mockSandbox>>();
   const starts: string[] = [];
@@ -207,7 +201,6 @@ describe("workflow step authorization", () => {
     const { registry, starts } = upsertSandboxes();
     bundle.registry = registry;
     const owner = { ...context("user-1", "owner-session") };
-    // `eve dev` deliveries carry the generation a development source resolves to.
     const generation = {
       generationId: "generation-1",
       source: createDiskRuntimeCompiledArtifactsSource("/virtual/app"),
@@ -234,7 +227,6 @@ describe("workflow step authorization", () => {
   it("closes the step's connection and leaves the session's tracked for runtime shutdown", async () => {
     const { closed, connections, registry, stopped } = upsertSandboxes();
     bundle.registry = registry;
-    // The session's turn opened its sandbox in this process.
     const session = await ensureSandboxAccess({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
@@ -249,7 +241,6 @@ describe("workflow step authorization", () => {
     const [sessionConnection, stepConnection] = connections;
     expect(closed).toEqual([stepConnection]);
     await shutdownActiveSandboxConnections();
-    // The step's connection neither replaced nor dropped the session's.
     expect(connections).toHaveLength(2);
     expect(stopped).toEqual([sessionConnection]);
   });
@@ -275,7 +266,6 @@ describe("workflow step authorization", () => {
       run: async (step: () => unknown) => await withWorkflowStepScope(step)(),
     },
     {
-      // `eve dev` runs a step inside the delivery's context, which is never saved.
       called: "without ctx in development",
       run: (step: () => unknown) =>
         withDevelopmentWorkflowGeneration(
@@ -304,7 +294,6 @@ describe("workflow step authorization", () => {
   it("accepts its own copy of the session's environment and leaves stopping and deleting to the session", async () => {
     const { deleted, provider, registry, stopped } = upsertSandboxes();
     bundle.registry = registry;
-    // The step imports its own copy of the module that declares the environment.
     await expect(
       runStep(async (ctx) => {
         await ctx.getSandbox(provider.environment());
@@ -381,7 +370,6 @@ describe("workflow step authorization", () => {
     expect(complete).toHaveBeenCalledOnce();
     expect(getToken).toHaveBeenCalledOnce();
     expect([...durable.entries.values()]).toEqual([[true]]);
-    // Retries still reject a fresh token that the service refuses, without another sign-in.
     await expect(
       runStep(async (ctx) => {
         await ctx.getToken(provider);
@@ -447,7 +435,6 @@ describe("workflow step authorization", () => {
     };
     const pending = await runStep(execute);
     if (pending.kind !== "authorization-required") throw new Error("Expected authorization");
-    // A step result is serialized across the step boundary.
     expect(structuredClone(pending)).toEqual(pending);
     const challenge = pending.challenges[0]!;
     if (challenge.attemptId === undefined) {

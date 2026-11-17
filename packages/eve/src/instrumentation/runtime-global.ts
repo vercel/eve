@@ -8,13 +8,11 @@ type InstrumentationGlobal = typeof globalThis & {
 
 const globalRuntime = globalThis as InstrumentationGlobal;
 
-/** Registers the process instrumentation runtime before agent execution begins. */
 export function registerInstrumentationRuntime(
   runtime: InstrumentationRuntime,
 ): InstrumentationRuntime {
   const existing = globalRuntime[INSTRUMENTATION_RUNTIME_KEY];
   if (existing !== undefined) {
-    // Keep ownership stable when initialization is attempted more than once.
     existing.otelSettings = runtime.otelSettings;
     return existing;
   }

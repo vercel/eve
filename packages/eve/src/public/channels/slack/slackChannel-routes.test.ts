@@ -112,7 +112,6 @@ function approvalPress(): Request {
   );
 }
 
-/** Posts `request` to the channel's webhook and drains every task it hands to `waitUntil`. */
 async function firePost(
   channel: unknown,
   request: Request,
@@ -164,7 +163,6 @@ describe("slackChannel ephemeral threading", () => {
       },
     });
 
-  // #5012: Slack only shows a threaded ephemeral once the thread has a reply.
   it("omits thread_ts from postEphemeral for a top-level mention", async () => {
     await firePost(postEphemeralOnMention(), mention({ ts: "1700000000.000001" }));
 
@@ -197,7 +195,6 @@ describe("slackChannel inactive prompt press", () => {
 
     const [update] = slackCalls("chat.update");
     expect(update).toMatchObject({ text: "No longer active", ts: "1700000000.000010" });
-    // Nobody's answer was taken, so the retired card credits nobody.
     const shown = JSON.stringify(update?.blocks);
     expect(shown).toContain("No longer active");
     expect(shown).not.toContain("U_APPROVER");
@@ -587,7 +584,6 @@ describe("slackChannel message status and guidance", () => {
       send,
       noSession,
     );
-    // An unmentioned edit to the root of the thread the agent serves.
     const root = {
       text: "Who can take the rollback?",
       thread_ts: rootTs,
@@ -631,9 +627,6 @@ describe("slackChannel message status and guidance", () => {
     expect(slackCalls("assistant.threads.setStatus")).toEqual([]);
   });
 
-  // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
-  // hook runs, so `deferred` can only keep the rest of the turn quiet. A `hidden` tool sets
-  // `label: false`: it shows no status and doesn't end a deferred turn's quiet.
   it.each<{
     name: string;
     request: () => Request;
@@ -764,7 +757,6 @@ describe("slackChannel message edits", () => {
     ];
     expect(address).toBe(`C01:${rootTs}`);
     expect(input).toMatchObject({ state: { quiet: true } });
-    // The channel's `turnPolicy` applies, so a queued edit can't overtake the message it edits.
     expect(input).not.toHaveProperty("turnPolicy");
     expect(input).not.toHaveProperty("title");
     expect("message" in input && input.message).toEqual(
@@ -834,7 +826,6 @@ describe("slackChannel message edits", () => {
   const dmEdit = { channelType: "im", previousText: "hi", text: "hello" } as const;
   const otherEdit = { previousText: "Lunch?", text: "Lunch at noon?" };
 
-  // Each row authors a hook the edit must skip, so the default can't just be "no hooks".
   it.each<{
     name: string;
     edit: Parameters<typeof edited>[0];
@@ -893,7 +884,6 @@ describe("slackChannel message edits", () => {
     },
   ])("$name", async ({ edit, hooks, reached }) => {
     const calls: string[] = [];
-    // Records the text each hook decided and the edit `ctx.edit` showed it.
     const hook = (name: MessageHook) =>
       name === "onMessageEdited"
         ? (ctx: SlackInboundMessageContext, decided: SlackMessageEdit) => {

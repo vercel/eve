@@ -13,7 +13,6 @@ import { HOST_HTTP_INVENTORY } from "#framework/host-inventory.js";
 
 type CompiledNode = CompiledAgentNodeManifest | CompiledAgentResources;
 
-/** Validates invariants that cannot be expressed by the serialized Zod shape. */
 export function validateCompiledAgentManifest(manifest: CompiledAgentManifest): void {
   const nodes = new Map<string, CompiledNode>([[ROOT_COMPILED_AGENT_NODE_ID, manifest]]);
   for (const subagent of manifest.subagents) {
@@ -81,7 +80,6 @@ function validateSubagentTree(
   }
 }
 
-/** Validates exact module-map parity with the manifest's required binding tables. */
 export function validateCompiledModuleMap(
   manifest: CompiledAgentManifest,
   moduleMap: CompiledModuleMap,
@@ -123,7 +121,6 @@ export function validateCompiledModuleMap(
   }
 }
 
-/** Validates one node's bindings, composition, and route-plan integrity. */
 export function validateCompiledAgentResources(
   node: CompiledNode,
   options: {

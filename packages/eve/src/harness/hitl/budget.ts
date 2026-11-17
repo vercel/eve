@@ -11,7 +11,6 @@ import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** Cache reads replay history rather than spending new input. Cache writes still count. */
 export const DEFAULT_SESSION_USAGE_LIMIT: SessionUsageLimit = ({ window }) =>
   window.inputTokens - window.cacheReadTokens >= 40_000_000;
 
@@ -31,7 +30,6 @@ export function checkSessionUsageLimit(input: {
   readonly session: Pick<HarnessSession, "sessionId" | "state">;
   readonly turnSequence: number;
   readonly usage: TokenUsage;
-  /** The window the last accepted budget prompt started; the stored one by default. */
   readonly window?: SessionProjection["usageWindow"];
 }): SessionUsageLimitCheck {
   const total = input.usage;

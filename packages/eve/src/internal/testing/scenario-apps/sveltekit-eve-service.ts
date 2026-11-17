@@ -8,9 +8,6 @@ interface SvelteKitEveServiceDescriptorOptions {
   readonly installDependencies?: boolean;
 }
 
-/**
- * A SvelteKit host with a generated eve Vercel service.
- */
 export function createSvelteKitEveServiceDescriptor(
   options: SvelteKitEveServiceDescriptorOptions = {},
 ): ScenarioAppDescriptor {

@@ -34,9 +34,6 @@ function toolFileMessage(data: unknown, mediaType = "image/png"): ModelMessage {
 describe("estimateTokens", () => {
   it("estimates based on serialized character length", () => {
     const messages: ModelMessage[] = [{ content: "a".repeat(400), role: "user" }];
-    // JSON.stringify wraps the payload with struct chars; the estimate is
-    // serialized-length / 4. The exact value matters less than the rough
-    // relationship to raw content length.
     expect(estimateTokens(messages)).toBeGreaterThanOrEqual(100);
     expect(estimateTokens(messages)).toBeLessThan(120);
   });
@@ -93,11 +90,6 @@ describe("estimateTokens", () => {
   });
 
   it("counts all content parts including reasoning", () => {
-    // The simplified estimator uses JSON.stringify(messages).length / 4 with
-    // no type-specific skipping. Reasoning contributes to the estimate like
-    // any other payload — this is intentional: the true token count comes
-    // back from the model each step via `lastKnownInputTokens`, so the
-    // heuristic only needs to roughly track size.
     const base: ModelMessage[] = [
       {
         content: [
@@ -171,8 +163,6 @@ describe("estimateTokens", () => {
 });
 
 describe("getInputTokenCount", () => {
-  // #3799: two page scans returned by a vision tool counted as ~160k tokens
-  // of base64 text and forced compaction against a 43,895-token prompt.
   it("does not count tool-result image bytes as text before provider usage arrives", () => {
     const page = pngBytes(1000, 1000, 240_000).toString("base64");
     const prompt: ModelMessage[] = [{ content: "Read both scanned pages.", role: "user" }];
@@ -199,7 +189,6 @@ describe("getInputTokenCount", () => {
       lastKnownInputTokens: 42,
       lastKnownPromptMessageCount: 1,
     });
-    // No appended messages: the exact prior count is the whole count.
     expect(result).toBe(42);
   });
 
@@ -214,8 +203,6 @@ describe("getInputTokenCount", () => {
       lastKnownInputTokens: 42,
       lastKnownPromptMessageCount: 1,
     });
-    // prior (42) + rough estimate of the one appended assistant message.
-    // The assistant message is ~80 content chars plus JSON struct overhead.
     expect(result).toBeGreaterThan(42 + 20);
     expect(result).toBeLessThan(42 + 40);
   });
@@ -292,9 +279,6 @@ describe("shouldCompact", () => {
     expect(shouldCompact([], { ...config, threshold: 0 })).toBe(false);
   });
 
-  // #4292: a 40,000-character Chinese tool result costs about 30k o200k and
-  // 40k cl100k tokens, but serialized length / 4 counted it as about 10k, so a
-  // measured 165k prompt reached the 200k window without compacting.
   it("compacts when a large CJK tool result pushes a measured prompt over the threshold", () => {
     const prompt: ModelMessage[] = [
       { content: "Summarize the attached Chinese report.", role: "user" },
@@ -325,23 +309,6 @@ describe("shouldCompact", () => {
   });
 });
 
-// --- compactMessages ---------------------------------------------------
-//
-// compactMessages escalates through heuristics before summarizing, and which
-// strategy a test hits is pure threshold arithmetic:
-//
-// - The tool-result cap heuristic is accepted only when the capped history
-//   PLUS the fixed compaction prompt envelope fits the threshold.
-//   `HEURISTICS_FORBIDDEN` leaves only a little room above the envelope, and
-//   `compact` prepends `OLD_BULK` to a history at that threshold, so no
-//   heuristic can be accepted and the summarization fallback always runs.
-// - `ROOMY` accepts capping whenever the history's bulk is tool output.
-//
-// Every result is checked against `expectWellFormedCompaction`: no orphaned
-// tool_result, never trailing on an assistant message, and — unless the
-// window was exhausted — within the threshold on shouldCompact's own ruler,
-// so the result cannot immediately re-trigger compaction.
-
 const ENVELOPE_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
@@ -367,7 +334,6 @@ function assistant(text: string): ModelMessage {
   return { content: text, role: "assistant" };
 }
 
-/** An assistant tool-call message and its paired tool-result message. */
 function toolExchange(input: {
   readonly callId: string;
   readonly payloadChars: number;
@@ -592,8 +558,6 @@ describe("compactMessages: tool-result cap heuristic", () => {
     const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
 
     expect(summarizer).not.toHaveBeenCalled();
-    // Structure survives untouched: the assistant message keeps its prose and
-    // its tool-call part, and the result stays a tool message.
     expect(result[0]).toEqual(user("investigate the bug"));
     expect(result[1]).toBe(call);
     const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
@@ -603,12 +567,10 @@ describe("compactMessages: tool-result cap heuristic", () => {
       typeof output === "object" && output !== null && "value" in output
         ? String(output.value)
         : "";
-    // Annotation leads; a real content prefix follows; the 4k bulk is gone.
     expect(value).toContain("Truncated by eve");
     expect(value).toContain("xxx");
     expect(value.length).toBeLessThan(2_400);
     expect(result.at(-1)).toEqual(user("what did you find?"));
-    // The capped result cannot immediately re-trigger compaction.
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
@@ -639,8 +601,6 @@ describe("compactMessages: tool-result cap heuristic", () => {
   });
 
   it("does not split a UTF-16 surrogate pair at either cut when capping tool results", async () => {
-    // Astral characters across the whole cut window: both the head and the
-    // tail cut fall inside surrogate pairs at one of the two offsets.
     for (const offset of [0, 1]) {
       const content = `${"x".repeat(offset)}${"📥".repeat(2_000)}`;
       const { result } = await compact(
@@ -810,9 +770,6 @@ describe("compactMessages: tool-result cap heuristic", () => {
     const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
     expect(cappedPart?.type).toBe("tool-result");
     const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
-    // Stubbing the file part is enough to fit: the output stays a structured
-    // content output, the sibling text survives whole, and no payload bytes
-    // (or truncation annotation) remain.
     expect(output).toEqual({
       type: "content",
       value: [
@@ -909,8 +866,6 @@ describe("compactMessages: tool-result cap heuristic", () => {
       typeof output === "object" && output !== null && "value" in output
         ? String(output.value)
         : "";
-    // The prefix cap now truncates stubbed content — readable text — never
-    // raw payload bytes.
     expect(value).toContain("Truncated by eve");
     expect(value).toContain("finding line");
     expect(value).not.toContain("iVBORw0KGgo");
@@ -931,7 +886,6 @@ describe("compactMessages: tool-result cap heuristic", () => {
     const { result, summarizer } = await compact(messages, { recentWindowSize: 3 });
 
     expect(summarizer).not.toHaveBeenCalled();
-    // A tool-ending tail gets no "Continue." guard, so the exchange is last.
     expect(result.slice(-2)).toEqual([recentCall, recentResult]);
   });
 
@@ -954,8 +908,6 @@ describe("compactMessages: tool-result cap heuristic", () => {
 
   it("keeps a tool result paired with its call when the window would split them", async () => {
     const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 40 });
-    // recentWindowSize 2 splits between call and result; the snap pulls the
-    // result into the older region, and capping leaves both untouched.
     const messages = [user("old context"), call, resultMsg, user("next question")];
 
     const { result, summarizer } = await compact(messages, { recentWindowSize: 2 });
@@ -1012,8 +964,6 @@ describe("compactMessages: forced summary", () => {
 });
 
 describe("compactMessages: deferred provider tool results", () => {
-  // Anthropic defers a web search called beside a local tool: the search runs once the local
-  // result is in, and its result opens the next response.
   const searchRun: ModelMessage[] = [
     user("Run date and search for the Node LTS."),
     {
@@ -1055,7 +1005,6 @@ describe("compactMessages: deferred provider tool results", () => {
   };
 
   it("keeps the deferred result with its call", async () => {
-    // `compact` fails on any kept result whose call was summarized away.
     await compact(
       [
         ...searchRun,
@@ -1081,9 +1030,6 @@ describe("compactMessages: deferred provider tool results", () => {
 
 describe("compactMessages: summarization fallback", () => {
   it("summarizes when capping cannot free enough space", async () => {
-    // All bulk is conversational prose — capping removes nothing — and the
-    // threshold sits below the prompt envelope, so no heuristic can be
-    // accepted regardless.
     const messages = [user("old context to fold away"), assistant("old reply"), user("continue")];
 
     const { result, summarizer } = await compact(messages, {
@@ -1122,7 +1068,6 @@ describe("compactMessages: summarization fallback", () => {
   });
 
   it("keeps the recent window verbatim after summarizing when it fits", async () => {
-    // Prose bulk forces summarization; the threshold has room for the tail.
     const oldProse = user("investigation notes ".repeat(2_000));
     const [recentCall, recentResult] = toolExchange({ callId: "call-1", payloadChars: 100 });
     const messages = [oldProse, assistant("done reading"), recentCall, recentResult];
@@ -1179,9 +1124,6 @@ describe("compactMessages: summarization fallback", () => {
     const tail = [user("do the thing"), recentCall, recentResult];
     const messages = [oldProse, ...tail];
 
-    // The threshold sits between the stripped and verbatim sizes, and half of
-    // it still holds the whole tail, so the window keeps it and only the
-    // summary head pushes the verbatim candidate over.
     const summary = "s".repeat(2_400);
     const summaryHead = [compactionMarker(CHECKPOINT_MARKER), assistant(summary)];
     const verbatimSize = estimateTokens([...summaryHead, ...tail]);
@@ -1217,8 +1159,6 @@ describe("compactMessages: summarization fallback", () => {
       threshold: HEURISTICS_FORBIDDEN,
     });
 
-    // The folded-away user prompt is replayed as the live turn, so the model
-    // resumes against its actual instruction rather than a bare "Continue.".
     expect(result).toEqual([
       compactionMarker(CHECKPOINT_MARKER),
       assistant("Summary of the large SQL result"),
@@ -1249,8 +1189,6 @@ describe("compactMessages: summarization fallback", () => {
       threshold: HEURISTICS_FORBIDDEN,
     });
 
-    // "latest question" is already in the kept tail — replaying it would ask
-    // the model to answer again instead of continuing.
     expect(result.at(-1)).toEqual(
       createFrameworkUserMessage("execution.continuation", "Continue."),
     );
@@ -1352,8 +1290,6 @@ describe("compactMessages: fixed kept-tail budget", () => {
 
   it("never splits a surrogate pair at either edge of the cut", async () => {
     const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-    // Padding shifts the pairs against the cut, so across the combinations the
-    // start and the end each land mid-pair at least once.
     for (const before of ["", "a", "ab"]) {
       for (const after of ["", "a", "ab"]) {
         const summarizer = summarizeWith("checkpoint text");

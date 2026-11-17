@@ -47,7 +47,6 @@ describe("createDevDiagnosticDump", () => {
       environment: () => Promise.resolve(ENVIRONMENT),
       now: () => new Date(nowMs),
     });
-    // Let the environment collection promise settle its write.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     nowMs += 95_000;
@@ -63,7 +62,6 @@ describe("createDevDiagnosticDump", () => {
     expect(dump.path).toBe(join(root, ".eve", "logs", "dev-2026-07-17T12-00-00.000Z-123.dump"));
     expect(dump.displayPath).toBe(".eve/logs/dev-2026-07-17T12-00-00.000Z-123.dump");
     if (process.platform !== "win32") {
-      // POSIX permission bits only: Windows reports 0o666 and uses ACLs.
       expect((await stat(dump.path)).mode & 0o777).toBe(0o600);
     }
 

@@ -35,10 +35,6 @@ import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider
 import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 
-/**
- * The spans a session exports, from its committed lines through eve's own OTel provider: the
- * path production takes, with no hand-built instrumentation events in between.
- */
 function session(
   tracePolicy: TraceCapturePolicy = () => ({ emit: true, recordInputs: true, recordOutputs: true }),
   deliveryInput?: DeliverHookPayload,
@@ -101,10 +97,8 @@ function session(
   const relayHandle = handleFor(true);
   return {
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(commitOf(facts))),
-    /** Commits as a step that relays an exchange for a child session or a workflow run. */
     relay: (...facts: SessionEvent[]) =>
       contextStorage.run(ctx, () => relayHandle(commitOf(facts))),
-    /** Runs a tool's `execute` the way the AI SDK bridge does, inside its call's span. */
     runTool: otel.runInContext,
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
@@ -159,7 +153,6 @@ const approval = (callId: string): SessionEvent =>
 const turnSettled = (data: Record<string, unknown>): SessionEvent =>
   ({ data: { turnId: "turn_0", ...data }, scope: turn, type: "turn.settled" }) as SessionEvent;
 
-/** Each span as `name outcome`, indented under its parent; `!` marks an error status. */
 function tree(spans: readonly ReadableSpan[]): string[] {
   const ids = new Set(spans.map((span) => span.spanContext().spanId));
   const children = new Map<string | undefined, ReadableSpan[]>();
@@ -413,7 +406,6 @@ describe("a session's spans, from its committed lines", () => {
         "invoke_agent weather completed",
         "  agent.approval approved",
       ]);
-      // Public scopes name a model run, and none has started.
       expect(heard).toEqual([]);
     },
   );
@@ -421,7 +413,6 @@ describe("a session's spans, from its committed lines", () => {
   it.each([
     ["a failure's reason code", "failed", "access_denied", "access_denied"],
     ["a failure's error message", "failed", "Calendar said: token abc123 is invalid", undefined],
-    // Alice sent a new message, so the sign-in ended without anyone refusing it.
     ["a withdrawal's reason", "withdrawn", "superseded-by-message", undefined],
   ])("records an authorization reason for %s", async (_, outcome, reason, recorded) => {
     const { commit, spans } = session();
@@ -466,7 +457,6 @@ describe("a session's spans, from its committed lines", () => {
     );
     await commit(...opening);
     await commit(requested("call_gh", "code__gh"));
-    // A turn a schedule started can't ask Alice to sign in, so the call fails without a prompt.
     const refused = new ConnectionAuthorizationFailedError("github", {
       message: "Alice has no GitHub token in this run.",
       reason: "sign_in_unavailable",
@@ -579,9 +569,7 @@ describe("a session's spans, from its committed lines", () => {
     for (const { audience, records, id, outcome = "accepted" } of [
       { audience: "public", records: true, id: "slack:T1:U2" },
       { audience: "public", records: false, id: undefined },
-      // An explicit policy records a private conversation's content, but never principal ids.
       { audience: "private", records: true, id: undefined },
-      // A denied call never runs, so only its approval names who denied it.
       { audience: "public", records: true, id: "slack:T1:U2", outcome: "declined" },
     ] as const) {
       const { commit, spans } = session(
@@ -645,7 +633,6 @@ describe("a session's spans, from its committed lines", () => {
     const exported = await spans();
     expect(tree(exported)).toEqual([
       "invoke_agent weather cancelled",
-      // The cancel stopped the step on purpose, so it ends without an error (#5025).
       "  agent.step",
       "    execute_tool weather failed !",
       "    execute_tool deploy cancelled !",
@@ -707,7 +694,6 @@ describe("a session's spans, from its committed lines", () => {
 
 describe("a child session's turn span", () => {
   const caller = { spanId: "c".repeat(16), traceFlags: 1, traceId: "a".repeat(32) };
-  // A propagated traceparent arrives as a remote span context.
   const remoteCaller = { ...caller, isRemote: true };
   const parentLineage = {
     callId: "call_ask",

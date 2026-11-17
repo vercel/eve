@@ -1,11 +1,3 @@
-/**
- * Discord inbound-interaction verification.
- *
- * Discord signs interaction webhooks with Ed25519. The signed payload is
- * the `X-Signature-Timestamp` header concatenated with the exact raw
- * request body string.
- */
-
 import { createPublicKey, verify } from "node:crypto";
 
 import { createLogger } from "#internal/logging.js";
@@ -28,27 +20,18 @@ export type DiscordPublicKey = string | (() => string | Promise<string>);
  */
 export type DiscordWebhookVerifier = (request: Request, body: string) => unknown | Promise<unknown>;
 
-/** Options for {@link verifyDiscordRequest}. */
 export interface DiscordVerifyOptions {
   readonly publicKey: DiscordPublicKey | undefined;
   readonly webhookVerifier?: DiscordWebhookVerifier;
-  /** Max allowed clock skew, in seconds. Defaults to 5 minutes. */
   readonly maxSkewSeconds?: number;
 }
 
-/** Resolves a Discord public key, falling back to `DISCORD_PUBLIC_KEY`. */
 export async function resolveDiscordPublicKey(publicKey?: DiscordPublicKey): Promise<string> {
   const source = publicKey ?? process.env.DISCORD_PUBLIC_KEY;
   if (!source) throw new Error("DISCORD_PUBLIC_KEY is required.");
   return typeof source === "function" ? await source() : source;
 }
 
-/**
- * Verifies an inbound Discord interaction request and returns the raw body.
- *
- * Throws when no public key/verifier is configured, required signature
- * headers are missing, timestamp checks fail, or the signature check fails.
- */
 export async function verifyDiscordRequest(
   request: Request,
   options: DiscordVerifyOptions,
@@ -88,11 +71,6 @@ export async function verifyDiscordRequest(
   return body;
 }
 
-/**
- * Verifies one Discord Ed25519 interaction signature over `timestamp + body`.
- * `publicKey` and `signature` are hex-encoded. Returns false (never throws) on
- * malformed input or a length/signature mismatch.
- */
 export function verifyDiscordSignature(input: {
   readonly body: string;
   readonly publicKey: string;

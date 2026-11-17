@@ -167,7 +167,6 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): T
       await finish(event.callId, (turn) => turn.complete({ outcome: "cancelled" }));
     },
     async onError(value: unknown) {
-      // Some agents report the bare error; it then belongs to every open call.
       const { callId, error } =
         value !== null && typeof value === "object" && "callId" in value && "error" in value
           ? (value as { callId: string; error: unknown })

@@ -5,16 +5,12 @@ import {
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
-// Built when an error needs it: the first `Intl` formatter in a process loads locale data, which
-// would otherwise add to every cold start.
 function formatEntryPointMethods(): string {
   return new Intl.ListFormat("en", { type: "disjunction" }).format(
     WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
   );
 }
 
-// Earlier eve releases exported these helpers from `eve/workflow`; name the replacement instead
-// of surfacing a generic missing-export error.
 const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 
 type AstNode = {
@@ -54,7 +50,6 @@ interface DirectiveFunctionNode {
   readonly fn: AstNode;
 }
 
-/** A default-exported definition's entry-point method: its property and function. */
 interface EntryPointMethod {
   readonly fn: AstNode;
   readonly name: string;
@@ -67,13 +62,6 @@ export interface AuthoredWorkflowDirectiveSource {
   readonly source: string;
 }
 
-/**
- * The directive transform understands one shape: a top-level `async function`
- * whose first statement is the directive. A marked `defineWorkflowTool` entry
- * point (`execute` or `task`) is hoisted into that shape here; every other
- * placement is a build error, because an ignored directive would run side
- * effects inline in a replayed body.
- */
 export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
@@ -166,7 +154,6 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     }
   }
 
-  // defineWorkflowTool() accepts one entry point, so only one is hoisted.
   const hoisted = entryPoints.find((entryPoint) =>
     found.some((entry) => entry.fn === entryPoint.fn),
   );
@@ -315,7 +302,6 @@ function isFunctionLike(node: AstNode): boolean {
   );
 }
 
-/** The source-module name of an import or re-export specifier. */
 function specifierName(specifier: AstNode): unknown {
   const name = specifier.type === "ImportSpecifier" ? specifier.imported : specifier.local;
   return name?.name ?? name?.value;

@@ -4,18 +4,13 @@ import { resolve } from "node:path";
 import { isExtensionModule } from "#internal/bundler/extension-mount-plugin.js";
 import { exactRegex, prefixRegex } from "#internal/bundler/filters.js";
 
-/**
- * One extension's on-disk source root paired with its logical mount identity.
- */
 interface ExtensionScope {
-  /** Absolute path to the extension's source root. */
   readonly sourceRoot: string;
   readonly mountId: string;
 }
 
 const VIRTUAL_PREFIX = "\0eve-ext-scope:";
 
-/** The subset of the rolldown/rollup plugin shape this plugin implements. */
 export interface ExtensionScopeBundlerPlugin {
   readonly name: string;
   readonly resolveId: {
@@ -36,7 +31,6 @@ function canonicalize(path: string): string {
   }
 }
 
-/** Strips a rolldown query suffix (`?v=…`) so containment compares real paths. */
 function importerPath(importer: string): string {
   const queryIndex = importer.indexOf("?");
   return canonicalize(queryIndex === -1 ? importer : importer.slice(0, queryIndex));
@@ -52,11 +46,6 @@ function shimSource(mountId: string): string {
   ].join("\n");
 }
 
-/**
- * Builds the resolveId/load hook pair shared by both plugin modes. `mountFor`
- * returns the owning mount for an importer, or `undefined` to leave the
- * import untouched.
- */
 function scopeHooks(
   name: string,
   mountFor: (importer: string) => string | undefined,
@@ -90,14 +79,6 @@ function scopeHooks(
   };
 }
 
-/**
- * Path-containment scope plugin for the whole-application bundle (the production
- * build). Any module physically under an extension's source root has its
- * `eve/context` imports redirected to a mount-owned state shim.
- *
- * Returns `null` when there are no extensions, so consumer-only builds carry no
- * extra plugin and their output is byte-identical to a non-extension build.
- */
 export function createExtensionScopePlugin(
   scopes: readonly ExtensionScope[],
 ): ExtensionScopeBundlerPlugin | null {
@@ -126,13 +107,6 @@ export function createExtensionScopePlugin(
   });
 }
 
-/**
- * Fixed-mount scope plugin for a single extension-owned module bundle (the
- * dev/eval per-module loader). The compiler already knows the owning mount,
- * so every module in the bundle — the entry plus its same-package dependencies —
- * is scoped, with no reliance on
- * filesystem path matching (which is unreliable under workspace symlinks).
- */
 export function createFixedMountScopePlugin(mountId: string): ExtensionScopeBundlerPlugin {
   return scopeHooks("eve-extension-scope-fixed", () => mountId);
 }

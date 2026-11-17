@@ -24,13 +24,6 @@ import { bufferToStream, streamToBuffer } from "./stream-utils.js";
  */
 export const SANDBOX_AGENT_ENV: Readonly<Record<string, string>> = { AI_AGENT: "eve" };
 
-/**
- * Builds the {@link SandboxSession} eve hands out from a provider's
- * connection: every path and working directory resolves from the
- * connection's workspace root, `run` collects `spawn`, the read and write
- * variants share the connection's byte primitives, and the connection's
- * extensions merge on top.
- */
 export function createConnectionSession<Extensions extends object>(
   connection: SandboxConnection<Extensions>,
 ): SandboxSession & Extensions {
@@ -139,24 +132,11 @@ export function createConnectionSession<Extensions extends object>(
   return { ...extensions, ...session } as SandboxSession & Extensions;
 }
 
-/**
- * Collects every chunk of a byte stream into a UTF-8 string. Mirrors
- * the standard `text()` shortcut on `Response` but works against the raw
- * `ReadableStream<Uint8Array>` shape that `Experimental_SandboxProcess`
- * exposes for stdout and stderr.
- */
 async function collectStreamToString(stream: ReadableStream<Uint8Array>): Promise<string> {
   const buf = await streamToBuffer(stream);
   return new TextDecoder().decode(buf);
 }
 
-/**
- * Validates the optional line-range options for
- * {@link SandboxSession.readTextFile}.
- *
- * Throws a descriptive error when values are non-integer, less than 1,
- * or when `startLine` exceeds `endLine`.
- */
 function validateReadTextFileOptions(options: SandboxReadTextFileOptions): void {
   const { startLine, endLine } = options;
   if (startLine !== undefined && (!Number.isInteger(startLine) || startLine < 1)) {
@@ -170,9 +150,6 @@ function validateReadTextFileOptions(options: SandboxReadTextFileOptions): void 
   }
 }
 
-/**
- * Splits content into lines preserving original line endings.
- */
 function splitLinesPreservingEndings(content: string): string[] {
   const lines: string[] = [];
   let start = 0;
@@ -197,10 +174,6 @@ function splitLinesPreservingEndings(content: string): string[] {
   return lines;
 }
 
-/**
- * Returns the line-range slice of `content`, preserving original line
- * endings.
- */
 function applyLineRange(content: string, options: SandboxReadTextFileOptions): string {
   if (options.startLine === undefined && options.endLine === undefined) {
     return content;
@@ -215,12 +188,6 @@ function applyLineRange(content: string, options: SandboxReadTextFileOptions): s
   return lines.slice(startLine - 1, endLine).join("");
 }
 
-/**
- * Decodes raw bytes to a string using the given encoding.
- *
- * `"utf-8"` uses `TextDecoder` in fatal mode so malformed sequences
- * throw. Other encodings fall back to Node's `Buffer.toString`.
- */
 function decodeBytes(buf: Uint8Array, encoding: string): string {
   if (encoding === "utf-8" || encoding === "utf8") {
     return new TextDecoder("utf-8", { fatal: true }).decode(buf);

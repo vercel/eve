@@ -37,7 +37,6 @@ export async function readDevelopmentModelCredential(
     headers[DEVELOPMENT_MODEL_REJECTED_HEADER] = createHash("sha256")
       .update(rejectedToken)
       .digest("hex");
-  // The host may wait for the refresh lock and complete two OAuth requests.
   const value = await authJson(url.href, { headers, signal }, 256_000, 75_000);
   if (
     typeof value.token !== "string" ||

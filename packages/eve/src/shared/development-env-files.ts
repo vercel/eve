@@ -4,7 +4,6 @@ import { parseEnv } from "node:util";
 
 import { isObject } from "#shared/guards.js";
 
-/** Development env files, from highest to lowest precedence. */
 export const DEVELOPMENT_ENV_FILE_NAMES = [
   ".env.development.local",
   ".env.local",
@@ -16,7 +15,6 @@ function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoExc
   return isObject(error) && error.code === "ENOENT";
 }
 
-/** Merged values of the development env files in `environmentRoot`, by precedence. */
 export function readDevelopmentEnvironmentValues(environmentRoot: string): Map<string, string> {
   const values = new Map<string, string>();
 

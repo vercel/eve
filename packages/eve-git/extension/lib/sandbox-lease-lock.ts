@@ -2,33 +2,16 @@ import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
 
-/**
- * Where a sandbox records which `gh` command holds its credential lease. Every session that
- * shares the sandbox, in any process, sees the same directory, and `mkdir` creates it atomically.
- */
 export const LEASE_LOCK_PATH = "/tmp/eve-github-lease.lock";
 
-/**
- * Held for a moment while a waiter breaks a stale lease lock or a holder releases one, so a
- * break can't delete a lock another waiter just acquired and a release can't delete a lock that
- * was broken and reacquired.
- */
 const GUARD_PATH = `${LEASE_LOCK_PATH}.guard`;
 
-/** A holder that has not released for this long has stopped: its lock is broken. */
 const STALE_AFTER_SECONDS = 10 * 60;
-/** Guards are held only for a few shell commands; one this old was left by a stopped sandbox. */
 const GUARD_STALE_AFTER_SECONDS = 60;
-/**
- * How long a command waits for another to release the lease. Waiting happens here, not in the
- * sandbox, and stays well inside a hosted function's budget, so a host that stops while waiting
- * leaves nothing behind in the sandbox to acquire the lock later.
- */
 export const LEASE_WAIT_MS = 60_000;
 const POLL_MS = 250;
 const BUSY_EXIT_CODE = 75;
 
-/** Exits 0 after acquiring the lock, or {@link BUSY_EXIT_CODE} while another command holds it. */
 function acquireCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
@@ -41,7 +24,6 @@ function acquireCommand(owner: string): string {
     `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
     `  exit ${BUSY_EXIT_CODE}`,
     `fi`,
-    // Another waiter may have broken and reacquired the lock since it was found stale.
     `[ "$(age ${lock})" -ge ${STALE_AFTER_SECONDS} ] && rm -rf ${lock}`,
     `status=${BUSY_EXIT_CODE}`,
     `if mkdir ${lock} 2>/dev/null; then printf '%s' ${id} > ${lock}/owner; status=0; fi`,
@@ -50,12 +32,6 @@ function acquireCommand(owner: string): string {
   ].join("\n");
 }
 
-/**
- * Starts a release: takes the guard (briefly retrying) so no waiter can break the lock while the
- * holder clears its credential, then prints `<guarded> <held>`, where `held` says whether `owner`
- * still holds the lock. Only breakers and releases take the guard, so when it stays busy for the
- * whole short wait it was left behind and releasing without it is safe.
- */
 function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
@@ -69,7 +45,6 @@ function beginReleaseCommand(owner: string): string {
   ].join("\n");
 }
 
-/** Finishes a release: removes the lock only while `owner` still holds it, then the guard. */
 function finishReleaseCommand(owner: string, guarded: boolean): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
@@ -94,26 +69,11 @@ function waitForRetry(signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
-/** What a holder does with the sandbox lease lock. */
 export interface SandboxLeaseLockOptions {
-  /**
-   * Undoes what the holder set up, such as clearing its network policy. It runs while no waiter
-   * can break the lock, and only while this holder still holds it: a holder whose lock was broken
-   * as stale must not clear its successor's credential.
-   */
   readonly cleanup?: () => PromiseLike<void>;
-  /** Stops waiting for the lock. */
   readonly signal?: AbortSignal;
 }
 
-/**
- * Holds the sandbox's credential lease lock while `run` executes. A lease replaces the sandbox's
- * whole network policy, so two `gh` commands sharing one sandbox, such as subagents sharing their
- * parent's, would otherwise replace or clear each other's credential mid-command.
- *
- * Throws a retryable error when another command holds the lock for longer than
- * {@link LEASE_WAIT_MS}, and stops waiting when `signal` aborts.
- */
 export async function withSandboxLeaseLock<T>(
   sandbox: SandboxSession,
   owner: string,
@@ -152,8 +112,6 @@ async function release(
   owner: string,
   cleanup: (() => PromiseLike<void>) | undefined,
 ): Promise<void> {
-  // When the sandbox can't say who holds the lock, clean up anyway: leaving a credential leased
-  // is worse than clearing a successor's.
   let guarded = false;
   let held = true;
   try {
@@ -167,7 +125,6 @@ async function release(
   try {
     if (held) await cleanup?.();
   } finally {
-    // A failed release must not replace the command's result; the lock goes stale instead.
     await Promise.resolve(sandbox.run({ command: finishReleaseCommand(owner, guarded) })).catch(
       () => undefined,
     );

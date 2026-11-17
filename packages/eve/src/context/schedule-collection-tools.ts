@@ -19,7 +19,6 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 
-// Approval must retain prepared data across durable suspension, not in a resolver closure.
 const PreparedWritesKey = new ContextKey<Readonly<Record<string, PreparedScheduleWrite>>>(
   "eve.schedulePreparedWrites",
 );
@@ -67,10 +66,6 @@ const expressionSchema = z.discriminatedUnion("type", [
 const timingGuidance =
   "For relative requests use expression { type: 'delay', minutes: 1 }; eve resolves timing after approval and rounds up to minute precision (up to 59 seconds later). Do not guess the clock or ask for a timezone for delays.";
 
-/**
- * The tools a schedule collection offers the model, named `schedule__<collection>__<action>`, or
- * `null` when its `tool` is `false`.
- */
 export function scheduleCollectionTools<TInput, TPrepared = TInput>(
   definition: DynamicSchedulesDefinition<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
   collection: string,
@@ -260,7 +255,6 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
             ),
             [key]: prepared,
           };
-          // Evicted approvals fail closed instead of blocking future creation forever.
           while (Buffer.byteLength(JSON.stringify(snapshots)) > 512 * 1024)
             delete snapshots[Object.keys(snapshots)[0]!];
           loadContext().set(PreparedWritesKey, snapshots);
@@ -282,7 +276,6 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
   };
   if (typeof policy !== "function" && policy.response !== undefined) {
     approval.response = async (context) => {
-      // Each key family is written by one typed preparer; restore that type after durable suspension.
       const prepared = loadContext().get(PreparedWritesKey)?.[keyFor(context.request.callId)] as
         | TWrite
         | undefined;

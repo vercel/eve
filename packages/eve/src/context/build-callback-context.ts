@@ -6,12 +6,6 @@ import { loadContext } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
 
-/**
- * Builds a {@link SessionContext} from the active ALS scope.
- *
- * Must be called inside a harness step (active `contextStorage.run`).
- * Throws when called outside an ALS scope.
- */
 export function buildCallbackContext(): SessionContext {
   const ctx = loadContext();
   const session = ctx.require(SessionKey);
@@ -30,9 +24,6 @@ export function buildCallbackContext(): SessionContext {
   };
 }
 
-/**
- * `ctx.getSandbox()` over a context's sandbox access: the session's sandbox, started on first use.
- */
 export function sandboxOf(ctx: Pick<ContextReader, "get">): SessionContext["getSandbox"] {
   return ((environment?: SandboxEnvironmentIdentity): Promise<RuntimeSandboxSession> => {
     const access = ctx.get(SandboxKey);

@@ -1,19 +1,5 @@
 import { defineConfig } from "vitest/config";
 
-/**
- * Tier 0 — Unit tests.
- *
- * Fast, hermetic tests that exercise a single module (or a small set of
- * modules) with every external boundary stubbed via `vi.mock`. Tests loaded by
- * this config must not touch the real filesystem (writes), spawn processes,
- * mutate `process.env`/`process.cwd`, or make real network requests. The
- * `unit-guard.ts` setup file replaces these surfaces with throwing stubs so
- * violations surface as a loud error that points the author at the integration
- * or scenario tier.
- *
- * Default timeout is deliberately tight so accidental I/O or async hangs fail
- * fast.
- */
 export default defineConfig({
   resolve: {
     alias: [
@@ -28,7 +14,6 @@ export default defineConfig({
     ],
   },
   test: {
-    // As in integration: a session a test drives fails on a line readers couldn't fold.
     env: { EVE_CHECK_SESSION_EVENTS: "1" },
     environment: "node",
     exclude: [

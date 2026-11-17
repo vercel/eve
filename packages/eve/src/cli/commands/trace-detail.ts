@@ -1,9 +1,3 @@
-/**
- * Span-level detail rendering for `eve traces`. Kept separate from the command
- * module: the tree renderer stays compact while these helpers answer "what
- * does this span carry" — inline metric chips and the `--verbose` per-span block.
- */
-
 import { formatCompactTokenCount } from "#cli/dev/tui/stream-format.js";
 import { formatAttributeContent } from "#cli/dev/tui/traces/trace-content.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
@@ -11,13 +5,6 @@ import { sanitizeForTerminal } from "#cli/ui/output.js";
 import type { LocalTraceSpan } from "#tracing/local/trace-reader.js";
 import { localTraceSpanCostUsd, type LocalTraceSummary } from "#tracing/local/trace-summary.js";
 
-/**
- * Compact metrics for one tree row: token chips (`↑1.4K`/`↓213`), cost
- * (`$0.0031`). Only chips whose attributes the span actually carries — rows
- * without usage stay clean. Tool names belong to eve's durable `execute_tool`
- * label instead of the AI SDK's child span.
- * Raw values: callers sanitize for their output surface.
- */
 export function spanMetricChips(span: LocalTraceSpan): string[] {
   const chips: string[] = [];
   const operation = span.attributes["gen_ai.operation.name"];
@@ -32,7 +19,6 @@ export function spanMetricChips(span: LocalTraceSpan): string[] {
   return chips;
 }
 
-/** One-line `Tokens` header value: `↑1.2K in · ↓340 out · 1.1K cached`. */
 export function formatTokenSummary(
   summary: Pick<
     LocalTraceSummary,
@@ -50,20 +36,10 @@ export function formatTokenSummary(
   return parts.join(" · ");
 }
 
-/** Formats a USD cost: `$1.50` at scale, `$0.0031` for typical spans. */
 export function formatCostUsd(costUsd: number): string {
   return costUsd >= 1 ? `$${costUsd.toFixed(2)}` : `$${costUsd.toFixed(4)}`;
 }
 
-/**
- * The `--verbose` block for one span: facts (status, timing, ids), every
- * attribute sorted with payloads rendered as transcripts/pretty JSON, then
- * every event with its offset from span start, rendered as `tree(1)`-style
- * entries: each fact, attribute key, and event is an entry with a connector
- * beneath the span's row, so the rails never break. Payload content wraps
- * under its key on a plain margin. `childrenFollow` decides whether the last
- * entry closes the branch — child span rows come after the detail entries.
- */
 export function renderSpanDetailTree(
   span: LocalTraceSpan,
   options: {
@@ -91,18 +67,13 @@ export function renderSpanDetailTree(
   }
 }
 
-/** One entry in a span's detail block: a head line plus nested content. */
 interface SpanDetailEntry {
   readonly head: string;
-  /** Payload content, rendered on a plain margin under the head. */
   readonly lines: readonly string[];
-  /** Structural sub-entries (span events), rendered with connectors. */
   readonly entries: readonly SpanDetailEntry[];
 }
 
 function spanDetailEntries(span: LocalTraceSpan, width: number): SpanDetailEntry[] {
-  // Payload formatting takes a dim style for de-emphasized parts; detail
-  // lines are dimmed wholesale at emit time, so payloads get the identity.
   const dim = (text: string): string => text;
   const attrWidth = Math.max(40, width);
   const entries: SpanDetailEntry[] = [];

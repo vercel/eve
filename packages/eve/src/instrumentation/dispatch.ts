@@ -298,7 +298,6 @@ async function withTimeout(
   }
 }
 
-/** Model calls are attempt-scoped; tool calls and input waits can outlive an attempt. */
 function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
   if (
     event.type === "delivery.consumed" ||

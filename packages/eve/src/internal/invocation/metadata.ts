@@ -11,7 +11,6 @@ export { INVOCATION_OWNER_ATTRIBUTE, INVOCATION_TOKEN_ATTRIBUTE };
 
 type ExternalInvocationMetadata = NonNullable<RunInput["externalInvocation"]>;
 
-/** Fixed-width fingerprint used to bind an invocation to its initiating principal. */
 export function invocationOwnerKey(auth: SessionAuthContext | null): string {
   const identity = auth === null ? ["anonymous"] : principalIdentity(auth);
   return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");

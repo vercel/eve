@@ -133,7 +133,6 @@ describe("eve dev server workflow generations", () => {
           firstTurn,
           `Timed out waiting for the interrupted turn to settle.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         );
-        // The crashed call never runs again; the model reads that it may have, and calls again.
         expect(
           firstResult.events.flatMap((event) =>
             event.type === "call.settled" ? [event.data.outcome] : [],
@@ -265,7 +264,6 @@ describe("eve dev server workflow generations", () => {
         );
         await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
 
-        // Converges on the latest files, so intermediate watcher rebuilds cannot make it flaky.
         const probeDescription = async () =>
           (await fetchAgentInfo(server.url)).tools.static.find((tool) => tool.name === "env_probe")
             ?.description;

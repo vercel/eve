@@ -112,7 +112,6 @@ describe("verifyGitHubRequest — caller-supplied verifier path", () => {
   it("prefers the verifier over an available webhook secret and never reads it", async () => {
     const verifier = vi.fn<GitHubWebhookVerifier>(async () => true);
     const body = "{}";
-    // Signature is wrong for SECRET, but the verifier path must not HMAC.
     const req = signedRequest(body, "sha256=bad");
 
     await expect(

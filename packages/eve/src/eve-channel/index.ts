@@ -102,7 +102,6 @@ export { eveVercelOidc, type EveVercelOidcOptions } from "#eve-channel/auth.js";
 
 const log = createLogger("eve.channel");
 
-/** Principals that may read `GET /eve/v1/info`; `"local-dev"` is what `localDev()` admits. */
 const AGENT_INFO_PRINCIPAL_TYPES: ReadonlySet<string> = new Set([
   "service",
   "runtime",
@@ -110,14 +109,6 @@ const AGENT_INFO_PRINCIPAL_TYPES: ReadonlySet<string> = new Set([
 ]);
 const localDevelopmentCaller = localDev();
 
-/**
- * Agent info carries authored text and server paths, so only operators read it
- * unless the request's auth result decides with `allowAgentInfo`. When the
- * channel's auth includes `localDev()`, a caller it would admit is the
- * developer at their own server even when an earlier strategy resolved them
- * first, such as the TUI's development Vercel OIDC token resolving to a `user`
- * on a linked project.
- */
 async function canReadAgentInfo(
   request: Request,
   caller: EveAuthResult,
@@ -129,16 +120,6 @@ async function canReadAgentInfo(
   return localDevConfigured && Boolean(await localDevelopmentCaller(request));
 }
 
-/**
- * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
- * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session,
- * ID-addressed POST routes deliver follow-ups and controls, and GET streams a
- * session's NDJSON event feed). Every route
- * runs {@link EveChannelConfig.auth} via {@link routeAuth} before dispatching.
- * Default-export the result as your `agent/channels/eve.ts` channel; reach for
- * {@link defineChannel} directly only for a custom transport.
- */
-/** A delegating caller checks that this deployment serves its remote agent protocol. */
 function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryId?: string) {
   const created: {
     ok: true;
@@ -148,7 +129,6 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryI
     deliveryId?: string;
   } = { ok: true, sessionId };
   if (deliveryId !== undefined) created.deliveryId = deliveryId;
-  // Supported delegated protocols still require this wire acknowledgement.
   if (body.callback !== undefined) created.status = "accepted";
   if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
   return created;
@@ -378,8 +358,6 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           );
         }
 
-        // A caller on an earlier remote agent protocol gets its result but can't answer for the
-        // session, which can't relay its requests in a shape that caller reads.
         const earlierCallerProtocol =
           body.protocolVersion === undefined ||
           body.protocolVersion === REMOTE_AGENT_PROTOCOL_VERSION
@@ -430,8 +408,6 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                 conversationId,
                 parent,
                 parentTraceContext: inheritedTrace,
-                // A remote agent's spans form their own session in this
-                // deployment; its lineage still names the caller's root.
                 traceRoot: parent === undefined ? undefined : { kind: "own" },
                 title: messageResult.title,
               });
@@ -533,7 +509,6 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
               outputSchema: body.outputSchema,
               turnPolicy: body.turnPolicy,
               title,
-              // A repeat of the same request is the same delivery, with the same receipt.
               ...(body.idempotencyKey !== undefined && {
                 deliveryId: await deliveryIdForIdempotencyKey(body.idempotencyKey),
                 idempotencyKey: body.idempotencyKey,

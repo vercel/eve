@@ -170,10 +170,6 @@ export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
   return renderer;
 }
 
-/**
- * A complete chain, whose handlers take no `next`: eve's default renderer,
- * which is the innermost link, and the composed chain a channel runs.
- */
 export interface SlackRenderChain {
   readonly events: SlackChannelInternalEvents;
   readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
@@ -222,10 +218,6 @@ function composeEvents(
   return events as SlackChannelInternalEvents;
 }
 
-/**
- * Runs `handlers` in order around `last`. Each handler's `next` runs the rest
- * once, with the event it passes or the event it received.
- */
 async function runChain(
   handlers: readonly AnyHandler[],
   event: unknown,
@@ -249,7 +241,6 @@ async function runChain(
   await run(0, event);
 }
 
-/** User renderers see only the private delivery surface for a sign-in challenge. */
 function userContext(
   type: SlackRenderedEvent,
   ctx: ChannelEventContext<SlackEventContext>,
@@ -295,7 +286,6 @@ async function composeReceived(
   });
 }
 
-/** Renderers' `interactionCard` hooks, first outermost, around `last`: eve's default. */
 export type SlackInteractionCardChain = (
   card: SlackInteractionCard,
   last: (card: SlackInteractionCard) => SlackInteractionCardParts,

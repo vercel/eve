@@ -15,7 +15,6 @@ import { withPublished } from "#internal/testing/session-machine.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 
-// Outside a workflow run, this session calls back no sign-ins of its own.
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   getWorkflowMetadata: () => ({}),
@@ -28,9 +27,7 @@ afterEach(() => {
 const interactionId = "approval-1";
 const remote = { name: "deployer", sessionId: "remote-session", url: "https://deployer.example" };
 
-/** A parent that forwarded the remote child's approval, and the child's receipt per request. */
 async function forwardingParent() {
-  // The remote child admits each forwarded request under a receipt of its own.
   const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
     const { answers } = JSON.parse(String(init?.body)) as { answers: { optionId: string }[] };
     return Response.json(
@@ -62,7 +59,6 @@ async function forwardingParent() {
     });
     step = { ...step, ...published };
   };
-  // One step can carry several queued deliveries, one payload each.
   const answered = async (...queued: [deliveryId: string, optionId: string][]) => {
     const delivery: DeliverHookPayload = {
       auth: null,
@@ -100,7 +96,6 @@ it("refuses the forwarded answer a remote child names by the receipt it gave for
   const runtime = await createTestRuntime({ agent: { name: "remote-answer-receipts" } });
   await runtime.run(async () => {
     const { answered, fetchMock, relayed, state } = await forwardingParent();
-    // Alice approves, then Bob rejects before the child settles: both answers go down.
     await answered(["d-alice", "approve"]);
     await answered(["d-bob", "reject"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -109,7 +104,6 @@ it("refuses the forwarded answer a remote child names by the receipt it gave for
       "receipt-reject": "d-bob",
     });
 
-    // The child refuses Bob's answer, naming the receipt it gave for it.
     await relayed([
       {
         data: { deliveryId: "receipt-reject", interactionId, outcome: "refused", reason: "No." },
@@ -118,7 +112,6 @@ it("refuses the forwarded answer a remote child names by the receipt it gave for
     ]);
     expect(answersOf(state())).toEqual({ "d-alice": "submitted", "d-bob": "refused" });
 
-    // It applies Alice's answer, naming its receipt as the decider; the route retires.
     await relayed([
       {
         data: { cause: { deliveryId: "receipt-approve" }, interactionId, outcome: "accepted" },
@@ -134,12 +127,10 @@ it("credits nobody for one receipt that covers answers from several deliveries",
   const runtime = await createTestRuntime({ agent: { name: "remote-answer-receipts" } });
   await runtime.run(async () => {
     const { answered, fetchMock, relayed, state } = await forwardingParent();
-    // Alice's and Bob's answers queue up and go down in one step, under one receipt.
     await answered(["d-alice", "approve"], ["d-bob", "reject"]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(readHitlState(state()).relays.get(interactionId)?.receipts).toBeUndefined();
 
-    // The receipt cannot say whose answer the child applied, so neither person is credited.
     await relayed([
       {
         data: { cause: { deliveryId: "receipt-approve" }, interactionId, outcome: "accepted" },
@@ -150,7 +141,6 @@ it("credits nobody for one receipt that covers answers from several deliveries",
   });
 });
 
-/** How each forwarded answer stands, by the delivery it came in. */
 function answersOf(state: ReturnType<typeof stateOf>): Record<string, string> {
   const { responses } = storedProjection(state).view;
   return Object.fromEntries(
@@ -158,7 +148,6 @@ function answersOf(state: ReturnType<typeof stateOf>): Record<string, string> {
   );
 }
 
-/** A parent whose open turn's call delegated to the remote child and still runs. */
 function runningCall(): DurableSessionState {
   const turnId = "turn_0";
   const runId = `test_${turnId}_0`;

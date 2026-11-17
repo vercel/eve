@@ -51,9 +51,6 @@ describe("coordination dispatch", () => {
       const before = await listWorkflowToolRunIds();
       let sessionId: string | undefined;
       let interrupted = false;
-      // The step that ran the `task.started` hook loses its completion once, as
-      // when its process exits before the step commits, so the step runs again.
-      // With batching off, every event goes through `create`, so none can skip the fault.
       const createBatch = world.events.createBatch;
       world.events.createBatch = undefined;
       const createEvent = world.events.create.bind(world.events);
@@ -124,8 +121,6 @@ describe("coordination dispatch", () => {
     });
 
     await runtime.run(async () => {
-      // An agent the run opens can share the session's sandbox and create it
-      // under the session's key, which the session's own state never records.
       const dispatching = await runUntilSessionEnds('Run deploy_service with service "api"');
       const plain = await runUntilSessionEnds("hello there");
 

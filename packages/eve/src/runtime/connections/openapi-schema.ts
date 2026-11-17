@@ -1,6 +1,5 @@
 import { isObject } from "#shared/guards.js";
 
-/** A path, query, header, or cookie parameter resolved from an operation. */
 export interface OpenApiParameter {
   readonly name: string;
   readonly location: "path" | "query" | "header" | "cookie";
@@ -9,19 +8,12 @@ export interface OpenApiParameter {
   readonly description?: string;
 }
 
-/** A request body resolved from an operation. */
 export interface OpenApiRequestBody {
   readonly required: boolean;
   readonly contentType: string;
   readonly schema: Record<string, unknown>;
 }
 
-/**
- * Builds the combined JSON Schema the model fills in: each path, query,
- * and header parameter becomes a top-level property; the request body
- * (when present) is nested under `body`. The component schemas they refer
- * to sit under `$defs`.
- */
 export function buildInputSchema(
   parameters: readonly OpenApiParameter[],
   requestBody: OpenApiRequestBody | undefined,
@@ -57,7 +49,6 @@ export function buildInputSchema(
   return schema;
 }
 
-/** Resolves a single `$ref` node one hop; returns the node unchanged otherwise. */
 export function deref(document: Record<string, unknown>, node: Record<string, unknown>): unknown {
   if (typeof node.$ref !== "string") {
     return node;
@@ -65,35 +56,17 @@ export function deref(document: Record<string, unknown>, node: Record<string, un
   return resolveRef(document, node.$ref) ?? {};
 }
 
-/** Keywords whose value maps names to subschemas, where names may shadow keywords. */
 const SCHEMA_MAP_KEYWORDS = new Set(["properties", "patternProperties", "$defs", "definitions"]);
-/** Keywords that set a schema's base URI, which would re-root the `#/$defs` refs inside it. */
 const BASE_URI_KEYWORDS = new Set(["$id", "$anchor", "$dynamicAnchor", "$schema"]);
 
-/** Converts one operation's schemas, collecting what they refer to. */
 export interface SchemaConverter {
-  /**
-   * Converts an OpenAPI schema to JSON Schema draft 2020-12. Each local
-   * `$ref` points into {@link defs}, which gets the converted target once.
-   */
   readonly convert: (schema: unknown) => unknown;
-  /** The converted `$ref` targets, keyed by the names `convert` points at. */
   readonly defs: Readonly<Record<string, unknown>>;
 }
 
-/**
- * Creates a converter for one operation's input schema.
- *
- * `$ref`s stay references instead of being copied in place, so a schema
- * shared by many properties, or one that refers to itself (Notion blocks),
- * costs its size once. Copying them in place would grow exponentially and
- * need a depth limit that cuts valid deep schemas off.
- */
 export function createSchemaConverter(document: Record<string, unknown>): SchemaConverter {
   const defs: Record<string, unknown> = {};
   const keys = new Map<string, string | undefined>();
-  // Targets wait here instead of converting in place, so a long `$ref` chain
-  // cannot overflow the stack.
   const pending: (readonly [key: string, target: unknown])[] = [];
 
   const define = (ref: string): string | undefined => {
@@ -152,10 +125,6 @@ export function createSchemaConverter(document: Record<string, unknown>): Schema
   return { convert, defs };
 }
 
-/**
- * Whether `ref` leads only through `$ref`s into a loop. Such a schema
- * constrains nothing, and the validator would follow it forever.
- */
 function isAliasCycle(document: Record<string, unknown>, ref: string): boolean {
   const seen = new Set<string>();
   for (let next: unknown = ref; typeof next === "string";) {
@@ -169,21 +138,15 @@ function isAliasCycle(document: Record<string, unknown>, ref: string): boolean {
   return false;
 }
 
-/**
- * A `$defs` key for `ref`, named after its last segment. Keys use only
- * characters that need no escaping in a JSON pointer or URI fragment.
- */
 function uniqueKey(ref: string, defs: Readonly<Record<string, unknown>>): string {
   const name = (ref.slice(ref.lastIndexOf("/") + 1) || "schema").replace(/[^\w.-]/g, "_");
   let key = name;
-  // Assigning `__proto__` would replace the prototype instead of adding a key.
   for (let suffix = 2; Object.hasOwn(defs, key) || key === "__proto__"; suffix += 1) {
     key = `${name}_${suffix}`;
   }
   return key;
 }
 
-/** Valid JSON Schema `type` values (draft 2020-12). */
 const VALID_JSON_SCHEMA_TYPES = new Set([
   "string",
   "number",
@@ -194,14 +157,6 @@ const VALID_JSON_SCHEMA_TYPES = new Set([
   "null",
 ]);
 
-/**
- * Drops `type` values that aren't valid JSON Schema types so a single
- * malformed operation can't make the whole connection's tool list invalid
- * and get rejected by strict providers. Real-world specs ship custom
- * placeholder types (e.g. Statuspage's `"type": "PartialStartDate"`);
- * removing the bad keyword leaves the remaining constraints intact and the
- * schema valid (and merely more permissive).
- */
 function normalizeSchemaType(schema: Record<string, unknown>): void {
   const type = schema.type;
   if (typeof type === "string" && !VALID_JSON_SCHEMA_TYPES.has(type)) {
@@ -218,14 +173,6 @@ function normalizeSchemaType(schema: Record<string, unknown>): void {
   }
 }
 
-/**
- * Down-converts OpenAPI 3.0's `nullable: true` to draft 2020-12. `nullable`
- * is not a JSON Schema keyword — OpenAPI 3.1 / 2020-12 dropped it in favor of a
- * `"null"` type — and strict providers reject it (ajv: `"nullable" cannot be
- * used without "type"`). Where a concrete `type` (or enum) is present we widen
- * it to admit `null`; otherwise we drop the keyword, leaving a valid, merely
- * more permissive schema, since nullability can't be expressed without it.
- */
 function normalizeNullable(schema: Record<string, unknown>): void {
   if (!("nullable" in schema)) {
     return;
@@ -249,7 +196,6 @@ function normalizeNullable(schema: Record<string, unknown>): void {
   }
 }
 
-/** Drops model-facing annotations that contradict the node's effective type. */
 function normalizeSchemaAnnotations(schema: Record<string, unknown>): void {
   const type = schema.type;
   if (typeof type !== "string" && !isArray(type)) {
@@ -287,7 +233,6 @@ function matchesSchemaType(value: unknown, type: string | readonly unknown[]): b
   });
 }
 
-/** Resolves a local JSON pointer ref (`#/components/...`) against the document. */
 function resolveRef(document: Record<string, unknown>, ref: string): unknown {
   if (!ref.startsWith("#/")) {
     return undefined;
@@ -307,7 +252,6 @@ function resolveRef(document: Record<string, unknown>, ref: string): unknown {
   return current;
 }
 
-/** Narrows `unknown` to a readonly array, used pervasively when duck-typing spec nodes. */
 export function isArray(value: unknown): value is readonly unknown[] {
   return Array.isArray(value);
 }

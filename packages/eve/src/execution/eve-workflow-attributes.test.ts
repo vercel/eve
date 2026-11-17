@@ -293,7 +293,6 @@ describe("deriveSessionTitle", () => {
   });
 
   it("never splits a surrogate pair at the truncation boundary", () => {
-    // (max - 1) leading chars + an emoji that would land on the last slot.
     const leading = "x".repeat(EVE_SESSION_TITLE_MAX_CHARS - 1);
     const title = deriveSessionTitle(`${leading}🚀tail`);
     expect(title).toBe(`${leading}…`);

@@ -8,7 +8,6 @@ import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 
-// Some NFS and FUSE mounts reject hard links with Linux ENOTSUPP (524), which Node cannot name.
 vi.mock("node:fs/promises", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:fs/promises")>()),
   link: async () => {

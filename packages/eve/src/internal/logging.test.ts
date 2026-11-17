@@ -18,10 +18,6 @@ import {
   type LogRecord,
 } from "#internal/logging.js";
 
-// ---------------------------------------------------------------------------
-// createErrorId
-// ---------------------------------------------------------------------------
-
 describe("createErrorId", () => {
   it("returns a unique opaque string each call", () => {
     const a = createErrorId();
@@ -91,10 +87,6 @@ describe("span error content policy", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// formatError
-// ---------------------------------------------------------------------------
-
 describe("formatError", () => {
   it("pins name and message fields and reuses the provided errorId", () => {
     const error = new TypeError("bad input");
@@ -117,8 +109,6 @@ describe("formatError", () => {
 
     const out = formatError(outer);
 
-    // The inspect dump should carry both the outer message and the
-    // inner cause's responseBody so operators can grep either side.
     expect(out.detail).toContain("gateway wrap");
     expect(out.detail).toContain("upstream 400");
     expect(out.detail).toContain("responseBody");
@@ -132,10 +122,6 @@ describe("formatError", () => {
   });
 
   it("extracts name and message off plain-object throwables (post structured-clone)", () => {
-    // Workflow step boundaries strip Errors to plain objects via
-    // structured clone. `formatError` must still surface `name` so
-    // `emitTerminalSessionFailureStep` can derive a useful `code`,
-    // and `message` so the user-visible event isn't JSON-stringified.
     const out = formatError({
       name: "EveAttachmentError",
       message: "image exceeds 5 megabytes",
@@ -145,10 +131,6 @@ describe("formatError", () => {
     expect(out.message).toBe("image exceeds 5 megabytes");
   });
 });
-
-// ---------------------------------------------------------------------------
-// createLogger
-// ---------------------------------------------------------------------------
 
 describe("createLogger", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -257,10 +239,6 @@ describe("createLogger", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// EVE_LOG_LEVEL filtering
-// ---------------------------------------------------------------------------
-
 describe("level filtering", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -318,10 +296,6 @@ describe("level filtering", () => {
     expect(logSpy).toHaveBeenCalledWith("[eve:ns] i");
   });
 });
-
-// ---------------------------------------------------------------------------
-// logError
-// ---------------------------------------------------------------------------
 
 describe("logError", () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;

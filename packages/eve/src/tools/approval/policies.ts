@@ -97,7 +97,6 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
     const evaluation = approvalEvaluation(context as ApprovalContext);
     if (evaluation === undefined) return "user-approval";
     const { entry, pending } = evaluation.read("once");
-    // An approval still waiting on its own answer stays a separate question.
     return entry?.outcome === "accepted" && !pending ? "approved" : evaluation.ask({ key: "once" });
   };
 }

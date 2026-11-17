@@ -8,7 +8,6 @@ import type { DevDiagnostics } from "../diagnostics.js";
 import { FakeEveServer, reply } from "./test/fake-eve-server.js";
 
 beforeEach(() => {
-  // A developer shell exporting gateway credentials must not leak into boot state.
   vi.stubEnv("AI_GATEWAY_API_KEY", "");
   vi.stubEnv("VERCEL_OIDC_TOKEN", "");
 });
@@ -18,10 +17,6 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-/**
- * A composer that submits each text once the previous turn settles, then
- * leaves. It closes when the runner needs the keyboard for something else.
- */
 function turnTaking(texts: Array<string | undefined>, overrides: Partial<AgentTUIRenderer> = {}) {
   const views: AgentTUIConversationView[] = [];
   const renderer: AgentTUIRenderer = {

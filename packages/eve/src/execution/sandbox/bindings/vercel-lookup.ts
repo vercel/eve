@@ -35,7 +35,6 @@ export async function getNamedVercelSandbox(input: {
   }
 }
 
-/** Whether a snapshot exists and finished, so a sandbox can still start from it. */
 export async function isVercelSnapshotCreated(input: {
   readonly createOptions: VercelCreateOptions;
   readonly sandboxModule: VercelModule;

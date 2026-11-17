@@ -55,12 +55,9 @@ import {
 } from "./registry-project.js";
 export { runRegistryAddCommand } from "./registry-add-command.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
-/** Source was installed, but the item's setup was cancelled, skipped, or failed. */
 export interface RegistrySetupIncomplete {
   resumeCommand: string;
-  /** Why setup failed; absent when it was cancelled or skipped. */
   reason?: string;
-  /** A structured action that unblocks setup, such as `vercel login`. */
   prerequisite?: SetupPrerequisite;
 }
 
@@ -71,19 +68,14 @@ export interface AddCommandOptions {
   yes?: boolean;
   nonInteractive?: boolean;
   answers?: Record<string, unknown>;
-  /** Suppresses the registry SDK's terminal-native progress output. */
   silent?: boolean;
 }
 
-/** Options shared by registry catalog commands. */
 export interface RegistryCommandOptions {
-  /** Emit the underlying registry result as JSON. */
   json?: boolean;
 }
 
-/** Options for searching registry catalogs. */
 export interface RegistrySearchCommandOptions extends RegistryCommandOptions {
-  /** Maximum number of matching items to return. */
   limit?: number;
 }
 
@@ -101,11 +93,9 @@ type RunAddCommandOptions = AddCommandOptions & {
   prompter?: Prompter;
   signal?: AbortSignal;
   setupAuthorized?: boolean;
-  /** Throw {@link RegistrySetupFailedError} to the caller instead of logging it. */
   throwSetupFailures?: boolean;
 };
 
-/** One discoverable item from an eve-compatible registry catalog. */
 export interface RegistryCatalogItem {
   address: string;
   name: string;
@@ -115,7 +105,6 @@ export interface RegistryCatalogItem {
   source: string;
 }
 
-/** Catalog items plus non-fatal failures from the registry sources queried. */
 export interface RegistryCatalogResult {
   items: RegistryCatalogItem[];
   total: number;
@@ -132,12 +121,6 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
 
 const DEFAULT_OFFICIAL_REGISTRY_URL = "https://eve.dev/r";
 
-/**
- * Resolves the official registry URL, honoring the explicit development trust override.
- *
- * The override makes its registry eligible to supply setup commands, so it must be
- * configured in the process environment rather than project configuration.
- */
 export function resolveOfficialRegistryUrl(
   configured = process.env.EVE_DEV_OFFICIAL_REGISTRY_URL,
 ): string {
@@ -167,8 +150,6 @@ const OFFICIAL_REGISTRY = resolveOfficialRegistryUrl();
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
 const SKILLS_REGISTRY = "@skills";
 const SKILLS_REGISTRY_URL = "https://www.skills.sh/r/{name}?agent=eve";
-// Browsing loads the whole catalog in one page, so this must stay above the
-// official registry's item count (hidden items count until they are filtered).
 const CATALOG_PAGE_SIZE = 500;
 const DEFAULT_SEARCH_LIMIT = 10;
 const ADD_SUGGESTION_LIMIT = 5;
@@ -179,18 +160,11 @@ function itemAddress(item: string): string {
     : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
-/** The registry item that carries each Web Chat framework's files. */
 const WEB_CHAT_ITEMS: Readonly<Record<WebChatFramework, string>> = {
   next: "channel/web",
   tanstack: "channel/web-tanstack",
 };
 
-/**
- * Asks which framework Web Chat uses. Only an interactive terminal prompts;
- * every other run takes the `web-framework` answer or the Next.js default.
- * Returns `false` when cancelled and `undefined` after reporting an invalid
- * headless answer.
- */
 async function askWebChatFramework(
   logger: RegistryCommandLogger,
   appRoot: string,
@@ -204,7 +178,6 @@ async function askWebChatFramework(
     (
       dependencies.hasInteractiveTerminal ?? defaultAddCommandDependencies.hasInteractiveTerminal!
     )();
-  // Headless and scripted installs keep working without an answer, as before frameworks existed.
   const asker = withAnswers(options.answers ?? {})(
     options.yes === true || nonInteractive || !canPrompt
       ? withPolicy("assume")(headlessAsker())
@@ -249,7 +222,6 @@ function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
   if (semver.validRange(requiredVersion) === null) {
     throw new Error(`Registry item has an invalid eve version requirement: ${requiredVersion}.`);
   }
-  // Without includePrerelease, no prerelease such as 1.0.0-rc.0 satisfies `>=0.30.0`.
   if (semver.subset(installedVersion, requiredVersion, { includePrerelease: true })) return;
   throw new Error(
     `This registry item requires eve ${requiredVersion}, but this project is using eve ${installedVersion}. Upgrade eve and run the command again.`,
@@ -342,9 +314,7 @@ async function printAddSuggestions(
 
     logger.log("Did you mean?");
     printRegistrySearchResults(logger, { query, sections });
-  } catch {
-    // The original not-found error remains actionable when catalog search is unavailable.
-  }
+  } catch {}
 }
 
 async function searchRegistryCatalog(
@@ -435,7 +405,6 @@ async function searchRegistryCatalog(
   return { config, result, resultsBySource, sources, metadataByAddress };
 }
 
-/** Browses all configured catalogs, or one namespace or URL source. */
 export async function browseRegistryCatalog(
   appRoot: string,
   options: { query?: string; source?: string } = {},
@@ -492,7 +461,6 @@ async function browseRegistryItems(
   if (errors.length > 0) process.exitCode = 1;
 }
 
-/** Installs an official, configured, or URL-addressed registry item. */
 export async function installRegistryItem(
   appRoot: string,
   item: string,
@@ -529,8 +497,6 @@ export async function installRegistryItem(
   } catch (error) {
     process.exitCode = previousExitCode;
     if (!(error instanceof RegistrySetupFailedError)) throw error;
-    // The source is already installed, so this is unfinished setup rather
-    // than a failed add; keep the reason and any prerequisite for recovery.
     const incomplete: RegistrySetupIncomplete = {
       resumeCommand: error.resumeCommand,
       reason: error.reason,
@@ -549,7 +515,6 @@ export async function installRegistryItem(
   return result;
 }
 
-/** Installs an official, configured, or URL-addressed registry item. */
 export async function runAddCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
@@ -557,7 +522,6 @@ export async function runAddCommand(
   options: RunAddCommandOptions,
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
 ): Promise<RegistrySetupCompletion | false | "setup-incomplete" | undefined> {
-  // Silent callers render the resume hint themselves from the structured result.
   const setupIncomplete = (outcome: "cancelled" | "skipped") => {
     if (options.silent !== true) logger.log(setupReminder(item, outcome));
     return "setup-incomplete" as const;
@@ -565,7 +529,6 @@ export async function runAddCommand(
   const action = async () => {
     const address = itemAddress(item);
     let webChatFramework: WebChatFramework | undefined;
-    // Setup reads the framework from the installed files, so only installs ask.
     if (address === itemAddress(WEB_CHAT_ITEMS.next) && options.skipInstall !== true) {
       const framework = await askWebChatFramework(logger, appRoot, item, options, dependencies);
       if (framework === false || framework === undefined) return framework;
@@ -715,7 +678,6 @@ export async function runAddCommand(
       options.throwSetupFailures === true && error instanceof RegistrySetupFailedError,
   });
 }
-/** Lists registry items from every configured source or one selected source. */
 export async function runRegistryListCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
@@ -726,7 +688,6 @@ export async function runRegistryListCommand(
     browseRegistryItems(logger, appRoot, undefined, source, options),
   );
 }
-/** Searches registry items across every configured source or one selected source. */
 export async function runRegistrySearchCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
@@ -741,7 +702,6 @@ export async function runRegistrySearchCommand(
     }),
   );
 }
-/** Inspects one official, configured, or URL-addressed registry item. */
 export async function runRegistryViewCommand(
   logger: RegistryCommandLogger,
   appRoot: string,

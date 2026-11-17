@@ -13,7 +13,6 @@ interface PendingEmission {
   deltaCharacters: number;
   deltaParts?: string[];
   event: SessionEvent;
-  /** A publication emitted as it came, never merged: a commit, or a record that doesn't append. */
   publication?: SessionPublication;
   messages?: readonly import("ai").ModelMessage[];
   sourceEvents: number;
@@ -21,19 +20,10 @@ interface PendingEmission {
 
 interface OrderedStreamEmitter {
   closeAndDrain(): Promise<void>;
-  /** Emits one streamed event, merged with adjacent deltas, or one commit, which is a barrier. */
   emit: HarnessEmitFn;
   readonly failureSignal: AbortSignal;
 }
 
-/**
- * Decouples model-stream consumption from the durable event sink while
- * preserving FIFO dispatch. Adjacent append events and same-call tool partials
- * waiting behind the active write are folded together; every other event
- * remains an ordering barrier.
- * Coalescing before the durable writer keeps one Workflow chunk per emitted
- * event, so event-count reconnect cursors remain aligned with chunk indexes.
- */
 export function createOrderedStreamEmitter(
   emitFn: HarnessEmitFn,
   options: { readonly maxPendingEvents?: number } = {},
@@ -164,7 +154,6 @@ export function createOrderedStreamEmitter(
           deltaCharacters: delta?.length ?? 0,
           event,
           messages,
-          // A fact keeps the commit it came in; progress merges, and is rebuilt as it emits.
           ...(!isProgressType(event.type) && { publication }),
           sourceEvents: 1,
         });
@@ -205,7 +194,6 @@ function mergeAdjacentEmissions(
     ) {
       return false;
     }
-    // The first record announces the entity; merged deltas keep its announcement.
     left.deltaParts ??= [appendDelta(left.event)];
     left.deltaParts.push(appendDelta(right));
     left.messages = messages;

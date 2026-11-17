@@ -403,9 +403,6 @@ describe("WorkflowBundleBuilder", () => {
             "",
           ].join("\n"),
         ),
-        // A plain (non-`"use step"`) helper that pulls in a node builtin —
-        // the same shape as the runtime-actions -> logging -> node:util
-        // regression that previously failed at workflow run time.
         writeFile(
           helperFilePath,
           [
@@ -701,8 +698,6 @@ describe("WorkflowBundleBuilder", () => {
             "",
           ].join("\n"),
         ),
-        // node:crypto is used only inside a `"use step"` function, which the
-        // transform stubs out of the driver chunk — the guard must not fire.
         writeFile(
           flowFilePath,
           [
@@ -765,7 +760,6 @@ describe("WorkflowBundleBuilder", () => {
           join(appRoot, "package.json"),
           `${JSON.stringify({ dependencies: { eve: "*" }, name: "authored-app", version: "0.0.0" })}\n`,
         ),
-        // Dependency trees are never authored modules, even with directives.
         writeFile(
           join(appRoot, "node_modules", "vendored", "index.js"),
           'export async function vendored() {\n  "use step";\n}\n',
@@ -852,7 +846,6 @@ describe("WorkflowBundleBuilder", () => {
   });
   it.each([
     { importer: "workflow code", specifier: "missing-workflow-package" },
-    // Dependency warnings are otherwise filtered as non-actionable.
     { importer: "a dependency", specifier: "dep" },
   ])(
     "rejects unresolved imports from $importer before emitting a VM bundle",

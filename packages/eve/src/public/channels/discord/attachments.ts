@@ -7,14 +7,8 @@ import type { DiscordFetch } from "#public/channels/discord/api.js";
 import type { DiscordAttachment } from "#public/channels/discord/inbound.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 
-// Discord serves attachments from signed CDN URLs that need no credentials.
 const DISCORD_CDN_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
 
-/**
- * The model-visible content of a command: its prompt, plus one file part per
- * attachment, which the channel's `fetchFile` downloads. Files over the default
- * upload limit become a short note instead.
- */
 export function discordCommandContent(
   text: string,
   attachments: readonly DiscordAttachment[],
@@ -40,10 +34,6 @@ export function discordCommandContent(
   return parts;
 }
 
-/**
- * Creates the channel's `fetchFile` for Discord CDN URLs. Any other URL
- * resolves to `null`, so it's never fetched here.
- */
 export function createDiscordFetchFile(
   fetchImpl: DiscordFetch = fetch,
 ): (url: string) => Promise<FetchFileResult | null> {
@@ -59,7 +49,6 @@ export function createDiscordFetchFile(
       });
     }
     return {
-      // Discord's reported size can be wrong, so the download itself stops at the limit too.
       bytes: await readLimitedBytes(response, DEFAULT_UPLOAD_POLICY.maxBytes, "discord"),
       mediaType: response.headers.get("content-type") ?? undefined,
     };

@@ -8,29 +8,14 @@ import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession } from "#harness/types.js";
 import { checksSessionEvents } from "#shared/dev-checks.js";
 
-/**
- * How a step changes the conversation history. History only gains messages, except where a
- * repair or a rewrite says otherwise.
- */
 export type HistoryChange =
-  /** Messages join the end. */
   | { readonly append: readonly ModelMessage[] }
-  /**
-   * History becomes `messages`, which keep every message it held, in order: the step's prompt and
-   * response, with the announcements its request placed ahead of the turn's input.
-   */
   | { readonly extend: readonly ModelMessage[] }
-  /** Tool exchanges a crash left unanswered gain their results; everything else stays. */
   | { readonly repaired: readonly ModelMessage[] }
-  /**
-   * History is replaced, as a compaction or a clear replaces it. What eve measured about the old
-   * history no longer applies, nor do the announcements whose message it dropped.
-   */
   | { readonly rewrite: readonly ModelMessage[] };
 
 type WithHistory = Pick<HarnessSession, "compaction" | "history">;
 
-/** The one way a session's history changes. Every message is checked as it joins. */
 export function changeHistory<T extends WithHistory>(session: T, change: HistoryChange): T {
   const changed = applyChange(session, change);
   if (changed !== session && checksSessionEvents()) assertAnswersFollowCalls(changed.history);
@@ -53,7 +38,6 @@ function applyChange<T extends WithHistory>(session: T, change: HistoryChange): 
   if ("repaired" in change) {
     return { ...session, history: validateHarnessModelMessages(change.repaired) };
   }
-  // Its measured prompt described the old history, and so did announcements whose message it drops.
   const history = validateHarnessModelMessages(change.rewrite);
   const ctx = contextStorage.getStore();
   const state = ctx?.get(HistoryStateKey);
@@ -67,10 +51,6 @@ function applyChange<T extends WithHistory>(session: T, change: HistoryChange): 
   };
 }
 
-/**
- * Under `eve dev` and in tests, an extension that drops or changes a message history held fails:
- * it is a rewrite that kept stale measurements and announcements.
- */
 function assertKeeps(previous: readonly ModelMessage[], next: readonly ModelMessage[]): void {
   if (!checksSessionEvents()) return;
   let at = 0;
@@ -85,11 +65,6 @@ function assertKeeps(previous: readonly ModelMessage[], next: readonly ModelMess
   }
 }
 
-/**
- * Why `history` can't be sent, if it can't: a tool result that answers no earlier call, or a call
- * answered twice. A provider rejects either. Results count wherever they are, including a
- * provider-executed result inline in its assistant message.
- */
 function answersFollowCalls(history: readonly ModelMessage[]): string | undefined {
   const calls = new Set<string>();
   const answered = new Set<string>();
@@ -110,7 +85,6 @@ function answersFollowCalls(history: readonly ModelMessage[]): string | undefine
   return undefined;
 }
 
-/** Under `eve dev` and in tests, history that couldn't be sent fails as it's written. */
 function assertAnswersFollowCalls(history: readonly ModelMessage[]): void {
   const problem = answersFollowCalls(history);
   if (problem !== undefined) throw new Error(problem);

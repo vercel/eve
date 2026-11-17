@@ -32,7 +32,6 @@ const customId = (
   })[0] as { components: Array<{ custom_id: string }> }
 ).components[0]!.custom_id;
 
-/** A press of Approve in guild G01, as Discord sends it: the presser on `member`. */
 function press(content: string | null = "Approve?"): Request {
   const body = JSON.stringify({
     application_id: "APP1",
@@ -60,7 +59,6 @@ function press(content: string | null = "Approve?"): Request {
   });
 }
 
-/** Posts `request` to the channel's webhook and drains every task it hands to `waitUntil`. */
 async function firePost(
   channel: unknown,
   request: Request,

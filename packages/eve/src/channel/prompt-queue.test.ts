@@ -12,7 +12,6 @@ const turnId = "turn_0";
 const runId = "run_0";
 const scope = { runId, turnId };
 
-/** A paused turn asking two approvals in one batch, and then `answers`' lines. */
 function viewWith(answers: readonly StoredLine[] = []) {
   const call = (callId: string) => ({
     data: { callId, capability: { kind: "tool", name: callId }, owner: { runId } },

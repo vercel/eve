@@ -22,48 +22,29 @@ import {
   type AgentChildTraceDispatch,
 } from "#tracing/eve/agent-invocation-coordinator.js";
 
-/**
- * What a workflow run needs to open `ctx.agent` sessions for its caller,
- * captured from the calling session for one call: the run's start input
- * carries it for the call that started the run, and each later call to a
- * `serve` task carries its own. The run never reads the session again:
- * opening, sending to, and ending its sessions never pass through the caller.
- *
- * It is a session's lineage, bound when the session opens. Auth is not part
- * of it: each message carries the auth of the call that sends it.
- */
 export interface AgentSessionContext {
   readonly toolStubs?: StubScope;
-  /** The agents the call may open, by name, which `ctx.agents` lists. */
   readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   readonly bundle: AgentSessionBundle;
-  /** Forwarded unchanged, so a session asks a person only when its caller can. */
   readonly capabilities?: SessionCapabilities;
   readonly schedule?: SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
-  /** The calling session's address on its channel, which `ctx.channel.continuationToken` reads. */
   readonly continuationToken?: string;
   readonly conversation?: ConversationContext;
-  /** Dynamic agents the calling turn selected, by node id. */
   readonly dynamicSelections: DynamicSubagentSelections;
-  /** Whether a parent, local or remote, delegated the calling session. */
   readonly delegated?: boolean;
   readonly localDevRequest?: LocalDevRequestProvenance;
-  /** The calling session, turn, and tool call, recorded as each session's lineage. */
   readonly parent: SessionParent;
-  /** Present when the caller's trace root differs from `parent.rootSessionId`. */
   readonly traceRoot?: SessionTraceRoot;
   readonly sandbox: AgentSessionSandbox;
   readonly trace: AgentChildTraceDispatch;
 }
 
-/** The compiled agent that owns the tool, which resolves agent names. */
 export interface AgentSessionBundle {
   readonly nodeId?: string;
   readonly source: DurableCompiledArtifactsSource;
 }
 
-/** The caller's sandbox, which agents declared with a parent sandbox share. */
 export interface AgentSessionSandbox {
   readonly sessionId: string;
   readonly state?: SandboxState;
@@ -86,7 +67,6 @@ type CallerDispatch = Pick<
   | "workflowAgents"
 >;
 
-/** Captures the agent session context for one workflow tool call, in the step that admits it. */
 export function captureAgentSessionContext(
   caller: CallerDispatch,
   callId: string,

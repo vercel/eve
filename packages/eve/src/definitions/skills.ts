@@ -30,11 +30,6 @@ import {
   SECTION_ORDER,
 } from "./definition.js";
 
-/**
- * The agent's own skills: each joins the call's skills, after the dynamic ones, which take a name
- * from them; the ones that aren't deferred are listed in eve's default prompt, as the call has
- * them.
- */
 export const skills: Definition = {
   contribute: ({ container }) => {
     const own = container.get(BundleKey)?.resolvedAgent.skills ?? [];
@@ -68,7 +63,6 @@ export const skills: Definition = {
   label: "the agent's skills",
 };
 
-/** The listing of `skills` in eve's default prompt: those that aren't deferred. */
 function skillsSection(
   skills: readonly {
     readonly name: string;
@@ -86,12 +80,6 @@ function skillsSection(
     : section("eve.skills", listed, { order: SECTION_ORDER.skills });
 }
 
-/**
- * A `defineDynamic()` in `agent/skills/`: one skill named after the file, or a map of them. It
- * keeps what the model sees: each skill's name, description, markdown, and a revision of its
- * files, and each joins the call's skills. The files themselves are built again wherever a
- * sandbox needs them, not stored.
- */
 export function skillDefinition(resolver: ResolvedDynamicDefinition<"skill">): Definition {
   const id = skillId(resolver);
   const evaluate = authoredEvaluate(resolver.evaluate);
@@ -134,11 +122,6 @@ export function skillDefinition(resolver: ResolvedDynamicDefinition<"skill">): D
   };
 }
 
-/**
- * Each dynamic skill definition's kept skills, read by kind, for writing their files: when two
- * name the same skill, the first keeps it, as it does in the call, so the sandbox holds the files
- * of the skill whose metadata the model sees.
- */
 function ownedSkills(ctx: Pick<ContextReader, "get">): {
   readonly id: string;
   readonly live?: unknown;
@@ -168,16 +151,6 @@ function ownedSkills(ctx: Pick<ContextReader, "get">): {
   });
 }
 
-/**
- * Queues the writes of skills with supporting files, so the model call never waits for the
- * sandbox; anything that uses the sandbox waits for them. A package already written at its
- * revision to the same sandbox is skipped, and a session with nothing to write or withdraw never
- * touches the sandbox.
- *
- * Files are removed only when no slot holds a skill by that name anymore. A skill that stops
- * returning supporting files keeps them, since the sandbox may already provide them, for example
- * from its snapshot.
- */
 export async function syncDynamicSkillFiles(ctx: ContextContainer): Promise<void> {
   const access = ctx.get(SandboxKey);
   if (access === undefined) return;
@@ -196,7 +169,6 @@ export async function syncDynamicSkillFiles(ctx: ContextContainer): Promise<void
       if (skill.revision === undefined) continue;
       desired.set(skill.name, skill.revision);
       const files = rendered.get(skill.name)?.files;
-      // A package this step couldn't build again waits for the next model call.
       if (files === undefined) continue;
       packages.set(skill.name, {
         description: skill.description,
@@ -206,20 +178,15 @@ export async function syncDynamicSkillFiles(ctx: ContextContainer): Promise<void
       });
     }
   }
-  // Markdown-only skills never need a sandbox.
   if (desired.size === 0 && Object.keys(ctx.get(DynamicSkillSandboxKey) ?? {}).length === 0) {
     return;
   }
 
   access.prepare(async (open) => {
-    // Read when the work runs: earlier work queued in this step may have changed it. The written
-    // record, not the slots, finds withdrawn files: a skill that went markdown-only has no
-    // revision left, but its files are still there.
     const written = ctx.get(DynamicSkillSandboxKey) ?? {};
     const identity = sandboxIdentity(await access.captureState());
     const mark = (name: string) => `${identity}#${desired.get(name) ?? ""}`;
     const withdrawn = Object.keys(written).filter((name) => !kept.has(name));
-    // Files written to another sandbox aren't in this one to remove.
     const stale = withdrawn.filter(
       (name) => identity !== null && written[name]?.startsWith(`${identity}#`) === true,
     );
@@ -242,10 +209,8 @@ export async function syncDynamicSkillFiles(ctx: ContextContainer): Promise<void
     for (const name of pending) {
       const skill = packages.get(name);
       if (skill === undefined) continue;
-      // Forget the package first so a failed write is redone by the next model call.
       delete next[name];
       ctx.set(DynamicSkillSandboxKey, { ...next });
-      // Replace the directory so files omitted from the new revision disappear.
       await removeSkillPackageFromSandbox({ name, sandbox });
       await writeSkillPackageToSandbox({ sandbox, skill });
       const current = sandboxIdentity(await access.captureState());
@@ -273,13 +238,10 @@ function toDurableSkill(skill: MaterializableSkillPackage): DurableDynamicSkillM
     -readonly [K in keyof DurableDynamicSkillMetadata]: DurableDynamicSkillMetadata[K];
   } = { markdown: skill.content, description: skill.description, name: skill.name };
   if (skill.deferred === true) durable.deferred = true;
-  // A package's files are built again where a sandbox needs them; the slot keeps their revision.
   if (skill.files.length > 1) durable.revision = skillPackageRevision(skill);
   return durable;
 }
 
-// The whole persisted record, including the generation `start()` sets: provider state alone
-// repeats when a gone sandbox is recreated under the same name.
 function sandboxIdentity(state: SandboxState): string | null {
   return state.session === null ? null : JSON.stringify(state.session);
 }

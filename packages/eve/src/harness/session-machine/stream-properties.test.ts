@@ -1,8 +1,3 @@
-// Random streams over the fact grammar, as a producer might write them: each commit goes through
-// the writer's cascade, the checker, and both retentions. The properties are the stream's
-// promises: the writer is idempotent and its lines check, and an operational view answers what a
-// complete one does. `EVE_STREAM_PROPERTY_RUNS` raises the number of streams.
-
 import { describe, expect, it } from "vitest";
 
 import { cascade } from "#harness/session-machine/cascade.js";
@@ -34,7 +29,6 @@ type Move = { readonly name: string; readonly facts: () => SessionEvent[] };
 
 const f = (type: string, data: object): SessionEvent => ({ data, type }) as SessionEvent;
 
-/** Moves enabled in `v`, the complete view, as a producer might make them. */
 function moves(v: SessionView, ids: () => string): Move[] {
   const out: Move[] = [];
   const turn = activeTurn(v);
@@ -183,7 +177,6 @@ function moves(v: SessionView, ids: () => string): Move[] {
         name: "ask.approval",
       });
     }
-    // A call a person was asked about starts only through their acceptance.
     const asked = Object.values(v.interactions).some(
       (i) => i.origin === undefined && "callId" in i.subject && i.subject.callId === c.callId,
     );
@@ -273,7 +266,6 @@ function moves(v: SessionView, ids: () => string): Move[] {
       for (const o of ["accepted", "declined"])
         out.push({
           facts: () => {
-            // A person's decision settles the approvals asked with it, in one commit.
             const own = (row: (typeof interactions)[number]) =>
               row.request.kind === "approval" && row.origin === undefined;
             const batch = own(i)
@@ -373,7 +365,6 @@ function moves(v: SessionView, ids: () => string): Move[] {
   return out;
 }
 
-/** What readers ask of a view, for comparing two retentions. */
 function answers(view: SessionView) {
   const turnId = activeTurn(view)?.turnId;
   const waits = turnId === undefined ? undefined : waiting(view, turnId);
@@ -398,7 +389,6 @@ function answers(view: SessionView) {
 const plain = (events: readonly SessionEvent[]) =>
   JSON.stringify(events.map(({ data, type }) => ({ data, type })));
 
-/** Folds one random stream; returns the first broken promise, or `undefined`. */
 function brokenPromise(seed: number, cascades = true): string | undefined {
   const random = rng(seed);
   let n = 0;
@@ -426,7 +416,6 @@ function brokenPromise(seed: number, cascades = true): string | undefined {
       plain(announceWaiting(before[0], complete)) !== plain(announceWaiting(before[1], operational))
     )
       return "announce";
-    // Each kind of move is as likely as any other, so work under a turn accumulates.
     const options = moves(complete, ids).filter((m) => m.name !== "session.end" || random() < 0.02);
     const names = [...new Set(options.map((m) => m.name))].filter(
       (name) => !name.startsWith("turn.") || name === "turn.start" || random() < 0.15,

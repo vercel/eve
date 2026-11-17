@@ -1,11 +1,3 @@
-/**
- * `eve__search`: finds catalog entries, the agent's deferred tools and skills
- * and every connection tool, by keyword. It never prompts: a connection whose
- * tools need sign-in is found as its sign-in entry instead. Its definition is
- * fixed for each eve version, so the catalog can change without changing the model's
- * tool list.
- */
-
 import { connectionToolName } from "#connections/ownership.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
@@ -28,18 +20,12 @@ import type { CatalogSkill } from "./skills.js";
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
 
-/** What an agent's search can return, from what it declares. */
 export interface SearchReach {
   readonly connections: boolean;
   readonly skills: boolean;
   readonly tools: boolean;
 }
 
-/**
- * `eve__search`'s description, saying which tool takes each kind of result.
- * It mentions only the catalog tools the session has, so it changes only when
- * the session first gains one.
- */
 function searchDescription({ connections, skills, tools }: SearchReach): string {
   return [
     "Search your own catalog for tools, agents, skills, and connected services that aren't in your tool list. Use it when nothing in your tool list fits the request; it doesn't search the web.",
@@ -81,7 +67,6 @@ const SEARCH_INPUT_SCHEMA = toInputSchema({
 
 interface SearchInput {
   readonly limit?: number;
-  /** The schema requires it; a call that skips validation and omits it fails like a query with no words. */
   readonly query?: string;
 }
 
@@ -96,27 +81,16 @@ interface UnavailableConnection {
 
 interface SearchOutput {
   readonly results: readonly SearchResult[];
-  /** Matches past `limit`. */
   readonly remaining: number;
-  /**
-   * Entries the query covered: the whole catalog, or one namespace. An
-   * unavailable connection counts as none, and one behind sign-in as its one
-   * sign-in entry.
-   */
   readonly searched: number;
   readonly unavailable?: readonly UnavailableConnection[];
 }
 
-/**
- * `fullName` is the name `eve__tool` takes and a namespace query scopes. `result`
- * renders only for the results returned, since signatures cost a render.
- */
 type SearchCandidate = RankCandidate & {
   readonly fullName: string;
   readonly result: () => SearchResult;
 };
 
-/** People see what the model searched for and, once it returns, how much it found. */
 const SEARCH_LABEL = {
   start: (input: unknown) => `Search tools${labelQuery(input)}`,
   complete: (input: unknown, output: unknown) => {
@@ -133,11 +107,6 @@ function labelQuery(input: unknown): string {
   return query ? ` for “${query}”` : "";
 }
 
-/**
- * Builds `eve__search` over one step's deferred entries and skills and the
- * connections in `registry`. `describe` returns an entry's description as the
- * model would read it in its tool list.
- */
 export function createSearchTool(input: {
   readonly deferred: readonly HarnessToolDefinition[];
   readonly describe: (definition: HarnessToolDefinition) => string;
@@ -208,47 +177,24 @@ async function search(
   return unavailable.length > 0 ? { ...found, unavailable } : found;
 }
 
-/**
- * The namespace a query scopes to: when its first word contains `__`,
- * everything before its last `__`, without trailing underscores. It only
- * filters; the whole query still ranks. Characters that can't appear in a
- * name, such as a leading `^`, are ignored; regex isn't supported.
- */
 function parseNamespace(query: string): string | undefined {
   const word = (query.trim().split(/\s+/u)[0] ?? "").replace(/^[^A-Za-z0-9_-]+/u, "");
   const namespace = word.slice(0, Math.max(0, word.lastIndexOf("__"))).replace(/_+$/u, "");
   return namespace === "" ? undefined : namespace;
 }
 
-/**
- * Names under `<namespace>__`, plus anything named exactly `namespace`, such
- * as a connection's sign-in entry.
- */
 function inNamespace(name: string, namespace: string): boolean {
   return name === namespace || name.startsWith(`${namespace}__`);
 }
 
-/**
- * Whether a connection can own names in `namespace`. Its names are its own
- * and those under its prefix, so only a connection that is the namespace,
- * contains it, or sits under it (an extension's connection, such as
- * `crm__api` under `crm`) can; every other connection is skipped without
- * listing its tools.
- */
 function mayOwnNamespace(connectionName: string, namespace: string): boolean {
   return inNamespace(connectionName, namespace) || namespace.startsWith(`${connectionName}__`);
 }
 
-/**
- * Why a namespace query found nothing: the connection it names has no tools,
- * or the closest connection names, or how to find names when none is close.
- * Names are case-sensitive, so `Linear__` misses `linear`.
- */
 function unknownNamespaceMessage(
   namespace: string,
   connections: readonly ResolvedConnectionDefinition[],
 ): string {
-  // A connection that lists no tools, such as an empty server or one its tool filter empties.
   if (connections.some(({ connectionName }) => connectionName === namespace)) {
     return `Connection "${namespace}" has no tools.`;
   }
@@ -266,7 +212,6 @@ function unknownNamespaceMessage(
   return `No entries are named "${namespace}__…". ${hint}`;
 }
 
-/** A connection's tools, or its sign-in entry while listing them needs sign-in. */
 async function searchConnection(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
@@ -336,7 +281,6 @@ function toolCandidate(
   };
 }
 
-/** Found by the connection's own name and description, as its sign-in entry. */
 function signInCandidate(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,

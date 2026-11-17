@@ -25,7 +25,6 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects agent info exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
@@ -207,7 +206,6 @@ export function buildAgentInfoResponse(
   };
 }
 
-/** Only the literal priority tier is needed by the dev TUI; other options may contain secrets. */
 function projectProviderOptionsForInfo(
   providerOptions: Record<string, JsonObject> | undefined,
 ): Record<string, JsonObject> | undefined {

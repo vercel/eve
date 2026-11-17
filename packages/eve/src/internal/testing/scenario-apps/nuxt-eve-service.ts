@@ -1,8 +1,5 @@
 import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
-// Not resolved from the installed workspace like the Next.js descriptor's
-// dependencies: `nuxt` is only an optional peer of eve, so no copy is
-// installed to resolve a version from.
 const NUXT_VERSION = "^4.0.0";
 const VUE_VERSION = "^3.5.0";
 
@@ -10,10 +7,6 @@ interface NuxtEveServiceDescriptorOptions {
   readonly installDependencies?: boolean;
 }
 
-/**
- * A Nuxt host with a generated eve Vercel service whose page uses the
- * auto-imported `useEveAgent()` composable.
- */
 export function createNuxtEveServiceDescriptor(
   options: NuxtEveServiceDescriptorOptions = {},
 ): ScenarioAppDescriptor {

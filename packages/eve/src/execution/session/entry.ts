@@ -57,21 +57,6 @@ import type {
   WorkflowEntryResult,
 } from "#execution/session/entry-input.js";
 
-// workflow-entry.ts is the durable workflow body — the bundler rejects
-// node built-ins here, so `internal/logging.ts` cannot be imported.
-// Error logging happens inside `emitTerminalSessionFailureStep`.
-
-/**
- * Long-lived workflow entrypoint. Handles both root sessions and
- * delegated child sessions: root sessions expose only parent
- * control-plane events; delegated children publish their full progress
- * on a child stream and resume the parked parent with a
- * `subagent-result` on completion.
- *
- * The current owner directly executes every turn. An idle owner can transfer
- * its settled checkpoint and hooks to an exact successor deployment while the
- * original run remains parked as the public stream anchor.
- */
 export async function workflowEntry(input: WorkflowEntryInput): Promise<WorkflowEntryResult> {
   "use workflow";
 
@@ -112,7 +97,6 @@ async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
     readonly continuationToken: string;
-    /** The claims confirm after it, so it runs inline while their hooks commit. */
     readonly sessionCreation: Promise<unknown>;
     readonly sessionId: string;
     readonly sessionTimeoutMs: number | false;
@@ -121,14 +105,10 @@ async function prepareInitialOwner(
 ): Promise<InitialOwnerPreparation> {
   const owner: OwnedInitialSession = {
     kind: "owned",
-    // The session loop starts the timer once the claims are confirmed; one
-    // started sooner could signal a command hook that is not registered yet.
     timeoutControl: createSessionTimeoutControl({
       sessionId: input.sessionId,
       timeoutMs: input.sessionTimeoutMs,
     }),
-    // Created before any await so its abort hooks commit with the session's
-    // hooks instead of beside the first turn's step.
     turnControl: createTurnControl(),
   };
   const claim = { confirmAfter: input.sessionCreation };
@@ -157,7 +137,6 @@ function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
   return result.value;
 }
 
-/** Returns `undefined` when a competing continuation owner already exists. */
 export async function bootInitialOwner(
   input: InitialWorkflowEntryInput,
   sessionId: string,
@@ -181,7 +160,6 @@ export async function bootInitialOwner(
       dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
         | DynamicSubagentAgentConfig
         | undefined,
-      // With a first message, its delivery carries the history instead.
       history: input.input.message === undefined ? input.input.history : undefined,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
@@ -213,7 +191,6 @@ export async function bootInitialOwner(
         });
       }
       await inbox.dispose();
-      // This run never becomes the session, so nothing else would end its stream.
       await closeSessionStreamStep({ sessionWritable });
       return undefined;
     }
@@ -253,25 +230,19 @@ export async function bootInitialOwner(
   }
 }
 
-/** A successor that may continue the session, before it owns any of its hooks. */
 interface PreparedSuccessor {
   readonly checkpoint: SessionCheckpoint;
   readonly serializedContext: Record<string, unknown>;
-  /** A session from an owner before v27: the turns it numbered, so the next takes the next. */
   readonly importedTurnCount?: number;
 }
 
-/** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
 async function prepareSuccessor(
   input: HandoffWorkflowEntryInput,
   source: { readonly runId: string; readonly hookTokens: readonly string[] },
 ): Promise<PreparedSuccessor | undefined> {
   const { sessionId } = input;
-  // The previous owner may run an older eve build; read its checkpoint in this build's shape.
   const migration = migrateSessionCheckpoint(input.checkpoint);
   if (migration.kind === "busy") {
-    // Not `incompatible`, which an owner before v27 remembers for this deployment: once its work
-    // finishes, its next delivery tries again.
     await signalFailedActivation(input, new Error(migration.detail), { payloads: [] });
     return undefined;
   }
@@ -293,7 +264,6 @@ async function prepareSuccessor(
     return undefined;
   }
   if (validation.kind === "source-gone") {
-    // A source that ended no longer listens; a live one keeps the session.
     const error = new Error("The session's previous owner no longer holds all of its addresses.");
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
@@ -313,10 +283,6 @@ async function prepareSuccessor(
   };
 }
 
-/**
- * An imported session continues its stream after the lines its earlier owner wrote. Read once this
- * run holds the session, so no line the earlier owner writes lands after the position.
- */
 async function placeImportedSession(
   sessionId: string,
   prepared: PreparedSuccessor,
@@ -343,17 +309,11 @@ async function signalFailedActivation(
   });
 }
 
-/**
- * The source still holds every hook. Fences duplicate candidates, prepares,
- * then force-claims the source's hook set and runs right away; the source's
- * handover is placed ahead of everything this run accepts itself.
- */
 async function bootHandoffOwner(
   input: HandoffWorkflowEntryInput,
 ): Promise<BootOutcome | undefined> {
   const { attemptKey, hookTokens, sessionId, sourceRunId } = input;
   if (attemptKey === undefined || hookTokens === undefined || sourceRunId === undefined) {
-    // Sources before handoff version 3 released their hooks first and sent none of these.
     const error = new Error(
       "Session handoff input is missing attemptKey, hookTokens, or sourceRunId; sources before handoff version 3 are no longer supported.",
     );
@@ -361,9 +321,6 @@ async function bootHandoffOwner(
     return undefined;
   }
   try {
-    // A start step retried after its run was created leaves a duplicate
-    // candidate, and an owner whose start step failed takes the lease itself.
-    // Only one run claims it; the token stays reserved past that run's end.
     const lease = createHook<never>({
       experimental_minRetention: HANDOFF_LEASE_RETENTION,
       token: handoffLeaseToken(attemptKey),
@@ -397,10 +354,6 @@ async function bootHandoffOwner(
   return await startSuccessor(input, inbox, prepared);
 }
 
-/**
- * Waits for the source to take its hooks back, then returns what this run
- * accepted meanwhile as the handover. A source that ended takes nothing back.
- */
 async function handBack(
   inbox: SessionInboxHandle,
   input: { readonly attemptKey: string; readonly sessionId: string; readonly sourceRunId: string },
@@ -438,8 +391,6 @@ async function startSuccessor(
       admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
-      // The earlier build's history follows its own message conventions, such as memory recalls
-      // and task notices; this build's model reads it only as a summary.
       compactFirst: prepared.importedTurnCount !== undefined && checkpoint.history.length > 0,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,

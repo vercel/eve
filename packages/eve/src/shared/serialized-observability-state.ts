@@ -3,7 +3,6 @@ export const SERIALIZED_INSTRUMENTATION_STATE_KEYS = {
   providerState: "eve.harness.instrumentationState",
 } as const;
 
-/** Keeps instrumentation state needed to settle operations opened by a discarded step. */
 export function preserveSerializedInstrumentationState(
   original: Record<string, unknown>,
   interrupted: Record<string, unknown>,

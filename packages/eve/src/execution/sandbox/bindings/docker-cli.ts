@@ -51,12 +51,7 @@ export interface DockerCli {
   ): DockerProcess;
 }
 
-/**
- * Raised when the `docker` executable cannot be spawned at all (not
- * installed or not on `PATH`).
- */
 export class DockerUnavailableError extends Error {
-  /** Structured remediation, surfaced by the semantic-error catalog. */
   readonly hint =
     "Install and start Docker Desktop, OrbStack, Colima, or another runtime exposing a " +
     "Docker-compatible `docker` CLI (or point EVE_DOCKER_PATH at one, e.g. Podman). " +
@@ -71,11 +66,7 @@ export class DockerUnavailableError extends Error {
   }
 }
 
-/**
- * Raised when the `docker` CLI exists but the daemon is not reachable.
- */
 export class DockerDaemonUnavailableError extends Error {
-  /** Structured remediation, surfaced by the semantic-error catalog. */
   readonly hint =
     "Start Docker Desktop (or your Docker-compatible runtime) and retry. Alternatively use " +
     "the dependency-free JustBashSandbox (installed automatically " +
@@ -91,11 +82,6 @@ export class DockerDaemonUnavailableError extends Error {
   }
 }
 
-/**
- * Verifies the Docker daemon answers before the engine performs its
- * first real operation, converting CLI/daemon failures into actionable
- * errors instead of letting individual commands fail obscurely.
- */
 export async function assertDockerDaemonAvailable(cli: DockerCli): Promise<void> {
   const result = await cli.run(["version", "--format", "{{.Server.Version}}"]);
   if (result.exitCode !== 0) {
@@ -110,27 +96,13 @@ function resolveDockerExecutable(): string {
 
 let cachedLinuxDockerAvailability: boolean | undefined;
 
-/**
- * Carries one probe result to every process and worker `eve dev` starts
- * later: `"1"` when a Linux Docker daemon is available, `"0"` when it is not.
- */
 export const LINUX_DOCKER_AVAILABILITY_ENV = "EVE_DEVELOPMENT_LINUX_DOCKER_AVAILABLE";
 
-/**
- * Synchronously probes whether a reachable Docker daemon runs Linux
- * containers, for `defaultSandbox()`'s availability chain. eve's Docker
- * sandbox image is Linux-only, so a Windows-container daemon is not a
- * compatible default even though it answers the Docker CLI. The result is
- * cached, and adopted from {@link LINUX_DOCKER_AVAILABILITY_ENV} when set:
- * provider selection must be stable for the whole dev server, and the probe
- * costs a subprocess round-trip.
- */
 export function isLinuxDockerDaemonAvailableSync(): boolean {
   cachedLinuxDockerAvailability ??= readAdoptedAvailability() ?? probeLinuxDockerDaemonSync();
   return cachedLinuxDockerAvailability;
 }
 
-/** This module instance's probe result, or `undefined` before the first probe. */
 export function peekLinuxDockerDaemonAvailability(): boolean | undefined {
   return cachedLinuxDockerAvailability;
 }
@@ -154,10 +126,6 @@ function probeLinuxDockerDaemonSync(): boolean {
   }
 }
 
-/**
- * Creates the production {@link DockerCli} that shells out to the
- * `docker` executable (override the binary with `EVE_DOCKER_PATH`).
- */
 export function createDockerCli(): DockerCli {
   return {
     async run(args, options = {}) {
@@ -203,8 +171,6 @@ export function createDockerCli(): DockerCli {
         child.on("error", (error) => reject(adaptSpawnError(error)));
         child.on("close", (code) => resolve(code ?? 1));
       });
-      // Surface spawn/abort failures through `wait()` instead of an
-      // unhandled rejection when the caller only consumes the streams.
       exit.catch(() => {});
 
       return {

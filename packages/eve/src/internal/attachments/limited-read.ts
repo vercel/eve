@@ -1,16 +1,10 @@
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import type { UploadPolicy } from "#public/channels/upload-policy.js";
 
-/** The byte cap an upload policy sets; a disabled policy accepts nothing. */
 export function maxBytesOf(policy: UploadPolicy): number {
   return policy === "disabled" ? 0 : policy.maxBytes;
 }
 
-/**
- * Reads a download's or request's body, failing as soon as it passes `maxBytes`. Checks a
- * declared `content-length` first, then counts what streams in, so a body that
- * misstates or omits its length still stops at the limit.
- */
 export async function readLimitedBytes(
   response: Pick<Response, "body" | "headers">,
   maxBytes: number,
@@ -39,10 +33,6 @@ export async function readLimitedBytes(
   return Buffer.concat(chunks);
 }
 
-/**
- * Wraps `fetch` so every response body fails once it passes `maxBytes`, for a
- * download that reads the body itself, such as a vendored client's.
- */
 export function limitedFetch(
   fetchImpl: typeof globalThis.fetch,
   maxBytes: number,
@@ -74,7 +64,6 @@ export function limitedFetch(
   };
 }
 
-/** Fails a download whose bytes arrived some other way than a `Response`, once they're in hand. */
 export function assertWithinLimit(bytes: Uint8Array, maxBytes: number, adapterKind: string): void {
   if (bytes.byteLength > maxBytes) throw overLimit(maxBytes, adapterKind);
 }

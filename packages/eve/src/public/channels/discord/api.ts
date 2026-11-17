@@ -1,9 +1,5 @@
 import type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 export type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
-/**
- * Minimal Discord REST API wrapper. The channel talks directly to Discord's
- * JSON HTTP API rather than exposing a third-party SDK through eve.
- */
 
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
@@ -48,10 +44,8 @@ export interface DiscordPostedMessage {
   readonly raw: unknown;
 }
 
-/** Allowed mentions payload that suppresses all generated pings. */
 export const DISCORD_NO_MENTIONS: JsonObject = { parse: [] };
 
-/** Discord's documented message-content cap. */
 export const DISCORD_MESSAGE_CONTENT_MAX_LENGTH = 2000;
 
 /** Builds the channel-local continuation token (`<channelId>:<conversationId>`). */
@@ -65,7 +59,6 @@ export function discordContinuationToken({
   return `${channelId}:${conversationId ?? ""}`;
 }
 
-/** Resolves a Discord application id, falling back to `DISCORD_APPLICATION_ID`. */
 export async function resolveDiscordApplicationId(
   applicationId?: DiscordApplicationId,
 ): Promise<string> {
@@ -74,7 +67,6 @@ export async function resolveDiscordApplicationId(
   return typeof source === "function" ? await source() : source;
 }
 
-/** Resolves a Discord bot token, falling back to `DISCORD_BOT_TOKEN`. */
 export async function resolveDiscordBotToken(botToken?: DiscordBotToken): Promise<string> {
   const source = botToken ?? process.env.DISCORD_BOT_TOKEN;
   if (!source) throw new Error("DISCORD_BOT_TOKEN is required.");
@@ -83,12 +75,6 @@ export async function resolveDiscordBotToken(botToken?: DiscordBotToken): Promis
 
 export { resolveDiscordPublicKey };
 
-/**
- * Low-level Discord JSON API call. Defaults to POST against
- * `https://discord.com/api/v10`. Bot-token auth is added only when a token is
- * supplied (interaction webhook endpoints run unauthenticated). Does not throw
- * on non-2xx, so callers must inspect `ok`/`status`.
- */
 export async function callDiscordApi(input: {
   readonly apiBaseUrl?: string;
   readonly body?: JsonObject;
@@ -124,7 +110,6 @@ export async function callDiscordApi(input: {
   };
 }
 
-/** Sends a bot-authenticated message to one Discord channel. */
 export async function sendDiscordChannelMessage(
   input: DiscordApiOptions & {
     readonly body: DiscordMessageBody;
@@ -144,7 +129,6 @@ export async function sendDiscordChannelMessage(
   return toPostedMessage(response.body);
 }
 
-/** Triggers Discord's short-lived channel typing indicator with bot auth. */
 export async function triggerDiscordTypingIndicator(
   input: DiscordApiOptions & {
     readonly channelId: string;
@@ -161,7 +145,6 @@ export async function triggerDiscordTypingIndicator(
   }
 }
 
-/** Edits the original response for a deferred Discord interaction. */
 export async function editDiscordOriginalResponse(
   input: DiscordApiOptions & {
     readonly body: DiscordMessageBody;
@@ -184,7 +167,6 @@ export async function editDiscordOriginalResponse(
   return toPostedMessage(response.body);
 }
 
-/** Creates a Discord interaction followup message. */
 export async function createDiscordFollowupMessage(
   input: DiscordApiOptions & {
     readonly body: DiscordMessageBody;
@@ -219,10 +201,6 @@ export interface DiscordMessageBody {
   readonly tts?: boolean;
 }
 
-/**
- * Splits text into chunks Discord accepts as individual message contents. An
- * empty string yields one empty chunk so callers can handle no-content messages.
- */
 export function splitDiscordMessageContent(content: string): readonly string[] {
   if (content.length <= DISCORD_MESSAGE_CONTENT_MAX_LENGTH) return [content];
 

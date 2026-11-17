@@ -19,10 +19,6 @@ if (globalResolverRegistry[VERCEL_OIDC_PROJECT_RESOLVERS] === undefined) {
 
 const projectResolvers = globalResolverRegistry[VERCEL_OIDC_PROJECT_RESOLVERS];
 
-/**
- * Binds the current local project only to one request. The global symbol makes
- * the binding visible to both Nitro-inlined and disk-imported eve modules.
- */
 export async function withVercelOidcProjectResolver<T>(
   input: {
     readonly request: Request;

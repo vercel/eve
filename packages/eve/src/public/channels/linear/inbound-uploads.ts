@@ -14,21 +14,17 @@ import {
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 
 const LINEAR_UPLOAD_ORIGIN = "https://uploads.linear.app";
-// Linear writes an uploaded image as `![name](url)` and any other uploaded file as `[name](url)`.
 const MARKDOWN_UPLOAD_PATTERN =
   /(!?)\[([^\]\r\n]*)\]\(\s*(?:<([^>\r\n]+)>|([^\s)\r\n]+))(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^)\r\n]*\)))?\s*\)/gu;
 
-/** One trusted Linear upload referenced by markdown image or link syntax. */
 interface LinearUploadReference {
   readonly end: number;
-  /** Whether markdown embeds it as an image, so only image bytes are accepted for it. */
   readonly image: boolean;
   readonly label: string;
   readonly start: number;
   readonly url: URL;
 }
 
-/** Extracts markdown images and links that target Linear's exact upload origin. */
 export function extractLinearUploadReferences(markdown: string): readonly LinearUploadReference[] {
   const references: LinearUploadReference[] = [];
   for (const match of markdown.matchAll(MARKDOWN_UPLOAD_PATTERN)) {
@@ -50,7 +46,6 @@ export function extractLinearUploadReferences(markdown: string): readonly Linear
   return references;
 }
 
-/** Adds authenticated Linear uploads, images and other files, to otherwise text-only inbound content. */
 export async function attachLinearInboundUploads(input: {
   readonly content: MessageContent;
   readonly credentials?: LinearChannelCredentials;
@@ -130,7 +125,6 @@ function readMediaType(contentType: string | null, image: boolean): string | nul
       ? mediaType
       : null;
   }
-  // An HTML answer is a sign-in or error page, not the uploaded file.
   if (mediaType === "text/html") return null;
   return mediaType === undefined || mediaType.length === 0 ? "application/octet-stream" : mediaType;
 }
@@ -148,7 +142,6 @@ function buildLinearUploadContent(
     text += markdown.slice(cursor, reference.start);
     text += reference.label;
     cursor = reference.end;
-    // A link the agent can't open is no use to it; a note tells it the file didn't arrive.
     attached.push(
       files[index] ?? {
         text: `Attachment ${reference.label || "file"} could not be retrieved.`,

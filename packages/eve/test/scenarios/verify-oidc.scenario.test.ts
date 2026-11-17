@@ -5,17 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import { authenticateOidcStrategy } from "../../src/channel/auth/oidc.js";
 
-/**
- * Scenario-tier coverage for the OIDC verifier's runtime-principal branch.
- * The verifier requires a real HTTP listener serving OIDC discovery and
- * JWKS documents, which the integration tier forbids. Targets
- * `authenticateOidcStrategy` directly because the public API
- * (`verifyVercelOidc`) no longer exposes a `discoveryUrl` override —
- * runtime-principal acceptance is a Vercel-platform implementation
- * detail of the framework, not a knob authors configure. The pure
- * verifier tests (`verifyVercelOidc`, `verifyJwtHmac`, etc.) live
- * alongside the source module under `src/public/channels/auth.test.ts`.
- */
 describe("authenticateOidcStrategy", () => {
   it("upgrades a current-project Vercel token to principalType: runtime", async () => {
     const oidcServer = await startOidcTestIssuer();

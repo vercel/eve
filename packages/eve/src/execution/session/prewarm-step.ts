@@ -18,11 +18,6 @@ interface SessionPrewarmInput {
   readonly sessionState: DurableSessionState;
 }
 
-/**
- * Starts the session prewarmers for a session started without a message and
- * records what they prepared, such as the sandbox state, once their work
- * settles. Runs beside the wait for the first message and never fails.
- */
 export async function prewarmSessionStep(
   input: SessionPrewarmInput,
 ): Promise<SessionStateTransition> {
@@ -37,12 +32,10 @@ async function prewarmSession(input: SessionPrewarmInput): Promise<{
   try {
     const ctx = await deserializeContext(input.serializedContext);
     const session = hydrateDurableSession(readDurableSession(input.sessionState));
-    // The providers' commit waits for the work the prewarmers started.
     const scoped = await withContextScope(ctx, session, async (current) => {
       startSessionPrewarmers(ctx, "session");
       return { result: undefined, session: current };
     });
-    // The selector may update `defineState()` handles, which live in the context.
     return {
       serializedContext: serializeContext(ctx),
       sessionState: replaceDurableSessionSnapshot({

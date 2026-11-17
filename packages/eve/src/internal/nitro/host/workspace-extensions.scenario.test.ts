@@ -10,8 +10,6 @@ import {
   prepareDevelopmentWorkspaceExtensions,
 } from "#internal/nitro/host/workspace-extensions.js";
 
-// These run the real extension publisher (rolldown and TypeScript), so they
-// belong to the scenario tier.
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -41,7 +39,6 @@ describe("buildWorkspaceExtensions", () => {
     expect(secondBuild.mtimeMs).toBe(firstBuild.mtimeMs);
   });
 
-  // https://github.com/vercel/eve/issues/5837
   it("builds an extension after the workspace extension its subagent mounts", async () => {
     const { appRoot, plannerRoot } = await createMountingWorkspaceAgent();
 
@@ -69,7 +66,6 @@ describe("buildWorkspaceExtensions", () => {
 });
 
 describe("prepareDevelopmentWorkspaceExtensions", () => {
-  // https://github.com/vercel/eve/issues/5837
   it("builds an extension after the workspace extension its subagent mounts", async () => {
     const { appRoot, plannerRoot } = await createMountingWorkspaceAgent();
 
@@ -81,7 +77,6 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
   });
 });
 
-/** Adds a `planner` extension whose packaged subagent mounts the `alpha` workspace extension. */
 async function createMountingWorkspaceAgent(
   options: { appMountsAlpha?: boolean } = {},
 ): Promise<{ alphaRoot: string; appRoot: string; plannerRoot: string }> {

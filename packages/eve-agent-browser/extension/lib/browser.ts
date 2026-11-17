@@ -12,12 +12,6 @@ export interface BrowserToolContext {
 export const SELECTOR_HINT =
   'Element selector: a ref from the snapshot tool like "@e12" (most reliable), a CSS selector like "#login .submit", "text=Sign in", or "xpath=//button[1]".';
 
-/**
- * Upper bound on acquiring the sandbox session and on a single command run.
- * The sandbox layer can occasionally wedge while (re)opening a session; an
- * unbounded await leaves the whole turn stuck on a running tool forever.
- * Generous enough for a cold template-backed session create.
- */
 const SANDBOX_DEADLINE_MS = 180_000;
 
 async function withDeadline<T>(work: PromiseLike<T>, label: string): Promise<T> {
@@ -58,13 +52,6 @@ interface McpCallResult {
   };
 }
 
-/**
- * Run one agent-browser MCP tool in the eve sandbox with `agent-browser mcp
- * call` and return its `data`, retaining `_boundary` when boundaries are enabled. Each call is its
- * own process, so nothing outlives the tool call; browser state lives in the
- * session daemon. Throws when the sandbox is unavailable, the installed CLI
- * does not match this package, or the tool reports an error.
- */
 export async function runMcpTool(
   ctx: BrowserToolContext,
   tool: string,
@@ -124,7 +111,6 @@ export async function runMcpTool(
   return { ...output, _boundary: boundary };
 }
 
-/** The catalog this package ships describes one agent-browser minor; another minor may take different arguments. */
 function assertMatchingVersion(installed: string | undefined): void {
   if (installed !== undefined && !matchesPackageMinor(installed)) {
     throw versionMismatchError(installed);
@@ -142,7 +128,6 @@ function matchesPackageMinor(version: string): boolean {
   return minor(version) === minor(AGENT_BROWSER_SANDBOX_VERSION);
 }
 
-/** Server-level settings that MCP tool arguments cannot carry. */
 function configEnv(): string[] {
   const config = extension.config;
   const env: string[] = [];
@@ -168,7 +153,6 @@ async function ensureInstalled(
   sandbox: EveSandboxSession,
   abortSignal?: AbortSignal,
 ): Promise<void> {
-  // eve sandbox sessions have no stable identity to cache by, so probe on every call.
   if (extension.config.autoInstall) {
     await installIfMissingOrStale(sandbox, abortSignal);
   }
@@ -183,7 +167,6 @@ async function installIfMissingOrStale(
   if (installed !== undefined && matchesPackageMinor(installed)) {
     return;
   }
-  // Reinstalling a custom spec or binary would repeat on every call, so report the mismatch instead.
   const userOwned = config.installSpec !== undefined || config.binary !== "agent-browser";
   if (installed !== undefined && userOwned) {
     throw versionMismatchError(installed);
@@ -203,7 +186,6 @@ async function installIfMissingOrStale(
   }
 }
 
-/** The installed CLI version, or undefined when the binary is missing. */
 async function probeVersion(
   sandbox: EveSandboxSession,
   abortSignal?: AbortSignal,

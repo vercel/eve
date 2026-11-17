@@ -10,8 +10,6 @@ export type CredentialPolicyBroker = (
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 const delivery = z.enum(["firewall", "command"]).default("firewall");
 
-// Point mounts that still pass the removed `worker` option at the replacement
-// instead of the generic unrecognized-key error.
 function removedWorkerMessage(keys: readonly string[]): string | undefined {
   if (!keys.includes("worker")) return undefined;
   const others = keys.filter((key) => key !== "worker");

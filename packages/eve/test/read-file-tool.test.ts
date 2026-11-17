@@ -14,10 +14,6 @@ import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
   return {
     async captureState() {
@@ -80,10 +76,6 @@ async function runInContext(
   return contextStorage.run(ctx, () => fn(sandbox!));
 }
 
-// ---------------------------------------------------------------------------
-// Basic read
-// ---------------------------------------------------------------------------
-
 describe("executeReadFileOnSandbox", () => {
   it("reads a small text file successfully", async () => {
     const result = (await runInContext({ "/workspace/foo.ts": "hello\nworld\n" }, (sandbox) =>
@@ -97,10 +89,6 @@ describe("executeReadFileOnSandbox", () => {
     expect(result.truncated).toBe(false);
     expect(result).not.toHaveProperty("nextOffset");
   });
-
-  // ---------------------------------------------------------------------------
-  // Offset and limit
-  // ---------------------------------------------------------------------------
 
   it("default offset = 1", async () => {
     const result = (await runInContext({ "/workspace/foo.ts": "a\nb\nc\n" }, (sandbox) =>
@@ -134,10 +122,6 @@ describe("executeReadFileOnSandbox", () => {
     expect(result.nextOffset).toBe(3);
   });
 
-  // ---------------------------------------------------------------------------
-  // Error cases
-  // ---------------------------------------------------------------------------
-
   it("offset < 1 errors", async () => {
     await expect(
       runInContext({ "/workspace/foo.ts": "a\n" }, (sandbox) =>
@@ -153,10 +137,6 @@ describe("executeReadFileOnSandbox", () => {
       ),
     ).rejects.toThrow("offset 5 is past the end of the file (2 lines)");
   });
-
-  // ---------------------------------------------------------------------------
-  // Empty file
-  // ---------------------------------------------------------------------------
 
   it("empty file at default offset succeeds", async () => {
     const result = (await runInContext({ "/workspace/empty.ts": "" }, (sandbox) =>
@@ -185,10 +165,6 @@ describe("executeReadFileOnSandbox", () => {
     expect(ctx.require(ReadFileStateKey).byTarget).toEqual({});
   });
 
-  // ---------------------------------------------------------------------------
-  // Line numbering and truncation
-  // ---------------------------------------------------------------------------
-
   it("lines are numbered correctly", async () => {
     const result = (await runInContext({ "/workspace/foo.ts": "alpha\nbeta\ngamma\n" }, (sandbox) =>
       executeReadFileOnSandbox(sandbox, { filePath: "/workspace/foo.ts" }),
@@ -208,12 +184,10 @@ describe("executeReadFileOnSandbox", () => {
 
     const outputLine = result.content.split("\n")[0] ?? "";
     expect(outputLine).toContain("[truncated]");
-    // Line prefix "1: " (3 chars) + 2000 chars + " [truncated]" = expected
     expect(outputLine.length).toBeLessThan(3000);
   });
 
   it("output caps at 50 KiB", async () => {
-    // Create a file with many lines that exceed 50 KiB total
     const lines = Array.from({ length: 5000 }, (_, i) => `Line ${i + 1} ${"x".repeat(20)}`);
     const content = `${lines.join("\n")}\n`;
 
@@ -234,10 +208,6 @@ describe("executeReadFileOnSandbox", () => {
     expect(result.truncated).toBe(true);
     expect(result.nextOffset).toBe(3);
   });
-
-  // ---------------------------------------------------------------------------
-  // Path validation
-  // ---------------------------------------------------------------------------
 
   it("resolves relative paths from the sandbox's workspace root", async () => {
     const result = (await runInContext({ "/srv/app/notes.md": "hello\n" }, (sandbox) =>
@@ -274,10 +244,6 @@ describe("executeReadFileOnSandbox", () => {
     expect(result.path).toBe(filePath);
   });
 
-  // ---------------------------------------------------------------------------
-  // Missing file
-  // ---------------------------------------------------------------------------
-
   it("missing file errors clearly", async () => {
     await expect(
       runInContext({}, (sandbox) =>
@@ -286,10 +252,6 @@ describe("executeReadFileOnSandbox", () => {
     ).rejects.toThrow("File not found: /workspace/missing.ts");
   });
 
-  // ---------------------------------------------------------------------------
-  // Binary file
-  // ---------------------------------------------------------------------------
-
   it("NUL-containing file is rejected", async () => {
     await expect(
       runInContext({ "/workspace/binary.bin": "hello\0world" }, (sandbox) =>
@@ -297,10 +259,6 @@ describe("executeReadFileOnSandbox", () => {
       ),
     ).rejects.toThrow("appears to be a binary file");
   });
-
-  // ---------------------------------------------------------------------------
-  // Durable stamp
-  // ---------------------------------------------------------------------------
 
   it("successful read writes a durable stamp", async () => {
     const access = createFakeAccess({ "/workspace/foo.ts": "hello\n" });
@@ -322,10 +280,6 @@ describe("executeReadFileOnSandbox", () => {
     expect(stamp?.byteLength).toBeGreaterThan(0);
   });
 
-  // ---------------------------------------------------------------------------
-  // Path canonicalization
-  // ---------------------------------------------------------------------------
-
   it("canonicalizes paths with dot segments", async () => {
     const access = createFakeAccess({ "/workspace/foo.ts": "hello\n" });
     const sandbox = (await access.get())!;
@@ -339,7 +293,6 @@ describe("executeReadFileOnSandbox", () => {
     );
 
     const state = ctx.require(ReadFileStateKey);
-    // The stamp should be under the normalized path
     expect(state.byTarget["/workspace/foo.ts"]).toBeDefined();
   });
 });

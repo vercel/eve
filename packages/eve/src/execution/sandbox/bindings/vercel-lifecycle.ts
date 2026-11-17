@@ -10,7 +10,6 @@ import type {
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
-/** Deletes the sandbox with this name, if there is one. */
 export async function deleteNamedVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;
   readonly sandboxModule: VercelModule;
@@ -30,12 +29,10 @@ export async function deleteNamedVercelSandbox(input: {
     await stopVercelSandbox(sandbox);
     await sandbox.delete({ deleteOrphanSnapshots: true, signal: input.signal });
   } catch (error) {
-    // Another cleanup attempt deleted it first.
     if (!isVercelSandboxMissingError(error)) throw error;
   }
 }
 
-/** Deletes a sandbox that can no longer resume, without stopping it first. */
 export async function deleteUnusableVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;
   readonly sandboxModule: VercelModule;

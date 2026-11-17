@@ -1,10 +1,3 @@
-/**
- * Conversation view for the `/traces` viewer: the same trace, re-told as a
- * flow of user messages, assistant replies, and tool calls instead of a
- * latency waterfall. Activation and tool spans provide the user and tool
- * cards directly; model response spans provide assistant cards.
- */
-
 import { formatCostUsd } from "#cli/commands/trace-detail.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
@@ -22,45 +15,30 @@ import { SURFACE_CLOSE } from "./trace-surfaces.js";
 
 export interface ConversationItem {
   readonly kind: "system" | "user" | "assistant" | "tool";
-  /** Detail-drawer source for this item. */
   readonly span: LocalTraceSpan;
-  /** Tool name for tool items. */
   readonly name?: string;
-  /** Message text for system/user/assistant items. */
   readonly text?: string;
-  /** Model reasoning for assistant items (shown dim above the reply). */
   readonly reasoning?: string;
-  /** Tool names from the model's tool-call decision (shown when no text). */
   readonly toolCallNames?: readonly string[];
-  /** Raw JSON for tool input / output. */
   readonly args?: string;
   readonly result?: string;
-  /** Assistant card metadata. */
   readonly model?: string;
   readonly inputTokens?: number;
   readonly outputTokens?: number;
-  /** Gateway-reported inference cost in USD (from the ancestor step span). */
   readonly costUsd?: number;
-  /** Set when the item's turn was delegated by another turn (a subagent). */
   readonly subagent?: ConversationSubagent;
   readonly durationMs: number;
   readonly error: boolean;
 }
 
-/** Dispatch lineage available on a subagent activation or its caller. */
 export interface ConversationSubagent {
-  /** Subagent name, when the turn arrived through the subagent adapter. */
   readonly name?: string;
-  /** Turn id of the dispatching parent turn. */
   readonly parentTurnId?: string;
-  /** Tool call id of the dispatch, when recorded. */
   readonly parentCallId?: string;
 }
 
-/** Max rendered lines for one collapsed card payload (args, result, or text). */
 const CARD_PAYLOAD_LINES = 3;
 
-/** Builds the conversation flow from eve's activation, model, and tool spans. */
 export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const byId = new Map(trace.spans.map((span) => [span.spanId, span]));
   const subagents = new Map<string, ConversationSubagent>();
@@ -145,8 +123,6 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
         },
         order: span.startTimeNs,
       });
-      // Provider-executed tools (e.g. web_search) run inside the model
-      // call, so their results only exist on this response span.
       for (const result of parseProviderToolResults(
         stringAttribute(span, "ai.response.tool_results"),
       )) {
@@ -259,16 +235,6 @@ function turnSubagent(
   };
 }
 
-/**
- * Renders one conversation card, width-clipped: a title row (bold kind plus
- * dim metadata, metrics right-aligned) over body rows. With `surfaces`
- * (derived from the terminal's background via the OSC 11 probe) the card
- * draws as two elevated bands; without them it falls back to a gutter rail —
- * the same vocabulary the dev transcript uses. Both layouts occupy identical
- * rows and columns, so scroll/click math and drag-copy column mapping never
- * depend on whether the probe was answered. Collapsed cards cap their
- * payloads; expanded ones render them in full.
- */
 export function renderConversationItem(
   item: ConversationItem,
   width: number,
@@ -280,12 +246,7 @@ export function renderConversationItem(
   const { colors, glyph } = theme;
   const inner = Math.max(8, width - 8);
   const expandable = conversationItemExpandable(item, width);
-  // Surfaces are only derived for color themes, but guard anyway so a
-  // no-color render can never emit their raw SGR sequences.
   const active = theme.color ? surfaces : undefined;
-  // Titles read as primary text: the theme's bright white on an unknown
-  // background, or the surface-matched primary (white on dark, black on
-  // light) once the terminal has answered the background probe.
   const primary = active?.primaryText ?? colors.white;
 
   let leftTitle: string;
@@ -327,14 +288,11 @@ export function renderConversationItem(
       (line) => colors.dim(line),
     );
     const textLines = expanded ? textUncapped : capLines(textUncapped, inner);
-    // Reasoning renders as its own headed section so it never reads as part
-    // of the reply, with a blank line separating it from what follows.
     if (reasoningLines.length > 0) {
       body.push(colors.dim("Thought:"), "", ...reasoningLines);
       if (textLines.length > 0) body.push("");
     }
     body.push(...textLines);
-    // Tool-call-only response (no text): show the decision as the body.
     if (
       (item.text === undefined || item.text.trim().length === 0) &&
       item.toolCallNames !== undefined &&
@@ -346,8 +304,6 @@ export function renderConversationItem(
       }
     }
   } else {
-    // A subagent's "user" message is the synthesized delegated prompt, not
-    // something the user typed — label it as the task it is.
     const label = item.kind === "user" && item.subagent !== undefined ? "task" : item.kind;
     leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(primary(label))}`;
     rightTitle = "";
@@ -357,26 +313,17 @@ export function renderConversationItem(
         : wrapPlainText(item.text, inner);
     body.push(...(expanded ? textUncapped : capLines(textUncapped, inner)));
   }
-  // Delegated work is called out on every card of the subagent's turn so it
-  // never reads as the main conversation.
   if (item.subagent !== undefined) {
     const label = item.subagent.name === undefined ? "subagent" : `subagent:${item.subagent.name}`;
     leftTitle += colors.dim(` · ${label}`);
   }
-  // Failures carry the transcript's error vocabulary: a red mark beside the
-  // title, echoed by a red rail down the card's left edge.
   if (item.error) leftTitle += ` ${colors.red(glyph.error)}`;
-  // A truncated card advertises its affordance: ellipsis on its own line,
-  // a gap, then the click hint (which flips once open).
   if (!expanded && expandable) {
     body.push("…", "", colors.dim("Click to expand"));
   } else if (expanded && expandable) {
     body.push("", colors.dim("Click to collapse"));
   }
 
-  // The header is a band with vertical padding on both sides of the title,
-  // so the card's identity dominates its content; the body gets a padding
-  // row at both ends.
   const headerSurface =
     active === undefined ? undefined : item.error ? active.errorHeader : active.header;
   const bodySurface =
@@ -392,15 +339,6 @@ export function renderConversationItem(
   ];
 }
 
-/**
- * One card row. With a `surface` the row draws as a padded band on that
- * background — one cell of margin either side of the band, the selection bar
- * in the left margin — and the theme's own colors style the content. Without
- * one, a gutter rail groups the card's rows: dim normally, red when the card
- * failed, a bright half-block bar when selected. Both forms pad to the same
- * visible width (`inner = width - 8`), so the two layouts are cell-for-cell
- * interchangeable and nothing assumes a dark terminal palette.
- */
 function cardRow(
   line: string,
   width: number,
@@ -411,21 +349,10 @@ function cardRow(
   const clipped = clipVisible(line, Math.max(1, width - 8));
   const pad = " ".repeat(Math.max(0, width - 8 - visibleLength(clipped)));
   if (surface === undefined || !theme.color) return ` ${rail}  ${clipped}${pad}    `;
-  // A style reset embedded in the content — `clipVisible` appends one when
-  // it truncates styled text, e.g. a title clipped by the details drawer —
-  // would drop the band's background for the rest of the row (the metrics
-  // after a clipped title would sit on the terminal's default background).
-  // Re-open the surface after every embedded reset, and once more before
-  // the padding to close any style the content left open.
   const covered = clipped.replaceAll("\x1b[0m", `\x1b[0m${surface}`);
   return ` ${rail}${surface}  ${covered}\x1b[0m${surface}${pad}  ${SURFACE_CLOSE}  `;
 }
 
-/**
- * The card's left-edge cell — constant for every row of one card: selection
- * bar (surface-matched primary so it stays visible on light backgrounds),
- * error rail, dim rail, or plain margin when a band already groups the card.
- */
 function railCell(
   theme: Theme,
   selected: boolean,
@@ -437,16 +364,10 @@ function railCell(
     const bar = theme.unicode ? "▌" : glyph.rule;
     return surfaces === undefined ? colors.white(bar) : surfaces.primaryText(bar);
   }
-  // Surfaced cards need no rail — the band groups them (error bands are red).
   if (surfaces !== undefined) return " ";
   return error ? colors.red(glyph.rule) : colors.dim(glyph.rule);
 }
 
-/**
- * Like {@link cardRow} but right-aligns `right` against the inner width so
- * metrics (duration, cost, tokens) line up across cards for quick scanning.
- * The left side clips first when the two don't fit together.
- */
 function cardSplitRow(
   left: string,
   right: string,
@@ -464,7 +385,6 @@ function cardSplitRow(
   return cardRow(`${leftClipped}${gap}${right}`, width, theme, rail, surface);
 }
 
-/** Right-aligned metrics for an assistant card: duration, tokens, cost. */
 function assistantMetrics(
   item: ConversationItem,
   glyph: Theme["glyph"],
@@ -480,13 +400,10 @@ function assistantMetrics(
   return parts.length === 0 ? "" : colors.dim(parts.join(" · "));
 }
 
-/** Reads the gateway cost from the model span's ancestor step span. */
 function stepCostUsd(
   modelSpan: LocalTraceSpan,
   byId: Map<string, LocalTraceSpan>,
 ): number | undefined {
-  // The model span (ai.streamText.doStream) is nested under an ai.streamText
-  // outer-op span, which in turn sits under agent.step. Walk up to find it.
   let span: LocalTraceSpan | undefined = modelSpan;
   while (span.parentSpanId !== undefined) {
     span = byId.get(span.parentSpanId);
@@ -496,13 +413,11 @@ function stepCostUsd(
   return undefined;
 }
 
-/** Fold affordance: ▸ when content is hidden behind the cap, ▾ when open. */
 function foldMarker(expanded: boolean, expandable: boolean, theme: Theme): string {
   if (expanded) return `${theme.colors.dim("▾")} `;
   return expandable ? `${theme.colors.dim("▸")} ` : "";
 }
 
-/** Caps payload lines — the standalone `…` + click hint marks the cut. */
 function capLines(lines: readonly string[], width: number): string[] {
   if (lines.length <= CARD_PAYLOAD_LINES) return [...lines];
   return [
@@ -511,7 +426,6 @@ function capLines(lines: readonly string[], width: number): string[] {
   ];
 }
 
-/** Rendered height of one card — the conversation viewport scrolls by lines. */
 export function conversationItemLineCount(
   item: ConversationItem,
   width: number,
@@ -521,7 +435,6 @@ export function conversationItemLineCount(
   return renderConversationItem(item, width, theme, false, expanded).length;
 }
 
-/** Whether a card has content hidden behind the collapsed cap at this width. */
 export function conversationItemExpandable(item: ConversationItem, width: number): boolean {
   const inner = Math.max(8, width - 8);
   if (item.kind === "tool") {
@@ -539,7 +452,6 @@ export function conversationItemExpandable(item: ConversationItem, width: number
         : wrapPlainText(item.text, inner).length;
     return text > CARD_PAYLOAD_LINES;
   }
-  // assistant
   const reasoning =
     item.reasoning === undefined || item.reasoning.trim().length === 0
       ? 0
@@ -551,26 +463,21 @@ export function conversationItemExpandable(item: ConversationItem, width: number
   return reasoning > CARD_PAYLOAD_LINES || text > CARD_PAYLOAD_LINES;
 }
 
-/** Rough chars-per-token estimate for text with no usage data (system prompts). */
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** The channel delivery projection holds the original message without prompt history. */
 function deliveryText(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
   try {
     const input: unknown = JSON.parse(raw);
     if (isRecord(input) && typeof input.message === "string") return input.message;
-    // Interaction-only deliveries have no user-facing text to render.
     return undefined;
   } catch {
-    // Content capture uses JSON, but keep an unexpected scalar readable.
     return raw;
   }
 }
 
-/** Text tool results are stored JSON-encoded; unwrap them to plain text. */
 function unwrapJsonString(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
   try {
@@ -588,7 +495,6 @@ function isModelSpan(span: LocalTraceSpan): boolean {
   );
 }
 
-/** Extracts tool names from the `ai.response.tool_calls` JSON array. */
 function parseToolCallNames(raw: string | undefined): readonly string[] | undefined {
   if (raw === undefined) return undefined;
   try {
@@ -612,14 +518,11 @@ interface ProviderToolResult {
   readonly result: string | undefined;
 }
 
-/** Parses the `ai.response.tool_results` JSON array of provider-executed tool outcomes. */
 function parseProviderToolResults(raw: string | undefined): readonly ProviderToolResult[] {
   if (raw === undefined) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    // Capture-side truncation may collapse input/output to capped text, so
-    // both structured values and pre-flattened strings appear here.
     const asText = (value: unknown): string | undefined =>
       typeof value === "string" ? value : value === undefined ? undefined : JSON.stringify(value);
     return parsed.filter(isRecord).map((entry) => {

@@ -6,15 +6,6 @@ import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 import { run } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
-/**
- * Covers the freeform-via-arrow-nav UX. The model raises an
- * `ask_question`, which always accepts free text, with a small set of
- * predefined options. The TUI surfaces a navigable "Type your own
- * answer" row below the last option. Pressing Enter on that row
- * switches to text mode, and the typed reply is sent as `text` (not
- * `optionId`).
- */
-
 const FREEFORM_ANSWER = "indigo-sandbox-eu";
 process.env.EVE_TUI_UNICODE = "1";
 
@@ -52,15 +43,12 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
 
   await sleep(1_000);
 
-  // Navigate past every predefined option to the freeform row.
-  input.down(); // → Staging
-  input.down(); // → Preview
-  input.down(); // → Type your own answer
+  input.down();
+  input.down();
+  input.down();
   await screen.waitForText("Type your own answer", 2_000);
   console.log(theme.muted("[tui-freeform] moved to freeform row"));
 
-  // The freeform row focuses its inline elbow editor the moment the cursor
-  // reaches it — typing lands there directly, no Enter required.
   input.type(FREEFORM_ANSWER);
   await screen.waitForText(FREEFORM_ANSWER, 2_000);
   console.log(theme.muted("[tui-freeform] inline editor active, answer typed"));
@@ -70,8 +58,6 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await screen.waitForText(`⎿  ${FREEFORM_ANSWER}`, 5_000);
   console.log(theme.muted("[tui-freeform] freeform answer recorded in body"));
 
-  // The follow-up assistant turn renders a `▲`-prefixed section below
-  // the answered question that echoes the freeform text.
   await waitForCondition(
     () => assistantReplyAfter(screen.snapshot(), `⎿  ${FREEFORM_ANSWER}`, FREEFORM_ANSWER),
     {
@@ -91,19 +77,12 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     );
   }
 
-  // The turn is complete; wait until the runner is back at the prompt so
-  // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
   await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   input.ctrlC();
   await runPromise;
 });
 
-/**
- * True when an assistant section (a `▲`-prefixed line and its wrapped
- * continuations) below `afterMarker` contains `needle`. Used to assert a
- * follow-up reply without matching transcript content above the marker.
- */
 function assistantReplyAfter(snapshot: string, afterMarker: string, needle: string): boolean {
   const markerIndex = snapshot.indexOf(afterMarker);
   if (markerIndex === -1) return false;

@@ -79,7 +79,6 @@ function renderProgressRow(
   return `${pc.green(glyph)}${prefix.slice(glyph.length)}${styledDetail}`;
 }
 
-/** Starts one transient row, falling back to phase logs when repainting is unavailable. */
 export function startCliLiveRow(
   logger: CliLiveRowLogger,
   options: CliLiveRowOptions = {},

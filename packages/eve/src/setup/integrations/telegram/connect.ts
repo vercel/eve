@@ -23,7 +23,6 @@ interface ProvisionTelegramConnectorDeps {
 
 const ConnectorSchema = z.object({ id: z.string().min(1), uid: z.string().min(1) });
 
-/** Parses Vercel Connect JSON for a created Telegram connector. */
 export function parseCreatedTelegramConnector(stdout: string): TelegramConnectorRef | undefined {
   try {
     const result = ConnectorSchema.safeParse(JSON.parse(stdout));
@@ -49,10 +48,6 @@ function requireCreatedConnector(result: RunVercelCaptureResult): TelegramConnec
   return connector;
 }
 
-/**
- * Stores the bot token in a Telegram connector and routes its triggers to eve.
- * Connect registers the bot's webhook and verifies Telegram's secret token.
- */
 export async function provisionTelegramConnector(input: {
   botToken: string;
   log: ChannelSetupLog;
@@ -87,7 +82,6 @@ export async function provisionTelegramConnector(input: {
         nonInteractive: true,
         onOutput,
         signal: input.signal,
-        // Pass the token on stdin so it never appears in argv or shell history.
         stdin: JSON.stringify({ values: [{ value: input.botToken }] }),
       },
     ),

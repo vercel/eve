@@ -1,4 +1,3 @@
-/** Normalized edit similarity using UTF-16 code units, matching string.length. */
 export function levenshteinSimilarity(left: string, right: string): number {
   if (left === right) return 1;
   if (left.length < right.length) [left, right] = [right, left];

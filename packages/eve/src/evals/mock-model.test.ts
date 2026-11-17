@@ -22,7 +22,6 @@ describe("mockModel", () => {
 
     expect(await callIdIn("session-a")).toBe("stage");
     expect(await callIdIn("session-b")).toBe("stage");
-    // The same session calls again, as after a sign-in dropped its first call.
     expect(await callIdIn("session-a")).toBe("stage#2");
   });
 

@@ -41,7 +41,6 @@ import {
 
 export { shouldMockAuthoredRuntimeModels };
 
-/** A deterministic authoring or selection error that retrying cannot repair. */
 export class InvalidRuntimeModelSelectionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -49,21 +48,16 @@ export class InvalidRuntimeModelSelectionError extends Error {
   }
 }
 
-/** Loaded compiled-module scope used to resolve source-backed runtime models. */
 export interface RuntimeModelResolutionScope {
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string | undefined;
 }
 
 export interface ResolvedRuntimeModelSelection {
-  /** Live provider instance; absent for string selections, which resolve through the reference so mock/bootstrap adapters keep precedence. */
   readonly model?: LanguageModel;
   readonly reference: RuntimeModelReference;
 }
 
-/**
- * Resolves one runtime model reference into the active language model.
- */
 export async function resolveRuntimeModelReference(
   reference: RuntimeModelReference,
   scope?: RuntimeModelResolutionScope,
@@ -132,7 +126,6 @@ async function loadSourceBackedRuntimeModelReference(
   return toAiSdkLanguageModel(model);
 }
 
-/** The live model of one `agent({ models })` option, which the child's step reads from the tool. */
 function agentToolOptionModel(
   definition: unknown,
   key: string,
@@ -188,7 +181,6 @@ export async function loadDynamicRuntimeModelDefinition(input: {
 
 export async function resolveRuntimeModelSelection(input: {
   readonly durability: "durable" | "live";
-  /** The build's model metadata snapshot, read only when the selection omits its context window. */
   readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly selection: PublicAgentDynamicModelResult;
 }): Promise<ResolvedRuntimeModelSelection> {
@@ -252,7 +244,6 @@ export async function resolveRuntimeModelSelection(input: {
   if (promptCache !== undefined && routesThroughGateway) {
     throw gatewayPromptCacheError(formattedId);
   }
-  // A Gateway instance carries its Gateway model id, as a string selection does.
   let id = routesThroughGateway ? selectedModel.modelId : formattedId;
   let contextWindowTokens = selection.modelContextWindowTokens;
   if (contextWindowTokens === undefined) {
@@ -265,7 +256,6 @@ export async function resolveRuntimeModelSelection(input: {
             selectedModel.modelId,
           ),
     );
-    // A direct provider model takes its Gateway slug, as the compiler names a static one.
     if (!routesThroughGateway) id = entry.slug;
     contextWindowTokens = entry.contextWindowTokens;
   }

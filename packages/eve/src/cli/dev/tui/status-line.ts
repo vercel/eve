@@ -22,28 +22,14 @@ function formatDevBuildStatus(status: DevBuildStatus, theme: Theme): string {
 }
 
 interface StatusLineInput {
-  /** Transient authored-source build state, independent of the server log filter. */
   devBuild?: DevBuildStatus;
-  /** Resolved model slug, e.g. "anthropic/claude-sonnet-5"; absent when `/eve/v1/info` failed. */
   model?: string;
-  /** Keep the dynamic-model label separate from the resolved model id. */
   dynamicModel?: boolean;
-  /** Authored reasoning effort, shown after the model label, e.g. `· high`. */
   reasoning?: string;
-  /** True when the Gateway priority tier is on; adds a speed marker. */
   fastMode?: boolean;
-  /**
-   * Transient dev-TUI log-display mode shown after a Ctrl+L cycle, e.g.
-   * `sandbox`. Rendered as a prominent leading `logs: <mode>` segment that
-   * survives width degradation and can stand alone; absent once the hint times
-   * out.
-   */
   logLevel?: LogDisplayMode;
-  /** Model endpoint readiness: external, or AI Gateway connected/not-connected. */
   endpoint?: AgentInfoResult["agent"]["model"]["endpoint"];
-  /** Workspace-scoped Vercel state; identity absent while unlinked or still resolving. */
   vercel?: VercelStatusSnapshot;
-  /** Remote server identity and its current connection/authentication state. */
   remote?: RemoteConnectionSnapshot;
   theme: Theme;
   width: number;
@@ -62,9 +48,6 @@ function renderModel(
   };
   if (input.reasoning !== undefined) summary.reasoning = input.reasoning;
   if (input.remote !== undefined) {
-    // Sanitize the untrusted remote id before appending suffixes, so its
-    // trailing whitespace is trimmed instead of collapsing into an interior
-    // space ahead of the reasoning level.
     summary.model = stripAnsi(summary.model).replace(/\s+/gu, " ").trim();
   }
   if (input.fastMode === true || summary.model.endsWith("-fast")) {
@@ -75,10 +58,7 @@ function renderModel(
   return c.dim(input.remote === undefined ? label : stripAnsi(label).replace(/\s+/gu, " ").trim());
 }
 
-/** Provider slugs whose display name differs from the AI SDK's identifier. */
 const EXTERNAL_PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
-  // `chatgpt()` wraps the Codex backend; what the user connected is their
-  // ChatGPT subscription, so the bar names that, not the transport.
   codex: "chatgpt-sub",
 };
 
@@ -93,8 +73,6 @@ function renderEndpoint(
   if (input.endpoint.kind === "external") {
     const provider =
       EXTERNAL_PROVIDER_DISPLAY_NAMES[input.endpoint.provider] ?? input.endpoint.provider;
-    // The `⌝` mark stays at the terminal's default foreground — full
-    // intensity on any theme — while the clause around it is dim.
     return `${c.dim(provider)}${g.external}`;
   }
   if (input.endpoint.kind === "chatgpt") {
@@ -128,7 +106,6 @@ function renderEndpoint(
   return clause("ai-gateway", `(${scope})`);
 }
 
-/** Builds model and connection segments, preserving the remote badge at narrow widths. */
 export function buildStatusLine(input: StatusLineInput): string | undefined {
   const { theme, width } = input;
   const c = theme.colors;
@@ -175,7 +152,6 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   for (const variant of leftVariants) {
     if (variant.length > 0 && visibleLength(variant) <= width) return variant;
   }
-  // Later variants can be empty, for example when a badge-only line has no hint.
   const narrowest = leftVariants.findLast((variant) => variant.length > 0)!;
   return clipVisible(narrowest, width);
 }
@@ -191,7 +167,6 @@ function formatRemoteStatus(
       : `${snapshot.deployment.projectName} (${snapshot.deployment.environment})`;
   const arrow = theme.unicode ? "↗" : "->";
   const badge = formatRemoteBadge(` ${arrow} ${label} `, snapshot.connection.state, theme);
-  // The badge carries its own trailing pad, so one space reads as a column gap.
   const separator = " ";
   let suffix: string | undefined;
 

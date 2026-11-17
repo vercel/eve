@@ -180,7 +180,6 @@ async function createPreparedHost(appRoot: string): Promise<PreparedApplicationH
   };
 }
 
-/** The public route prefix the host bakes into its Vercel functions. */
 function publicRoutePrefixOf(spec: HostSpec): string | undefined {
   return Object.values(spec.vercel?.functionRules ?? {})[0]?.environment[
     EVE_PUBLIC_ROUTE_PREFIX_ENV

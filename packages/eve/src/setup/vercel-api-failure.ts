@@ -24,7 +24,6 @@ function apiFailureText(failure: VercelCaptureFailure): string {
   return `${String(error?.code ?? "")} ${error?.message ?? ""} ${failure.stderr}`.toLowerCase();
 }
 
-/** Treats a structured API error as a failure even when `vercel api --raw` exits zero. */
 export function normalizeVercelApiResult(result: VercelCaptureResult): VercelCaptureResult {
   if (!result.ok) return result;
   const error = apiErrorFromStdout(result.stdout);
@@ -41,12 +40,10 @@ export function normalizeVercelApiResult(result: VercelCaptureResult): VercelCap
   };
 }
 
-/** Whether a Vercel API failure proves that the requested resource does not exist. */
 export function isNotFoundApiFailure(failure: VercelCaptureFailure): boolean {
   return /(^|\W)(404|not_found)(\W|$)|not found/.test(apiFailureText(failure));
 }
 
-/** Whether a scoped Vercel API request was denied. */
 export function isForbiddenApiFailure(failure: VercelCaptureFailure): boolean {
   return /(^|\W)(403|forbidden|not_authorized|team_unauthorized|sso|saml)(\W|$)|not authorized/.test(
     apiFailureText(failure),

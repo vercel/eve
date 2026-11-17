@@ -8,7 +8,6 @@ const resumeHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: async (token: string) => ({ runId: "owner", specVersion: 6, token }),
-  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
   getWorld: async () => ({ capabilities: { deploymentAffinity: true } }),
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
 }));
@@ -75,8 +74,6 @@ describe("handleConnectionCallbackRequest", () => {
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     const [token, payload] = resumeHookMock.mock.calls[0] ?? [];
     expect(token).toBe("eve:inbox:v1:tok123");
-    // Exact match: only parsed params + method cross into the hook
-    // payload. The inbound `x-probe` header (and any `Cookie`) is dropped.
     expect(payload).toEqual({
       kind: "authorization-callback",
       payloads: [
@@ -133,7 +130,6 @@ describe("handleConnectionCallbackRequest", () => {
       buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok123" }),
     );
 
-    // The callback still resumes the workflow so it can fail the attempt.
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     expect(response.headers.get("content-type")).toContain("text/html");
     const body = await response.text();
@@ -142,9 +138,6 @@ describe("handleConnectionCallbackRequest", () => {
   });
 
   it("returns 404 when the workflow runtime reports no hook for the supplied token", async () => {
-    // `resumeHook` throws when no workflow run is currently waiting on
-    // the supplied token, e.g. the workflow already completed,
-    // disposed the hook, or the user replayed a stale callback URL.
     resumeHookMock.mockRejectedValueOnce(new Error("hook not found"));
     const response = await handleConnectionCallbackRequest(
       new Request(

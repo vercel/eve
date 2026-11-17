@@ -18,10 +18,6 @@ import {
 const BOOTSTRAP_MODEL_PROVIDER = "eve-bootstrap";
 const bootstrapRuntimeModels = new Map<string, LanguageModel>();
 
-/**
- * Resolves the framework-owned bootstrap model into a deterministic local
- * language model.
- */
 export function resolveBootstrapRuntimeModel(
   reference: RuntimeModelReference,
 ): LanguageModel | null {

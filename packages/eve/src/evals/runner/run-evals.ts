@@ -13,59 +13,30 @@ import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 const DEFAULT_MAX_CONCURRENCY = 8;
 
-/**
- * Options for executing a set of evals as one run.
- */
 export interface RunEvalsOptions {
   readonly evaluations: readonly EveEval[];
-  /** Run-wide configuration from `evals.config.ts` (defaults shared by every eval). */
   readonly config: EveEvalConfig;
-  /** Shared setup context; stays in the runner process. */
   readonly setupContext?: unknown;
   readonly target: EveEvalTargetHandle;
   readonly client: Client;
   readonly appRoot: string;
-  /** Run-level reporters (console, JUnit) that observe every eval. */
   readonly reporters: readonly EvalReporter[];
-  /** When false, eval-defined and config `reporters` are ignored (CLI `--skip-report`). */
   readonly includeEvalReporters?: boolean;
-  /**
-   * Maximum number of evals executing at once. Must be a positive integer.
-   * Overrides the config `maxConcurrency`; defaults to 8 when neither is set.
-   */
   readonly maxConcurrency?: number;
-  /** Overrides every eval's `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
-  /**
-   * Times to run every eval. Must be a positive integer. Overrides the config
-   * `repeat`; defaults to 1 when neither is set.
-   */
   readonly repeat?: number;
-  /** Receives verbose activity lines as evals run. */
   readonly onEvalLog?: (evalId: string, message: string) => void;
 }
 
-/** One reporter bound to the subset of evals that should observe it. */
 interface ReporterBinding {
   readonly reporter: EvalReporter;
   readonly evalIds: ReadonlySet<string>;
 }
 
-/**
- * Executes every eval with bounded concurrency, drives reporters, writes
- * run artifacts under `.eve/evals/`, and returns the aggregated summary.
- *
- * Run-level reporters observe every eval. Eval-defined reporters observe
- * only the evals that reference them; a reporter instance shared by several
- * evals (e.g. one `braintrustReporter()` passed to every entry of an array export)
- * is deduplicated and observes all of its evals as one group.
- */
 export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSummary> {
   const { config, target, client, appRoot } = options;
   const maxConcurrency = options.maxConcurrency ?? config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
 
-  // A non-positive (or NaN) pool size would make the scheduling loop below
-  // spin forever without ever starting a task or yielding to the event loop.
   if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
     throw new Error(
       `Eval maxConcurrency must be a positive integer; got ${String(
@@ -96,11 +67,6 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
 
   const results: EveEvalResult[] = [];
 
-  // Execute evals with bounded concurrency. Reporter callbacks run on a
-  // serial queue off the hot path so a slow reporter never throttles the
-  // pool; the queue drains before the run completes.
-  // Attempts of one eval are queued back to back, so a repeated run still
-  // finishes each eval's attempts close together under bounded concurrency.
   const pending = evaluations.flatMap((evaluation) =>
     Array.from({ length: repeat }, (_, index) => ({
       evaluation,
@@ -196,7 +162,6 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
 
   await reporterQueue;
 
-  // Report results in discovery order regardless of completion order.
   const order = new Map(evaluations.map((evaluation, index) => [evaluation.id, index]));
   results.sort(
     (a, b) =>
@@ -220,9 +185,6 @@ function buildReporterBindings(
 ): ReporterBinding[] {
   const allIds = new Set(options.evaluations.map((evaluation) => evaluation.id));
 
-  // Run-level reporters (CLI console/JUnit and config reporters) each observe
-  // every eval. A reporter instance is bound at most once, so referencing a
-  // config reporter from an eval too does not double-fire its callbacks.
   const runLevel = new Set<EvalReporter>(options.reporters);
   if (options.includeEvalReporters !== false) {
     for (const reporter of options.config.reporters ?? []) {
@@ -256,7 +218,6 @@ function buildReporterBindings(
   return bindings;
 }
 
-/** Fills per-eval defaults from the run config without replacing authored values. */
 function applyConfigDefaults(evaluation: EveEval, config: EveEvalConfig): EveEval {
   const judge = evaluation.judge ?? config.judge;
   const timeoutMs = evaluation.timeoutMs ?? config.timeoutMs;
@@ -290,7 +251,6 @@ function buildSummary(
   };
 }
 
-/** Narrows a run summary to the subset of results a scoped reporter observes. */
 function scopeSummary(summary: EveEvalRunSummary, evalIds: ReadonlySet<string>): EveEvalRunSummary {
   if (summary.results.every((result) => evalIds.has(result.id))) {
     return summary;

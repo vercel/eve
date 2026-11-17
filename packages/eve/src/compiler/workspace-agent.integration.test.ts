@@ -19,7 +19,6 @@ const peerConfig = [
 
 function workspaceFiles(subagent: string) {
   return {
-    // Workspace detection requires the root manifest to declare eve.
     "package.json": `${JSON.stringify({ dependencies: { eve: "*" }, name: "workspace", type: "module" })}\n`,
     "agents/research/agent/agent.ts": peerConfig,
     "agents/support/agent/agent.ts": rootConfig,
@@ -33,7 +32,6 @@ describe("Vercel workspace subagent compilation", () => {
 
   async function createWorkspace(prefix: string, subagent: string) {
     const app = await createAppRoot(prefix, { files: workspaceFiles(subagent) });
-    // A root agent/ directory would make the workspace root an agent root.
     await rmdir(app.agentRoot);
     return app;
   }

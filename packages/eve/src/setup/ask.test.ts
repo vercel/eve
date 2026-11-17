@@ -24,7 +24,6 @@ import {
 import type { MultiSelectOptions, PrompterValue, SingleSelectOptions } from "./prompter.js";
 import { WizardCancelledError } from "./step.js";
 
-/** Proves a rung resolved the question without reaching the rung below. */
 function untouchableAsker(): Asker {
   return {
     ask(question): Promise<never> {
@@ -467,8 +466,6 @@ describe("withAnswers", () => {
 
     const value = await asker.askMany(colorsQuestion());
 
-    // The locked value joins the answer even though it was not named, exactly
-    // as the interactive picker always returns its locked rows.
     expect(value).toEqual([BLUE, RED, WHITE]);
     expect(events.resolutions).toEqual([
       { key: "colors", value: [BLUE, RED, WHITE], source: "answer" },
@@ -573,8 +570,6 @@ describe("withPolicy", () => {
     expect(single).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Use the detected value for "color"?' }),
     );
-    // The synthesized confirm is interaction mechanics: only the policy's own
-    // "detected" resolution is announced, never an "asked" for the confirm.
     expect(events.resolutions).toEqual([{ key: "color", value: BLUE, source: "detected" }]);
   });
 
@@ -679,9 +674,7 @@ describe("decorator stacking", () => {
       events,
     )(withPolicy("assume", events)(untouchableAsker()));
 
-    // The flag answer outranks the detected value.
     await expect(stack.ask(colorQuestion({ detected: BLUE }))).resolves.toBe(RED);
-    // Without an answer, the policy resolves before the base is reached.
     await expect(
       stack.ask(
         select({

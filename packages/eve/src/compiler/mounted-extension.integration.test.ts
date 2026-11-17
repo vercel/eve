@@ -26,10 +26,6 @@ function compatibilityManifest(): string {
   });
 }
 
-/**
- * Compiles the app and hydrates the module map from authored source, the
- * `eve eval` / `eve dev` path.
- */
 async function compileRuntimeGraph(appRoot: string) {
   await compileAgent({ startPath: appRoot });
   const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
@@ -40,11 +36,6 @@ async function compileRuntimeGraph(appRoot: string) {
   return { graph: await resolveRuntimeAgentGraph({ manifest, moduleMap }), manifest, moduleMap };
 }
 
-/**
- * Runs the `eve eval` / `eve dev` path: the module map is hydrated from authored
- * source, so the extension-scope plugin must bind config across separately-bundled
- * mount and tool modules. Deterministic guard for the config-binding regression.
- */
 describe("mounted extension via authored-source loader", () => {
   it("binds independent config for duplicate mounts, authored subagents, and loaded application graphs", async () => {
     const app = await createAppRoot("eve-independent-extension-config-", {
@@ -246,8 +237,6 @@ describe("mounted extension via authored-source loader", () => {
       },
     });
     const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
-    // Keep the Connect token request offline: an unexpired OIDC token skips the
-    // refresh, and the request itself fails before reaching the network.
     const exp = Math.floor(Date.now() / 1000) + 3600;
     vi.stubEnv(
       "VERCEL_OIDC_TOKEN",
@@ -256,7 +245,6 @@ describe("mounted extension via authored-source loader", () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN_FILE", "");
     vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
     try {
-      // Each mounted authentication hook requests a token for its own connector.
       const authenticate = (map: typeof moduleMap, mount: string) => {
         const hook = compiledOf(manifest, "hook").find(
           (entry) => entry.slug === `${mount}__authenticate`,
@@ -476,7 +464,6 @@ describe("mounted extension via authored-source loader", () => {
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
-          // Minimal pass-through Standard Schema — this scenario tests binding, not validation.
           "const config = { '~standard': { version: 1, vendor: 'scenario', validate: (value) => ({ value }) } };",
           "export default defineExtension({ config });",
           "",
@@ -506,11 +493,6 @@ describe("mounted extension via authored-source loader", () => {
   });
 });
 
-/**
- * A no-config extension (`defineExtension()`, no schema) mounted with a bare
- * re-export — no factory call. Proves config is optional end to end through the
- * dev/eval loader.
- */
 describe("mounted extension without config", () => {
   it("composes and runs a no-config extension mounted via re-export", async () => {
     const app = await createAppRoot("eve-mounted-extension-no-config-", {
@@ -591,12 +573,6 @@ describe("mounted extension with an unsupported capability contract", () => {
   });
 });
 
-/**
- * The directory mount form with a co-located override slot. The extension's own
- * tools compose and bind config, while a consumer override of the same name
- * shadows the extension's contribution. Runs through the dev/eval authored-source
- * loader to exercise directory discovery and override precedence deterministically.
- */
 describe("mounted extension via directory form with override", () => {
   it("binds base config and lets a co-located override shadow or disable a tool", async () => {
     const app = await createAppRoot("eve-mounted-extension-directory-override-", {
@@ -609,7 +585,6 @@ describe("mounted extension via directory form with override", () => {
           'export default crm({ apiKey: "sk-dir" });',
           "",
         ].join("\n"),
-        // Co-located override: shadows the extension's own crm_status.
         "agent/extensions/crm/tools/crm_status.mjs": [
           'import { defineTool } from "eve/tools";',
           "export default defineTool({",
@@ -621,13 +596,11 @@ describe("mounted extension via directory form with override", () => {
           "});",
           "",
         ].join("\n"),
-        // Co-located override: opts out of the extension's own crm_legacy.
         "agent/extensions/crm/tools/crm_legacy.mjs": [
           'import { disableTool } from "eve/tools";',
           "export default disableTool();",
           "",
         ].join("\n"),
-        // Co-located override: opts out of the extension's dynamic crm_pulse.
         "agent/extensions/crm/tools/crm_pulse.mjs": [
           'import { disableTool } from "eve/tools";',
           "export default disableTool();",
@@ -883,8 +856,6 @@ describe("nested extension mounts", () => {
     const generated = (await import(`${moduleMapPath}?test=nested-config`)) as {
       default: typeof moduleMap;
     };
-    // Each nested mount reads the configuration of the mounts that contributed its subagent,
-    // through every level of nesting.
     for (const [mount, label] of [
       ["outer", "from-outer"],
       ["second", "from-second"],

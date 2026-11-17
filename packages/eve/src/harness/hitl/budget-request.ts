@@ -16,7 +16,6 @@ export function createSessionLimitContinuationRequest(input: {
 }): LimitAsk {
   const { sessionId, turnSequence, windowIndex } = input;
   return {
-    // Cost-only windows can advance without any token count changing.
     interactionId: `${sessionId}:${turnSequence}:limit:usage:${windowIndex}`,
     request: {
       allowFreeform: false,

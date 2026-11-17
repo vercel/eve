@@ -1,9 +1,3 @@
-/**
- * Renders one approval, question, or budget prompt through the renderers' `interactionCard`
- * chain, and checks the result against eve's own controls so a renderer can restyle a card but
- * never break how its clicks route.
- */
-
 import type { Interaction } from "#channel/interaction-prompts.js";
 import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -30,19 +24,13 @@ import { truncate } from "#public/channels/text.js";
 
 const log = createLogger("slack.interaction-card");
 
-/** Room an answer label gets in the answered line, so the prompt keeps the rest. */
 const ANSWER_LABEL_MAX_LENGTH = 500;
 
-/** One request's messages, and eve's default for it, sent when Slack rejects the rendered ones. */
 export interface RenderedRequestCard {
   readonly parts: SlackInteractionCardParts;
   readonly fallback: SlackInteractionCardParts;
 }
 
-/**
- * eve's default card: an open, unanswered request's controls, or once answered or settled, one
- * block naming the answer and, when known, who gave it.
- */
 export function defaultInteractionCard(
   card: SlackInteractionCard,
   route?: SlackHitlRoute,
@@ -60,10 +48,6 @@ export function defaultInteractionCard(
   return { controls: { blocks: [answered as BlockKitBlock], text } };
 }
 
-/**
- * How an answered or settled request reads: the answer's label, or how it ended without one,
- * and the notification text.
- */
 export function endingOf(interaction: Interaction): {
   readonly label: string;
   readonly text: string;
@@ -79,11 +63,6 @@ export function endingOf(interaction: Interaction): {
   return { label, text: label };
 }
 
-/**
- * How a direct-message request's note in the shared thread reads once the request settles. The
- * answer stays in the DM: the note names an approval's decision, but for any other request only
- * that it was answered.
- */
 export function threadNoteEndingOf(interaction: Interaction): string {
   const { answer, request } = interaction;
   if (answer === undefined) return endingOf(interaction).text;
@@ -101,11 +80,6 @@ function answeredSection(prompt: string, label: string, userId?: string): BlockK
   return { text: { text, type: "mrkdwn" }, type: "section" };
 }
 
-/**
- * Runs `chain` for one request, falling back to eve's default when the renderer throws or its
- * result fails {@link invalidCardReason}. The default renders from the original interaction, so
- * a changed card handed to `next` can't change which controls are expected.
- */
 export function renderRequestCard(
   chain: SlackInteractionCardChain,
   card: SlackInteractionCard,
@@ -114,7 +88,6 @@ export function renderRequestCard(
   const fallback = defaultInteractionCard(card, route);
   const { interactionId } = card.interaction;
   try {
-    // A copy that survives JSON is what eve persists, so state in memory matches state on disk.
     const parts = JSON.parse(
       JSON.stringify(chain(card, (next) => defaultInteractionCard(next, route))),
     ) as SlackInteractionCardParts;
@@ -160,19 +133,11 @@ function isMessage(value: unknown): value is SlackCardMessage {
   return Array.isArray(blocks) && typeof text === "string";
 }
 
-/**
- * eve's default at its smallest: only the block holding its controls, which every open default
- * has exactly one of, or the single block of an answered or settled default.
- */
 export function compactDefault(fallback: SlackCardMessage): SlackCardMessage {
   const blocks = fallback.blocks.filter((block) => eveControls(block).length > 0);
   return blocks.length === 0 ? fallback : { ...fallback, blocks };
 }
 
-/**
- * eve's controls anywhere in `value`, nested blocks included: each action ID with the value or
- * option values a click sends, sorted so order and nesting don't matter.
- */
 function eveControls(value: unknown): string[] {
   const found: string[] = [];
   const walk = (node: unknown): void => {
@@ -195,12 +160,6 @@ function eveControls(value: unknown): string[] {
   return found.sort();
 }
 
-/**
- * Sends `message`, and once more with eve's default when Slack refuses its content, unless the
- * default is the same message. Any other failure is thrown, since resending after a timeout could
- * duplicate a message that landed. A request without a default for this message, such as details
- * a renderer added, sends nothing the second time.
- */
 export async function sendWithFallback<T>(
   send: (message: SlackCardMessage) => Promise<T>,
   message: SlackCardMessage,

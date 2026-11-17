@@ -162,7 +162,6 @@ describe("prepareSuccessorStep", () => {
     expect(getHookByTokenMock.mock.calls.map(([token]) => token)).toEqual(
       SOURCE_TOKENS.map(sessionInboxHookToken),
     );
-    // Ingress reads the recorded owner version, so only a successor that will claim records it.
     expect(setAttributesMock).toHaveBeenCalledTimes(kind === "valid" ? 1 : 0);
   });
 
@@ -376,7 +375,6 @@ describe("signalSessionOwnerActivationStep", () => {
   });
 });
 
-/** A source that hands over no addresses, so the check that it still holds them passes. */
 const NO_ADDRESSES = { hookTokens: [], runId: "run-a" };
 
 function validate(checkpoint: SessionCheckpoint) {

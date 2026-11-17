@@ -35,8 +35,6 @@ describe("durable compiled artifact sources", () => {
   });
 
   it("stores untagged development sources verbatim and resolves them without delivery context", () => {
-    // A custom World's deliveries never install a generation context, so
-    // its payloads must pin their exact snapshot instead of a selector.
     const source = createDiskRuntimeCompiledArtifactsSource(
       "/app/.eve/dev-runtime/snapshots/generation-a/source/app",
       { moduleMapLoaderPath: "/pkg/loader.ts", sandboxAppRoot: "/app" },

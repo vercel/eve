@@ -27,26 +27,12 @@ import {
   TIME_PROMPT,
 } from "#internal/testing/channel-conformance/question-workflows.js";
 
-/**
- * One behavior every first-party channel owes a person, stated once and run
- * against every channel whose platform has the capabilities it `requires`.
- */
 export interface ContractRule {
-  /** The behavior, in one sentence. Also the test name. */
   readonly rule: string;
-  /** Where the behavior is promised: a docs anchor or the PR that introduced it. */
   readonly source: string;
   readonly requires: readonly ChannelCapability[];
-  /**
-   * The behavior can differ between a shared thread and a DM, such as a typed
-   * answer that must mention the bot in a channel, or a press whose presser a
-   * platform names differently in a server. A channel's DM column runs only
-   * these; its shared-thread column covers the rest.
-   */
   readonly variesByConversation?: boolean;
-  /** The surfaces the behavior is promised on; every surface when unset. */
   readonly surfaces?: readonly Surface[];
-  /** How the test agent differs from the default for this rule. */
   readonly agent?: Pick<ConversationOptions, "limits">;
   run(conversation: ChannelConversation): Promise<void>;
 }
@@ -66,11 +52,8 @@ const OWN_WORDS = "Mostly the billing migration";
 
 const PLAN_REVIEW = `Use ${TWO_QUESTIONS_TOOL} to plan the review.`;
 
-// The mock model fills the tool's `release` input from this, and the tool's
-// custom approval prompt reads it back, so rules see the prompt the tool built.
 const RELEASE = 'release "v2.4"';
 const DEPLOY = `Use ${GATED_TOOL} to ship ${RELEASE}.`;
-// Channels word the two approval choices differently; the TUI asks Yes or No.
 const APPROVE_LABELS = ["Approve", "Yes"];
 const DENY_LABELS = ["Deny", "No"];
 const APPROVAL_PROMPT = deployPrompt("v2.4");
@@ -85,7 +68,6 @@ const PUBLISH_PROMPT = "Approve Publish notes?";
 const DEPLOY_AND_PUBLISH = `Call tools in parallel: ${GATED_TOOL}, ${SECOND_GATED_TOOL}\nShip ${RELEASE}.`;
 const ASK_AND_DEPLOY = `Call tools in parallel: ask_question, ${GATED_TOOL}\n${ASK}\nShip ${RELEASE}.`;
 
-/** Answers each prompt with its option, in whatever order the client shows them. */
 function answerEach(
   conversation: ChannelConversation,
   choices: Record<string, string | readonly string[]>,
@@ -95,7 +77,6 @@ function answerEach(
   );
 }
 
-/** The option a person would press for `label`, or any of its channel-specific wordings. */
 function option(
   options: readonly RenderedOption[] | undefined,
   label: string | readonly string[],
@@ -106,17 +87,14 @@ function option(
   return found!;
 }
 
-// Neither matches an option, a tool, or a number, so each steers the turn.
 const ASIDE = "Alice also wants the changelog summarized.";
 const FOLLOW_UP = "Alice asks what is still left to do.";
 
-/** Each person in turn asks for {@link PLAIN_TOOL}; returns the caller each run saw. */
 async function lookUpNotesAs(
   conversation: ChannelConversation,
   people: readonly Person[],
 ): Promise<readonly (string | null)[]> {
   for (const [index, person] of people.entries()) {
-    // Numbered, so each run's reply, which quotes its message, can be told apart.
     const request = `request ${index + 1}`;
     await conversation.say(`Use ${PLAIN_TOOL} to find the review notes, ${request}.`, person);
     await conversation.waitForShown(new RegExp(`Used ${PLAIN_TOOL} for .*${request}`, "su"));
@@ -158,7 +136,6 @@ async function expectReleased(conversation: ChannelConversation) {
   await expectRan(conversation, REQUESTER_GATED_TOOL, { released: true });
 }
 
-/** Once the session settles after Bob answers, the requester-only approval is still pending. */
 async function expectStillPending(conversation: ChannelConversation) {
   await conversation.waitForRest();
   expect(
@@ -176,7 +153,6 @@ async function expectNotDeployed(conversation: ChannelConversation) {
 }
 
 function expectAnswered(output: unknown, answer: string) {
-  // The message carries the real output so a broken cell's symptom can match it.
   expect(output, `ask_question returned ${JSON.stringify(output)}`).toEqual({
     answer,
     status: "answered",
@@ -213,13 +189,11 @@ async function approveDeploy(conversation: ChannelConversation, by: Answer) {
   await expectDeployed(conversation);
 }
 
-/** Once answered, the prompt's message stops offering choices nobody can use anymore. */
 async function expectButtonsCleared(conversation: ChannelConversation, prompt: string) {
   const labels = (await conversation.shownPrompt(prompt)).options.map((option) => option.label);
   expect(labels, `the answered prompt still offers ${JSON.stringify(labels)}`).toEqual([]);
 }
 
-/** A press an approval policy rejected leaves the prompt answerable by someone else. */
 async function expectButtonsKept(conversation: ChannelConversation, prompt: string) {
   const labels = (await conversation.shownPrompt(prompt)).options.map((option) => option.label);
   const message = `the rejected prompt offers ${JSON.stringify(labels)}`;
@@ -233,7 +207,6 @@ async function expectButtonsKept(conversation: ChannelConversation, prompt: stri
   ).toBe(true);
 }
 
-/** Once answered, the prompt's message shows everyone in the conversation who answered it. */
 async function expectResponderNamed(conversation: ChannelConversation, prompt: string) {
   const { text } = await conversation.shownPrompt(prompt);
   expect(
@@ -242,11 +215,6 @@ async function expectResponderNamed(conversation: ChannelConversation, prompt: s
   ).toBe(true);
 }
 
-/**
- * A one-token input budget lets the model call that crosses it finish, so a
- * turn that calls a tool is held before the model reads the tool's result.
- */
-// The smallest valid JPEG (1x1) and PDF, so a channel's media checks accept them.
 const DIAGRAM: SentFile = {
   bytes: Buffer.from(
     "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=",
@@ -263,13 +231,8 @@ const REPORT: SentFile = {
   name: "report.pdf",
 };
 const LIST_ATTACHMENTS = "Alice asks to list the attachments.";
-// The test model's answer to LIST_ATTACHMENTS: every file part it was given, as JSON.
 const ATTACHMENTS_REPLY = /Attachments: (\[.*?\])(?:\s|$)/su;
 
-/**
- * One file the test model saw, as it lists them: bytes and type, a link it was
- * left to fetch, or eve's note for a file it couldn't pass on.
- */
 interface SeenFile {
   readonly bytes?: number;
   readonly mediaType?: string;
@@ -278,12 +241,6 @@ interface SeenFile {
   readonly url?: string;
 }
 
-/**
- * Asks the agent which files it can see, sending `files` with the question, and
- * reads its answer from the channel's reply. Sending a file with the question
- * keeps the check to one message, which a channel that starts a session per
- * message, such as Discord's slash commands, can still answer.
- */
 async function attachmentsSeen(
   conversation: ChannelConversation,
   files?: readonly SentFile[],
@@ -293,7 +250,6 @@ async function attachmentsSeen(
   return JSON.parse(ATTACHMENTS_REPLY.exec(shown)![1]!) as SeenFile[];
 }
 
-/** What the agent should see for `file`: its exact bytes, with its type. */
 function asSeen(file: SentFile): SeenFile {
   return {
     bytes: file.bytes.length,
@@ -302,7 +258,6 @@ function asSeen(file: SentFile): SeenFile {
   };
 }
 
-/** Sends `file` with a message, then checks the agent sees exactly it. */
 async function expectFileReachesAgent(conversation: ChannelConversation, file: SentFile) {
   const seen = await attachmentsSeen(conversation, [file]);
   expect(
@@ -320,19 +275,11 @@ const BUDGET_PROMPT =
 const LOOK_UP_NOTES = `Use ${PLAIN_TOOL} to find Bob's review notes.`;
 const LATER_MESSAGE = "Carol wants the review by Friday.";
 
-/** Starts a turn that spends the budget on its first model call and is held after its tool runs. */
 async function exhaustBudget(conversation: ChannelConversation) {
   await conversation.say(LOOK_UP_NOTES);
   return await conversation.waitForQuestion(BUDGET_PROMPT);
 }
 
-/**
- * Once approved, the agent replies without redoing the work it did before the
- * prompt. A text answer's channel context (such as Telegram's message id)
- * reaches the model after the tool result, and the test model answers that
- * context instead of reporting the result, so this waits for any reply rather
- * than the tool's.
- */
 async function expectWorkContinued(conversation: ChannelConversation) {
   await conversation.waitForReply();
   await conversation.waitForRest();
@@ -341,7 +288,6 @@ async function expectWorkContinued(conversation: ChannelConversation) {
 
 async function expectStoppedAndAskedAgain(conversation: ChannelConversation) {
   await conversation.say(LATER_MESSAGE);
-  // Stopping keeps the session over budget, so the next message asks again.
   const options = await conversation.waitForQuestion(BUDGET_PROMPT);
   expect(options.map((option) => option.label).sort()).toEqual(["Approve", "Stop"]);
   expect(await conversation.replyCount(), "the bot replied after Stop").toBe(0);
@@ -359,11 +305,6 @@ async function expectSignInToolResult(conversation: ChannelConversation) {
   expect(conversation.runsOf("read_calendar")).toBe(1);
 }
 
-/**
- * Asks for something that needs a sign-in, then opens the sign-in as a person
- * would. In a group the bot may first post a status with a button that sends
- * the sign-in to whoever asked, such as Telegram's Authorize.
- */
 async function requestSignIn(conversation: ChannelConversation, message: string) {
   await conversation.say(message);
   await conversation.waitForSignIn();
@@ -375,10 +316,6 @@ async function requestSignIn(conversation: ChannelConversation, message: string)
 
 const SIGN_IN_OPENERS = /^(?:authori[sz]e|sign in)$/iu;
 
-/**
- * Fails when a person can still see the calendar sign-in: its link, its code,
- * or a Cancel that would act on it.
- */
 async function expectSignInPromptGone(conversation: ChannelConversation, after: string) {
   const left = (await conversation.visible()).filter(
     ({ options, text }) =>
@@ -394,10 +331,6 @@ async function expectSignInPromptGone(conversation: ChannelConversation, after: 
 
 const SIGN_IN_CANCEL_LABEL = "Cancel";
 
-/**
- * Presses the Cancel the calendar sign-in's prompt shows. The press settles once the channel's
- * background work for it does, so whatever it shows the person has been shown.
- */
 async function pressSignInCancel(conversation: ChannelConversation) {
   const cancel = (await conversation.visible())
     .flatMap(({ options }) => options)
@@ -406,11 +339,9 @@ async function pressSignInCancel(conversation: ChannelConversation) {
   await conversation.press(cancel!);
 }
 
-/** Starts a calendar sign-in, then moves on with a new message before finishing it. */
 async function abandonSignIn(conversation: ChannelConversation) {
   await conversation.say(READ_CALENDAR);
   await conversation.waitForSignIn();
-  // A person moves on once they've seen the sign-in, which in a group they reply to.
   await conversation.waitForRest();
   await conversation.say(CHANGE_OF_PLANS);
 }
@@ -528,7 +459,6 @@ const questionRules = [
       await conversation.waitForQuestion(RETRO_PROMPT);
       await conversation.say(ASIDE);
       await conversation.waitForReplyTo(ASIDE);
-      // Once withdrawn, an option label is an ordinary message. A question left open would take it.
       await conversation.say("Thursday");
       await conversation.waitForRest();
       expect(
@@ -617,7 +547,6 @@ const approvalRules = [
       await conversation.press(approve);
       await conversation.press(approve);
       await expectDeployed(conversation);
-      // However the channel reads the second press, the session must finish with it.
       await conversation.waitForRest();
       expect(conversation.runsOf(GATED_TOOL)).toBe(1);
     },
@@ -632,7 +561,6 @@ const approvalRules = [
         [APPROVAL_PROMPT]: APPROVE_LABELS,
         [PUBLISH_PROMPT]: DENY_LABELS,
       });
-      // Results reach the model in the order they settle, so the reply names the approved call.
       await expectDeployed(conversation);
       expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
     },
@@ -656,7 +584,6 @@ const approvalRules = [
     async run(conversation) {
       await conversation.say(ASK_AND_DEPLOY);
       await answerEach(conversation, { [APPROVAL_PROMPT]: APPROVE_LABELS, [PROMPT]: "Saturday" });
-      // The turn replies only once both calls settle.
       await expectDeployed(conversation);
     },
   },
@@ -667,13 +594,11 @@ const approvalRules = [
     async run(conversation) {
       await conversation.say(ASK_AND_DEPLOY);
       await conversation.replyToEach({ [PROMPT]: "Saturday", [APPROVAL_PROMPT]: "approve" });
-      // The turn replies only once both calls settle.
       await expectDeployed(conversation);
     },
   },
   {
     rule: "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply",
-    // Policy since #4135. #4051 proposes keeping the approval open instead, which flips this rule.
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -700,7 +625,6 @@ const approvalRules = [
       const options = await askToDeploy(conversation);
       await conversation.say(ASIDE);
       await conversation.waitForReplyTo(ASIDE);
-      // The card's original button, as a client that hasn't refreshed still shows it.
       await conversation.press(option(options, APPROVE_LABELS));
       await conversation.waitForRest();
       expect(
@@ -790,11 +714,6 @@ const answeredPromptRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
-/**
- * A run cancelled outside eve, such as by an operator in the workflow world,
- * never withdraws its pending prompts, so their buttons stay pressable. A press
- * can then reach no session (#4835).
- */
 async function pressAfterRunEnded(
   conversation: ChannelConversation,
   kind: "approval" | "question",
@@ -927,7 +846,6 @@ const budgetRules = [
     async run(conversation) {
       await exhaustBudget(conversation);
       await conversation.say(LATER_MESSAGE);
-      // Had the message closed or replaced the prompt, approve would be held behind it.
       await conversation.say("approve");
       await conversation.waitForReplyTo(LATER_MESSAGE);
     },
@@ -940,12 +858,10 @@ const signInRules = [
     source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
-    // A public surface has nowhere private to show a link.
     surfaces: ["shared", "private"],
     async run(conversation) {
       await requestSignIn(conversation, READ_CALENDAR);
       const shown = await conversation.waitForShown(CALENDAR.url);
-      // Slack names the service in the shared status and links privately, so accept either.
       await conversation.waitForShown(CALENDAR.displayName);
       expect(shown, "the sign-in link was shown").toContain(CALENDAR.url);
     },
@@ -1044,7 +960,6 @@ const signInRules = [
     source: "#5995",
     requires: [],
     variesByConversation: true,
-    // A public surface never shows the link or code, so there is nothing to take away.
     surfaces: ["shared", "private"],
     async run(conversation) {
       await requestSignIn(conversation, READ_CALENDAR);
@@ -1077,7 +992,6 @@ const signInRules = [
       await conversation.say(READ_CALENDAR);
       await conversation.waitForSignIn();
       await conversation.waitForRest();
-      // An ended run never withdraws its sign-in, so Cancel finds no turn left to cancel.
       await conversation.cancelRunsInWorld();
       await pressSignInCancel(conversation);
       await expectSignInPromptGone(conversation, "after pressing Cancel");
@@ -1091,7 +1005,6 @@ const signInRules = [
     async run(conversation) {
       await abandonSignIn(conversation);
       await conversation.waitForReplyTo(CHANGE_OF_PLANS);
-      // Finishing the abandoned sign-in afterwards must not run the tool.
       await conversation.completeSignIn();
       await conversation.waitForRest();
       expect(
@@ -1133,7 +1046,6 @@ const approvalPermissionRules = [
       await conversation.press(option(options, DENY_LABELS), "bob");
       await conversation.press(approve, "bob");
       await expectStillPending(conversation);
-      // A denial that got through would settle the call as denied before this approval.
       await conversation.press(approve);
       await expectReleased(conversation);
     },
@@ -1144,12 +1056,9 @@ const approvalPermissionRules = [
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
-      // Today another person's message waits for the turn to end, so it never reaches the
-      // response policy; the approval stays pending either way.
       await conversation.say("deny", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
-      // A denial taken as Alice's would settle the call as denied before this approval.
       await conversation.say("approve");
       await expectReleased(conversation);
     },
@@ -1182,13 +1091,11 @@ const callerRules = [
     rule: "a tool sees the person who sent the message as its caller",
     source: "docs/tools/index.mdx",
     requires: [],
-    // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
     variesByConversation: true,
     async run(conversation) {
       const [caller] = await lookUpNotesAs(conversation, ["alice"]);
       expect(caller, `${PLAIN_TOOL} ran with no caller`).not.toBeNull();
       const [principalId] = JSON.parse(caller!) as [string];
-      // Platform principals are namespaced, e.g. `slack:T01:U_ALICE`; a client's is the bare id.
       expect(
         principalId === conversation.personId || principalId.endsWith(`:${conversation.personId}`),
         `${PLAIN_TOOL} ran as ${principalId}, which doesn't name ${conversation.personId}`,
@@ -1231,8 +1138,6 @@ const attachmentRules = [
     source: "#855, #3419",
     requires: ["attachments"],
     async run(conversation) {
-      // A link left for the model provider fails again on every later turn (#3419),
-      // and with nothing at all the agent can't tell the person their file didn't arrive.
       const seen = await attachmentsSeen(conversation, [{ ...DIAGRAM, downloadable: false }]);
       expect(seen, `the agent saw ${JSON.stringify(seen)}`).toEqual([
         { note: expect.stringMatching(/^Attachment\b/u) },
@@ -1260,7 +1165,6 @@ const attachmentRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
-/** The contract's rules, grouped by the kind of behavior they cover. */
 export const channelContractSections = [
   { title: "Questions", rules: questionRules },
   { title: "Tool approvals", rules: approvalRules },

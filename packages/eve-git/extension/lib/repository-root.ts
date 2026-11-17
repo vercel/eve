@@ -6,7 +6,6 @@ type RootSandbox = Pick<SandboxSession, "resolvePath" | "run">;
 
 const MAX_ERROR_DETAIL_CHARS = 2_000;
 
-/** A workspace directory that must also be the top of a git work tree. */
 export async function validateRepositoryRoot(sandbox: RootSandbox, root: string): Promise<string> {
   if (!root.startsWith("/")) throw new Error("root must be an absolute sandbox path");
   const workspace = await realPath(sandbox, sandbox.resolvePath(""), "sandbox workspace");
@@ -23,7 +22,6 @@ export async function validateRepositoryRoot(sandbox: RootSandbox, root: string)
   return resolved;
 }
 
-/** NUL-delimited output keeps paths that contain newlines unambiguous. */
 async function realPath(sandbox: RootSandbox, path: string, label: string): Promise<string> {
   const result = await sandbox.run({ command: `realpath -e -z -- ${shellQuote(path)}` });
   if (result.exitCode !== 0) {

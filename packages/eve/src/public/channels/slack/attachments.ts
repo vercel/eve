@@ -30,20 +30,9 @@ import { DEFAULT_UPLOAD_POLICY, type UploadPolicy } from "#public/channels/uploa
 
 const log = createLogger("slack.attachments");
 
-/** Thread messages the lookback inspects, newest first, when a mention carries no files. */
 const THREAD_LOOKBACK_MESSAGES = 10;
-/** Slack file downloads give up after this long, so one slow file can't stall the turn. */
 const FILE_FETCH_TIMEOUT_MS = 30_000;
 
-/**
- * Emits one {@link MessageFilePart} per attachment in the inbound message, with
- * `data` set to a `URL` object pointing at the Slack file. URL-less and
- * policy-violating attachments are dropped so a single bad upload never
- * blocks the text portion.
- *
- * The `URL` object in `data` is resolved by the channel's `fetchFile`
- * function at staging time inside the workflow step.
- */
 export function collectSlackFileParts(
   attachments: readonly SlackAttachment[] | undefined,
   policy: UploadPolicy,
@@ -81,35 +70,12 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): MessageFil
   };
 }
 
-/**
- * Collects file parts for an inbound message.
- *
- * Prefers attachments on the triggering message (the common case: a person
- * uploads a file and mentions the app in the same message). When a mention
- * carries none, refreshes the thread via {@link SlackThread.refresh} and
- * collects, in thread order, the files of the messages between the previous
- * mention of the app and the trigger, up to {@link THREAD_LOOKBACK_MESSAGES}
- * messages back. When the cached replies don't reach the trigger, as in a
- * thread past Slack's first page, the window ending at the trigger is
- * fetched; a trigger neither returns gets no lookback.
- * That earlier mention started its own turn, which collected the files before
- * it. The app's own messages and remote files are skipped. A message that
- * didn't mention the app gets no lookback: the app answers every message in
- * that conversation, so each earlier message brought its own files.
- *
- * Any error during refresh is logged and treated as "no attachments" so the
- * text portion of the message still gets delivered. Skips the lookback when
- * the policy disables uploads, since the refresh can't surface anything we'd
- * deliver.
- */
 export async function collectInboundFileParts(input: {
   readonly mention: Pick<SlackMessage, "attachments" | "ts">;
   readonly thread: SlackThread;
   readonly policy: UploadPolicy;
-  /** Whether the triggering message mentions the app. */
   readonly isMentioned: boolean;
   readonly botUserId: string | undefined;
-  /** Fetches the `size` thread messages ending at `latest`, oldest first. */
   readonly fetchThreadWindow?: (
     latest: string,
     size: number,
@@ -128,7 +94,6 @@ export async function collectInboundFileParts(input: {
     }
   }
 
-  // Anchor on the trigger: messages posted after it aren't its files.
   const recent = await withTrigger(input);
   const trigger = recent.findIndex((message) => message.ts === input.mention.ts);
   if (trigger === -1) return [];
@@ -148,10 +113,6 @@ export async function collectInboundFileParts(input: {
   return collectSlackFileParts(attachments, input.policy);
 }
 
-/**
- * Returns thread messages that include the trigger. The cached replies are
- * the thread's first page, so a later trigger needs its own window.
- */
 async function withTrigger(input: {
   readonly mention: Pick<SlackMessage, "ts">;
   readonly thread: SlackThread;
@@ -162,8 +123,6 @@ async function withTrigger(input: {
 }): Promise<readonly SlackThreadMessage[]> {
   const cached = input.thread.recentMessages;
   if (cached.some((message) => message.ts === input.mention.ts)) return cached;
-  // Only a full first page means the thread continues past it. A short or
-  // failed refresh has nothing further to fetch.
   if (input.fetchThreadWindow === undefined || cached.length < THREAD_REFRESH_LIMIT) return [];
   try {
     return (await input.fetchThreadWindow(input.mention.ts, THREAD_LOOKBACK_MESSAGES + 1)) ?? [];
@@ -173,7 +132,6 @@ async function withTrigger(input: {
   }
 }
 
-/** Matches `<@U123>` and the labelled `<@U123|name>` form. */
 function mentionsApp(text: string, botUserId: string | undefined): boolean {
   return (
     botUserId !== undefined &&
@@ -181,11 +139,6 @@ function mentionsApp(text: string, botUserId: string | undefined): boolean {
   );
 }
 
-/**
- * Combines text + file parts into the {@link MessageContent} shape the
- * harness expects. Returns the raw text string when there are no
- * parts (the common path).
- */
 export function buildSlackTurnMessage(
   text: string,
   fileParts: readonly MessageFilePart[],
@@ -201,18 +154,9 @@ export function buildSlackTurnMessage(
   return [textPart, ...fileParts];
 }
 
-/**
- * Creates a `fetchFile` function for the Slack channel.
- *
- * Returns `null` for URLs that don't belong to Slack so they pass
- * through to the model provider unchanged. Fetches Slack file URLs, and
- * URLs under a configured `api.fileBaseUrl`, with the bot token, on
- * `api.fetch` when one is configured.
- */
 export function createSlackFetchFile(input: {
   readonly api?: SlackTransportOptions;
   readonly botToken?: SlackBotToken;
-  /** Downloads stop at this many bytes. Defaults to the framework's 25 MB. */
   readonly maxBytes?: number;
 }): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
   const api = resolveSlackTransportOptions(input.api);

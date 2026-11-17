@@ -12,7 +12,6 @@ import { resumeHook, start } from "#internal/workflow/runtime.js";
 const channel = defineChannel({
   routes: [POST("/drop", async () => new Response("ok"))],
   state: {},
-  // A channel drops a delivery it does not handle by replacing it with nothing to deliver.
   deliver(payload) {
     return payload.message === "drop me" ? {} : undefined;
   },

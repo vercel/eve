@@ -28,7 +28,6 @@ test("built extension adds no grep tool or GitHub contributions to the root agen
     const config = await tryReadExtensionBuildConfig(extensionRoot);
     assert.ok(config);
     await buildExtensionPackage(extensionRoot, config);
-    // Consume only the distribution, so source discovery cannot hide a packaging regression.
     await rm(join(extensionRoot, "extension"), { recursive: true });
 
     const appRoot = join(root, "consumer");

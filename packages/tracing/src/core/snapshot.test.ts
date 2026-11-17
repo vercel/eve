@@ -37,8 +37,6 @@ function turnAttributes(input: { input: string; output?: string }): ScopeRecord[
 }
 
 describe("snapshotRecord's oversized-node fallback", () => {
-  // turnContent copies a model's input into both the turn's attributes and its
-  // data, which is what pushes the turn node over the budget in production.
   const turnWithContent = (input: {
     capture?: ScopeRecord["capture"];
     input: string;
@@ -67,8 +65,6 @@ describe("snapshotRecord's oversized-node fallback", () => {
   });
 
   it("keeps a turn input capped by the content serializer", () => {
-    // Production copies the model scope's prepared attribute, which the
-    // serializer already capped at CONTENT_ATTRIBUTE_LIMIT.
     const messages = [{ role: "user", content: "x".repeat(400_000) }];
     const capped = genAiInputMessagesAttribute(messages)!.json;
     expect(capped.length).toBeLessThanOrEqual(250 * 1024);
@@ -82,8 +78,6 @@ describe("snapshotRecord's oversized-node fallback", () => {
   });
 
   it("shrinks an oversized checkpoint copy instead of denying capture", () => {
-    // A host can supply an attribute larger than the serializer would produce;
-    // the checkpoint then exceeds the node budget and the copy is fitted.
     const input = JSON.stringify([
       { role: "user", parts: [{ content: "x".repeat(600_000), type: "text" }] },
     ]);
@@ -94,9 +88,7 @@ describe("snapshotRecord's oversized-node fallback", () => {
     const truncated = snapshot.attributes?.["gen_ai.input.messages"];
     expect(typeof truncated).toBe("string");
     expect((truncated as string).length).toBeLessThan(input.length);
-    // The marker lives inside the JSON payload.
     expect((truncated as string).includes("… [truncated]")).toBe(true);
-    // The truncation stays valid GenAI message JSON.
     const messages = JSON.parse(truncated as string) as unknown[];
     expect(messages).toHaveLength(1);
     expect((messages[0] as { role: string }).role).toBe("user");

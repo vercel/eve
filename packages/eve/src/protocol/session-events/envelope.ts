@@ -1,9 +1,3 @@
-// The session stream's envelope: what a stored line is, and the values facts share.
-//
-// This module is the wire contract, so it stands alone: nothing here imports runtime code, the
-// AI SDK, or Zod. Schemas live beside it for tests and development (`schemas.ts`), and readers
-// use the plain types and the runtime catalog (`catalog.ts`).
-
 /**
  * One line of a session stream: a commit, which holds every fact of one transition, or one
  * progress record. A line's zero-based index in the stream is its position, and its identity.
@@ -43,17 +37,12 @@ export interface Envelope<TType extends string, TData> {
   readonly data: TData;
 }
 
-/**
- * Records the stream route writes into a response. They are never stored and never counted, and
- * readers ignore the ones they don't know.
- */
 export type TransportRecord =
   | PositionMarker
   | { readonly $eve: "heartbeat" }
   | { readonly $eve: "stream.lease-ended" }
   | { readonly $eve: "stream.ended" };
 
-/** Written after lines a read skipped: the position of the next line the response sends. */
 export interface PositionMarker {
   readonly $eve: "position";
   readonly next: number;
@@ -69,7 +58,6 @@ export interface FactPosition {
   readonly index: number;
 }
 
-/** What one record read from a response is. */
 export type ReadRecord<TFact = unknown, TProgress = unknown> =
   | { readonly kind: "commit"; readonly line: CommitLine<TFact> }
   | { readonly kind: "progress"; readonly line: ProgressLine<TProgress> }
@@ -77,7 +65,6 @@ export type ReadRecord<TFact = unknown, TProgress = unknown> =
   | { readonly kind: "unknown-transport"; readonly name: string }
   | { readonly kind: "invalid"; readonly value: unknown };
 
-/** Tells the kinds of record apart by key, as every reader does. */
 export function classifyRecord<TFact = unknown, TProgress = unknown>(
   value: unknown,
 ): ReadRecord<TFact, TProgress> {
@@ -90,8 +77,7 @@ export function classifyRecord<TFact = unknown, TProgress = unknown>(
       case "position":
         return typeof record.next === "number" && Number.isSafeInteger(record.next)
           ? { kind: "transport", record: { $eve: "position", next: record.next } }
-          : // Not a stored line, so a reader skips it without counting a position.
-            { kind: "unknown-transport", name: record.$eve };
+          : { kind: "unknown-transport", name: record.$eve };
       case "heartbeat":
       case "stream.lease-ended":
       case "stream.ended":
@@ -109,18 +95,15 @@ export function classifyRecord<TFact = unknown, TProgress = unknown>(
   return { kind: "invalid", value };
 }
 
-/** True for a stored line: a commit or a progress record. */
 export function isStoredLine(value: unknown): value is StoredLine {
   const { kind } = classifyRecord(value);
   return kind === "commit" || kind === "progress";
 }
 
-/** Encodes one stored line as NDJSON. */
 export function encodeLine(line: StoredLine | TransportRecord): string {
   return `${JSON.stringify(line)}\n`;
 }
 
-/** Below the workflow writer's 10 MiB per-chunk ceiling, including UTF-8 and the newline. */
 export const MAX_SESSION_LINE_BYTES = 8 * 1024 * 1024;
 
 export class SessionLineTooLargeError extends Error {
@@ -138,17 +121,12 @@ export class SessionLineTooLargeError extends Error {
 
 const lineEncoder = new TextEncoder();
 
-/** Encodes one atomic chunk, refusing oversized lines before a durable write. */
 export function encodeLineBytes(line: StoredLine | TransportRecord): Uint8Array {
   const bytes = lineEncoder.encode(encodeLine(line));
   if (bytes.byteLength > MAX_SESSION_LINE_BYTES)
     throw new SessionLineTooLargeError(bytes.byteLength);
   return bytes;
 }
-
-// ---------------------------------------------------------------------------
-// Values facts share
-// ---------------------------------------------------------------------------
 
 /**
  * What caused something, by the entity that did. The set is open: a reader that meets a cause it
@@ -211,7 +189,6 @@ export interface ValueReference {
   readonly withheld?: true;
 }
 
-/** Any JSON value. */
 export type { JsonValue } from "./json.js";
 
 /** One part of what a person sent. The kind set is open. */

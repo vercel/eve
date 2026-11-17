@@ -40,7 +40,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** An append-only agent stream, independent of when its POST acknowledgements arrive. */
 function agent(onPost?: (deliveryId: string, path: string) => Promise<void> | void) {
   const log: string[] = [];
   const open = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -152,7 +151,6 @@ const personWait: SessionEvent[] = [
     data: { deliveryId: "asked", outcome: "awaiting-input", turnId: "turn_0" },
   },
 ];
-/** Turn 0 asks a person and its delivery settles, leaving no machine work. */
 function appendPersonWait(server: ReturnType<typeof agent>) {
   server.append(testTurnFacts(0, "Later.", ["asked"]).slice(0, 4));
   server.append(personWait, true);
@@ -203,7 +201,6 @@ describe("SessionStore acceptance and observation", () => {
     const before = current.snapshot.session;
     expect(before?.inbox).toBe("inbox_0");
 
-    // No stream facts arrive: the POST receipt must publish the refreshed state.
     await current.send({ message: "Alice starts the conversation." });
     expect(current.snapshot.session).toEqual({ ...initialSession, inbox: "inbox_1" });
     expect(changed).toHaveBeenLastCalledWith(current.snapshot.session);
@@ -716,7 +713,6 @@ describe("SessionStore acceptance and observation", () => {
     expect(current.snapshot.messages[0]?.metadata?.status).toBe("failed");
   });
 
-  // Browsers expose `crypto.randomUUID` only in secure contexts (#5415).
   it("sends where crypto.randomUUID is not exposed, as on a plain-HTTP origin", async () => {
     const server = agent();
     const webCrypto = globalThis.crypto;
@@ -1254,7 +1250,6 @@ describe("SessionStore with a follow predicate", () => {
     await current.resume();
     server.append(testTurnFacts(1, "Arrived while closed.", ["d_1"]));
     for await (const _event of session.stream({ follow: false, startIndex: 0 })) {
-      /* bounded independent read */
     }
     expect(session.state.streamIndex).toBe(server.log.length);
     expect(current.snapshot.status).toBe("idle");

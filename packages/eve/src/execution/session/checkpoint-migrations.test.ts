@@ -119,7 +119,6 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
       imported: {
         checkpoint: {
           admittedDeliveryKeys: [],
-          // The caller speaks protocol 1, so the session relays it no requests.
           capabilities: { requestInput: false },
           history: [
             { content: "Alice asks for a report.", kind: "user", role: "user" },
@@ -208,7 +207,6 @@ const CALLBACK = {
   url: "https://caller.example/eve/v1/callback/callback-token",
 };
 
-/** An idle session an eve 0.83 owner hands off after its third turn. */
 function eve083Checkpoint(state: Record<string, unknown>, context: Record<string, unknown> = {}) {
   return {
     admittedDeliveryKeys: ["delivery-3"],
@@ -240,7 +238,6 @@ function eve083Checkpoint(state: Record<string, unknown>, context: Record<string
   };
 }
 
-/** An idle session an eve 0.69 owner hands off after its first turn: history still in its snapshot. */
 function eve069Checkpoint() {
   return {
     serializedContext: {

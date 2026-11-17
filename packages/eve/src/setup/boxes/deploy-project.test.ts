@@ -39,12 +39,6 @@ function createDeps() {
   };
 }
 
-/**
- * The deploy box no longer derives `headless` from the gather face: the
- * composition site fixes it. So a headless-path test builds the box with
- * `headless: true` (what onboarding/setup pass on a headless run) and pairs it
- * with `runHeadless`; an interactive test leaves it at the default `false`.
- */
 function headlessBox(args: {
   deps: ReturnType<typeof createDeps>;
   prompter?: Prompter;
@@ -92,8 +86,6 @@ describe("deployProject box", () => {
 
     const next = await runHeadless([box], pendingState(), silentSink);
 
-    // The #1020 deadlock fix: the already-linked project is reused instead of
-    // triggering a second interactive `vercel link`.
     expect(deps.runVercel).not.toHaveBeenCalledWith(["link"], expect.anything());
     expect(next.project).toEqual({
       kind: "deployed",
@@ -123,9 +115,6 @@ describe("deployProject box", () => {
 
     await runInteractive([box], pendingState(), silentSink);
 
-    // `--yes` is required even interactively: setup already made the deploy
-    // decision, so deploy should not re-open settings confirmation for a fresh
-    // project.
     expect(deps.runVercel).toHaveBeenNthCalledWith(
       1,
       ["deploy", "--prod", "--yes", "--logs"],
@@ -141,9 +130,6 @@ describe("deployProject box", () => {
 
     const result = await runInteractive([box], state, silentSink);
 
-    // No onOutput key at all: interactive `vercel link` must own the terminal,
-    // otherwise its prompt is line-buffered out of view and the CLI hangs on
-    // hidden input (the #1020 deadlock).
     expect(deps.runVercel).toHaveBeenNthCalledWith(1, ["link"], { cwd: "/tmp/project" });
     expect(result.kind).toBe("done");
     if (result.kind === "done") {
@@ -184,8 +170,6 @@ describe("deployProject box", () => {
       expect.anything(),
       expect.anything(),
     );
-    // The preset must be aligned before the deploy subprocess so Vercel builds
-    // the right framework, and only after the project is linked.
     const reconcileOrder = deps.syncHostFrameworkPreset.mock.invocationCallOrder[0]!;
     const deployOrder = deps.runVercel.mock.invocationCallOrder[0]!;
     expect(reconcileOrder).toBeLessThan(deployOrder);
@@ -199,8 +183,6 @@ describe("deployProject box", () => {
 
     await runInteractive([box], state, silentSink);
 
-    // A stale preset can only be read once the directory is linked, so the
-    // reconcile must follow the interactive `vercel link`.
     const linkOrder = deps.runVercel.mock.invocationCallOrder[0]!;
     const reconcileOrder = deps.syncHostFrameworkPreset.mock.invocationCallOrder[0]!;
     expect(deps.runVercel.mock.calls[0]?.[0]).toEqual(["link"]);
@@ -245,12 +227,9 @@ describe("deployProject box", () => {
       "vercel inspect <deployment-url> --logs",
     );
 
-    // The rail only flushes the captured `vercel deploy --prod` output on a
-    // warning/error, so the failure must report through `error`.
     expect(prompter.log.error).toHaveBeenCalledWith(
       expect.stringContaining("`vercel deploy --prod` failed."),
     );
-    // Failure stops the flow before the env pull.
     expect(deps.runVercel).toHaveBeenCalledTimes(1);
   });
 
@@ -341,7 +320,6 @@ describe("deployProject box", () => {
     const deps = createDeps();
     const box = headlessBox({ deps });
     const state = pendingState();
-    // In-project setup has no onboarding plan; the on-disk link alone gates.
     state.vercelProject = { kind: "none" };
 
     await runHeadless([box], state, silentSink);

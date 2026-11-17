@@ -1,26 +1,3 @@
-/**
- * Makes @workflow/world-local stream reads cost O(new chunks) instead of
- * O(all chunks) per call within one process (vercel/eve#3168).
- *
- * Upstream lists a stream's chunk directory and opens every chunk file on each
- * `getInfo`, `getChunks` and live-poll call, so a tail lookup on a 50k-chunk
- * stream opens 50k files. Chunk files are written once (temp file + rename) and
- * never change, so this transform:
- *
- * - caches the sorted listing per (directory, tag), reused only while the
- *   directory's dev/ino/size/mtime/ctime are unchanged and its mtime is older
- *   than the listing by more than the mtime granularity margin, so a chunk
- *   landing in the same mtime tick is never missed;
- * - remembers which physical chunk files are known not to be EOF, so the
- *   first-EOF walk in `getInfo`, `getChunks` and `get(-n)` opens only files it
- *   has not seen. The walk itself is unchanged: sorted order, first EOF ends the
- *   stream, nothing past it is opened. The purge tombstone is rewritten in
- *   place and is never remembered.
- *
- * Every replacement is an exact match that must occur the expected number of
- * times, so a changed upstream file fails the vendor build.
- */
-
 const STREAMER_ID = "/@workflow/world-local/dist/streamer.js";
 
 const CACHE_SOURCE = `
@@ -109,7 +86,6 @@ const REPLACEMENTS = [
     to: "        clearCache() {\n            registeredStreams.clear();\n            clearStreamReadCaches();",
   },
   {
-    // getChunks: the walk before the cursor and the peek past the page.
     from: "if (isEofByte(await readFirstByte(filePath))) {",
     to: "if (await isEofChunkFile(chunksDir, `${file}${ext}`)) {",
     count: 2,
@@ -119,12 +95,10 @@ const REPLACEMENTS = [
     to: "                    rememberNonEofChunk(chunksDir, `${file}${ext}`);\n                    resultChunks.push({\n                        index: dataIndex,",
   },
   {
-    // getInfo.
     from: "if (isEofByte(await readFirstByte(path.join(chunksDir, `${file}${ext}`)))) {",
     to: "if (await isEofChunkFile(chunksDir, `${file}${ext}`)) {",
   },
   {
-    // get() with a negative start index.
     from: "if (isEofByte(await readFirstByte(path.join(chunksDir, `${lastFile}${lastExt}`)))) {",
     to: "if (await isEofChunkFile(chunksDir, `${lastFile}${lastExt}`)) {",
   },

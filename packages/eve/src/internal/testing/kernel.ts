@@ -8,15 +8,10 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
-/** A kernel config for a direct harness test: the agent it runs is only a model and its settings. */
 export interface TestKernelConfig extends KernelConfig {
   readonly agent: { readonly model: RuntimeModelReference } & AgentSettings;
 }
 
-/**
- * A kernel whose steps run in a session of an agent that declares nothing but `agent`: the
- * test's context when it made one, else a new one, holding that agent's bundle.
- */
 export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn {
   const step = createKernel(config);
   const run: StepFn = async (session, input) => {
@@ -28,7 +23,6 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
       }
       return continued(await step(session, input));
     }
-    // A step of its own: the test's handler stands where the publish sink folds what it writes.
     const own = new ContextContainer();
     own.set(BundleKey, agentBundle(agent));
     own.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
@@ -41,7 +35,6 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
     });
     return continued(await contextStorage.run(own, () => folding(session, input)));
   };
-  // The step a result continues with runs as this kernel's steps do.
   const continued = (result: StepResult): StepResult =>
     typeof result.next === "function" ? { ...result, next: run } : result;
   return run;

@@ -60,12 +60,10 @@ export function webSearch(input: WebSearchToolInput): WebSearchToolDefinition {
   });
 }
 
-/** Default provider-managed web search configuration. */
 export const defaultWebSearch = webSearch({ provider: "exa" });
 
 export default defaultWebSearch;
 
-/** Returns whether a value is a provider-managed web search definition. */
 export function isWebSearchToolDefinition(value: unknown): value is WebSearchToolDefinition {
   return (
     typeof value === "object" &&

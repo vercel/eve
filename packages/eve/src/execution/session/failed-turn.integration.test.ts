@@ -48,7 +48,6 @@ it("attributes a failure to the running turn after a compaction hands the sessio
           default: defineMemory({
             provider: {
               recall: {
-                // The second turn's recall fails that turn; an abort-shaped error isn't retried.
                 "turn.started": async (context) => {
                   if (context.turn.sequence === 0) return null;
                   throw Object.assign(new Error("This operation was aborted"), {
@@ -85,7 +84,6 @@ it("attributes a failure to the running turn after a compaction hands the sessio
     try {
       await stream.nextTurn();
       await session.compact();
-      // A compaction between turns settles its context change; no turn ends.
       await stream.nextUntil((event) => event.type === "context.settled");
 
       await session.send("Bob asks for the summary again.", { auth: null });
@@ -93,7 +91,6 @@ it("attributes a failure to the running turn after a compaction hands the sessio
       expect(filterEventsByType(failed, "turn.started")).toMatchObject([
         { data: { turnId: "turn_1" } },
       ]);
-      // A value that fails fails its turn, not the session.
       expect(filterEventsByType(failed, "turn.settled")).toMatchObject([
         { data: { outcome: "failed" } },
       ]);

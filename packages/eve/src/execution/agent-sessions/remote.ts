@@ -61,10 +61,6 @@ const DeliveryReceiptResponseSchema = z.object({
   deliveryId: z.string().min(1),
 });
 
-/**
- * The receipt a child gives forwarded answers. This session keeps it in its durable state until
- * the request closes, so an id longer than any eve mints is not kept.
- */
 const AnswerReceiptResponseSchema = DeliveryReceiptResponseSchema.extend({
   deliveryId: z.string().min(1).max(256),
 });
@@ -102,7 +98,6 @@ const CreateSessionResponseSchema = z
   .and(
     z.union([
       z.object({ deliveryId: z.string().min(1) }),
-      // Earlier protocol peers acknowledge creation without naming the delivery.
       z.object({ status: z.literal("accepted") }),
     ]),
   );
@@ -112,26 +107,17 @@ const UNKNOWN_REMOTE_OUTCOME =
 
 type RemoteAgentSessionCoordinates = {
   readonly sessionId: string;
-  /** The first message's delivery, which earlier-protocol receivers don't name. */
   readonly deliveryId?: string;
-  /** The child's protocol, when it speaks an earlier one: its result arrives, nothing else. */
   readonly earlierProtocol?: number;
 };
 
 export async function startRemoteAgentSession(input: {
   readonly action: RuntimeRemoteAgentDispatchRequest;
-  /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly capabilities?: SessionCapabilities;
   readonly originAudience?: ChannelAudience;
-  /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
-  /**
-   * Replay-stable identity of this create attempt. A retried dispatch step
-   * re-sends the same value, letting the receiver return the child it already
-   * created instead of starting a second one.
-   */
   readonly operationId?: string;
   readonly parent?: Omit<SubagentParentContext, "lineage"> & {
     readonly lineage?: SubagentParentContext["lineage"];
@@ -176,7 +162,6 @@ export async function startRemoteAgentSession(input: {
       action: input.action,
       remote: input.remote,
     }),
-    // `ctx.agent` already dropped an empty schema, so what arrives is one to honor.
     outputSchema: input.action.input.outputSchema as JsonObject | undefined,
     protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
   };
@@ -229,7 +214,6 @@ export async function startRemoteAgentSession(input: {
     rejected.version < REMOTE_AGENT_PROTOCOL_VERSION
   ) {
     requestBody.protocolVersion = rejected.version;
-    // The same callback, marked with the protocol it now agrees to.
     requestBody.callback.url = callbackUrlForProtocol(requestBody.callback.url, rejected.version);
     response = await post();
     rejected = response.ok ? undefined : await readProtocolRejection(response);
@@ -315,10 +299,6 @@ export async function respondToRemoteAgentSession(input: {
   readonly remote: RemoteAgentBinding & { readonly sessionId: string };
   readonly headers: Record<string, string>;
   readonly auth: SessionAuthContext | null | undefined;
-  /**
-   * Names this set of answers, so a retried step's repeat is the same delivery to the child.
-   * Only a child on this protocol accepts it.
-   */
   readonly idempotencyKey?: string;
   readonly responses: readonly Answer[];
 }): Promise<string | undefined> {
@@ -326,7 +306,6 @@ export async function respondToRemoteAgentSession(input: {
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
       body: JSON.stringify({
-        // A protocol 2 child takes answers as v26 responses, each naming the request it answers.
         ...(input.remote.earlierProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL
           ? {
               inputResponses: input.responses.map(({ interactionId, optionId, text }) => ({
@@ -352,19 +331,14 @@ export async function respondToRemoteAgentSession(input: {
     throw new Error(
       `Remote agent "${input.remote.name}" input answer failed with HTTP ${response.status}.`,
     );
-  // A child on this protocol admits the answers as a delivery of its own and names it when it
-  // relays how they settled. The answers stand without it, so an unreadable receipt isn't fatal.
   if (input.remote.earlierProtocol !== undefined) return undefined;
   const receipt = AnswerReceiptResponseSchema.safeParse(await response.json().catch(() => null));
-  // A receipt from another session names none of this child's deliveries.
   return receipt.success && receipt.data.sessionId === input.remote.sessionId
     ? receipt.data.deliveryId
     : undefined;
 }
 
-/** Continues one remote-agent session by its immutable session ID. */
 export async function continueRemoteAgentSession(input: {
-  /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth: SessionAuthContext | null;
   readonly callback: {
     readonly callId: string;
@@ -373,10 +347,6 @@ export async function continueRemoteAgentSession(input: {
     readonly url: string;
   };
   readonly earlierProtocol?: number;
-  /**
-   * Names this message, so a retried step's repeat is the same delivery and returns the same
-   * receipt. Only a child on this protocol accepts it.
-   */
   readonly idempotencyKey?: string;
   readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
@@ -401,7 +371,6 @@ export async function continueRemoteAgentSession(input: {
     message: input.message,
     outputSchema: input.outputSchema,
   };
-  // Earlier protocols reject fields they don't know.
   if (input.earlierProtocol === undefined && input.idempotencyKey !== undefined) {
     requestBody.idempotencyKey = input.idempotencyKey;
   }
@@ -426,7 +395,6 @@ export async function continueRemoteAgentSession(input: {
       `Remote agent "${input.remote.name}" continue-session request failed with HTTP ${response.status}.${compatibilityHint}`,
     );
   }
-  // An earlier-protocol receiver's reply isn't read: it names no delivery the parent records.
   if (input.earlierProtocol !== undefined) return { sessionId: input.sessionId };
   const receipt = DeliveryReceiptResponseSchema.safeParse(await response.json().catch(() => null));
   if (!receipt.success) {
@@ -445,8 +413,6 @@ function buildForwardedPrincipalField(input: {
   if (input.remote.forwardPrincipal !== true) {
     return undefined;
   }
-  // No current principal (the request was accepted with no credentials):
-  // proceed on transport trust alone.
   if (input.auth === null || input.auth === undefined) {
     return undefined;
   }
@@ -506,7 +472,6 @@ function setHeader(headers: Record<string, string>, name: string, value: string 
   if (value !== undefined) headers[name] = value;
 }
 
-/** Retires one exact remote child session through eve's authenticated reset route. */
 export async function resetRemoteAgentSession(input: {
   readonly reason: string;
   readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
@@ -538,7 +503,6 @@ export async function resetRemoteAgentSession(input: {
 
 export function resolveRemoteAgentForAction(input: {
   readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
-  /** A dynamic remote agent's credentials, built again from its child's binding. */
   readonly credentials?: RemoteAgentCredentials;
   readonly nodeId: string;
   readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
@@ -588,21 +552,11 @@ export function resolveRemoteAgentForAction(input: {
   return definition;
 }
 
-/**
- * Resolves authored outbound headers for a server-authored remote child event.
- *
- * `resolverId` is the key the parent's private child binding records: the subagent's node id,
- * never resolved credentials. A static remote agent's definition must still agree with the
- * event's `name`/`url`, and a dynamic one's credentials are built again from the binding the
- * child was opened with, for the same destination, so a stale or mismatched key fails closed
- * rather than minting headers for the wrong upstream.
- */
 export async function resolveRemoteAgentStreamHeaders(input: {
   readonly bundle: CompiledRuntimeAgentBundle;
   readonly name: string;
   readonly resolverId?: string;
   readonly url: string;
-  /** A dynamic remote agent's binding, from the parent's binding for the child. */
   readonly dynamicBinding?: JsonValue | DynamicRemoteBinding;
 }): Promise<Record<string, string>> {
   if (input.resolverId === undefined) {
@@ -613,7 +567,6 @@ export async function resolveRemoteAgentStreamHeaders(input: {
   for (const node of nodes) {
     const { dynamicNodeIds, dynamicResolvers } = node.subagentRegistry;
     if (dynamicNodeIds.has(input.resolverId)) {
-      // A dynamic remote agent without credentials keeps no binding.
       if (input.dynamicBinding === undefined) return {};
       return await resolveRemoteAgentRequestHeaders(
         await remoteAgentCredentials({

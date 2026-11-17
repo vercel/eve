@@ -1,6 +1,5 @@
 import { resolveVercelDeployment, type VerifiedVercelTarget } from "#setup/vercel-deployment.js";
 
-/** Builds a branded target through the production parser for unit tests. */
 export async function resolveTestVercelTarget(input: {
   readonly host: string;
   readonly projectId?: string;

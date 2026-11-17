@@ -15,10 +15,6 @@ async function resolveHookDefinition(definition: CompiledDefinition, moduleMap: 
   return resolved;
 }
 
-/**
- * Builds a minimal {@link CompiledModuleMap} that exposes one authored
- * module under one source id at the root node.
- */
 function buildModuleMap(sourceId: string, moduleNamespace: unknown): CompiledModuleMap {
   return {
     nodes: {

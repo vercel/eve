@@ -17,7 +17,6 @@ import { waitWithSignal } from "#shared/wait-with-signal.js";
 import { isObject } from "#shared/guards.js";
 import { isExpiredWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 
-/** Every hop resolves recorded authority on its owning deployment, never an event-supplied URL. */
 export async function descendantStreamResponse(input: {
   readonly request: Request;
   readonly root: Session;

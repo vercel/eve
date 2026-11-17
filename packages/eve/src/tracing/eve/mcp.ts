@@ -115,7 +115,6 @@ function injectMcpTraceContext(
 }
 
 const noContent = () => undefined;
-/** Records only JSON tool arguments and results, as MCP spans carry no model content. */
 export const MCP_SERIALIZER: ContentSerializer = {
   json: contentAttribute,
   text: noContent,

@@ -5,9 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import { resolveVersionToken } from "./version-tokens.js";
 
-// These tests always execute from the dev tree (vitest runs over src), so the
-// fallback's sources — eve's package.json and the workspace catalog — are the
-// live files the assertions read independently.
 const EVE_PACKAGE_JSON_URL = new URL("../../../package.json", import.meta.url);
 
 describe("resolveVersionToken", () => {

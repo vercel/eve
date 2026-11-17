@@ -130,16 +130,8 @@ const LIVE_TURNS = 1000;
 
 interface LiveTurn {
   readonly root: LiveOperation;
-  /** Token of the last checkpoint this process wrote. */
   revision: string | undefined;
-  /**
-   * Every checkpoint token this tree wrote. A checkpoint store scoped to an
-   * execution context (eve keeps it in the serialized workflow context) can
-   * hand a concurrent hook an older checkpoint of this same tree; that is not
-   * another process's write and must not fork the tree.
-   */
   readonly revisions: Set<string>;
-  /** Replaced by another process's checkpoint: the tree still records spans but no longer persists. */
   retired: boolean;
   writes: number;
 }
@@ -164,8 +156,6 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     durable: checkpointer !== undefined,
     onError: input.onError,
   });
-  // Turns hydrated in this process, so concurrent hooks share one tree. The
-  // checkpoint stays authoritative: another process's write replaces the entry.
   const live = new Map<string, Promise<LiveTurn | undefined>>();
 
   function turnKey(identity: RunIdentity): string {
@@ -173,7 +163,6 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return ["turn", identity.runId, identity.turnId].map(encodeURIComponent).join(":");
   }
 
-  /** Writes are serialized so a slow store never persists an older tree last. */
   function persistence(key: string, entry: () => LiveTurn | undefined) {
     let queue = Promise.resolve();
     return () => {
@@ -228,13 +217,9 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
         (savedRevision !== undefined && cached.revisions.has(savedRevision)))
     ) {
       if (context !== undefined) cached.root.useContext(context);
-      // A re-entry may decline content the cached turn was allowed to record.
       if (capture !== undefined) cached.root.narrow(capture);
       return cached;
     }
-    // Another process wrote this checkpoint, so it replaces the cached tree.
-    // Callers may still hold the cached tree's operations; keep them from
-    // persisting their older view over the newer checkpoint.
     if (cached !== undefined) cached.retired = true;
     let entry: LiveTurn | undefined;
     const onChange = persistence(key, () => entry);
@@ -378,17 +363,11 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return value;
   }
 
-  /**
-   * The active operation owns the decision. A span the host started inside it, in the same
-   * trace, nests the decision further; a span from another trace, such as a workflow step,
-   * does not.
-   */
   async function decision(data: DecisionInput): Promise<DecisionOperation> {
     const active = telemetry.active();
     const owner = active?.reference ?? data.parent;
     const span = telemetry.activeSpan?.(data.context);
     const parent = owner === undefined || span?.traceId === owner.traceId ? span : owner;
-    // A decision joins its parent's sampling decision whatever sampler the provider uses.
     const sampled = parent === undefined || (parent.traceFlags & 1) !== 0;
     const live = await scopes.start({
       identity: {

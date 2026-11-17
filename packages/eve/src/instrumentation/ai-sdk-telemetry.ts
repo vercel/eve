@@ -8,14 +8,6 @@ let eveOtelIntegration: Telemetry | undefined;
 let errorSafeEveOtelIntegration: Telemetry | undefined;
 let warnedMissingEveOtelIntegration = false;
 
-/**
- * Registers the AI SDK OpenTelemetry integration once so that model
- * calls emit OTel spans, including runtime-context attributes. Safe to
- * call multiple times — only the first call has an effect.
- *
- * In AI SDK v7 the built-in OTel tracing was moved to `@ai-sdk/otel`
- * and must be registered explicitly.
- */
 export function ensureOtelIntegration(): void {
   if (registered) {
     return;
@@ -26,14 +18,6 @@ export function ensureOtelIntegration(): void {
   registerTelemetry(eveOtelIntegration);
 }
 
-/**
- * Every integration currently registered with the AI SDK — eve's own, plus any
- * an authored instrumentation module added with `registerTelemetry`.
- *
- * A per-call `integrations` list replaces the registered ones rather than
- * adding to them, so anything that passes integrations per call has to carry
- * these forward or they stop receiving events.
- */
 export function getRegisteredTelemetryIntegrations(options?: {
   readonly excludeEveOtelIntegration?: boolean;
   readonly sanitizeEveOtelErrors?: boolean;

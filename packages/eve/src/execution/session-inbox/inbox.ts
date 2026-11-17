@@ -16,40 +16,27 @@ import type {
   WorkflowToolRunMessageBatch,
 } from "#execution/tools/workflow/messages.js";
 
-/** All session addresses accept the same protocol. Callback routes construct
- * their own message kind; they never accept arbitrary session commands. */
 export interface AuthorizationCallbackPayload {
   readonly kind: "authorization-callback";
   readonly payloads: DeliverPayload[];
 }
 
-/** The runtime sends this command; channel request bodies cannot supply it. */
 export interface SessionFailurePayload {
   readonly kind: "session-failure";
   readonly error: string;
 }
 
-/**
- * One part of the previous owner's accepted-but-unread payloads after a
- * handoff. The runtime sends these commands; channel request bodies cannot
- * supply them.
- */
 export interface SessionHandoverPayload {
   readonly kind: "handover";
-  /** The handoff attempt this answers; see {@link SessionHookBatchClaimOptions.handover}. */
   readonly attemptKey: string;
-  /** Parts apply in index order; a retried send repeats its index. */
   readonly index: number;
-  /** The last part; reads resume once every part before it has been applied. */
   readonly final?: true;
   readonly payloads: readonly Exclude<SessionInboxPayload, SessionHandoverPayload>[];
 }
 
-/** Replay-stable evidence that every buffered part and the final marker were applied. */
 export interface SessionHandoverObservation {
   readonly attemptKey: string;
   readonly payloadCount: number;
-  /** Workflow event time, not the host wall clock when replay reached this point. */
   readonly appliedAtMs: number;
 }
 
@@ -68,85 +55,36 @@ interface Source {
   registered?: Promise<void>;
   stopping: boolean;
   closed: boolean;
-  /** A forced claim by this inbox took the token over from this source. */
   replaced: boolean;
 }
 
-/**
- * While a handover is awaited (see {@link SessionHookBatchClaimOptions.handover}),
- * reads expose nothing; interrupt handlers still fire on arrival.
- */
 export interface SessionInboxReader {
   readonly handoverObservation?: SessionHandoverObservation;
-  /**
-   * Waits for and removes the next accepted payload in arrival order, or
-   * `undefined` once no hook can deliver any more (disposed or taken over).
-   * Only one consumer waits at a time; the owner program is strictly sequential.
-   */
   next(): Promise<SessionInboxPayload | undefined>;
-  /** Removes every payload accepted so far, in arrival order. */
   drain(): SessionInboxPayload[];
-  /** Removes the payloads at the front of the queue that `accepts` takes, stopping at the first it doesn't. */
   takeLeading<T extends SessionInboxPayload>(
     accepts: (payload: SessionInboxPayload) => payload is T,
   ): T[];
   hasPending(): boolean;
-  /** Resolves once a payload is ready or the inbox closes, without consuming anything. */
   whenPending(): Promise<void>;
-  /**
-   * Called from the pump the moment an interrupt (`cancel`, `clear`,
-   * `reset`, `session-timeout`) is accepted, ahead of any consumer read. Handlers must
-   * be synchronous and idempotent. The payload stays in the queue so the
-   * consumer still processes it in order.
-   */
   onInterrupt(handler: (payload: SessionInboxPayload) => void): () => void;
-  /**
-   * Observes readable deliveries without consuming them; replays unread
-   * deliveries on subscription and when a handover arrives, so handlers must
-   * be idempotent.
-   */
   onDelivery(handler: (payload: SessionInboxPayload) => void): () => void;
-  /** Requeues payloads a successor handed back, ahead of everything pumped since. */
   restore(payloads: readonly SessionInboxPayload[]): void;
 }
 
 export interface SessionHookClaimOptions {
-  /**
-   * Take the address over from the run that holds it instead of conflicting.
-   * Still rejects with `HookConflictError` when the holder's runtime cannot be
-   * taken from; throws `FatalError` when the World does not support it. A
-   * token this inbox already holds is claimed again on a fresh hook.
-   */
   readonly force?: boolean;
-  /**
-   * Creates the hook at once but confirms its registration only after this
-   * settles. While a registration is awaited, Workflow queues every step
-   * started beside it instead of running it inline, so a claim made next to a
-   * step confirms after that step; the hook still commits alongside it.
-   */
   readonly confirmAfter?: Promise<unknown>;
-  /**
-   * `start()` already created this address's hook with the run, metadata
-   * included; claiming it opens that hook and never conflicts.
-   */
   readonly claimedAtStart?: boolean;
 }
 
 export interface SessionHookBatchClaimOptions extends SessionHookClaimOptions {
-  /**
-   * Expect a `handover` for this attempt key. Before any hook is created,
-   * reads stop exposing anything; as its parts arrive on any hook, their
-   * payloads take their place after what was queued at this call and ahead of
-   * everything accepted since. Reads resume after the final part.
-   */
   readonly handover?: string;
 }
 
 export interface SessionInboxOwnership {
-  /** Logical tokens currently claimed, in claim order. */
   readonly claimedTokens: readonly string[];
   claimSessionHook(token: string, options?: SessionHookClaimOptions): Promise<void>;
-  /** Registers every token as one batch; all claims settle before the first failure propagates. */
   claimSessionHooks(
     tokens: readonly string[],
     options?: SessionHookBatchClaimOptions,
@@ -154,24 +92,12 @@ export interface SessionInboxOwnership {
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
-  /** A handover is expected and has not arrived; the session must not move again until it does. */
   readonly awaitingHandover: boolean;
-  /** Resolves once no handover is awaited: it arrived, was abandoned, or the inbox closed. */
   whenHandoverSettled(): Promise<void>;
-  /** Stops waiting for `attemptKey`'s handover, which can no longer arrive; queued payloads become readable. */
   abandonHandover(attemptKey: string): void;
-  /** Resolves the first time a read waits on an awaited handover. */
   whenBlockedOnHandover(): Promise<void>;
-  /** Resolves when the next payload arrives on any hook, readable or not. */
   whenArrival(): Promise<void>;
-  /** Another run force-claimed every hook this inbox held. */
   readonly takenOver: boolean;
-  /**
-   * Resolves once another run has force-claimed every hook this inbox held.
-   * Every payload delivered before the takeover is queued by then. Rejects if
-   * a reader fails, if the inbox is disposed first, or once
-   * `signal` aborts.
-   */
   whenTakenOver(signal?: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -190,13 +116,6 @@ function isDelivery(value: SessionInboxPayload): boolean {
   return value.kind === "send" || value.kind === "deliver";
 }
 
-/**
- * One FIFO queue for the session lifetime, fed by a continuous reader per
- * claimed hook. The pump never waits on queue depth: interrupts share each
- * hook's ordered stream, so any backpressure on ordinary payloads would also
- * hold back the cancel behind them. Accepted payloads are already durable on
- * the hook, so the queue is a mirror rather than the source of truth.
- */
 export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const sources: Source[] = [];
   const queue: SessionInboxPayload[] = [];
@@ -204,10 +123,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
   const deliveryHandlers = new Set<(payload: SessionInboxPayload) => void>();
   let failure: { error: unknown } | undefined;
-  /**
-   * `index` is where the next part's payloads go in `queue`; `parts` holds
-   * parts that arrived ahead of `nextPart`.
-   */
   let handover:
     | {
         readonly attemptKey: string;
@@ -228,7 +143,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
   const wait = (): Promise<void> => new Promise((resolve) => waiters.add(resolve));
   const closed = (): boolean => sources.every((source) => source.closed || source.stopping);
-  // With no source left the handover can never arrive, so what is queued stays readable.
   const gated = (): boolean => handover !== undefined && sources.length > 0;
   const hasReadable = (): boolean => !gated() && queue.length > 0;
   const throwIfFailed = (): void => {
@@ -245,7 +159,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 
   const openHandover = (): void => {
     handover = undefined;
-    // Deliveries held back while the handover was awaited were never observed.
     observe(deliveryHandlers, queue, isDelivery);
     notify();
   };
@@ -256,8 +169,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 
   const acceptHandover = (part: SessionHandoverPayload): void => {
-    // A retried send step repeats its own key and index, so any other key
-    // belongs to an attempt this inbox is no longer waiting for.
     const current = handover;
     if (current === undefined || part.attemptKey !== current.attemptKey) return;
     if (part.index < current.nextPart || current.parts.has(part.index)) return;
@@ -286,8 +197,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     notify();
   };
 
-  // The SDK abandons (never settles) a read that is in flight when the hook
-  // is disposed, so the loop exits on `stopping` rather than on `done`.
   const pump = async (source: Source): Promise<void> => {
     const iterator = source.hook[Symbol.asyncIterator]();
     try {
@@ -298,7 +207,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         for (const resolve of arrivalWaiters) resolve();
         arrivalWaiters.clear();
         if (payload.kind === "workflow-batch") {
-          // A run's messages carry no deliveries or interrupts.
           queue.push(...payload.messages);
           notify();
           continue;
@@ -313,11 +221,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         notify();
       }
     } catch (error) {
-      // A replaced source's payloads accepted before the replacement are
-      // already queued; its fresh hook carries on.
       if (source.stopping || source.replaced) return;
-      // The SDK delivers every payload accepted before a takeover first, so
-      // the queue already holds them; the address now belongs to another run.
       if (isHookForceClaimedError(error)) {
         sources.splice(sources.indexOf(source), 1);
         takenOver = true;
@@ -367,13 +271,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       closed: false,
       replaced: false,
     };
-    // Reserve the slot before awaiting registration: parallel claims retain
-    // deterministic order and duplicate calls cannot create another hook.
     if (existing === undefined) {
       sources.push(source);
     } else {
-      // Workflow lets a run take a token from its own earlier hook. This also
-      // reclaims a token whose takeover the old pump has not observed yet.
       existing.replaced = true;
       sources.splice(sources.indexOf(existing), 1, source);
     }
@@ -382,12 +282,10 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const confirm = () => claimHookOwnership(source.hook);
       source.registered = options.confirmAfter?.then(confirm, confirm) ?? confirm();
       await source.registered;
-      // A takeover this run has reclaimed from no longer counts toward the next one.
       takenOver = false;
       void pump(source);
     } catch (error) {
       if (existing === undefined || existing.closed) {
-        // A replaced source whose pump already returned can never deliver again.
         sources.splice(sources.indexOf(source), 1);
       } else {
         existing.replaced = false;
@@ -437,7 +335,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
     },
     async whenTakenOver(signal) {
-      // Wakes the loop now rather than at the next arrival, so no waiter lingers.
       signal?.addEventListener("abort", notify, { once: true });
       while (sources.length > 0 || !takenOver) {
         throwIfFailed();
@@ -493,14 +390,11 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     restore(payloads) {
       if (sources.length === 0)
         throw new Error("Cannot restore session commands before reclaiming the session hooks.");
-      // Restored payloads were accepted before anything the reclaimed pumps
-      // have enqueued since, so they must precede the current queue.
       queue.unshift(...payloads);
       if (handover !== undefined) handover.index += payloads.length;
       notify();
     },
     async dispose() {
-      // Accepted-but-unread payloads are dropped: disposal ends the session.
       await stop();
     },
   };

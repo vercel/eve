@@ -1,5 +1,3 @@
-/** Sends settled turn results to the caller of each turn. */
-
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
@@ -26,14 +24,11 @@ import {
 
 const log = createLogger("execution.delegated-parent-notification");
 
-/** Error code for a delegated agent whose execution threw. */
 const SUBAGENT_EXECUTION_FAILED = "SUBAGENT_EXECUTION_FAILED";
 
-/** Settled turn payload forwarded from the owner to the caller. */
 export interface SettledTurnNotification {
   readonly output: unknown;
   readonly isError?: boolean;
-  /** Usage accumulated since the previous caller settlement, including yielded turns. */
   readonly usage?: TokenUsage;
 }
 
@@ -44,15 +39,6 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
   outputTokens: 0,
 };
 
-/**
- * Sends a settled conversation turn to the caller that started it.
- *
- * `lifecycle` is the child engine's explicit verdict — `parked` when the
- * child session survived the turn and can accept another delivery,
- * `terminal` when it ended with this turn. It is carried on the result as
- * an {@link AgentTurnOutcome} so the caller never infers lifecycle from
- * success or error codes.
- */
 export async function notifyTurnCallerStep(input: {
   readonly caller: TurnCaller | undefined;
   readonly lifecycle: AgentTurnOutcome["kind"];
@@ -84,7 +70,6 @@ export async function notifyTurnCallerStep(input: {
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
 }
 
-/** Settles a workflow-owned caller after the child turn is cooperatively cancelled. */
 export async function notifyCancelledTaskCallerStep(input: {
   readonly caller: TurnCaller;
   readonly sessionId: string;
@@ -163,12 +148,9 @@ function createSettledTurnResult(input: {
     output,
     subagentName: input.caller.subagentName,
   };
-  // Legacy per-result usage projection (usage spans); the run that opened the
-  // child tallies `outcome.usageDelta`, never this field, when present.
   return input.settled.usage === undefined ? result : { ...result, usage: input.settled.usage };
 }
 
-/** Resolves the caller that created a delegated conversation session. */
 export async function resolveInitialTurnCallerStep(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Promise<TurnCaller | undefined> {
@@ -206,11 +188,6 @@ export async function resolveInitialTurnCallerStep(input: {
   };
 }
 
-/**
- * Points child event forwarding at the caller that owns the next accepted turn,
- * so the turn's input requests and progress reach that caller and not the
- * previous one.
- */
 export function bindTurnCallerContext(
   caller: TurnCaller | undefined,
   serializedContext: Record<string, unknown>,
@@ -253,7 +230,6 @@ export function bindTurnCallerContext(
 
 async function postSettledTurnCallback(input: {
   readonly result: RuntimeSubagentChildResult;
-  /** Informational on the wire (tracing); the receiver never verifies it. */
   readonly sessionId: string;
   readonly url: string;
 }): Promise<void> {
@@ -286,10 +262,6 @@ async function postSettledTurnCallback(input: {
   });
 }
 
-/**
- * How long a result waits on a caller whose callback reports nothing pending, in case the caller
- * hasn't registered the reply it sent the token for yet.
- */
 export const NOT_PENDING_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2000, 4000];
 
 async function postCallbackPayload(input: {
@@ -307,9 +279,6 @@ async function postCallbackPayload(input: {
     }
     const delay = NOT_PENDING_RETRY_DELAYS_MS[attempt];
     if (delay === undefined) {
-      // The caller already took this result, say from a delivery whose acknowledgement was lost,
-      // or stopped waiting for it. As for a local caller whose hook is gone, the turn's result
-      // has nowhere to go; the session itself is unaffected, so it doesn't fail.
       log.warn("turn caller no longer waits for this result", {
         kind: Reflect.get(input.payload as object, "kind"),
       });
@@ -319,7 +288,6 @@ async function postCallbackPayload(input: {
   }
 }
 
-/** Whether a callback's 404 is its route saying nothing waits on the token, in any protocol. */
 async function isCallbackNotPending(response: Response): Promise<boolean> {
   if (response.status !== 404) return false;
   const body: unknown = await response.json().catch(() => undefined);

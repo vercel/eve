@@ -1,4 +1,3 @@
-/** HTTP authentication strategies and verifiers. */
 export {
   verifyHttpBasic,
   verifyJwtHmac,

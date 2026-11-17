@@ -1,16 +1,3 @@
-/**
- * Scope-parameterized authorization flow shared by MCP connections and
- * authored tools and workflow steps using inline providers.
- *
- * A *scope* names the framework-owned callback URL — a connection name for
- * an MCP connection, a tool name for tool-hosted auth. Connection-hosted
- * authorization also carries an opaque instance ID that keys its token cache
- * and pins callback completion to the exact resolved connection. Everything else
- * (principal resolution, the park/resume webhook dance, the loop guard)
- * is identical across both, so it lives here once instead of being
- * duplicated per caller.
- */
-
 import { type AlsContext, contextStorage, loadContext } from "#context/container.js";
 import {
   type ConnectionAuthorizationChallenge,
@@ -52,22 +39,14 @@ import {
 
 const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]"]);
 
-/**
- * Everything the scoped authorization helpers need to drive one
- * authorization strategy: the cache/callback {@link scope}, the
- * authored {@link AuthorizationDefinition}, and the per-scope
- * {@link ConnectionAuthorizationContext} handed to every callback.
- */
 export interface ScopedAuthorization {
   readonly boundResponder?: SessionAuthContext;
-  /** Opaque resolved instance identity for connection-hosted authorization. */
   readonly instanceId?: string;
   readonly scope: string;
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly connection: ConnectionAuthorizationContext;
 }
 
-/** One execution's token capability and authorization interruption boundary. */
 export function createAuthorizationExecution(
   options: {
     readonly completeAuthorization?: typeof completeScopedAuthorization;
@@ -95,7 +74,6 @@ export function createAuthorizationExecution(
 
   return {
     complete,
-    /** Whether this execution completed a sign-in for `scoped`. */
     isJustAuthorized(scoped: ScopedAuthorization): boolean {
       return justAuthorized.has(scoped.instanceId ?? scoped.scope);
     },
@@ -110,11 +88,6 @@ export function createAuthorizationExecution(
         return requireAuth(scoped, error);
       }
     },
-    /**
-     * Resolves a stored token for the bound responder, who isn't part of this
-     * execution: it never starts or completes a sign-in, so a missing token
-     * fails terminally instead of reaching the interruption boundary.
-     */
     async getResponderToken(scoped: ScopedAuthorization): Promise<TokenResult> {
       try {
         return await resolveScopedToken(scoped);
@@ -138,7 +111,6 @@ export function createAuthorizationExecution(
             justAuthorized.has(scoped.instanceId ?? scoped.scope),
             error,
           ),
-          // Connection transports evict refused bearers when classifying their errors.
           { evictToken: false },
         );
       }
@@ -160,14 +132,12 @@ class ScopedAuthorizationRequiredError extends Error {
   }
 }
 
-/** Whether `error` asks the enclosing boundary to start a sign-in. */
 export function isScopedAuthorizationRequiredError(
   error: unknown,
 ): error is ScopedAuthorizationRequiredError {
   return error instanceof Error && error.name === "ScopedAuthorizationRequiredError";
 }
 
-/** Produces the shared challenge; the caller owns parking and resumption. */
 export async function handleAuthorizationError(
   error: unknown,
   options: { readonly evictToken: boolean } = { evictToken: true },
@@ -184,8 +154,6 @@ export async function handleAuthorizationError(
     });
   }
 
-  // A turn a schedule started is no request from the person: asking there posts a prompt on
-  // every firing, whether or not anyone is there to answer it.
   const store = contextStorage.getStore();
   if (
     store !== undefined &&
@@ -199,7 +167,6 @@ export async function handleAuthorizationError(
     });
   }
 
-  // A sign-in this turn already ended without completing is reported, not started again.
   const projection = liveProjection();
   const refused =
     projection === undefined
@@ -245,7 +212,6 @@ export async function handleAuthorizationError(
 function executeWithAuthorization(
   execute: () => unknown,
 ): Promise<unknown> | AsyncIterable<unknown> {
-  // Keep generator results as iterables, including errors raised during iteration.
   try {
     const output = execute();
     return isAsyncIterable(output)
@@ -266,28 +232,10 @@ async function* handleIterable(output: AsyncIterable<unknown>): AsyncIterable<un
   }
 }
 
-/**
- * Resolves a bearer token for one scope, consulting the per-step token
- * cache before invoking the authored `getToken`.
- *
- * The cache is keyed by `(instanceId ?? scope, principalKey(principal))` so
- * concurrent users and resolved connection instances never alias onto each
- * other's bearer. Outside a runtime scope the cache is unavailable, but
- * `getToken` still runs with
- * a framework-resolved principal so ad-hoc `"app"`-scoped use keeps
- * working; `"user"`-scoped strategies without a context fail fast inside
- * {@link resolveConnectionPrincipal}.
- *
- * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
- * callers catch it and drive {@link startScopedAuthorization}.
- */
 export async function resolveScopedToken(input: ScopedAuthorization): Promise<TokenResult> {
   const { scope, authorization, connection } = input;
   const cacheScope = input.instanceId ?? scope;
 
-  // Reading `contextStorage.getStore()` directly keeps this the only
-  // place that tolerates a missing context; authored code uses
-  // `loadContext()` so misuse fails loudly.
   const ctx = contextStorage.getStore();
   const principal = resolveScopedPrincipal(input, ctx);
 
@@ -304,23 +252,6 @@ export async function resolveScopedToken(input: ScopedAuthorization): Promise<To
   return result;
 }
 
-/**
- * Best-effort removal of a rejected bearer for one scope's resolved
- * principal, across every cache layer.
- *
- * Called when an already-resolved bearer is rejected (a downstream
- * `401`, or an explicit `requireAuth()` after a failed call) so the
- * re-authorization attempt does not re-read the stale token. Drops two
- * layers: eve's per-step cache, and — via the strategy's optional
- * {@link AuthorizationDefinition.evict} hook — any cache the strategy
- * itself owns (e.g. the `@vercel/connect` in-process token cache). The
- * single shared eviction path here means both authored tools and MCP
- * connections cascade identically.
- *
- * No-op outside a runtime scope or when the principal cannot be
- * resolved; a resolution failure here must never mask the underlying
- * authorization error that triggered the eviction.
- */
 export async function evictScopedToken(input: ScopedAuthorization): Promise<void> {
   const { scope, authorization, connection } = input;
   const cacheScope = input.instanceId ?? scope;
@@ -331,29 +262,13 @@ export async function evictScopedToken(input: ScopedAuthorization): Promise<void
     principal = resolveScopedPrincipal(input, ctx);
     evictCachedToken(ctx, cacheScope, principalKey(principal));
   } catch {
-    // Eviction is best-effort; without a principal we can drop neither
-    // cache layer, so bail rather than mask the authorization error.
     return;
   }
   try {
     await authorization.evict?.({ connection, principal });
-  } catch {
-    // The strategy's own cache eviction is best-effort too.
-  }
+  } catch {}
 }
 
-/**
- * Completes an authorization whose callback arrived this turn, caching
- * the freshly minted token under the scope.
- *
- * Returns `true` when a token was minted. Callers use the boolean as a
- * loop guard: a scope authorized this turn that still reports `Required`
- * on the immediately following call has a token the server itself
- * rejected, so it must fail terminally rather than re-challenge forever.
- *
- * No-op (returns `false`) when the strategy is not interactive or no
- * callback arrived for the scope.
- */
 export async function completeScopedAuthorization(input: ScopedAuthorization): Promise<boolean> {
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return false;
@@ -362,10 +277,8 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   if (result === undefined) return false;
 
   const ctx: AlsContext = loadContext();
-  // The sign-in is reported as it completes, not when the call that completes it returns.
   const report = ctx.get(SignInCompletedKey);
   try {
-    // RFC 6749 section 4.1.2.1: the person refused consent, so there is nothing to complete.
     if (result.callback.params.error === SIGN_IN_DECLINED)
       throw new ConnectionAuthorizationFailedError(scope, {
         message: `Sign-in to "${scope}" was declined.`,
@@ -390,14 +303,6 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   return true;
 }
 
-/**
- * Starts an interactive authorization for one scope and returns the
- * {@link AuthorizationSignal} a tool returns to park the turn.
- *
- * Returns `undefined` when the strategy is not interactive or no
- * callback URL can be minted (for example outside a deployment), so
- * callers can fall through to rethrowing the original `Required` error.
- */
 async function startScopedAuthorization(
   input: ScopedAuthorization,
 ): Promise<AuthorizationSignal | undefined> {
@@ -446,7 +351,6 @@ function resolveScopedPrincipal(input: ScopedAuthorization, ctx?: AlsContext) {
       );
 }
 
-/** Normalizes callback URLs for providers with localhost requirements. */
 export function resolveAuthorizationCallbackUrl(input: {
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly callbackUrl: string;
@@ -455,7 +359,6 @@ export function resolveAuthorizationCallbackUrl(input: {
   return vercelConnectCallbackUrl(input.callbackUrl);
 }
 
-/** A callback URL as Vercel Connect accepts it: a loopback HTTP host is named `localhost`. */
 export function vercelConnectCallbackUrl(callbackUrl: string): string {
   let url: URL;
   try {
@@ -472,16 +375,6 @@ export function vercelConnectCallbackUrl(callbackUrl: string): string {
   return url.toString();
 }
 
-/**
- * Resolves the user-facing `displayName` onto a challenge before it is
- * surfaced on sign-in `interaction.opened`.
- *
- * The agent author's static definition-level value wins over the
- * strategy-stamped one: an author writing
- * `auth: { ...connect("x"), displayName: "Y" }` is the most explicit
- * intent, while strategies provide defaults. Returns the input challenge
- * unchanged when the resolved value does not differ.
- */
 export function stampChallengeDisplayName(
   challenge: ConnectionAuthorizationChallenge,
   authorization: Readonly<AuthorizationDefinition>,

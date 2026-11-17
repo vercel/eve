@@ -16,15 +16,6 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import { createWorkflowProgramExecuteInput } from "#tools/workflow-program-input.js";
 
-/**
- * Resolves one compiled authored tool into a runtime-owned definition
- * with live callbacks reattached from the authored module.
- *
- * Schema-bearing module exports are retained when they implement the validated
- * runtime contract; serialized schemas from the compiled manifest are
- * otherwise rehydrated into live validators. Optional hooks are reattached
- * from the live module export.
- */
 export async function resolveToolDefinition(
   definition: CompiledToolDefinition,
   moduleMap: CompiledModuleMap,
@@ -67,7 +58,6 @@ export async function resolveToolDefinition(
       `tool:${resolvedRecord.description}`,
     );
 
-    // A workflow tool's entry point runs from the workflow registry, never in process.
     const execute =
       definition.behavior?.handling?.kind === "workflow-tool"
         ? undefined
@@ -105,8 +95,6 @@ export async function resolveToolDefinition(
       ...extractOptionalHooks(resolvedRecord, definition),
     };
     const marked = isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
-    // Checked on the authored executor, so only a definition that runs a built-in interaction
-    // executor is marked, never one that merely shares its name.
     return isInteractionOnly(resolvedRecord.execute) ? markInteractionOnly(marked) : marked;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
@@ -122,23 +110,12 @@ export async function resolveToolDefinition(
   }
 }
 
-/**
- * Mutable slice of {@link ResolvedToolDefinition} covering every
- * optional authored hook. Keys are only assigned when the authored
- * export declared the corresponding hook so callers can `...spread` the
- * result without clobbering required fields with `undefined`.
- */
 type LabelCallbacks = Exclude<NonNullable<ResolvedToolDefinition["label"]>, false>;
 
 type OptionalResolvedFields = {
   -readonly [K in "label" | "approval" | "endsTurn" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
-/**
- * Validates and extracts every optional hook declared on the authored
- * tool module, returning them as an {@link OptionalResolvedFields}
- * builder.
- */
 function extractOptionalHooks(
   record: Record<string, unknown>,
   definition: CompiledToolDefinition,
@@ -201,10 +178,6 @@ function extractOptionalHooks(
   return optional;
 }
 
-/**
- * Formats the "Expected the tool export ... {predicate}" message used
- * by every validation error in this file.
- */
 function describe(definition: CompiledToolDefinition, predicate: string): string {
   return `Expected the tool export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" ${predicate}.`;
 }

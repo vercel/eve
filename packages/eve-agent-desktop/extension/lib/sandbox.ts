@@ -1,12 +1,3 @@
-/**
- * Sandbox helpers for running agent-desktop inside an eve sandbox: install the
- * CLI and a minimal X11 desktop, start the display, session bus and window
- * manager, and build the environment every agent-desktop command needs.
- *
- * This file is also published as `@eve/agent-desktop/sandbox`, so it imports
- * no part of the extension other than its own sibling `./process`.
- */
-
 import { runCommand, type CommandSandbox } from "./process.js";
 
 /** The agent-desktop CLI version this package's tools are written against. */
@@ -93,7 +84,6 @@ export async function installAgentDesktop(
   const spec = quoteShellArg(options.installSpec ?? DEFAULT_AGENT_DESKTOP_INSTALL_SPEC);
   await runOrThrow(
     sandbox,
-    // A user-writable npm prefix needs no sudo; fall back to sudo for a root-owned one.
     `npm install -g ${spec} || sudo -n npm install -g ${spec}`,
     "Installing agent-desktop",
     options.signal,
@@ -149,7 +139,6 @@ function windowManagerReady(display: string): string {
   return `DISPLAY=${quoteShellArg(display)} xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -Eq 'window id # 0x[1-9a-f]'`;
 }
 
-/** Poll a readiness check for up to `tenths` tenths of a second, then fail with the log. */
 function awaitReady(check: string, tenths: number, log: string, what: string): string[] {
   return [
     `for _ in $(seq 1 ${tenths}); do ${check} && break; sleep 0.1; done`,
@@ -173,7 +162,6 @@ function startDesktopScript(options: StartDesktopOptions): string {
     `  setsid -f Xvfb ${d} -screen 0 ${size} -nolisten tcp +extension RANDR > ${root}/xvfb.log 2>&1`,
     ...awaitReady(displayReady(display), 50, `${root}/xvfb.log`, "Xvfb"),
     "fi",
-    // One session bus, reused across commands. AT-SPI's launcher is activated on it on first use.
     `if ! ${sessionBusReady()}; then`,
     `  eval "$(DISPLAY=${d} dbus-launch --sh-syntax)"`,
     `  printf '%s' "$DBUS_SESSION_BUS_ADDRESS" > ${SESSION_BUS_FILE}`,

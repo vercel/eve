@@ -140,7 +140,6 @@ describe("session prewarmers", () => {
         expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]);
 
         await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
-        // Cleanup that did not wait for the prewarm step would run while start is held.
         await vi
           .waitFor(() => expect(runtime.sandboxEvents).toContain(`end:${run.runId}`), {
             timeout: 2_000,
@@ -148,7 +147,6 @@ describe("session prewarmers", () => {
           .catch(() => undefined);
         started.resolve();
         await expect(run.returnValue).resolves.toEqual({ output: "" });
-        // Session end waited for the prewarm step, so its cleanup removed the started sandbox.
         expect(runtime.sandboxEvents).toEqual([
           `definition:${run.runId}`,
           `start:${run.runId}`,
@@ -194,7 +192,6 @@ describe("prewarm handoff while the prewarm step runs", () => {
           expectedOwnerRunId: run.runId,
           targetDeploymentId: "dpl_b",
         });
-        // Without the hold, the session moves within a few hundred milliseconds.
         const until = Date.now() + 2_000;
         while (Date.now() < until) {
           expect((await waitForHookOwner(token)).runId).toBe(run.runId);
@@ -263,7 +260,6 @@ describe("idle session prewarm handoff", () => {
       });
       try {
         await waitForHookOwner(token);
-        // A session moves only once its prewarm step has started the sandbox.
         await waitForPrewarmStep(anchor.runId);
         await resumeHook(token, {
           kind: "session-prewarm",
@@ -355,7 +351,6 @@ describe("idle session prewarm handoff", () => {
           );
           const preparedDeadline = await deadline(successorId!);
           if (conversation) {
-            // Completed turns extend the idle window; preparation itself must not renew it.
             expect(preparedDeadline.getTime()).toBeGreaterThanOrEqual(originalDeadline.getTime());
             const successor = await world.runs.get(successorId!);
             expect(preparedDeadline.getTime()).toBeLessThan(successor.createdAt.getTime() + 60_000);
@@ -375,7 +370,6 @@ describe("idle session prewarm handoff", () => {
               command: { kind: "clear", deliveryId: "before-first-message" },
             });
           }
-          // A retry inspected before handoff must not move the successor backwards.
           await resumeHook(token, {
             kind: "session-prewarm",
             expectedOwnerRunId: anchor.runId,
@@ -399,7 +393,6 @@ describe("idle session prewarm handoff", () => {
               data: expect.objectContaining({ value: expect.stringContaining("Alice confirms") }),
             }),
           );
-          // Publication and hook takeover precede the successor's durable turn commit.
           await waitForParkedTurnStep(successorId!);
           const states = await readTurnStepStates(successorId!);
           const userHistory = states
@@ -493,7 +486,6 @@ describe("first turn abort hooks", () => {
               abortHooksBeforeEachTurn.push(abortHooks);
             }
           }
-          // Each turn uses the pair registered before its message; none starts its own.
           expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
         } finally {
           stream.dispose();
@@ -522,10 +514,8 @@ describe("controls before a prewarmed session's first message", () => {
       const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
       try {
         await waitForHook({ runId: run.runId }, { token: inboxToken });
-        // Alice cancels, clears, and compacts before she has said anything.
         const controls = ["cancel", "clear", "compact"] as const;
         for (const kind of controls) await resumeHook(inboxToken, { deliveryId: kind, kind });
-        // A command from a newer eve fails, also only once the session has started.
         await resumeHook(inboxToken, { deliveryId: "unknown", kind: "from-the-future" });
         await resumeHook(inboxToken, handoffFollowUp("dpl_inline", "Say hello.", "first-message"));
         const settled = new Set<string>();
@@ -549,7 +539,6 @@ describe("controls before a prewarmed session's first message", () => {
             data: expect.objectContaining({ deliveryId: "unknown", outcome: "failed" }),
           }),
         );
-        // The early clear and compaction leave Alice's first turn alone.
         expect(events.some((event) => event.type === "context.started")).toBe(false);
       } finally {
         stream.dispose();

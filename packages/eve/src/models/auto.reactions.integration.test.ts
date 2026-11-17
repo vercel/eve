@@ -18,9 +18,6 @@ import { defineDynamic } from "#public/definitions/model.js";
 
 import { auto } from "./auto.js";
 
-// auto() as an agent's model field, run through the runtime: what it decides, how often, and which
-// model each call reaches, with and without a fresh process for every step.
-
 const ALICE = {
   attributes: {},
   authenticator: "test",
@@ -29,7 +26,6 @@ const ALICE = {
   principalType: "user" as const,
 };
 
-/** A model that calls `lookup` once per turn and then replies, logging each call by name. */
 function scriptedModel(name: string, modelId: string, log: string[]) {
   return markMockModel(
     new MockLanguageModelV4({
@@ -66,7 +62,6 @@ async function runTwoTurns(): Promise<{ readonly log: string[]; readonly decisio
     doDecide: async ({ state }) => {
       const serialized = JSON.stringify(state);
       decisions.push(serialized);
-      // The latest message decides: earlier turns are context.
       const part = state[0];
       const routing = (part?.type === "json" ? part.value : undefined) as
         | { readonly messages: readonly { readonly text: string }[] }
@@ -110,7 +105,6 @@ async function runTwoTurns(): Promise<{ readonly log: string[]; readonly decisio
             description: "Look something up.",
             execute: async () => {
               log.push("tool:lookup");
-              // The first turn's lookup waits for a message that steers the turn.
               if (log.filter((entry) => entry === "tool:lookup").length === 1) {
                 await until(log, "steered", 1);
               }
@@ -164,7 +158,6 @@ async function runTwoTurns(): Promise<{ readonly log: string[]; readonly decisio
   return { decisions, log };
 }
 
-/** The first turn's calls, steered with a second message, reached small; the second's, large. */
 function expectCallsPerTurn(log: readonly string[]): void {
   const calls = log.filter((entry) => entry.startsWith("call:"));
   const firstLarge = calls.indexOf("call:large");
@@ -181,8 +174,6 @@ describe("auto() as the agent's model", () => {
     const { decisions, log } = await runTwoTurns();
 
     expect(decisions).toHaveLength(2);
-    // Steering the first turn toward difficult work didn't decide again: its calls stayed small.
-    // The second turn decides with the first as context.
     expect(decisions[0]).not.toContain("Actually");
     expect(decisions[1]).toContain("Alice needs a routine summary.");
     expect(decisions[1]).toContain("Done by small.");
@@ -190,7 +181,6 @@ describe("auto() as the agent's model", () => {
   }, 60_000);
 
   it("rebuilds the chosen model in a fresh process without deciding again", async () => {
-    // Every step forgets the code it built, as a process that didn't build it would.
     vi.stubEnv("EVE_DEFINITIONS_COLD", "1");
     const { decisions, log } = await runTwoTurns();
 
@@ -207,7 +197,6 @@ describe("auto() as the agent's model", () => {
     const runtime = await createTestRuntime({
       agent: {
         definition: defineAgent({
-          // Code outside a memo that answers differently: evaluating again returns another model.
           model: defineDynamic(() => {
             builds += 1;
             log.push("build");
@@ -249,8 +238,6 @@ describe("auto() as the agent's model", () => {
       }
     });
 
-    // The fresh process evaluated the model again for the step, which chose another one; the next
-    // model call evaluated it again, and used what it chose.
     const calls = log.filter((entry) => entry === "build" || entry.startsWith("call:"));
     expect(calls.slice(0, 2)).toEqual(["build", "call:small"]);
     expect(calls.slice(2, 5)).toEqual(["build", "build", "call:large"]);

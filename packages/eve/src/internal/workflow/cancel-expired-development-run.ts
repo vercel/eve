@@ -12,7 +12,6 @@ export async function cancelExpiredDevelopmentRun(world: World, runId: string): 
       });
     } catch (error) {
       if (isInactiveWorkflowRunError(error)) return;
-      // A delivery can finish between the scan and cancellation.
       const current = await world.runs.get(runId, { resolveData: "none" });
       if (current.status === "pending" || current.status === "running") throw error;
     }

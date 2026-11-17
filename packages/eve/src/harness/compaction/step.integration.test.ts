@@ -82,7 +82,6 @@ const lookupTool: HarnessToolDefinition = {
   name: "lookup",
 };
 
-/** The user-role text of one model request, in order. */
 function userTexts(prompt: Prompt): string[] {
   return prompt.flatMap((message) =>
     message.role === "user"
@@ -91,7 +90,6 @@ function userTexts(prompt: Prompt): string[] {
   );
 }
 
-/** Manually compacts a short conversation with `model`, as `session.compact()` does. */
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
@@ -134,7 +132,6 @@ describe("compaction summary call", () => {
       tools: new Map(),
     })(
       {
-        // Small enough that the brief compacts before the turn's first model call.
         compaction: {},
         continuationToken: "http:unresolved-compaction-model",
         history: [
@@ -154,7 +151,6 @@ describe("compaction summary call", () => {
         data: { outcome: "failed", error: { code: "COMPACTION_FAILED" } },
       },
     ]);
-    // No summary run started: the only run requested is the turn's own.
     const owners = events.flatMap((event) =>
       event.type === "model.requested" ? [event.data.owner] : [],
     );
@@ -223,7 +219,6 @@ describe("compaction summary call", () => {
     },
   );
 
-  // https://github.com/vercel/eve/issues/5350
   it("fails the turn and keeps the history when the summary call stays rate limited", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -234,7 +229,6 @@ describe("compaction summary call", () => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
         if (!system.includes("CONTEXT CHECKPOINT COMPACTION")) return await turnCalls();
         throw new APICallError({
-          // eve's retry policy still retries the 429; this skips the AI SDK's slower inner retry.
           isRetryable: false,
           message: "Too Many Requests",
           requestBodyValues: {},
@@ -257,7 +251,6 @@ describe("compaction summary call", () => {
         tools: new Map(),
       })(
         {
-          // Small enough that the long brief compacts before the turn's first model call.
           compaction: {},
           continuationToken: "http:rate-limited-compaction",
           history,
@@ -286,7 +279,6 @@ describe("compaction summary call", () => {
       agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async () => new MockLanguageModelV3({ doStream }),
-      // A tool description no compaction can shrink, over the limit by itself.
       tools: new Map([
         [
           "policy_lookup",
@@ -366,7 +358,6 @@ describe("compaction summary call", () => {
       content: "Alice asked for the quarterly report.",
       role: "assistant",
     });
-    // Session limits see the summary call; a manual compaction has no turn to report it.
     expect(sessionUsage(result.session)).toMatchObject({
       inputTokens: 120,
       outputTokens: 8,
@@ -446,7 +437,6 @@ describe("compaction summary call", () => {
     const at = "2026-10-21T00:00:00.000Z";
     const issues: unknown[] = [];
     let position = 0;
-    // Over the threshold, but capping the old search output fits it without a summary.
     const session: HarnessSession = {
       compaction: {},
       continuationToken: "http:compaction-capped",
@@ -489,7 +479,6 @@ describe("compaction summary call", () => {
       { kind: "compaction", type: "context.started" },
       { kind: "compaction", outcome: "completed", type: "context.settled" },
     ]);
-    // Only the turn's own run: the summary model was never requested.
     expect(
       events.filter((event) => event.type === "model.requested").map(({ data }) => data),
     ).toEqual([expect.not.objectContaining({ changeId: expect.anything() })]);
@@ -510,8 +499,6 @@ describe("announcements after a compaction during a turn", () => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
         if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return summaryStream();
         requests.push(userTexts(prompt));
-        // A long first reply pushes the second step over the threshold, so compaction runs
-        // between the turn's steps and folds the first announcement into the summary.
         return requests.length === 1
           ? lookup(`Let me check. ${"lorem ipsum ".repeat(1_500)}`)
           : answer();
@@ -525,7 +512,6 @@ describe("announcements after a compaction during a turn", () => {
     };
     const tools: HarnessToolMap = new Map([
       ["lookup", lookupTool],
-      // A deferred tool gives the session a catalog to announce.
       ["refund_invoice", { ...lookupTool, deferred: true, name: "refund_invoice" }],
     ]);
 
@@ -552,8 +538,6 @@ describe("announcements after a compaction during a turn", () => {
       doStream: async ({ prompt }) => {
         requests.push(userTexts(prompt));
         const parts = (requests.length === 1 ? lookup("Let me check.") : answer()).stream;
-        // Usage that follows the prompt's size, as a provider reports it, so eve measures the
-        // large result it left behind.
         const total = Math.ceil(JSON.stringify(prompt).length / 4);
         return {
           stream: parts.pipeThrough(
@@ -577,14 +561,10 @@ describe("announcements after a compaction during a turn", () => {
       },
     });
     const tools: HarnessToolMap = new Map([
-      // A large result that capping shortens once it is old.
       ["lookup", { ...lookupTool, execute: async () => "x".repeat(100_000) }],
-      // A deferred tool gives the session a catalog to announce.
       ["refund_invoice", { ...lookupTool, deferred: true, name: "refund_invoice" }],
     ]);
     const events: SessionEvent[] = [];
-    // The first turn fits, and leaves the large result behind; the second doesn't, until capping
-    // shortens the old result.
     const reference = { contextWindowTokens: 200_000, id: "step-model" };
     const kernel = createTestKernel({
       agent: { model: reference, thresholdPercent: 1 },
@@ -611,7 +591,6 @@ describe("announcements after a compaction during a turn", () => {
     expect(
       events.filter(({ type }) => type === "context.settled").map(({ data }) => data),
     ).toMatchObject([{ kind: "compaction", outcome: "completed" }]);
-    // Only the turns' own runs: capping was enough, so no summary ran.
     expect(requests).toHaveLength(3);
     const catalogs = (texts: readonly string[]) =>
       texts.filter((text) => text.includes("eve__search")).length;

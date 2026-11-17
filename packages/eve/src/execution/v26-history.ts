@@ -1,16 +1,3 @@
-// Reads a session an eve before v27 recorded. Those sessions stored one v26 `{type, data, meta}`
-// event per line; a v27 deployment shares their World, so it can read their history but not
-// their events. This reads each stored v26 event as the v27 commit it records, so every v27
-// reader folds the conversation as if v27 had written it: its messages, reasoning, calls and
-// their results, approvals and questions, sign-ins, subagents, clears, and compactions.
-//
-// It reads; it never writes. One stored v26 line reads as at most one v27 line, so positions
-// keep their meaning, and a v26 line that records nothing a v27 reader folds reads as none.
-// What v26 never recorded, such as a delivery's admission or the end of what a cancel cut, the
-// commit that implies it records, the way the v27 writer closes what an owner leaves open.
-//
-// Delete once no session a v27 deployment serves was recorded before v27.
-
 import { cascade } from "#harness/session-machine/cascade.js";
 import { FACT_CATALOG } from "#protocol/session-events/catalog.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
@@ -37,17 +24,10 @@ import { isV26Line } from "#protocol/v26-lines.js";
 
 type Data = Readonly<Record<string, unknown>>;
 
-/** Reads consecutive stored lines of one session an eve before v27 started, from its first. */
 export interface V26HistoryReader {
-  /**
-   * The v27 line the record at `position` reads as, or `undefined` when it records nothing a v27
-   * reader folds, such as a streamed delta. A v27 line reads as itself: a v27 deployment that
-   * ends a stranded v26 session appends its end as one.
-   */
   read(record: unknown, position: number): StoredLine<SessionEvent> | undefined;
 }
 
-/** A reader for one session's stored v26 lines. Read them in order, from position 0. */
 export function createV26HistoryReader(): V26HistoryReader {
   const view = emptySessionView();
   const translator = new Translator(view);
@@ -69,24 +49,16 @@ export function createV26HistoryReader(): V26HistoryReader {
         : [];
       const built = translator.factsOf(event.type, data, { deliveryIds, position });
       if (built.length === 0) return undefined;
-      // Facts leave out absent fields, as a stored line carries them.
       const intents = JSON.parse(JSON.stringify(built)) as Fact[];
-      // The writer's own rule: a commit that ends an owner ends what it still holds.
       const facts = cascade(view, intents);
       const line: CommitLine<SessionEvent> = { at, facts };
       translator.noteIntroduced(facts);
-      // As the writer folds: a whole session's settled rows would make each commit cost more.
       foldLine(view, line, position, { retention: "operational" });
       return line;
     },
   };
 }
 
-/**
- * The v27 lines a v26 session's stored records read as, from position `from` on: one output per
- * record, a `position` marker for a record that reads as none, so cursors keep counting stored
- * lines. `records` must start at position 0: each record reads in light of those before it.
- */
 export function v26LineStream(
   records: ReadableStream<unknown>,
   from: number,
@@ -106,14 +78,6 @@ export function v26LineStream(
   );
 }
 
-/**
- * The events one session's saved v26 events read as, for an application that kept them: the
- * events a v27 reader of the session's stream would read from them, at the same positions. They
- * must be the session's events from its first, one per stored line, in order, as a v26 client
- * read them from position 0; the next stored line is then at `records.length`. If trailing
- * records emit nothing, the last event's `meta.next` retains that source coverage without
- * changing any event's original position. Save the returned reader metadata unchanged.
- */
 export function convertLegacyEvents(records: readonly unknown[]): SessionStreamEvent[] {
   if (!isSessionStarted(records[0])) {
     throw new TypeError(
@@ -147,7 +111,6 @@ export function convertLegacyEvents(records: readonly unknown[]): SessionStreamE
   return events;
 }
 
-/** A v27 event looks like a v26 one but for the stream position a reader stamped on it. */
 function hasStreamPosition(record: unknown): boolean {
   const meta = (record as { readonly meta?: unknown }).meta;
   return isRecord(meta) && meta.position !== undefined;
@@ -163,28 +126,18 @@ interface Context {
 }
 
 class Translator {
-  /** The turn that runs, as v26 named it. */
   private turnId: string | undefined;
-  /** The turn the next one follows; `null` after a clear. */
   private follows: string | null = null;
-  /** Each turn's model run per v26 step. */
   private readonly runs = new Map<string, string>();
   private readonly partCounts = new Map<string, number>();
-  /** The reply parts of the turn's latest run that replied. */
   private reply: { readonly runId: string; readonly parts: string[] } | undefined;
-  /** Calls a task serves: their v26 `action.result` only reports the task starting. */
   private readonly taskCalls = new Set<string>();
-  /** The approval that cleared or rejected each call. */
   private readonly approvals = new Map<string, string>();
   private readonly interactionCalls = new Map<string, string>();
-  /** The context change a compaction runs as, until it completes. */
   private compaction: string | undefined;
-  /** History v26 imported for the turn, for the `delivery.consumed` it records next. */
   private pendingHistory: { id?: string; role: "user" | "assistant"; text: string }[] | undefined;
-  /** The delivery `turn.started` admitted, for the message v26 records next. */
   private startingDelivery: string | undefined;
 
-  /** Every entity a commit introduced, by family: the view drops them once they close. */
   private readonly introduced = new Set<string>();
 
   private readonly view: SessionView;
@@ -216,7 +169,6 @@ class Translator {
       case "turn.started":
         return this.startTurn(str(data.turnId), context);
       case "history.imported":
-        // Folded into the turn's `delivery.consumed`, which v26 records next.
         this.pendingHistory = Array.isArray(data.messages)
           ? data.messages.flatMap((message) =>
               isRecord(message) &&
@@ -293,15 +245,12 @@ class Translator {
       case "compaction.completed":
         return this.compactionSettled("completed");
       case "session.waiting":
-        // Idle: whatever v26 left open, such as a compaction that failed without an event, ended.
         return this.compaction === undefined ? [] : this.compactionSettled("failed");
       case "session.completed":
         return [{ data: { outcome: "completed" }, type: "session.ended" }];
       case "session.failed":
         return sessionFailed(data, id);
       default:
-        // Deltas preview what the completed events record; approval candidates precede the
-        // resolution that settles them.
         return [];
     }
   }
@@ -352,7 +301,6 @@ class Translator {
     return facts;
   }
 
-  /** The first of the line's deliveries v26 named that no turn consumed yet, or `fallback`. */
   private unadmitted(context: Context, fallback: string): string {
     return (
       context.deliveryIds.find(
@@ -400,7 +348,6 @@ class Translator {
     id: string,
   ): Fact[] {
     if (value === undefined) return [];
-    // A v26 writer that recorded no `step.started` for the step still names its run.
     const facts = this.runOf(data) === undefined ? this.stepStarted(data, id) : [];
     const runId = this.runOf(data);
     if (runId === undefined || !(this.isOpenRun(runId) || facts.length > 0)) return [];
@@ -497,7 +444,6 @@ class Translator {
     const callId = str(result.callId);
     const row = callId === undefined ? undefined : this.view.calls[callId];
     if (callId === undefined || row === undefined || row.status === "settled") return [];
-    // A task serves the call; its `task.settled` carries the call's result.
     if (this.taskCalls.has(callId)) return [];
     const error = isRecord(data.error) ? errorOf(data.error) : undefined;
     if (data.status === "rejected") {
@@ -632,7 +578,6 @@ class Translator {
       .map((row) => ({ interactionId: row.interactionId }));
     if (awaiting.length === 0 || this.view.turns[turnId]?.status !== "running") return [];
     const facts: Fact[] = [{ data: { awaiting, turnId }, type: "turn.paused" }];
-    // The deliveries that led here are answered: the turn now waits on a person.
     for (const row of Object.values(this.view.deliveries)) {
       if (row.status === "consumed" && row.turnId === turnId)
         facts.push({
@@ -736,7 +681,6 @@ class Translator {
     const reply = end.outcome === "completed" ? this.reply?.parts : undefined;
     this.turnId = undefined;
     this.reply = undefined;
-    // `cascade` closes what the turn still holds and settles the deliveries it consumed.
     return [
       {
         data: {
@@ -813,8 +757,6 @@ function sessionStarted(data: Data) {
 function sessionFailed(data: Data, id: string): Fact[] {
   const error = errorOf(data);
   const details = isRecord(data.details) ? data.details : {};
-  // A v26 deployment ending a stranded session recorded what ended it. v27 records a reset as
-  // the control delivery it admitted, and names that delivery as the end's cause.
   if (error.code !== "session_stranded" || typeof details.trigger !== "string") {
     return [{ data: { error, outcome: "failed" }, type: "session.ended" }];
   }
@@ -873,7 +815,6 @@ function userParts(data: Data): UserPart[] {
           kind: "file",
           mediaType: part.mediaType,
           size: typeof part.size === "number" ? part.size : undefined,
-          // v26 kept no reference to a file's bytes beyond a client-resolvable URL.
           unavailable: url === undefined ? true : undefined,
           url,
         },

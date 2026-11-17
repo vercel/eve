@@ -72,25 +72,6 @@ import {
   type SessionView,
 } from "#harness/session-machine/view.js";
 
-// The session's human-in-the-loop rules. Each reads the session and returns what changed; the
-// step runs them in order and parks once, when none of them leaves anything to run.
-//
-// A model step asks for the approvals its calls need (`askApprovals`). Answers are admitted as
-// they arrive and stand, revisable, as response rows (`admitAnswers`); a step's approvals settle
-// together once each has one, or when a message steers past them (`settleApprovals`). An
-// exhausted budget asks to continue (`requestLimit`, `settleLimit`), and a sign-in stops the
-// calls that need it (`requireSignIn`). Nothing here pauses the turn: the step does, from what
-// is still open.
-
-// ---------------------------------------------------------------------------
-// Asking
-// ---------------------------------------------------------------------------
-
-/**
- * A model response made calls that need a person's approval. The response waits in a suspended
- * step, beside any runtime calls it made. The approvals are asked now, or once the step's tasks
- * finish (`openDeferredApprovals`).
- */
 export function askApprovals(
   view: SessionView,
   input: {
@@ -102,10 +83,7 @@ export function askApprovals(
     readonly requester?: SuspendedStep["requester"];
   },
 ): Transition {
-  // Every anonymous caller shares one synthetic identity, so an anonymous requester can't be told
-  // apart from another anonymous responder: record none.
   const requester = input.requester?.principalType === "anonymous" ? null : input.requester;
-  // Results of work resumed in this step stay ahead of the notice; the rest waits for approval.
   const pendingStart = input.messages.findIndex((message) => message.role !== "tool");
   const committed = pendingStart === -1 ? input.messages : input.messages.slice(0, pendingStart);
   const turn = suspend(view.turn, {
@@ -117,15 +95,12 @@ export function askApprovals(
     tasks: input.tasks,
   });
   return transition({
-    // What still waits is told to each later model call from the session, not written into
-    // history, where it would outlive the approval it describes.
     history: { append: committed },
     events: input.tasks.length > 0 ? [] : input.requests.map((ask) => approvalOpened(ask)),
     turn,
   });
 }
 
-/** A step that parked approvals beside its tasks asks for them once the tasks finish. */
 export function openDeferredApprovals(view: SessionView): Transition {
   const tables = view.projection.view;
   const events = view.turn.suspended.flatMap((step) =>
@@ -138,7 +113,6 @@ export function openDeferredApprovals(view: SessionView): Transition {
   return transition({ events, turn: view.turn });
 }
 
-/** Approved workflow and agent calls join the runs their requesting steps wait on. */
 export function dispatch(
   view: SessionView,
   input: { readonly tasks: readonly RuntimeWorkflowTaskRequest[] },
@@ -153,7 +127,6 @@ export function dispatch(
   return transition({ events: [], turn: { ...view.turn, suspended } });
 }
 
-/** Turn input the turn can't take yet waits, unreceived, for a later step. */
 export function queueInput(view: SessionView, input: HarnessStepInput | undefined): Transition {
   return transition({ events: [], turn: withQueued(view.turn, input) });
 }
@@ -166,15 +139,6 @@ function withQueued(turn: TurnState, queued: HarnessStepInput | undefined): Turn
   };
 }
 
-// ---------------------------------------------------------------------------
-// Admitting answers
-// ---------------------------------------------------------------------------
-
-/**
- * A delivery's answers reach the session: each is submitted once, and stands, admitted, once
- * its responder may answer. An answer a response policy still weighs stays submitted. What a
- * responder may not do refuses their delivery, with why.
- */
 export function admitAnswers(
   view: SessionView,
   input: {
@@ -191,8 +155,6 @@ export function admitAnswers(
   }
   for (const responseId of check.admit) responses.admit(responseId);
   const refusal = check.refused.map(({ reason }) => reason).join("\n");
-  // The step's input can join an earlier delivery whose answer waits for the rest of its batch:
-  // only the deliveries that carried a refused answer, and haven't settled, are refused.
   const refusedIds = new Set(check.refused.map(({ responseId }) => responseId));
   const carriers = (delivery?.answers ?? [])
     .filter(({ responseId }) => refusedIds.has(responseId))
@@ -215,7 +177,6 @@ export function admitAnswers(
   });
 }
 
-/** The answer that stands for each open interaction: its latest admitted response. */
 function standingAnswers(tables: PublicView): ReadonlyMap<string, ResponseRow> {
   const standing = new Map<string, ResponseRow>();
   const rows = Object.values(tables.responses).sort((a, b) => a.introducedAt - b.introducedAt);
@@ -233,23 +194,11 @@ function responseOf(interactionId: string, row: ResponseRow | undefined): Answer
   return response;
 }
 
-// ---------------------------------------------------------------------------
-// Settling approvals
-// ---------------------------------------------------------------------------
-
-/** A call cleared to run now, with the step that asked, whose tools it runs with. */
 export interface RunnableCall {
   readonly approval: ApprovedCall;
   readonly step: SuspendedStep;
 }
 
-/**
- * A step's approvals settle together, once each has a standing answer. A message steers past
- * them instead: the answers given stand, and the approvals nobody answered are withdrawn.
- * Approved calls are returned to run; denied ones get their denial as a result.
- * A request that asked to be remembered records the decision. `answered` says a step settled on
- * its answers rather than a message.
- */
 export function settleApprovals(
   view: SessionView,
   input: {
@@ -338,8 +287,6 @@ export function settleApprovals(
     }
     return { ...step, messages };
   });
-  // Decisions settled together apply in the order people gave them, and the latest one stands.
-  // Answers in one delivery share a position and can't be ordered, so a denial among them stands.
   const declinedLast = (decision: (typeof decisions)[number]) =>
     decision.outcome === "declined" ? 1 : 0;
   const remembered = decisions
@@ -356,15 +303,10 @@ export function settleApprovals(
   });
 }
 
-/**
- * Approvals whose tool went away: no answer can run their calls, so nobody needs them anymore.
- * Each call fails, and the model reads why.
- */
 export function withdrawUnavailable(
   view: SessionView,
   input: {
     readonly interactionIds: readonly string[];
-    /** The step offers `eve__search`, which an unavailable tool's message points to. */
     readonly searchable: boolean;
   },
 ): Transition {
@@ -405,14 +347,8 @@ export function approvalMemory(view: SessionView): ApprovalMemory {
   };
 }
 
-// ---------------------------------------------------------------------------
-// The budget prompt
-// ---------------------------------------------------------------------------
-
-/** Why an answer to the budget prompt that is neither Continue nor Stop doesn't count. */
 const INVALID_BUDGET_ANSWER = "The budget prompt takes Continue or Stop.";
 
-/** The budget prompt the session waits on, with the turn it asked in, if any. */
 export function openLimit(
   view: SessionView,
 ): { readonly row: InteractionRow; readonly turnId?: string } | undefined {
@@ -424,10 +360,6 @@ export function openLimit(
   return row === undefined ? undefined : { row, turnId: interactionOwner(tables, row).turnId };
 }
 
-/**
- * The session spent its budget: it asks whether to continue instead of calling the model.
- * `settleLimit` grants a fresh budget or declines it.
- */
 export function requestLimit(view: SessionView, ask: LimitAsk): Transition {
   const { turnId } = turnPosition(view.projection);
   return transition({
@@ -436,10 +368,6 @@ export function requestLimit(view: SessionView, ask: LimitAsk): Transition {
   });
 }
 
-/**
- * The budget prompt settles on its standing answer: Continue grants a fresh budget, and Stop
- * declines it. Any other answer is refused, and the prompt stays open for another.
- */
 export function settleLimit(view: SessionView): Transition & {
   readonly limit?: { readonly granted: boolean };
 } {
@@ -477,14 +405,6 @@ export function settleLimit(view: SessionView): Transition & {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Sign-ins
-// ---------------------------------------------------------------------------
-
-/**
- * The held turn moves on, steered: the sign-ins it waits on are withdrawn, including a
- * responder's for one of its approvals, and the calls that waited for them fail with `reason`.
- */
 export function withdrawSignIns(view: SessionView, reason: string): Transition {
   const tables = view.projection.view;
   const waiting = view.turn.suspended.flatMap((step) =>
@@ -507,18 +427,11 @@ export function withdrawSignIns(view: SessionView, reason: string): Transition {
   return transition({ ...settled, events: [...events, ...settled.events], signIns: [] });
 }
 
-/**
- * Work needs a sign-in. The calls that need it stop and wait in their steps; an attempt it
- * replaces fails; and each sign-in is asked for and recorded. The turn holds until every sign-in
- * calls back, and then the stopped calls run. Input that waited on a responder's sign-in stays
- * queued for it.
- */
 export function requireSignIn(
   view: SessionView,
   input: {
     readonly challenges: readonly AuthorizationChallenge[];
     readonly calls?: readonly StoppedCall[];
-    /** The sign-ins this session can call back, when it runs in a workflow. */
     readonly callsBack?: CallsBack;
     readonly queued?: HarnessStepInput;
   },
@@ -528,9 +441,6 @@ export function requireSignIn(
   const opening = input.challenges.filter(
     (challenge) => tables.interactions[signInInteractionId(challenge)] === undefined,
   );
-  // A call a sign-in stopped stays open in its step and runs once the sign-in completes, so its
-  // settlement reports how the sign-in came out (`callSignInsSettled`).
-  // A newer attempt replaces the one it supersedes.
   const superseded = new Set(
     supersededChallenges(view.signIns, input.challenges)
       .map(signInInteractionId)
@@ -544,14 +454,12 @@ export function requireSignIn(
     ),
     ...opening.map((challenge) => {
       const opened = signInOpened(challenge, {
-        // A responder's sign-in is about their answer; any other holds the turn.
         subject:
           challenge.candidateId !== undefined &&
           tables.responses[challenge.candidateId] !== undefined
             ? { responseId: challenge.candidateId }
             : { turnId },
       });
-      // One a child already has a card for waits on that card's answer.
       return { ...opened, data: waitingSignIn(tables, opened.data, input.callsBack, superseded) };
     }),
   ];
@@ -567,21 +475,10 @@ export function requireSignIn(
   return transition({ events, signIns, turn: { ...turn, suspended } });
 }
 
-// ---------------------------------------------------------------------------
-// The response ledger
-// ---------------------------------------------------------------------------
-
-/**
- * The responses a commit records: each answer submitted once, its checks, and how it settled.
- * Revising an admitted answer abandons the one it replaces; an interaction that settles
- * withdraws the open answers that didn't decide it.
- */
 interface ResponseLedger {
-  /** Records answers not seen yet; one to a request nobody can answer anymore is dropped. */
   submit(answers: readonly SubmittedAnswer[]): void;
   admit(responseId: string): void;
   settle(responseId: string, outcome: ResponseOutcome, reason?: string): void;
-  /** Settles every other open answer to an interaction that `decidedBy` settles. */
   closeOthers(interactionId: string, decidedBy: string | undefined): void;
   facts(): SessionEvent[];
 }
@@ -595,8 +492,6 @@ function responseLedger(tables: PublicView): ResponseLedger {
     for (const answer of answers) {
       const { deliveryId, interactionId, optionId, responseId, text } = answer;
       if (status.has(responseId)) continue;
-      // An answer to a request nobody can answer anymore introduces nothing: it was converted
-      // or dropped before it got here.
       if (tables.interactions[interactionId]?.status !== "open") continue;
       fresh.set(responseId, answer);
       status.set(responseId, "submitted");

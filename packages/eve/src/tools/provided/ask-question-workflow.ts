@@ -12,10 +12,6 @@ export async function executeAskQuestionTool(
   return toAskQuestionOutput(answer);
 }
 
-/**
- * Free text is always allowed, so the model never needs an "Other" option.
- * Labels double as option ids so a late answer still reads as the label.
- */
 export function toAskQuestionRequest(input: AskQuestionInput): ToolQuestion {
   const options = input.options?.map((option) => ({
     description: option.description,

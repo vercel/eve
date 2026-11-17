@@ -1,14 +1,5 @@
 import { anyOf, codeIs, messageMatches, nameIs, type SemanticErrorRule } from "../rule.js";
 
-/**
- * Discriminators verified against the vendored `@ai-sdk/provider` /
- * `@ai-sdk/provider-utils` source: the error classes set
- * `name = "AI_LoadAPIKeyError"` / `"AI_UnsupportedFunctionalityError"`,
- * and `loadApiKey` builds its message as
- * `"<provider> API key is missing. Pass it using the …"`. The bare
- * `LoadAPIKeyError` spelling is defensive, for provider adapters that
- * rethrow under the unprefixed class name.
- */
 export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
   {
     id: "model-provider-api-key-missing",
@@ -22,10 +13,6 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
   },
   {
-    // eve's own EmptyModelResponseError (harness/model-call-error.ts); its
-    // message is authored for end users, so it passes through. The
-    // model-call classifier special-cases this shape *before* consulting
-    // tags — a same-hooks retry would read a stale step result.
     id: "empty-model-response",
     name: "Empty model response",
     tags: ["model-provider", "transient"],
@@ -41,7 +28,6 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Review the request and its context against your model provider's content policy.",
   },
   {
-    // A 400 that would otherwise end the session; only the refused prompt fails.
     id: "model-request-cyber-policy-refused",
     name: "Model request refused",
     tags: ["model-provider", "recoverable", "refused"],

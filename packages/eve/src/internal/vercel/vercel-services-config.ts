@@ -179,7 +179,6 @@ function parseServices(
   );
 }
 
-/** Parse the Vercel configuration fields used by eve while preserving other JSON fields. */
 export function parseVercelServicesConfig(value: unknown, fileName: string): VercelServicesConfig {
   let config: JsonObject;
   try {

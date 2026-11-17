@@ -10,7 +10,6 @@ import type {
   ApprovalResponsePolicy,
 } from "#approval/definition.js";
 
-/** Validates the function shorthand or explicit request/response/prompt approval shape. */
 export function normalizeApproval(value: unknown, message: string): Approval {
   if (typeof value === "function") return value as Approval;
 
@@ -28,10 +27,6 @@ export function normalizeApproval(value: unknown, message: string): Approval {
   return { request, prompt, response };
 }
 
-/**
- * Validates `defineAgent`'s `approval`: a request policy only. Prompts and response policies stay
- * with the entries that ask, so the agent's policy adds a gate without changing who answers it.
- */
 export function normalizeAgentApproval(value: unknown, message: string): ApprovalPolicy {
   return expectFunction<ApprovalPolicy>(value, message);
 }

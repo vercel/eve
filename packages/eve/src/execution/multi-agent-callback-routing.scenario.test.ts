@@ -25,28 +25,6 @@ import { ensureEveVercelOutputConfig } from "#public/next/vercel-output-config.j
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import type { HarnessSession } from "#harness/types.js";
 
-/**
- * Deployment-shaped callback loop for multi-agent mode (issue #839).
- *
- * Two named parent agents are mounted behind per-agent public route
- * prefixes, exactly as `withEve({ agents })` generates them. The test wires
- * the real pieces end to end over live HTTP:
- *
- * 1. the actual Build Output routing config from
- *    `ensureEveVercelOutputConfig` (route `src` regexes + `request.path`
- *    transforms) drives a router emulating Vercel's documented semantics;
- * 2. the parent mints callback URLs through the real code paths — the
- *    remote-subagent session callback (`startRemoteAgentSession`) and the
- *    connection hook URL (`getHookUrl`);
- * 3. the remote side validates the callback metadata with the real
- *    create-session parser (`parseSessionCallback`) and posts the settled turn
- *    with the real durable step (`notifyTurnCallerStep`);
- * 4. each parent service only serves its own prefix-stripped `/eve/v1/*`
- *    callback routes — anything else 404s, matching production.
- *
- * The only simulated component is Vercel's route engine itself.
- */
-
 const DEPLOYMENT_AGENTS = [
   {
     name: "support",
@@ -76,11 +54,6 @@ interface RoutedServiceRequest {
   readonly servicePath: string;
 }
 
-/**
- * Resolves an inbound public path the way the Vercel router does for the
- * generated Build Output config: match a top-level route `src` to pick the
- * destination service, then apply that service's `request.path` transform.
- */
 function routeDeploymentRequest(
   config: VercelOutputConfig,
   pathname: string,
@@ -165,8 +138,6 @@ describe("multi-agent callback routing", () => {
       expectedSessionIds.set(agent.serviceName, `${agent.name}-session`);
     }
 
-    // Generate the real Build Output config the Next integration writes for
-    // two named agents on Vercel.
     vi.stubEnv("VERCEL", "1");
     try {
       await ensureEveVercelOutputConfig({
@@ -187,9 +158,6 @@ describe("multi-agent callback routing", () => {
       await readFile(join(nextRoot, ".vercel", "output", "config.json"), "utf8"),
     ) as VercelOutputConfig;
 
-    // Deployment origin: routes public paths per the generated config, then
-    // serves each eve service's prefix-stripped framework callback routes.
-    // Unrouted paths 404, matching a deployment with no bare /eve/v1 mount.
     deploymentServer = createServer((request, response) => {
       const pathname = new URL(request.url ?? "/", "http://deployment.invalid").pathname;
       const routed = routeDeploymentRequest(outputConfig, pathname);
@@ -227,8 +195,6 @@ describe("multi-agent callback routing", () => {
     });
     deploymentOrigin = await listen(deploymentServer);
 
-    // Remote subagent: records the create-session body and returns the eve
-    // channel's canonical accepted response.
     remoteAgentServer = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -261,13 +227,8 @@ describe("multi-agent callback routing", () => {
   });
 
   function stubAgentRuntimeEnvironment(publicRoutePrefix: string | undefined): void {
-    // Mirrors the environment baked into the agent's deployed workflow
-    // functions: no local world override, non-production Vercel deployment,
-    // and (post-fix) the agent's public route prefix.
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
-    // The stand-in deployment listens on loopback, which callbacks may only
-    // target on local development servers.
     vi.stubEnv("EVE_DEV", "1");
     if (publicRoutePrefix !== undefined) {
       vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", publicRoutePrefix);
@@ -323,7 +284,6 @@ describe("multi-agent callback routing", () => {
       const callbackToken = `${agent.name}-session:callback-token`;
 
       expect(remoteSessionId).toBe("remote-session-1");
-      // Every callback URL names the protocol the parent and child agreed.
       expect(callback.url).toBe(
         `${deploymentOrigin}${joinEveRoutePath(
           agent.publicRoutePrefix,
@@ -331,12 +291,8 @@ describe("multi-agent callback routing", () => {
         )}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
 
-      // Remote-side create-session validation (public/channels/eve.ts):
-      // the prefixed URL must parse, or the remote rejects with HTTP 400.
       expect(parseSessionCallback(callback)).toMatchObject({ ok: true });
 
-      // The remote conversation's first settled turn must reach the parent
-      // service through the deployment router and succeed.
       const serializedContext = {
         [SessionCallbackKey.name]: {
           callId: `call-${agent.name}`,
@@ -378,7 +334,6 @@ describe("multi-agent callback routing", () => {
         )}`,
       );
 
-      // The IdP redirect follows this URL from the user's browser.
       const response = await fetch(hookUrl ?? "");
       expect(response.status).toBe(200);
       expect(serviceRequests.get(agent.serviceName)).toContainEqual({
@@ -393,9 +348,6 @@ describe("multi-agent callback routing", () => {
   }
 
   it("keeps each parent's callbacks on its own service", () => {
-    // All prior traffic in this suite must have stayed on the minting
-    // agent's own service: support paths only on eve-support, billing paths
-    // only on eve-billing.
     for (const agent of DEPLOYMENT_AGENTS) {
       const requests = serviceRequests.get(agent.serviceName) ?? [];
       expect(requests.length).toBeGreaterThan(0);
@@ -414,8 +366,6 @@ describe("multi-agent callback routing", () => {
 
       const { callback } = await mintRemoteAgentCallback("support");
 
-      // Without the prefix the minted URL targets the bare /eve/v1 path that
-      // nothing serves in multi-agent mode — the exact production failure.
       expect(callback.url).toBe(
         `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );

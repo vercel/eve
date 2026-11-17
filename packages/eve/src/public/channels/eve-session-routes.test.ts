@@ -372,8 +372,6 @@ describe("eve ID-addressed session routes", () => {
       );
 
       expect(response.status).toBe(202);
-      // Protocols 2–3 readers require this acknowledgement, even when a newer
-      // caller could identify the accepted delivery from its receipt instead.
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         status: "accepted",
@@ -580,7 +578,6 @@ describe("eve ID-addressed session routes", () => {
 
       expect(response.status).toBe(202);
       expect(trustedForwarders).toHaveBeenCalledTimes(1);
-      // Lineage-only requests assert no principal.
       expect(trustedForwarders).toHaveBeenCalledWith(expect.anything(), {});
       expect(createSession).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -638,7 +635,6 @@ describe("eve ID-addressed session routes", () => {
     await expect(another.json()).resolves.toMatchObject({ sessionId: "wrun_1" });
     expect(createSession).toHaveBeenCalledTimes(2);
 
-    // Without a principal to scope it to, an operation id could name anyone's session.
     const anonymous = await create(none(), "op-1");
     expect(anonymous.status).toBe(400);
     expect(createSession).toHaveBeenCalledTimes(2);
@@ -743,7 +739,6 @@ describe("eve ID-addressed session routes", () => {
         idempotencyKey: "parent-answers-1",
       },
     ]);
-    // An unkeyed message is still a delivery of its own.
     await post({ message: "another" });
     expect(keyed(session.send).at(-1)).toEqual({
       deliveryId: undefined,

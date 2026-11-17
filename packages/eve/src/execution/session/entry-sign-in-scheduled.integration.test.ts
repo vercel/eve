@@ -27,7 +27,6 @@ const alice = {
   principalId: "user-1",
   principalType: "user",
 };
-// Calls create_issue for every new message, and answers in text once a tool result is in.
 const scriptedModel = markMockModel(
   new MockLanguageModelV4({
     doStream: async ({ prompt }) =>
@@ -103,7 +102,6 @@ const turnEnd = (event: SessionStreamEvent) =>
   event.type === "turn.settled" || event.type === "turn.paused";
 
 describe("workflowEntry scheduled sign-in", () => {
-  // a schedule firing into a conversation posted a sign-in prompt on every firing.
   it("never asks across ten firings into a conversation, and asks once for the person", async () => {
     const { counts, runtime } = await issuesRuntime("scheduled-sign-in-conversation");
     await runtime.run(async () => {
@@ -137,7 +135,6 @@ describe("workflowEntry scheduled sign-in", () => {
           "isn't asked for in a scheduled run",
         );
 
-        // The person's own message can still need it: it asks once.
         await send(run.runId, "Create it, I'll sign in.", false);
         const followUp = await stream.nextUntil("follow-up sign-in", isSignInOpened);
         expect(followUp.filter(isSignInOpened)).toHaveLength(1);

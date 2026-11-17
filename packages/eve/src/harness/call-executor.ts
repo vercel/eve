@@ -39,29 +39,18 @@ import { toModelSchema } from "#tools/schema.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
-// eve runs every local call itself: the AI SDK only calls the model. The calls a model response
-// makes run here as soon as the response ends, and so do the calls a person approved later.
-
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
-/** A call's result, as the model reads it. */
 export interface CallResult {
   readonly part: Extract<ToolResponsePart, { type: "tool-result" }>;
 }
 
 const log = createLogger("harness.tool-loop");
 
-/** What the model reads for an approved call the turn's cancellation cut short. */
 export const APPROVED_CALL_INTERRUPTED_MESSAGE =
   "The turn was cancelled while this approved tool call was running. It may have partially run; it was not retried.";
 
-/** How a call's approval is decided before it runs. */
-type CallApproval =
-  /** A person approved it; the policy may still refuse it now. */
-  | "recheck"
-  /** The model just made it; the policy decides whether it runs, waits for a person, or is denied. */
-  | "evaluate";
+type CallApproval = "recheck" | "evaluate";
 
-/** A call that stopped for a sign-in: the tool returned the challenge instead of a result. */
 export interface ToolSignIn {
   readonly callId: string;
   readonly input: unknown;
@@ -70,22 +59,15 @@ export interface ToolSignIn {
   readonly version?: string;
 }
 
-/** How one call came out: its result for the model, or what it waits on instead. */
 export interface CallOutcome {
   readonly remember?: RememberRequest;
-  /** What cleared a call the runtime runs outside the step, such as a workflow tool's. */
   readonly clearance?: Clearance;
   readonly settled: readonly CallResult[];
-  /** What `execute` returned, for `endsTurn`. */
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   readonly awaitsApproval?: true;
   readonly signIn?: ToolSignIn;
 }
 
-/**
- * Runs one local call: it decides the approval, streams the call's progress and result, and
- * returns the result the model reads. A call a person approved revalidates its input first.
- */
 export async function executeToolCall(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
@@ -95,18 +77,10 @@ export async function executeToolCall(
     readonly messages: readonly ModelMessage[];
     readonly publish: HandleEventFn;
     readonly telemetry?: TelemetryOptions;
-    /** The AI SDK's ID for the model call that made a fresh call. */
     readonly modelCallId?: string;
-    /** Runs just before the tool does, as the step's steering protection. */
     readonly beforeExecute?: () => void;
-    /** The session as the call resumes, where a person's acceptance clears a call they approved. */
     readonly view?: () => Pick<SessionView, "projection">;
-    /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
-    /**
-     * Runs once the call settles, just before its result is reported: with why it didn't succeed,
-     * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
-     */
     readonly beforeResult?: (failure?: Error | string) => Promise<void>;
   },
   approval: CallApproval,
@@ -115,14 +89,10 @@ export async function executeToolCall(
   const { definition } = input;
   const settled: CallResult[] = [];
   const toolResults: TypedToolResult<ToolSet>[] = [];
-  // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
-  // session, so it never runs a call with side effects a second time.
   let started = false;
   let completed: CallResult | undefined;
   try {
     throwIfTurnAborted(input.abortSignal);
-    // The stored input revalidates against the tool's current schema and runs unchanged, so the
-    // call that runs is the one the person approved. A model's fresh call was validated as parsed.
     const validation =
       approval === "recheck"
         ? await asSchema(toModelSchema(definition.inputSchema, "input")).validate?.(args)
@@ -167,7 +137,6 @@ export async function executeToolCall(
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
-    // A call a person approved runs on their acceptance; the recheck only confirms it still may.
     const clearance =
       (approval === "recheck" && input.view !== undefined
         ? approvedClearance(input.view().projection.view, callId)
@@ -178,7 +147,6 @@ export async function executeToolCall(
     let failure = "";
     let thrown: Error | undefined;
     const telemetry = toolTelemetry(input.telemetry, {
-      // A call a person approved runs outside any model call.
       callId: input.modelCallId ?? `approved:${callId}`,
       messages: [...input.messages],
       toolCall: { input: args, toolCallId: callId, toolName, type: "tool-call" },
@@ -191,10 +159,7 @@ export async function executeToolCall(
         const startedAt = performance.now();
         try {
           started = true;
-          // A call a person approved starts when it runs, after the recheck: the approval cleared
-          // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
-          // Usage the tool records belongs to its call, including while a streaming tool iterates.
           await withUsageCall(callId, async () => {
             const executed = invokeTool(
               definition,
@@ -207,8 +172,6 @@ export async function executeToolCall(
               },
               clearance,
             );
-            // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
-            // waiting, and whatever the tool returns later is dropped.
             const abandon = approval === "evaluate" ? input.abortSignal : undefined;
             if (isAsyncIterable(executed)) {
               for await (const partial of untilAborted(executed, abandon)) {
@@ -311,10 +274,6 @@ export async function executeToolCall(
   }
 }
 
-/**
- * Rejects with the signal's reason once it aborts, without waiting for `promise`. An abandoned
- * call may still settle later; its outcome is dropped, not reported as unhandled.
- */
 async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return await promise;
   promise.catch(() => {});
@@ -347,16 +306,11 @@ async function* untilAborted<T>(
       yield next.value;
     }
   } finally {
-    // Request cleanup without letting an uncooperative iterator hold up cancellation.
     if (!done && iterator.return !== undefined)
       await raceAbort(Promise.resolve(iterator.return()), signal);
   }
 }
 
-/**
- * What the model reads for a call whose tool threw: the error as the AI SDK rendered it, with its
- * name, which tells the model what kind of failure it was (a `TimeoutError` may be worth retrying).
- */
 function modelFacingError(error: unknown): string {
   if (error === null || error === undefined) return "unknown error";
   if (typeof error === "string") return error;
@@ -364,7 +318,6 @@ function modelFacingError(error: unknown): string {
   return JSON.stringify(error);
 }
 
-/** A sign-in challenge as readers may see it: its URLs and codes stay with the session. */
 function withoutSignInSecrets(output: unknown): unknown {
   return isAuthorizationSignal(output) ? modelFacingAuthorizationOutput(output) : output;
 }
@@ -383,11 +336,6 @@ function interruptedResult(callId: string, toolName: string): CallResult {
 type ToolExecutionStart = Parameters<NonNullable<Telemetry["onToolExecutionStart"]>>[0];
 type ToolExecutionEnd = Parameters<NonNullable<Telemetry["onToolExecutionEnd"]>>[0];
 
-/**
- * The telemetry around one tool execution, as the AI SDK dispatched it for a call it ran: each
- * integration hears the start and the end, and their `executeTool` wrappers nest around the call
- * so work it does is attributed to it. Integration failures don't fail the call.
- */
 function toolTelemetry(
   telemetry: TelemetryOptions | undefined,
   execution: Pick<ToolExecutionStart, "callId" | "messages" | "toolCall">,
@@ -440,20 +388,14 @@ function toolTelemetry(
   };
 }
 
-/** What the local calls of one model response produced. */
 export interface InlineCallResults {
-  /** The calls' results, for the response's tool message. */
   readonly parts: readonly ToolResultPart[];
-  /** What each call's `execute` returned, for `endsTurn`. */
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
-  /** The calls that wait on a person's approval. */
   readonly approvals: readonly ApprovalAsk[];
-  /** The calls that stopped for a sign-in. */
   readonly signIns: readonly ToolSignIn[];
   readonly policyApprovals?: Readonly<Record<string, Clearance>>;
 }
 
-/** Nothing ran: the response ended early, or made no local calls. */
 export const NO_INLINE_CALLS: InlineCallResults = {
   approvals: [],
   parts: [],
@@ -461,26 +403,16 @@ export const NO_INLINE_CALLS: InlineCallResults = {
   toolResults: [],
 };
 
-/**
- * Runs the local calls a model response made. The AI SDK only calls the model: eve decides each
- * call's approval and runs it the way it runs a call a person approved. A call to a tool that runs
- * outside the step (a workflow or task tool) is decided here and left for the runtime.
- */
 export async function executeInlineCalls(input: {
   readonly toolCalls: readonly TypedToolCall<ToolSet>[];
-  /** Calls whose input failed validation; they already have their result. */
   readonly excludedCallIds: ReadonlySet<string>;
-  /** The step's entries: each call already names the entry it runs. */
   readonly tools: HarnessToolLookup;
   readonly approvalMemory: ApprovalMemory;
-  /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
   readonly telemetry?: TelemetryOptions;
-  /** The AI SDK's ID for the model call that made the calls. */
   readonly modelCallId?: string;
-  /** Runs just before each tool does, so steering no longer interrupts the step. */
   readonly beforeExecute: () => void;
 }): Promise<InlineCallResults> {
   const calls = input.toolCalls.filter(
@@ -537,7 +469,6 @@ export async function executeInlineCalls(input: {
   };
 }
 
-/** A deferred call waits on a person or is denied here; otherwise the runtime runs it. */
 async function decideDeferredCall(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   definition: HarnessToolDefinition,
@@ -568,7 +499,6 @@ async function decideDeferredCall(
   });
 }
 
-/** Reports a call its approval policy refused: it settles rejected, without running. */
 export async function publishDenial(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
@@ -601,10 +531,6 @@ export async function publishDenial(
   return { settled: [{ part }], toolResults: [] };
 }
 
-/**
- * What a person answers to approve or cancel a call the model made. The prompt is the one the
- * tool's approval writes for the call, or names the call by the label its entry gives it.
- */
 function approvalRequest(
   call: TypedToolCall<ToolSet>,
   definition: HarnessToolDefinition | undefined,
@@ -634,7 +560,6 @@ function approvalRequest(
   };
 }
 
-/** The prompt a tool's approval configuration writes for `call`, when it has one. */
 function authoredApprovalPrompt(
   call: TypedToolCall<ToolSet>,
   definition: HarnessToolDefinition | undefined,

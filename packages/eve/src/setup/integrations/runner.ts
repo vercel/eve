@@ -16,14 +16,10 @@ import { createSetupContexts } from "./shared/ui.js";
 import { setupIntegration } from "./registry.js";
 import type { IntegrationSetupResult, SetupExternalAction } from "./types.js";
 
-/** Inputs shared by every registry-owned integration setup flow. */
 interface RunIntegrationSetupOptions {
-  /** Selected agent project where authored files are changed. */
   appRoot: string;
-  /** Project root for shared dependencies, Vercel links, and environment files. */
   projectRoot?: string;
   prompter: Prompter;
-  /** Defaults to the interactive adapter; agent drivers inject an answer-backed asker. */
   asker?: Asker;
   signal?: AbortSignal;
   force?: boolean;
@@ -35,7 +31,6 @@ interface RunIntegrationSetupOptions {
   resolveVercelProject?: SetupProjectResolver;
 }
 
-/** Effects shared by the built-in integration setup runner. */
 type SetupProjectResolver = (integration: string) => Promise<VercelProjectReference>;
 
 export interface IntegrationSetupRunnerDeps {
@@ -48,7 +43,6 @@ const defaultDeps: IntegrationSetupRunnerDeps = {
   getVercelAuthStatus,
 };
 
-/** Runs one built-in integration setup flow selected by its registry setup name. */
 export async function runIntegrationSetup(
   kind: string,
   options: RunIntegrationSetupOptions,

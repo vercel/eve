@@ -1,8 +1,3 @@
-// Minimal declaration for the vendored slice of `@vercel/sdk`: the project
-// trusted-sources model helpers. Mirrors upstream's `UpdateProject*` shapes
-// for the fields eve reads; widen it if a caller needs more of the policy.
-
-/** System environment slugs (`production`, `preview`) and/or custom environment slugs. */
 export type UpdateProjectEnvironmentSet =
   | { slugs: string[]; preset?: "all-custom" | undefined }
   | { slugs?: string[] | undefined; preset: "all-custom" };

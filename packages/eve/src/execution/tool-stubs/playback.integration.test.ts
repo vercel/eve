@@ -122,7 +122,6 @@ describe("durable tool stub playback", () => {
             callIds: ["lookup"],
             outcome: { status: "completed", output: "raw" },
           });
-          // Reload the saved task result before processing its output in the next turn.
           const session = JSON.parse(
             JSON.stringify(
               writeTaskTable(

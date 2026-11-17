@@ -8,7 +8,6 @@ import { runInstallVercelCliFlow, type InstallVercelCliDeps } from "./install-ve
 
 const APP_ROOT = "/app/my-agent";
 
-/** Auth-status probe returning the given sequence across successive calls. */
 function statusProbe(
   ...results: Array<"authenticated" | "logged-out" | "cli-missing">
 ): InstallVercelCliDeps["getVercelAuthStatus"] {
@@ -50,7 +49,6 @@ describe("runInstallVercelCliFlow", () => {
     const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
       packageProcessResult(),
     );
-    // cli-missing before; logged-out (i.e. CLI now present) after.
     await expect(
       run({ getVercelAuthStatus: statusProbe("cli-missing", "logged-out") }, spawnPackageManager),
     ).resolves.toEqual({ kind: "installed" });
@@ -136,7 +134,6 @@ describe("runInstallVercelCliFlow", () => {
     const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
       packageProcessResult(),
     );
-    // Still cli-missing after a "successful" global install (bin not on PATH).
     await expect(
       run({ getVercelAuthStatus: statusProbe("cli-missing", "cli-missing") }, spawnPackageManager),
     ).resolves.toEqual({ kind: "failed" });

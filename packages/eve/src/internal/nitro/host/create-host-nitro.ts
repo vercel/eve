@@ -38,21 +38,10 @@ const INSTRUMENTATION_ALIAS_PATHS = {
   "eve/instrumentation/otel": "src/public/instrumentation/otel.ts",
 } as const;
 
-// Nitro picks the Vite builder when the app root has a `vite.config` that calls
-// `nitro(`, which is the case when a TanStack Start host shares its root with
-// the agent. eve bundles its own runtime and never builds through the host's Vite.
 const EVE_NITRO_BUILDER = "rolldown";
 
-// Nitro gates preset behavior on this date. Pinning it keeps the build date
-// and COMPATIBILITY_DATE env out of eve's host; move it with the Nitro version.
 const EVE_NITRO_COMPATIBILITY_DATE = "2026-11-03";
 
-/**
- * eve owns its host config and env loading, so Nitro must not merge the app
- * root's `nitro.config`, `.nitrorc`, `package.json` `nitro` key, or `.env`
- * files into eve's host. c12 has no switch for the main config file, so its
- * lookup points into eve's build directory, which never holds one.
- */
 function createNitroLoadOptions(buildDir: string): LoadConfigOptions {
   return {
     c12: { configFile: join(buildDir, "nitro.config"), packageJson: false, rcFile: false },
@@ -60,10 +49,6 @@ function createNitroLoadOptions(buildDir: string): LoadConfigOptions {
   };
 }
 
-/**
- * Creates eve's Nitro host: one isolated candidate for `eve dev`, or one
- * production build. The returned Nitro is configured entirely by its config.
- */
 export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
   const { locations } = spec;
   const workflowArtifacts = await new WorkflowBundleBuilder({
@@ -145,8 +130,6 @@ function toNitroConfig(
       workflowArtifacts: built.workflowArtifacts,
     }),
     compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
-    // eve builds with its own Rolldown and never lets Nitro install a package
-    // into the app; a missing one fails the build with the install command.
     deps: { install: false, paths: { rolldown: resolveRolldownPackageDir() } },
     dev: spec.development,
     features: { websocket: spec.websocket },
@@ -154,7 +137,6 @@ function toNitroConfig(
       inlineDynamicImports: instrumentationEntry.inlineDynamicImports,
     }),
     logLevel: spec.development ? 1 : undefined,
-    // Gzipping every output file only annotates the build log's file tree.
     logging: spec.development ? undefined : { compressedSizes: false },
     modules: instrumentationEntry ? [instrumentationEntry.module] : [],
     noExternals: createHostNoExternals(built.workflowArtifacts.stepTargets),
@@ -165,26 +147,19 @@ function toNitroConfig(
     ],
     preset: spec.preset,
     publicAssets: [],
-    // Nitro would otherwise serve an app-root `index.html` and `server.*` as
-    // catch-alls in front of eve's routes.
     renderer: false,
     rolldownConfig: {
-      // eve's own plugins dominate the timings, which the app cannot act on.
       checks: { bundlerTimings: false },
       onLog: onVendoredDependencyLog,
-      // Keep dependency filtering out of Rolldown's JS callback bridge.
       output: { sourcemapIgnoreList: /node_modules/ },
       tsconfig: spec.authored.tsconfig,
-      // Region comments contain invocation-random scratch paths, not runtime inputs.
       ...(!spec.development && { experimental: { attachDebugInfo: "none" as const } }),
     },
     rootDir: locations.appRoot,
-    // eve registers every handler, plugin, and task explicitly.
     scanDirs: [],
     serverDir: false,
     serverEntry: false,
     traceDeps: [...spec.externals.traceDeps],
-    // Rolldown's `tsconfig` option above resolves authored aliases.
     typescript: { tsconfigPaths: false },
     vercel: spec.vercel,
     virtual: {

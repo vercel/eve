@@ -20,10 +20,6 @@ import { useEveAgent as useReactAgent, type UseEveAgentReturn } from "#react/use
 import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
 import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
 
-// Each binding is a thin adapter over the shared agent store, which its own suite covers. What a
-// binding owns is its framework's lifecycle: it shows the store's changes, and stops reading the
-// session once the framework disposes it.
-
 const mounts: Array<() => void> = [];
 vi.mock("svelte", () => ({
   onMount: (callback: () => () => void) => void mounts.push(callback()),
@@ -36,7 +32,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** An agent whose session stream stays open, serving what `append` writes. */
 function agent() {
   const log: string[] = [];
   const open = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -77,7 +72,6 @@ function agent() {
       log.push(...lines);
       for (const controller of open) controller.enqueue(encoder.encode(lines.join("")));
     },
-    /** How many session streams are still being read. */
     get reading() {
       return open.size;
     },
@@ -85,7 +79,6 @@ function agent() {
 }
 
 interface Mounted {
-  /** What the binding shows; `undefined` when the framework renders nothing reactive. */
   readonly data: () => Pick<ConversationState, "messages"> | undefined;
   readonly send: (message: string) => Promise<unknown>;
   readonly finished: ReturnType<typeof vi.fn>;
@@ -133,8 +126,6 @@ const bindings: Record<string, () => Mounted> = {
     vi.stubGlobal("window", {});
     const finished = vi.fn();
     const binding = useSvelteAgent({ baseUrl: "https://eve.test", onFinish: finished });
-    // Svelte shows the store's changes only inside a component's effects, which a unit test has
-    // none of; its lifecycle is what's left to check.
     return {
       data: () => undefined,
       dispose: () => mounts.forEach((cleanup) => cleanup()),

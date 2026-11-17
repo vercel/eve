@@ -36,50 +36,32 @@ import { answersDeliveryId } from "#shared/answers-delivery-id.js";
 export type RuntimeEvent =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
-  /** A steering message that answered no pending request arrived during the wait. */
   | { readonly kind: "steering" }
-  /** An `eve__task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
-  /** A delivery or sign-in callback was admitted; a paused turn's request may be answered. */
   | { readonly kind: "input" }
   | "cancelled";
 
-/**
- * Admission policy, cancellation, and steering for one active turn.
- * Deliveries admitted while a model step runs stay in the shared queue until
- * the turn reaches a committed boundary; a runtime-action wait routes them
- * eagerly so a proxied child can receive the answer it is blocked on.
- *
- * The pump signals cancellation and eligible steering immediately. Cancellation
- * aborts the turn; steering only interrupts generation before assistant output
- * or local tool execution. Both retain ordered admission at the next boundary.
- */
 export class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
-  /** The cancel control that stopped this turn, when it named its delivery. */
   #cancelledBy: ControlOrigin | undefined;
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  /** Who alone steers the turn: its principal, or its delegated caller. */
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
-  /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
-  /** A step of this turn compacted the history. */
   compacted = false;
 
   constructor(
     input: SessionExecutionInput,
     owner: {
       readonly caller: TurnCaller | undefined;
-      /** A clear or a compact runs, not a turn: a cancel, which stops turns, leaves it to finish. */
       readonly control?: boolean;
       readonly principal: string;
     },
@@ -133,22 +115,14 @@ export class ActiveTurn {
     if (!this.steeringController.signal.aborted) return;
     this.unsubscribeDelivery();
     this.steeringController = new AbortController();
-    // Admission can yield while new deliveries are pumped. Replaying the
-    // unread inbox keeps those arrivals attached to the next generation.
     this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
   }
 
-  /** Admits everything the pump accepted while the last step ran. */
   async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
     for (const payload of pending) await this.admit(payload, settled);
   }
 
-  /**
-   * Steering admitted during this turn, routed to children first and coalesced.
-   * The next step reads it as input, so its signal must not interrupt that
-   * step; only deliveries still unread re-signal the next generation.
-   */
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
@@ -169,10 +143,6 @@ export class ActiveTurn {
     return delivery;
   }
 
-  /**
-   * Removes the admitted run messages the session applies at once instead of
-   * in a runtime wait, or only those `only` accepts.
-   */
   takeBoundaryMessages(
     only?: (message: WorkflowToolRunMessage) => boolean,
   ): WorkflowToolRunMessage[] {
@@ -187,12 +157,6 @@ export class ActiveTurn {
     return taken;
   }
 
-  /**
-   * Removes the run messages read after one the session just took, as long as
-   * each is one it applies as it reads it and they fit one batch. Those it
-   * already admitted come first, then those still in the inbox, so arrival
-   * order holds.
-   */
   takeAppliedRunMessages(): AppliedRunMessage[] {
     const admits = runMessageBatchBudget();
     const taken: AppliedRunMessage[] = [];
@@ -210,12 +174,6 @@ export class ActiveTurn {
     return [...taken, ...takeLeadingAppliedRunMessages(this.input.inbox, admits)];
   }
 
-  /**
-   * Next runtime result, workflow message, steering, or timeout, admitting
-   * inbox traffic while waiting. Deliveries admitted before the wait began are
-   * routed first, so a message that arrived as the calls started still steers.
-   * `timers` are durable sleeps raced against the inbox.
-   */
   async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
     while (true) {
       const steered = await this.routeAdmittedToChildren();
@@ -232,11 +190,6 @@ export class ActiveTurn {
     }
   }
 
-  /**
-   * Takes one admitted delivery that answers a pending input request, from any
-   * responder: an approver need not be the turn's own person. Returns
-   * `undefined` when no admitted delivery answers one.
-   */
   async takeAnswers(requestIds: ReadonlySet<string>): Promise<DeliverHookPayload | undefined> {
     for (const sequence of this.admitted) {
       let delivery = this.input.queue.delivery(sequence);
@@ -244,8 +197,6 @@ export class ActiveTurn {
       const responses = delivery.payloads.flatMap((payload) => payload.answers ?? []);
       if (responses.length === 0) continue;
       if (!responses.some((response) => requestIds.has(response.interactionId))) {
-        // Some channels answer with ids only their `deliver` hook resolves,
-        // such as Telegram's compact button callbacks.
         if (this.mappedForHeldRequest.has(sequence)) continue;
         this.mappedForHeldRequest.add(sequence);
         const target = delivery;
@@ -256,8 +207,6 @@ export class ActiveTurn {
         delivery = mapped.delivery;
       }
       this.admitted.delete(sequence);
-      // Someone else's answers settle the paused turn's request, but the rest of their
-      // delivery waits for the turn to end, as their messages do.
       const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
         ? undefined
         : splitAnswers(delivery);
@@ -267,7 +216,6 @@ export class ActiveTurn {
     return undefined;
   }
 
-  /** Resolves with the id of the call whose timer won, or `undefined` once inbox input is ready. */
   private async waitForInboxOrTimer(
     timers: readonly Promise<string>[],
   ): Promise<string | undefined> {
@@ -284,7 +232,6 @@ export class ActiveTurn {
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
-  /** Admits one payload; returns whether it was a delivery or sign-in callback. */
   private async admit(value: SessionInboxPayload, settled = false): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
@@ -330,11 +277,6 @@ export class ActiveTurn {
     }
   }
 
-  /**
-   * During a runtime wait, descendant-bound answers cannot wait for the
-   * boundary. Returns whether a newly routed delivery still steers: it
-   * answered nothing, so its message is for the model.
-   */
   private async routeAdmittedToChildren(): Promise<boolean> {
     let steered = false;
     for (const sequence of this.admitted) {
@@ -364,12 +306,10 @@ export class ActiveTurn {
     return steered;
   }
 
-  /** The cancel control that stopped this turn, when it named its delivery. */
   get cancelledBy(): ControlOrigin | undefined {
     return this.#cancelledBy;
   }
 
-  /** Also used by hooks on workflow reports while the turn waits. */
   abort(): void {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
@@ -378,11 +318,7 @@ export class ActiveTurn {
 
 function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {
   if (event === "cancelled" || event.kind !== "workflow") return undefined;
-  // Tasks run beside the turn, so everything their runs send, such as a
-  // question, reaches the session at the next boundary rather than at turn end.
   if (event.message.from.taskId !== undefined) return event.message;
-  // An `execute` run can open or message a session after its call returns, when
-  // the turn may have no wait left to take the message, and publishing it needs none.
   if (isAgentSessionMessage(event.message)) return event.message;
   return undefined;
 }
@@ -394,9 +330,6 @@ function splitAnswers(delivery: DeliverHookPayload): {
   const answers = delivery.payloads.flatMap((payload, index) =>
     payload.answers === undefined ? [] : [{ index, payload: { answers: payload.answers } }],
   );
-  // Only a message waits for the turn to end. What else a press carries, such as a channel's
-  // state, has nothing left to deliver; queued, it would come back as a delivery the session
-  // already settled.
   const rest = delivery.payloads.flatMap((payload, index) => {
     if (payload.message === undefined) return [];
     const { answers: _answers, ...other } = payload;

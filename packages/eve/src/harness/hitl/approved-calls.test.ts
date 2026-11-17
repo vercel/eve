@@ -40,7 +40,6 @@ it("settles calls a cancellation cut short, and keeps their siblings' results", 
   const controller = new AbortController();
   const finished = tool("finished", async () => "done");
   const cut = tool("cut", async () => {
-    // The sibling has its result before the turn is cancelled.
     await Promise.resolve();
     controller.abort(new TurnCancelledError());
     throw controller.signal.reason;
@@ -118,7 +117,6 @@ function completion(attemptId: string): AuthorizationResult {
   } as AuthorizationResult;
 }
 
-/** A session whose sign-ins stay open as far as `view` says, so only the reports dedupe them. */
 function signInSession(...attemptIds: string[]) {
   const published: SessionEvent[] = [];
   const view = () => ({
@@ -157,7 +155,6 @@ it("reports each group's sign-in while its call holds, with one reporter for the
       await held;
       return "done";
     });
-  // Two asking steps resume together: each group runs its own calls, as the intake does.
   const groups = calls.map((call) =>
     runApprovedCalls({
       abortSignal: undefined,
@@ -180,7 +177,6 @@ it("reports each group's sign-in while its call holds, with one reporter for the
 it("settles a sign-in once when two calls complete it at the same time", async () => {
   const session = signInSession("attempt-shared");
   const reports = signInReports(session);
-  // The intake gives the shared sign-in to the first call; both calls still complete it.
   const calls = [stoppedOn("probe", "attempt-shared"), { ...approval("publish", "publish") }];
   const completed = reports.completed(calls);
   const completing = (name: string) =>

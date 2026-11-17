@@ -265,7 +265,6 @@ test("computer-use restarts a desktop lost to sandbox resume before acting", asy
         ...sandbox,
         run: async ({ command }: { command: string }) => {
           commands.push(command);
-          // A resumed sandbox has no display or driver processes.
           if (command === computerUseReadyCommand(sandbox)) {
             return { exitCode: 1, stderr: "", stdout: "" };
           }

@@ -8,7 +8,6 @@ const DEVELOPMENT_RUNTIME_ARTIFACTS_RETIRED_METADATA = "retired.json";
 const DEVELOPMENT_RUNTIME_SNAPSHOT_GRACE_PERIOD_MS = 30 * 60 * 1_000;
 const DEVELOPMENT_RUNTIME_SNAPSHOT_RETAIN_COUNT = 5;
 
-/** Records the instant at which an activated generation stopped being current. */
 export async function recordRetiredDevelopmentRuntimeArtifactsSnapshot(
   snapshotRoot: string,
   retiredAt = Date.now(),
@@ -19,7 +18,6 @@ export async function recordRetiredDevelopmentRuntimeArtifactsSnapshot(
   );
 }
 
-/** Applies retention and reports whether any snapshots were removed. */
 export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
   readonly activeSnapshotRoot: string | undefined;
   readonly gracePeriodMs?: number;

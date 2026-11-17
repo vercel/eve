@@ -211,9 +211,21 @@
  *             never reach a Node builtin through their value imports. One
  *             import of a server module from a shared one breaks every client
  *             bundle that loads the entry.
+ *   rule 66 — Source under `packages/` carries comments only as JSDoc on
+ *             declarations users can see: what a published package entry
+ *             exports, plus the types those declarations refer to. Tool
+ *             directives (`@ts-expect-error`, `oxlint-disable`,
+ *             `/// <reference>`, `@__PURE__`) are allowed anywhere. Anything
+ *             else drifts from the code it describes; an invariant belongs in
+ *             code that throws when it breaks (a named assert, a type, or a
+ *             guard rule). See `scripts/comment-policy.mjs`.
+ *   rule 67 — Every export of a published package entry has JSDoc. Users
+ *             read these docs in their editor and in the generated API
+ *             reference.
  *
  * Baselines for rules with pre-existing violations live in
- * `guard-invariants-baseline.json`. Counts and allowlists in that file
+ * `guard-invariants-baseline.json`, and for rules 66 and 67 in
+ * `guard-comments-baseline.json`. Counts and allowlists in those files
  * may only shrink (as offenders are removed) — they may never grow.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
@@ -222,6 +234,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { parseSummary } from "./changeset-format.mjs";
+import { checkComments } from "./comment-policy.mjs";
 import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
@@ -2406,6 +2419,8 @@ async function main() {
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
   }
+
+  violations.push(...(await checkComments()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

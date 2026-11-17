@@ -6,9 +6,6 @@ import type {
   MemoryScopeResolverResult,
 } from "#public/memory/index.js";
 
-// A memory slot's scope as eve keys it: the namespace and scope a provider reads and writes under,
-// digested so a provider never sees raw principal ids it didn't choose to put there.
-
 const MEMORY_NAMESPACE_MAX_BYTES = 1_024;
 const MEMORY_SCOPE_COMPONENT_MAX_BYTES = 1_024;
 const MEMORY_SCOPE_TUPLE_MAX_COMPONENTS = 16;
@@ -20,7 +17,6 @@ export interface NormalizedMemoryRecallMessage {
   readonly itemKey?: string;
 }
 
-/** The scope a memory slot operates under. */
 export function createMemoryScope(input: {
   readonly namespace: string;
   readonly scope: Exclude<MemoryScopeResolverResult, null>;

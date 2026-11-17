@@ -1,11 +1,5 @@
 import { isLoopbackHostname } from "#shared/network-address.js";
 
-/**
- * Applies the fetch-native HTTP guards required in front of the MCP SDK.
- *
- * Non-browser clients normally omit `Origin`; browser requests are restricted
- * to the endpoint's exact origin. Plain HTTP is accepted only on loopback.
- */
 export function validateMcpHttpRequest(request: Request): Response | undefined {
   const baseFailure = validateMcpHttpRequestBase(request);
   if (baseFailure !== undefined) return baseFailure;
@@ -27,10 +21,6 @@ export function validateMcpHttpRequest(request: Request): Response | undefined {
   return undefined;
 }
 
-/**
- * Applies transport and Host validation to the public OAuth discovery route
- * without restricting its Origin. The route itself supplies permissive CORS.
- */
 export function validateMcpMetadataRequest(request: Request): Response | undefined {
   return validateMcpHttpRequestBase(request);
 }

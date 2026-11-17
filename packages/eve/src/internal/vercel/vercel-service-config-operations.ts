@@ -72,7 +72,6 @@ function resolveServiceCollection(
   );
 }
 
-/** Resolve the mounted prefix for the eve service matching an application root. */
 export function resolveEveServicePrefixByRoot(input: {
   readonly appRoots: readonly string[];
   readonly config: VercelServicesConfig;

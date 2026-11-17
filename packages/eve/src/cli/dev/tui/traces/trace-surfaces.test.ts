@@ -15,8 +15,6 @@ describe("deriveTraceViewerSurfaces", () => {
     const surfaces = deriveTraceViewerSurfaces({ r: 255, g: 255, b: 255 });
     expect(surfaces.header).toBe("\x1b[48;2;233;233;233m");
     expect(surfaces.body).toBe("\x1b[48;2;219;219;219m");
-    // Error bands blend toward the red accent from the light side: a soft
-    // pink instead of a dark maroon.
     expect(surfaces.errorHeader).toBe("\x1b[48;2;248;210;215m");
     expect(surfaces.errorBody).toBe("\x1b[48;2;249;218;222m");
   });
@@ -36,10 +34,8 @@ describe("deriveTraceViewerSurfaces", () => {
   });
 
   it("keys the blend direction on perceived luminance, not raw channels", () => {
-    // A saturated blue reads dark despite a maxed channel: lighten it.
     const blue = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 255 });
     expect(blue.header).toBe("\x1b[48;2;22;22;255m");
-    // A pale yellow reads light: darken it.
     const yellow = deriveTraceViewerSurfaces({ r: 255, g: 255, b: 200 });
     expect(yellow.header).toBe("\x1b[48;2;233;233;183m");
   });

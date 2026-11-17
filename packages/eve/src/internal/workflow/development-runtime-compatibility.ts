@@ -5,7 +5,6 @@ export type DevelopmentGenerationAvailability =
   | { readonly kind: "missing"; readonly reason: string }
   | { readonly kind: "ineligible"; readonly reason: string };
 
-/** Recovery checks snapshot readability, not whether changed code will replay successfully. */
 export async function readDevelopmentGenerationAvailability(
   appRoot: string,
   generationId: string,

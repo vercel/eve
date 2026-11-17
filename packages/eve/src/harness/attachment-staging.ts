@@ -33,11 +33,6 @@ import {
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 
-/**
- * Directory, relative to the workspace root, where eve stages message
- * attachments and tool-result files. It sits under eve's own dot-directory so
- * it never collides with an agent's own `attachments/`.
- */
 const ATTACHMENTS_ROOT = ".eve/attachments";
 
 const log = createLogger("harness.attachment-staging");
@@ -47,21 +42,11 @@ const SHA_PREFIX_LENGTH = 16;
 
 const DEFAULT_MEDIA_TYPE = "application/octet-stream";
 
-/**
- * Upper bound on the bytes this process keeps for inline refs, so warm
- * processes hydrate images and PDFs without resuming the sandbox on every
- * model call. Inline files are at most 3 MiB (images) or 20 MiB (PDFs), so
- * 64 MiB holds a typical session's recent attachments without letting one
- * process grow unbounded.
- */
 const CACHED_REF_BYTES_LIMIT = 64 * 1024 * 1024;
 
-// Insertion order doubles as LRU order: a hit moves its entry to the end.
 const cachedRefBytes = new Map<string, Buffer>();
 let cachedRefBytesTotal = 0;
 
-// A staged name keeps or gains the extension its media type implies, so a
-// nameless file (an MCP image, say) can still be opened by path later.
 const MEDIA_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
   "application/pdf": ".pdf",
   "image/gif": ".gif",
@@ -74,13 +59,6 @@ type ToolResultOutput = ToolResultPart["output"];
 type ToolOutputContentPart = Extract<ToolResultOutput, { type: "content" }>["value"][number];
 type ToolOutputFilePart = Extract<ToolOutputContentPart, { type: "file" }>;
 
-/**
- * Writes inbound `FilePart` bytes into the sandbox and rewrites each
- * staged part to a compact `eve-sandbox:` ref. Links resolve through the
- * channel's `fetchFile` or eve's public download; a file eve can't stage
- * becomes a note. Existing `eve-sandbox:` refs pass through so staging is
- * idempotent.
- */
 export async function stageAttachmentsForAdapter(
   content: string | UserContent,
   sandbox: SandboxSession,
@@ -104,11 +82,6 @@ export async function stageAttachmentsForAdapter(
   );
 }
 
-/**
- * Context-bound variant of {@link stageAttachmentsForAdapter}. Without an
- * active sandbox, every file part becomes a note: history never keeps an
- * attachment eve did not stage.
- */
 export async function stageAttachmentsToSandbox(
   message: string | UserContent,
 ): Promise<string | UserContent> {
@@ -134,12 +107,6 @@ export async function stageAttachmentsToSandbox(
     );
   }
 
-  // Build the adapter context once up front. When an adapter is bound,
-  // use the same helper the runtime uses for `deliver` and event
-  // handlers so the Slack (and other) `createAdapterContext` override
-  // runs. When no adapter is bound, build a minimal accessor-only ctx
-  // so inline FileParts still stage cleanly — a ref on the message will
-  // raise `missing-adapter` inside the resolver dispatch.
   const adapter = container.get(ChannelKey);
   const adapterCtx: ChannelAdapterContext = adapter
     ? buildAdapterContext(adapter, container)
@@ -152,13 +119,6 @@ export async function stageAttachmentsToSandbox(
   return stageAttachmentsForAdapter(message, sandbox, adapterCtx);
 }
 
-/**
- * Moves inline file payloads in `content` tool outputs into the sandbox and
- * leaves `eve-sandbox:` refs in their place, so durable history never
- * carries tool-result bytes. {@link hydrateSandboxAttachments} restores the
- * bytes on every model call. Without an active sandbox, or when it rejects
- * the write, each file becomes a note instead.
- */
 export async function stageToolResultMedia<T extends ModelMessage>(
   messages: readonly T[],
 ): Promise<T[]> {
@@ -183,19 +143,6 @@ export async function stageToolResultMedia<T extends ModelMessage>(
   );
 }
 
-/**
- * Hydrates `eve-sandbox:` file refs for a single model call.
- *
- * Every attachment, inbound or returned by a tool, renders as a label naming
- * its sandbox path. Small verified images and PDFs follow their label as
- * bytes; anything else stays a label the agent can open with tools. Every
- * decision is pure in the ref, so each message renders identically on every
- * call and the provider's prompt cache stays valid. The returned messages
- * must not be written back to session history, which stays ref-only.
- *
- * Resuming a sandbox is slow and can be billed, so it happens only when a
- * ref needs bytes this process does not already hold for the session.
- */
 export async function hydrateSandboxAttachments(
   input: readonly ModelMessage[],
 ): Promise<ModelMessage[]> {
@@ -217,14 +164,8 @@ export async function hydrateSandboxAttachments(
   );
 }
 
-/** Verified bytes for an inline ref, or `null` when they are missing or changed. */
 type SandboxRefReader = (ref: SandboxRef) => Promise<Uint8Array | null>;
 
-/**
- * Serves inline refs from the session's cached bytes and opens the sandbox
- * at most once per hydration, on the first miss. Parts hydrate concurrently,
- * so the open is shared as a promise.
- */
 function sandboxRefReader(
   access: SandboxAccess | undefined,
   sessionId: string | undefined,
@@ -247,11 +188,6 @@ function sandboxRefReader(
   };
 }
 
-/**
- * Scoped to the session: a ref in one session's history can never reach bytes
- * eve staged for another, even if a caller crafts one. The path carries the
- * content hash, and the media type is the one eve verified at staging.
- */
 function cacheKey(sessionId: string | undefined, ref: SandboxRef): string | undefined {
   if (sessionId === undefined) return undefined;
   return JSON.stringify([sessionId, ref.path, ref.size, ref.mediaType]);
@@ -266,10 +202,8 @@ function readCachedRefBytes(key: string): Buffer | undefined {
   return bytes;
 }
 
-/** Caches bytes eve staged or verified; callers must never pass unverified bytes. */
 function cacheRefBytes(key: string, bytes: Uint8Array): void {
   if (bytes.byteLength > CACHED_REF_BYTES_LIMIT || cachedRefBytes.has(key)) return;
-  // A copy, so a caller reusing its buffer can't change what later calls send.
   cachedRefBytes.set(key, Buffer.from(bytes));
   cachedRefBytesTotal += bytes.byteLength;
   for (const [oldestKey, oldest] of cachedRefBytes) {
@@ -279,16 +213,9 @@ function cacheRefBytes(key: string, bytes: Uint8Array): void {
   }
 }
 
-/**
- * The session's sandbox for attachment staging and hydration, or `null` when
- * there is none or it can't be resumed (another replica, a restart, an
- * expired provider sandbox). Attachments then degrade to notes and labels so
- * the step survives; tools still see the resume error through `get()`.
- */
 async function activeSandbox(access: SandboxAccess | undefined): Promise<SandboxSession | null> {
   if (access === undefined) return null;
   try {
-    // Attachments need only the connection, not the skill files queued behind the open.
     return await access.open();
   } catch (error) {
     log.warn("session sandbox unavailable, degrading attachments to text", { error });
@@ -296,11 +223,6 @@ async function activeSandbox(access: SandboxAccess | undefined): Promise<Sandbox
   }
 }
 
-/**
- * History written before eve resolved every attachment can still hold a link
- * or an `eve-url:` marker that a provider would try to fetch on every call.
- * Each renders as a note, so such a session recovers.
- */
 function replaceUnresolvedFileParts(messages: readonly ModelMessage[]): ModelMessage[] {
   let changed = false;
   const result = messages.map((message) => {
@@ -396,7 +318,6 @@ async function stageToolOutputFiles(
           mediaType: ref.mediaType,
         };
       } catch (error) {
-        // The step's model call and tools already ran, so a throw would replay them.
         log.warn("sandbox write failed for a tool-result file, degrading it to text", { error });
         return unstoredFileNote(part);
       }
@@ -412,15 +333,6 @@ function unstoredFileNote(part: ToolOutputFilePart): ToolOutputContentPart {
   };
 }
 
-/**
- * Narrows a `UserContent` / `ModelMessage.content` element to a
- * {@link FilePart} whose `data` is an `eve-sandbox:` ref URL.
- *
- * Safe on arbitrary input shapes — returns `false` for strings,
- * `null`, non-object values, non-file parts, and file parts whose
- * `data` is not a sandbox ref. Centralises the structural check used
- * by the staging and hydration passes so the two stay in lockstep.
- */
 function isSandboxRefFilePart(part: unknown): part is FilePart {
   return (
     part !== null &&
@@ -488,8 +400,6 @@ async function readSandboxRefBytes(
   if (sandbox === null) return null;
   const bytes = await sandbox.readBinaryFile({ path: ref.path });
   if (bytes === null) {
-    // #325: sandbox snapshots can change during a session lifecycle
-    // as they are deployment bounded.
     log.warn("sandbox-ref attachment bytes missing on hydration — degrading to text reference", {
       mediaType: ref.mediaType,
       path: ref.path,
@@ -497,8 +407,6 @@ async function readSandboxRefBytes(
     });
     return null;
   }
-  // Sandbox code can overwrite a staged file; only the bytes eve staged may
-  // reach the model as the original attachment.
   if (bytes.byteLength !== ref.size || sha256Prefix(bytes) !== basename(dirname(ref.path))) {
     log.warn("sandbox-ref attachment bytes changed since staging — degrading to text reference", {
       mediaType: ref.mediaType,
@@ -517,13 +425,6 @@ function renderMissingSandboxRef(ref: SandboxRef): TextPart {
   };
 }
 
-/**
- * Chat Completions-style providers (`*.chat`) serialize `content` tool
- * outputs as JSON text, so a file would reach the model as base64
- * characters. Moves the files of each run of tool messages into one user
- * message right after it, leaving a text stub in the tool result. The move
- * is deterministic, so the prompt prefix stays cache-stable.
- */
 export function moveToolResultFilesToUserMessages(
   messages: readonly ModelMessage[],
 ): ModelMessage[] {
@@ -565,16 +466,6 @@ function createReturnedFilesMessage(files: readonly FilePart[]): ModelMessage {
   ]);
 }
 
-/**
- * Labels a sandbox-resident attachment with a {@link TextPart} the model can
- * use to reach the payload through filesystem tools, whether or not the
- * bytes follow.
- *
- * Matches the text shape produced by the compaction summarizer for
- * `FilePart`s so the model sees one consistent surface for "there is a
- * file at this path" regardless of whether the reference came from the
- * current turn's hydration or a summarized older turn.
- */
 function renderSandboxRefAsTextPart(ref: SandboxRef): TextPart {
   return { text: `Attached file ${ref.path} (${ref.mediaType})`, type: "text" };
 }
@@ -594,7 +485,6 @@ async function stageFilePart(
   if (data.kind === "bytes") {
     return stageResolvedBytes(part, { bytes: data.bytes }, sandbox, policy);
   }
-  // The provider already holds a referenced file.
   if (data.kind === "reference") {
     return part;
   }
@@ -622,16 +512,10 @@ async function stageFilePart(
   return stageResolvedBytes(part, resolved, sandbox, policy);
 }
 
-/** A model-visible note that stands in for an attachment eve could not stage. */
 function attachmentNote(part: FilePart, outcome: string): TextPart {
   return { text: `Attachment ${part.filename?.trim() || "file"} ${outcome}`, type: "text" };
 }
 
-/**
- * Stages resolved bytes, or a note when they break the channel's upload
- * policy. A link's size is unknown until it downloads, and only the bytes
- * prove the media type, so the policy runs here as well as at the route.
- */
 async function stageResolvedBytes(
   part: FilePart,
   resolved: FetchFileResult,
@@ -666,11 +550,6 @@ async function stageResolvedBytes(
   return { ...part, data: encodeSandboxRef(ref), filename: ref.path, mediaType: ref.mediaType };
 }
 
-/**
- * Writes content-addressed bytes under {@link ATTACHMENTS_ROOT} and describes
- * them as a ref whose media type the bytes confirm. Inline bytes are cached
- * for the session so the next model calls need not read them back.
- */
 async function writeSandboxRef(
   bytes: Buffer,
   declaredMediaType: string,
@@ -687,11 +566,6 @@ async function writeSandboxRef(
   return ref;
 }
 
-/**
- * Resolves a link through the channel's `fetchFile`. When the channel has none
- * or returns `null`, eve downloads a public `https:` link itself; a provider
- * never fetches an attachment.
- */
 async function resolveLink(
   url: URL,
   adapterCtx: ChannelAdapterContext,
@@ -706,7 +580,6 @@ async function resolveLink(
       result = await adapter.fetchFile(url.href, adapterCtx);
     } catch (cause) {
       if (cause instanceof EveAttachmentError) {
-        // Operator logs name the channel that ran the resolver, not one it claims.
         throw new EveAttachmentError({
           adapterKind,
           cause: cause.cause,
@@ -728,12 +601,6 @@ async function resolveLink(
   return downloads(url, adapterKind);
 }
 
-/**
- * Reconstitutes `URL` objects from `eve-url:` serialized strings in
- * `FilePart.data`. Before the queue boundary, `send()` serializes
- * `URL` objects as `eve-url:{href}` strings. This pass restores them
- * so the staging pipeline can use `instanceof URL`.
- */
 function reconstitueFilePartUrls(
   content: Exclude<UserContent, string>,
 ): Exclude<UserContent, string> {

@@ -91,11 +91,7 @@ function dependencies(
       }
       return addAgentToProject(merged);
     },
-    // Stubbed to "no visible manager" so assertions do not depend on which
-    // manager launched the test runner itself.
     detectInvokingPackageManager: vi.fn(() => undefined),
-    // Stubbed to "human launch" for the same reason: the runner is often
-    // launched by a coding agent, and these tests assert the human path.
     isCodingAgentLaunch: vi.fn(async () => false),
     now: vi.fn(() => 0),
     detectPackageManager,
@@ -119,7 +115,6 @@ function dependencies(
   };
 }
 
-/** A host project the dir-mode tests target: package.json plus a pnpm lockfile. */
 async function createHostProject(
   parentDirectory: string,
   packageJson: Record<string, unknown> = { name: "host-app" },
@@ -522,7 +517,6 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, ".vercel"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "vercel.json"))).resolves.toBe(false);
-    // No visible invoking manager: the scaffold stays pnpm-managed.
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(true);
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -761,8 +755,6 @@ describe("runInitCommand", () => {
       expect(await readFile(join(projectPath, "agent/agent.ts"), "utf8")).toContain(
         DEFAULT_AGENT_MODEL_ID,
       );
-      // The workspace policy is pnpm configuration; a scaffold owned by
-      // another manager must not receive it.
       await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
       const packageJson: unknown = JSON.parse(
         await readFile(join(projectPath, "package.json"), "utf8"),
@@ -1169,9 +1161,6 @@ describe("runInitCommand", () => {
     expect(agentSource).toContain('reasoning: "high"');
     await expect(pathExists(join(projectRoot, "agent/instructions.md"))).resolves.toBe(true);
     await expect(pathExists(join(projectRoot, "agent/channels/eve.ts"))).resolves.toBe(true);
-    // Missing runtime deps are added; ones the project already declares stay.
-    // A node engine is declared so Vercel builds on a supported Node rather
-    // than a stale dashboard pin.
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
       dependencies: { "@vercel/connect": "0.2.2", ai: "7.0.0", eve: "^0.6.0", zod: "^3.25.0" },
       engines: { node: "24.x" },
@@ -1181,7 +1170,6 @@ describe("runInitCommand", () => {
       projectRoot,
       expect.anything(),
     );
-    // An existing project's history is its own; only fresh scaffolds get git init.
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
       "--reporter=silent",
@@ -1365,8 +1353,6 @@ describe("runInitCommand", () => {
       expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
         dependencies: { eve: "^0.6.0" },
       });
-      // The workspace policy is pnpm configuration; it must not leak into
-      // projects owned by other managers.
       await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
@@ -1515,8 +1501,6 @@ describe("runInitCommand", () => {
       expect.anything(),
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
-    // The dev server is handed off as text, never spawned — the dev TUI would
-    // wedge the launching agent. The handoff's content is the unit test's job.
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
     const messages = stripAnsi(output.messages.join("\n"));
     expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);

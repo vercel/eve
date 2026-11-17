@@ -14,18 +14,11 @@ import { executeGrepSearch } from "#execution/sandbox/grep-search.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// The whole file exercises the opt-in just-bash provider; the workspace
-// devDependency provides the `just-bash` install that applications opt
-// into explicitly.
 function createJustBashProvider(options: JustBashEnvironmentOptions = {}) {
   return createSandboxEnvironmentHarness(JustBashSandbox.environment(options));
 }
 
 async function createTemporaryCacheDirectory(label: string): Promise<string> {
-  // The local provider derives its cache directory from
-  // `appRoot` via `resolveSandboxCacheDirectory`, so the
-  // helper returns a temporary appRoot rather than a cache directory
-  // directly.
   return await createScratchDirectory(`eve-local-sandbox-${label}-`);
 }
 
@@ -422,9 +415,6 @@ describe("just-bash sandbox file API", () => {
       sandboxName: "session-buffer",
     });
 
-    // A PNG header plus a handful of non-UTF-8 bytes. Reading this
-    // back as UTF-8 text would throw, so the roundtrip check uses the
-    // `wc -c` command to confirm the on-disk byte length matches.
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
     await handle.sandbox.writeBinaryFile({ content: bytes, path: "assets/fixture.bin" });
 
@@ -550,7 +540,6 @@ describe("just-bash provider", () => {
         },
       ],
     });
-    // Build in CI, then ship the cache to a different app root (#4606).
     await cp(buildRoot, runtimeRoot, { recursive: true });
     await rm(buildRoot, { force: true, recursive: true });
 

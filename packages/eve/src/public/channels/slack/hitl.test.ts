@@ -71,7 +71,6 @@ describe("private HITL routes", () => {
     });
   });
 
-  // A code channel's session has no thread, so its route says so instead of leaving it empty.
   it("round-trips a code channel route and rejects an empty thread", () => {
     const route = { channelId: "C123", codeChannel: true } as const;
     const blocks = renderInteractionBlocks(
@@ -101,10 +100,6 @@ describe("answerFromSlackAction", () => {
   });
 
   it("decodes a button click with a requestId that contains underscores", () => {
-    // `requestId` is the AI SDK `action.callId`, which always starts
-    // with `call_…` and contains underscores. The old encoding
-    // split the action id on `_`, silently producing `requestId =
-    // "call"`. The suffix-based encoding survives any requestId shape.
     const response = answerFromSlackAction({
       actionId: `${ANSWER_ACTION_PREFIX}call_abc123:button:0`,
       value: "approve",
@@ -443,9 +438,6 @@ describe("renderInteractionBlocks", () => {
         options: [{ id: "yes", label: "Approve" }],
       }),
     );
-    // current behavior: options take precedence; freeform button is the
-    // fallback when no options are supplied. This documents the
-    // option-only path; freeform-with-options is left as future work.
     expect(blocks).toHaveLength(1);
     const card = blocks[0] as { actions: Array<{ action_id: string }> };
     const ids = card.actions.map((e) => e.action_id);

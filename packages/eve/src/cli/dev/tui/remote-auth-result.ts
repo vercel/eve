@@ -24,7 +24,6 @@ export type RemoteAuthPreparation =
       readonly completedMutations: readonly RemoteAuthCompletedMutation[];
     };
 
-/** Human-readable actions that completed and cannot be rolled back automatically. */
 export function describeRemoteAuthCompletedMutations(
   completedMutations: readonly RemoteAuthCompletedMutation[],
 ): string[] {
@@ -38,7 +37,6 @@ export function describeRemoteAuthCompletedMutations(
   });
 }
 
-/** Adds the mutations that cannot be rolled back to an authentication failure. */
 export function appendRemoteAuthMutationSummary(
   message: string,
   completedMutations: readonly RemoteAuthCompletedMutation[],
@@ -49,7 +47,6 @@ export function appendRemoteAuthMutationSummary(
     : `${message} Completed before the failure: ${completed.join(", ")}.`;
 }
 
-/** Formats a Vercel Deployment Protection challenge for the remote TUI. */
 export function formatRemoteAuthChallengeMessage(serverUrl: string): string {
   return [
     `Vercel Deployment Protection blocked the request to ${serverUrl}.`,

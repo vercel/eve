@@ -1,10 +1,5 @@
 import { codeIs, messageIs, type SemanticErrorRule } from "../rule.js";
 
-/**
- * Node/undici error codes that identify a failed network dial or a
- * connection dropped mid-request, independent of what the surrounding
- * library wrapped them in.
- */
 const NETWORK_ERROR_CODES = [
   "ECONNREFUSED",
   "ECONNRESET",
@@ -39,10 +34,6 @@ export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
     message: "The disk is full, so writes are failing.",
     hint: "Free up space and retry.",
   },
-  // One failure shape, two detection signals in priority order: a
-  // structured code anywhere on the chain beats a message match, because
-  // undici wraps the coded socket error under a generic `fetch failed`
-  // and the code is the evidence worth naming in the summary.
   {
     id: "network-request-failed",
     name: "Network request failed",
@@ -52,14 +43,6 @@ export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
     hint: NETWORK_FAILURE_HINT,
   },
   {
-    // Exact-equality message fallback, verified empirically on Node 26:
-    // a failed `fetch` rejects with a TypeError whose message is exactly
-    // "fetch failed" (the coded cause is sometimes stripped in transit),
-    // a peer-destroyed HTTP socket errors with exactly "socket hang up",
-    // and an undici headers/body timeout can surface as exactly
-    // "terminated" when its coded cause is stripped in transit. Equality,
-    // never containment: user errors that merely mention these messages
-    // must not be reclassified as connectivity problems.
     id: "network-request-failed",
     name: "Network request failed",
     tags: ["system", "transient"],

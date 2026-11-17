@@ -22,21 +22,14 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
-/** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly kind: "cancel"; readonly origin?: ControlOrigin }
   | { readonly kind: "consumed" }
-  /** A control this owner cannot run: settle it failed, so its sender doesn't wait forever. */
   | { readonly kind: "unsupported"; readonly settlement: ControlSettlement }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
-/**
- * Decodes and admits one inbox payload. This boundary never decides whether a
- * delivery steers, starts a turn, or routes to a child; those are selection
- * and delivery-routing policies owned by their respective layers.
- */
 export async function admitSessionInboxPayload(
   value: SessionInboxPayload,
   input: {
@@ -52,7 +45,6 @@ export async function admitSessionInboxPayload(
     input.queue.enqueueAuthorization(value.payloads);
     return { kind: "consumed" };
   }
-  // A child's questions reach the session only through the run that opened it.
   if (value.kind === "subagent-interaction") {
     return { kind: "consumed" };
   }
@@ -83,15 +75,12 @@ export async function admitSessionInboxPayload(
       return { admission, kind: "delivery" };
     }
     case "clear":
-      // A clear starts over: it stops the running turn and its tasks, as a reset does, then runs.
-      // It carries no origin: the queued control, not the cancel, settles its delivery.
       input.queue.enqueueControl("clear", controlOrigin(command));
       return { kind: "cancel" };
     case "compact":
       input.queue.enqueueControl("compact", controlOrigin(command));
       return { kind: "consumed" };
     case "session-timeout":
-      // A previous owner's timer may fire after handoff; only this owner's deadline counts.
       if (command.ownerRunId === getWorkflowMetadata().workflowRunId) {
         input.queue.enqueueControl("expired");
       }
@@ -106,18 +95,12 @@ export async function admitSessionInboxPayload(
   }
 }
 
-/** The delivery a control arrived as. */
 export function controlOrigin(command: SessionControlIdentity): ControlOrigin {
   return command.auth === undefined
     ? { deliveryId: command.deliveryId }
     : { auth: command.auth, deliveryId: command.deliveryId };
 }
 
-/**
- * The failed settlement of an undecodable payload that names its delivery: a control from a newer eve, or
- * a malformed one. Its sender awaits that delivery's settlement. Without a delivery id, nobody
- * waits on it, and the payload is only dropped.
- */
 function unsupportedControl(
   value: SessionInboxPayload,
   reason: string,

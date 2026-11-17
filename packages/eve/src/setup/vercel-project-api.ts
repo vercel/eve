@@ -7,7 +7,6 @@ import type { VercelProjectOperationOptions } from "./project-resolution.js";
 
 export type { VercelProjectOperationOptions };
 
-/** Shared deadline for Vercel project list and exact-lookup requests. */
 export const VERCEL_PROJECT_REQUEST_TIMEOUT_MS = 15_000;
 
 const VercelTeamListEntrySchema = z.object({
@@ -25,7 +24,6 @@ const VercelProjectListEntrySchema = z.object({
 
 export type VercelProjectListEntry = z.infer<typeof VercelProjectListEntrySchema>;
 
-/** One ranked Vercel project search page and its optional continuation cursor. */
 interface VercelProjectSearchPage {
   readonly projects: VercelProjectListEntry[];
   readonly next?: number;
@@ -35,7 +33,6 @@ const VercelPaginationSchema = z.object({
   next: z.number().int().nonnegative().nullable().optional(),
 });
 
-/** One drained page of a cursor-paginated Vercel list. */
 interface VercelPage<T> {
   readonly items: T[];
   readonly next?: number;
@@ -55,7 +52,6 @@ const VercelProjectPageSchema = z
   })
   .transform((data) => ({ items: data.projects, next: data.pagination?.next ?? undefined }));
 
-/** Parses one JSON response captured from the Vercel CLI. */
 export function parseVercelJson(stdout: string, description: string): unknown {
   try {
     return JSON.parse(stdout);
@@ -64,7 +60,6 @@ export function parseVercelJson(stdout: string, description: string): unknown {
   }
 }
 
-/** Converts a scoped API denial into the Vercel re-authentication action. */
 export function requireVercelTeamAccess(failure: VercelCaptureFailure): never {
   const stderr = failure.stderr.trim();
   const detail = stderr ? ` ${stderr}` : "";
@@ -105,7 +100,6 @@ async function captureTeamPage(
   return result.stdout;
 }
 
-/** Lists up to the maximum 100 Vercel scopes supported by the CLI. */
 export async function listTeams(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
@@ -123,7 +117,6 @@ export async function listTeams(
   return parsed.data;
 }
 
-/** Capabilities required by a setup flow, using Vercel's permission resource names. */
 export interface VercelTeamRequirement {
   permissions: Readonly<Record<string, readonly string[]>>;
   disabledReason: string;
@@ -145,7 +138,6 @@ function teamPermissionIssue(
     : requirement.disabledReason;
 }
 
-/** Checks the listed teams in one request, retaining unknown scopes as unavailable. */
 export async function checkTeamRequirements(
   projectRoot: string,
   teams: readonly VercelTeamListEntry[],
@@ -193,7 +185,6 @@ export async function checkTeamRequirements(
   return issues;
 }
 
-/** Returns an actionable reason when a specific team cannot satisfy a setup flow. */
 export async function checkTeamRequirement(
   projectRoot: string,
   team: string,
@@ -241,7 +232,6 @@ async function fetchProjectPage(
   return parsed.data;
 }
 
-/** Lists the 20 most recent Vercel projects in one account scope. */
 export async function listRecentProjects(
   projectRoot: string,
   team: string,
@@ -258,7 +248,6 @@ function projectSearchRank(project: VercelProjectListEntry, query: string): numb
   return 2;
 }
 
-/** Ranks exact and prefix project-name matches ahead of substring matches. */
 export function rankProjectSearchResults(
   projects: readonly VercelProjectListEntry[],
   query: string,
@@ -269,7 +258,6 @@ export function rankProjectSearchResults(
   );
 }
 
-/** Searches one ranked Vercel project page and retains its continuation cursor. */
 export async function searchProjects(
   projectRoot: string,
   team: string,

@@ -6,7 +6,6 @@ export type {
   JsonValue,
 } from "#protocol/session-events/json.js";
 
-/** Compares two already-validated JSON structures by value. */
 export function jsonValuesEqual(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   if (Array.isArray(left) || Array.isArray(right)) {
@@ -34,14 +33,6 @@ const INVALID_JSON_VALUE_CANDIDATE = Symbol("invalid-json-value-candidate");
 const JSON_VALUE_ERROR_MESSAGE = "Expected a JSON-serializable value.";
 const JSON_OBJECT_ERROR_MESSAGE = "Expected a JSON-serializable object.";
 
-/**
- * Returns the normalized JSON value for one runtime payload.
- *
- * Object properties whose value is `undefined` are treated as omitted so
- * callers can pass normal JavaScript option bags without tripping the JSON
- * boundary on absent optional fields. Lossy JavaScript values such as `Date`,
- * `Map`, `Set`, `NaN`, and cyclic structures are rejected.
- */
 export function parseJsonValue(value: unknown): JsonValue {
   const normalized = normalizeJsonValueCandidate(value);
 
@@ -52,12 +43,6 @@ export function parseJsonValue(value: unknown): JsonValue {
   return normalized;
 }
 
-/**
- * Returns the normalized JSON object for one runtime payload.
- *
- * Top-level arrays and primitives are rejected. Object properties whose
- * value is `undefined` are treated as omitted.
- */
 export function parseJsonObject(value: unknown): JsonObject {
   const normalized = parseJsonValue(value);
 
@@ -131,9 +116,6 @@ function normalizeJsonValueCandidate(
   return normalized;
 }
 
-/**
- * Narrows an already-normalized {@link JsonValue} to a {@link JsonObject}.
- */
 export function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
   return value !== null && !Array.isArray(value) && typeof value === "object";
 }

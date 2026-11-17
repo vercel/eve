@@ -27,13 +27,9 @@ class JUnitReporter implements EvalReporter {
     this.#config = config;
   }
 
-  onRunStart(): void {
-    // Nothing to initialize.
-  }
+  onRunStart(): void {}
 
-  onEvalComplete(): void {
-    // The file is written once on completion so the suite has final counters.
-  }
+  onEvalComplete(): void {}
 
   async onRunComplete(summary: EveEvalRunSummary): Promise<void> {
     const xml = renderJUnit(summary, { suiteName: this.#config.suiteName });
@@ -77,10 +73,6 @@ function renderTestCase(result: EveEvalResult): string {
   ].join("\n");
 }
 
-/**
- * Compact failure payload for the XML body. Full event streams stay in the
- * `.eve/evals/` artifacts; CI annotations only need the verdict and why.
- */
 function buildFailureDetail(result: EveEvalResult): Record<string, unknown> {
   return {
     verdict: result.verdict,

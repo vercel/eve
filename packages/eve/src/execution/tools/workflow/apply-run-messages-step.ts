@@ -23,11 +23,6 @@ import {
 } from "#protocol/routes.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
-/**
- * A workflow tool run's `ctx.report()` update, as its call's progress. A run's last report can
- * arrive after its call settled, as when its outcome came first or its turn ended: nobody reads
- * progress for a settled call, so it's dropped.
- */
 function workflowToolRunReportEvents(
   state: SessionStepState,
   from: WorkflowToolRunRef,
@@ -39,11 +34,6 @@ function workflowToolRunReportEvents(
   return settled ? [] : [callProgress(from.callId, update)];
 }
 
-/**
- * `child.opened` for a session a workflow tool run opened: it names the call whose run opened
- * it and the route that serves its stream. A remote child's binding, which names its deployment
- * and credential resolver, goes to a private side stream first.
- */
 async function childOpenedEvent(
   parentSessionId: string,
   { from, session }: WorkflowToolRunAgentStartedMessage,
@@ -83,18 +73,10 @@ function childSentEvent({ deliveryId, from, sessionId }: WorkflowToolRunAgentSen
   );
 }
 
-/** A run's message the session applies as it reads it, which answers no call a turn waits on. */
 export type AppliedRunMessage =
   | Extract<WorkflowToolRunMessage, { readonly kind: "agent-started" | "agent-sent" | "report" }>
-  // Only a task's run reports these to the task table; an `execute` run's outcome answers its call.
   | (TaskRunMessage & { readonly from: { readonly taskId: string } });
 
-/**
- * Applies run messages in the order they arrived, in one step however many
- * there are: a fan-out's starts, reports, and replies would otherwise cost a
- * step each. Set `canCancelTurn` while a turn runs: a hook's `ctx.cancel()`
- * on a report then returns `cancelled` for the turn to stop.
- */
 export async function applyRunMessagesStep(
   input: SessionStepState & {
     readonly canCancelTurn?: boolean;
@@ -105,7 +87,6 @@ export async function applyRunMessagesStep(
   return await withSessionStateDelta(input, async ({ canCancelTurn, messages, ...target }) => {
     let state: SessionStepState = target;
     let cancelled = false;
-    // Consecutive starts and reports publish together, as one turn's events do.
     let events: SessionPublication[] = [];
     const publish = async (): Promise<void> => {
       if (events.length === 0) return;

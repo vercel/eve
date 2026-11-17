@@ -15,12 +15,6 @@ import type {
 
 const DEFAULT_LOCAL_TARGET_PORT = Number(process.env.PORT ?? 3000);
 
-/**
- * True when nothing on this machine already listens on the port. Default
- * allocation must skip a developer's own `eve dev` (or anything else) parked
- * on 3000 — the harness would otherwise probe the foreign server, see the
- * wrong agent name, and fail the whole smoke run.
- */
 function portIsFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = createServer();
@@ -43,7 +37,6 @@ interface PendingLocalTargetRecord {
   readonly target: Promise<TestTarget>;
 }
 
-/** Creates an environment that starts local eve app servers on demand. */
 export function createLocalTestEnvironment(
   options: CreateLocalTestEnvironmentOptions = {},
 ): LocalTestEnvironment {

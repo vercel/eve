@@ -22,7 +22,6 @@ import {
 
 const log = createLogger("harness.tool-loop");
 
-/** A failed model call as the stream reports it: what a reader can act on, not the SDK's dump. */
 export function modelCallErrorInfo(error: unknown): ErrorInfo {
   const message =
     summarizeKnownError(error)?.message ??
@@ -31,9 +30,7 @@ export function modelCallErrorInfo(error: unknown): ErrorInfo {
   return { code: "MODEL_CALL_FAILED", message };
 }
 
-/** Exhausted model calls fail the turn; terminal errors end its session as well. */
 export async function reportModelCallFailure(step: Step, error: unknown): Promise<StepResult> {
-  // The AI SDK's span omits the cause chain and upstream response body.
   step.instrumentation?.recordError(error);
   if (step.emit === undefined) throw error;
   const { sessionId } = step.session;
@@ -60,7 +57,6 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
   const summary = summarizeKnownError(error);
   const rejection = summary === null ? extractUpstreamRejectionMessage(error) : null;
   const message = summary?.message ?? rejection?.message ?? toErrorMessage(error);
-  // A delegated caller reads the remedy as prose; events keep it structured.
   const output = summary?.hint === undefined ? message : `${message} ${summary.hint}`;
   const diagnostics = extractModelCallErrorDetails(error);
   const details: JsonObject =
@@ -85,7 +81,6 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
         (terminal
           ? "model call failed terminally"
           : "model call failed — parking session for retry by the user"),
-      // Recognized failures use compact diagnostics, not an inspector dump of their cause chain.
       summary !== null || rejection !== null
         ? { ...coordinates, details: diagnostics }
         : { ...coordinates, error },
@@ -114,18 +109,11 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
   return { next: null, session: step.session, settledTurn: { isError: true, output } };
 }
 
-// The model learns a turn was refused, so it doesn't repeat it unaware, without reading what it said.
 const REFUSED_TURN_NOTE = createFrameworkUserMessage(
   "context.instruction",
   "The model provider refused a response in this turn, so the turn ended with an error and the request that started it was removed from this conversation. Any tool calls that follow ran before the refusal.",
 );
 
-/**
- * History with the turn's input replaced by a note, or `undefined` when history holds none of it.
- * The input stays in the stream, but the model doesn't read it again: sent with the next turn, it
- * would be refused too. The tool calls the turn already ran stay, since they happened, and the
- * note keeps them behind a user message, as providers require.
- */
 function withoutTurnInput(
   history: readonly HarnessModelMessage[],
   turnId: string,
@@ -135,17 +123,11 @@ function withoutTurnInput(
     if (turnAnchorOf(message) !== turnId) return [message];
     if (noted) return [];
     noted = true;
-    // Consecutive refused turns share one note.
     return history[index - 1]?.content === REFUSED_TURN_NOTE.content ? [] : [REFUSED_TURN_NOTE];
   });
   return noted ? rewrite : undefined;
 }
 
-/**
- * Compaction could not bring the history under the limit. The next attempt
- * would fail the same way, so the session ends with the message instead of
- * the step being retried.
- */
 export async function reportCompactionFailure(
   step: Step,
   error: CompactionOverLimitError,

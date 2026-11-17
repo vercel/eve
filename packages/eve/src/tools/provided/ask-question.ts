@@ -69,7 +69,6 @@ export const ASK_QUESTION_INPUT_SCHEMA = defineJsonSchema<AskQuestionInput>(
     required: ["question"],
     additionalProperties: false,
   },
-  // Labels double as option ids, so duplicates would make answers ambiguous.
   (input) =>
     input.options !== undefined &&
     new Set(input.options.map((option) => option.label)).size !== input.options.length

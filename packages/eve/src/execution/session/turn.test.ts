@@ -49,7 +49,6 @@ import type { TokenUsage } from "#shared/token-usage.js";
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
   getWorkflowMetadata: () => ({ url: "https://parent.example" }),
-  // Every task_wait now carries a timeout; these tests settle the wait before it could pass.
   sleep: () => new Promise<never>(() => {}),
 }));
 vi.mock("#execution/coordination-dispatch-step.js", () => ({
@@ -57,7 +56,6 @@ vi.mock("#execution/coordination-dispatch-step.js", () => ({
   publishDispatchedCallsStep: vi.fn(),
 }));
 
-// A task run's late spend publishes a fact; this suite's sessions carry no bundle to publish with.
 const committed = vi.hoisted((): unknown[] => []);
 
 vi.mock("#execution/publish-session-events.js", async (importOriginal) => {
@@ -73,7 +71,6 @@ vi.mock("#execution/publish-session-events.js", async (importOriginal) => {
   return {
     ...(await importOriginal()),
     publishSessionEvents: unchanged,
-    // Task steps commit through it: record what they decide; the state they saved comes back.
     commitSessionStep: vi.fn(
       async (
         target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
@@ -111,7 +108,6 @@ vi.mock("#execution/tools/workflow/apply-run-messages-step.js", async (importOri
 });
 
 beforeEach(() => {
-  // Tests that record publishing replace the real step; the rest apply messages for real.
   vi.mocked(applyRunMessagesStep).mockReset();
   vi.mocked(cancelTasksStep).mockClear();
   vi.mocked(routeDeliverToChildren)
@@ -127,20 +123,17 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-/** A mocked session step whose work returns whole state, as the real step's work does. */
 function stepWork<I extends Partial<SessionStateValues>, R extends Partial<SessionStateValues>>(
   work: (input: I) => Promise<R>,
 ): (input: I) => Promise<WithSessionStateDelta<R>> {
   return (input) => withSessionStateDelta(input, work);
 }
-/** These turns leave the history alone, so their work omits it, which the delta reads as unchanged. */
 type TurnStepWorkResult = DurableStepResult extends infer R
   ? R extends unknown
     ? Omit<R, "history">
     : never
   : never;
 const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
-/** These dispatches leave nothing to publish, so their work omits `pending`. */
 function dispatchWork(
   work: (
     input: Parameters<typeof dispatchCoordinationStep>[0],
@@ -518,8 +511,6 @@ describe("SessionExecution checkpoints", () => {
   });
 
   it("lets its caller's next message steer a turn whose input carries no caller", async () => {
-    // A delegated session's first turn starts from its initial message; the
-    // session binds the caller beside it.
     const firstCall: TurnCaller = {
       callId: "call-1",
       replyTo: { kind: "hook", token: "reply-1" },
@@ -582,8 +573,6 @@ describe("SessionExecution checkpoints", () => {
     expect(turnStep).toHaveBeenCalledTimes(2);
   });
 
-  // #4923: another person's answer can resume a parked turn; the turn stays
-  // its owner's, so only the owner's text steers it.
   it("keeps a resumed turn's owner when someone else's answer resumes it", async () => {
     const alice: SessionAuthContext = {
       attributes: {},
@@ -851,7 +840,6 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "done", output: "done" });
 
-    // Steering and the blocking action's result travel in one step, steering first.
     expect(turnStep).toHaveBeenCalledTimes(2);
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toMatchObject({
       delivery: steering,
@@ -953,7 +941,6 @@ describe("SessionExecution checkpoints", () => {
         delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
       });
       if (holds) {
-        // Someone can answer, so the turn waits for them.
         const outcome = await Promise.race([
           turn.then(
             () => "settled",
@@ -1249,7 +1236,6 @@ describe("SessionExecution checkpoints", () => {
       ...base,
       snapshot: { session: writeTaskTable(base.snapshot.session, working.table) },
     };
-    // An unrelated result keeps the wait going for a second pass before the cancel.
     const runtimePayloads: SessionInboxPayload[] = [
       { kind: "runtime-action-result", results: [] },
       { deliveryId: "cancel-delivery", kind: "cancel" },
@@ -1294,15 +1280,12 @@ describe("SessionExecution checkpoints", () => {
       kind: "park",
     });
 
-    // Only a task tool call is pending: nothing is dispatched, and the cancel has
-    // no workflow tool run to stop.
     expect(dispatchCoordinationStep).not.toHaveBeenCalled();
     expect(cancelTasksStep).toHaveBeenCalledWith(expect.objectContaining({ turnCalls: false }));
   });
 
   it("admits an idle agent task's usage report while the turn waits and counts it", async () => {
     const base = state("");
-    // Alice's reviewer task answered earlier and is idle; its run is still live.
     const created = createTask(readTaskTable(undefined), {
       callId: "review-call",
       kind: "agent",
@@ -1323,7 +1306,6 @@ describe("SessionExecution checkpoints", () => {
       ...base,
       snapshot: { session: writeTaskTable(base.snapshot.session, idle) },
     };
-    // A turn of the reviewer that no reply answers ends while Alice's turn waits on a call.
     const payloads: SessionInboxPayload[] = [
       {
         from: {
@@ -1393,7 +1375,6 @@ describe("SessionExecution checkpoints", () => {
       kind: "park",
     });
 
-    // No call is open to own it, so the spend is the task's own late usage.
     expect(committed).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1429,7 +1410,6 @@ describe("SessionExecution checkpoints", () => {
         sessionId,
       },
     });
-    // Alice's triage opens two reviewers and reports, then Bob cancels the turn.
     const payloads: SessionInboxPayload[] = [
       opened("child-1"),
       opened("child-2"),
@@ -1501,7 +1481,6 @@ describe("SessionExecution checkpoints", () => {
       turnId: "turn_0",
     };
     const report = (update: string): SessionInboxPayload => ({ from, kind: "report", update });
-    // Alice's run reported twice while the model step ran, then once more and finished.
     const pending: SessionInboxPayload[] = [
       report("Third check passed."),
       { from, kind: "outcome", result: { output: "held", status: "completed" } },
@@ -1612,7 +1591,6 @@ describe("SessionExecution checkpoints", () => {
       result: { output: `${name} finished`, status: "completed" },
       usage: spent(inputTokens),
     });
-    // The draft's outcome is delivered twice before the review finishes.
     const payloads = [outcome("draft", 300), outcome("draft", 300), outcome("review", 500)];
     const inbox: SessionInbox = {
       claimedTokens: [],
@@ -1657,7 +1635,6 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "done" });
 
-    // Each call owns what its run spent.
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.delegatedUsage).toEqual({
       "draft-call": spent(300),
       "review-call": spent(500),
@@ -1704,7 +1681,6 @@ describe("SessionExecution checkpoints", () => {
       },
     ];
     const inbox: SessionInbox = { ...idleInbox(), next: vi.fn(async () => payloads.shift()) };
-    // The outcome records the task's result, as the real step does before publishing `task.settled`.
     vi.mocked(applyRunMessagesStep).mockImplementation(
       stepWork(async (input: Parameters<typeof applyRunMessagesStep>[0]) => ({
         cancelled: false,
@@ -1752,9 +1728,7 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "park", settled: { output: "Here is the research." } });
 
-    // Alice's turn resumes only once her task reported, with no new delivery, so it keeps her auth.
     expect(resumed).toEqual([{ input: undefined, reportedTaskIds: [created.taskId] }]);
-    // Bob's message waits for a turn of its own, which carries his auth.
     expect(queue.takeNext()).toMatchObject({ delivery: bobsMessage, kind: "turn" });
   });
 
@@ -1762,7 +1736,6 @@ describe("SessionExecution checkpoints", () => {
     const created = workingResearchTask();
     const sessionState = stateWithTasks(created.table);
     const inbox: SessionInbox = { ...idleInbox(), next: vi.fn(() => new Promise<never>(() => {})) };
-    // A turn that fails settles even though the turn rule would have held it for its task.
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementation(
@@ -1773,7 +1746,6 @@ describe("SessionExecution checkpoints", () => {
           settled: { isError: true, output: "The model provider failed." },
         })),
       );
-    // The real step tells the run to stop and publishes `task.settled`; this test reads the request.
     vi.mocked(cancelTasksStep).mockImplementationOnce(
       stepWork(async (input: Parameters<typeof cancelTasksStep>[0]) => ({
         serializedContext: input.serializedContext,
@@ -1819,7 +1791,6 @@ describe("SessionExecution checkpoints", () => {
       drain: vi.fn(() => []),
       hasPending: vi.fn(() => true),
       whenPending: () => new Promise<void>(() => {}),
-      // The pump signals a delivery as it arrives, then the wait reads it.
       next: vi.fn(async () => {
         signalDelivery(steering);
         return steering;
@@ -1918,7 +1889,6 @@ describe("SessionExecution checkpoints", () => {
       createExecution({ cursor, inbox, sessionState }).runTurn(undefined),
     ).resolves.toMatchObject({ kind: "done" });
 
-    // The boundary still ran: it handled the task's report and dropped only the child.
     expect(cursor.serializedContext[PUBLISHED]).toEqual(["Halfway through the sources."]);
   });
 
@@ -1930,7 +1900,6 @@ describe("SessionExecution checkpoints", () => {
       interrupt = handler;
       return () => {};
     };
-    // Bob cancels while the turn waits, just as Alice's run opens a planner.
     inbox.next = vi.fn(async () => {
       interrupt({ deliveryId: "cancel-delivery", kind: "cancel" });
       return planner;
@@ -1961,10 +1930,8 @@ describe("SessionExecution checkpoints", () => {
   });
 });
 
-/** The context key the mocked publishing steps append to, as a hook's state write would. */
 const PUBLISHED = "test.published";
 
-/** Mocks the run-message publishing steps to record what they publish in the session context. */
 function publishIntoContext(): void {
   const append = (context: Record<string, unknown>, entry: string) => ({
     cancelled: false,
@@ -1993,10 +1960,6 @@ function publishIntoContext(): void {
     );
 }
 
-/**
- * Alice's runs open a planner, a reviewer, and a writer, and her research task
- * reports progress, with an inbox that has nothing else to admit.
- */
 function boundaryRunMessages() {
   const from = (callId: string, taskId?: string): WorkflowToolRunRef => ({
     callId,
@@ -2094,7 +2057,6 @@ function createExecution(input: {
   });
 }
 
-/** A `research` task the turn's call started, whose run is still working. */
 function workingResearchTask(): { readonly table: TaskTable; readonly taskId: string } {
   const created = createTask(readTaskTable(undefined), {
     callId: "research-call",
@@ -2115,7 +2077,6 @@ function stateWithTasks(table: TaskTable): DurableSessionState {
   return { ...base, snapshot: { session: writeTaskTable(base.snapshot.session, table) } };
 }
 
-/** A session whose turn waits on a workflow tool run, so cancelling it has a run to cancel. */
 function stateWithBlockingRun(): DurableSessionState {
   const base = state("");
   return {
@@ -2139,7 +2100,6 @@ function state(continuationToken: string): DurableSessionState {
   });
 }
 
-/** A paused step's fields: what it awaits, and whether it has runs to start. */
 function callsPause(input: {
   readonly callIds: readonly string[];
   readonly dispatch?: boolean;

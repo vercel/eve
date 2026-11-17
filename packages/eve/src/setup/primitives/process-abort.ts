@@ -2,11 +2,6 @@ import type { ChildProcess } from "node:child_process";
 
 const ABORT_KILL_GRACE_MS = 5_000;
 
-/**
- * Couples a parent abort signal to a child process and guarantees eventual
- * termination. Callers still wait for `close`; this helper only owns signals
- * and the SIGKILL escalation.
- */
 export function armProcessAbort(child: ChildProcess, signal: AbortSignal | undefined): () => void {
   if (signal === undefined) return () => {};
 

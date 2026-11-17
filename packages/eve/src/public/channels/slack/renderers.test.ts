@@ -8,7 +8,6 @@ import {
   type SlackInteractionCard,
 } from "#public/channels/slack/renderers.js";
 
-/** The parts of a handler's context these renderers read. */
 function context() {
   const thread = {
     postDirectMessage: vi.fn(async () => undefined),
@@ -20,7 +19,6 @@ function context() {
   };
 }
 
-/** Runs a composed chain's handler with the partial context above. */
 async function invoke(handler: unknown, event: unknown): Promise<void> {
   await (handler as (event: unknown, ctx: unknown) => Promise<void>)(event, context());
 }

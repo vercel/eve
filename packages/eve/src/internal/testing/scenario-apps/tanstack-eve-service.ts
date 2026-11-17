@@ -2,9 +2,6 @@ import { createRequire } from "node:module";
 
 import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
-// Not resolved from the installed workspace like the Next.js descriptor's
-// dependencies: TanStack Start is not an eve dependency, so no copy is
-// installed to resolve a version from. `nitro` is the copy eve ships.
 const require = createRequire(import.meta.url);
 const TANSTACK_ROUTER_VERSION = "^1.170.0";
 const TANSTACK_START_VERSION = "^1.168.0";
@@ -17,11 +14,6 @@ interface TanStackEveServiceDescriptorOptions {
   readonly installDependencies?: boolean;
 }
 
-/**
- * A TanStack Start host with a generated eve Vercel service. The agent lives
- * in the host root, next to the `vite.config.ts` that registers `nitro()`
- * with a user catch-all route that must not shadow eve's route.
- */
 export function createTanStackEveServiceDescriptor(
   options: TanStackEveServiceDescriptorOptions = {},
 ): ScenarioAppDescriptor {

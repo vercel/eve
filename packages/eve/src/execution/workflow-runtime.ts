@@ -113,22 +113,14 @@ interface SessionInboxOwnerRecord extends WorkflowHookRecord {
   readonly sessionId: string;
 }
 
-/**
- * Stable workflow reference used by `start()` to locate the workflow
- * entrypoint registered by the Workflow DevKit builder. The id omits
- * the package version stamp so the long-lived owner can rotate across
- * deployments without rewriting the registry key.
- */
 export const workflowEntryReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_ENTRY_NAME}`,
 };
 
-/** Stable workflow reference for session deadline timers. */
 export const sessionTimeoutWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
 };
 
-/** Stable workflow reference for authored workflow tool runs. */
 export const workflowToolRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
 };
@@ -141,7 +133,6 @@ export const connectionEventDeliveryWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME}`,
 };
 
-/** Starts tried while each one finds an owner that ends before taking the delivery. */
 const CONTINUATION_START_ATTEMPTS = 3;
 
 function sessionHandle(
@@ -161,17 +152,12 @@ function sessionHandle(
   };
 }
 
-/**
- * Creates a workflow-backed runtime whose current owner executes turns and
- * whose original run retains the public event stream across owner handoffs.
- */
 export function createWorkflowRuntime(config: {
   readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
 }): Runtime {
-  /** `predecessor` is set only on a successor of a retired session that has just ended. */
   const startSession = async (
     input: RunInput,
     predecessor?: SessionPredecessor,
@@ -188,8 +174,6 @@ export function createWorkflowRuntime(config: {
         }),
       };
     }
-    // A losing candidate forwards this command to the winner instead of starting, so it is the
-    // same delivery and must carry the same identity.
     const conflictCommand = input.continuationConflictCommand;
     if (conflictCommand !== undefined && conflictCommand.delivery === undefined) {
       input = {
@@ -216,7 +200,6 @@ export function createWorkflowRuntime(config: {
       ctx,
     });
     const sessionTimeoutMs = agentLimits(bundle, ctx)?.sessionTimeoutMs;
-    // Workflow cannot purge inputs and outputs independently.
     const retention =
       bundle.resolvedAgent.config?.experimental?.workflow?.retention ??
       (traceDecision.action === "record" &&
@@ -266,9 +249,6 @@ export function createWorkflowRuntime(config: {
     };
 
     const { continuationToken } = input;
-    // The run claims one address as it is admitted. A continuation address
-    // tells the caller at once whether this run or an earlier one owns it.
-    // Without one, the session's own inbox takes commands before the run boots.
     assertStartClaims(await getWorld());
     const hasContinuation = continuationToken !== undefined && continuationToken !== "";
     workflowInput.startClaim = hasContinuation ? "continuation" : "inbox";
@@ -305,12 +285,6 @@ export function createWorkflowRuntime(config: {
     return sessionHandle(run.runId, input.delivery?.deliveryId, hasContinuation ? true : undefined);
   };
 
-  /**
-   * Another session already owned the address this start claimed, and no run
-   * was created. A send goes to that owner as the delivery the caller meant;
-   * any other start was a duplicate and names the owner. An owner that ended
-   * since leaves the address free, so the start is tried again.
-   */
   const joinContinuationOwner = async (
     input: RunInput,
     predecessor: SessionPredecessor | undefined,
@@ -343,7 +317,6 @@ export function createWorkflowRuntime(config: {
       if (command.kind !== "send" || successor === undefined) {
         return await settleStrandedCommand(continuationToken, command, error);
       }
-      // A successor has no request for these answers, so they cannot be delivered anywhere.
       if ((command.payload.answers?.length ?? 0) > 0) {
         throw sessionStrandedError(
           error,
@@ -380,7 +353,6 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: SessionStreamOptions,
     ): Promise<ReadableStream<SessionStreamEvent>> {
-      // Recorded history needs no owner, so reading it never inspects the session's lifecycle.
       if (options?.follow === false)
         return readSessionEventHistory(sessionId, options.startIndex, options.signal);
       await assertFollowableSession(sessionId);
@@ -441,9 +413,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     startAddress = resumed.startAddress;
     hook = { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
   } catch (error) {
-    // Each entry point decides what a stranded owner means for its caller.
     if (error instanceof StrandedSessionOwnerError) throw error;
-    // A session's start claims its address, so a missing hook means it ended.
     if (isInactiveCommandTarget(error)) return inactiveCommandResult(command);
     const logicalToken = logicalSessionToken(token);
     log.error("failed to dispatch session command", {
@@ -454,7 +424,6 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   if (command.kind === "reset") {
-    // A session that took the reset before booting holds only its start address yet.
     await waitForSessionHooksRelease(
       [
         sessionCommandHookToken(hook.sessionId),
@@ -471,12 +440,6 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   ) as SessionCommandResult<TCommand>;
 }
 
-/**
- * What a command means for a stranded owner, which can run none. `reset` ends
- * the session. A send or `clear` needs the session to run, so it is refused
- * and the caller decides whether to reset. `cancel` and `compact` find no
- * active session.
- */
 async function settleStrandedCommand<TCommand extends SessionCommand>(
   address: string | SessionInboxAddress,
   command: TCommand,
@@ -495,13 +458,7 @@ async function settleStrandedCommand<TCommand extends SessionCommand>(
   }
 }
 
-/**
- * An ended session has no inbox, and a dormant `eve dev` run may resume; either recorded stream
- * stays readable. Only a stranded owner refuses a follow.
- */
 async function assertFollowableSession(sessionId: string): Promise<void> {
-  // An ended session has no inbox, and a dormant `eve dev` run may resume; either recorded
-  // stream stays readable. Only a stranded owner, an unknown session, or expired history refuses.
   try {
     await Promise.all([
       assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId))),
@@ -513,7 +470,6 @@ async function assertFollowableSession(sessionId: string): Promise<void> {
   }
 }
 
-/** Public form of a stranded owner; `nextStep` replaces the default recovery instruction. */
 function sessionStrandedError(
   stranded: StrandedSessionOwnerError,
   nextStep?: string,
@@ -547,11 +503,6 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
   return result as SessionCommandResult<TCommand>;
 }
 
-/**
- * Sends one command to a session through its stable command inbox. A caller
- * holding the session id asked for that exact session, so a send to a
- * stranded one is refused rather than replaced.
- */
 export async function dispatchWorkflowSessionCommand<TCommand extends SessionCommand>(
   input: DispatchSessionInput<TCommand>,
 ): Promise<SessionCommandResult<TCommand>> {
@@ -580,7 +531,6 @@ function isInactiveCommandTarget(error: unknown): boolean {
   return false;
 }
 
-/** The session holding a continuation token's inbox, if any does. */
 export async function resolveContinuation(
   continuationToken: string,
   options?: { readonly runnable?: boolean },
@@ -593,8 +543,6 @@ export async function resolveContinuation(
       return undefined;
     }
     let failure = error;
-    // An owner whose deployment was deleted is stranded like any other: its session still
-    // holds the address until a message replaces it or `end()` ends it.
     if (error instanceof StrandedSessionOwnerError) {
       if (options?.runnable === true) throw sessionStrandedError(error);
       try {
@@ -620,10 +568,6 @@ export async function resolveContinuation(
   return owner;
 }
 
-/**
- * Calls `check` until it returns a value, backing off from 20 ms to 200 ms
- * between calls, and resolves `undefined` once `timeoutMs` passes without one.
- */
 export async function pollUntil<T>(
   check: () => Promise<T | undefined>,
   timeoutMs: number,
@@ -636,7 +580,6 @@ export async function pollUntil<T>(
   }
 }
 
-/** A run `start()` accepted may not be readable yet, which is not an ended run. */
 export async function hasRunEnded(runId: string): Promise<boolean> {
   try {
     const status = await getRun(runId).status;
@@ -650,7 +593,6 @@ export async function hasRunEnded(runId: string): Promise<boolean> {
   }
 }
 
-/** Starts a workflow on the deployment executing this call. */
 export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
@@ -664,19 +606,8 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
   );
 }
 
-/**
- * The hook the run holds from its admission, given the id of the run the
- * start creates. A run that already holds the token refuses the start with
- * `HookConflictError` naming that run, and no run is created. Requires a
- * World that passes {@link assertStartClaims}.
- */
 type StartClaim = (runId: string) => { readonly token: string; readonly metadata?: unknown };
 
-/**
- * Starts a run on an exact deployment. Every run eve starts records the eve
- * version that started it: ingress and the stranded replay guard read it to
- * decide whether this build can still execute the run.
- */
 export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
@@ -702,7 +633,6 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
       world: pinned.world,
     });
     if (run.runId !== pinned.runId) {
-      // The hook's metadata names a run that does not exist; nothing may use it.
       await run.cancel().catch(() => {});
       throw new Error(
         `Workflow started run "${run.runId}" instead of the pinned "${pinned.runId}", so its claimed hook names the wrong run.`,
@@ -722,9 +652,6 @@ async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
 }
 
 async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult>) {
-  // Agent parentage is reconstructed from Eve's serialized trace context. Only
-  // remove the ambient span marked by an agent boundary; the marker is not
-  // propagated into Workflow runs, so Workflow-to-Workflow traces stay intact.
   const activeContext = context.active();
   const workflowContext = isAgentTraceContext(activeContext)
     ? trace.deleteSpan(activeContext)
@@ -732,7 +659,6 @@ async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult
   return await context.with(workflowContext, callback);
 }
 
-/** Assign the delivery before accepting it, so replay and the sender name the same facts. */
 function identifyCommand<T extends SessionCommand>(command: T): T {
   if (command.kind !== "send" || command.delivery !== undefined) return command;
   const channel =

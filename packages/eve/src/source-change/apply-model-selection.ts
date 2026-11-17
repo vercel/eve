@@ -24,7 +24,6 @@ type SourceEdit =
       readonly line: number;
     };
 
-/** Reads only model expressions the source editor can safely rewrite. */
 export async function readModelSelectionFromSource(
   sourceText: string,
 ): Promise<string | undefined> {
@@ -34,7 +33,6 @@ export async function readModelSelectionFromSource(
   return value === undefined ? undefined : currentSelection(value, parsed.program);
 }
 
-/** Rewrites between a Gateway string model and an eve-owned model helper. */
 export async function applyModelSelectionToSource(
   sourceText: string,
   selection: string,

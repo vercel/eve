@@ -45,7 +45,6 @@ import { recordMemoryToolStore } from "#tracing/eve/agent-memory-instrumentation
 
 const log = createLogger("memory");
 
-/** Memory operation instrumentation for a step's context, when the session installs it. */
 const instrumentations = new WeakMap<ContextContainer, MemoryInstrumentation>();
 
 export function bindMemoryInstrumentation(
@@ -56,20 +55,10 @@ export function bindMemoryInstrumentation(
   else instrumentations.set(ctx, instrumentation);
 }
 
-/**
- * A `defineMemory()` slot. Recall runs before the first model call of each turn, and what it
- * brings back joins what earlier turns' recalls brought, which the slot keeps: each model call
- * reads every turn's recall just ahead of that turn's input, where earlier calls read it, so the
- * prompt ahead of it stays cached. A message with an `id` replaces the one with that `id` an
- * earlier turn recalled. A clear or a new scope starts over. Capture runs after the commit that
- * completes a turn, and before a compaction rewrites the history it captures: a failure there
- * fails the compaction. The provider's tools are {@link memoryToolsDefinition}'s.
- */
 export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
   return {
     contribute: (ctx) => ({
       context: async () => {
-        // Recall runs once per turn, principal, and clear: the memo keeps what it brought back.
         const kept = await ctx.keep(async (evaluation, previous) => {
           const latest = readDefinitionsState(evaluation.ctx).latest;
           const turn = latest["turn.started"] ?? null;
@@ -116,7 +105,6 @@ export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
   };
 }
 
-/** Capture after the commit that completes a turn: a failure is logged. */
 async function captureTurn(
   memory: ResolvedMemoryDefinition,
   ctx: DefinitionContext,
@@ -156,7 +144,6 @@ async function captureTurn(
   }
 }
 
-/** One turn's recall: what the provider brought back, under the scope it recalled in. */
 async function recallOnce(
   memory: ResolvedMemoryDefinition,
   ctx: InternalContext,
@@ -202,7 +189,6 @@ async function recallOnce(
   };
 }
 
-/** What resolving a memory scope reads, after a commit. */
 function commitScopeContext(ctx: DefinitionContext): ScopeContext {
   const frame = buildCallbackContext();
   return {
@@ -213,11 +199,6 @@ function commitScopeContext(ctx: DefinitionContext): ScopeContext {
   };
 }
 
-/**
- * Capture before compaction, after the commit that starts it: that commit carries the history
- * compaction is about to rewrite, and the summary waits for it. It blocks: a capture that fails
- * fails the compaction before it rewrites the history the capture couldn't keep.
- */
 async function captureBeforeCompaction(
   memory: ResolvedMemoryDefinition,
   ctx: DefinitionContext,
@@ -275,12 +256,9 @@ async function captureBeforeCompaction(
   }
 }
 
-/** One turn's recall, as `record` returns it. */
 interface RecallRecord {
-  /** The latest clear when it recalled: a clear starts over. */
   readonly cleared: number | null;
   readonly result: unknown;
-  /** The scope it recalled under: another scope starts over. */
   readonly scope: string;
   readonly turnId: string;
 }
@@ -295,18 +273,12 @@ interface RecallBatch {
   readonly messages: readonly RecalledMessage[];
 }
 
-/** What a slot's recalls brought, for the session so far: each turn's, in turn order. */
 interface Recalls {
   readonly cleared: number | null;
   readonly scope: string;
   readonly batches: readonly RecallBatch[];
 }
 
-/**
- * Joins a turn's recall to what earlier turns' recalls brought. A message with an `id` an earlier
- * turn recalled replaces it, unless its content is the same; a recall for a turn that already has
- * one, as on a new deployment, replaces that turn's.
- */
 export function accumulate(
   previous: JsonValue,
   recalled: RecallRecord,
@@ -341,7 +313,6 @@ export function accumulate(
   return { batches, cleared: recalled.cleared, scope: recalled.scope };
 }
 
-/** What resolving a memory slot's scope reads. */
 export interface ScopeContext {
   readonly abortSignal: AbortSignal;
   readonly channel: SessionFrame["channel"];
@@ -349,7 +320,6 @@ export interface ScopeContext {
   readonly session: Pick<SessionFrame["session"], "auth" | "id">;
 }
 
-/** The scope a memory slot operates under for this session, or `null` when it's disabled. */
 export async function resolveMemoryScope(
   memory: Pick<ResolvedMemoryDefinition, "namespace" | "scope" | "slot">,
   ctx: ScopeContext,
@@ -385,22 +355,14 @@ function disabled(slot: string, resolver: "namespace" | "scope"): null {
   return null;
 }
 
-/**
- * Who the session acts for, as a memory selection reads it: the whole principal, since a scope
- * tells principals apart by type, authenticator, issuer, and id, and an authored scope can read
- * its attributes too. Two principals that share an id never share a selection.
- */
 export function principalOf(ctx: Pick<SessionFrame, "session">): SessionAuthContext | null {
   return ctx.session.auth.current;
 }
 
-/** The open turn, with the user input that ends the conversation as its input. */
 function activeTurn(messages: readonly ModelMessage[]): MemoryTurnContext {
   const projection = currentProjection();
   const turnId = activeTurnIdOf(projection) ?? latestTurnIdOf(projection) ?? "";
   const { sequence } = turnCoordinatesOf(projection, turnId);
-  // The turn's input is the latest run of user messages: trailing while the turn is starting,
-  // followed by the turn's response once it has completed.
   let end = messages.length;
   while (end > 0 && messages[end - 1]!.role !== "user") end -= 1;
   let start = end;
@@ -428,10 +390,6 @@ function operationId(
   ].join(":");
 }
 
-/**
- * A memory's provider tools, named `<slot>__<key>`, as the tool file `agent/tools/<slot>.ts`
- * would offer them, which replaces or disables them where the agent declares it.
- */
 export function memoryToolsDefinition(memory: ResolvedMemoryDefinition): Definition {
   return toolsDefinition({ logicalPath: `tools/${memory.slot}.ts`, slug: memory.slot }, (ctx) =>
     memoryTools(memory, ctx),
@@ -441,8 +399,6 @@ export function memoryToolsDefinition(memory: ResolvedMemoryDefinition): Definit
 export async function memoryTools(memory: ResolvedMemoryDefinition, ctx: InternalContext) {
   const { provider, slot } = memory;
   if (provider.tools === undefined) return null;
-  // The scope is the data the tools are made from: resolved once per turn and principal, as recall
-  // resolves it, so both read the channel of the same turn.
   const turn = readDefinitionsState(ctx.ctx).latest["turn.started"] ?? null;
   const scope = await ctx.memo({ principal: principalOf(ctx), turn }, () =>
     resolveMemoryScope(memory, ctx),

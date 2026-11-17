@@ -336,7 +336,6 @@ export function operationHandle(
   return common;
 }
 
-/** Tool calls can nest, so a call ID is searched through every open call of the turn. */
 function findTool(parent: LiveOperation, callId: string): LiveOperation | undefined {
   for (const next of parent.children) {
     if (next.type === "tool" && next.callId === callId) return next;

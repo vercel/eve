@@ -12,7 +12,6 @@ import type { ModelCallOptions } from "./call.js";
 
 const log = createLogger("harness.tool-loop");
 
-/** Recovery changes the request, never executes it: drop unsupported tools, then nudge once. */
 export function recoverModelCall(
   error: unknown,
   options: ModelCallOptions,
@@ -43,11 +42,6 @@ export function recoverModelCall(
   return { ...options, retryReason: "empty-response", trailingUserNote: EMPTY_RESPONSE_NUDGE };
 }
 
-/**
- * Builds the one-shot system note prepended to the recovery retry's
- * instructions so the model has explicit context for why a capability
- * disappeared mid-turn.
- */
 function buildDisabledToolNote(toolNames: readonly string[]): string {
   const list = toolNames.join(", ");
   const noun = toolNames.length === 1 ? "tool is" : "tools are";
@@ -58,10 +52,6 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
   );
 }
 
-/**
- * Whether a step produced no assistant text or tool work. The caller decides
- * whether a successful empty `stop` is usable for the session.
- */
 export function isEmptyModelResponse(step: HarnessStepResult): boolean {
   return (
     step.toolCalls.length === 0 &&
@@ -70,17 +60,6 @@ export function isEmptyModelResponse(step: HarnessStepResult): boolean {
   );
 }
 
-/**
- * Rethrows the AI SDK's `NoOutputGeneratedError` as
- * {@link EmptyModelResponseError}. Since `ai@7.0.0-canary.169`
- * (vercel/ai#15938) a stream that closes after metadata without output or
- * a finish chunk rejects — the SDK enqueues the error onto `fullStream`
- * (so `emitStreamContent` throws it) and never emits `finish-step`, so
- * `onStepEnd` does not fire and the step hooks' `stepResult` promise
- * would never settle. The same condition previously completed as an empty
- * step caught by {@link isEmptyModelResponse}; normalizing here funnels
- * both shapes into the one-shot empty-response reissue.
- */
 export function rethrowNoOutputAsEmptyResponse(error: unknown): never {
   if (isNoOutputGeneratedError(error)) {
     throw new EmptyModelResponseError({ cause: error });
@@ -88,13 +67,5 @@ export function rethrowNoOutputAsEmptyResponse(error: unknown): never {
   throw error;
 }
 
-/**
- * Wire-only note the empty-response reissue appends to its retry. Reads may
- * be refreshed when earlier results are stale; completed writes and other
- * side effects must not be repeated. Each recovery stage declares its own
- * follow-up text: tool recovery prepends {@link buildDisabledToolNote} as
- * a system note (its toolset change busts the prompt cache anyway), while
- * this one trails as a user note to keep the cached prefix valid.
- */
 const EMPTY_RESPONSE_NUDGE =
   "Your previous reply was empty and was not delivered. Continue the current user request. Reuse completed results when they satisfy the request. If existing results are stale or insufficient, use the appropriate read tools to get fresh results. Do not repeat writes or other side effects that already completed. Do not mention this notice.";

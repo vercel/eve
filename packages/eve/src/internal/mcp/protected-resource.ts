@@ -6,7 +6,6 @@ interface McpProtectedResourceMetadataOptions {
   readonly scopesSupported?: readonly string[];
 }
 
-/** Creates RFC 9728 protected-resource metadata for an MCP endpoint. */
 export function createMcpProtectedResourceMetadata(
   options: McpProtectedResourceMetadataOptions,
 ): Readonly<Record<string, unknown>> {
@@ -20,7 +19,6 @@ export function createMcpProtectedResourceMetadata(
   return metadata;
 }
 
-/** Creates the RFC 9728 bearer discovery challenge for an MCP resource. */
 export function createMcpResourceChallenge(
   resourceMetadataUrl: string,
   scopes?: readonly string[],

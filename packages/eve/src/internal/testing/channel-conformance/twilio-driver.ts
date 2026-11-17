@@ -14,18 +14,15 @@ const AUTH_TOKEN = "twilio-conformance-secret";
 const TO = "+15550000001";
 let nextPerson = 0;
 
-/** Drives SMS webhooks and Twilio's form-encoded Messages API. */
 export function twilioDriver(): ChannelDriver {
   nextPerson += 1;
   const PERSON = `+1555000${String(nextPerson).padStart(4, "0")}`;
   let messageSid = 0;
-  /** Files a person sent, by the media URL the webhook listed each under. */
   const uploads = new Map<string, SentFile>();
   const webhookUrl = "https://agent.example.com/eve/v1/twilio/messages";
 
   function message(text: string, files: readonly SentFile[] = []): Request {
     messageSid += 1;
-    // An MMS lists its media by URL, numbered from zero.
     const media = files.flatMap((file, index) => {
       const url = `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages/MM${messageSid}/Media/ME${index}`;
       uploads.set(url, file);
@@ -55,7 +52,6 @@ export function twilioDriver(): ChannelDriver {
   async function decode(request: Request): Promise<PlatformCall> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname.includes("/Media/")) {
-      // Twilio serves media to the account's Basic auth.
       const authorized =
         request.headers.get("authorization") === `Basic ${btoa(`${ACCOUNT_SID}:${AUTH_TOKEN}`)}`;
       return {

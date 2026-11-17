@@ -8,7 +8,6 @@ import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/ru
 import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
-/** Default time to wait for an eve server spawned by a framework integration. */
 export const DEFAULT_EVE_SERVER_TIMEOUT_MS = 180_000;
 
 const DEV_SERVER_REGISTRY_POLL_MS = 100;
@@ -19,10 +18,6 @@ const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
 const SERVER_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'<>]+/g;
 
-/**
- * Framework that owns the eve server process. `label` appears in errors;
- * `slug` keeps each framework's dev-server registry and lock separate.
- */
 export interface EveFrameworkHost {
   readonly label: string;
   readonly slug: string;
@@ -68,10 +63,6 @@ function resolveEveDevServerLockPath(appRoot: string, host: EveFrameworkHost): s
   return join(resolveEveCacheDirectory(appRoot), `${host.slug}-dev-server.lock`);
 }
 
-/**
- * Validate a framework-supplied dev-server timeout. Returns `undefined` when
- * unset so callers fall back to {@link DEFAULT_EVE_SERVER_TIMEOUT_MS}.
- */
 export function resolveDevServerTimeout(
   timeoutMs: number | undefined,
   host: EveFrameworkHost,
@@ -239,9 +230,6 @@ function createEveBinaryPath(): string {
 
 function parseLocalServerOrigin(urlText: string): string | undefined {
   const url = URL.parse(urlText);
-  // Dev-server discovery reads mixed subprocess output. Build metadata and
-  // dependency warnings can print unrelated URLs before eve reports its listener,
-  // but the integration only owns the app-local loopback server it started.
   if (
     url === null ||
     (url.protocol !== "http:" && url.protocol !== "https:") ||
@@ -358,7 +346,6 @@ function startServerProcess(input: {
     }, timeoutMs);
 
     let settled = false;
-    // Accumulated because a failure line can span several `data` chunks.
     let startupOutput = "";
     const cleanup = () => {
       settled = true;
@@ -474,15 +461,10 @@ function startEveDevServer(input: {
   }).then(installProcessShutdown);
 }
 
-/**
- * Serve an existing `eve build` output from `.output/server/index.mjs` on
- * {@link input.origin}'s loopback port.
- */
 export function startEveProductionServer(input: {
   readonly appRoot: string;
   readonly host: EveFrameworkHost;
   readonly origin: string;
-  /** How to pick another port, completing "stop it or ..." when the port is taken. */
   readonly portRetryHint: string;
 }): Promise<EveProcessHandle> {
   const parsedOrigin = new URL(input.origin);
@@ -509,18 +491,11 @@ export function startEveProductionServer(input: {
   }).then(installProcessShutdown);
 }
 
-/**
- * Resolve a shared eve dev server for `appRoot`, reusing a healthy registered
- * server when one exists and otherwise spawning `eve dev` behind a
- * cross-process lock so concurrent framework processes don't each boot eve.
- * `process` is set only when this call spawned the server.
- */
 export async function resolveSharedEveDevServer(input: {
   readonly appRoot: string;
   readonly host: EveFrameworkHost;
   readonly logLabel?: string;
   readonly timeoutMs?: number;
-  /** Workspace member selected when spawning the local eve dev server. */
   readonly workspaceAgentName?: string;
 }): Promise<EveProcessHandle> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_EVE_SERVER_TIMEOUT_MS;

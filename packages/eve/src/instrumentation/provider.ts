@@ -1,14 +1,5 @@
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
-/**
- * The provider contract authored under `agent/instrumentation/`.
- *
- * Each file in the directory declares one independently configured provider.
- */
 
-// Type-only, so nothing couples the provider definition to the harness at
-// runtime. The event shapes are eve's own vocabulary; deriving the handler map
-// from the union below is what keeps the public contract from drifting away
-// from the bus that feeds it.
 import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";

@@ -13,11 +13,9 @@ export interface ParsedCreateBody {
   context?: ClientContextValue;
   operationId?: string;
   outputSchema?: JsonObject;
-  /** Remote agent protocol of a delegating caller; set only with {@link callback}. */
   protocolVersion?: number;
 }
 
-/** Enforces the fields that only make sense when creation also starts a turn. */
 export function validateMessageFreeCreate(input: {
   readonly callback: SessionCallback | undefined;
   readonly hasClientContext: boolean;

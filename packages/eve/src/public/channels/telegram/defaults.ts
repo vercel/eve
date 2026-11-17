@@ -29,10 +29,6 @@ type TelegramEventChannel = Parameters<
   NonNullable<TelegramChannelEvents["interaction.opened"]>
 >[1]["channel"];
 
-/**
- * A Telegram chat as a sign-in shows on it: a private chat gets the sign-in button; a group, a
- * status whose Authorize button sends the requester the prompt privately.
- */
 function telegramSignIns(channel: TelegramEventChannel): SignInSurface {
   const { telegram } = channel;
   const posting = async (message: Parameters<typeof telegram.post>[0]) => {
@@ -102,7 +98,6 @@ export function defaultTelegramAuth(
   };
 }
 
-/** Default inbound message hook: dispatch allowed messages with Telegram user auth. */
 export async function defaultOnMessage(
   ctx: TelegramContext,
   message: TelegramMessage,
@@ -169,7 +164,6 @@ async function editTelegramResolvedPrompt(
   }
 }
 
-/** Built-in Telegram event handlers for typing, replies, HITL, and terminal errors. */
 export const defaultEvents: TelegramChannelEvents = surfaceEvents<TelegramEventChannel>({
   typing: (channel) => channel.telegram.startTyping(),
   post: (channel, text) => channel.telegram.post(text),

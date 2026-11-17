@@ -27,7 +27,6 @@ export function createDirectModelFetch(provider: "openai" | "anthropic"): typeof
 
 function createLocalGateway(): ReturnType<typeof createGateway> | undefined {
   if (!isEveDevEnvironment()) return undefined;
-  // A custom AI SDK default provider owns model ids in `eve dev` too, as it does in `eve start`.
   if (Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") != null) return undefined;
   const selected = process.env[MODEL_CONNECTION_ENV];
   if (
@@ -66,12 +65,10 @@ function createLocalGateway(): ReturnType<typeof createGateway> | undefined {
   });
 }
 
-/** Resolve the connection for every request, including models constructed before /login. */
 export function localGatewayModel(id: string): LanguageModel | undefined {
   return createLocalGateway()?.languageModel(id);
 }
 
-/** Resolve a decision model through the same local Gateway connection used by language models. */
 export function localGatewayDecisionModel(
   id: string,
 ): ReturnType<ReturnType<typeof createGateway>["decisionModel"]> | undefined {

@@ -7,10 +7,6 @@ import { readDevelopmentEnvironmentHostValues } from "#cli/dev/environment.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 
-/**
- * Hashes everything that shapes a development host build: the host spec minus
- * its locations, plus the inputs the host bundles or bakes in from disk.
- */
 export async function computeDevelopmentHostFingerprint(
   host: PreparedDevelopmentApplicationHost,
 ): Promise<string> {
@@ -26,8 +22,6 @@ export async function computeDevelopmentHostFingerprint(
     { kind: "development" },
     { buildDir: workspace.nitroBuildDir, outputDir: workspace.nitroOutputDir },
   );
-  // Equivalent hosts in different app roots or package stores share a
-  // fingerprint. Some paths are canonical, so the app root may appear as either.
   const roots = [appRoot, realpathSync(appRoot)];
   const portable = (path: string) =>
     roots
@@ -47,7 +41,6 @@ export async function computeDevelopmentHostFingerprint(
         ({ mountSourcePath, programmaticImport, sourceRoot, ...mount }) => ({
           ...mount,
           mountSourcePath: portable(mountSourcePath),
-          // Its config reaches the extension through the runtime module map.
           ...(programmaticImport && {
             programmaticImport: {
               entryPath: portable(programmaticImport.entryPath),
@@ -62,8 +55,6 @@ export async function computeDevelopmentHostFingerprint(
         mountId,
       ]),
     },
-    // Authored workflow bodies and step registrations are bundled into the
-    // host, so their sources are structural, not runtime, state.
     workflowSources: host.generation.workflowSourceFingerprint ?? null,
   };
 

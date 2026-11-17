@@ -53,7 +53,6 @@ function createServiceNameHash(value: string): string {
     .join("");
 }
 
-/** Derive a stable Vercel service identifier without restricting the public agent name. */
 export function createEveServiceName(name: string | undefined): string {
   if (name === undefined) return "eve";
   const directName = `eve-${name}`;
@@ -91,7 +90,6 @@ export function createEveHomeRouteSrc(publicRoutePrefix: string): string | undef
   return `^${escapeVercelRouteLiteral(prefix)}/?$`;
 }
 
-/** Route a member's public base path to its package-owned home channel. */
 function createEveHomePathRoute(publicRoutePrefix: string): VercelRouteConfig | undefined {
   const src = createEveHomeRouteSrc(publicRoutePrefix);
   return src === undefined
@@ -141,7 +139,6 @@ function createIsolatedService(input: {
   };
 }
 
-/** Compile one eve agent into its complete Vercel service and ingress contribution. */
 export function compileEveVercelService(input: {
   readonly agent: EveVercelAgentTarget;
   readonly target: EveVercelBuildTarget;

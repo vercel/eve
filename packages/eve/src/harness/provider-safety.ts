@@ -7,10 +7,6 @@ import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { mergeObjects } from "#shared/objects.js";
 
-/**
- * Adds a provider-specific end-user safety identifier without disclosing the
- * raw eve principal. Authored provider options take precedence over the default.
- */
 export function mergeProviderSafetyIdentifier(
   provider: string,
   providerOptions: Readonly<Record<string, unknown>> | undefined,
@@ -31,7 +27,6 @@ export function mergeProviderSafetyIdentifier(
   return defaults === undefined ? providerOptions : mergeObjects(defaults, providerOptions);
 }
 
-/** Composes the per-call defaults shared by model steps and compaction. */
 export function resolveCallProviderOptions(input: {
   readonly auth: SessionAuthContext | null;
   readonly profile: ModelProfile;
@@ -55,17 +50,8 @@ export function resolveCallProviderOptions(input: {
     : providerOptions;
 }
 
-/**
- * Direct OpenAI, and the ChatGPT subscription's Codex backend, which the Codex CLI itself sends a
- * per-session `prompt_cache_key`.
- */
 const PROMPT_CACHE_KEY_PROVIDERS: ReadonlySet<string> = new Set(["openai", "codex"]);
 
-/**
- * OpenAI uses the cache key to route requests that share a prompt prefix toward the same cache,
- * and matches less reliably without one. Each session keeps its own prefix, so its id makes the key. The hash
- * keeps the key short and opaque whatever the session id looks like.
- */
 function mergeOpenAIPromptCacheKey(
   providerOptions: Readonly<Record<string, unknown>> | undefined,
   sessionId: string,
@@ -74,7 +60,6 @@ function mergeOpenAIPromptCacheKey(
   return mergeObjects({ openai: { promptCacheKey } }, providerOptions);
 }
 
-/** Groups Gateway generations under the same identity used by eve's agent spans. */
 function mergeGatewaySessionId(
   providerOptions: Readonly<Record<string, unknown>> | undefined,
   conversationId: string,

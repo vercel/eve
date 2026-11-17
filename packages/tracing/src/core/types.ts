@@ -261,7 +261,6 @@ export interface ScopeTerminal {
 export interface ScopeRecord {
   readonly version?: 1;
   readonly finished?: boolean;
-  /** Write token used to detect a checkpoint changed by another process. */
   readonly revision?: string;
   readonly key: string;
   readonly identity: ScopeIdentity;

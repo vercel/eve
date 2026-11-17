@@ -10,7 +10,6 @@ import { telegramChannel } from "#public/channels/telegram/index.js";
 
 const SECRET = "telegram-secret";
 
-/** Posts `body` to the channel's webhook and drains every task it hands to `waitUntil`. */
 async function firePost(
   channel: unknown,
   body: unknown,

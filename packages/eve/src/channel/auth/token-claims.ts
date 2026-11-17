@@ -8,10 +8,6 @@ import type {
 
 const STANDARD_PROJECTED_CLAIM_KEYS = new Set(["aud", "exp", "iat", "iss", "jti", "nbf", "sub"]);
 
-/**
- * Returns the normalized string-valued JWT claim projection used by eve's
- * runtime auth layer.
- */
 function normalizeJwtClaims(payload: JWTPayload): RouteAuthAttributes {
   const normalized: Record<string, string | readonly string[]> = {};
 
@@ -29,10 +25,6 @@ function normalizeJwtClaims(payload: JWTPayload): RouteAuthAttributes {
   return Object.freeze(normalized);
 }
 
-/**
- * Returns the non-standard string-valued JWT claim projection exposed as public
- * session auth attributes.
- */
 function createJwtAttributeProjection(payload: JWTPayload): RouteAuthAttributes {
   const claims = normalizeJwtClaims(payload);
 
@@ -43,10 +35,6 @@ function createJwtAttributeProjection(payload: JWTPayload): RouteAuthAttributes 
   );
 }
 
-/**
- * Returns whether the verified JWT payload satisfies the authored subject and
- * claim selectors.
- */
 export function areTokenClaimMatchersSatisfied(
   payload: JWTPayload,
   matchers: ResolvedTokenClaimMatchers,
@@ -83,9 +71,6 @@ export function areTokenClaimMatchersSatisfied(
   });
 }
 
-/**
- * Creates a normalized JWT-backed eve principal from a verified payload.
- */
 export function createJwtAuthenticatedCallerPrincipal(input: {
   readonly authenticator: AuthenticatedCallerPrincipal["authenticator"];
   readonly issuerClaims?: readonly string[];
@@ -130,10 +115,6 @@ function readFirstStringClaim(
   return undefined;
 }
 
-/**
- * Returns whether the value matches one AWS IAM-style whole-string wildcard
- * pattern where `*` matches zero or more characters.
- */
 function matchesWildcardPattern(pattern: string, value: string): boolean {
   if (!pattern.includes("*")) {
     return pattern === value;

@@ -33,7 +33,6 @@ const CHILD = { rootSessionId: "root-session" };
 
 const names = (tools: ReadonlyMap<string, HarnessToolDefinition>) => [...tools.keys()];
 
-/** Validates `input` against a catalog tool's schema, which every call passes before it runs. */
 function validate(catalog: StepCatalog, tool: string, input: unknown) {
   const schema = catalog.advertised.get(tool)!.inputSchema as StandardSchemaV1;
   return schema["~standard"].validate(input);
@@ -43,7 +42,6 @@ const validateTool = (catalog: StepCatalog, input: unknown) =>
 const validateSkill = (catalog: StepCatalog, input: unknown) =>
   validate(catalog, SKILL_TOOL_NAME, input);
 
-/** A catalog tool's description and input fields, as the model reads them. */
 function shape(catalog: StepCatalog, tool: string) {
   const definition = catalog.advertised.get(tool)!;
   const schema = serializeInputSchema(definition.inputSchema as ToolSchemaSource) as {
@@ -173,7 +171,6 @@ describe("buildStepCatalog", () => {
       ["a deferred agent", { tools: [subagentTool("researcher", { deferred: true })] }],
       ["a connection", { connections: [fakeConnection({ name: "linear", tools: [] })] }],
     ])("gives an agent with %s search and eve__tool", async (_, declared) => {
-      // A subagent also brings the task tools; the catalog tools come last.
       expect(names((await catalogContext(declared)).catalog.advertised).slice(-2)).toEqual([
         SEARCH_TOOL_NAME,
         CALL_TOOL_NAME,
@@ -197,7 +194,6 @@ describe("buildStepCatalog", () => {
         session: {},
       });
 
-      // A dynamic subagent resolver still brings the task tools.
       expect(names(catalog.advertised)).toEqual([
         "add",
         TASK_WAIT_TOOL_NAME,
@@ -277,7 +273,6 @@ describe("buildStepCatalog", () => {
       CALL_TOOL_NAME,
     ]);
     expect(names(child.deferred)).toEqual(["researcher"]);
-    // A hidden entry can't be reached through eve__tool either.
     expect(await validateTool(child, { name: "archive" })).toEqual({
       issues: [
         { message: 'No tool named "archive". Find tools with eve__search.', path: ["name"] },
@@ -391,7 +386,6 @@ describe("buildStepCatalog", () => {
           inlineTool("refund_payment", { deferred: true }),
           inlineTool("stripe_list_disputes", { deferred: true }),
           workflowTool("research", "task"),
-          // eve's built-in tools and static agents are marked as framework tools.
           inlineTool("bash", { frameworkTool: true }),
           subagentTool("billing_specialist", { frameworkTool: true }),
           {
@@ -621,7 +615,6 @@ describe("buildStepCatalog", () => {
       }
     });
 
-    // #4977: a server that lists its tools but never answers a call held the turn.
     it.each([
       {
         case: "fails and cancels a call the connection doesn't answer within 5 minutes",
@@ -639,7 +632,6 @@ describe("buildStepCatalog", () => {
       try {
         const { catalog, linear, run } = await linearCatalog();
         let request: AbortSignal | undefined;
-        // Like an MCP client: the request settles only when its signal aborts.
         vi.spyOn(linear.client, "executeTool").mockImplementationOnce(
           async (_tool, _args, { abortSignal }) =>
             await new Promise((_, reject) => {
@@ -661,16 +653,13 @@ describe("buildStepCatalog", () => {
           }),
         );
 
-        // Observe the outcome before advancing: the call rejects while the timers run.
         const outcome = Promise.resolve(calling).then(
           () => "resolved",
           (error: unknown) => (error instanceof Error ? error.message : String(error)),
         );
         await vi.advanceTimersByTimeAsync(60_000);
-        // A cancelled turn settles the call at once, without waiting out the deadline.
         if (cancelTurn) turn.abort();
         await vi.advanceTimersByTimeAsync(cancelTurn ? 0 : 4 * 60_000);
-        // Racing a settled value reports a call that is still pending instead of hanging the test.
         expect(await Promise.race([outcome, "still waiting"])).toBe(error);
         expect(request?.aborted).toBe(true);
       } finally {
@@ -700,7 +689,6 @@ describe("buildStepCatalog", () => {
     });
 
     it("accepts a key the connection provides when the model sends it anyway, since the provided value replaces it", async () => {
-      // Listed without `env`, as connection clients omit provided keys from the schemas they list.
       const nova = fakeConnection({
         name: "nova",
         toolCall: { providedArguments: { env: "prod" } },
@@ -783,7 +771,6 @@ describe("buildStepCatalog", () => {
           context.run(() =>
             signIn.definition.execute!(signIn.call.input, { messages: [], toolCallId: "connect" }),
           ),
-        /** Delivers the finished sign-in, as the turn step does when its callback arrives. */
         finishSignIn: () =>
           context.ctx.set(PendingAuthorizationResultKey, [
             {

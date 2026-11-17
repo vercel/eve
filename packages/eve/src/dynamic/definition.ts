@@ -177,17 +177,12 @@ export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
   return typeof value === "object" && value !== null && DYNAMIC_SENTINEL in value;
 }
 
-/** The function a `defineDynamic()` value wraps. */
 export function dynamicEvaluate<TResult, TContext>(
   sentinel: DynamicSentinel<TResult, TContext>,
 ): (ctx: TContext) => TResult | Promise<TResult> {
   return sentinel[DYNAMIC_SENTINEL];
 }
 
-/**
- * Throws unless `sentinel` is a `defineDynamic(fn)` value: the function and nothing beside it.
- * The compiler and the runtime loader both use it, so every source agrees.
- */
 export function assertDynamicSentinelKeys(sentinel: DynamicSentinel, message: string): void {
   assertDynamicFunction(dynamicEvaluate(sentinel), `${message} defineDynamic()`);
   const unknownKeys = Object.keys(sentinel);

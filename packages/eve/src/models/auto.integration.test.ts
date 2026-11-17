@@ -45,7 +45,6 @@ function context(
   return { abortSignal, text };
 }
 
-/** A session whose latest turn opened with `text`, as the projection records it. */
 function view(text: string) {
   const tables = {
     deliveries: {
@@ -66,7 +65,6 @@ function view(text: string) {
   return { ...(tables as object), turn: latestTurn(tables) } as never;
 }
 
-/** Evaluates the model as the runner does: its memo decides, and the option is the model. */
 async function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof context>) {
   const tables = view(input.text) as { readonly turn: unknown };
   const memos = openMemos({

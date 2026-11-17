@@ -16,47 +16,20 @@ import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { collectFlatSlotCandidates, collectNamedSlotCandidates } from "#discover/slots.js";
 
-/**
- * Agent-root folder name that carries the optional `sandbox.<ext>`
- * override and optional `workspace/` subdirectory.
- */
 const SANDBOX_DIRECTORY_NAME = "sandbox";
 
-/**
- * Subdirectory inside the sandbox folder that mounts authored files
- * into the live sandbox cwd at session bootstrap.
- */
 const SANDBOX_WORKSPACE_DIRECTORY_NAME = "workspace";
 
-/**
- * Filename of the sandbox definition module inside the sandbox folder.
- */
 const SANDBOX_DEFINITION_BASE_NAME = "sandbox";
 
-/**
- * Discovery diagnostic emitted when the `sandbox/` folder exists but
- * contains neither a `sandbox.<ext>` module nor a `workspace/`
- * subdirectory. The folder is inert and almost certainly a typo.
- */
 export const DISCOVER_SANDBOX_FOLDER_EMPTY = "discover/sandbox-folder-empty";
 
-/**
- * Result of discovering the authored sandbox from a single agent root.
- */
 interface DiscoverSandboxSourceResult {
   diagnostics: DiscoverDiagnostic[];
   sandbox: ModuleSourceRef | null;
   sandboxWorkspace: SandboxWorkspaceFolderSourceRef | null;
 }
 
-/**
- * Discovers the single authored sandbox.
- *
- * Looks for `agent/sandbox/` first; the folder owns the sandbox when
- * it exists (and may carry an authored `workspace/` subtree). If no
- * folder is present, falls back to a top-level `agent/sandbox.<ext>`
- * shorthand for agents that don't need a workspace.
- */
 export async function discoverSandboxSource(input: {
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
@@ -186,12 +159,6 @@ export async function discoverSandboxSource(input: {
   };
 }
 
-/**
- * Discovers a top-level `sandbox.<ext>` module when the agent has no
- * `sandbox/` folder. Provides a workspace-less shorthand for agents
- * that only need a sandbox definition; the folder layout remains
- * available whenever a `workspace/` subtree is required.
- */
 function discoverRootSandboxModule(input: {
   diagnostics: DiscoverDiagnostic[];
   rootEntries: readonly ProjectSourceEntry[];
@@ -237,11 +204,6 @@ function discoverRootSandboxModule(input: {
   };
 }
 
-/**
- * Returns the file names inside the sandbox folder that match the
- * `sandbox.<ext>` definition slot. The result is sorted for stable
- * collision diagnostics.
- */
 function collectFolderSandboxModuleCandidates(
   entries: readonly ProjectSourceEntry[],
 ): readonly string[] {
@@ -260,12 +222,6 @@ function collectFolderSandboxModuleCandidates(
   return candidates;
 }
 
-/**
- * Walks the top of an authored workspace folder and returns the
- * file/directory names ordered alphabetically. Directories are
- * suffixed with `/` so the workspace prompt section can render them
- * recognizably.
- */
 async function collectWorkspaceRootEntries(
   source: ProjectSource,
   workspacePath: string,

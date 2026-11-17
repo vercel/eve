@@ -78,16 +78,12 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
     ) {
       appServer.restart?.();
     } else if (credentialOwner === "eve") {
-      // Re-probe at an explicit readiness boundary so a newly installed Codex
-      // becomes authoritative without changing owners in the middle of a request.
       credentialOwner = undefined;
     }
     cached = undefined;
     try {
       await getToken("request");
-    } catch {
-      // The state is the reportable result; callers should not need exception control flow.
-    }
+    } catch {}
     return currentState;
   }
 

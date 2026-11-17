@@ -21,10 +21,6 @@ export type HostMode =
   | {
       readonly kind: "production";
       readonly preset: "vercel" | undefined;
-      /**
-       * The agent's public route prefix, baked into the Vercel flow function
-       * so callback URLs resolve behind a per-agent mount.
-       */
       readonly publicRoutePrefix?: string;
       readonly workspaceMember?: boolean;
     };
@@ -34,44 +30,33 @@ export interface HostDirectories {
   readonly outputDir: string;
 }
 
-/** Nitro runtime plugins eve installs after its own runtime plugin, in load order. */
 export type HostRuntimePlugin =
   | "instrumentation"
   | "local-schedules"
   | "sandbox-shutdown"
   | "skill-files";
 
-/** Everything eve's Nitro host serves and bundles, derived from the compiled agent. */
 export interface HostSpec {
   readonly agentName: string;
-  /** How the host bundles authored sources. */
   readonly authored: HostAuthoredSources;
   readonly development: boolean;
   readonly extensionMounts: readonly CompiledExtensionMount[];
-  /** Authored files that override an extension mount's bindings, keyed to the mount id. */
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly externals: ExternalsPolicy;
-  /** Wraps the server entry so authored instrumentation finishes setup first. */
   readonly instrumented: boolean;
   readonly preset: "vercel" | undefined;
   readonly routes: HostRouteTable;
-  /** What eve's generated runtime plugin installs. */
   readonly runtime: HostRuntime;
   readonly runtimePlugins: readonly HostRuntimePlugin[];
-  /** Skills a production build embeds; dev reads the compile directory. */
   readonly skills: readonly string[];
   readonly vercel: ReturnType<typeof createEveVercelOptions>;
   readonly websocket: boolean;
-  /** The configured Workflow world; unset selects the local world. */
   readonly world: AgentWorkflowWorldDefinition | undefined;
-  /** Where the host's inputs and outputs live. Nothing here changes what the host does. */
   readonly locations: HostLocations;
 }
 
 interface HostAuthoredSources {
-  /** Package root authored asset imports may not escape. */
   readonly packageRoot: string;
-  /** The authored package's tsconfig or jsconfig, which resolves authored import aliases. */
   readonly tsconfig: string | false;
 }
 
@@ -91,7 +76,6 @@ export function createHostSpec(
 ): HostSpec {
   const { appRoot, compiledArtifacts } = preparedHost;
   const { manifest, paths } = preparedHost.compileResult;
-  // A workspace member without its own package.json shares the enclosing package.
   const packageRoot = findAuthoredPackageRoot(appRoot) ?? appRoot;
   const development = mode.kind === "development";
   const preset = mode.kind === "production" ? mode.preset : undefined;
@@ -150,7 +134,6 @@ export function createHostSpec(
   };
 }
 
-/** Whether any agent exposes a generated-program tool that needs the workflow sandbox runtime. */
 function hasWorkflowProgram(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   return nodes.some((node) => node.tools.some((tool) => tool.workflowProgram !== undefined));

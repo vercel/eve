@@ -53,7 +53,6 @@ export async function handleConnectionEventRequest(
       for (const [key, value] of Object.entries(identifiers)) span?.setAttribute(key, value);
       stage = "handler";
       const requestTraceContext = connectionEventTraceContext(span?.spanContext());
-      // Context locates the watch. The binding its hook carries authorizes execution.
       const started = await startConnectionEventDelivery(
         {
           kind: "connection-event",
@@ -64,7 +63,6 @@ export async function handleConnectionEventRequest(
         },
         bundle,
       );
-      // 410 tells Connect the watch has ended, so it stops delivering.
       return new Response(null, { status: started ? 202 : 410 });
     } catch (error) {
       if (isObject(error) && error.code === "invalid_delivery")

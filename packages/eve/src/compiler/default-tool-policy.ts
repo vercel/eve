@@ -29,10 +29,6 @@ export function applyAgentToolPolicy(
   );
 }
 
-/**
- * A tool file can disable what eve offers under its name with no file beneath it: a subagent's
- * tool, a memory slot's tools, or a schedule collection's.
- */
 export function canDisableToolWithoutSelectedSource(
   state: FinalizedNodeSourceState,
   toolName: string,
@@ -47,7 +43,6 @@ export function canDisableToolWithoutSelectedSource(
   );
 }
 
-/** The tool file name a memory slot's or schedule collection's tools take. */
 function featureToolName(logicalPath: string): string | undefined {
   const slot = canonicalSourceSlot(logicalPath);
   if (slot === "memory" || slot.startsWith("memory/")) return deriveMemorySlot(logicalPath);

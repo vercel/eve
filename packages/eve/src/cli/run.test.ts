@@ -1242,8 +1242,6 @@ describe("eve dev boot progress", () => {
     expect(tuiReporter).toBe(hostReporter);
     expect(writes.join("")).toContain("Starting your agent");
     expect(writes.join("")).not.toContain("compiling agent");
-    // Replaying every write through a terminal emulator: the boot progress row
-    // is erased, leaving a clean screen for the error to print onto.
     const screen = new MockScreen({ columns: 80, rows: 10 });
     screen.write(writes.join(""));
     expect(screen.snapshot()).toBe("");
@@ -1407,8 +1405,6 @@ describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
       logs: "error",
-      // Collapsed reasoning is the fixed thinking line; `--show-reasoning full`
-      // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });

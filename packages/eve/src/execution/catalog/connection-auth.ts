@@ -1,5 +1,3 @@
-/** Sign-in shared by connection tool calls, searches, and connecting a connection. */
-
 import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
@@ -25,20 +23,12 @@ import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 const log = createLogger("framework.catalog-connections");
 
-/** A connection ready for one call, with any sign-in the user finished completed. */
 export interface ConnectionSession {
-  /** Completes and starts sign-in for this call, and guards against a sign-in loop. */
   readonly auth: ReturnType<typeof createAuthorizationExecution>;
   readonly client: ConnectionClient;
-  /** The connection's interactive sign-in, when it supports one. */
   readonly scoped: ScopedAuthorization | undefined;
 }
 
-/**
- * Completes the sign-in the user finished for `connection`, if any, before a
- * search, a sign-in, or a tool call uses its client. It never prompts; a caller
- * that needs sign-in starts it through `auth`.
- */
 export async function completeConnectionSignIn(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
@@ -48,15 +38,12 @@ export async function completeConnectionSignIn(
   const auth = createAuthorizationExecution();
   if (scoped !== undefined) await auth.complete(scoped);
   const client = registry.getClient(connection.connectionName);
-  // A client that connected anonymously before sign-in must reconnect with the new token.
   if (scoped !== undefined && auth.isJustAuthorized(scoped)) await client.close();
   return { auth, client, scoped };
 }
 
-/** A connection's tools, or why they can't be listed. */
 export type ConnectionListing =
   | { readonly tools: readonly ConnectionToolMetadata[] }
-  /** Listable once the user signs in; `error` is the listing's request for sign-in. */
   | { readonly authorization: ScopedAuthorization; readonly error: unknown }
   | { readonly failure: string };
 
@@ -75,7 +62,6 @@ export async function listConnectionTools(
     if (scoped === undefined) {
       return { failure: `"${name}" requires authorization and cannot start interactive sign-in.` };
     }
-    // The token the user just signed in with was refused; asking again would loop.
     if (auth.isJustAuthorized(scoped)) {
       return {
         failure: `Authorization failed for "${name}": the service rejected the token immediately after authorization.`,
@@ -85,20 +71,10 @@ export async function listConnectionTools(
   }
 }
 
-/** How long a connection may take to list its tools before it counts as unavailable. */
 const LISTING_TIMEOUT_MS = 10_000;
 
 class ListingTimeoutError extends Error {}
 
-/**
- * A connection's tools, or a timeout error once listing them takes longer than
- * {@link LISTING_TIMEOUT_MS}, so one hung server can't stall a step. Clients
- * share one in-flight listing and take no signal, so this stops waiting rather
- * than cancelling: a late result fills only that client's cache, and the race
- * handles a late rejection. Event discovery runs under the same deadline.
- * The connection's `tools` filter applies to everything listed, remote tools
- * and eve's event actions alike, and a call only runs a listed tool.
- */
 export async function listToolMetadata(
   connection: Pick<ResolvedConnectionDefinition, "connectionName" | "tools">,
   client: ConnectionClient,
@@ -139,7 +115,6 @@ async function listConnectionMetadata(
     remoteListing,
     listEventActions(connectionName, actions, deadline),
   ]);
-  // An auth challenge must reach the sign-in flow, not become a partial catalog.
   for (const result of [remoteResult, actionResult]) {
     if (result.status === "rejected" && isConnectionAuthorizationRequiredError(result.reason))
       throw result.reason;
@@ -155,7 +130,6 @@ async function listConnectionMetadata(
   return [...remote, ...generated];
 }
 
-/** Event discovery that fails or misses the listing's deadline keeps get and stop for existing watches. */
 async function listEventActions(
   connectionName: string,
   actions: ConnectionEventActionHandler,
@@ -170,7 +144,6 @@ async function listEventActions(
   }
 }
 
-/** Why a connection's tools could not be listed, for a failure other than a needed sign-in. */
 export function listingFailureMessage(connectionName: string, error: unknown): string {
   if (error instanceof ListingTimeoutError) return error.message;
   return isConnectionAuthorizationFailedError(error)
@@ -193,7 +166,6 @@ async function interactiveAuthorization(
   };
 }
 
-/** Rejects a finished sign-in for `connection` when its resolved instance changed while pending. */
 function assertPendingSignInInstance(connection: ResolvedConnectionDefinition): void {
   for (const result of getAuthorizationResults()) {
     if (result.name !== connection.connectionName || result.instanceId === undefined) continue;

@@ -55,11 +55,6 @@ export async function readRecoveryLeaseJournal(
   return isRecoveryLeaseJournal(value) ? value : undefined;
 }
 
-/**
- * Resolves the journal file inside a lock or lease directory. Exposed so
- * the lock module can heartbeat the file's mtime while a publication or
- * recovery is in flight.
- */
 export function resolveJournalFilePath(path: string): string {
   return join(path, "owner.json");
 }

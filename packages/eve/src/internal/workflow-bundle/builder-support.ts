@@ -31,13 +31,7 @@ export interface WorkflowBundleBuilderOptions {
   compiledArtifactsBootstrapPath: string;
   outDir: string;
   rootDir: string;
-  /** Test-harness-only: also scans `src/internal/testing/`. */
   includeTestFixtures?: boolean;
-  /**
-   * Inlines a source map into the workflow driver code so errors thrown in workflow functions
-   * point at their source. Development builds keep it; production omits it, since every cold
-   * start would otherwise load the map with the code. Defaults to true.
-   */
   inlineSourcemap?: boolean;
 }
 const NODE_BUILTIN_MODULES = new Set([
@@ -186,11 +180,6 @@ export function createWorkflowVirtualEntryPlugin(source: string): WorkflowRolldo
   };
 }
 
-/**
- * `eve/workflow` resolves to the body-side shim. An `eve/workflow/api` import still live
- * after step bodies were stubbed means a body calls the runtime API; fail the
- * build here rather than the driver later.
- */
 export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRolldownPlugin {
   return {
     name: "eve-workflow-driver-aliases",
@@ -227,8 +216,6 @@ export function createEvePackageImportsPlugin(
   workingDir: string,
   options: { workflowCondition?: boolean } = {},
 ): WorkflowRolldownPlugin {
-  // Production builds from eve's package root. Fixtures that build from another
-  // directory still need eve's own modules, e.g. the step wrapper the transform injects.
   const roots = [...new Set([workingDir, resolvePackageRoot()])];
   return {
     name: "eve-package-imports",
@@ -322,8 +309,6 @@ export function createWorkflowNodeBuiltinGuardPlugin(): WorkflowRolldownPlugin {
         return undefined;
       }
 
-      // Name the importer so the offending edge is obvious instead of
-      // failing later at run time with a bare "require is not defined".
       const via = importer ? ` (imported by "${importer}")` : "";
       throw new Error(
         `Workflow bundle cannot import Node.js builtin "${source}"${via}. ` +
@@ -340,8 +325,6 @@ export async function bundleFinalWorkflowOutput(input: {
   queueNamespace: string;
   stepRegistrationsPath?: string;
 }): Promise<void> {
-  // The driver code ships as a text asset beside the entrypoint, so the host bundles it as a plain
-  // string: nothing decodes it at startup, and Nitro's `replace` cannot rewrite tokens inside it.
   const codePath = workflowDriverCodePath(input.outfile);
   await writeWorkflowBundleAtomically(
     codePath,
@@ -359,19 +342,12 @@ export async function bundleFinalWorkflowOutput(input: {
   await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
 }
 
-/** Where the driver code for the entrypoint at `outfile` is written. */
 export function workflowDriverCodePath(outfile: string): string {
   return join(dirname(outfile), `${basename(outfile, extname(outfile))}.code.txt`);
 }
 
-// The transform emits bare `.set(...)` calls, so the Map must exist before any chunk runs.
 const WORKFLOW_REGISTRY_BANNER = `globalThis.${WORKFLOW_REGISTRY_GLOBAL} = new Map();`;
 
-/**
- * Chunks share state only through globals (the workflow registry, the serde
- * class registry, `Symbol.for` keys), so each runs in its own IIFE and their
- * top-level declarations never collide.
- */
 export function composeWorkflowDriverCode(chunks: readonly string[]): string {
   const bodies = chunks
     .map((chunk) => chunk.trim())

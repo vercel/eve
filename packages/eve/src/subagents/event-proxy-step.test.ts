@@ -178,7 +178,6 @@ describe("signInsAnswered", () => {
       shown,
       waiting("child-b-sign-in", "child-b"),
       waiting("parent-sign-in", undefined),
-      // Its own card is shown, so its own answer settles it.
       signInRow("child-c-sign-in", "child-c", ALICE),
     ]);
     const ending = { interactionId: shown.interactionId, reason: "server_error" };

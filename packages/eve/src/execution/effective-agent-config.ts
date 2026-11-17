@@ -11,14 +11,12 @@ import type {
   SessionUsageLimit,
 } from "#shared/agent-definition.js";
 
-/** What the agent sets for every model call, whichever model it runs. */
 export interface AgentSettings {
   readonly compactionModel?: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly thresholdPercent?: number;
 }
 
-/** The settings of the agent the step runs: `agent.ts`'s, or a dynamic subagent config's. */
 export function agentSettings(step: {
   readonly ctx: Pick<ContextReader, "get" | "require">;
 }): AgentSettings {
@@ -38,7 +36,6 @@ export function agentSettings(step: {
   };
 }
 
-/** The session's limits: a dynamic subagent config's, else `agent.ts`'s. */
 export function agentLimits(
   bundle: Pick<CompiledBundle, "resolvedAgent">,
   ctx: Pick<ContextReader, "get">,
@@ -47,10 +44,6 @@ export function agentLimits(
   return config === undefined ? bundle.resolvedAgent.config?.limits : config.limits;
 }
 
-/**
- * The session's `limits.sessionUsage`: the agent's own, else the root agent's.
- * A dynamic subagent config can't carry one, so its sessions run the root's.
- */
 export function resolveSessionUsageLimit(
   bundle: Pick<CompiledBundle, "graph" | "resolvedAgent">,
 ): SessionUsageLimit | undefined {
@@ -60,16 +53,10 @@ export function resolveSessionUsageLimit(
   return limit === false ? () => false : limit;
 }
 
-/**
- * The session's agent-wide `approval`. The root agent's always applies, including in subagent
- * sessions; a subagent's own can only add to it, so no subagent (an extension's included) can
- * loosen the root's gates.
- */
 export function resolveAgentApproval(
   bundle: Pick<CompiledBundle, "graph" | "nodeId" | "resolvedAgent">,
 ): ApprovalPolicy | undefined {
   const root = bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.approval;
-  // The root session's own policy is the root's, so it must not run twice.
   if (bundle.nodeId === undefined || bundle.nodeId === ROOT_RUNTIME_AGENT_NODE_ID) return root;
   const own = bundle.resolvedAgent.config?.approval;
   if (own === undefined) return root;

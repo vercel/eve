@@ -30,10 +30,6 @@ import {
   type ToolEntry,
 } from "./definition.js";
 
-/**
- * The agent's `defineTool()` files: the same tools in every session, so they keep nothing. The step
- * holds them, as it runs them outside a turn too; each joins the call like any other tool.
- */
 export const staticTools: Definition = {
   contribute: ({ step }) => ({
     tools: () => ({ entries: toolEntries([...(step?.agentTools.values() ?? [])], "eve.tools") }),
@@ -42,20 +38,10 @@ export const staticTools: Definition = {
   label: "the agent's tools",
 };
 
-/**
- * A `defineDynamic()` in `agent/tools/`: one tool named after the file, or a map of them. It keeps
- * what the model is offered; the tools themselves are code. Its tools take their names from the
- * agent's own.
- */
 export function toolDefinition(resolver: ResolvedDynamicDefinition<"tool">): Definition {
   return toolsDefinition(resolver, authoredEvaluate(resolver.evaluate));
 }
 
-/**
- * Tools `evaluate` makes, as the tool file `source` names would: a `defineDynamic()` tool file's,
- * or an eve feature's, which offers its tools under the file it would take, such as a memory
- * slot's. Their versions are kept under that file's ID.
- */
 export function toolsDefinition(
   source: ToolSource,
   evaluate: (ctx: InternalContext) => unknown,
@@ -88,7 +74,6 @@ export function toolsDefinition(
   };
 }
 
-/** The names of the dynamic tools the session keeps, live or not. */
 export function dynamicToolNames(ctx: Pick<ContextReader, "get">): readonly string[] {
   return slotsOf(ctx, "tool").flatMap(({ slot }) =>
     Array.isArray(slot.value) ? slot.value.map((tool) => (tool as { name: string }).name) : [],
@@ -107,14 +92,12 @@ export function toolEntries(
   );
 }
 
-/** Where dynamic tools come from: a file, by its slug, in an extension's namespace or none. */
 export interface ToolSource {
   readonly extensionNamespace?: string;
   readonly logicalPath: string;
   readonly slug: string;
 }
 
-/** The tools `result` defines, checked and named as `source`'s, with their declarations. */
 export function contributeTools(source: ToolSource, result: unknown, ctx: ContextContainer): Kept {
   const tools = namedTools(source, result).map(({ entry, name }) => {
     assertToolNameAvailable(ctx, source, name);
@@ -145,10 +128,6 @@ function namedTools(source: ToolSource, value: unknown) {
   return entries as readonly { readonly name: string; readonly entry: DynamicToolEntry }[];
 }
 
-/**
- * The agent's workflow tools and agents run after the model step, so a dynamic tool, which runs in
- * it, can't take their names. Nor can a connection's.
- */
 function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, name: string): void {
   assertNotConnectionOwned({
     connectionNames: sessionConnectionNames(ctx),
@@ -198,7 +177,6 @@ function liveTool(name: string, authored: DynamicToolEntry): HarnessToolDefiniti
   };
 }
 
-/** What a tool's slot records: what the model is offered, without the code. */
 function declaration(tool: HarnessToolDefinition): JsonObject {
   return {
     description: tool.description,

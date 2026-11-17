@@ -5,11 +5,6 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { InstrumentationSetupContext } from "#public/instrumentation/provider.js";
 
-/**
- * Builds the context handed to an authored `setup` at server startup.
- *
- * @internal — not part of the public API.
- */
 export function createInstrumentationSetupContext(agentName: string): InstrumentationSetupContext {
   const evaluationRunId = resolveEveEvaluationRunId();
   return {

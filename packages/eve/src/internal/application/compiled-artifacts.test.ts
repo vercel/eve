@@ -27,7 +27,6 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
       source.indexOf("await createWorldFromModule("),
     );
-    // Worlds read the spec version when they are constructed.
     expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeGreaterThan(-1);
     expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeLessThan(
       source.indexOf("await createWorldFromModule("),

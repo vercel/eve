@@ -18,7 +18,6 @@ interface RegistryItem {
   readonly files: readonly { readonly path: string; readonly target: string }[];
 }
 
-/** `eve add` installs a bare package name at its latest release. */
 function dependencyEntry(specifier: string): [string, string] {
   const separator = specifier.lastIndexOf("@");
   return separator > 0
@@ -27,7 +26,6 @@ function dependencyEntry(specifier: string): [string, string] {
 }
 
 describe(`registry ${ITEM_NAME}`, () => {
-  // https://github.com/vercel/eve/issues/4961
   it("builds the agent the registry item installs", async () => {
     const registry = JSON.parse(await readFile(join(REGISTRY_ROOT, "registry.json"), "utf8")) as {
       readonly items: readonly RegistryItem[];
@@ -51,8 +49,6 @@ describe(`registry ${ITEM_NAME}`, () => {
       name: "registry-hindsight",
     });
 
-    // The build evaluates authored modules, which read these, but never calls Hindsight.
-    // Sandbox preparation is unrelated to the item and depends on the host.
     await runPnpmCommand({
       args: ["exec", "eve", "build", "--skip-sandbox-prewarm"],
       cwd: app.appRoot,

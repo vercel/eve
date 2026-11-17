@@ -26,7 +26,7 @@ import {
 describe("line editing", () => {
   it("inserts at the caret and advances it", () => {
     let line = lineOf("helo");
-    line = moveLeft(line); // caret before "o"
+    line = moveLeft(line);
     line = insert(line, "l");
     expect(line).toEqual({ text: "hello", cursor: 4 });
   });
@@ -154,9 +154,7 @@ describe("line editing", () => {
   });
 
   it("bounds delete-word to the current line", () => {
-    // Deletes within the current line, leaving the newline and the line above.
     expect(deleteWord({ text: "one\ntwo", cursor: 7 })).toEqual({ text: "one\n", cursor: 4 });
-    // At the start of a line there is nothing on it to delete; no line merge.
     expect(deleteWord({ text: "one\ntwo", cursor: 4 })).toEqual({ text: "one\ntwo", cursor: 4 });
   });
 
@@ -314,7 +312,6 @@ describe("visibleLine", () => {
     const { under } = visibleLine({ text, cursor: text.length }, 6, "…");
     const visible = before + under + after;
     expect(visible.length).toBe(6);
-    // Caret sits at the end of the window; the truncated head is marked.
     expect(after).toBe("");
     expect(visible.startsWith("…")).toBe(true);
   });
@@ -336,11 +333,9 @@ describe("PromptHistory", () => {
     history.begin("draft");
     expect(history.previous("draft")).toBe("second");
     expect(history.previous("second")).toBe("first");
-    // At the oldest entry, further up does nothing.
     expect(history.previous("first")).toBeUndefined();
 
     expect(history.next()).toBe("second");
-    // Past the newest entry restores the in-progress draft.
     expect(history.next()).toBe("draft");
     expect(history.next()).toBeUndefined();
   });
@@ -373,7 +368,6 @@ describe("layoutPromptInput", () => {
       { text: "ab", start: 0 },
       { text: "cd", start: 3 },
     ]);
-    // Cursor 4 is the "d": second row (start 3), offset 1.
     expect({ caretRow: layout.caretRow, caretOffset: layout.caretOffset }).toEqual({
       caretRow: 1,
       caretOffset: 1,

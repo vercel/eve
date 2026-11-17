@@ -3,7 +3,6 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeAuthorizationCallback, handleExpiredLegacyAuthorization } from "./authorization.js";
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), resume: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: mocks.resume }));
-// Owner classification has its own tests; every owner here is runnable.
 vi.mock("#execution/session-inbox/owner.js", () => ({
   resumeRunnableHook: (token: string, payload: unknown) => mocks.resume(token, payload),
 }));

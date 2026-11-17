@@ -1,7 +1,6 @@
 import { addRegistryMappings } from "./registry-project.js";
 import { runRegistryAction, type RegistryCommandLogger } from "./registry-recovery.js";
 
-/** Adds registry namespace mappings to the project's package.json. */
 export async function runRegistryAddCommand(
   logger: RegistryCommandLogger,
   appRoot: string,

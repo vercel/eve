@@ -27,10 +27,8 @@ import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 
-/** Hydrates the compiled module map from the manifest’s authored bindings. */
 export async function loadCompiledModuleMapFromAuthoredSource(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
-  /** Current location of a built application deployed with its source and dependencies. */
   readonly authoredAppRoot?: string;
 }): Promise<CompiledModuleMap> {
   const manifest = await loadCompiledManifest({
@@ -75,15 +73,12 @@ async function hydrateCompiledModuleMapFromManifest(
     const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
     try {
       await writeFile(temporaryPath, code, { flag: "wx" });
-      // Not link(): some NFS and FUSE mounts reject hard links. The name is the content hash,
-      // so replacing a concurrent writer's file swaps identical bytes.
       await renameWithTransientBusyRetry(temporaryPath, outputPath);
     } finally {
       await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
       });
     }
-    // Independent application loads need fresh mutable extension handles, but share bundle bytes.
     return await loadMaterializedCompiledModuleMap({
       moduleMapPath: fileName,
       runtimeAppRoot,

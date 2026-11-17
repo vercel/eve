@@ -19,9 +19,7 @@ function resolveWorkflowWorldLocalVersion() {
       if (manifest.name === "@workflow/world-local" && typeof manifest.version === "string") {
         return manifest.version;
       }
-    } catch {
-      // Keep walking toward the package root.
-    }
+    } catch {}
 
     const parentPath = dirname(currentPath);
 

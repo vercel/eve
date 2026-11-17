@@ -1,6 +1,3 @@
-// The process runner against real processes, with eve's abort binding in place:
-// the stop a cancelled call reports has to be a stop that happened, and the
-// report has to say what could and could not be observed.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -20,7 +17,6 @@ const streamOf = (text) =>
 test("the report waits for the exit after the kill is accepted", async () => {
   const events = [];
   let exited;
-  // eve memoizes the exit it hands back, so both the caller and the stop see one promise.
   const wait = () =>
     (exited ??= (async () => {
       await tick(30);

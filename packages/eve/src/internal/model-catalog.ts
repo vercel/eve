@@ -29,25 +29,18 @@ export const modelCatalogResponseSchema = z
 export type CatalogModelProvider = z.infer<typeof catalogModelProviderSchema>;
 export type CatalogModel = z.infer<typeof catalogModelSchema>;
 
-/** The parts of the AI Gateway model catalog that eve's lookups read. */
 export interface ModelCatalog {
   readonly models: readonly CatalogModel[];
   readonly providerAliases: Readonly<Record<string, string>>;
 }
 
-/** A catalog match: the canonical Gateway slug and the context window eve compacts against. */
 export interface ModelCatalogEntry {
   readonly contextWindowTokens: number;
   readonly slug: string;
 }
 
-/**
- * The model metadata one build bakes into its compiled artifacts. Runtime model selections
- * resolve context windows from this snapshot and never call AI Gateway themselves.
- */
 export const modelMetadataSchema = z
   .object({
-    /** When the build read the catalog, or `null` when the catalog was unavailable. */
     fetchedAt: z.string().nullable(),
     kind: z.literal(MODEL_METADATA_KIND),
     models: z.array(
@@ -75,10 +68,6 @@ export const modelMetadataSchema = z
 
 export type ModelMetadata = z.infer<typeof modelMetadataSchema>;
 
-/**
- * Projects a catalog onto the snapshot a build ships: only providers with a usable context
- * window, and only the fields eve's lookups read.
- */
 export function createModelMetadata(
   input: { readonly catalog: ModelCatalog; readonly fetchedAt: string } | null,
 ): ModelMetadata {
@@ -109,8 +98,6 @@ export function findCatalogModelBySlug(
   models: readonly CatalogModel[],
   slug: string,
 ): CatalogModel | undefined {
-  // Some models publish `-thinking` as their own canonical slug, so the
-  // verbatim id must win before the suffix is stripped.
   const exact = models.find((model) => model.slug === slug);
   if (exact !== undefined) {
     return exact;
@@ -120,7 +107,6 @@ export function findCatalogModelBySlug(
   return normalized === slug ? undefined : models.find((model) => model.slug === normalized);
 }
 
-/** Looks up an AI Gateway model id, such as `anthropic/claude-sonnet-5`. */
 export function lookupCatalogModelBySlug(
   catalog: ModelCatalog,
   slug: string,
@@ -134,7 +120,6 @@ export function lookupCatalogModelBySlug(
   return null;
 }
 
-/** Looks up an AI SDK provider model, such as `anthropic.messages` and `claude-sonnet-5`. */
 export function lookupCatalogModelByProviderModelId(
   catalog: ModelCatalog,
   provider: string,
@@ -146,7 +131,6 @@ export function lookupCatalogModelByProviderModelId(
 
   for (const model of catalog.models) {
     for (const entry of model.providers) {
-      // Skip windowless entries, as the snapshot drops them, so both resolve alike.
       const contextWindowTokens = contextWindowOf(entry);
       if (
         contextWindowTokens !== null &&

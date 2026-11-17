@@ -136,11 +136,6 @@ describe("normalizeMcpClientConnectionDefinition", () => {
     });
 
     it("preserves the optional vercelConnect marker on auth", () => {
-      // The `connect()` helper from `@vercel/connect/eve` attaches a
-      // `vercelConnect: { connector }` marker so downstream tooling can
-      // detect Vercel Connect-backed connections without inspecting the
-      // closure state of `getToken`. Validation must let it through and
-      // the normalized result must preserve it.
       const result = normalizeMcpClientConnectionDefinition(
         validInput({
           auth: {
@@ -205,9 +200,6 @@ describe("normalizeMcpClientConnectionDefinition", () => {
     });
 
     it("drops a malformed vercelConnect marker without throwing", () => {
-      // A misbehaving auth provider could attach a malformed marker; the
-      // normalizer treats it as absent rather than failing the whole
-      // connection. This protects against auth providers we don't control.
       const result = normalizeMcpClientConnectionDefinition(
         validInput({
           auth: {

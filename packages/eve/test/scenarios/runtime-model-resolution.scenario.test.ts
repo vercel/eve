@@ -103,7 +103,6 @@ describe("runtime model resolution", () => {
         "export default defineAgent({",
         "  model: weatherModel,",
         "  modelOptions: {",
-        // contextWindowTokens removed — catalog supplies it at compile time
         "    providerOptions: {",
         "      testProvider: {",
         '        reasoning: "enabled",',

@@ -173,7 +173,6 @@ describe("ScheduleDispatcher", () => {
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
       const started = vi.mocked(runtime.createSession).mock.calls.map(([value]) => value);
       expect(started).toHaveLength(2);
-      // A retried callback claims the same address, so its start reaches the first session.
       expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
       expect(started[1]).toMatchObject({
         idempotencyKey: "exec-1:digest",
@@ -270,7 +269,6 @@ describe("ScheduleDispatcher", () => {
         expect(runtime.createSession).toHaveBeenCalledTimes(1);
         const run = vi.mocked(runtime.createSession).mock.calls[0]![0];
         expect(run.auth).toEqual(SCHEDULE_APP_AUTH);
-        // A threadless destination needs a fresh conversation per dispatch.
         expect(run.continuationToken).toMatch(
           /^slack:C0123ABC:[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/,
         );
@@ -326,7 +324,6 @@ describe("ScheduleDispatcher", () => {
         vi.unstubAllEnvs();
       }
     });
-    // https://github.com/vercel/eve/issues/5598
     it("tags to() sends with the Vercel deployment running the schedule", async () => {
       vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
       try {
@@ -372,7 +369,6 @@ describe("ScheduleDispatcher", () => {
         vi.unstubAllEnvs();
       }
     });
-    // the turn a scheduled send starts in a conversation must know a schedule sent it.
     it("marks to() sends into an existing conversation with the schedule", async () => {
       const runtime = createMockRuntime();
       runtime.dispatchContinuation = vi

@@ -29,15 +29,11 @@ function createEngine(input: {
   return createDockerSandboxHarness({ ...input, runtimeOptions: input.runtimeOptions ?? {} });
 }
 
-// Literal values recorded from the previous release. Running sessions persist
-// container names and state, and deployments ship image references, so these
-// must stay byte-identical across provider refactors.
 describe("Docker provider compatibility with the previous release", () => {
   const ALICE_STORAGE = "/srv/alice-app/.eve/sandbox";
   const PREVIOUS_ARTIFACT = { imageReference: "eve-sandbox-template:previous-release" };
   const ALICE_CONTAINER = "eve-sbx-9b576ac2a11e0d99ef5520deef1b41fa";
 
-  // `eve dev` labels containers with its run id; the recorded arguments predate it.
   beforeEach(() => {
     vi.stubEnv(EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV, undefined);
   });

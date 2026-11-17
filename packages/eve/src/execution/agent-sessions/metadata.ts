@@ -5,7 +5,6 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
-/** Snapshots callable agent metadata for one workflow tool run. */
 export function resolveWorkflowAgentMetadata(
   ctx: ContextReader,
 ): Readonly<Record<string, WorkflowAgentMetadata>> {

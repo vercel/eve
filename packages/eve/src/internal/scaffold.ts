@@ -1,4 +1,3 @@
-/** Internal Agent Builder integration; not a stable authoring API. */
 export {
   scaffoldBaseProject,
   type EvePackageContract,

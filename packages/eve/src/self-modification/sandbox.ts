@@ -18,7 +18,6 @@ export interface SelfModificationSandbox {
   (context: SandboxSelectorContext): Promise<RuntimeSandboxSession> | RuntimeSandboxSession;
 }
 
-/** Defines the local self-modification sandbox; source mounts exist only during development. */
 export function defineSelfModificationSandbox(
   options: SelfModificationSandboxOptions = {},
 ): SelfModificationSandbox {

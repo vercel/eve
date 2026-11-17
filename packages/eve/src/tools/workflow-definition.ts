@@ -294,8 +294,6 @@ type TaskDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<T
   execute?: never;
   serve?: never;
 };
-// `ctx.reply()` needs the output type before the body is checked, so a serve
-// tool's output comes from its `outputSchema`, not from what `serve` returns.
 type ServeDefinition<TInput, TOutput> = DefinitionFields<TInput, TOutput> & {
   serve(
     receive: WorkflowServeReceive<TInput>,
@@ -315,10 +313,6 @@ type WithInputSchema<TDefinition, TSchema> = Omit<TDefinition, "inputSchema"> & 
   inputSchema: TSchema;
 };
 
-// One overload per entry point and schema form. A single overload per form
-// can't tell which entry point a definition uses: TypeScript neither infers it
-// from the method a definition defines nor contextually types `toModelOutput`
-// through a union of the three shapes.
 export function defineWorkflowTool<
   TInputSchema extends Schema,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
@@ -403,7 +397,6 @@ export function isWorkflowToolDefinition(value: unknown): boolean {
   );
 }
 
-/** The entry points a definition defines; a workflow tool defines exactly one. */
 export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEntryPoint[] {
   return WORKFLOW_TOOL_ENTRY_POINTS.filter(
     (entryPoint) => Reflect.get(definition, entryPoint) !== undefined,
@@ -413,7 +406,6 @@ export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEnt
 function assertOneEntryPoint(definition: object): void {
   const defined = readWorkflowToolEntryPoints(definition);
   if (defined.length === 1) return;
-  // Built here rather than at module scope, so loading this module stays off the locale-data path.
   const found =
     defined.length === 0
       ? "none"

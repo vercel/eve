@@ -14,7 +14,6 @@ async function readResult(inbox: SessionInboxHandle): Promise<IteratorResult<Ses
   return value === undefined ? { done: true, value: undefined } : { done: false, value };
 }
 
-/** Resolves with the first interrupt the pump pushes to `onInterrupt`. */
 function nextInterrupt(inbox: SessionInboxHandle): Promise<SessionInboxPayload> {
   return new Promise((resolve) => {
     const unsubscribe = inbox.onInterrupt((payload) => {
@@ -163,7 +162,6 @@ describe("createSessionInbox", () => {
         sessionId: "child-1",
       },
     };
-    // Alice's reviewers report long findings, more than one step applies at once.
     const findings = (label: string): SessionInboxPayload => ({
       from,
       kind: "report",
@@ -189,7 +187,6 @@ describe("createSessionInbox", () => {
 
     expect(takeLeadingAppliedRunMessages(inbox)).toEqual([opened, findings("first")]);
     expect(takeLeadingAppliedRunMessages(inbox)).toEqual([findings("second")]);
-    // Taking run messages from the front stops at Bob's message.
     expect(takeLeadingAppliedRunMessages(inbox)).toEqual([]);
     expect(inbox.drain()).toEqual([send("Bob asks how it is going.")]);
     await inbox.dispose();
@@ -343,7 +340,6 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHooks(["stable", "channel"], { handover: "owner-a:1" });
 
     await expect(interrupted).resolves.toEqual(cancel);
-    // Arrivals count even while nothing is readable.
     await arrived;
     expect(inbox.awaitingHandover).toBe(true);
     expect(inbox.drain()).toEqual([]);
@@ -388,7 +384,6 @@ describe("createSessionInbox", () => {
         reads: [
           Promise.resolve(resolved(send("direct"))),
           Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
-          // A retried send step repeats its index.
           Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
           Promise.resolve(resolved(finalPart("owner-a:1", 2))),
           Promise.resolve(resolved(cancel)),
@@ -401,7 +396,6 @@ describe("createSessionInbox", () => {
     const pumped = nextInterrupt(inbox);
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
     await pumped;
-    // The final part has arrived, but part 0 has not.
     expect(inbox.awaitingHandover).toBe(true);
     expect(inbox.handoverObservation).toBeUndefined();
     expect(inbox.drain()).toEqual([]);
@@ -736,11 +730,7 @@ function createMockHook(input: {
     [Symbol.asyncIterator]() {
       return {
         next: vi.fn(
-          () =>
-            reads.shift() ??
-            new Promise<IteratorResult<SessionInboxPayload>>(() => {
-              // Intentionally pending.
-            }),
+          () => reads.shift() ?? new Promise<IteratorResult<SessionInboxPayload>>(() => {}),
         ),
         return: iteratorReturn,
       };

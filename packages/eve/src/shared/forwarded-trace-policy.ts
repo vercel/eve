@@ -57,7 +57,6 @@ export function formatTraceContentCeiling(ceiling: TraceContentCeiling): string 
   return `i${ceiling.recordInputs ? "1" : "0"}o${ceiling.recordOutputs ? "1" : "0"}`;
 }
 
-/** Applies a distinct live delivery audience without re-capping callback or origin delivery. */
 export function applyLiveDeliveryAudienceCeiling(
   decision: InstrumentationDecision,
   liveAudience: ChannelAudience,
@@ -101,7 +100,6 @@ export function readForwardedTraceAssertion(value: unknown): ForwardedTraceAsser
   };
 }
 
-/** Resolves the coupled durable decision and assertion without allowing either to widen the other. */
 function resolveForwardedTraceState(input: {
   readonly decision: unknown;
   readonly forwardedTracePolicy: unknown;

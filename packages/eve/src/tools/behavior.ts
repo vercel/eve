@@ -25,7 +25,6 @@ export interface CompiledToolBehavior {
   readonly shape?: ToolExecutionShape;
 }
 
-/** Concrete dispatch identity prepared before a tool reaches the harness. */
 export type PreparedDispatchTarget =
   | {
       readonly kind: "remote-agent-call";
@@ -48,18 +47,15 @@ export type PreparedDispatchTarget =
       readonly workflowId: string;
     };
 
-/** Runtime-prepared handling consumed by the harness and execution boundary. */
 export type PreparedToolHandling =
   | { readonly kind: "dispatch"; readonly target: PreparedDispatchTarget }
   | Extract<CompiledToolHandling, { readonly kind: "provider-tool" }>;
 
-/** Runtime-prepared behavior carried by one harness-visible tool. */
 export interface PreparedToolBehavior {
   readonly availability: readonly ToolAvailabilityCondition[];
   readonly handling?: PreparedToolHandling;
 }
 
-// Framework definitions and the compiler may come from different bundled copies.
 const TOOL_BEHAVIOR = Symbol.for("eve.tool-behavior");
 
 type ToolBehaviorCarrier = {
@@ -80,7 +76,6 @@ export function attachToolBehavior<TDefinition extends object>(
   return definition;
 }
 
-/** Reads internal behavior from a framework-owned definition. */
 export function readToolBehavior(value: unknown): CompiledToolBehavior | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   return (value as Partial<ToolBehaviorCarrier>)[TOOL_BEHAVIOR];

@@ -7,7 +7,6 @@ import {
   EVE_STREAM_TAIL_INDEX_HEADER,
 } from "#protocol/session-http.js";
 
-/** What one fake model run spends, recorded with its terminal facts. */
 const FAKE_USAGE = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
@@ -22,7 +21,6 @@ export interface FakeEveRequest {
   readonly body?: Record<string, unknown>;
 }
 
-/** Events a fake agent streams after it accepts one delivery. */
 export type FakeEveTurn = (
   request: FakeEveRequest & { readonly deliveryId: string; readonly turnId: string },
 ) => readonly SessionEvent[];
@@ -34,11 +32,6 @@ interface FakeSession {
 
 const encoder = new TextEncoder();
 
-/**
- * An in-memory eve HTTP server for driving real clients through `fetch`.
- * Sessions keep a durable event log; streams replay from their cursor and then
- * follow live emissions, so reconnects and late subscribers behave like eve.
- */
 export class FakeEveServer {
   readonly requests: FakeEveRequest[] = [];
   readonly #sessions = new Map<string, FakeSession>();
@@ -49,7 +42,6 @@ export class FakeEveServer {
   #eventCount = 0;
   #currentSessionId?: string;
 
-  /** `fallback` serves routes outside the session API, such as dev runtime artifacts. */
   constructor(respond: FakeEveTurn = reply("Done."), fallback?: typeof fetch) {
     this.#respond = respond;
     if (fallback !== undefined) this.#fallback = fallback;
@@ -59,14 +51,12 @@ export class FakeEveServer {
     return this.#currentSessionId;
   }
 
-  /** Requests to one route, such as `POST /cancel`. */
   requestsTo(method: string, suffix: string): FakeEveRequest[] {
     return this.requests.filter(
       (request) => request.method === method && request.path.endsWith(suffix),
     );
   }
 
-  /** Appends events to a session's durable stream; the current session by default. */
   emit(
     events: readonly SessionEvent[],
     _deliveryId?: string,
@@ -195,7 +185,6 @@ export class FakeEveServer {
   }
 }
 
-/** A fake agent that answers every message with the same completed reply. */
 export function reply(text: string): FakeEveTurn {
   return ({ body, deliveryId, turnId }) => {
     const runId = `${turnId}.run`;
@@ -232,7 +221,6 @@ export function reply(text: string): FakeEveTurn {
   };
 }
 
-/** A fake agent that accepts deliveries and leaves their events to the test. */
 export function silent(): FakeEveTurn {
   return () => [];
 }

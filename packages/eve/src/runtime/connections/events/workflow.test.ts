@@ -2,7 +2,6 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import type { EventBinding } from "./state.js";
 
-/** A deterministic stand-in for Workflow's hooks and sleep: one owner per token. */
 const world = vi.hoisted(() => {
   class FakeHook<T> {
     readonly queue: T[] = [];
@@ -57,7 +56,6 @@ const world = vi.hoisted(() => {
         metadata: options.metadata,
         options,
       });
-      // A held token conflicts; the hook reports which owner holds it.
       if (previous !== undefined) {
         hook.conflict = previous.id;
         return hook;
@@ -73,7 +71,6 @@ const world = vi.hoisted(() => {
     sleeps: [] as Date[],
     backoffs: [] as number[],
     sleep(until: Date | number) {
-      // A finite delay is the unsubscribe backoff; a date is the watch's expiry.
       if (typeof until === "number") {
         world.backoffs.push(until);
         return Promise.resolve();
@@ -84,7 +81,6 @@ const world = vi.hoisted(() => {
     expire: () => expire?.(),
     expiresAt: null as string | null,
     followed: [] as string[],
-    /** Settles the watch's subscribe step; tests hold it to model a slow Connect. */
     subscribed: Promise.resolve() as Promise<void>,
     refuse: false,
     unsubscribed: vi.fn(async (_input: unknown): Promise<"pending" | "done"> => "done"),
@@ -154,7 +150,6 @@ it("holds the binding in a hook that ends with the run", async () => {
   await watching();
   const hook = world.owners.get(token)!;
   expect(hook.metadata).toEqual(binding);
-  // No retention: once the run ends, the watch is not found.
   expect(hook.options).not.toHaveProperty("experimental_minRetention");
   world.resume(token, { kind: "retire" });
   await run;
@@ -175,14 +170,12 @@ it("unsubscribes when stopped, and ends only once Connect finishes cleanup", asy
     binding,
     subscriptionId: "sub_1",
   });
-  // Each repeat waits durably, longer each time.
   expect(world.backoffs).toEqual([5_000, 10_000]);
 });
 
 it("keeps the watch through repeated failed unsubscribes until Connect's cleanup completes", async () => {
   let attempts = 0;
   world.unsubscribed.mockImplementation(async () => {
-    // Every failed attempt leaves the watch reachable for get and stop.
     expect(world.owners.has(token)).toBe(true);
     return ++attempts <= 5 ? "pending" : "done";
   });
@@ -251,7 +244,6 @@ it("runs each delivery in its own run, so a failed callback leaves the watch to 
   await expect(connectionEventDeliveryWorkflow(input)).rejects.toThrow("callback failed");
   await connectionEventDeliveryWorkflow(input);
   expect(world.dispatch).toHaveBeenCalledWith(input);
-  // The watch's run saw neither delivery and still holds its hook.
   expect(world.owners.get(token)).toBe(live);
   expect(live?.queue).toEqual([]);
   world.resume(token, { kind: "retire" });

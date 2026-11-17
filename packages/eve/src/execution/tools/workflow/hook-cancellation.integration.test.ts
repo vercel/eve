@@ -38,7 +38,6 @@ describe("workflow hook cancellation", () => {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
             input: { message: 'Run confirm_deploy with service "api"' },
-            // A typed answer joins the turn only from the principal that started it.
             serializedContext: {
               ...buildWorkflowToolSerializedContext({
                 acceptedDeploymentId: "dpl_inline",
@@ -163,7 +162,6 @@ describe("workflow hook cancellation", () => {
 
         const answered = await stream.nextTurn();
         expect(hooksAfterCancel).toEqual(["Deploy"]);
-        // The hook rejected the message, so it must not reach the waiting call.
         const outcomes = filterEventsByType(answered, "interaction.settled").flatMap((event) => [
           event.data.outcome,
         ]);
@@ -219,7 +217,6 @@ describe("workflow hook cancellation", () => {
       const stream = captureTurnEvents(run);
       try {
         await stream.nextTurn();
-        // Alice answers the deploy question and, in the same delivery, adds a note for the agent.
         await resumeSessionInbox(sessionCommandHookToken(run.runId), {
           deliveryMetadata: [
             {
@@ -291,7 +288,6 @@ describe("workflow hook cancellation", () => {
       try {
         const settled = await stream.nextTurn();
         expect(filterEventsByType(settled, "call.progress")).toHaveLength(1);
-        // The hook stopped the turn, so the run's return must not reach the model.
         const outputs = filterEventsByType(settled, "call.settled").map(
           (event) => event.data.output,
         );
@@ -306,9 +302,6 @@ describe("workflow hook cancellation", () => {
 });
 
 describe("workflow typed answers", () => {
-  // #4923: a typed answer is the person's next message, so its hooks and the
-  // rest of the turn see the request that sent it, as a steering message does,
-  // whatever else its payload carries for the session.
   it.each([
     { extra: {}, label: "text" },
     { extra: { state: { thread: "thread-1" } }, label: "channel-state" },
@@ -384,8 +377,6 @@ describe("workflow typed answers", () => {
     60_000,
   );
 
-  // #4923: a turn's principal is fixed. Another person's typed text must not
-  // answer the turn's question; it waits and runs as their own turn.
   it.each([
     {
       answers: { alice: "Deploy", bob: "Cancel" },

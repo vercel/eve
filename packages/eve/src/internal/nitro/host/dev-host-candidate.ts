@@ -12,12 +12,6 @@ interface DevelopmentWorkerPayload {
   readonly workerData: Readonly<Record<string, unknown>>;
 }
 
-/**
- * Builds one host candidate in its invocation-owned workspace and returns the
- * worker payload Nitro emitted for it. The Nitro instance is closed before
- * returning: the payload's entry lives on disk in the workspace, so nothing
- * retains the builder.
- */
 export async function buildDevelopmentHostCandidate(input: {
   readonly host: PreparedDevelopmentApplicationHost;
   readonly nitro: Nitro;
@@ -36,8 +30,6 @@ export async function buildDevelopmentHostCandidate(input: {
       return;
     }
     settled = true;
-    // Stock Nitro falls back to the configured output entry when the reload
-    // payload does not carry one.
     payload = {
       entry:
         reload?.entry ??

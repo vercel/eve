@@ -10,8 +10,6 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
-// Exercise the failed scope and terminal step with the last successful checkpoint,
-// not the failed access's uncommitted captureState().
 describe("sandbox terminal cleanup after a failed scope", () => {
   it.each(["failed", "expired"] as const)(
     "cleans up by key on %s after initialization opened a sandbox then threw",

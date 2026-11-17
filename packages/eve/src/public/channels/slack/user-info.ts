@@ -45,7 +45,6 @@ export type SlackUsersOption =
       ) => Promise<SlackUserInfo | undefined>;
     };
 
-/** Looks up Slack users for one channel. Never throws; a failure resolves to `undefined`. */
 export type SlackUserResolver = (input: {
   readonly userId: string;
   readonly teamId: string | undefined;
@@ -53,12 +52,9 @@ export type SlackUserResolver = (input: {
 }) => Promise<SlackUserInfo | undefined>;
 
 const PROFILE_TTL_MS = 60 * 60 * 1000;
-/** A failed lookup is retried after this, so a blip doesn't hide a name for an hour. */
 const FAILED_LOOKUP_TTL_MS = 60_000;
 const MAX_CACHED_PROFILES = 1000;
-/** Profiles are optional, so a lookup that never settles must not hold the message. */
 const LOOKUP_TIMEOUT_MS = 2000;
-// Bounds the lookups one inbound message can trigger.
 const MAX_LOOKUPS_PER_MESSAGE = 20;
 
 interface CachedProfile {
@@ -66,13 +62,6 @@ interface CachedProfile {
   readonly profile: Promise<SlackUserInfo | undefined>;
 }
 
-/**
- * Builds the resolver for `messageContext.users`, or `undefined` when it adds
- * no fields. Without an authored `resolve`, `users.info` results are cached in
- * memory per workspace and user for an hour, and failures for a minute. Each
- * Slack channel builds its own, so a profile fetched with one app's scopes
- * never reaches another app in the same process.
- */
 export function createSlackUserResolver(
   option: SlackUsersOption | undefined,
   now: () => number = Date.now,
@@ -142,10 +131,6 @@ export function createSlackUserResolver(
   };
 }
 
-/**
- * Resolves each distinct user, the first {@link MAX_LOOKUPS_PER_MESSAGE} only.
- * A failed or empty lookup leaves that user out of the map.
- */
 export async function resolveSlackUsers(
   resolver: SlackUserResolver,
   input: {
@@ -164,7 +149,6 @@ export async function resolveSlackUsers(
   return new Map(entries.flat());
 }
 
-/** Returns `message` with its human author's resolved profile fields, or unchanged. */
 export async function withSlackUserInfo(
   message: SlackMessage,
   resolver: SlackUserResolver,
@@ -185,7 +169,6 @@ export async function withSlackUserInfo(
   };
 }
 
-/** Calls Slack's `users.info`. Throws when Slack rejects the call. */
 async function fetchSlackUserInfo(userId: string, request: SlackRequest): Promise<SlackUserInfo> {
   const response = await request("users.info", { user: userId });
   if (response.ok !== true) {

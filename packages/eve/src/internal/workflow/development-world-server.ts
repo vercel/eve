@@ -34,22 +34,6 @@ import {
   type DevelopmentWorldRequest,
 } from "#internal/workflow/development-world-protocol.js";
 
-/**
- * The application's one local Workflow World, owned by the CLI parent.
- *
- * Why the parent: run records, the queue, and stream state must outlive the
- * Nitro dev worker, which is disposed on every structural reload. The parent
- * is the only process whose lifetime matches the run data, so it holds the
- * real (stock, vendored) world-local instance and serves it to workers over
- * an RPC route on the public listener; workers hold only an
- * interface-faithful client. Deliveries are not served here — the queue
- * posts them through the public listener to the active worker like any
- * other request, so drained replacement covers them automatically.
- *
- * `handleRequest` must be reachable before `start()` runs: starting the
- * world begins queue redelivery immediately, and a delivery's first World
- * call arrives back on the listener within milliseconds.
- */
 export interface ParentDevelopmentWorkflowWorld {
   close(): Promise<void>;
   handleRequest(request: Request): Promise<Response | undefined>;
@@ -74,7 +58,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #transportSecret: string;
   readonly #world: LocalWorld;
   readonly #resume: boolean;
-  // Owned by the host, not a worker: rebuilds preserve the startup admission decision.
   readonly #unrecoveredGenerations = new Map<
     string,
     | Extract<DevelopmentGenerationAvailability, { kind: "ineligible" }>
@@ -110,7 +93,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     if (this.#started) {
       return;
     }
-    // Queue redelivery starts with the World. Decide admission before it can wake retained runs.
     const recoveryGenerationId = this.#resolveActiveGenerationId();
     this.#unrecoveredGenerations.clear();
     for (const generationId of await listDevelopmentGenerationIds(this.#appRoot)) {
@@ -158,7 +140,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     this.#closed = true;
     this.#started = false;
-    // Reconciliation failures belong to their caller, not a later shutdown.
     await this.#reconciliation.catch(() => undefined);
     await this.#world.close?.();
   }
@@ -193,7 +174,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   }
 
   async #collectExpiredRunIds(): Promise<readonly string[]> {
-    // Finish pagination before cancellation changes the status-filtered result set.
     const runIds: string[] = [];
     for (const status of ["pending", "running"] as const) {
       let cursor: string | undefined;
@@ -283,9 +263,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       return await this.#generationAvailability(call.generationId);
     }
     const args = [...call.arguments];
-    // Deployment identity and enqueueing carry eve semantics (generation
-    // resolution, the delivery header); everything else forwards to the
-    // vendored world by the dot-path the shared operation table names.
     if (call.operation === "getDeploymentId" || call.operation === "resolveLatestDeploymentId") {
       return this.#resolveActiveGenerationId();
     }
@@ -323,8 +300,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         ? (receiver as Record<string, unknown>)[call.operation.slice(separator + 1)]
         : undefined;
     if (typeof operation !== "function") {
-      // Optional interface members (e.g. runs.experimentalSetAttributes)
-      // no-op rather than fail a caller probing for support.
       return undefined;
     }
     return await Reflect.apply(operation, receiver, args);
@@ -337,7 +312,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
 
   async #generationAvailability(generationId: string): Promise<DevelopmentGenerationAdmission> {
     const availability = await readDevelopmentGenerationAvailability(this.#appRoot, generationId);
-    // Pruning still expires a run, even when startup refused its recovery.
     if (availability.kind !== "ready") return availability;
     return this.#unrecoveredGenerations.get(generationId) ?? availability;
   }

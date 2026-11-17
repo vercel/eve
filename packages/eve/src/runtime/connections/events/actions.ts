@@ -32,7 +32,6 @@ const GET = "events_get_subscription";
 const STOP = "events_unsubscribe";
 const PREFIX = "events_subscribe_";
 const MIN_TTL_MS = 120_000;
-/** The longest finite watch Connect accepts, in milliseconds. */
 const MAX_TTL_MS = 31_536_000_000;
 type EventCatalog = Pick<MCPEvents, "list">;
 const SUBSCRIBE_INPUT_SCHEMA = defineJsonSchema<
@@ -97,7 +96,6 @@ export class ConnectionEventActions {
 
   private async withClient<T>(run: (events: EventCatalog) => Promise<T>): Promise<T> {
     this.scope();
-    // A fresh authenticated transport keeps catalogs isolated between people sharing a session.
     let client: Awaited<ReturnType<typeof createMCPClient>> | undefined;
     const config = {
       transport: {
@@ -164,7 +162,6 @@ export class ConnectionEventActions {
     });
   }
 
-  /** Existing watches must remain stoppable when upstream discovery fails. */
   recoveryMetadata(): ConnectionToolMetadata[] {
     this.scope();
     return managementMetadata().map((tool) => ({
@@ -180,7 +177,6 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    // Discovery also runs in the harness. Load the workflow runtime only when executing an action.
     const { findConnectionEventOwner, startConnectionEventOwner, retireConnectionEventOwner } =
       await import("#runtime/connections/events/owner.js");
     if (name === GET || name === STOP) {
@@ -189,7 +185,6 @@ export class ConnectionEventActions {
       const handler = await findConnectionEventOwner(bindingId);
       if (handler === undefined || !sameEventOwner(handler.owner, caller))
         throw new Error("Unknown subscription for this caller and account.");
-      // The watch's run unsubscribes, and repeats it until Connect finishes cleaning up.
       if (name === STOP) {
         if (!(await retireConnectionEventOwner(bindingId)))
           throw new Error("Unknown subscription for this caller and account.");
@@ -220,8 +215,6 @@ export class ConnectionEventActions {
       );
       if (definition === undefined)
         throw new Error("Unknown event subscription action for this account.");
-      // Unsupported provider schemas can pass through validation. Keep eve's input checks
-      // independent, and validate provider arguments with their original local $ref root.
       const inputResult = await SUBSCRIBE_INPUT_SCHEMA["~standard"].validate(args);
       if (inputResult.issues !== undefined)
         throw new Error(
@@ -238,8 +231,6 @@ export class ConnectionEventActions {
       if (valid.issues !== undefined)
         throw new Error("Event arguments do not match the authorized catalog schema.");
       const eventArguments = parseJsonObject(valid.value);
-      // The id names what is watched, not the tool call, so asking again after a
-      // cancelled or timed-out call reaches the same watch and its subscription.
       const id = createHash("sha256")
         .update(
           canonicalJson([
@@ -266,7 +257,6 @@ export class ConnectionEventActions {
           context: { eve: { version: 1, sessionId, bindingId: id } },
         },
       };
-      // A watch already running under this id answers instead of a new one.
       const subscription = await startConnectionEventOwner(
         binding,
         ctx.require(BundleKey),
@@ -298,18 +288,15 @@ function subscribeInputSchema(
   };
 }
 
-/** Model-facing ids are eve's binding ids: they locate the handler that owns the watch. */
 function subscriptionResult(bindingId: string, subscription: ManagedEventSubscription) {
   return { ...subscription, id: bindingId, subscriptionId: subscription.id };
 }
 
-/** A watch whose subscribe is still in flight: its id already works with get and stop. */
 function pendingResult(binding: EventBinding) {
   const { name, arguments: eventArguments } = binding.request;
   return { id: binding.id, name, arguments: eventArguments, status: "pending" as const };
 }
 
-/** JSON with object keys sorted, so equal arguments hash equally. */
 function canonicalJson(value: unknown): string {
   return JSON.stringify(value, (_key, entry: unknown) =>
     entry !== null && typeof entry === "object" && !Array.isArray(entry)

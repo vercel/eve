@@ -68,42 +68,23 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 
 const log = createLogger("execution.publish-session-events");
 
-/**
- * Whose event a session publishes. Every event reaches the channel adapter, the
- * session stream, and stream-event hooks. The session's own events also reach
- * its instrumentation and carry its turn's delivery ids.
- *
- * A relayed event belongs to an exchange this session carries for a child
- * session or a workflow run: the question or sign-in it raised, the turn
- * boundary that question causes here, and the `interaction.settled` for the answer
- * this session routes back. Only the exchange's requests reach this session's
- * instrumentation, and only a workflow run's: a child session records its own.
- */
 export type SessionEventOrigin = "own" | "relayed";
 
-/** The session a step publishes to: its stream and the state it starts from. */
 export interface SessionStepState {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
-/** A {@link SessionStepState} with the conversation history, for a step that reads or changes it. */
 export interface SessionHistoryStepState extends SessionStepState {
   readonly history: HarnessModelMessage[];
 }
 
-/** The context and session state a publication leaves behind. */
 export interface PublishedSessionEvents {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-/**
- * Publishes a session step's own events, such as a workflow tool's
- * `call.progress`, exactly as a turn publishes its events. Call from a step
- * and adopt the result: hooks run in the session's context and may change it.
- */
 export async function publishSessionEvents(
   target: SessionStepState,
   publications: readonly SessionPublication[],
@@ -145,14 +126,12 @@ async function publishEventsFromStep(
   ).published;
 }
 
-/** A session step's context and session, restored so the step can publish. */
 export interface RestoredSessionStep {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
-/** A {@link RestoredSessionStep} with the history, so its publication sees a whole session. */
 export interface RestoredSessionHistoryStep extends RestoredSessionStep {
   readonly history: HarnessModelMessage[];
 }
@@ -165,37 +144,19 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
   };
 }
 
-/**
- * What a session step publishes, and how it changes the session the
- * publication leaves. `S` is a {@link HarnessSession} only for a step
- * restored with its history.
- */
 export interface SessionStepPublication<T, R, S extends HarnessSessionBase = HarnessSessionBase> {
-  /** A hook stops this publication's running turn; its owner adopts the cancellation after commit. */
   readonly cancelTurn?: () => void;
   readonly origin: SessionEventOrigin;
-  /** Where a relayed input batch came from; the channel adapter and its forwarding see it. */
   readonly inputSource?: string;
-  /** Emits the step's events in the session's context scope. */
   publish(emit: HandleEventFn, session: S): Promise<T>;
-  /**
-   * Changes the step makes to the session once the scope has committed it,
-   * before its continuation token is reconciled.
-   */
   updateSession?(session: S, published: T): SessionUpdate<R, S>;
 }
 
-/** The session a step keeps, and anything it derived while changing it. */
 export interface SessionUpdate<R, S extends HarnessSessionBase = HarnessSessionBase> {
   readonly session: S;
   readonly result?: R;
 }
 
-/**
- * Publishes from a step that owns the session. Returns the context and session
- * state to adopt, and the result of `updateSession`. `step.ctx` is updated in place.
- * The history is published and returned only when the step was restored with it.
- */
 export async function publishFromSessionStep<T, R = undefined>(
   step: RestoredSessionHistoryStep,
   publication: SessionStepPublication<T, R, HarnessSession>,
@@ -219,7 +180,6 @@ export async function publishFromSessionStep<T, R>(
   const update: SessionUpdate<R> = publication.updateSession?.(scoped.session, scoped.result) ?? {
     session: scoped.session,
   };
-  // The session saves the lifecycle it published, without the records whose owners it closed.
   const projection = readSessionProjection(ctx);
   const session = reconcileSessionContinuationToken(
     ctx,
@@ -235,18 +195,12 @@ export async function publishFromSessionStep<T, R>(
   };
 }
 
-/**
- * Runs `publication.publish` in the session's context scope with an emit that
- * publishes each event in order. Returns its result and the session the scope
- * commits.
- */
 async function publishInSessionScope<T>(
   step: RestoredSessionStep & { readonly history?: HarnessModelMessage[] },
   publication: SessionStepPublication<T, unknown>,
 ): Promise<{ readonly result: T; readonly session: HarnessSessionBase }> {
   const { ctx } = step;
   enterSessionProjection(ctx, step.durableSession.state);
-  // The step decides from its checkpoint, so a retry writes again what its attempt wrote.
   const orphaned = await readOrphanedLines({
     sessionId: step.durableSession.sessionId,
     position: nextLinePosition(ctx),
@@ -289,37 +243,24 @@ async function publishInSessionScope<T>(
   }
 }
 
-/**
- * Holds a session's stream for one step, which keeps its writer lock until it
- * releases it. Events reach the stream through `SessionEventPublisher.emit`.
- */
 export interface SessionEventWriter {
-  /** Closes the session stream; only a terminal event (`done`, completion, or failure) does this. */
   close(): Promise<void>;
-  /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
 }
 
-/** One event as written: as readers read it back, with where it sits on the stream. */
 export interface WrittenEvent {
   readonly event: SessionStreamEvent;
   readonly position: FactPosition;
-  /** It rode as a progress record, which only hooks keyed on its type hear. */
   readonly progress: boolean;
-  /** Immutable table snapshot after this record's whole line, not a later concurrent write. */
   readonly view: SessionView;
 }
 
 interface StreamWriter extends SessionEventWriter {
-  /** Writes one line: one chunk, so a crash leaves all of it or none. */
   write(bytes: Uint8Array): Promise<void>;
 }
 
-/** Dispatches a session's written events to its channel and stream-event hooks. */
 export interface SessionEventDispatcher {
-  /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
   readonly adapterCtx: ChannelAdapterContext;
-  /** Runs the effects of written events; see `definitions/kernel.ts`. */
   react(
     written: readonly WrittenEvent[],
     options?: Omit<RunEffectsInput, "written">,
@@ -327,52 +268,24 @@ export interface SessionEventDispatcher {
 }
 
 interface EventDispatcher extends SessionEventDispatcher {
-  /**
-   * After the write: relays each input request this session carries for its caller
-   * (`forwardSessionInput`), or runs the channel adapter's handler, then saves the channel
-   * context.
-   */
   deliver(written: readonly WrittenEvent[]): Promise<void>;
 }
 
-/** A session's stream held by one step, with the dispatch of the events that step publishes. */
 export interface SessionEventPublisher {
   readonly dispatcher: SessionEventDispatcher;
   readonly writer: SessionEventWriter;
-  /**
-   * Writes one publication (a commit's facts on one line, each progress record on its own),
-   * folds each line into the step's projection, then runs the channel's handlers. Returns the
-   * events as written, for their hooks.
-   */
   emit(publication: SessionPublication): Promise<readonly WrittenEvent[]>;
-  /** `emit`, then the events' stream-event hooks. */
   publish(publication: SessionPublication): Promise<void>;
-  /**
-   * Ends a unit of the step's progress: publishes what the tables now say about the open
-   * turn waiting on people (`announceWaiting`). Steps call it as they end. A turn step passes
-   * whether it stopped for a person; a step that runs while the turn waits leaves it to the
-   * tables.
-   */
   finish(options?: { readonly announce?: boolean }): Promise<void>;
 }
 
-/** A line an interrupted attempt of the current step wrote after the step's checkpoint. */
 export interface OrphanedLine {
   readonly line: StoredLine;
   readonly position: number;
 }
 
-/**
- * What an interrupted earlier attempt of the running step wrote, read once per attempt: the
- * attempt's own writes reach the stream only as it completes, so a later read could miss them.
- * Keyed by the attempt's session writable, which each attempt restores afresh.
- */
 const interruptedAttempts = new WeakMap<WritableStream<Uint8Array>, readonly OrphanedLine[]>();
 
-/**
- * The lines an interrupted earlier attempt of this step wrote after the checkpoint: none on a
- * first attempt, unless `always`, for a step that recovers what a failed step's attempts left.
- */
 export async function readOrphanedLines(input: {
   readonly sessionId: string;
   readonly position: number;
@@ -389,12 +302,6 @@ export async function readOrphanedLines(input: {
   return lines.filter(({ position }) => position >= first);
 }
 
-/**
- * The state a retried step returns, following every line its interrupted attempt wrote. The
- * retry decides from the same checkpoint and writes the same lines again, so this changes
- * nothing; if its decisions changed and it wrote fewer, the lines it left still sit on the
- * stream, and the session folds them instead of writing its next lines over their positions.
- */
 export function followInterruptedAttempt(
   sessionWritable: WritableStream<Uint8Array>,
   state: DurableSessionState,
@@ -450,21 +357,18 @@ async function readLinesFrom(sessionId: string, first: number): Promise<Orphaned
   return lines;
 }
 
-/** The projection with orphaned lines folded in, as if the step had just written them. */
 export function foldOrphanedLines(
   projection: SessionProjection,
   lines: readonly OrphanedLine[],
 ): SessionProjection {
   let next = projection;
   for (const { line, position } of lines) {
-    // Progress advances the physical cursor but changes no durable lifecycle table.
     const events = "facts" in line ? eventsOfLine(line, position, line.at) : [];
     next = advance(next, line, position, events);
   }
   return next;
 }
 
-/** Folds the physical tail for terminal closure, without guessing auth or replaying authored work. */
 async function reconcilePublishedSessionLines(
   checkpoint: SessionProjection | undefined,
   sessionId: string,
@@ -473,10 +377,6 @@ async function reconcilePublishedSessionLines(
   return foldOrphanedLines(projection, await readLinesFrom(sessionId, projection.view.position));
 }
 
-/**
- * Whether a line a retry would write is the one its interrupted attempt wrote there: the same
- * facts, by type and entity, or the same progress record. Timestamps and incidental ids differ.
- */
 function sameLine(orphaned: StoredLine, line: StoredLine<SessionEvent, SessionEvent>): boolean {
   if ("progress" in line || "progress" in orphaned) {
     return (
@@ -503,20 +403,13 @@ export function openSessionEventPublisher(input: {
   readonly origin: SessionEventOrigin;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly inputSource?: string;
-  /**
-   * What an interrupted attempt of this step already wrote. Each line the publication would
-   * write again is folded from the stream instead, and its handlers and hooks don't run again.
-   */
   readonly orphaned?: readonly OrphanedLine[];
 }): SessionEventPublisher {
   const { ctx } = input;
   const orphaned = [...(input.orphaned ?? [])];
   const dispatcher = createSessionEventDispatcher(input);
-  // Opened after the dispatcher, so a context that cannot build one leaves the
-  // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter(input.sessionWritable);
   const committing = createLineCommitter();
-  // The tables as the step's first publication found them, for what its end announces.
   let before: SessionView | undefined;
   const emitOne = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
     const committer = await committing;
@@ -528,7 +421,6 @@ export function openSessionEventPublisher(input: {
       const position = nextLinePosition(ctx);
       const earlier = orphaned[0];
       if (earlier !== undefined) {
-        // Only a decision the retry repeats exactly can adopt what its attempt wrote.
         if (earlier.position !== position || !sameLine(earlier.line, line)) {
           throw new Error("A retried step published differently from its interrupted attempt.");
         }
@@ -543,8 +435,6 @@ export function openSessionEventPublisher(input: {
         continue;
       }
       await writer.write(bytes).catch((error: unknown) => {
-        // Validation ran ahead of the write. A failed write must not leave the checker ahead
-        // of the checkpoint; a later publication reseeds it from what actually committed.
         committer.reset();
         throw error;
       });
@@ -559,9 +449,6 @@ export function openSessionEventPublisher(input: {
     await dispatcher.deliver(written);
     return written;
   };
-  // Local calls execute concurrently. Serialize publication through write, fold and channel
-  // delivery so two calls cannot reserve the same position or overwrite channel state. A
-  // failure rejects its caller but releases this lane for terminal cleanup.
   let publicationTail: Promise<unknown> = Promise.resolve();
   const emit = (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
     const next = publicationTail.then(() => emitOne(publication));
@@ -601,15 +488,12 @@ function createSessionEventDispatcher(input: {
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const deliveryCtx = inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource };
-  // Commits react one at a time, in order. Inline tool calls publish concurrently, and a slow
-  // effect of an earlier commit must not write its slot over a later commit's.
   let reacting: Promise<void> = Promise.resolve();
 
   return {
     adapterCtx,
     async deliver(written) {
       if (written.length === 0) return;
-      // Each committed line's facts, for its `committed` handler once the line's events ran.
       let line: { facts: SessionEvent[]; position: FactPosition; view: SessionView } | undefined;
       const committed = async () => {
         if (line === undefined) return;
@@ -664,42 +548,26 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
   };
 }
 
-/** The session's projection as of the last event it published. */
 export function readSessionProjection(ctx: ContextContainer): SessionProjection {
   return currentProjection(ctx);
 }
 
-/** How a session ends from outside a turn. */
 export interface SessionEnding {
   readonly outcome: "completed" | "failed";
   readonly settles?: readonly ControlSettlement[];
   readonly cause?: Cause;
-  /** The reset control that ends the session, when it named its delivery. */
   readonly control?: ControlDelivery;
   readonly error?: ErrorInfo;
 }
 
-/**
- * Ends the session from outside a turn: one commit settles what it left open and ends it
- * (`session.ended`), through its channel adapter and instrumentation, then closes the session
- * stream so readers following it reach its end. Stream-event hooks do not run: the ending session
- * may not restore, and no turn scope remains for authored code. Throws only when the session's
- * published tail cannot be read, which the ending must follow.
- *
- * When the context cannot be restored, the commit is only written and the stream closed: the one
- * degraded write of a session event.
- */
 export async function publishTerminalSessionEvent(input: {
   readonly errorId?: string;
   readonly ending: SessionEnding;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState?: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
-  /** The session's last turn, for channel handlers' `ctx.session.turn`. */
   readonly turn?: { readonly id: string; readonly sequence: number };
-  /** The turn the event ends, for instrumentation. */
   readonly turnId?: string;
-  /** The session's last checkpointed projection: what's open, and the next line's position. */
   readonly projection?: SessionProjection;
 }): Promise<void> {
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
@@ -713,8 +581,6 @@ export async function publishTerminalSessionEvent(input: {
   try {
     projection = await reconcilePublishedSessionLines(projection, sessionId);
   } catch (error) {
-    // Ending over the checkpoint alone could miss rows the tail opened and close rows it closed,
-    // so the step retries instead.
     log.error(`failed to fold the published tail for terminal ${type} event`, {
       ...fields,
       error,
@@ -733,13 +599,10 @@ export async function publishTerminalSessionEvent(input: {
     });
   } catch (error) {
     log.error(`failed to restore context for terminal ${type} event`, { ...fields, error });
-    // Folding needs no provider or authority; a broken context must not hide orphaned facts.
     if (projection.view.session.status === "ended") {
       try {
         await openSessionEventWriter(input.sessionWritable).close();
-      } catch {
-        // Another attempt may have closed the stream already.
-      }
+      } catch {}
       return;
     }
     const ended = endSession(projection, input.ending);
@@ -753,17 +616,12 @@ export async function publishTerminalSessionEvent(input: {
     try {
       await publisher.writer.close();
     } catch {
-      // The terminal fact survived an earlier attempt that already closed the stream.
     } finally {
       publisher.writer.release();
     }
     return;
   }
 
-  // Terminal events publish outside any turn step, and only a turn step
-  // installs the session callback context that channel `session.ended`
-  // handlers read, so install it here. A prewarmed session that expires,
-  // resets, or closes before its first message has no turn yet: `turn_0`.
   const auth = ctx.get(AuthKey) ?? null;
   ctx.setVirtualContext(SessionKey, {
     auth: { current: auth, initiator: ctx.get(InitiatorAuthKey) ?? auth },
@@ -772,7 +630,6 @@ export async function publishTerminalSessionEvent(input: {
     turn: input.turn ?? { id: "turn_0", sequence: 0 },
   });
 
-  // Emitted without its hooks; see above.
   const publish: HandleEventFn = async (event) => {
     await publisher.emit(event);
     await publisher.writer.close();
@@ -825,19 +682,12 @@ async function writeUnroutedSessionEvent(
   }
 }
 
-/**
- * The commit of a step that owns the session outside a turn: restore it, decide its transitions
- * against what it restored, publish their events in order, and save what they change.
- * Used by relay-changing steps outside a turn; other steps still publish or apply transitions
- * directly. Batches keep the turn unchanged and contain at most one sign-in snapshot.
- */
 export async function commitSessionStep(
   target: SessionStepState | RestoredSessionStep,
   decide: (view: MachineView) => readonly Transition[],
   options: {
     readonly origin: SessionEventOrigin;
     readonly cancelTurn?: () => void;
-    /** Where a relayed input batch came from; see `SessionStepPublication.inputSource`. */
     readonly inputSource?: string;
   },
 ): Promise<PublishedSessionEvents> {
@@ -851,7 +701,6 @@ export async function commitSessionStep(
   ) {
     throw new Error("A transition batch must not overlap turn or sign-in snapshots.");
   }
-  // The batch is one commit: the publisher closes what its owners' ends leave open, seeing it whole.
   if ("ctx" in target) return await commit(target, transitions, options);
   if (transitions.every((transition) => changesNothing(view, transition))) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
@@ -873,11 +722,9 @@ async function commit(
     cancelTurn: options.cancelTurn,
     origin: options.origin,
     async publish(emit) {
-      // One commit: the batch's events are one atomic line.
       const committed = commitTransitions(transitions);
       if (committed.length > 0) await emit(committed);
     },
-    // Save onto the session the scope committed, which carries what its providers captured.
     updateSession: (session) => ({
       session: transitions.reduce((next, transition) => saveTransition(next, transition), session),
     }),
@@ -885,7 +732,6 @@ async function commit(
   return published;
 }
 
-/** A transition that reports nothing and changes no record, as the machine decides with no work. */
 function changesNothing(view: MachineView, transition: Transition): boolean {
   return (
     transition.turn === view.turn &&

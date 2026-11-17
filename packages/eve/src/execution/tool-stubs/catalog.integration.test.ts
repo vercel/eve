@@ -19,7 +19,6 @@ import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
 
-/** The last value a tool execution produced, as eve records it. */
 async function settle(output: unknown): Promise<unknown> {
   if (!isAsyncIterable(output)) return await output;
   let last: unknown;
@@ -94,7 +93,6 @@ describe("tool stubs through eve__tool", () => {
         });
         ctx.set(ToolStubsKey, { rootSessionId: run.runId, rules, token });
         ctx.setVirtualContext(toolStubProvider.key, toolStubProvider.create(ctx)!.value);
-        // eve runs an eve__tool call as the call to the entry it resolves to.
         const call = (toolCallId: string, input: Record<string, unknown>) =>
           inSession(async () => {
             const resolved = catalog.resolve({ input, toolName: CALL_TOOL_NAME });

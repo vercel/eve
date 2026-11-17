@@ -103,7 +103,6 @@ async function publish(input: unknown, toolContext: ToolContext) {
   });
 }
 
-/** Derives replay identity only from eve's verified delegation lineage. */
 export function publicationOperationId(ctx: Pick<ToolContext, "session">): string {
   const parent = ctx.session.parent;
   if (parent === undefined) {

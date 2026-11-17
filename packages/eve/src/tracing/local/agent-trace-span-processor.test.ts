@@ -108,7 +108,6 @@ describe("AgentTraceSpanProcessor", () => {
     expect(processor.releaseConversation("child-1")).toBe(false);
     expect([...processor.activeTraceIds()]).toEqual(["trace-1"]);
 
-    // The parent is still writing to the trace the child recorded into.
     const later = span("trace-1", owned);
     processor.onEnd(later);
     expect(child.onEnd).toHaveBeenCalledWith(later);

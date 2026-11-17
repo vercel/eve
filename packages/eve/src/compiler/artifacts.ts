@@ -20,29 +20,14 @@ import type { DevelopmentExtensionSelection } from "#compiler/development-extens
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
 import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 
-/**
- * Stable diagnostics artifact kind emitted by the compiler.
- */
 const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
 
-/**
- * Current diagnostics artifact schema version.
- */
 const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
 
-/**
- * Stable compile metadata artifact kind emitted by the compiler.
- */
 export const COMPILE_METADATA_KIND = "eve-compile-metadata";
 
-/**
- * Current compile metadata schema version.
- */
 export const COMPILE_METADATA_VERSION = 6;
 
-/**
- * Structured paths for compiler-owned artifacts under `.eve/`.
- */
 export interface CompilerArtifactPaths {
   appRoot: string;
   compiledManifestPath: string;
@@ -56,9 +41,6 @@ export interface CompilerArtifactPaths {
   sandboxPreparedArtifactsPath: string;
 }
 
-/**
- * Machine-readable compiler diagnostics artifact written by the compiler.
- */
 interface CompilerDiagnosticsArtifact {
   diagnostics: CompilerDiagnostic[];
   kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
@@ -66,17 +48,11 @@ interface CompilerDiagnosticsArtifact {
   version: typeof COMPILER_DIAGNOSTICS_ARTIFACT_VERSION;
 }
 
-/**
- * One artifact digest recorded in compile metadata.
- */
 interface CompileArtifactDigest {
   path: string;
   sha256: string;
 }
 
-/**
- * Minimal compiler metadata artifact with versioning and hashes.
- */
 export interface CompileMetadata {
   compile: {
     manifest: CompileArtifactDigest;
@@ -102,9 +78,6 @@ export interface CompilerArtifactLocations {
   readonly writeRoot: string;
 }
 
-/**
- * Input for writing compiler-owned source and diagnostic artifacts.
- */
 interface WriteCompilerArtifactsInput {
   appRoot: string;
   developmentExtensions?: DevelopmentExtensionSelection;
@@ -113,9 +86,6 @@ interface WriteCompilerArtifactsInput {
   manifest: AgentSourceManifest;
 }
 
-/**
- * Result of writing compiler-owned artifacts.
- */
 interface WriteCompilerArtifactsResult {
   compiledManifest: CompiledAgentManifest;
   diagnosticsArtifact: CompilerDiagnosticsArtifact;
@@ -124,7 +94,6 @@ interface WriteCompilerArtifactsResult {
   paths: CompilerArtifactPaths;
 }
 
-/** Resolves stable compiler-owned artifact paths for one application root. */
 export function resolveCompilerArtifactPaths(appRoot: string): CompilerArtifactPaths {
   return resolveCompilerArtifactPathsAt(appRoot, join(resolve(appRoot), ".eve"));
 }
@@ -152,9 +121,6 @@ function resolveCompilerArtifactPathsAt(
   };
 }
 
-/**
- * Creates the compiler diagnostics artifact written alongside the source manifest.
- */
 function createCompilerDiagnosticsArtifact(
   diagnostics: readonly CompilerDiagnostic[],
 ): CompilerDiagnosticsArtifact {
@@ -166,10 +132,6 @@ function createCompilerDiagnosticsArtifact(
   };
 }
 
-/**
- * Creates deterministic compile metadata from already-serialized artifact
- * payloads.
- */
 export function createCompileMetadata(input: {
   appRoot: string;
   compiledManifestJson: string;
@@ -220,7 +182,6 @@ export function createCompileMetadata(input: {
   };
 }
 
-/** Writes compiler-owned artifacts and records their stable published locations. */
 export async function writeCompilerArtifacts(
   input: WriteCompilerArtifactsInput,
 ): Promise<WriteCompilerArtifactsResult> {
@@ -233,7 +194,6 @@ export async function writeCompilerArtifacts(
     projectDiscoverDiagnostic(diagnostic, ROOT_COMPILED_AGENT_NODE_ID),
   );
   const modelCatalog = createCompiledRuntimeModelCatalogLoader(input.manifest.appRoot);
-  // Checked before compiling so the manifest's diagnostics summary counts the warning.
   if ((await modelCatalog.loadModelMetadata()).fetchedAt === null) {
     diagnostics.push(createModelMetadataUnavailableDiagnostic(paths.modelMetadataPath));
   }
@@ -245,7 +205,6 @@ export async function writeCompilerArtifacts(
       modelCatalog,
     }),
   });
-  // Read again after compiling: a static model the cached catalog missed refreshes it.
   const modelMetadata = await modelCatalog.loadModelMetadata();
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);

@@ -13,20 +13,17 @@ vi.mock("#execution/agent-sessions/remote.js", async (importOriginal) => ({
   continueRemoteAgentSession: async (input: unknown) => continueRemoteAgentSession(input),
 }));
 
-// The send step names its delivery by its own run and step.
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getStepMetadata: () => ({ attempt: 1, stepId: "step_0" }),
   getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
 }));
 
-// The parent's stream, which a restore folds its view from: here, nothing yet.
 vi.mock("#execution/session-event-stream.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-event-stream.js")>()),
   streamSessionLines: async function* () {},
 }));
 
-/** A dynamic subagent whose remote agent, and token, follow the tenant its memo keeps. */
 const tenantRemote = {
   evaluate: async (ctx: { readonly memo: <T>(key: unknown, fn: () => T) => Promise<T> }) => {
     const tenant = await ctx.memo("tenant", (): { id: string } => {
@@ -72,7 +69,6 @@ const bindingFor = (tenant: string): DynamicRemoteBinding => ({
   session: { auth: { current: null, initiator: null }, id: "parent" },
 });
 
-/** The parent's context, as its session stands now: the finance agent for `tenant`. */
 function contextSelecting(tenant: string): AgentSessionContext {
   return {
     bundle: { nodeId: "root", source: {} },
@@ -133,7 +129,6 @@ describe("a dynamic remote agent's child", () => {
   beforeEach(() => continueRemoteAgentSession.mockReset());
 
   it("keeps the credentials it was opened with after the parent's session moves to another tenant", async () => {
-    // Opened for acme; the parent's session, as the step runs now, is globex's.
     await expect(send(contextSelecting("globex"), addressOpenedFor("acme"))).resolves.toEqual({
       authorization: "Bearer acme",
     });

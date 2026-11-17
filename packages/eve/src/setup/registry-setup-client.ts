@@ -71,7 +71,6 @@ export interface RegistrySetupClient {
   fail(error: unknown): void;
 }
 
-/** Creates a prompter whose questions and output are rendered by the parent eve process. */
 export function createRegistrySetupClient(
   input: {
     process?: SetupProcess;

@@ -56,7 +56,6 @@ interface CompileFromMemoryResult {
   readonly moduleMap: CompiledModuleMap;
 }
 
-/** Compiles a synthetic application by registering one ordinary programmatic source. */
 export async function compileFromMemory(
   input: CompileFromMemoryInput,
 ): Promise<CompileFromMemoryResult> {
@@ -131,9 +130,6 @@ function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefi
   });
 }
 
-// A build writes a skill's sibling files into the workspace resources a sandbox seeds, and keeps
-// them out of the manifest. Memory has no such resources, so the files stay unwritten; the
-// skill's content still lists and loads.
 function withoutSkillFiles(manifest: CompiledAgentManifest): CompiledAgentManifest {
   return {
     ...stripSkillFiles(manifest),

@@ -12,14 +12,6 @@ const MAX_FILES = 50;
 const MAX_PATCH_BYTES = 20_000;
 const PR_BODY_MAX_LENGTH = 4_000;
 
-/**
- * Built-in glob patterns excluded from the diff loaded into model context.
- *
- * These files are large and generated; their patch text seldom helps the model
- * and consumes context budget. They are still listed with their stats so the
- * agent knows they changed, and the full file is always available from the
- * checkout.
- */
 export const GITHUB_DEFAULT_EXCLUDED_DIFF_FILES: readonly string[] = [
   "**/pnpm-lock.yaml",
   "**/package-lock.json",
@@ -50,20 +42,11 @@ export interface GitHubPullRequestContextConfig {
   readonly excludedFiles?: readonly string[];
 }
 
-/** Input for building one-shot model context for a pull request. */
 interface GitHubPullRequestContextInput {
   readonly api?: GitHubApiOptions;
-  /**
-   * When set with {@link headSha}, file patches load via the compare API for
-   * this exact base/head pair instead of `/pulls/{number}/files` (current head).
-   */
   readonly baseSha?: string | null;
   readonly config?: GitHubPullRequestContextConfig;
   readonly credentials?: GitHubChannelCredentials;
-  /**
-   * Webhook-resolved head SHA for this turn. When set, metadata and diffs pin to
-   * this commit so injected context matches sandbox checkout.
-   */
   readonly headSha?: string | null;
   readonly installationId?: number;
   readonly owner: string;
@@ -71,13 +54,6 @@ interface GitHubPullRequestContextInput {
   readonly repo: string;
 }
 
-/**
- * Builds bounded, one-shot pull-request background for a GitHub turn: PR
- * metadata plus the changed-file diff (noisy files excluded from the patch).
- *
- * The returned strings are intended for a send operation's `context`; each is appended
- * as a `role: "user"` message to session history before the delivery message.
- */
 export async function buildGitHubPullRequestContext(
   input: GitHubPullRequestContextInput,
 ): Promise<readonly string[] | undefined> {
@@ -135,7 +111,6 @@ export async function buildGitHubPullRequestContext(
   ];
 }
 
-/** Merges channel-generated PR context before hook-provided context. */
 export function mergeGitHubContext(input: {
   readonly github?: readonly string[];
   readonly hook?: readonly string[];
@@ -238,7 +213,6 @@ function renderFileSummary(file: GitHubPullRequestFile): string {
   return `- ${file.filename}${stats.length > 0 ? ` (${stats.join(", ")})` : ""}`;
 }
 
-/** Returns true when a file path matches any of the provided glob patterns. */
 function fileMatchesAnyGlob(filename: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => globToRegExp(pattern).test(filename));
 }

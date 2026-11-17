@@ -15,7 +15,6 @@ import { TELEGRAM_SETUP } from "./telegram/setup.js";
 import type { SetupIntegration } from "./types.js";
 import { WEB_SETUP } from "./web/setup.js";
 
-/** Built-in registry setup integrations in canonical picker order. */
 const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   WEB_SETUP,
   FILE_MEMORY_SETUP,
@@ -32,7 +31,6 @@ const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   SELF_MODIFICATION_PRODUCTION_SETUP,
 ];
 
-/** Resolves one built-in setup integration by its registry setup name. */
 export function setupIntegration(kind: string): SetupIntegration {
   const integration = SETUP_INTEGRATIONS.find((candidate) => candidate.kind === kind);
   if (integration === undefined) {

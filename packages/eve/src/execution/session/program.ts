@@ -32,19 +32,12 @@ import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
-/** The run's own failure never carries internals; the terminal event already logged them. */
 function createSafeOuterWorkflowError(): Error {
   const error = new Error("Agent workflow failed. Inspect the private session trace for details.");
   error.name = "EveWorkflowFailure";
   return error;
 }
 
-/**
- * Who to tell when this owner exits. The original run anchors the public
- * stream itself; a successor signals the original run. A `self` anchor may
- * also name a `notify` step that runs with the final result, which lets an
- * importer settle whatever predecessor still holds the stream open.
- */
 export type SessionAnchor =
   | {
       readonly kind: "self";
@@ -52,16 +45,9 @@ export type SessionAnchor =
     }
   | { readonly kind: "successor" };
 
-/** What an owner does before it first waits on its inbox. */
 export type SessionStart =
-  /** Runs a turn first; `input` is absent for a session started without a message. */
   | { readonly kind: "turn"; readonly input: DeliverHookPayload | undefined }
-  /**
-   * A prewarmed session parks on the inbox before any turn, session event, or
-   * session hook, while its session prewarmers run beside the wait.
-   */
   | { readonly kind: "first-message" }
-  /** A successor that received a settled session waits for its next input. */
   | { readonly kind: "parked" };
 
 export interface SessionBoot {
@@ -69,7 +55,6 @@ export interface SessionBoot {
   readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
-  /** Compacts the history before the first action, for a session an earlier build recorded. */
   readonly compactFirst?: boolean;
   readonly deploymentId: string;
   readonly history: HarnessModelMessage[];
@@ -92,15 +77,11 @@ type SessionActionResult =
   | { readonly action: TurnOutcome; readonly kind: "action" }
   | SessionLoopOutcome;
 
-/** Mutable facts the crash path needs that do not live in the state cursor. */
 interface SessionProgress {
-  /** Delegated caller whose awaited reply is still unsettled. */
   caller: TurnCaller | undefined;
-  /** The turn a running turn step runs; a crash outside one is attributed to the latest turn. */
   turnId?: string;
 }
 
-/** Runs an already prepared owner against its session's existing stream. */
 export async function runPreparedSession(
   boot: SessionBoot,
   inbox: SessionInboxHandle,
@@ -154,8 +135,6 @@ export async function runPreparedSession(
     });
     return result;
   } catch (error) {
-    // Once finalization of the decided outcome starts, failing it must not report a different
-    // outcome. The channel may already have handled the decided terminal event.
     if (!finalizing) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
@@ -164,16 +143,11 @@ export async function runPreparedSession(
     }
     throw createSafeOuterWorkflowError();
   } finally {
-    // Also dispose if playback setup fails before the session loop starts. Disposal is idempotent.
     await inbox.dispose();
     await reportResultToAnchor(boot, result, handoff, loop);
   }
 }
 
-/**
- * Terminal path for a boot that failed before the session loop could run.
- * The caller is re-resolved from context because no turn ever bound it.
- */
 export async function failSession(input: {
   readonly error: unknown;
   readonly serializedContext: Record<string, unknown>;
@@ -184,9 +158,7 @@ export async function failSession(input: {
   let caller: TurnCaller | undefined;
   try {
     caller = await resolveInitialTurnCallerStep({ serializedContext: input.serializedContext });
-  } catch {
-    // Best effort: when resolution fails again there is no reachable caller to notify.
-  }
+  } catch {}
   await finalizeSession(
     { error: input.error, kind: "failed" },
     {
@@ -238,13 +210,9 @@ async function runSessionLoop(
     sessionId: boot.sessionId,
   });
   const sessionTimeout = boot.sessionTimeoutControl;
-  // A prewarmed session's prewarm step, which runs beside the session's own steps.
   let prewarming: Promise<void> = Promise.resolve();
   let prewarmSettled = true;
-  // What it prepared is kept only while the owner still waits for its first input.
   let awaitingFirstInput = false;
-  // Controls to a prewarmed session change nothing, and settle once it has started: nothing
-  // precedes `session.started`.
   const unstarted: ControlSettlement[] = [];
   const started = () =>
     storedProjection(cursor.sessionState.snapshot.session.state).view.session.status !== "new";
@@ -260,7 +228,6 @@ async function runSessionLoop(
     for (const settlement of unstarted.splice(0))
       await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
   };
-  // A session that ends before it started settles them in its end's commit.
   const expired = (control?: ControlDelivery): SessionTerminalOutcome => ({
     kind: "expired",
     ...(control && { control }),
@@ -280,8 +247,6 @@ async function runSessionLoop(
         queue,
       });
       if (next.kind === "prewarm") {
-        // A prewarm step still starting a sandbox keeps the session here: a
-        // successor could end the session and clean up before that start lands.
         if (
           prewarmSettled &&
           progress.caller === undefined &&
@@ -317,7 +282,6 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "expired" && sessionTimeout !== undefined) {
-        // Input accepted behind the timer's signal would be lost if the session ended now.
         if (queue.pendingCount > 0 || inbox.hasPending()) sessionTimeout.recordActivity();
         if ((await sessionTimeout.handleTimerElapsed()) === "extended") continue;
       }
@@ -327,15 +291,11 @@ async function runSessionLoop(
 
   let turnControl =
     boot.initialTurnControl ?? (boot.anchor.kind === "self" ? createTurnControl() : undefined);
-  // Set when a turn compacts and kept until the session moves to a fresh run,
-  // so this run's event log does not keep growing.
   let compactionHandoffDue = false;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
     const control = turnControl;
     turnControl = undefined;
-    // A step that fails can leave the turn it opened out of the cursor, so the turn is read
-    // before the step runs. Controls run between turns.
     progress.turnId =
       payload?.control === undefined
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
@@ -357,12 +317,6 @@ async function runSessionLoop(
     compactionHandoffDue &&
     progress.caller === undefined &&
     workingTasks(sessionTaskTable(cursor)).length === 0;
-  /**
-   * Hands a session that compacted to a fresh run on this deployment while
-   * nothing is waiting. Input that is already waiting runs here first, and
-   * the session moves at the next quiet boundary; input that arrives once the
-   * move has started runs on the successor.
-   */
   const tryCompactionHandoff = async (): Promise<SessionLoopOutcome | undefined> => {
     if (!compactionHandoffReady() || queue.pendingCount > 0 || inbox.hasPending()) return undefined;
     const transfer = await handoff.tryCompactionTransfer(transferState());
@@ -386,7 +340,6 @@ async function runSessionLoop(
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
       const next = await nextParkedActivity();
-      // A transfer or turn may start next, and neither must see the session change under it.
       awaitingFirstInput = false;
       switch (next.kind) {
         case "reset":
@@ -395,7 +348,6 @@ async function runSessionLoop(
             outcome: expired(next.origin && controlDeliveryOf(next.origin)),
           };
         case "closed":
-          // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: expired() };
         case "transferred":
@@ -420,16 +372,11 @@ async function runSessionLoop(
   };
   const runInitialAction = async (): Promise<SessionActionResult> => {
     if (boot.compactFirst === true) {
-      // A failed compaction keeps the history; the session continues either way. This run already
-      // starts fresh, so the compaction moves it nowhere.
       await runTurn({ control: "compact" });
       compactionHandoffDue = false;
     }
     switch (boot.start.kind) {
       case "first-message":
-        // Beside the wait, so a first message starts its turn without waiting
-        // for it. Provider `start()` upserts by session id, so a turn that
-        // opens the sandbox meanwhile reaches the one being prewarmed.
         awaitingFirstInput = true;
         prewarmSettled = false;
         prewarming = cursor
@@ -468,7 +415,6 @@ async function runSessionLoop(
     let action = initial.action;
 
     while (true) {
-      // A first turn that ended the session left no commit after its start for them.
       if (action.kind === "done") {
         return { kind: "terminal", outcome: { action, kind: "done" } };
       }
@@ -498,8 +444,6 @@ async function runSessionLoop(
       const transferred = await tryCompactionHandoff();
       if (transferred !== undefined) return transferred;
 
-      // Registered while parked, so the next turn's first step is not held
-      // behind its abort hooks.
       turnControl ??= createTurnControl();
       const next = await nextParkedActivity();
 
@@ -507,7 +451,6 @@ async function runSessionLoop(
         case "reset":
           return { kind: "terminal", outcome: resetOutcome(next.origin) };
         case "closed":
-          // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "transferred":
@@ -516,7 +459,6 @@ async function runSessionLoop(
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
-          // A clear that waited behind a compaction found no turn to cancel; its tasks stop here.
           if (next.kind === "clear")
             await cancelWorkingTasks(cursor, "turn-cancelled", { turnCalls: true });
           action = await runTurn(
@@ -532,7 +474,6 @@ async function runSessionLoop(
             next.origin === undefined ? undefined : controlDeliveryOf(next.origin),
           );
           sessionTimeout?.recordActivity();
-          // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };
           continue;
         case "turn": {
@@ -545,13 +486,11 @@ async function runSessionLoop(
     }
   } finally {
     awaitingFirstInput = false;
-    // Session end must not clean up before a sandbox the prewarm step is still starting.
     await prewarming;
     await sessionTimeout?.dispose();
   }
 }
 
-/** A reset ends the session; the delivery it arrived as is the end's cause. */
 function resetOutcome(origin: ControlOrigin | undefined): SessionTerminalOutcome {
   return origin === undefined
     ? { kind: "expired" }

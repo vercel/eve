@@ -60,7 +60,6 @@ function viewOf(session: HarnessSession) {
   return sessionView(storedProjection(session.state), session.state);
 }
 
-/** A turn whose run called `probe`, which started and is still running. */
 function runningCall(): HarnessSession {
   return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
     {
@@ -90,7 +89,6 @@ describe("the budget prompt", () => {
         type: "interaction.opened",
       },
     ]);
-    // The answer stands, admitted, as any answer to the prompt does.
     const answered = withPublished(asked, [
       { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
       {
@@ -157,8 +155,6 @@ describe("requireSignIn", () => {
       challenges: [challenge],
     });
 
-    // The step pauses the turn once nothing it holds can run; the transition only asks. The call
-    // doesn't settle: its sign-in's outcome settles with it once it runs.
     expect(events.map((event) => event.type)).toEqual(["interaction.opened"]);
     expect(turn.suspended[0]?.approved).toEqual([
       { call: { callId: "probe", input: {}, toolName: "auth-probe" }, signIns: [challenge] },
@@ -180,7 +176,6 @@ describe("sessionEndedFacts", () => {
   });
 });
 
-/** A turn whose run called a tool and started an agent task, then asked a person to approve. */
 function busyTurn(): HarnessSession {
   return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
     {
@@ -212,7 +207,6 @@ function busyTurn(): HarnessSession {
   ]);
 }
 
-/** What `events` settles, by type and id. */
 function settledBy(events: readonly SessionEvent[]): Record<string, string> {
   const settled: Record<string, string> = {};
   for (const event of events) {
@@ -229,7 +223,6 @@ describe("closing what a turn leaves open", () => {
       fail(view, { code: "BOOM", message: "It broke." }),
     );
 
-    // The failing model run keeps the error; its unfinished calls are interrupted.
     expect(settledBy(events)).toMatchObject({
       "call.settled:tool": "interrupted",
       "interaction.settled:approval-1": "interrupted",
@@ -305,7 +298,6 @@ describe("closing what a turn leaves open", () => {
   });
 });
 
-/** The callback that completes the GitHub sign-in. */
 const GITHUB_CALLBACK = {
   attemptId: "github-1",
   challenge: {},
@@ -313,7 +305,6 @@ const GITHUB_CALLBACK = {
   name: "github",
 };
 
-/** A paused turn waiting on `approval-1` about its call, and on a GitHub sign-in. */
 function waitingTurn(): HarnessSession {
   return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
     {
@@ -346,7 +337,6 @@ function waitingTurn(): HarnessSession {
   ]);
 }
 
-/** Whether the contract accepts `events` as the next line after `session`'s. */
 function accepted(session: HarnessSession, events: readonly SessionEvent[]) {
   const seed = storedProjection(session.state).view;
   return createStreamChecker({ seed }).check(
@@ -462,12 +452,10 @@ describe("controls and callbacks as deliveries", () => {
   });
 });
 
-/** A sign-in for `name`, as its attempt asks for it and its callback completes it. */
 function signIn(name: string): AuthorizationChallenge {
   return { attemptId: `${name}-1`, challenge: {}, hookUrl: `https://example.test/${name}`, name };
 }
 
-/** A call to `deploy` that the model made, with what a sign-in for `connection` stopped. */
 function stoppedCall(callId: string, connection: string) {
   return {
     call: { callId, input: { service: "api" }, toolName: "deploy" },
@@ -475,10 +463,6 @@ function stoppedCall(callId: string, connection: string) {
   };
 }
 
-/**
- * A paused turn whose run made `callIds`, each started and then stopped on a sign-in for the
- * matching connection in `connections`, which the session still waits on.
- */
 function stoppedOnSignIns(callIds: readonly string[], connections: readonly string[]) {
   const session = withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
     ...callIds.flatMap((callId): SessionEvent[] => [
@@ -571,7 +555,6 @@ describe("settle", () => {
     const { events, history } = settle(view, { results });
     const commit = history !== undefined && "append" in history ? history.append : [];
 
-    // Both results reach the model; only the recorded call settles and owns what it spent.
     expect(commit.at(-1)?.content).toHaveLength(2);
     expect(events).toMatchObject([
       { data: { callId: "probe" }, type: "call.settled" },
@@ -587,7 +570,6 @@ describe("calls a sign-in stopped", () => {
     expect(step.approved?.map(({ call }) => call.callId)).toEqual(["call-1", "call-2"]);
     expect(runnable(view)).toEqual([]);
 
-    // Google calls back: its call can run, and the callback itself records nothing.
     const matched: SessionView = {
       ...view,
       signIns: matchSignIns(view, { attemptIds: ["google-1"] }).signIns!,
@@ -595,7 +577,6 @@ describe("calls a sign-in stopped", () => {
     expect(completeSignIn(matched, { completions: [signIn("google")] }).events).toEqual([]);
     expect(runnable(matched)).toEqual(["call-1"]);
 
-    // The call returned: its sign-in is accepted, in a line the contract accepts.
     const [first, second] = step.approved!;
     const accepted_ = callSignInsSettled(matched, first!);
     expect(accepted_.map((event) => event.type)).toEqual([
@@ -608,7 +589,6 @@ describe("calls a sign-in stopped", () => {
     expect(settledBy(accepted_)).toMatchObject({ "interaction.settled:google-1": "accepted" });
     expect(accepted(session, accepted_)).toEqual([]);
 
-    // A call that throws fails its sign-in with why, and says when the failure is terminal.
     const failed = callSignInsSettled(matched, second!, {
       reason: "invalid_grant",
       retryable: false,
@@ -622,7 +602,6 @@ describe("calls a sign-in stopped", () => {
     });
     expect(accepted(session, failed)).toEqual([]);
 
-    // One the person refused at the provider is declined, not failed.
     const declined = callSignInsSettled(matched, second!, {
       reason: "access_denied",
       retryable: false,
@@ -955,7 +934,6 @@ describe("routing answers", () => {
       { data: { responseId: "r-1" }, type: "response.admitted" },
     ]);
     expect(accepted(forwarded, admitted("d-answer"))).toEqual([]);
-    // An answer already admitted here isn't admitted twice.
     const twice = withPublished(forwarded, admitted("d-answer"));
     expect(
       relay(viewOf(twice), {
@@ -979,7 +957,6 @@ describe("routing answers", () => {
 describe("crediting the answers this session forwarded", () => {
   const interactionId = "approval-1";
 
-  /** A mirrored approval with two forwarded answers, in `order`, both still open. */
   function forwardedTwice(order = ["bob", "alice"]): HarnessSession {
     const parent = runningCall();
     const mirrored = withPublished(
@@ -1024,7 +1001,6 @@ describe("crediting the answers this session forwarded", () => {
     }).events;
   }
 
-  /** Each forwarded answer's final status here, with its outcome once settled. */
   function credited(session: HarnessSession): Record<string, string | undefined> {
     const { responses } = viewOf(session).projection.view;
     return Object.fromEntries(
@@ -1041,7 +1017,6 @@ describe("crediting the answers this session forwarded", () => {
 
   it("refuses and credits nothing it would have to guess, from a child that names no delivery", () => {
     const session = forwardedTwice();
-    // A protocol 2 child names no delivery; another child may name one this session never sent.
     expect(relayed(session, refusesBob())).toEqual([]);
     expect(relayed(session, refusesBob("d-unknown"))).toEqual([]);
     const settled = withPublished(
@@ -1062,11 +1037,8 @@ describe("crediting the answers this session forwarded", () => {
         { childContinuationToken: "deployer-hook", receipts: { "receipt-1": "d-alice" }, remote },
       ],
     ]);
-    // A remote never received this session's delivery ids, so naming one, or a share of one,
-    // refuses nobody.
     expect(relayed(session, refusesBob("d-bob"), relays)).toEqual([]);
     expect(relayed(session, refusesBob(forwardedShareId("d-bob", 1)), relays)).toEqual([]);
-    // A local child names the delivery it received, so the same report refuses Bob there.
     expect(credited(withPublished(session, relayed(session, refusesBob("d-bob"))))).toEqual({
       "r-alice": "submitted",
       "r-bob": "refused",
@@ -1077,7 +1049,6 @@ describe("crediting the answers this session forwarded", () => {
 
   it("credits nothing from an older child that names its own response as the cause", () => {
     const session = forwardedTwice();
-    // An older child names the decider by its own response id, which means nothing here.
     const settled = withPublished(
       session,
       relayed(session, [
@@ -1092,9 +1063,7 @@ describe("crediting the answers this session forwarded", () => {
   });
 
   it("credits the answer the child applied, not a later one that raced it", () => {
-    // Bob's answer reached this session after Alice's went down, before the child settled.
     const parent = forwardedTwice(["alice", "bob"]);
-    // The child applied Alice's answer, which it admitted under the delivery this session sent.
     const child = withPublished(runningCall(), [
       {
         data: {
@@ -1135,7 +1104,6 @@ describe("a remote agent's relayed sign-in", () => {
     principal: ALICE,
   });
 
-  /** A turn with a subagent call, a remote agent call, and Alice's own open GitHub sign-in. */
   function parentAsking(): HarnessSession {
     return withPublished(busyTurn(), [
       {
@@ -1160,10 +1128,6 @@ describe("a remote agent's relayed sign-in", () => {
     ]);
   }
 
-  /**
-   * The payload the agent session serving a child forwards to this session for `events`: `remote`
-   * is that session's own record of where the child runs, never the child's claim.
-   */
   async function sent(events: AgentSessionRequest["events"], remote?: typeof REMOTE) {
     const payloads: AgentSessionRequest[] = [];
     await forwardAgentSessionRequest({
@@ -1184,7 +1148,6 @@ describe("a remote agent's relayed sign-in", () => {
         },
       },
       replyTo: "agent-session-hook",
-      // The child claims a call of this session's own subagent, and to be that subagent.
       request: {
         kind: "subagent-interaction",
         callId: "agent",
@@ -1228,8 +1191,6 @@ describe("a remote agent's relayed sign-in", () => {
   });
 
   it("never lets a remote agent claiming a subagent's call settle this session's own sign-in", async () => {
-    // The remote claims Alice's grant, a callback on this deployment, a local call and session,
-    // and the card it waits on, then reports its sign-in declined.
     const parent = parentAsking();
     for (const claim of [opened(), opened("own-sign-in")]) {
       const events = await forwarded(parent, [claim], REMOTE);
@@ -1250,7 +1211,6 @@ describe("a remote agent's relayed sign-in", () => {
       expect(
         signInsAnswered(tables, { ...answer, signIn: mirrored!.request.signIn! }, OWN),
       ).toEqual([]);
-      // Nor does it wait on this session's own card, to hear when that card ends.
       expect(
         signInsEnded(tables, { interactionId: "own-sign-in", reason: "steered" }, OWN),
       ).toEqual([]);
@@ -1258,9 +1218,6 @@ describe("a remote agent's relayed sign-in", () => {
   });
 
   it("never lets a remote agent settle a subagent's mirrored sign-in", async () => {
-    // The subagent's sign-in waits on Alice's card. The remote then reports it declined, and
-    // withdrawn, under the subagent's call, session and interaction ids, including when the remote
-    // names the subagent's session as its own.
     const asked = withPublished(parentAsking(), await forwarded(parentAsking(), [opened()]));
     const tables = viewOf(asked).projection.view;
     for (const remote of [REMOTE, { ...REMOTE, sessionId: "child-1" }])
@@ -1271,7 +1228,6 @@ describe("a remote agent's relayed sign-in", () => {
         expect(await forwarded(asked, settled, remote)).toEqual([]);
         expect(relayedAnswers(tables, await sent(settled, remote))).toEqual([]);
       }
-    // The subagent's own decline settles it.
     const declined = [
       {
         type: "interaction.settled" as const,
@@ -1285,7 +1241,6 @@ describe("a remote agent's relayed sign-in", () => {
   });
 
   it("settles a remote agent's own request after its session is replaced", async () => {
-    // The remote opens a sign-in, its session is replaced, and the new session settles it.
     const mirrored = await forwarded(parentAsking(), [opened()], REMOTE);
     expect(mirrored).toMatchObject([
       {
@@ -1329,7 +1284,6 @@ describe("a remote agent's relayed sign-in", () => {
         REMOTE,
       );
       const tables = viewOf(withPublished(parentAsking(), mirrored)).projection.view;
-      // The person answers the mirrors this session named under its handle on the remote.
       const answers = [
         { interactionId: `${runId}:0/q-1`, text: "iad1" },
         { interactionId: `${runId}:0/a-1`, optionId: "approve" },
@@ -1361,8 +1315,6 @@ describe("a remote agent's relayed sign-in", () => {
               ],
             },
       );
-      // A protocol 2 remote never relays how its questions settle, so this session settles its
-      // own mirror of the question, and leaves the approval for the remote to report.
       expect(
         protocolTwoAnswersSettledOnForward({
           answers,
@@ -1373,7 +1325,6 @@ describe("a remote agent's relayed sign-in", () => {
   );
 });
 
-/** A transition's facts as the session commits them: an owner's end closes what it holds. */
 function committed(
   view: ReturnType<typeof viewOf>,
   decide: (view: ReturnType<typeof viewOf>) => { readonly events: readonly SessionEvent[] },

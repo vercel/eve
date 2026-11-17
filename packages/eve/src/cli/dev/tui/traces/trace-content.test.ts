@@ -19,8 +19,6 @@ describe("formatAttributeContent", () => {
   });
 
   it("sanitizes non-string attribute values instead of String()ing them", () => {
-    // OTLP array attributes can carry strings with raw escape sequences.
-    // Assert on the unstripped output — stripAnsi would mask an injection.
     const raw = formatAttributeContent(
       "agent.session.ids",
       ["safe", "evil\x1b[2J\x1b]0;owned\x07text"],
@@ -76,7 +74,6 @@ describe("formatAttributeContent", () => {
     expect(lines[0]).toMatch(/^assistant: /);
     for (const line of lines.slice(1)) expect(line).toMatch(/^ {2}\S/);
     for (const line of lines) expect(visibleLength(line)).toBeLessThanOrEqual(40);
-    // No content word is lost in wrapping.
     expect(lines.join(" ").match(/word/g)).toHaveLength(30);
   });
 

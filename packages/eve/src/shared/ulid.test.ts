@@ -37,8 +37,6 @@ describe("createUlid", () => {
 
 describe("createUlidFactory", () => {
   it("matches the ULID spec's canonical full encoding", () => {
-    // The spec's 01ARZ3NDEKTSV4RRFFQ69G5FAV example decodes to this
-    // timestamp and 80-bit random value.
     stubRandomBytes([0xd6, 0x76, 0x4c, 0x61, 0xef, 0xb9, 0x93, 0x02, 0xbd, 0x5b]);
     vi.useFakeTimers();
     vi.setSystemTime(1_469_922_850_259);
@@ -47,8 +45,6 @@ describe("createUlidFactory", () => {
   });
 
   it("encodes the timestamp exactly as the ULID spec does", () => {
-    // Golden vectors from the reference `ulid` package's `encodeTime`, so an
-    // encoder change cannot silently produce ids other tooling misreads.
     vi.useFakeTimers();
     const mint = createUlidFactory();
 
@@ -133,8 +129,6 @@ describe("createUlidFactory", () => {
     const settled = createUlidFactory();
     settled();
 
-    // A fresh generator has observed no clock, so it may mint an earlier
-    // timestamp than one that already ran past it.
     vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
     const fresh = createUlidFactory();
 

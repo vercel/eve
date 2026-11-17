@@ -4,7 +4,6 @@ import { createSessionInbox, type SessionInboxPayload } from "#execution/session
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 export async function sessionCommandInboxWorkflow(input: {
-  /** Session whose stable inbox this owner holds; a handoff successor names its anchor. */
   readonly sessionId?: string;
   readonly token: string;
 }): Promise<void> {
@@ -25,7 +24,6 @@ export async function sessionCommandInboxWorkflow(input: {
   }
 }
 
-/** Parks like a session anchor after a handoff: it holds no session address of its own. */
 export async function parkedAnchorWorkflow(input: { readonly token: string }): Promise<void> {
   "use workflow";
 
@@ -33,10 +31,6 @@ export async function parkedAnchorWorkflow(input: { readonly token: string }): P
   await gate;
 }
 
-/**
- * Holds `token` until another run force-claims it, reads what arrived before
- * the takeover, then takes the token back and returns the next payload.
- */
 export async function sessionInboxTakeoverWorkflow(input: { readonly token: string }): Promise<{
   readonly beforeTakeover: readonly SessionInboxPayload[];
   readonly afterReclaim: SessionInboxPayload | undefined;
@@ -57,7 +51,6 @@ export async function sessionInboxTakeoverWorkflow(input: { readonly token: stri
   }
 }
 
-/** Force-claims `token` and returns once another run takes it back. */
 export async function sessionInboxForceClaimWorkflow(input: {
   readonly token: string;
 }): Promise<void> {

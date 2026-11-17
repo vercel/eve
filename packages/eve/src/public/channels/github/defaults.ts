@@ -61,12 +61,10 @@ export function defaultGitHubAuth(ctx: GitHubInboundContext): SessionAuthContext
   };
 }
 
-/** Options used by the built-in GitHub comment dispatch hook. */
 interface GitHubDefaultDispatchOptions {
   readonly botName?: GitHubBotNameResolver;
 }
 
-/** Default comment hook: dispatch only when the comment `@mention`s the bot. */
 export async function defaultOnComment(
   ctx: GitHubInboundContext,
   comment: GitHubComment,
@@ -84,7 +82,6 @@ export async function defaultOnComment(
   return { auth: defaultGitHubAuth(ctx) };
 }
 
-/** Options used by built-in GitHub event handlers. */
 interface GitHubDefaultEventOptions {
   readonly api?: GitHubApiOptions;
   readonly botName?: GitHubBotNameResolver;
@@ -92,7 +89,6 @@ interface GitHubDefaultEventOptions {
   readonly progress?: GitHubProgressConfig;
 }
 
-/** Builds GitHub's built-in event handlers for acknowledgement and terminal output. */
 export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): GitHubChannelEvents {
   async function showPrompt(channel: GitHubEventContext, request: Interaction): Promise<void> {
     const sections = [renderInteraction(request)];
@@ -105,7 +101,6 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     ...surfaceEvents<GitHubEventContext>({
       post: postCommentChunks,
       restart: "comment",
-      // A comment can only answer the prompt it sees, so prompts post one at a time.
       requests: { showOne: showPrompt },
       signIns: gitHubSignIns,
     }),
@@ -132,8 +127,6 @@ function renderInteraction(request: Interaction): string {
     : body;
 }
 
-// The default onComment hook only dispatches comments that @mention the bot,
-// so a prompt without this instruction invites replies that are silently ignored.
 function renderReplyInstruction(
   request: Interaction,
   botName: string | undefined,
@@ -180,10 +173,6 @@ async function checkoutRepositoryForTurn(
   }
 }
 
-/**
- * A GitHub conversation as a sign-in shows on it: comments are public and can't reach one person,
- * so it shows only a link-free status saying the person who asked must sign in.
- */
 function gitHubSignIns(channel: GitHubEventContext): SignInSurface {
   const post = async (text: string) => {
     await postCommentChunks(channel, text);

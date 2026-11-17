@@ -52,11 +52,6 @@ interface StdinCommand {
   writeStdin(data: Uint8Array, options: { readonly abortSignal?: AbortSignal }): PromiseLike<void>;
 }
 
-/**
- * Writes go to the command in order. Aborting the writer or any of `signals`
- * cancels the pending write, so a stalled request cannot outlive the process.
- * Aborting the writer still closes stdin, so EOF-driven commands can finish.
- */
 function createStdinStream(
   command: StdinCommand,
   signals: readonly AbortSignal[],
@@ -79,12 +74,6 @@ function createStdinStream(
   });
 }
 
-/**
- * Adapts a detached command with one tagged log iterator to a sandbox process
- * with independent stdout and stderr streams. Aborting `abortSignal` kills the
- * command and rejects `wait()` and both streams. `stdin`, when given, backs
- * the process's writable `stdin` stream.
- */
 export function adaptMultiplexedCommandToSandboxProcess<
   Log extends { readonly data: string },
 >(input: {
@@ -107,7 +96,6 @@ export function adaptMultiplexedCommandToSandboxProcess<
       stdout.close();
       stderr.close();
     } catch (error) {
-      // The SDK aborts its log request without the caller's abort reason.
       const cause = signal?.aborted ? signal.reason : error;
       stdout.error(cause);
       stderr.error(cause);
@@ -123,15 +111,10 @@ export function adaptMultiplexedCommandToSandboxProcess<
     return (killPromise ??= Promise.resolve().then(() => command.kill()));
   };
 
-  // A detached command outlives the signal that started it. The kill is
-  // best-effort: the command may already be gone.
   const killOnAbort = () => void kill().catch(() => undefined);
   const disarmKill = () => signal?.removeEventListener("abort", killOnAbort);
   if (signal?.aborted) killOnAbort();
   signal?.addEventListener("abort", killOnAbort, { once: true });
-  // Logs end when the command exits. A failed log stream says nothing about
-  // the command, so the kill stays armed. The streams surface log failures
-  // immediately; retain the rejection for wait().
   void logsDone.then(disarmKill, () => undefined);
 
   return {

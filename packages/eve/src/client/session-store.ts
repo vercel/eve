@@ -184,8 +184,6 @@ export class SessionStore {
         retract = this.#conversationClient.replaceAnswers(retract, prepared);
         this.#publish();
       }
-      // Keep the optimistic row stable until its accepted delivery identity is known, even if
-      // the stream beats the POST response. No renderer has to match messages by text.
       posting = true;
       this.#posting += 1;
       const delivery = await this.#dispatch({ ...prepared, signal });
@@ -330,7 +328,6 @@ export class SessionStore {
 
   async #control(dispatch: (session: ClientSession) => Promise<Delivery>): Promise<Delivery> {
     const lifetime = this.#controller;
-    // A control issued while this store creates its session goes to that session.
     if (this.#session === undefined && this.#creation !== undefined) {
       await waitWithSignal(
         this.#creation.catch(() => undefined),
@@ -412,7 +409,6 @@ export class SessionStore {
     this.#abandonLine();
   }
 
-  /** Rolls back to the committed line; replaying from the folded cursor delivers it again. */
   #abandonLine(): void {
     this.#conversationClient.closeStream();
     let end = this.#events.length;
@@ -455,7 +451,6 @@ export class SessionStore {
     return promise;
   }
 
-  // Preparation is advisory: its failure is the caller's, and sends never wait for it.
   #prepare(session: ClientSession): Promise<void> {
     const lifetime = this.#controller;
     if (this.#preparation?.lifetime === lifetime) return this.#preparation.promise;
@@ -471,7 +466,6 @@ export class SessionStore {
 
   async #dispatch(input: SendTurnPayload): Promise<Delivery> {
     if (this.#creation !== undefined) {
-      // Speculative prewarm failure must not prevent a message creating its session.
       await waitWithSignal(
         this.#creation.catch(() => undefined),
         input.signal,
@@ -627,7 +621,6 @@ export class SessionStore {
     this.#publish();
   }
 
-  /** Other Delivery/session readers may have read further than this store's committed prefix. */
   get #sessionState(): ClientSessionState | undefined {
     if (this.#session === undefined) return (this.#observedSession = undefined);
     const sessionId = this.#session.id;
@@ -668,7 +661,6 @@ export class SessionStore {
     if (this.#resumePromise !== undefined && !force) return;
     if (this.#inLine) {
       if (this.#error === undefined && !this.#hasLocalObligation) return;
-      // Keep the committed projection intact even when an obligation or failure arrives mid-line.
       this.#snapshot = {
         ...this.#snapshot,
         error: this.#error,
@@ -692,12 +684,10 @@ export class SessionStore {
   }
 }
 
-/** @internal Detaches local transport without cancelling durable server work. */
 export function detachSessionStore(store: SessionStore): void {
   store[detachStore]();
 }
 
-/** @internal Starts mount-scoped session work after the framework commits. */
 export function attachSessionStore(store: SessionStore): void {
   store[attachStore]();
 }

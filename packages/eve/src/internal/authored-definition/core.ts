@@ -36,12 +36,6 @@ type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
   };
 };
 
-/**
- * Normalizes one authored agent definition into the canonical internal shape.
- *
- * Authored `name` fields are rejected — agent identity is derived at compile
- * time from `manifest.agentId` (package name or app-root basename).
- */
 export function normalizeAgentDefinition(
   value: unknown,
   message: string,
@@ -136,11 +130,9 @@ export function normalizeAgentDefinition(
   return definition as Readonly<NormalizedAgentDefinition>;
 }
 
-/** A static model passes through; a dynamic one is its `defineDynamic(fn)` value. */
 function normalizeAgentModel(value: unknown, message: string): NormalizedAgentDefinition["model"] {
   if (!isDynamicSentinel(value)) return value as NormalizedAgentDefinition["model"];
   assertDynamicSentinelKeys(value, `${message} The dynamic "model":`);
-  // Keep the sentinel itself: eve's own resolvers, such as auto(), carry internal hooks on it.
   return value as NormalizedAgentDefinition["model"];
 }
 
@@ -152,7 +144,6 @@ function normalizeAgentReasoningDefinition(
   return value;
 }
 
-/** `false` explicitly disables one numeric runtime limit. */
 function expectPositiveIntegerOrFalse(value: unknown, message: string): number | false {
   if (value === false) {
     return false;
@@ -295,7 +286,6 @@ function normalizeAgentModelOptions(
   return options;
 }
 
-/** Validates an authored `modelOptions.promptCache` value. */
 export function normalizeAgentPromptCache(
   value: unknown,
   message: string,
@@ -369,14 +359,6 @@ function normalizeAgentCompactionDefinition(
   return normalizedDefinition;
 }
 
-/**
- * Normalizes one authored instructions definition into the canonical
- * internal shape.
- *
- * Authored `name` fields are rejected — instructions prompt identity is
- * derived from the file path (`instructions.md` or
- * `instructions.{ts,...}`).
- */
 export function normalizeInstructionsDefinition(
   value: unknown,
   message: string,
@@ -394,13 +376,6 @@ export function normalizeInstructionsDefinition(
   };
 }
 
-/**
- * Normalizes one authored skill definition into the canonical internal
- * shape.
- *
- * Authored `name` fields are rejected — skill identity is derived from
- * the file path under `agent/skills/`.
- */
 export function normalizeSkillDefinition(value: unknown, message: string): SkillDefinition {
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
@@ -452,15 +427,6 @@ function normalizeSkillFiles(
   return normalized;
 }
 
-/**
- * Normalizes one authored schedule definition into the canonical internal
- * shape.
- *
- * Authored `name` fields are rejected — schedule identity is derived from
- * the file path under `agent/schedules/`. Exactly one of `content` (the
- * fire-and-forget agent prompt) or `run` (the cron handler function)
- * must be provided.
- */
 export function normalizeScheduleDefinition(value: unknown, message: string): ScheduleDefinition {
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(record, ["cron", "content", "run"], message);

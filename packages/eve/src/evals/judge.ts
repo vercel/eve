@@ -22,7 +22,6 @@ interface JudgeDeps {
   readonly signal: AbortSignal;
 }
 
-/** Bind decision-backed judgments to the existing assertion lifecycle. */
 export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
   function judge(criteria: string, opts?: JudgeOpts): AssertionHandle;
   function judge<const Q extends JudgeQuestion>(
@@ -71,7 +70,6 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
         );
         const result = await decideWithMetadata({
           model,
-          // The AI SDK reads a bare array as state parts, so JSON arrays travel as one JSON part.
           state: isJsonArray(capturedState)
             ? [{ type: "json", value: capturedState }]
             : capturedState,

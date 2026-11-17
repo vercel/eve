@@ -41,16 +41,6 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   contractMajor: 0,
 });
 
-/**
- * Disk-fixture cases covered by the original `test/discover-agent.integration.test.ts`
- * (the `weather-agent`, `sandbox-agent`, and `extension-agent` fixtures) have
- * been intentionally dropped from this file: they assert that discovery
- * produces the expected manifest when run against a real committed fixture
- * tree, which is a scenario-tier concern. The equivalent end-to-end
- * coverage lives under `test/scenarios/compile-agent.scenario.test.ts`.
- * Every authored-grammar rule exercised by those disk cases is covered
- * here against an in-memory {@link buildMemoryAgentProject} tree.
- */
 describe("discoverAgent (memory)", () => {
   it.each(["agent", "extension"] as const)(
     "excludes colocated tests from %s definitions and local subagents",
@@ -1103,9 +1093,6 @@ describe("discoverAgent (memory)", () => {
     expect(sourcesOf(mount.manifest, "tool")).toEqual([
       { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
     ]);
-    // A directory mount always carries an overrides manifest (the mount dir is
-    // itself an agent-shaped source); with no override slots authored it is
-    // empty and composes to nothing.
     expect(mount.overrides?.agentRoot).toBe(resolve(project.agentRoot, "extensions", "crm"));
     expect(sourcesOf(mount.overrides!, "tool")).toEqual([]);
   });
@@ -1137,18 +1124,12 @@ describe("discoverAgent (memory)", () => {
 
     expect(result.diagnostics).toEqual([]);
     const mount = result.manifest.resolvedExtensions[0]!;
-    // The extension's own tree still carries its `search` tool from the package.
     expect(sourcesOf(mount.manifest, "tool")).toEqual([
       { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
     ]);
-    // The consumer's override slot is discovered as an agent-shaped source so
-    // the compiler can compose it under `crm__search` with consumer priority.
     expect(sourcesOf(mount.overrides!, "tool")).toEqual([
       { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
     ]);
-    // The override manifest is rooted at the mount directory — that root is
-    // what rebases the override's module to the consumer's file, not the
-    // extension package.
     expect(mount.overrides?.agentRoot).toBe(resolve(project.agentRoot, "extensions", "crm"));
   });
 
@@ -1178,7 +1159,6 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
     );
-    // The ambiguous namespace is dropped from both forms rather than resolved.
     expect(result.manifest.resolvedExtensions).toEqual([]);
     expect(
       result.manifest.extensions.some((entry) => entry.logicalPath.startsWith("extensions/crm")),
@@ -1435,8 +1415,6 @@ describe("discoverAgent (memory)", () => {
         "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
-        // The mounted extension itself tries to mount another extension — not
-        // supported yet, so discovery must reject it rather than drop it.
         "node_modules/@acme/crm/extension/extensions/inner.ts":
           'export { default } from "@acme/inner";\n',
       },
@@ -1480,7 +1458,6 @@ describe("discoverAgent (memory)", () => {
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
-        // Not a `crm__` prefix, so it is a normal consumer tool.
         "tools/crm_helper.ts": "export default {};\n",
         "instructions.md": "You are a precise assistant.",
       },

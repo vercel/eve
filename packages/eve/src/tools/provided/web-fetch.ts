@@ -38,7 +38,6 @@ export const WEB_FETCH_INPUT_SCHEMA = defineJsonSchema<WebFetchToolInput>(
     required: ["url"],
     additionalProperties: false,
   },
-  // AbortSignal.timeout() throws on a negative delay, and 0 aborts the request at once.
   (input) =>
     input.timeout !== undefined && !(input.timeout > 0)
       ? "timeout must be greater than 0 seconds."

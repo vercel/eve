@@ -2,9 +2,6 @@ import { readFile, writeFile } from "node:fs/promises";
 
 const CONNECT_SLACK_CREDENTIALS_REGEX = /(connectSlackCredentials\(\s*)(["'`])([^"'`]+)\2/;
 
-/**
- * Replaces the connector UID literal in a scaffolded Slack channel definition.
- */
 export async function updateSlackChannelConnectorUid(
   slackChannelPath: string,
   connectorUid: string,
@@ -28,18 +25,12 @@ export async function updateSlackChannelConnectorUid(
   return { patched: true };
 }
 
-/**
- * What an existing `agent/channels/slack.ts` already decides. `connect` names
- * one connector UID literal; `environment` reads the default Slack environment
- * variables; `custom` is hand-written credential wiring eve does not parse.
- */
 export type SlackChannelFileState =
   | { kind: "absent" }
   | { kind: "connect"; connectorUid: string }
   | { kind: "environment" }
   | { kind: "custom" };
 
-/** Reads the Slack channel definition without changing it. */
 export async function readSlackChannelFile(
   slackChannelPath: string,
 ): Promise<SlackChannelFileState> {

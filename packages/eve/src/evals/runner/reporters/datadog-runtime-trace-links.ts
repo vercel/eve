@@ -6,7 +6,6 @@ const DATADOG_LLMOBS_TRACE_ID_NAMESPACE = Buffer.from("f47ac10b58cc4372a5670e02b
 const W3C_TRACE_ID_PATTERN = /^[0-9a-f]{32}$/iu;
 const W3C_SPAN_ID_PATTERN = /^[0-9a-f]{16}$/iu;
 
-/** Identifies one runtime trace by the IDs Datadog's APM-to-LLMObs indexer assigns. */
 export interface ExperimentRuntimeTraceLink {
   readonly relation: "experiment_runtime";
   readonly traceId: string;
@@ -15,7 +14,6 @@ export interface ExperimentRuntimeTraceLink {
   readonly primary: boolean;
 }
 
-/** Converts sampled runtime trace contexts to Datadog-indexed links; skips the rest. */
 export function resolveRuntimeTraceLinks(
   traceContexts: readonly EveEvalTraceContext[],
 ): ExperimentRuntimeTraceLink[] {
@@ -42,7 +40,6 @@ function toDatadogLlmobsTraceId(traceId: string): string | undefined {
     return undefined;
   }
 
-  // Datadog indexes OTel traces by their low 64 bits, then derives a UUIDv5-style LLMObs ID.
   const canonicalApmTraceId = canonicalTraceId.slice(-16).padStart(32, "0");
   const hash = createHash("sha1")
     .update(DATADOG_LLMOBS_TRACE_ID_NAMESPACE)

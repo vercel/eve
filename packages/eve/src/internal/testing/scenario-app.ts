@@ -25,83 +25,19 @@ const SCENARIO_APP_CLEANUP_TIMEOUT_MS = 60_000;
 const require = createRequire(import.meta.url);
 const SCENARIO_AI_PACKAGE_VERSION = resolvePackageVersion("ai");
 
-/**
- * Declarative description of a scenario-tier application.
- *
- * Scenario tests that need a real on-disk app (to run `eve build`, the Nitro
- * dev server, or `compileAgent` against real files) materialize a descriptor
- * into a fresh temporary directory via {@link materializeScenarioApp}. The
- * descriptor captures every file the test needs; the helper wires up the
- * package manifest, the eve tarball dependency, and (when requested) an
- * installed `node_modules/` tree.
- *
- * Descriptors are the single source of truth for fixture content — the
- * former `test/fixtures/**` trees were deleted in favour of this model.
- */
 export interface ScenarioAppDescriptor {
-  /**
-   * Stable slug used as the temp-directory prefix and the `package.json#name`.
-   * Keep this short and kebab-case.
-   */
   readonly name: string;
-  /**
-   * Files to write, keyed by path relative to the app root. Use POSIX-style
-   * separators. Parent directories are created automatically.
-   */
   readonly files: Readonly<Record<string, string>>;
-  /**
-   * Additional dependencies installed alongside `eve`. Keys are
-   * package names, values are npm version specifiers or `file:` specifiers.
-   *
-   * `eve` is always wired via the test tarball and must not be
-   * listed here. The AI SDK peer dependency is wired from the workspace's
-   * installed version by default unless a descriptor overrides `ai`.
-   */
   readonly dependencies?: Readonly<Record<string, string>>;
-  /**
-   * When `true`, the materialized app has a populated `node_modules/` tree
-   * containing the `eve` tarball and the requested dependencies.
-   *
-   * Set this for scenarios that spawn subprocesses (`eve dev`, `eve build`)
-   * or start the Nitro dev server — anything that resolves `eve`
-   * at runtime. Compile-only tests can leave this `false` (the default) to
-   * skip the pnpm-install cost. pnpm's content-addressable store keeps the
-   * second-and-onwards install in the same vitest worker fast (~1s) without
-   * us having to maintain a bespoke template-then-copy cache.
-   */
   readonly installDependencies?: boolean;
-  /**
-   * Package manager used for {@link installDependencies}. Defaults to pnpm.
-   * npm and bun installs are slower but produce the hoisted real-directory
-   * `node_modules/` layout, which exercises dependency resolution paths that
-   * pnpm's symlinked store never hits.
-   */
   readonly packageManager?: "bun" | "npm" | "pnpm";
 }
 
-/**
- * Handle to a materialized scenario app. Callers must call
- * {@link ScenarioApp.cleanup} in `afterEach` / `afterAll`.
- */
 interface ScenarioApp {
-  /** Absolute filesystem path to the materialized app root. */
   readonly appRoot: string;
-  /** Removes the app root and all transient artifacts. */
   cleanup(): Promise<void>;
 }
 
-/**
- * Materializes {@link ScenarioAppDescriptor} under `os.tmpdir()` and returns
- * a handle pointing at the fresh app root. Each call produces an isolated
- * root so tests may freely mutate files without cross-test interference.
- *
- * `eve` is installed from a worker-local tarball cached across
- * invocations. When {@link ScenarioAppDescriptor.installDependencies} is
- * `true`, this function additionally runs `pnpm install` directly in the
- * fresh app root. pnpm's content-addressable store keeps repeat installs
- * cheap, so we skip the bespoke template-then-copy caching that previously
- * tripped over Windows directory junctions in `fs.cp`.
- */
 export async function materializeScenarioApp(
   descriptor: ScenarioAppDescriptor,
 ): Promise<ScenarioApp> {
@@ -147,11 +83,6 @@ export async function materializeScenarioApp(
   }
 }
 
-/**
- * Registers an `afterEach` cleanup for scenario apps created inside a test
- * block. Returns a factory that pushes each materialization onto the shared
- * cleanup list.
- */
 export function useScenarioApp(): (descriptor: ScenarioAppDescriptor) => Promise<ScenarioApp> {
   const materialized: ScenarioApp[] = [];
 
@@ -160,9 +91,7 @@ export function useScenarioApp(): (descriptor: ScenarioAppDescriptor) => Promise
       materialized.splice(0).map(async (app) => {
         try {
           await app.cleanup();
-        } catch {
-          // Best-effort cleanup; a leaked tmpdir must not fail the run.
-        }
+        } catch {}
       }),
     );
   }, SCENARIO_APP_CLEANUP_TIMEOUT_MS);
@@ -252,27 +181,11 @@ async function writeDescriptorFiles(input: {
   );
 }
 
-/**
- * Runs `pnpm install` directly inside the materialized app root. The
- * `package.json` and `eve` tarball were already written by
- * {@link writePackageManifest}, so all this needs to do is invoke pnpm.
- *
- * We deliberately do *not* maintain a per-test "template" `node_modules/`
- * that we copy across apps. The previous template-then-copy optimization
- * tripped over `fs.cp`'s handling of pnpm's directory junctions on Windows
- * (relative `node_modules/.pnpm/<pkg>/node_modules/<dep>` links did not
- * survive the round-trip), and pnpm's content-addressable store already
- * keeps subsequent installs in the same worker fast enough that the
- * bespoke cache wasn't pulling its weight.
- */
 async function installScenarioDependencies(input: {
   readonly appRoot: string;
   readonly descriptor: ScenarioAppDescriptor;
 }): Promise<void> {
   if (input.descriptor.packageManager === "npm") {
-    // A project .npmrc overrides any host-global release-age gate, which
-    // would otherwise reject the workspace's freshly published dependency
-    // versions and make the test outcome depend on host configuration.
     await writeFile(
       join(input.appRoot, ".npmrc"),
       "registry=https://registry.npmjs.org/\nmin-release-age=0\n",
@@ -282,15 +195,11 @@ async function installScenarioDependencies(input: {
       "--no-audit",
       "--no-fund",
       "--ignore-scripts",
-      // The workspace's installed AI SDK version may be newer than cached registry metadata.
       "--prefer-online",
     ]);
     return;
   }
   if (input.descriptor.packageManager === "bun") {
-    // A local bunfig overrides any host-global minimumReleaseAge gate, which
-    // would otherwise reject the workspace's freshly published dependency
-    // versions and make the test outcome depend on host configuration.
     await writeFile(
       join(input.appRoot, "bunfig.toml"),
       ["[install]", "minimumReleaseAge = 0", ""].join("\n"),
@@ -300,9 +209,6 @@ async function installScenarioDependencies(input: {
     return;
   }
 
-  // Generated scenario apps install public package dependencies. Pinning the
-  // registry keeps their outcome independent of a developer or runner's
-  // private registry configuration.
   await writeFile(join(input.appRoot, ".npmrc"), "registry=https://registry.npmjs.org/\n");
   await runPnpmCommand({
     args: [
@@ -352,18 +258,6 @@ const EVE_SCENARIO_EVE_TARBALL_PATH_ENV = "EVE_SCENARIO_EVE_TARBALL_PATH";
 
 let cachedScenarioEveTarballPromise: Promise<string> | null = null;
 
-/**
- * Returns the on-disk path to the eve tarball used by scenario apps.
- *
- * When the scenario vitest config's `globalSetup`
- * (`test/setup/pack-scenario-tarball.ts`) has run, the tarball is packed
- * once upfront to a shared location and every worker reuses it via the
- * `EVE_SCENARIO_EVE_TARBALL_PATH` env var. When the env var is missing
- * (e.g. a developer invokes `vitest` against a single scenario file
- * directly), this falls back to packing into a worker-local cache
- * directory with lifecycle scripts disabled, so the fallback never mutates
- * the shared workspace `dist/` even under parallel workers.
- */
 export async function ensureScenarioEveTarballPath(): Promise<string> {
   cachedScenarioEveTarballPromise ??= resolveOrPackScenarioEveTarball();
   return await cachedScenarioEveTarballPromise;
@@ -433,12 +327,6 @@ async function resolveScenarioEveTarballFileName(): Promise<string> {
 
 let cachedScenarioWorkerCacheDirectoryPromise: Promise<string> | null = null;
 
-/**
- * Returns a per-worker cache directory used to store the eve tarball and the
- * installed dependency templates. The directory is created on demand and
- * scoped by `VITEST_WORKER_ID` so concurrent workers cannot corrupt each
- * other's caches.
- */
 async function resolveScenarioWorkerCacheDirectory(): Promise<string> {
   cachedScenarioWorkerCacheDirectoryPromise ??= (async () => {
     const workerId = process.env.VITEST_WORKER_ID ?? process.env.VITEST_POOL_ID ?? "main";

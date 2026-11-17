@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-/** Derives the private Vercel Queues topic used by one eve agent's schedule collections. */
 export function deriveEveScheduleQueueTopic(application: string): string {
   const normalized = application.trim();
   if (normalized.length === 0) throw new Error("Schedule application must not be empty.");

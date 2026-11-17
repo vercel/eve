@@ -10,7 +10,6 @@ const DECLARATIONS = [
   ["schema/types.gen.d.ts", "schema/types.gen.d.ts"],
 ];
 
-/** Vendor the stable ACP v1 SDK without adding it to eve's runtime dependencies. */
 export default {
   packageName: "@agentclientprotocol/sdk",
   compiledPath: "@agentclientprotocol/sdk",

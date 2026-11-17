@@ -16,13 +16,8 @@ const createAppRoot = useTemporaryAppRoots();
 const APP_ROOT_OPTIONS = { packageName: "agent-info-route-test-agent" } as const;
 const INFO_ROUTE_KEY = `GET ${EVE_INFO_ROUTE_PATH}`;
 
-// A request to the local server. The deployment environment, not this
-// URL, decides auth: `localDev()` authenticates only when the process
-// is an `eve dev` or `vercel dev` server (stubbed via EVE_DEV below).
 const LOOPBACK_REQUEST = new Request("http://localhost/eve/v1/info");
 
-// A request a real deployment sees on the wire. With no dev flag set,
-// `localDev()` skips it and the walk falls through to `vercelOidc()`.
 const DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info");
 function deployedInfoRequest(principalType: string): Request {
   return new Request("https://weather-agent.vercel.app/eve/v1/info", {
@@ -134,9 +129,6 @@ describe("eve agent info route", () => {
   });
 
   it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
-    // With no dev flag set, the default chain must reject a request that
-    // carries no token: `vercelOidc()` skips without a bearer token and
-    // `localDev()` skips outside an `eve dev` or `vercel dev` server.
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-agent-info-route-deployed-",
       APP_ROOT_OPTIONS,
@@ -156,7 +148,6 @@ describe("eve agent info route", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
-    // The unauthenticated response must not leak any agent metadata.
     const body = await response.text();
     expect(body).not.toMatch(/openai|gpt-5|gpt5/i);
     expect(body).not.toMatch(/precise assistant/i);
@@ -174,7 +165,6 @@ describe("eve agent info route", () => {
       'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
-    // The caller picks its principal type so one channel exercises each class.
     await writeFile(
       join(agentRoot, "channels", "eve.mjs"),
       `import { localDev } from "eve/channels/auth";
@@ -220,8 +210,6 @@ export default eveChannel({ auth: [issue389Auth, localDev()] });
       expect(payload.instructions.static[0]?.content).toContain("precise assistant");
     }
 
-    // On a development server, a caller the configured localDev() would admit
-    // is the developer even when an earlier strategy resolved them as a user.
     vi.stubEnv("EVE_DEV", "1");
     const localUser = await requestAgentInfo(
       appRoot,

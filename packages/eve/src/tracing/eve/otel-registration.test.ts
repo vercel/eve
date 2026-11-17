@@ -47,7 +47,6 @@ describe("OTel registration", () => {
 
     const configuration = registerOTel.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect("traceSampler" in configuration).toBe(false);
-    // Absent propagators keep @vercel/otel's automatic defaults; eve's marker follows them.
     expect(configuration["propagators"]).toEqual(["auto", expect.any(Object)]);
   });
 

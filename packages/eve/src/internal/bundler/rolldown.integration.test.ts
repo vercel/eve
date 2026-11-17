@@ -119,7 +119,6 @@ describe("buildSingleRolldownChunk", () => {
     const dependencyRoot = join(dir, "node_modules", "evaluator");
     const entryPath = join(dir, "entry.mjs");
     const warnings: string[] = [];
-    // Rolldown's default log handler prints warnings with console.warn.
     const warn = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
       warnings.push(String(message));
     });

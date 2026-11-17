@@ -47,7 +47,6 @@ describe("executeBashOnSandbox", () => {
     async () => {
       const line = `${"x".repeat(1023)}\n`;
       const chunk = new TextEncoder().encode(line.repeat(1024));
-      // One chunk past V8's longest string (2 ** 29 - 24 characters).
       let chunks = 2 ** 29 / chunk.byteLength + 1;
       const stdout = new ReadableStream<Uint8Array>({
         pull(controller) {

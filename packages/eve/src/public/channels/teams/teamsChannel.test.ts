@@ -393,7 +393,6 @@ describe("teamsChannel", () => {
     const send = vi.fn().mockRejectedValue(new SessionNotActiveError());
     const waitUntil = vi.fn();
 
-    // A question card rendered before this change carries only the request and option.
     await post.handler(
       new Request("https://eve.test/eve/v1/teams", {
         body: JSON.stringify({

@@ -1,10 +1,5 @@
 import { createDeclarationCopier } from "../_shared.mjs";
 
-/**
- * Applies exact upstream snippet replacements to `@ai-sdk/mcp/dist/index.js`.
- * The build fails when a snippet is missing, so a dependency bump cannot
- * silently drop the patch.
- */
 function patchMcpSourcePlugin(name, replacements) {
   let patched = false;
 
@@ -32,10 +27,6 @@ function patchMcpSourcePlugin(name, replacements) {
   };
 }
 
-// Streamable HTTP always answers, so a slow `server/discover` is not a legacy
-// signal: the MCP spec falls back there only on a 4xx. Upstream caps the probe
-// at 1 s on every transport and then downgrades modern-only servers to
-// `initialize`. Remove once @ai-sdk/mcp ships vercel/ai#22042.
 const waitForHttpProtocolDiscovery = patchMcpSourcePlugin("wait-for-http-discovery", [
   [
     "timeout: DEFAULT_PROTOCOL_DISCOVERY_TIMEOUT",
@@ -43,9 +34,6 @@ const waitForHttpProtocolDiscovery = patchMcpSourcePlugin("wait-for-http-discove
   ],
 ]);
 
-// The SDK already returns to legacy initialize for ordinary discovery failures,
-// but treats every -32022 as fatal. Negotiate only when the server lists a legacy
-// version this client supports, and preserve the highest overlapping version.
 const supportedProtocolVersionFallback = patchMcpSourcePlugin(
   "supported-protocol-version-fallback",
   [
@@ -81,18 +69,6 @@ const supportedProtocolVersionFallback = patchMcpSourcePlugin(
   ],
 );
 
-// A 2025-era session allows one standalone GET stream; MCP SDK servers answer
-// a second with 409 and stateful gateways drop the session (#4379). Upstream
-// marks the stream only once a GET's response arrives, so one connect sends up
-// to three GETs, the first before `initialize` has created the session, and
-// its reconnect timer opens another GET even when a stream is attached.
-// `inboundSseConnection` becomes the one stream slot: taken synchronously when
-// a GET starts, released when that GET fails or its stream ends, and every
-// opener (start, protocol switch, 202, reconnect timer) goes through
-// `startInboundSse`, which returns while the slot is taken. A protocol switch
-// opens the stream only once a session exists; a fresh session's
-// `notifications/initialized` 202 opens it otherwise. Remove once
-// @ai-sdk/mcp gives `HttpMCPTransport` a single inbound stream.
 const singleInboundSseStream = patchMcpSourcePlugin("single-inbound-sse-stream", [
   [
     "\t\tif (!this.inboundSseConnection) this.startInboundSse();\n\t}\n\tisModernProtocol() {",
@@ -117,13 +93,6 @@ const singleInboundSseStream = patchMcpSourcePlugin("single-inbound-sse-stream",
   ],
 ]);
 
-// Ending a 2025-era session is one DELETE, and nothing bounds it upstream:
-// `close()` sends it with no signal, so a server that stops answering stalls
-// every caller that awaits the close, and eve awaits it when a step ends. The
-// DELETE now runs under a 5 s deadline of its own that is cleared once it
-// settles. The deadline is best effort: an unreachable server keeps the
-// session until it expires it. Remove once @ai-sdk/mcp bounds session
-// termination.
 const boundedSessionTermination = patchMcpSourcePlugin("bounded-session-termination", [
   [
     `\t\t\t\tawait this.fetchFn(this.url.href, {

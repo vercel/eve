@@ -187,8 +187,6 @@ describe("runCli", () => {
 
   it("writes all of a large `eve info --json` document before the bin exits", async () => {
     const appRoot = await createMinimalAppRoot("eve-cli-info-json-pipe-");
-    // Far larger than a pipe or socket buffer, so most of it is still queued
-    // when the command resolves.
     const descriptionLength = 1024 * 1024;
     await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
     await writeFile(
@@ -211,8 +209,6 @@ describe("runCli", () => {
       [EVE_BIN_PATH, "info", "--json"],
       {
         cwd: appRoot,
-        // A telemetry flush yields to the event loop, which would drain stdout
-        // and hide an early exit.
         env: { ...process.env, EVE_TELEMETRY_DISABLED: "1" },
         maxBuffer: 16 * 1024 * 1024,
       },
@@ -424,8 +420,6 @@ describe("runCli", () => {
       join(workspaceRoot, "agent", "agent.mjs"),
       'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
     );
-    // No instructions.md or instructions.ts â discovery should fail with
-    // DISCOVER_REQUIRED_INSTRUCTIONS_MISSING.
 
     process.chdir(workspaceRoot);
 

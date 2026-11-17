@@ -52,10 +52,6 @@ export interface ActiveDevelopmentRuntimeArtifactsSnapshot {
   readonly snapshotRoot: string;
 }
 
-/**
- * Resolves the dev-server pointer that records the latest runtime artifact
- * snapshot for new sessions.
- */
 export function resolveDevelopmentRuntimeArtifactsPointerPath(appRoot: string): string {
   return join(
     resolveDevelopmentStateDirectory(appRoot),
@@ -71,9 +67,6 @@ function isDevelopmentRuntimeArtifactsSnapshotRoot(appRoot: string, snapshotRoot
   );
 }
 
-/**
- * Stages one immutable dev runtime snapshot without moving the latest pointer.
- */
 export async function stageDevelopmentRuntimeArtifactsSnapshot(
   compileResult: CompileAgentResult,
 ): Promise<DevelopmentRuntimeArtifactsSnapshot> {
@@ -202,9 +195,6 @@ function findPackageRoot(entryPath: string, packageName: string): string {
   }
 }
 
-/**
- * Moves the dev runtime pointer so future sessions use a staged snapshot.
- */
 export async function activateDevelopmentRuntimeArtifactsSnapshot(input: {
   readonly appRoot: string;
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
@@ -255,9 +245,6 @@ export async function activateDevelopmentRuntimeArtifactsSnapshot(input: {
   }
 }
 
-/**
- * Reads the latest dev runtime snapshot root when the dev server has one.
- */
 export function readDevelopmentRuntimeArtifactsSnapshotRoot(
   pointerPath: string | undefined,
 ): string | undefined {
@@ -279,7 +266,6 @@ export function readActiveDevelopmentRuntimeArtifactsSnapshot(
   };
 }
 
-/** Reads a revision token for the latest dev runtime artifact snapshot. */
 export function readDevelopmentRuntimeArtifactsRevision(
   appRoot: string,
 ): DevelopmentRuntimeArtifactsRevision {
@@ -291,11 +277,6 @@ export function readDevelopmentRuntimeArtifactsRevision(
   };
 }
 
-/**
- * Bounds dev snapshot storage without consulting a Workflow World. The active
- * generation is always retained; retired generations receive a grace period,
- * and the newest retired generations remain as a rebuild-rate safety net.
- */
 export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   readonly appRoot: string;
   readonly gracePeriodMs?: number;
@@ -314,11 +295,6 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   });
 }
 
-/**
- * Collects the workspace roots that host extension-authored source. Extension
- * modules hydrate from disk at runtime through snapshot paths, so their
- * packages stay real copies while other workspace dependencies are mounted.
- */
 function collectExtensionMountSourceRoots(manifest?: CompiledAgentManifest): string[] {
   if (manifest === undefined) {
     return [];
@@ -472,8 +448,6 @@ function rewritePathWithinAppRoot(input: {
   readonly runtimeAppRoot: string;
 }): string {
   if (!isPathInsideOrEqual(input.path, input.appRoot)) {
-    // Extension subagents retain package-owned roots at compile time; runtime
-    // code is materialized separately, but their metadata must be snapshot-local.
     const extension = input.extensionPackageRoots.find((root) =>
       isPathInsideOrEqual(input.path, root.sourceRoot),
     );

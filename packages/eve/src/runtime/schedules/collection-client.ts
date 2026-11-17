@@ -51,7 +51,6 @@ export interface PreparedScheduleUpdate<TPrepared = unknown> {
 
 export type PreparedScheduleWrite = PreparedScheduleCreate | PreparedScheduleUpdate;
 
-/** Internal preparation capabilities used by generated write approval. */
 export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleClient<TInput> {
   prepareCreate(input: ScheduleClientCreate<unknown>): Promise<PreparedScheduleCreate<TPrepared>>;
   create(
@@ -130,7 +129,6 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     if (creator === null)
       throw new Error("Writing a schedule payload requires an authenticated principal.");
     const validated = await validateSchedulePayload<TPayload>(definition.inputSchema, value);
-    // Definitions without preparation default TPrepared to the validated input type.
     const preparedPayload = (
       definition.preparePayload === undefined
         ? validated
@@ -174,7 +172,6 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
 
   const prepareCreation = async (input: ScheduleClientCreate<unknown>) => {
     const displayName = validateScheduleName(input.name);
-    // Validate timing before preparation; relative delays are resolved again at the write boundary.
     resolveScheduleTiming(input.expression);
     const { scope, provider } = await resolveNamespace("create", displayName);
     const prepared = snapshotPreparedWrite({

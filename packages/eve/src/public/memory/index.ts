@@ -114,8 +114,6 @@ export interface MemoryToolsContext extends Pick<
   };
 }
 
-// A tool's input and output types appear in both parameter and result positions, so only `any`
-// accepts every `defineTool()` result. eve validates input against the tool's schema at runtime.
 /** Tools a memory provider exposes, each created with `defineTool()`, keyed by tool name. */
 export type MemoryToolSet = Readonly<Record<string, ToolDefinition<any, any>>>;
 

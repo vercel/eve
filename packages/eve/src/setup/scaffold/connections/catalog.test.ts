@@ -91,8 +91,6 @@ describe("isValidConnectionSlug", () => {
     expect(isValidConnectionSlug("Linear")).toBe(false);
     expect(isValidConnectionSlug("-bad")).toBe(false);
     expect(isValidConnectionSlug("has space")).toBe(false);
-    // Underscores, leading digits, and >64 chars pass a laxer pattern but
-    // fail `eve build` discovery — the scaffolder must reject them up front.
     expect(isValidConnectionSlug("my_corp")).toBe(false);
     expect(isValidConnectionSlug("2cool")).toBe(false);
     expect(isValidConnectionSlug(`a${"b".repeat(64)}`)).toBe(false);

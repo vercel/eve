@@ -20,11 +20,6 @@ import {
 import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framework-eve-server.js";
 import { readOptionalFile } from "#shared/read-optional-file.js";
 
-/**
- * Dev servers this process spawned, keyed by agent root. Module scope
- * survives Vite config restarts, which re-run `vite.config.ts` and reuse the
- * running servers through the shared registry.
- */
 const spawnedDevServers = new Map<string, ChildProcess>();
 
 /**
@@ -51,21 +46,12 @@ export interface EveVitePluginOptions {
   readonly eveBuildCommand?: string;
 }
 
-/**
- * The slice of Nitro's `nitro` Vite config key the plugin writes. It is typed
- * locally so eve does not depend on Nitro's Vite type augmentation.
- */
 type NitroUserConfig = UserConfig & {
   readonly nitro?: {
     readonly routeRules?: Record<string, { readonly proxy: string }>;
   };
 };
 
-/**
- * The slice of a Nitro module, and of the Nitro instance its `setup` receives,
- * that the plugin uses. Nitro's Vite plugin installs the `nitro` property of
- * any Vite plugin as a Nitro module.
- */
 interface EveNitroModule {
   readonly name: string;
   setup(nitro: {
@@ -85,14 +71,6 @@ function flattenPlugins(options: readonly PluginOption[]): Plugin[] {
   return plugins;
 }
 
-/**
- * Create a Vite plugin that runs eve agents alongside a Vite app.
- *
- * `nitroOnly` is for hosts that Nitro serves in every mode: the plugin then
- * requires the Nitro Vite plugin and leaves `vite preview` alone.
- * `vercelOutputAfterSsrBundle` is for hosts whose adapter writes
- * `.vercel/output` when the SSR build's bundle closes, after `buildApp`.
- */
 export function createEveVitePlugin(input: {
   readonly host: EveFrameworkHost;
   readonly nitroOnly?: boolean;
@@ -108,8 +86,6 @@ export function createEveVitePlugin(input: {
   let isSsrBuild = false;
   let isVercelBuild = false;
   let nitroModuleInstalled = false;
-  // Nitro's own preview server answers every request, and its build Vite
-  // instance does not share this module state, so its plugin name is the signal.
   let nitroServesPreview = false;
 
   async function addEveVercelServicesToOutput(): Promise<void> {
@@ -138,12 +114,9 @@ export function createEveVitePlugin(input: {
 
   return {
     name: `eve:${host.slug}`,
-    // Runs its build hooks after framework adapters have written `.vercel/output`.
     enforce: "post",
     nitro: {
       name: "eve",
-      // Nitro writes `.vercel/output` from this config, so merging here puts
-      // eve's routes ahead of the user's own `nitro({ vercel })` routes.
       async setup(nitro) {
         nitroModuleInstalled = true;
         if (!isVercelBuild) {
@@ -161,7 +134,6 @@ export function createEveVitePlugin(input: {
       },
     },
     config: {
-      // Nitro reads its route rules from the config in its own `config` hook.
       order: "pre",
       async handler(config, env): Promise<NitroUserConfig> {
         viteRoot = resolve(config.root ?? "");
@@ -172,27 +144,18 @@ export function createEveVitePlugin(input: {
           flattenPlugins(config.plugins ?? []).some((plugin) => plugin.name === "nitro:preview");
         isVercelBuild = env.command === "build" && Boolean(process.env.VERCEL);
         if (env.command !== "serve") {
-          // Vercel needs the agents to generate their services; every other
-          // build needs none, and may have no agent files at all.
           agents = isVercelBuild ? await resolveEveAgents(projectRoot) : [];
           return {};
         }
-        // The proxy only needs the agent names, so a frontend that reaches an
-        // agent elsewhere can build without local agent files.
         const configuredOrigin = readEveBaseUrlOrigin();
         agents =
           configuredOrigin === undefined
             ? await resolveEveAgents(projectRoot)
             : [{ appRoot: projectRoot, publicRoutePrefix: "" }];
-        // Nitro answers every preview request itself, so a proxy or a dev
-        // server here would do nothing. A Nitro-only host always reaches
-        // preview through it.
         if (nitroServesPreview || (isPreview && nitroOnly)) {
           return {};
         }
 
-        // Each workspace member's dev server serves only that member at
-        // `/eve/v1`, so dev and preview both need one server per member.
         const origins = await Promise.all(
           agents.map(async (agent) => {
             const handle = await resolveEveAgentDevServer(agent, host, devServerTimeoutMs);
@@ -220,15 +183,11 @@ export function createEveVitePlugin(input: {
         if (isPreview) {
           return { preview: { proxy } };
         }
-        // Nitro answers dev requests before Vite's proxy middleware runs, so
-        // Nitro-served apps need the proxies as route rules too.
         return { nitro: { routeRules }, server: { proxy } };
       },
     },
     configResolved(config) {
       isSsrBuild = Boolean(config.build.ssr);
-      // Nitro installs the `nitro` module above while resolving config.
-      // Without Nitro the eve routes would silently 404.
       if (nitroOnly && !isPreview && !nitroModuleInstalled) {
         throw new Error(
           `The eve ${host.label} plugin needs the Nitro Vite plugin. Install "nitro" and add nitro() from "nitro/vite" to the plugins in vite.config.ts.`,
@@ -249,8 +208,6 @@ export function createEveVitePlugin(input: {
         if (!isVercelBuild || nitroModuleInstalled || vercelOutputAfterSsrBundle) {
           return;
         }
-        // `buildApp` runs before Vite builds the environments that `--app`
-        // selects, so the adapter has not written `.vercel/output` yet.
         for (const environment of Object.values(builder.environments)) {
           if (!environment.isBuilt) {
             await builder.build(environment);

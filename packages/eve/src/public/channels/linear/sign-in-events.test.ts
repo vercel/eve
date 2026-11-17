@@ -15,7 +15,6 @@ vi.mock("#public/channels/linear/api.js", () => ({
 
 const turnId = "turn_0";
 
-/** Two Weather sign-ins on one turn: `s_waiting` waits on `s_shown`'s card. */
 function twoSignIns() {
   const view = emptySessionView();
   const opened = (interactionId: string, waitsOn?: string): SessionEvent =>

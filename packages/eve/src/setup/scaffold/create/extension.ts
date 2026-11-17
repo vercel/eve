@@ -42,10 +42,6 @@ function renderTemplate(content: string, ctx: ExtensionTemplateContext): string 
     .replaceAll("__EVE_INIT_NODE_ENGINE__", ctx.nodeEngine);
 }
 
-/**
- * Extension package.json as a plain object so named fields like `exports` stay
- * structured. Tokens are still substituted by {@link renderTemplate}.
- */
 function packageJsonTemplate(includeRootOnlyFields: boolean): string {
   const packageJson = {
     name: "__EVE_INIT_APP_NAME__",
@@ -86,7 +82,6 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
     },
   };
 
-  // Same trailing engines block the agent scaffold appends for non-workspace roots.
   return `${JSON.stringify(packageJson, null, 2).slice(0, -1)}${
     includeRootOnlyFields ? ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX : ""
   }}\n`;
@@ -200,10 +195,6 @@ async function assertCanCreateInPlace(
 
 export interface ScaffoldExtensionProjectOptions {
   projectName: string;
-  /**
-   * The manager that owns command execution and manager-specific generated
-   * project files for this scaffold. Defaults to pnpm.
-   */
   packageManager?: PackageManagerKind;
   targetDirectory?: string;
   overwriteExisting?: boolean;
@@ -211,20 +202,10 @@ export interface ScaffoldExtensionProjectOptions {
   evePackage?: EvePackageContract;
   zodPackageVersion?: string;
   typescriptPackageVersion?: string;
-  /**
-   * Final project path used to discover ancestor workspaces. This differs from
-   * the write target only when the CLI stages a scaffold before moving it into
-   * place.
-   */
   workspaceProbeDirectory?: string;
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
 }
 
-/**
- * Scaffolds a standalone eve extension package: `extension/extension.ts`, package
- * metadata (`eve.extension`, peer+dev `eve`, zod), and TypeScript config. Does
- * not write sample tools — authors add contributions under `extension/` themselves.
- */
 export async function scaffoldExtensionProject(
   options: ScaffoldExtensionProjectOptions,
 ): Promise<string> {
@@ -278,8 +259,6 @@ export async function scaffoldExtensionProject(
     onWorkspaceRootMutation: options.onWorkspaceRootMutation,
   });
 
-  // Extensions do not depend on `ai`; only reconcile engines.node on a workspace
-  // root when the package is a member.
   await patchWorkspaceRootPackageJson(packageManager, workspaceProbeRoot, {
     nodeEngineRequirement: evePackage.nodeEngine,
     onWorkspaceRootMutation: options.onWorkspaceRootMutation,

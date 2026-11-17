@@ -59,7 +59,6 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { startTaskToolCallsStep } from "#execution/session/task-tool-tracing-step.js";
 
-/** True when a delegating parent (local or remote) receives this session's input requests. */
 export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
   if (earlierRemoteCaller(serializedContext) !== undefined) return false;
   if (serializedContext["eve.sessionCallback"] !== undefined) return true;
@@ -69,7 +68,6 @@ export function hasDelegatedCallerContext(serializedContext: Record<string, unkn
   );
 }
 
-/** The protocol of a remote caller this session can't relay requests to, when it has one. */
 function earlierRemoteCaller(serializedContext: Record<string, unknown>): number | undefined {
   const version = serializedContext[EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME];
   return typeof version === "number" ? version : undefined;
@@ -87,11 +85,6 @@ export interface SessionExecutionInput {
   readonly sessionId: string;
 }
 
-/**
- * Executes conversational turns inside the owning session workflow: runs
- * `turnStep`, services the inbox at committed boundaries, coordinates waits,
- * and settles locally. There is no child run and no transport protocol.
- */
 export class SessionExecution {
   private readonly input: SessionExecutionInput;
   private observedHandoverAttemptKey: string | undefined;
@@ -107,17 +100,11 @@ export class SessionExecution {
   async runTurn(
     delivery: TurnStepPayload | undefined,
     options: {
-      /**
-       * The delegated caller the turn answers, including for a first turn whose
-       * input carries no caller. The turn's first step binds it into the context.
-       */
       readonly caller?: TurnCaller;
       readonly control?: TurnControl;
     } = {},
   ): Promise<TurnOutcome> {
     const { cursor } = this.input;
-    // A resumed turn keeps its principal; another person's answer that
-    // resumes it does not make them its owner.
     const starts = isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state));
     const turn = new ActiveTurn(
       this.input,
@@ -130,11 +117,7 @@ export class SessionExecution {
     );
     try {
       const outcome = await this.runTurnSteps(turn, delivery);
-      // Tasks run beside the turn, and a run can open a session after its call
-      // returns, so these messages still reach the session.
       await this.handleBoundaryMessages(turn.takeBoundaryMessages(), outcome.kind === "done");
-      // The turn rule holds a turn while its tasks work, so a turn that ends
-      // anyway, such as by failing, cancels them.
       if (outcome.kind === "park" && outcome.settled !== undefined) {
         await cancelWorkingTasks(this.input.cursor, "turn-ended");
       }
@@ -148,13 +131,6 @@ export class SessionExecution {
     }
   }
 
-  /**
-   * Applies what runs reported while the model step ran, so the next step sees
-   * it. Consecutive messages the session applies as it reads them, such as a
-   * fan-out's, share one step. An ending session drops its runs' agent session
-   * messages: its stream is closed, and finalizing the session terminates the
-   * children.
-   */
   private async handleBoundaryMessages(
     messages: readonly WorkflowToolRunMessage[],
     ending = false,
@@ -173,7 +149,6 @@ export class SessionExecution {
     await this.applyRunMessages(applied, turn);
   }
 
-  /** Hooks on the messages' events may cancel `turn`, the turn that is running. */
   private async applyRunMessages(
     messages: readonly AppliedRunMessage[],
     turn?: ActiveTurn,
@@ -190,9 +165,6 @@ export class SessionExecution {
     delivery: TurnStepPayload | undefined,
   ): Promise<TurnOutcome> {
     let nextStepInput: TurnStepPayload | undefined = delivery;
-    // Only the first step binds the caller. A caller that steers in mid-turn is
-    // replied to at its own address (`TurnOutcome.caller`) and is bound by the
-    // next turn, so this turn's forwarding keeps its original caller.
     let bindCaller = turn.caller;
 
     while (true) {
@@ -202,9 +174,6 @@ export class SessionExecution {
       const observation = this.input.inbox.handoverObservation;
       const handover =
         observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
-      // A step that fails every attempt fails its turn, not the session; only a failed recovery
-      // ends the session. What fails once a step has returned, such as adopting its state, is
-      // not the step's failure, so it is not recovered.
       const result = await cursor.advanceWithHistory((state) => {
         const run = (recover?: { readonly error: unknown }) =>
           turnStep({
@@ -223,9 +192,6 @@ export class SessionExecution {
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;
 
-      // Deliveries the boundary admits next arrived while the step ran. A step
-      // that raises a request publishes it before it returns, so they may
-      // reply to it.
       const stepAdmission = this.input.queue.nextAdmission;
       const settles = result.action === "parked" && result.settled !== undefined;
       await turn.admitBoundary(settles);
@@ -237,7 +203,6 @@ export class SessionExecution {
       );
 
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
-      // A settled turn stands, and calls the turn waits on still report, so neither cancels here.
       const waitsOnCalls = result.action === "paused" && result.on === "calls";
       if (!settles && !waitsOnCalls && turn.signal.aborted) {
         return await this.finishCancelledTurn(turn);
@@ -267,7 +232,6 @@ export class SessionExecution {
     }
   }
 
-  /** The next step's input: what resumed the turn, behind any steering admitted meanwhile. */
   private async withSteering(
     turn: ActiveTurn,
     input: Omit<TurnStepPayload, "delivery">,
@@ -277,16 +241,6 @@ export class SessionExecution {
     return { ...input, ...(delivery !== undefined && { delivery }) };
   }
 
-  /**
-   * Waits for what a paused turn awaits, and returns the input its next step reads:
-   *
-   * - an interaction's answer, a sign-in callback, or the turn's own requester steering it, for the
-   *   requests and sign-ins it raised. Anyone else's message queues behind the turn, as does a
-   *   message admitted before the step that raised the request (`heldSince`): it was sent
-   *   before the request existed;
-   * - one of its tasks settling. Steering interrupts that wait;
-   * - every call's result. Steering interrupts the workflow tool calls, which still report.
-   */
   private async resume(
     turn: ActiveTurn,
     paused: TurnPause,
@@ -333,7 +287,6 @@ export class SessionExecution {
       if (next === "cancelled") return next;
       switch (next.kind) {
         case "steering":
-          // Only the first steering message interrupts; later ones wait for the calls anyway.
           if (!interrupted) await calls?.interrupt();
           interrupted = true;
           continue;
@@ -354,7 +307,6 @@ export class SessionExecution {
     }
   }
 
-  /** Starts the runs a paused step asked for, answers its task tool calls, and tracks the rest. */
   private async startCallWait(
     paused: Extract<TurnPause, { readonly on: "calls" }>,
   ): Promise<CallWait> {
@@ -364,11 +316,6 @@ export class SessionExecution {
     return wait;
   }
 
-  /**
-   * Starts the workflow tool runs a parked step requested, and returns the
-   * results of any that settled at once. Task tool calls need no dispatch: the
-   * session answers them itself.
-   */
   private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
     const { cursor } = this.input;
     const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
@@ -380,7 +327,6 @@ export class SessionExecution {
         },
       }),
     );
-    // Published in a step of its own, so a retry while it runs cannot start the runs again.
     const { executing, refused, started } = dispatched.pending;
     if (executing.length > 0 || started.length > 0 || refused.length > 0) {
       await cursor.advance((state) =>
@@ -390,11 +336,6 @@ export class SessionExecution {
     return dispatched.results;
   }
 
-  /**
-   * Handles a run message the session just read. One it applies as it reads
-   * it takes along those read after it, from `turn` while a turn runs, so a
-   * fan-out's messages share one step.
-   */
   async handleWorkflowMessage(
     message: WorkflowToolRunMessage,
     turn?: ActiveTurn,
@@ -411,18 +352,11 @@ export class SessionExecution {
     });
   }
 
-  /**
-   * Stops the work a cancelled turn leaves behind: the workflow tool runs it
-   * waits on and every working task. A turn that waits on no run, the common
-   * case, skips that durable step.
-   */
   async cancelTurnWork(): Promise<void> {
     await cancelWorkingTasks(this.input.cursor, "turn-cancelled", { turnCalls: true });
   }
 
-  /** `session.cancel()` stops the turn, the calls it waits on, and every working task. */
   private async finishCancelledTurn(turn: ActiveTurn): Promise<TurnOutcome> {
-    // A child a run opened before the cancel appears before its task settles as cancelled.
     await this.handleBoundaryMessages(turn.takeBoundaryMessages(isAgentSessionMessage));
     await this.cancelTurnWork();
     const by = turn.cancelledBy;
@@ -432,16 +366,11 @@ export class SessionExecution {
   }
 }
 
-/**
- * The calls a paused turn waits on: the results that arrived and when, what the `ctx.agent`
- * sessions behind them spent, and the `eve__task_wait` calls still parked.
- */
 class CallWait {
   private readonly cursor: SessionStateCursor;
   private readonly callIds: readonly string[];
   private readonly results: RuntimeActionResult[] = [];
   private readonly acceptedAtMs = new Map<string, number>();
-  /** By call id, so an outcome delivered twice counts once. */
   private readonly delegatedUsage = new Map<string, TokenUsage>();
   private taskWaits: TaskWait[] = [];
 
@@ -456,7 +385,6 @@ class CallWait {
     for (const result of dispatched) this.accept(result, acceptedAtMs);
   }
 
-  /** Every call's result, once each has one. */
   async ready(interrupted: boolean): Promise<RuntimeActionResultStepInput | undefined> {
     this.taskWaits = await this.resolveTaskWaits(interrupted);
     const ready = resolveRuntimeActionResultsForCallIds({
@@ -477,7 +405,6 @@ class CallWait {
     };
   }
 
-  /** The durable sleeps of the parked `eve__task_wait` calls. */
   timers(): readonly Promise<string>[] {
     return this.taskWaits.flatMap((wait) => (wait.timer === undefined ? [] : [wait.timer]));
   }
@@ -488,7 +415,6 @@ class CallWait {
     }
   }
 
-  /** Results through the turn inbox count only from runs the turn recorded. */
   acceptInbox(results: readonly RuntimeActionResult[]): void {
     const snapshot = this.cursor.sessionState.snapshot.session.state;
     const acceptedAtMs = Date.now();
@@ -502,7 +428,6 @@ class CallWait {
     }
   }
 
-  /** A run's message settled a call. */
   acceptRun(result: RuntimeActionResult, message: WorkflowToolRunMessage): void {
     this.accept(result);
     if (message.kind === "outcome" && message.usage !== undefined) {
@@ -510,7 +435,6 @@ class CallWait {
     }
   }
 
-  /** Aborts the `abortSignal` of every workflow tool call without a result yet. */
   async interrupt(): Promise<void> {
     const state = this.cursor.sessionState.snapshot.session.state;
     const runs = this.callIds.flatMap((callId) => {
@@ -521,13 +445,6 @@ class CallWait {
     await Promise.all(runs.map((run) => interruptWorkflowToolRun(run)));
   }
 
-  /**
-   * `eve__task_cancel` is answered at once, and so is each `eve__task_wait` that can
-   * return now: a timeout of 0, a result already waiting, or nothing working.
-   * Any other `eve__task_wait` parks the open turn, reported once as
-   * `turn.paused`, and the turn resolves it alongside the step's other
-   * workflow tool calls.
-   */
   async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {
     const waits: TaskWait[] = [];
     const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
@@ -547,7 +464,6 @@ class CallWait {
     this.acceptedAtMs.set(result.callId, acceptedAtMs);
   }
 
-  /** Answers every `eve__task_wait` that can return now; returns the ones still waiting. */
   private async resolveTaskWaits(interrupted: boolean): Promise<TaskWait[]> {
     const table = sessionTaskTable(this.cursor);
     const waiting: TaskWait[] = [];
@@ -564,14 +480,9 @@ class CallWait {
   }
 }
 
-/**
- * One `eve__task_wait` call the turn is parked on. Its timeout is a durable sleep
- * the turn races against the inbox; nothing polls.
- */
 interface TaskWait {
   readonly callId: string;
   readonly startedAtMs: number;
-  /** Resolves with the call's id once the timeout passes; absent without a timeout. */
   readonly timer?: Promise<string>;
   timedOut: boolean;
 }

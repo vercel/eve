@@ -12,10 +12,6 @@ import type {
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
 
-/**
- * Returns a sandbox session that applies `abortSignal` to every operation.
- * Per-call signals are composed with the bound signal.
- */
 export function bindSandboxAbortSignal<TSession extends SandboxSession>(
   session: TSession,
   abortSignal: AbortSignal,
@@ -47,6 +43,5 @@ export function bindSandboxAbortSignal<TSession extends SandboxSession>(
       session.removePath({ ...options, signal: compose(options.signal) }),
   } satisfies SandboxSession;
 
-  // The spread retains provider-specific lifecycle methods not declared on SandboxSession.
   return bound as TSession;
 }

@@ -96,7 +96,6 @@ describe("agentRouter", () => {
   });
 });
 
-/** An agent whose session replies to every message with `message`. */
 function replyingAgent(message: string) {
   const send = vi.fn(async () => ({
     result: async () => ({

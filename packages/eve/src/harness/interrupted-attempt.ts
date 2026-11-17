@@ -2,13 +2,6 @@ import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/m
 import type { CallOutcome } from "#protocol/session-events/families/call.js";
 import type { JsonValue } from "#shared/json.js";
 
-/**
- * A step's earlier attempt can publish and then be interrupted before its checkpoint. Its retry
- * runs the step again from that checkpoint, and the model reads which calls the attempt may have
- * run, so it decides what to call again.
- */
-
-/** What an interrupted attempt published about one call. */
 export interface InterruptedCall {
   readonly name: string;
   readonly input?: JsonValue;
@@ -16,7 +9,6 @@ export interface InterruptedCall {
   readonly outcome?: CallOutcome;
 }
 
-/** What the model reads of a call an interrupted attempt published, by what it published. */
 export function interruptedCallResult(call: InterruptedCall | undefined): string {
   switch (call?.outcome) {
     case "completed":
@@ -35,7 +27,6 @@ export function interruptedCallResult(call: InterruptedCall | undefined): string
 const MAX_NOTED_CALLS = 20;
 const MAX_NOTED_INPUT_LENGTH = 500;
 
-/** Which calls the attempt started, so the model decides what to run again. None: no note. */
 export function interruptedAttemptNote(
   calls: ReadonlyMap<string, InterruptedCall>,
 ): HarnessModelMessage | undefined {

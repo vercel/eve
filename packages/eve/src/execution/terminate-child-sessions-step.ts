@@ -5,10 +5,6 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.terminate-child-sessions");
 
-/**
- * Session end ends every run the session started, including cancelled runs that haven't
- * confirmed yet. Each run ends the agent sessions it opened.
- */
 export async function terminateChildSessionsStep(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<void> {

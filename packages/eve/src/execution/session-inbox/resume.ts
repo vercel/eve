@@ -35,19 +35,10 @@ import { isObject } from "#shared/guards.js";
 export interface ResumedSessionInboxHook {
   readonly ownerRunId: string;
   readonly inbox?: string;
-  /** Lazy identity resolution; delivery never needs to decrypt hook metadata. */
   readonly sessionId: Promise<string>;
-  /**
-   * The logical address that took the command when the session had not yet
-   * claimed its stable inbox; see {@link resumeSessionStartHook}.
-   */
   readonly startAddress?: string;
 }
 
-/**
- * Resumes the current owner with the current command shape. A handoff never
- * leaves an address unowned: the successor force-claims the source's hooks.
- */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
   command:
@@ -91,9 +82,6 @@ export async function resumeSessionInbox(
         try {
           return knownSessionId ?? requireSessionId(await hook.metadata);
         } catch (cause) {
-          // A failed identity read must never cause a second delivery. An owner whose
-          // deployment was deleted can never replay what it accepted, so replacing it
-          // delivers the command once.
           const stranded = await strandedIfDeploymentDeleted(cause, hook);
           throw stranded === cause ? new AcceptedSessionIdentityError(cause) : stranded;
         }
@@ -102,13 +90,6 @@ export async function resumeSessionInbox(
   };
 }
 
-/**
- * Resumes the token's owner. A run without a public key needs its deployment's
- * key to accept anything, so a deleted deployment fails the resume itself. A
- * concurrent delivery may have replaced that owner since: the current holder
- * is stranded only when its own key lookup fails too, and a live one gets the
- * command by token, because a cached inbox handle names the dead owner.
- */
 async function resumeCurrentOwner(
   token: string,
   command: unknown,
@@ -144,10 +125,6 @@ export function requireSessionId(metadata: unknown): string {
   return value;
 }
 
-/**
- * The session holding a logical token. Throws `StrandedSessionOwnerError` when
- * its owner's deployment was deleted, which hides the session ID.
- */
 export async function resolveSessionInbox(token: string): Promise<{ sessionId: string }> {
   let hook: Hook | undefined;
   try {
@@ -164,18 +141,10 @@ export async function resolveSessionInbox(token: string): Promise<{ sessionId: s
   }
 }
 
-/**
- * Resumes the hook a session's `start()` claimed with its run. The run takes
- * commands there before it boots and claims its stable inbox, so a command
- * by session id needs no wait for the boot. Resolves `undefined` when the
- * session was started without one or has released it. The hook is resumed by
- * id, so it never reaches a later session's claim of the same address.
- */
 export async function resumeSessionStartHook(
   sessionId: string,
   payload: unknown,
 ): Promise<{ readonly address: string; readonly runId: string } | undefined> {
-  // Only a run id names a start Hook; a caller can send any session id.
   if (!sessionId.startsWith("wrun_")) return undefined;
   let hook: Awaited<ReturnType<WorldHooks["get"]>>;
   try {
@@ -199,18 +168,15 @@ export async function resumeSessionStartHook(
 
 type WorldHooks = Awaited<ReturnType<typeof getWorld>>["hooks"];
 
-/** world-vercel answers a lookup of an absent hook by id with a bare 404. */
 function isMissingHook(error: unknown): boolean {
   return HookNotFoundError.is(error) || (WorkflowWorldError.is(error) && error.status === 404);
 }
 
-/** A driver too old to import is, for every caller, a session that no longer exists. */
 function rethrowUnsupportedAsNotFound(error: unknown): never {
   if (error instanceof UnsupportedLegacySessionError) throw new HookNotFoundError(error.message);
   throw error;
 }
 
-/** Logical token behind an address: the address itself, or the session's stable command token. */
 export function logicalSessionToken(address: string | SessionInboxAddress): string {
   if (typeof address === "string") return address;
   if (!isSessionInboxAddress(address))

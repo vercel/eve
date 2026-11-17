@@ -1,9 +1,3 @@
-// How a v26 request, its resolution, and a sign-in read as v27 interactions. Both readers of v26
-// share this: the history reader, which reads sessions an eve before v27 recorded, and the remote
-// agent callback, which mirrors what a child on remote agent protocol 2 asks.
-//
-// Delete once neither v26 history nor protocol 2 children remain.
-
 import type {
   InteractionOption,
   InteractionOutcome,
@@ -12,7 +6,6 @@ import type {
 
 type Data = Readonly<Record<string, unknown>>;
 
-/** A v26 question, tool approval, or session limit as the request a v27 reader shows. */
 export function v26InteractionRequest(request: Data): InteractionRequest {
   const kind =
     request.kind === "tool-approval"
@@ -52,7 +45,6 @@ export function v26InteractionRequest(request: Data): InteractionRequest {
   };
 }
 
-/** How a v26 resolution's outcome settles the interaction it resolved. */
 export function v26InteractionOutcome(outcome: unknown): InteractionOutcome {
   switch (outcome) {
     case "answered":
@@ -63,12 +55,10 @@ export function v26InteractionOutcome(outcome: unknown): InteractionOutcome {
     case "invalid":
       return "invalid";
     default:
-      // `cancelled` and `ignored`: the request was withdrawn without an answer.
       return "withdrawn";
   }
 }
 
-/** A v26 `authorization.required` event's data as the sign-in a v27 reader shows. */
 export function v26SignInRequest(data: Data): InteractionRequest {
   const challenge = isRecord(data.authorization) ? data.authorization : {};
   const name = str(data.name) ?? "sign-in";
@@ -98,7 +88,6 @@ export function v26SignInRequest(data: Data): InteractionRequest {
   };
 }
 
-/** How a v26 `authorization.completed` outcome settles its sign-in. */
 export function v26SignInOutcome(outcome: unknown): InteractionOutcome {
   return outcome === "authorized"
     ? "accepted"

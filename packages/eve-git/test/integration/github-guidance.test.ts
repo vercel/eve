@@ -14,7 +14,6 @@ const context = {
   channel: { kind: "http" as const, metadata: {} },
 };
 
-// A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
 async function run<T>(definition: unknown): Promise<T> {
   const evaluate = (definition as Record<symbol, (ctx: never) => unknown>)[
     Symbol.for("eve.dynamic")
@@ -68,7 +67,6 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   assert.match(content, /GitHub credentials are not available to ordinary `bash`/u);
   assert.match(content, /Use the `gh` tool for every authenticated GitHub operation/u);
   assert.match(content, /Load the pr skill before publishing/u);
-  // The agent discovers repositories itself instead of asking for an exact owner/name.
   assert.match(content, /gh search repos/u);
   assert.match(content, /gh repo list <owner>/u);
   assert.match(content, /Do not ask the requester for an exact `owner\/name`/u);
@@ -85,7 +83,6 @@ test("github config without authorize is rejected, so brokered access never defa
       } as never),
     /github\.authorize/u,
   );
-  // principalType selects what authorize receives, so it is required.
   assert.throws(
     () =>
       extension({

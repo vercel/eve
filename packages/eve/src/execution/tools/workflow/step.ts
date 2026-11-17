@@ -25,13 +25,10 @@ interface WorkflowContextArgument {
   readonly run: WorkflowToolRunContext;
 }
 
-/** Wraps a step proxy only when the caller explicitly passes its workflow tool context. */
 export function workflowToolStep(
   original: (...args: unknown[]) => Promise<unknown>,
   execute: (invocation: WorkflowStepInvocation) => Promise<unknown>,
 ) {
-  // Forward the SDK proxy's stepId, bind implementation, and serialization metadata.
-  // A revived reference still calls the original registered function with native arguments.
   return new Proxy(original, {
     apply(target, receiver, args: unknown[]) {
       const contextArgument = findWorkflowContextArgument(args);
@@ -197,7 +194,6 @@ async function collectAuthorizationCallbacks(input: {
         callback: response,
       });
     } catch (error) {
-      // Cancelled turns close their inbox; cancelled tasks discard further deliveries.
       if (!ctx.abortSignal.aborted) {
         await reportAuthorization(run, ctx.abortSignal, identified, "failed");
       }
@@ -232,9 +228,6 @@ async function reportAuthorization(
   const event = runSignIn(run.from, challenge, outcome);
   const acknowledged = createHook<void>();
   try {
-    // The relay can run before this suspension registers the hook, and the
-    // session's acknowledgement skips a hook it can't find. A generated token
-    // can't conflict, so this only waits for registration.
     await acknowledged.getConflict();
     await withAbort(
       run.owner.send({
@@ -335,10 +328,6 @@ function readCallback(
   return undefined;
 }
 
-/**
- * A workflow run's sign-in, reported to the session that owns the run, which mirrors it: opened
- * while the run waits, then how it settled.
- */
 function runSignIn(
   from: { readonly taskId?: string; readonly turnId: string },
   challenge: AuthorizationChallenge,

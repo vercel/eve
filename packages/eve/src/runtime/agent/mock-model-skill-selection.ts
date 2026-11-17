@@ -15,11 +15,6 @@ export function getAvailableSkills(prompt: BootstrapPrompt): AvailableBootstrapS
       continue;
     }
 
-    // The "Available skills" section may be a standalone announcement
-    // (dynamic skills) or embedded inside the agent's static instructions
-    // (authored skills); parse bullet lines from the section header to the
-    // first blank line either way. Deferred skills aren't listed, so only
-    // these are offered.
     const lines = getPromptContentText(message.content).split("\n");
     const headerIndex = lines.findIndex((line) => line.trim() === "Available skills");
 
@@ -81,14 +76,9 @@ export function getActivatedSkillIds(prompt: BootstrapPrompt): string[] {
         });
     });
 
-  // Static skill adverts stay in the prompt for the whole session (prompt
-  // caching), so activation must also be derived from skill loads already
-  // present in the history — otherwise the mock would re-load the same skill
-  // on every step.
   return [...fromSystemLabels, ...getSkillLoads(prompt).values()];
 }
 
-/** Skill loads in the history: each `eve__skill({ name })` call's id and skill. */
 export function getSkillLoads(prompt: BootstrapPrompt): ReadonlyMap<string, string> {
   const loads = new Map<string, string>();
 

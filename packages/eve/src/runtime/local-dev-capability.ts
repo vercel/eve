@@ -13,17 +13,7 @@ import {
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 
-/**
- * Authored application root, published by the `eve dev` host that owns the
- * authored-source watcher.
- *
- * The runtime's own `appRoot` can point at an immutable development snapshot
- * (see `runtime/compiled-artifacts-source.ts`), so a tool that writes to it
- * mutates a directory that is about to be discarded. This variable always names
- * the directory the developer authored.
- */
 const LOCAL_DEV_APP_ROOT_ENV = "EVE_DEV_APP_ROOT";
-/** Origin of the dev host's control plane, which owns the watcher handle. */
 const LOCAL_DEV_CONTROL_URL_ENV = "EVE_DEV_CONTROL_URL";
 export const LOCAL_DEV_INTERACTIVE_CLIENT_HEADER = "x-eve-dev-interactive-client";
 
@@ -56,12 +46,6 @@ export interface LocalDevCapability {
   withSuspendedSource<T>(task: () => Promise<T>): Promise<T>;
 }
 
-/**
- * Publishes the local dev capability to the runtime for one dev server.
- *
- * Returns a restore function that reinstates the previous values, matching the
- * other environment installers the dev host tears down on close.
- */
 export function installLocalDevCapabilityEnvironment(input: {
   readonly appRoot: string;
   readonly serverUrl: string;
@@ -76,10 +60,6 @@ export function installLocalDevCapabilityEnvironment(input: {
   };
 }
 
-/**
- * Seeds the inherited dev-TUI hint only when the dev host signed a peer
- * address on this machine. Client-supplied address headers cannot create that hint.
- */
 export async function withLocalDevRequestScope<T>(
   request: Request,
   callback: () => Promise<T>,
@@ -157,8 +137,6 @@ export function getLocalDevCapability(
         outcome = { error, ok: false };
       }
 
-      // Release is keyed by this acquisition, so retrying after a lost
-      // response cannot release another concurrent holder.
       if (
         (await resumeDevelopmentRuntimeArtifacts({ leaseId, serverUrl: controlUrl })) ===
           undefined &&

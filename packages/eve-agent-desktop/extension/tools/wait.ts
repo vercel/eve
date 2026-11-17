@@ -4,11 +4,6 @@ import { desktopTool, flag } from "../lib/tool";
 
 const TARGET_FLAG = { window: "window", text: "text", element: "element" } as const;
 
-/**
- * The input stays one object rather than a union on `condition`: model
- * providers require a top-level object schema. The refinement still rejects a
- * mode's missing or stray fields before the call reaches the sandbox.
- */
 const inputSchema = z
   .object({
     condition: z
@@ -79,7 +74,6 @@ export default desktopTool({
     "Wait for a window, text, or element to appear, for a menu to open or close, or for a fixed time. Prefer a condition over a fixed time.",
   inputSchema,
   argv: (input) => {
-    // The schema already enforces these; the checks narrow the types and guard direct execute calls.
     let mode: string[];
     if (input.condition === "time") {
       if (input.ms === undefined) throw new Error("wait with condition time needs ms.");

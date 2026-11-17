@@ -9,7 +9,6 @@ import {
 
 const MB = 1024 * 1024;
 
-/** A body that streams `total` bytes in `chunk`-sized pieces and declares no length. */
 function streamed(total: number, chunk: number): Response {
   let sent = 0;
   const body = new ReadableStream<Uint8Array>({

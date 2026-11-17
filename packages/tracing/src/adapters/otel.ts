@@ -81,10 +81,6 @@ function mappedAttributes(
   return mapping?.attributes(span, attributes) ?? attributes;
 }
 
-/**
- * Applied when the host passes no mapping. On Vercel it adds the session ID
- * Agent Runs uses to find a run's spans.
- */
 const DEFAULT_MAPPING: OutputMapping = {
   attributes(_span, attributes) {
     const runId = attributes["agent.run.id"];
@@ -203,7 +199,6 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
     },
     run(operation, execute, executionContext) {
       let capture = intersectCapture(operation.capture, activeTraceOperation()?.capture);
-      // Retain baggage and host context while replacing the semantic parent span.
       let active = trace.setSpan(
         (executionContext as Context | undefined) ?? context.active(),
         trace.wrapSpanContext(otelReference(operation.reference)),

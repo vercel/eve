@@ -10,23 +10,13 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.stop-runs");
 
-/** How a run is told to stop: `end` also finishes a `serve` task's run, which a cancel keeps. */
 export type RunStop = Extract<WorkflowToolRunControlMessage, { readonly kind: "cancel" | "end" }>;
 
-/** One run to stop. */
 export interface RunStopTarget {
   readonly run: WorkflowToolRunAddress;
-  /**
-   * Whether the stop ends the run. A resumable task's cancel stops only its current stretch of
-   * work, and its run stays parked for later calls, so nothing waits for it to end.
-   */
   readonly ends: boolean;
 }
 
-/**
- * The workflow tool runs the session's turn waits on; each run is one call, which a cancel ends.
- * A cancel still commits when they can't be read, so it stops none of them.
- */
 export function waitedCallRuns(session: {
   readonly sessionId: string;
   readonly state?: SessionStateMap;
@@ -47,14 +37,6 @@ export function waitedCallRuns(session: {
   }
 }
 
-/**
- * Stops runs, the same way whoever stops them: each is told to stop, and a run that couldn't be
- * told, such as one that hasn't registered its control hook yet, is cancelled outright. By default
- * a run the stop ends gets until the deadline to finish cleaning up, and one still running then is
- * cancelled outright too. With `waitForEnd: false` nothing waits: a told run that never finishes
- * is not cancelled here, and keeps running until it ends on its own or its session ends.
- * Returns the runs cancelled outright, which never report how they ended.
- */
 export async function stopRuns(
   targets: readonly RunStopTarget[],
   stop: RunStop,
@@ -84,7 +66,6 @@ async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean
     await resumeHook(run.hookToken, stop);
     return true;
   } catch (error) {
-    // A fresh run may not have registered its control hook yet.
     if (!isTaskWorkflowTargetGone(error)) {
       logError(log, "failed to tell a run to stop; cancelling it outright", error, {
         runId: run.runId,
@@ -94,7 +75,6 @@ async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean
   }
 }
 
-/** Waits until every run finishes or the deadline passes, and returns the ones still running. */
 async function runsStillRunning(runIds: readonly string[]): Promise<readonly string[]> {
   let running = runIds;
   const deadline = Date.now() + WORKFLOW_CANCELLATION_SETTLE_MS;
@@ -108,7 +88,6 @@ async function runsStillRunning(runIds: readonly string[]): Promise<readonly str
   return running;
 }
 
-/** A run whose status can't be read counts as live, so the deadline still stops it. */
 async function isRunLive(runId: string): Promise<boolean> {
   try {
     const status = await getRun(runId).status;
@@ -118,7 +97,6 @@ async function isRunLive(runId: string): Promise<boolean> {
   }
 }
 
-/** True when the run was still live and is now cancelled. */
 async function cancelOutright(runId: string, reason: string): Promise<boolean> {
   try {
     await cancelRun(await getWorld(), runId, { cancelReason: reason });

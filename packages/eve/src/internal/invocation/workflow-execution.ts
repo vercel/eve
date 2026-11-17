@@ -90,8 +90,6 @@ export class WorkflowAgentInvocationExecution {
     const { invocation, stream, token } = current;
     const pendingBatch = stream?.pending;
     if (invocation.status !== "awaiting-input" || pendingBatch === undefined) {
-      // A retry after a lost response is the common case here: the answer
-      // already landed, so acknowledge it instead of demanding a new one.
       if (stream !== undefined && replaysSettledBatch(stream, input.responses)) {
         return { invocation, type: "success" };
       }
@@ -186,10 +184,6 @@ export class WorkflowAgentInvocationExecution {
   }
 }
 
-/**
- * The requests one commit opened, by `interactionId`. An id belongs to one interaction for the
- * session's life, so an answer naming one outside the pending batch can't reach a later one.
- */
 type InputBatch = ReadonlyMap<string, Interaction>;
 
 interface InvocationFailure {
@@ -197,18 +191,12 @@ interface InvocationFailure {
   readonly terminal: boolean;
 }
 
-/** The session's shared tables, plus what an invocation shows that they don't keep. */
 interface InvocationStream {
   readonly view: SessionView;
-  /** The batches in the order they were requested, each holding the requests it introduced. */
   readonly batches: readonly InputBatch[];
-  /** The latest batch with requests still open, narrowed to them. */
   readonly pending: InputBatch | undefined;
-  /** Each sign-in still open, in the order they opened. */
   readonly signIns: readonly InteractionRow[];
-  /** The latest turn's final message. */
   readonly result: JsonValue | undefined;
-  /** How the latest turn ended; reset when a turn starts or a park resumes. */
   readonly settled: "completed" | "cancelled" | InvocationFailure | undefined;
 }
 
@@ -219,8 +207,6 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
     follow: false,
   })) {
     if (line === undefined) {
-      // v27 can't read the turns or requests of an invocation an earlier eve started; without
-      // this, it would read as working forever.
       if (position === 0 && isV26Line(record)) return startedOnEarlierEve(view);
       continue;
     }
@@ -266,10 +252,6 @@ function startedOnEarlierEve(view: SessionView): InvocationStream {
   };
 }
 
-/**
- * How the latest turn ended, unless an answer it waited on has settled since; a failed session
- * ends the invocation for good.
- */
 function howItSettled(view: SessionView): InvocationStream["settled"] {
   const { session } = view;
   const ended = session.outcome === "failed" ? failure(view) : undefined;
@@ -287,7 +269,6 @@ function howItSettled(view: SessionView): InvocationStream["settled"] {
   return session.status === "ended" ? "completed" : undefined;
 }
 
-/** What the latest turn replied once it settled: its structured result, or else its text. */
 function latestResult(view: SessionView): JsonValue | undefined {
   const turnId = view.session.latestTurnId;
   if (turnId === undefined || view.turns[turnId]?.status !== "settled") return undefined;
@@ -303,7 +284,6 @@ function invocationInteractions(
   return shown;
 }
 
-/** True when `responses` exactly repeats the answers eve accepted for the latest batch. */
 function replaysSettledBatch(stream: InvocationStream, responses: readonly Answer[]): boolean {
   const batch = stream.batches.at(-1);
   if (batch === undefined || responses.length !== batch.size) return false;
@@ -321,12 +301,6 @@ function replaysSettledBatch(stream: InvocationStream, responses: readonly Answe
   return true;
 }
 
-/**
- * Projects the invocation from its session. The session parks after the
- * turn settles, so `turn.settled` or a failure — not the run
- * status — is what completes the invocation. An open sign-in or input
- * request outranks how the turn ended.
- */
 function projectInvocation(
   base: { readonly createdAt: string; readonly expiresAt?: string; readonly invocationId: string },
   runStatus: string,
@@ -344,7 +318,6 @@ function projectInvocation(
     error: publicInvocationFailure(base.invocationId, failure?.error),
     status: "failed",
   });
-  // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
   if (runStatus === "failed" || failure?.terminal === true) return failed();
   if (info.sessionEnded) {
     if (failure !== undefined) return failed();
@@ -371,7 +344,6 @@ function projectInvocation(
   };
 }
 
-/** The latest running call or task, plus how many others are still running. */
 function statusMessage(current: Activity): string | undefined {
   const names =
     current.kind === "calling"

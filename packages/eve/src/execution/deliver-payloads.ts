@@ -10,7 +10,6 @@ const COALESCED_DELIVER_FIELDS = [
   "outputSchema",
 ] as const;
 
-/** Coalesces channel payloads while preserving turn input and adapter-specific fields. */
 export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): DeliverPayload {
   if (payloads.length === 0) return {};
   if (payloads.length === 1) return payloads[0] ?? {};

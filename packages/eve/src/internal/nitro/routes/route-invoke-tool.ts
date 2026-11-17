@@ -13,15 +13,9 @@ import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { InvokeToolTraceOrigin } from "#tracing/eve/invoke-tool-span.js";
 
-/**
- * Builds the route's `invokeTool`. The agent's static tools and sandbox load on
- * the first call, so routes that never invoke a tool pay nothing.
- */
 export function createRouteInvokeTool(input: {
-  /** The agent's name, on every call's span and in its trace policy input. */
   readonly agentName: string;
   readonly config: NitroArtifactsConfig;
-  /** The channel this route belongs to; trace policy classifies calls by it. */
   readonly origin?: InvokeToolTraceOrigin;
   readonly requestUrl: string;
 }): InvokeToolFn {
@@ -44,10 +38,8 @@ export function createRouteInvokeTool(input: {
   };
 }
 
-/** The part of `InvokeToolRuntime` that comes from the compiled agent. */
 export type LoadedInvokeToolRuntime = Omit<InvokeToolRuntime, "agentName" | "origin">;
 
-/** Loads the root agent's static tools and sandbox. Dynamic resolvers are not run. */
 export async function loadInvokeToolRuntime(input: {
   readonly callbackBaseUrl: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
@@ -58,7 +50,6 @@ export async function loadInvokeToolRuntime(input: {
     loadCompiledManifest({ compiledArtifactsSource }),
   ]);
   const node = bundle.graph.root;
-  // A channel's direct `invokeTool` runs under the same agent-wide policy as a model's call.
   const tools = withAgentApprovalOnEntries(
     createNodeHarnessTools({ node }),
     resolveAgentApproval(bundle),

@@ -185,7 +185,6 @@ describe("dynamic runtime model resolution", () => {
 
   it.each([
     { selection: "openai/gpt-5.5", id: "openai/gpt-5.5" },
-    // A -thinking variant keeps its Gateway id and takes its base model's window.
     { selection: "openai/gpt-5.5-thinking", id: "openai/gpt-5.5-thinking" },
   ])("resolves an omitted context window for $selection from the build", async (input) => {
     const resolved = await resolveRuntimeModelSelection({

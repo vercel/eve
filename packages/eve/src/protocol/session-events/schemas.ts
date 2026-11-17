@@ -1,6 +1,3 @@
-// The schemas for every fact and progress type, for tests and development. Readers never load
-// this module: they rely on the catalog and tolerate what they don't know.
-
 import { z } from "#compiled/zod/index.js";
 
 import type { FactType, ProgressType } from "./catalog.js";
@@ -37,10 +34,6 @@ export const PROGRESS_SCHEMAS = {
   ...callProgressSchemas,
 } satisfies { readonly [TType in ProgressType]: z.ZodType };
 
-/**
- * Checks one fact or progress record of a known type against its schema, and returns what's
- * wrong, or `undefined`. Records of unknown types pass: readers ignore them.
- */
 export function schemaViolation(record: unknown, kind: "fact" | "progress"): string | undefined {
   const type =
     record !== null && typeof record === "object"

@@ -74,7 +74,6 @@ export default defineChannel({
   name: "stranded-session-reset",
 };
 
-/** Fetches from the running app, attaching its output to any transport failure. */
 async function request(server: RunningEveStart, path: string, init?: RequestInit) {
   try {
     return await fetch(new URL(path, server.url), init);
@@ -92,10 +91,6 @@ async function streamRequests(server: RunningEveStart): Promise<number> {
   return ((await (await request(server, "/stream-requests")).json()) as { count: number }).count;
 }
 
-/**
- * HEAD reaches only routes declared with HEAD(): a GET-only path answers 405
- * with its methods and CORS headers before its handler runs.
- */
 async function expectHeadRouting(server: RunningEveStart): Promise<void> {
   const before = await streamRequests(server);
   const guarded = await request(server, "/sessions/unknown/stream", {
@@ -120,7 +115,6 @@ async function sendToThread(server: RunningEveStart, message: string): Promise<s
   return (JSON.parse(body) as { sessionId: string }).sessionId;
 }
 
-/** Reads the session's event stream until its first turn has finished. */
 async function waitForTurnCompleted(server: RunningEveStart, sessionId: string): Promise<void> {
   const response = await request(server, `/sessions/${sessionId}/stream`, {
     signal: AbortSignal.timeout(WAIT_TIMEOUT_MS),
@@ -158,7 +152,6 @@ async function waitForOutput(server: RunningEveStart, text: string): Promise<voi
   }
 }
 
-/** The local World keeps each run's record, including its attributes, at `runs/<runId>.json`. */
 function runFilePath(appRoot: string, runId: string): string {
   return join(resolveLocalWorkflowWorldDataDirectory(appRoot), "runs", `${runId}.json`);
 }
@@ -186,13 +179,11 @@ describe("stranded sessions across an eve upgrade", () => {
         await expectHeadRouting(server);
         strandedSessionId = await sendToThread(server, "Alice opens the thread.");
         await waitForTurnCompleted(server, strandedSessionId);
-        // The counter the HEAD check relies on does count stream requests.
         expect(await streamRequests(server)).toBeGreaterThan(0);
       } finally {
         await server.stop();
       }
 
-      // Simulate the first upgrade from a release that did not stamp owner versions.
       const runFile = runFilePath(appRoot, strandedSessionId);
       const parked = await readRun(runFile);
       expect(parked.status).toBe("running");
@@ -211,7 +202,6 @@ describe("stranded sessions across an eve upgrade", () => {
           method: "POST",
         });
         expect(byId.status, server.stderr()).toBe(409);
-        // The parked run recorded no eve version, as on the first upgrade.
         await expect(byId.json()).resolves.toEqual({ stranded: true });
 
         const freshSessionId = await sendToThread(server, "Alice continues the thread.");

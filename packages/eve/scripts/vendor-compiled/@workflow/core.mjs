@@ -12,19 +12,13 @@ const WORKFLOW_VM_DECLARATION = "_workflow-vm.d.ts";
 
 async function discoverDeclarationFiles({ distDir }) {
   const files = await collectFilesRecursively(distDir, [".d.ts"]);
-  return (
-    files
-      .map((file) => relative(distDir, file).replaceAll("\\", "/"))
-      .sort()
-      // eve flattens dist/workflow/index.js to workflow.js, so workflow.d.ts
-      // is owned by the shim entry below. Upstream's VM-runner declarations
-      // move aside; queueing them here keeps relative-import discovery from
-      // copying them back over the shim.
-      .map((file) => ({
-        source: file,
-        output: file === "workflow.d.ts" ? WORKFLOW_VM_DECLARATION : file,
-      }))
-  );
+  return files
+    .map((file) => relative(distDir, file).replaceAll("\\", "/"))
+    .sort()
+    .map((file) => ({
+      source: file,
+      output: file === "workflow.d.ts" ? WORKFLOW_VM_DECLARATION : file,
+    }));
 }
 
 function buildMsStub(names, moduleName) {
@@ -120,12 +114,6 @@ const copyDeclarations = createDeclarationCopier({
   },
 });
 
-// @workflow/core@5.0.0-beta.38 restored runtime world selection: its
-// `createWorld()` statically imports both first-party world packages. eve
-// never calls that factory — worlds are selected and wired explicitly at
-// build time — so those imports would only drag the local world into hosted
-// Vercel output (and the Vercel world into local-only builds). Stub them
-// inside core; each world package keeps its own vendored entry.
 const CORE_WORLD_FACTORY_STUB_ID = "\0eve-core-world-factory-stub";
 
 function stubCoreWorldFactories() {
@@ -150,18 +138,12 @@ function stubCoreWorldFactories() {
   };
 }
 
-// @workflow/core@5.0.0-beta.40 lazy-loads the optional QuickJS runtime, but
-// Rolldown still emits it as a reachable chunk and Nitro packages that chunk
-// into every eve function. eve only supports the Node.js workflow VM, so keep
-// the lazy boundary while replacing its target with a small, explicit error.
 const CORE_QUICKJS_ENTRYPOINT_STUB_ID = "\0eve-core-quickjs-entrypoint-stub";
 
 function stubCoreQuickJSEntrypoint() {
   return {
     name: "eve:stub-core-quickjs-entrypoint",
     resolveId(source, importer) {
-      // Each orchestrator (`runtime/spec8/`, `runtime/spec9/`) lazily imports
-      // its own sibling entrypoint.
       if (!/^\.\/(?:runtime\/)?quickjs-entrypoint\.js$/u.test(source)) return null;
       if (typeof importer !== "string") return null;
       if (!importer.replaceAll("\\", "/").includes("/@workflow/core/")) return null;
@@ -194,8 +176,6 @@ export default {
     {
       entry: "dist/workflow/index.js",
       outputPath: "workflow",
-      // Upstream's orchestrator declarations import `PendingQueueDrain` from
-      // the root `workflow.js`, which this shim now owns.
       declaration: `export * from "./workflow/index.js";\nexport type { PendingQueueDrain } from "./_workflow-vm.js";\n`,
     },
     {
@@ -209,8 +189,6 @@ export default {
   ],
   async copyDeclarations(context) {
     await copyDeclarations(context);
-    // Workflow runs in Node, where Request.duplex is always "half". DOM's
-    // Request type deliberately lacks that Node-only property; do not augment it.
     for (const path of await collectFilesRecursively(context.destinationRoot, [".d.ts"])) {
       const source = await readFile(path, "utf8");
       const portable = source.replace(/Request\[(?:"duplex"|'duplex')\]/g, '"half"');

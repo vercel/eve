@@ -20,9 +20,6 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineTool } from "#tools/definition.js";
 
-// What each surface contributes, and when its memos and hooks run, read from what the model
-// receives and what the definitions log, so the pins hold while the stream changes underneath.
-
 const ALICE = {
   attributes: {},
   authenticator: "test",
@@ -52,7 +49,6 @@ function lastUserText(prompt: LanguageModelV4Prompt): string {
   return "";
 }
 
-/** Each turn calls `lookup` once and then replies; a compaction gets a summary. */
 function scriptedModel(log: string[], prompts: LanguageModelV4Prompt[]) {
   const summary = () => {
     log.push("call:summary");
@@ -108,7 +104,6 @@ describe("reactions", () => {
     const runtime = await createTestRuntime({
       agent: {
         definition: defineAgent({
-          // The memo chooses once per session; the provider object is built from its answer.
           model: defineDynamicModel(async (ctx) => {
             await ctx.memo(ctx.session.id, () => {
               log.push("memo:model");
@@ -157,7 +152,6 @@ describe("reactions", () => {
               return {
                 lookup: defineTool({
                   description: "Look something up.",
-                  // Code a closure captures needs no durable descriptor.
                   execute: async () => ({ found: log.length > 0 }),
                   inputSchema: {},
                 }),
@@ -243,27 +237,19 @@ describe("reactions", () => {
       }
     });
 
-    // The model's memo runs once for the session, however many processes and model calls read it.
     expect(log.filter((entry) => entry === "memo:model")).toHaveLength(1);
-    // Every model call evaluates the values again: two turns of two calls each. The third turn's
-    // hook cancels it before it reaches one.
     expect(log.filter((entry) => entry === "evaluate:instructions").length).toBeGreaterThanOrEqual(
       4,
     );
     expect(log.filter((entry) => entry === "evaluate:tools").length).toBeGreaterThanOrEqual(4);
     expect(log.indexOf("evaluate:tools")).toBeLessThan(log.indexOf("call:turn"));
-    // Recall runs before each turn's first model call, and every call reads it with the
-    // instructions.
     expect(log.filter((entry) => entry === "resolve:recall")).toHaveLength(2);
-    // Recall and capture both see the turn's own input.
     expect(log).toContain(`recall:input:${JSON.stringify(["Look up the first thing."])}`);
     expect(log).toContain(`capture:input:${JSON.stringify(["Look up the first thing."])}`);
     for (const prompt of prompts) {
       expect(JSON.stringify(prompt)).toContain(RECALLED);
       expect(JSON.stringify(prompt)).toContain(POLICY);
     }
-    // Each turn's recall sits just ahead of its input, so a continuation extends the call before
-    // it. A recall with the same id replaces the earlier turn's.
     const texts = (prompt: LanguageModelV4Prompt) =>
       prompt.flatMap((message) =>
         message.role === "user"
@@ -280,22 +266,18 @@ describe("reactions", () => {
       "Look up the second thing.",
     ]);
     expect(JSON.stringify(prompts[2])).not.toContain("(turn 1)");
-    // The tool the reaction returned ran, and the model read its result.
     expect(JSON.stringify(prompts[1])).toContain('"found":true');
 
-    // An explicit session compaction ran once before the second turn's first model call.
     const secondTurn = log.slice(log.indexOf("capture:turn") + 1, log.lastIndexOf("capture:turn"));
     expect(log.filter((entry) => entry === "call:summary")).toHaveLength(1);
     expect(secondTurn.indexOf("call:summary")).toBeLessThan(secondTurn.indexOf("call:turn"));
 
-    // Capture before compaction read the history the summary rewrote, before the summary ran.
     expect(log.filter((entry) => entry === "capture:compaction")).toHaveLength(1);
     expect(log.indexOf("capture:compaction")).toBeLessThan(log.indexOf("call:summary"));
     expect(log).toContain("capture:compaction:model:eve-test/scripted-model");
     const captured = log.find((entry) => entry.startsWith("capture:compaction:history:"))!;
     expect(captured).toContain("Look up the first thing.");
 
-    // The third turn's hook cancelled it before its model call.
     expect(prompts.map(lastUserText).some((text) => text.includes("[cancel]"))).toBe(false);
   }, 90_000);
 
@@ -380,7 +362,6 @@ describe("reactions", () => {
       }
     });
 
-    // The capture threw before the summary, so no summary ran and the compaction failed.
     expect(log.filter((entry) => entry === "capture:compaction")).toHaveLength(1);
     expect(log).not.toContain("call:summary");
     expect(log).not.toContain("context:compaction:completed");
@@ -469,7 +450,6 @@ describe("reactions", () => {
         await until(log, "turn:completed", 1);
         await resumeHook(inbox, { kind: "compact", deliveryId: "compact" });
         await until(log, "capture:compaction", 1);
-        // Alice cancels while the compaction is still capturing memory.
         await resumeHook(inbox, { kind: "cancel", deliveryId: "cancel" });
         await new Promise((resolve) => setTimeout(resolve, 200));
         release();
@@ -488,7 +468,6 @@ describe("reactions", () => {
     const log: string[] = [];
     const prompts: LanguageModelV4Prompt[] = [];
     const model = scriptedModel(log, prompts);
-    // Alice moves to another thread between turns; a scope that follows the thread changes too.
     let thread = "thread-1";
     const runtime = await createTestRuntime({
       agent: {
@@ -567,7 +546,6 @@ describe("reactions", () => {
       }
     });
 
-    // Each turn's tools use the scope that turn's recall used.
     const turns = [
       log.slice(0, log.indexOf("turn:settled")),
       log.slice(log.indexOf("turn:settled")),
@@ -743,7 +721,6 @@ describe("reactions", () => {
       },
       modules: [
         {
-          // Stands in for `git clone`: the repository's guidelines land in the sandbox.
           loadNamespace: async () => ({
             default: defineTool({
               description: "Check out the repository.",
@@ -817,7 +794,6 @@ describe("reactions", () => {
       }
     });
 
-    // The second turn's model call reads the same checkout, so it reuses the memo's result.
     expect(prompts).toHaveLength(3);
     expect(JSON.stringify(prompts[0])).not.toContain("Run pnpm test.");
     expect(JSON.stringify(prompts[1])).toContain("Run pnpm test.");
@@ -897,7 +873,6 @@ describe("reactions", () => {
         const inbox = sessionInboxHookToken(continuationToken);
         try {
           await until(log, "turn:settled", 1);
-          // The idle session's next step runs on another deployment.
           vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_second");
           await resumeHook(inbox, {
             auth: ALICE,
@@ -911,7 +886,6 @@ describe("reactions", () => {
         }
       });
 
-      // The session-keyed memo runs once per deployment, and every call still reads it.
       expect(log.filter((entry) => entry.startsWith("memo:policy:"))).toEqual([
         "memo:policy:dpl_first",
         "memo:policy:dpl_second",

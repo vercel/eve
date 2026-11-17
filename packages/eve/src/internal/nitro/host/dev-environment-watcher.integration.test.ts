@@ -170,8 +170,6 @@ describe("development environment reload transactions", () => {
     stageDevelopmentEnvironmentFiles(appRoot).rollback();
     expect(process.env.EVE_WATCH_ENV_SHARED).toBe("from-local");
 
-    // The retry rebuild carries no env-file change of its own; staging from
-    // the files on disk must still pick the edit up.
     const retry = stageDevelopmentEnvironmentFiles(appRoot);
     retry.commit();
 

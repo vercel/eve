@@ -1,14 +1,8 @@
 import { z } from "#compiled/zod/index.js";
 import { mountIdSchema } from "#shared/extension-mount.js";
 
-/** Bumped only for breaking reshapes; additive changes keep the version. */
 export const AGENT_INFO_VERSION = 5;
 
-/**
- * A value set the server may grow. Older clients read a newer string as
- * `"unrecognized"` instead of rejecting the whole inspection payload; a missing
- * or non-string value is still malformed and fails the parse.
- */
 function openEnum<const Values extends readonly [string, ...string[]]>(values: Values) {
   return z.union([z.enum(values), z.string().transform(() => "unrecognized" as const)]);
 }
@@ -239,13 +233,6 @@ const compositionDiagnostic = z.object({
   winnerSourceId: z.string().optional(),
 });
 
-/**
- * Runtime contract for the authoritative `/eve/v1/info` v5 response. Parsing is
- * tolerant so a server may add fields and enum values without a version bump:
- * unknown keys are stripped and unknown enum strings read as `"unrecognized"`.
- * Discriminated-union `kind` fields stay closed, so a new variant needs a
- * version bump.
- */
 export const AgentInfoResultSchema = z
   .object({
     agent: z.object({
@@ -326,8 +313,6 @@ export const AgentInfoResultSchema = z
     assertUnique(value.connections, (entry) => entry.connectionName, ["connections"]);
     assertUnique(value.hooks, (entry) => entry.slug, ["hooks"]);
     assertUnique(value.memories, (entry) => entry.slot, ["memories"]);
-    // Distinct methods this client does not know all read as "unrecognized", so
-    // they cannot be compared; a newer server may serve several on one path.
     assertUnique(
       value.channels.routes,
       (entry) =>
@@ -392,7 +377,6 @@ export const AgentInfoResultSchema = z
         });
         continue;
       }
-      // A source kind this client does not know may legitimately be bound.
       if (
         entry.sourceKind !== "module" &&
         entry.sourceKind !== "unrecognized" &&
@@ -423,10 +407,6 @@ export const AgentInfoResultSchema = z
     }
   });
 
-/**
- * Names which side to upgrade when an agent-info body carries another version,
- * so the caller sees one actionable issue instead of every reshaped field.
- */
 export function describeAgentInfoVersionMismatch(payload: unknown): string | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
   const { kind, version } = payload as { kind?: unknown; version?: unknown };

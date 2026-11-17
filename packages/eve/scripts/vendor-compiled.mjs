@@ -1,14 +1,3 @@
-/**
- * Entry point for `pnpm build:compiled`. Resolves the per-package configs
- * in `scripts/vendor-compiled/` and delegates the heavy lifting to
- * `runVendor` from the shared library.
- *
- * The directory split mirrors npm package names so each vendored package
- * is one small file. Adding a new vendored dependency means writing a new
- * file in `scripts/vendor-compiled/`, dropping its declaration into
- * `scripts/vendor-compiled/declarations/`, and importing the config from
- * `scripts/vendor-compiled/index.mjs`.
- */
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,9 +13,6 @@ const packageRoot = dirname(here);
 const compiledRoot = join(packageRoot, ".generated", "compiled");
 const vendorCompiledDir = join(here, "vendor-compiled");
 
-// The stamp fingerprint covers this entry script plus every `.mjs` and
-// `.d.ts` under `vendor-compiled/`. When any of those change the stamp
-// is invalidated and vendoring re-runs.
 const scriptFiles = [
   fileURLToPath(import.meta.url),
   join(packageRoot, "package.json"),
@@ -37,8 +23,6 @@ const scriptFiles = [
 
 await syncExtensions();
 
-// env-runner's worker entry bundles srvx and crossws, whose versions its own
-// manifest only bounds, so a lockfile change alone must re-vendor it.
 const envRunner = await findPackageJson("env-runner", packageRoot);
 const envRunnerServerVersions = Object.fromEntries(
   await Promise.all(

@@ -16,10 +16,8 @@ import {
 let nextChannel = 0;
 const PERSON = { id: "U_CONFORMANCE", username: "alice" } as const;
 const PEOPLE = { alice: PERSON, bob: { id: "U_BOB", username: "bob" } } as const;
-/** Discord's message flag (1 << 6) for a message only its recipient sees. */
 const EPHEMERAL_FLAG = 64;
 
-/** A message component eve renders for a choice: a button (type 2) or a select menu (type 3). */
 interface DiscordComponent {
   readonly custom_id?: string;
   readonly label?: string;
@@ -30,9 +28,7 @@ interface DiscordComponent {
 interface PressHandle {
   readonly customId: string;
   readonly messageId: string;
-  /** The pressed message's text, which Discord sends with every component press. */
   readonly content?: string;
-  /** Set for a select menu option; a button press carries no value. */
   readonly value?: string;
 }
 
@@ -45,13 +41,8 @@ function testKeys(): { privateKey: KeyObject; publicKeyHex: string } {
   };
 }
 
-/**
- * How a person's messages reach eve: as `/ask` slash commands, or as ordinary
- * messages a Gateway relay forwards, optionally answered in a new thread.
- */
 export type DiscordTransport = "interactions" | "gateway" | "gateway-threads";
 
-/** The relay's identity; the conformance route trusts it the way production trusts the daemon. */
 const RELAY_AUTH = {
   attributes: {},
   authenticator: "conformance-relay",
@@ -59,12 +50,6 @@ const RELAY_AUTH = {
   principalType: "service",
 } as const;
 
-/**
- * Drives Discord, in a server text channel by default or in a DM. Messages
- * arrive as signed application-command interactions or, with a Gateway
- * transport, as forwarded `MESSAGE_CREATE` dispatches; presses are always
- * component interactions.
- */
 export function discordDriver(
   surface: Exclude<Surface, "public"> = "shared",
   transport: DiscordTransport = "interactions",
@@ -72,7 +57,6 @@ export function discordDriver(
   const dm = surface === "private";
   const gateway = transport !== "interactions";
   const threads = transport === "gateway-threads";
-  // In a server, Discord names the actor as a member; in a DM, as a user.
   const where = (user: (typeof PEOPLE)[Person] = PERSON) =>
     dm
       ? { channel: { type: 1 }, user }
@@ -82,18 +66,12 @@ export function discordDriver(
   const { privateKey, publicKeyHex } = testKeys();
   let interactionId = 0;
   let messageId = 0;
-  /** Files a person attached, by the signed CDN URL Discord lists each under. */
   const uploads = new Map<string, SentFile>();
-  /** The message each interaction token's `@original` response is, once known. */
   const originals = new Map<string, string>();
-  /** Interaction tokens answered with an ephemeral deferred response, which only the presser sees. */
   const ephemeralTokens = new Set<string>();
-  /** The thread the bot started for the conversation, once it has. */
   let threadId: string | undefined;
-  /** The bot's latest channel message, which a person in a server replies to so the bot hears them. */
   let lastBotMessage: string | undefined;
   let dispatchSequence = 0;
-  /** Where the conversation happens now: the channel, or the thread the bot moved it to. */
   const conversationChannel = () => threadId ?? channelId;
 
   function signed(body: string): Request {
@@ -147,14 +125,9 @@ export function discordDriver(
     };
   }
 
-  /** `person`'s message as the relay forwards it: the Gateway dispatch, unchanged. */
   function gatewayMessage(text: string, person: Person, files: readonly SentFile[]): Request {
     dispatchSequence += 1;
     const id = `U_MESSAGE_${channelId}_${dispatchSequence}`;
-    // In a server, a person mentions the bot once, then replies to its latest
-    // message, unless the bot moved the conversation into a thread, where every
-    // message reaches it. The mention sits on its own line so the test model's
-    // line-based directives still read the message.
     const replyTo = !dm && !threads ? lastBotMessage : undefined;
     const mention = !dm && replyTo === undefined && threadId === undefined;
     return new Request("https://agent.example.com/eve/v1/discord/gateway", {
@@ -193,7 +166,6 @@ export function discordDriver(
     });
   }
 
-  /** Edits keep the id of the message they rewrite; everything else posts a new message. */
   function writtenMessageId(method: string, path: string): string {
     const original = /^\/api\/v\d+\/webhooks\/[^/]+\/([^/]+)\/messages\/@original$/u.exec(path);
     if (original !== null) {
@@ -235,7 +207,6 @@ export function discordDriver(
         credentials: { applicationId: "APP1", botToken: "bot-token", publicKey: publicKeyHex },
         ...(gateway && { gateway: { auth: () => RELAY_AUTH, startThread: threads } }),
       }),
-    // A reply to the bot's message continues the session that posted it.
     nextAddress: () =>
       gateway && !dm && !threads && lastBotMessage !== undefined
         ? discordContinuationToken({ channelId, conversationId: lastBotMessage })
@@ -243,7 +214,6 @@ export function discordDriver(
     message: (text, person, files = []) => {
       if (gateway) return gatewayMessage(text, person, files);
       const id = nextInteraction();
-      // Each file rides an attachment option (type 11) whose value names it in `resolved`.
       const attached = files.map((file, index) => {
         const attachmentId = `A_${id}_${index}`;
         const url = `https://cdn.discordapp.com/attachments/${channelId}/${attachmentId}/${file.name}?ex=signed`;
@@ -313,7 +283,6 @@ export function discordDriver(
       };
     },
     shownReply(body) {
-      // A message answering an interaction; with the ephemeral flag, only the presser sees it.
       const reply = body as {
         readonly data?: {
           readonly components?: unknown;
@@ -336,10 +305,8 @@ export function discordDriver(
       const handle = option.handle as PressHandle;
       const id = nextInteraction();
       if (handle.customId.startsWith("eve_auth:")) {
-        // eve answers a sign-in press with an ephemeral deferred response, a new message.
         ephemeralTokens.add(`tok-${id}`);
       } else {
-        // A component interaction's `@original` response is the message holding the component.
         originals.set(`tok-${id}`, handle.messageId);
       }
       return signed(
@@ -400,11 +367,6 @@ function visibleChoices(
   return [];
 }
 
-/**
- * Any call that writes a message a person sees. eve edits the interaction's
- * original response first, then sends follow-ups, and falls back to a plain
- * channel message when the interaction token fails.
- */
 function isMessageWrite(call: PlatformCall): boolean {
   return (
     /^(PATCH|POST) /u.test(call.method) &&

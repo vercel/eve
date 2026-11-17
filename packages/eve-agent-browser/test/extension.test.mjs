@@ -2,11 +2,6 @@ import assert from "node:assert/strict";
 import { readdirSync } from "node:fs";
 import test from "node:test";
 
-// Since eve 0.25, extension config is bound in a scope-keyed registry instead of
-// on the handle itself. The eve runtime sets this ambient scope global while it
-// loads an extension's modules so `defineExtension` can capture it; emulate that
-// here before importing the built dist so the mount factory calls below
-// (`extension({ ... })`) bind config that the tools then read.
 globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-browser.test";
 
 const { default: extension } = await import("@eve/agent-browser");
@@ -16,7 +11,6 @@ const { default: catalog } = await import("../extension/lib/mcp-tools.json", {
   with: { type: "json" },
 });
 
-/** A `mcp call` result line carrying a CLI response whose `data` is `data`. */
 const OK = (data, version = AGENT_BROWSER_SANDBOX_VERSION) =>
   JSON.stringify({
     _meta: { agentBrowserVersion: version },
@@ -60,7 +54,6 @@ function resetConfig(overrides = {}) {
   extension(overrides);
 }
 
-/** Splits `[ENV=...] agent-browser mcp call <tool> '<json>'` into its tool and arguments. */
 function parseCall(command) {
   const match = /mcp call (\S+) '(.*)'$/.exec(command);
   assert.ok(match, command);
@@ -352,7 +345,7 @@ test("forwards cancellation to version probes and tool commands", async () => {
 
   controller.abort(new Error("Call cancelled"));
   await assert.rejects(() => tools.close.execute({}, ctx), /Call cancelled/);
-  assert.equal(calls.length, 3); // The aborted probe must not reach the tool command.
+  assert.equal(calls.length, 3);
 });
 
 test("quotes arguments for the shell", async () => {
@@ -471,8 +464,6 @@ test("screenshot inlines the image and hides it from the model", async () => {
   const modelOutput = await tools.screenshot.toModelOutput(output);
   assert.equal(modelOutput.type, "json");
   assert.equal(modelOutput.value.imageDataUrl, undefined);
-  // The image is already shown to the user, so the model gets neither the
-  // base64 nor the sandbox path it might otherwise echo into its reply.
   assert.equal(modelOutput.value.path, undefined);
   assert.match(modelOutput.value.screenshot, /displayed to the user/);
 });
@@ -483,8 +474,6 @@ test("screenshot still works when the sandbox cannot read files back", async () 
   const output = await tools.screenshot.execute({}, fakeCtx(sandbox));
   assert.equal(output.path, "/workspace/shot.png");
   assert.equal(output.imageDataUrl, undefined);
-  // Without an inline image the user has no other way to locate the file,
-  // so the model keeps the path.
   const modelOutput = await tools.screenshot.toModelOutput(output);
   assert.equal(modelOutput.value.path, "/workspace/shot.png");
 });
@@ -506,7 +495,6 @@ test("errors instead of hanging when the sandbox stops responding", async (t) =>
     () => tools.close.execute({}, fakeCtx(sandbox)),
     /did not respond within 180s/,
   );
-  // Let the async chain reach sandbox.run and arm the deadline timer.
   await new Promise((resolve) => setImmediate(resolve));
   t.mock.timers.tick(180_001);
   await rejection;
@@ -520,7 +508,6 @@ test("errors instead of hanging when the install probe stops responding", async 
     () => tools.close.execute({}, fakeCtx(sandbox)),
     /The browser install probe did not respond within 180s/,
   );
-  // Let the async chain reach the probe's sandbox.run and arm the deadline timer.
   await new Promise((resolve) => setImmediate(resolve));
   t.mock.timers.tick(180_001);
   await rejection;

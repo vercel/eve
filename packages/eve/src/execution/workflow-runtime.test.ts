@@ -34,9 +34,7 @@ const OWNER_RUN_ID = "wrun_owner-run";
 const getHookByTokenMock = vi.fn();
 const getRunRecordMock = vi.fn();
 const world = {
-  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
   capabilities: { atomicStartHook: { active: true }, deploymentAffinity: true },
-  // A session start pins the run id, so `start()` names the run `wrun_owner-run`.
   createRunId: () => "owner-run",
   getDeploymentId: vi.fn(async () => "dpl_current"),
   runs: { get: getRunRecordMock },
@@ -84,9 +82,6 @@ describe("workflowEntryReference", () => {
   it("uses the installed eve package identity for the runtime workflow id", () => {
     const packageInfo = resolveInstalledPackageInfo();
 
-    // The runtime references intentionally omit the `@<pkg.version>` stamp
-    // so an explicitly targeted deployment finds the same workflow even when
-    // eve itself has been upgraded.
     expect(workflowEntryReference.workflowId).toBe(`workflow//${packageInfo.name}//workflowEntry`);
     expect(workflowEntryReference.workflowId).not.toContain("/src/execution/");
     expect(workflowEntryReference.workflowId).not.toContain("@");

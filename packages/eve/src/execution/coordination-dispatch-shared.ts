@@ -1,5 +1,3 @@
-/** Shared owner-side dispatch context preparation. */
-
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { type ChannelAdapter, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { SandboxState } from "#sandbox/state.js";
@@ -43,26 +41,22 @@ import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
-/** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-/** Owner-side results and the updated context and session. */
 export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  /** What the dispatch leaves for the step that publishes it; the dispatch itself publishes nothing. */
   readonly pending: PendingDispatch;
 }
 
 import type { PendingDispatch } from "#harness/session-machine/transitions.js";
 export type { PendingDispatch };
 
-/** Everything preflight produces before either step's dispatch loop runs. */
 export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskRequest> {
   readonly adapter: ChannelAdapter;
   readonly adapterCtx: ChannelAdapterContext;
@@ -76,27 +70,18 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
-  /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
-  /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
   readonly sandboxSessionId: string;
-  /** The state of that sandbox: this session's own, or else its owner's when it shares it. */
   readonly sandboxState?: SandboxState;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
   readonly session: HarnessSessionBase;
   readonly sessionState: DurableSessionState;
-  /** Trace root that this session's local children inherit, when it isn't the lineage root. */
   readonly traceRoot?: SessionTraceRoot;
   readonly workflowAgents: Readonly<Record<string, WorkflowAgentMetadata>>;
 }
 
-/**
- * Runs every dispatch precondition that may throw — durable reads, context
- * deserialization, handle-store validation, and batch planning — before any
- * run starts. Returns undefined when no actions are pending.
- */
 export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -182,17 +167,11 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   };
 }
 
-/**
- * A local child normally shares its caller's lineage root as its trace
- * session, so nothing is recorded. When the caller's trace session differs,
- * as for a remote agent and its descendants, the child inherits it.
- */
 function childTraceRoot(ctx: ContextReader, sessionId: string): SessionTraceRoot | undefined {
   if (ctx.get(TraceRootKey) === undefined) return undefined;
   return { kind: "inherited", sessionId: resolveTraceRootSessionId(ctx, sessionId) };
 }
 
-/** A child that shares its owner's sandbox uses the owner's state until it records its own. */
 function resolveOwnerSandboxState(adapterState: unknown): SandboxState | undefined {
   if (typeof adapterState !== "object" || adapterState === null) return undefined;
   return (adapterState as Record<string, unknown>).parentSandboxState as SandboxState | undefined;

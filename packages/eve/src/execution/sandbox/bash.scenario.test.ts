@@ -14,7 +14,6 @@ import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// Real `bash -lc` on the host stands in for a sandbox; fake timers skip the wait before the yield.
 describe("executeBashOnSandbox with a real shell", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -79,7 +78,6 @@ describe("executeBashOnSandbox with a real shell", () => {
     expect(result).toMatchObject({ stderr: "", stdout: "first\n", truncated: false });
     expect(result.message).toContain(`still running after ${BASH_YIELD_SECONDS} seconds`);
     expect(result.message).toContain(`kill -- -${result.pid}`);
-    // The call's stream ends at the yield; only the command keeps running.
     await launches[0];
     expect(isProcessAlive(childPid)).toBe(true);
 
@@ -104,7 +102,6 @@ describe("executeBashOnSandbox with a real shell", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     const result = await call;
     if (result.status !== "running") throw new Error(`expected running: ${JSON.stringify(result)}`);
-    // SIGKILL stops the whole group before it can write its exit file.
     await runHostBash(`kill -9 -- -${result.pid}`, home);
 
     const waited = await executeBashOnSandbox(sandbox, { command: waitCommand(result.message) });
@@ -145,8 +142,6 @@ describe("executeBashOnSandbox with a real shell", () => {
         throw new Error(`expected running: ${JSON.stringify(result)}`);
       expect(result.message).toContain(`still running after ${waitSeconds} seconds`);
       await runHostBash(`kill -- -${result.pid}`, home);
-      // The killed group writes its exit file after the kill returns; removing the
-      // directory before that races with the write.
       await executeBashOnSandbox(sandbox, { command: waitCommand(result.message) });
       await rm(result.outputDirectory, { force: true, recursive: true });
     },
@@ -172,7 +167,6 @@ describe("executeBashOnSandbox with a real shell", () => {
 
 async function createHostSandbox(): Promise<{
   readonly home: string;
-  /** Settles when each launched process has exited and closed its output. */
   readonly launches: Promise<unknown>[];
   readonly sandbox: SandboxSession;
 }> {
@@ -197,7 +191,6 @@ async function createHostSandbox(): Promise<{
         child.on("close", (code) => resolve({ exitCode: code ?? 137 }));
       });
       launches.push(exited);
-      // Like many providers, aborting kills only the launched process.
       options.signal?.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
       return {
         pid: child.pid,
@@ -217,7 +210,6 @@ async function createHostSandbox(): Promise<{
   return { home, launches, sandbox };
 }
 
-/** The single-call wait the `running` message suggests to the model. */
 function waitCommand(message: string): string {
   const command = /run `(while [^`]+)`/u.exec(message)?.[1];
   if (command === undefined) throw new Error(`no wait command in: ${message}`);

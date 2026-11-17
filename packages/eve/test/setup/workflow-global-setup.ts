@@ -52,10 +52,6 @@ export default async function setupWorkflowTests(): Promise<void> {
   await initDataDir(resolveLocalWorkflowWorldDataDirectory(packageRoot));
 }
 
-/**
- * The workflow entrypoint imports its driver code with Nitro's `text:` scheme, which only the host
- * build resolves. Tests import the entrypoint with Node, so inline the code as the host would.
- */
 async function inlineWorkflowDriverCode(entrypointPath: string): Promise<void> {
   const source = await readFile(entrypointPath, "utf8");
   const match = /^import workflowCode from ("text:[^"]+");$/m.exec(source);

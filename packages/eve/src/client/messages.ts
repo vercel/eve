@@ -17,33 +17,23 @@ import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-/** What a turn's message derives from: the tables, their previews, and the interactions shown. */
 export interface MessageSources {
   readonly view: SessionView;
   readonly previews: SessionPreviews;
   readonly interactions: Readonly<Record<string, Interaction>>;
 }
 
-/** A part and where it sorts in its turn: by the line that introduced it, previews last. */
 interface Placed {
   readonly at: number;
   readonly rank: number;
   readonly part: EveMessagePart;
 }
 
-/** A message and the stream position it sorts at among its turn's messages. */
 export interface PlacedMessage {
   readonly at: number;
   readonly message: EveMessage;
 }
 
-/**
- * The agent's messages for each of `turnIds` (every turn when absent): what its runs wrote and
- * called, and what it asked that no call carries, in the order the stream introduced them. A
- * message a person sent while the turn worked splits it, so what the agent did before it reads
- * above it and the rest below; each piece sorts at its first part, the last at the end. A turn
- * that has requested no run and shows nothing has no message.
- */
 export function assistantMessages(
   sources: MessageSources,
   turnIds?: ReadonlySet<string>,
@@ -59,7 +49,6 @@ export function assistantMessages(
     else entries.push(entry);
   };
 
-  // An approval or a question about one of the session's calls shows on that call.
   const onCall = new Map<string, Interaction>();
   for (const interaction of Object.values(interactions)) {
     const row = view.interactions[interaction.interactionId];
@@ -94,7 +83,6 @@ export function assistantMessages(
   }
 
   for (const row of Object.values(view.calls)) {
-    // A run a retry replaced leaves its calls behind; the replacement asks again.
     if (row.outcome === "abandoned") continue;
     const at = callPlace(view, row.callId);
     if (!shows(at?.turnId)) continue;
@@ -148,7 +136,6 @@ export function assistantMessages(
     });
   }
 
-  // Where each turn took in a message a person sent: those after it showed something split it.
   const received = new Map<string, { readonly deliveryId: string; readonly at: number }[]>();
   for (const row of Object.values(view.deliveries)) {
     if (!shows(row.turnId) || row.consumedAt === undefined || !sendsMessage(row)) continue;
@@ -166,13 +153,11 @@ export function assistantMessages(
       messages.set(turn.turnId, []);
       continue;
     }
-    // Content commits as it completes, so the line that introduced a row is its place.
     entries.sort((a, b) => a.at - b.at || a.rank - b.rank);
     const first = entries[0]?.at ?? Infinity;
     const openers = (received.get(turn.turnId) ?? [])
       .filter((entry) => entry.at > first)
       .sort((a, b) => a.at - b.at);
-    // One piece before the first opener, then one after each.
     const pieces: Placed[][] = [[], ...openers.map((): Placed[] => [])];
     for (const entry of entries) {
       pieces[openers.filter((opener) => opener.at < entry.at).length]?.push(entry);
@@ -186,7 +171,6 @@ export function assistantMessages(
         );
     const shown: PlacedMessage[] = [];
     pieces.forEach((parts, index) => {
-      // The last piece stands while the turn works on, so what comes next has somewhere to go.
       if (parts.length === 0 && !(index === last && (running || last === 0))) return;
       const metadata: Mutable<NonNullable<EveMessage["metadata"]>> = {
         status: index === last && running ? "streaming" : "complete",
@@ -212,12 +196,10 @@ export function assistantMessages(
   return messages;
 }
 
-/** The content kinds a message shows as text: its text and its reasoning. */
 function textKind(kind: string): "text" | "reasoning" | undefined {
   return kind === "text" || kind === "reasoning" ? kind : undefined;
 }
 
-/** A call as its row stands, with the latest preview of its output while it runs. */
 function toolPart(
   view: SessionView,
   row: CallRow,
@@ -250,14 +232,12 @@ function toolPart(
   return part;
 }
 
-/** Whether a delivery carries something a person sent, not only answers or context. */
 function sendsMessage(
   row: DeliveryRow,
 ): row is DeliveryRow & { readonly parts: readonly UserPart[] } {
   return row.parts !== undefined && row.parts.length > 0;
 }
 
-/** What a person sent, as the turn that consumed it received it. An answer sends no message. */
 export function userMessage(row: DeliveryRow): EveMessage | undefined {
   if (row.turnId === undefined || !sendsMessage(row)) return undefined;
   return {
@@ -268,10 +248,6 @@ export function userMessage(row: DeliveryRow): EveMessage | undefined {
   };
 }
 
-/**
- * The earlier conversation a delivery imported, as messages. They name no turn, so a turn's reply
- * never streams into an imported assistant message.
- */
 export function importedMessages(
   deliveryId: string,
   history: readonly ImportedMessage[],
@@ -287,7 +263,6 @@ export function importedMessages(
   }));
 }
 
-/** A person's parts as message parts: text, and files by their metadata. */
 function receivedParts(parts: readonly UserPart[]): readonly EveMessagePart[] {
   return parts.map((part) =>
     part.kind === "text"

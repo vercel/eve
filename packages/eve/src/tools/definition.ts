@@ -19,7 +19,6 @@ import type { InteractionRequest } from "#protocol/session-events/families/inter
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
-// `any` passes through so `ToolDefinition<any, any>` stays the type every defined tool fits.
 type ApprovalContextInput<TInput> = 0 extends 1 & TInput
   ? TInput
   : unknown extends TInput
@@ -30,7 +29,6 @@ export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#too
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context"> & {
-  /** Who approved the call, when it runs after a person approved it. */
   readonly approval?: { readonly responder: SessionAuthContext };
 };
 
@@ -59,13 +57,6 @@ export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string;
 }
 
-/**
- * Internal/compiled tool definition shape. Carries `name` because the
- * compiler stamps a path-derived identifier onto every tool entry.
- *
- * Authored public definitions (see {@link PublicToolDefinition}) do not
- * carry `name`; identity comes from the file path.
- */
 export interface InternalToolLabelDefinition {
   readonly complete?: (input: unknown, output: unknown) => string;
   readonly delta?: (input: unknown, partial: unknown) => string;
@@ -486,10 +477,6 @@ export function disableTool(): DisabledToolSentinel {
   return { [DISABLED_TOOL]: true };
 }
 
-/**
- * Type guard: returns whether `value` is a {@link DisabledToolSentinel}
- * produced by {@link disableTool}.
- */
 export function isDisabledToolSentinel(value: unknown): value is DisabledToolSentinel {
   return typeof value === "object" && value !== null && Reflect.get(value, DISABLED_TOOL) === true;
 }

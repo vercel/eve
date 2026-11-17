@@ -14,12 +14,6 @@ const AUTH = { basic: { username: "alice", password: "fixture" } };
 
 afterEach(() => vi.unstubAllEnvs());
 
-/**
- * Starts a turn, SIGKILLs `eve start` once the agent writes `crashMarker` and
- * the local World stores at least `storedWaits` waits, restarts on the same
- * data directory, and returns the turn's outcome, or undefined if it does not
- * settle within 60s.
- */
 async function crashMidTurnAndRecover(input: {
   readonly name: string;
   readonly files: Readonly<Record<string, string>>;
@@ -77,11 +71,7 @@ export default eveChannel({ auth: httpBasic({ username: "alice", password: "fixt
   }
 }
 
-// Without releasing the dead process's steps, the restarted server defers to
-// its inline-ownership lease (860s) before it runs the turn again.
 it("finishes a spec 8 turn whose model call was running when `eve start` was killed", async () => {
-  // Spec 8 runs stamp inline steps with their owner; sessions created before
-  // eve moved to spec 9 keep that version for their whole life.
   vi.stubEnv("WORKFLOW_SPEC_VERSION", "8");
   const { outcome, stderr } = await crashMidTurnAndRecover({
     name: "local-workflow-restart-inline-step",
@@ -108,13 +98,10 @@ export default defineAgent({
   expect(outcome, `The turn did not settle within 60s.\n${stderr}`).toBe("completed");
 }, 180_000);
 
-// The local queue is in memory, so the wait's timer died with the process.
-// Only a recovery message tells a spec 9 run to arm it again.
 it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async () => {
   const { outcome, stderr } = await crashMidTurnAndRecover({
     name: "local-workflow-restart-sleep",
     crashMarker: ".sleep-requested",
-    // The session's idle timeout and the sleep: the crash must lose a stored wait's timer.
     storedWaits: 2,
     files: {
       "agent/agent.ts": `import { writeFileSync } from "node:fs";

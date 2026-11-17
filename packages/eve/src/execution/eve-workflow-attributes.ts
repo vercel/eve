@@ -1,42 +1,3 @@
-/**
- * Builders for the framework's reserved `$eve.*` workflow attributes.
- *
- * Each builder returns a plain `Record<string, string | number | undefined>`
- * suitable for `setEveAttributes` from
- * {@link "#runtime/attributes/emit.js" }. Builders are intentionally
- * pure data → data transforms: they hold zero dependencies on the
- * workflow runtime so the workflow body, step bodies, and tests can
- * all call them identically.
- *
- * `$eve.*` is the framework-owned attribute namespace. Authored code
- * never emits these tags directly — they describe the structural shape
- * of a session/turn/subagent run so dashboards can stitch a tree of
- * workflow runs back together without inspecting their bodies.
- *
- * Tag inventory (recap):
- * - `$eve.type`         — `"session" | "turn" | "subagent"`
- * - `$eve.parent`       — sessionId of the **immediate** parent
- * - `$eve.root`         — sessionId of the **root** session in the chain
- * - `$eve.parent_call`  — parent task tool-call id (subagent rows only)
- * - `$eve.parent_turn`  — parent turn id that dispatched the subagent (subagent rows only)
- * - `$eve.subagent`     — active compiled graph node id (subagent rows only)
- * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
- * - `$eve.title`        — truncated session title from the first user message
- * - `$eve.channel_request_id` — inbound channel request id
- * - `$eve.schedule`     — authored schedule that created the session
- * - `$eve.invocation_token` — channel-local continuation token for an external invocation
- * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
- * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
- * - `$eve.is_otel_trace_enabled` — whether hosted Agent Runs OTEL is enabled for the run
- * - `$eve.trace_id` — sampled trace seed available in the serialized context when
- *   tagging the run. This is a trace link, not a session-wide trace identity or
- *   confirmation that a destination retained the trace.
- * - `$eve.version`      — eve version that started the run; handoff successors
- *   and legacy importers re-record their own at boot. Ingress and the stranded
- *   replay guard compare it to decide whether the run can still execute
- * - `$eve.session`      — public session id a handoff successor owner serves
- */
-
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import {
   ChannelRequestIdKey,
@@ -56,42 +17,24 @@ import {
 import { isSampledTrace } from "#shared/trace-policy.js";
 import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
-/** Explicit support for idle preparation hints on a session owner. */
 export const EVE_PREWARM_ATTRIBUTE = "$eve.prewarm";
 
-/** eve version recorded on every run eve starts; successors re-record it at boot. */
 export const EVE_VERSION_ATTRIBUTE = "$eve.version";
 
-/** Run kind; only runs started as a session or subagent session carry it. */
 export const EVE_TYPE_ATTRIBUTE = "$eve.type";
 
-/**
- * Public session id recorded on handoff successor owners. Initial owners omit
- * it: their run id is the session id.
- */
 export const EVE_SESSION_ATTRIBUTE = "$eve.session";
 
-/** Root session id of a delegated subagent session run. */
 export const EVE_ROOT_ATTRIBUTE = "$eve.root";
 
-/**
- * Active compiled graph node id for the session's agent. Returned by
- * `createSessionStep` so workflow bodies don't have to load the bundle
- * themselves. Equal to the framework root sentinel (`"__root__"`) for
- * the root agent; equal to the subagent's compiled node id for
- * delegated child runs. Tag emitters use this to populate
- * `$eve.subagent`.
- */
 interface SessionIdentitySummary {
   readonly nodeId: string;
 }
 
-/** Untyped channel adapter snapshot as it survives serialization. */
 interface SerializedChannelAdapter {
   readonly kind?: unknown;
 }
 
-/** Untyped session parent snapshot as it survives serialization. */
 interface SerializedSessionParent {
   readonly callId?: unknown;
   readonly sessionId?: unknown;
@@ -101,9 +44,6 @@ interface SerializedSessionParent {
   };
 }
 
-/**
- * Parent session lineage decoded from the serialized run context.
- */
 interface SessionParentLineage {
   readonly callId?: string;
   readonly rootSessionId?: string;
@@ -111,11 +51,6 @@ interface SessionParentLineage {
   readonly turnId?: string;
 }
 
-/**
- * Reads the active channel kind from a deserialized context map.
- * Returns `undefined` when the channel slot is missing or malformed —
- * tag emission silently drops undefined values.
- */
 export function readChannelKind(serializedContext: Record<string, unknown>): string | undefined {
   const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | SerializedChannelAdapter
@@ -155,10 +90,6 @@ export function readSessionTraceId(serializedContext: Record<string, unknown>): 
   return isNonEmptyString(seed.traceId) ? seed.traceId : undefined;
 }
 
-/**
- * Reads parent session lineage from a deserialized context map. Returns
- * an empty object for top-level runs or malformed delegated contexts.
- */
 export function readParentLineage(
   serializedContext: Record<string, unknown>,
 ): SessionParentLineage {
@@ -175,34 +106,16 @@ export function readParentLineage(
   };
 }
 
-/**
- * Reads the immediate parent session id from a deserialized context map.
- * Returns `undefined` when the run is a top-level session.
- */
 export function readParentSessionId(
   serializedContext: Record<string, unknown>,
 ): string | undefined {
   return readParentLineage(serializedContext).sessionId;
 }
 
-/**
- * Reads the **root** session id from a deserialized context map.
- *
- * `eve.parentSession.rootSessionId` is denormalized at every dispatch
- * site (see {@link "#channel/types.js".SessionParent}) so a subagent
- * five levels deep can still attribute itself to the top user-facing
- * session without walking the chain. Returns `undefined` for top-level
- * runs, which carry no verified `eve.parentSession`.
- */
 export function readRootSessionId(serializedContext: Record<string, unknown>): string | undefined {
   return readParentLineage(serializedContext).rootSessionId;
 }
 
-/**
- * Reads the channel request id minted by an inbound channel route.
- * Returns `undefined` when the active run was not started from an
- * inbound route, such as a schedule.
- */
 export function readChannelRequestId(
   serializedContext: Record<string, unknown>,
 ): string | undefined {
@@ -210,54 +123,27 @@ export function readChannelRequestId(
   return isNonEmptyString(channelRequestId) ? channelRequestId : undefined;
 }
 
-/** Reads the schedule name inherited from a schedule dispatch scope. */
 export function readScheduleId(serializedContext: Record<string, unknown>): string | undefined {
   const scheduleId = serializedContext[ScheduleIdKey.name];
   return isNonEmptyString(scheduleId) ? scheduleId : undefined;
 }
 
-/** Reads the bounded title stored for a top-level session. */
 function readSessionTitle(serializedContext: Record<string, unknown>): string | undefined {
   const title = serializedContext[SessionTitleKey.name];
   return isNonEmptyString(title) ? title : undefined;
 }
 
-/**
- * Maximum visible length (in code points) of a derived `$eve.title`.
- *
- * Titles render as the first column of the dashboard's run table, so
- * they get a tighter, display-oriented cap here than the generic
- * runtime byte budget (`EVE_ATTRIBUTE_VALUE_MAX_BYTES`). Mostly-ASCII
- * titles stay within that budget; a title dominated by multi-byte
- * characters may still be further truncated by the runtime tag
- * truncator, which is acceptable.
- */
 export const EVE_SESSION_TITLE_MAX_CHARS = 125;
 
-/**
- * Derives the `$eve.title` value from the first user message of a
- * top-level session.
- *
- * Returns `undefined` when no plain-text content is available; the
- * attribute emitter strips undefined values. Multimodal messages
- * (image/file parts) contribute only their text parts to keep the
- * title human-readable. Long prompts are truncated to
- * {@link EVE_SESSION_TITLE_MAX_CHARS} code points with a trailing
- * ellipsis so the dashboard's title column stays readable.
- */
 export function deriveSessionTitle(message: unknown): string | undefined {
   const text = collectMessageText(message);
   if (text === undefined || text.length === 0) {
     return undefined;
   }
-  // Collapse whitespace runs so multi-line user prompts produce a
-  // single-line title.
   const collapsed = text.replace(/\s+/gu, " ").trim();
   if (collapsed.length === 0) {
     return undefined;
   }
-  // Truncate by code point (not UTF-16 unit) so we never split a
-  // surrogate pair, and reserve one slot for the ellipsis.
   const codePoints = Array.from(collapsed);
   if (codePoints.length <= EVE_SESSION_TITLE_MAX_CHARS) {
     return collapsed;
@@ -286,13 +172,6 @@ function collectMessageText(message: unknown): string | undefined {
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
-/**
- * Builds the `$eve.*` attribute payload for a top-level session run
- * (`workflowEntry` invoked without an `eve.parentSession`).
- *
- * `$eve.root` is intentionally omitted — the session row IS the root,
- * so its own `workflowRunId` already identifies the chain root.
- */
 export function buildSessionAttributes(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
@@ -310,15 +189,6 @@ export function buildSessionAttributes(input: {
   };
 }
 
-/**
- * Builds the `$eve.*` attribute payload for a delegated subagent root
- * run (`workflowEntry` invoked with an `eve.parentSession`).
- *
- * `$eve.root` carries the **root** session id so the dashboard can
- * group every descendant under one query: `search($eve.root=<root>)`
- * returns all turns and nested subagents under that user-facing
- * session in a single round trip.
- */
 export function buildSubagentRootAttributes(input: {
   readonly identity: SessionIdentitySummary;
   readonly parentCallId?: string;

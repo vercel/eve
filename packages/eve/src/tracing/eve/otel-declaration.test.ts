@@ -10,7 +10,6 @@ import {
   otelIntegration,
 } from "#tracing/eve/otel-declaration.js";
 
-/** Collection only ever moves processors, so a fresh no-op is identity enough. */
 function processor(): SpanProcessor {
   return {
     forceFlush: async () => undefined,
@@ -176,15 +175,12 @@ describe("collectOtelPipeline", () => {
     });
     expect(collected.settings).toStrictEqual({
       functionId: "weather",
-      // Nothing declared a destination, so nothing consumes content.
       recordInputs: false,
       recordOutputs: false,
       traceChannelRequests: true,
     });
   });
 
-  // A process has one tracer provider, so letting the first declaration win
-  // would silently discard the second — the failure this throw exists to stop.
   it("refuses a second otel() rather than picking one", () => {
     expect(() =>
       collectOtelPipeline([otel({ sampler: "always_on" }), otel({ sampler: "always_off" })]),

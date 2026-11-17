@@ -19,7 +19,6 @@ function message(raw: unknown, names: readonly string[]): Message {
   });
 }
 
-/** A Photon app serving `files` by attachment id, whose `fetchMessage` returns `refetchedRaw`. */
 function appServing(files: Record<string, string>, refetchedRaw?: unknown) {
   const getAttachment = vi.fn(async (_ctx: unknown, id: string, _phone?: string) =>
     files[id] === undefined ? undefined : { read: async () => Buffer.from(files[id]!) },
@@ -97,7 +96,6 @@ describe("addPhotonAttachmentDownloads", () => {
   });
 
   it("keeps the webhook's ids and fills only the missing ones from the refetch", async () => {
-    // The refetched copy is shaped differently: its photo has no id.
     const { adapter } = appServing(
       { "p-1": "photo", "v-1": "audio" },
       {

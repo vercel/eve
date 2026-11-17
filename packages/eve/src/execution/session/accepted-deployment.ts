@@ -1,6 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 
-/** Exact trusted deployment shared by every payload in a delivery. */
 export function readAcceptedDeploymentId(delivery: DeliverHookPayload): string | undefined {
   const acceptedDeploymentId = delivery.deliveryMetadata?.[0]?.acceptedDeploymentId;
   if (

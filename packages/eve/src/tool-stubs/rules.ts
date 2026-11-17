@@ -26,7 +26,6 @@ const toolStubsSchema = z
   )
   .max(100);
 
-/** Validates stubs before creating the session. */
 export function parseToolStubs(value: unknown): readonly ToolStub[] {
   boundStubConfiguration(value);
   const rules = toolStubsSchema.parse(parseJsonValue(value));

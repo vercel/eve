@@ -83,7 +83,6 @@ export interface ChannelReceiveContext<TState = undefined> {
   readonly resolveSession: ChannelResolveSession;
 }
 
-/** Creates request-scoped channel operations backed by continuation dispatch. */
 export function createChannelOperations<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
@@ -98,8 +97,6 @@ export function createChannelOperations<TState = undefined>(input: {
       const bound = channelAddress(address);
       const source: ChannelSource<TState> = {
         async send(message, options) {
-          // Deliver hooks read per-delivery state (such as the message author)
-          // from the payload, as they do for `respond()`.
           return await bound.deliver(
             attachInputText(
               {

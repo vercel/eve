@@ -1,10 +1,5 @@
 import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
-/**
- * Scenario-tier descriptor exercising module bundling diagnostics — path
- * aliases (`@/`, `@/lib/*`) and CommonJS interop (`snowflake-sdk`). Used by
- * compile tests and e2e deployment tests.
- */
 export const VERBOSE_BUNDLING_DESCRIPTOR: ScenarioAppDescriptor = {
   dependencies: {
     "snowflake-sdk": "^2.0.0",

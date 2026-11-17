@@ -1,4 +1,3 @@
-/** A selectable connection shown in the onboarding picker. */
 export interface ConnectionSelectOption {
   value: string;
   label: string;

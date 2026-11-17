@@ -16,12 +16,8 @@ import { staticTools, toolDefinition, toolsDefinition } from "./tools.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import type { ResolvedScheduleCollection } from "#runtime/types.js";
 
-// eve's own harness: a definition for each file the agent declares, then eve's builtins and
-// catalog, which see everything the agent declares, and the model the session's parent gave it.
-
 const built = new WeakMap<CompiledBundle, Promise<readonly Definition[]>>();
 
-/** The definitions the session's agent declares, built once per bundle. */
 export function agentDefinitions(bundle: CompiledBundle): Promise<readonly Definition[]> {
   let definitions = built.get(bundle);
   if (definitions === undefined) {
@@ -32,7 +28,6 @@ export function agentDefinitions(bundle: CompiledBundle): Promise<readonly Defin
   return definitions;
 }
 
-/** The session's definitions. */
 export async function sessionDefinitions(
   ctx: Pick<ContextReader, "require">,
 ): Promise<readonly Definition[]> {
@@ -43,10 +38,6 @@ async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly D
   const agent = bundle.resolvedAgent;
   const model = await loadModelDefinition(bundle);
   const staticModel = agentModel(bundle);
-  // The order is the contract. Definitions contribute in it, and each arrangement wraps what the
-  // ones before it left: the first to offer a tool name keeps it, so static tools come before
-  // dynamic ones, and connections keep theirs before tools and subagents check names against them.
-  // The catalog arranges after every tool, so it indexes the final table. The last model choice wins.
   return [
     ...declared(agent, "hook").map(hookDefinition),
     ...(staticModel === undefined ? [] : [staticModel]),
@@ -71,16 +62,13 @@ async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly D
     approvals,
     builtins,
     catalog,
-    // Last, so a parent's choice is the one the session runs: nothing of the session's evaluates for it.
     parentModel,
   ];
 }
 
-/** A schedule collection's tools, as the tool file `agent/tools/schedule__<name>.ts` would offer them. */
 function scheduleToolsDefinition(collection: ResolvedScheduleCollection): Definition {
   const slug = scheduleCollectionToolPrefix(collection.name);
   return toolsDefinition({ logicalPath: `tools/${slug}.ts`, slug }, async () => {
-    // Loaded where it runs: the schedule client reaches Workflow, which the harness doesn't.
     const { scheduleCollectionTools } = await import("#context/schedule-collection-tools.js");
     return scheduleCollectionTools(collection.definition, collection.name);
   });

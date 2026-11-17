@@ -43,7 +43,6 @@ export interface GrepToolInput {
   readonly pattern: string;
 }
 
-/** Identifiers are faster as fixed strings. Regex syntax keeps the regex engine. */
 export function shouldUseFixedStrings(pattern: string, literal: boolean | undefined): boolean {
   if (literal === true) return true;
   if (literal === false) return false;
@@ -58,8 +57,6 @@ export function effectiveLimit(limit: number | undefined): number {
   return Math.min(Math.max(1, limit ?? DEFAULT_GREP_LIMIT), MAX_GREP_LIMIT);
 }
 
-// Containment is enforced on real paths in executeGrepSearch; the workspace
-// root differs by provider (/workspace, /app, ...), so no literal prefix here.
 export function assertNoParentSegments(resolved: string, requested?: string): string {
   if (
     (requested !== undefined && requested.split(/[\\/]/u).includes("..")) ||
@@ -137,14 +134,11 @@ export function buildSearchCommand(input: GrepCommandInput): string {
     "  else",
     `    ${buildPosixGrepCommand(input)}`,
     "  fi",
-    // Drain excess diagnostics so truncating stderr cannot SIGPIPE the search.
     `} 2> >({ head -c ${MAX_GREP_LINE_BYTES}; cat >/dev/null; } >&2) | head -c ${MAX_GREP_COMMAND_BYTES + 1}`,
   ].join("\n");
 }
 
 export function buildRipgrepCommand(input: GrepCommandInput): string {
-  // stdout is piped, so native ripgrep does not add terminal colors. The
-  // virtual just-bash implementation supports these search flags, but not --color.
   const parts = ["rg", "--hidden", "--glob", shellQuote("!.git/*")];
 
   if (input.ignoreCase) {
@@ -371,9 +365,6 @@ function normalizeContentLine(line: string, partial = false): ContentLine {
   };
 }
 
-// The byte cap can cut a JSON record inside its line text, before rg emits
-// line_number. Keep the confirmed match and a bounded preview without inventing
-// a position or allocating the rest of a minified line.
 function partialContentLine(line: string): ContentLine {
   const type = /^\s*\{\s*"type"\s*:\s*"(match|context)"/u.exec(line)?.[1];
   if (type === undefined) return { isMatch: false, line: "", skip: true };
@@ -384,14 +375,11 @@ function partialContentLine(line: string): ContentLine {
     ).exec(line);
     if (match === null) return undefined;
     const raw = match[2]!.slice(0, MAX_GREP_LINE_BYTES);
-    // A cap can split a JSON escape (at most six characters, e.g. \u1234).
     for (let trim = 0; trim <= 6 && trim <= raw.length; trim += 1) {
       try {
         const value: string = JSON.parse(`"${raw.slice(0, raw.length - trim)}"`);
         return match[1] === "bytes" ? Buffer.from(value, "base64").toString("utf8") : value;
-      } catch {
-        /* Drop only the incomplete trailing escape. */
-      }
+      } catch {}
     }
     return undefined;
   };

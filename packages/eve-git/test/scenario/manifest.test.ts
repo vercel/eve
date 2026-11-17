@@ -33,7 +33,6 @@ before(async () => {
   const config = await tryReadExtensionBuildConfig(extensionRoot);
   assert.ok(config);
   await buildExtensionPackage(extensionRoot, config);
-  // Consume only the distribution, so source discovery cannot hide a packaging regression.
   await rm(join(extensionRoot, "extension"), { recursive: true });
 });
 
@@ -87,7 +86,6 @@ test("git__gh resolves an executable tool when GitHub is configured", async () =
   const resolver = compiledOf(manifest, "tool").find((entry) => entry.slug === "git__gh");
   assert.ok(resolver);
 
-  // Evaluate the packaged resolver through the app bundle, not its source export.
   const moduleMapPath = join(appRoot, ".eve", "compile", "module-map.mjs");
   const { code } = await bundleAuthoredModuleMapForGeneration({ appRoot, manifest, moduleMapPath });
   await mkdir(join(appRoot, ".eve", "compile"), { recursive: true });
@@ -95,7 +93,6 @@ test("git__gh resolves an executable tool when GitHub is configured", async () =
   const { moduleMap } = await import(pathToFileURL(moduleMapPath).href);
   const definition =
     moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID].modules[resolver.sourceId].default;
-  // A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
   const tool = await definition[Symbol.for("eve.dynamic")]();
   assert.ok(tool, "gh resolved to null with github configured");
   const input = tool.inputSchema.parse({

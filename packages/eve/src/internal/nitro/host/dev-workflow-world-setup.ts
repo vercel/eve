@@ -22,10 +22,6 @@ export function createDevelopmentWorkflowWorld(input: {
   readonly preparedHost: PreparedDevelopmentApplicationHost;
   readonly transportSecret: string;
 }): ParentDevelopmentWorkflowWorld | undefined {
-  // A World that does not resolve to the vendored local package stays inside
-  // the worker; the parent only owns the local World, which must survive
-  // worker replacement. The predicate is shared with the generated worker
-  // plugin so the two sides cannot disagree.
   if (
     !usesParentDevelopmentWorkflowWorld(
       input.preparedHost.compileResult.manifest.config.experimental?.workflow?.world,

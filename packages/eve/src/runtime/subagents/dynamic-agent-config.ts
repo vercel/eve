@@ -18,7 +18,6 @@ export interface DynamicSubagentAgentConfig {
     readonly thresholdPercent?: number;
   };
   readonly description: string;
-  /** Serialized into workflow input, so it can't carry the `sessionUsage` function. */
   readonly limits?: Pick<AgentLimitsDefinition, "sessionTimeoutMs">;
   readonly model: DynamicSubagentModelReference;
   readonly reasoning?: AgentReasoningDefinition;
@@ -132,11 +131,6 @@ async function normalizeDurableModelSelection(input: {
   return resolved.reference;
 }
 
-/**
- * The parent's context window, for a child that runs the parent's own model: a subagent that
- * passes `view.model.id` along gets the metadata the parent's model already has, which a custom
- * model's id alone doesn't carry.
- */
 function parentContextWindow(state: ContextAccessor, model: unknown): number | undefined {
   if (typeof model !== "string") return undefined;
   const parent = currentModel(state);

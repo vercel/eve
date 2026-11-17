@@ -8,9 +8,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("#shared/resolve-eve-binary.js", async () => {
   const { join } = await import("node:path");
   return {
-    // Pin resolution to the conventional app-local path so build-command
-    // assertions stay deterministic without a real eve install on disk. The
-    // real resolver is exercised in resolve-eve-binary.integration.test.ts.
     resolveEveBinaryPath: (nextRoot: string) =>
       join(nextRoot, "node_modules", "eve", "bin", "eve.js"),
   };
@@ -880,7 +877,6 @@ async function writeBuiltAgent(agentRoot: string): Promise<void> {
   await writeFile(join(agentRoot, ".output", "server", "index.mjs"), "// built agent\n");
 }
 
-/** Each spawned child reports it is listening on the port it was given. */
 function spawnListeningServer(): void {
   spawnMock.mockImplementation((_command, _args, options) => {
     const child = Object.assign(new EventEmitter(), {

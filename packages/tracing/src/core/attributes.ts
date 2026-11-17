@@ -29,7 +29,6 @@ export function frameworkAttributes(framework?: FrameworkIdentity): Attributes {
   };
 }
 
-/** Invocation and model spans use GenAI token counts; structural spans use eve's. */
 export function usageAttributes(usage: Usage, genAi = false): Attributes {
   if (genAi)
     return {

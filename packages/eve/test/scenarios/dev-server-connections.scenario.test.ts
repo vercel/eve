@@ -189,8 +189,6 @@ describe("eve dev server live connections", () => {
         );
         expect(new TextDecoder().decode(firstChunk.value)).toBe("first\n");
 
-        // The parent-owned control route must answer continuously through
-        // candidate preparation and promotion, not merely at spot checks.
         const revisionFailures: string[] = [];
         let stopRevisionPolling = false;
         const revisionPoller = (async () => {

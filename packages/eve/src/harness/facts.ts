@@ -1,9 +1,3 @@
-// Facts as eve writes them. `fact` builds any fact, omitting the fields its data leaves
-// undefined; the rest are the lifecycle facts more than one writer makes: a session's start and
-// end, a turn's end, a model run's request, start, and settlement with its spend, a context
-// change's start, and a control delivery's admission and settlement. Calls' facts are in
-// `call-facts.ts`, interactions' and responses' in `interaction-facts.ts`.
-
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, ErrorInfo, Usage } from "#protocol/session-events/envelope.js";
 import type { Fact, FactOf } from "#protocol/session-events/facts.js";
@@ -14,17 +8,14 @@ import { activeTurn } from "#protocol/session-projection/selectors.js";
 import type { ControlDelivery } from "#harness/types.js";
 import type { JsonObject } from "#shared/json.js";
 
-/** `value` without the fields it leaves undefined. */
 export function defined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined)) as T;
 }
 
-/** A fact of `type`, without the fields its data leaves undefined. */
 export function fact<T extends Fact["type"]>(type: T, data: FactOf<T>["data"]): FactOf<T> {
   return { data: defined(data as object), type } as FactOf<T>;
 }
 
-/** Spend as `usage.recorded` carries it: every count, zero when unreported, and a known cost. */
 export function usageOf(counts: Partial<Usage>): Usage {
   return defined({
     cacheReadTokens: counts.cacheReadTokens ?? 0,
@@ -35,7 +26,6 @@ export function usageOf(counts: Partial<Usage>): Usage {
   });
 }
 
-/** A failure as the stream reports it: its code and message, with its support id and remedy. */
 export function errorInfoOf(failure: {
   readonly code: string;
   readonly details?: JsonObject;
@@ -50,30 +40,17 @@ export function errorInfoOf(failure: {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Sessions and turns
-// ---------------------------------------------------------------------------
-
-/**
- * The facts that end a session, in one commit, `session.ended` last. The writer closes what the
- * session leaves open before it (`cascade`): an open turn ends cancelled, since its session ended,
- * not it; `failure(view, turnId)` reads the session's error. Every reader stops there.
- */
 export function sessionEndedFacts(
   projection: Pick<SessionProjection, "view"> | undefined,
   ending: {
     readonly outcome: "completed" | "failed";
     readonly cause?: Cause;
-    /** The reset control that ends the session: admitted first, applied before the end. */
     readonly control?: ControlDelivery;
-    /** Controls that arrived before the session started, which settle as it starts. */
     readonly settles?: readonly ControlSettlement[];
     readonly error?: ErrorInfo;
   },
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
-  // A session that ends before it started, as one that fails admitting its first message or a
-  // prewarmed one that expires, starts in the same commit: only a started session ends.
   if (projection !== undefined && projection.view.session.status === "new") {
     facts.push(fact("session.started", {}));
   }
@@ -87,18 +64,12 @@ export function sessionEndedFacts(
   return facts;
 }
 
-/** How a turn ends. */
 export interface TurnEnding {
   readonly outcome: FactOf<"turn.settled">["data"]["outcome"];
   readonly cause?: Cause;
   readonly error?: ErrorInfo;
 }
 
-/**
- * The fact that ends a turn, the open one unless `turnId` names another, with what it replied.
- * The writer closes what it leaves open before it, and settles the deliveries it answered after
- * it (`cascade`).
- */
 export function turnSettled(
   projection: SessionProjection,
   ending: TurnEnding,
@@ -115,16 +86,10 @@ export function turnSettled(
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Model runs
-// ---------------------------------------------------------------------------
-
-/** A model run is asked for: a turn's, or a context change's summary run. */
 export function runRequested(owner: ModelOwner, runId: string): SessionEvent {
   return fact("model.requested", { owner, runId });
 }
 
-/** The run's model was chosen and an attempt at its provider call begins. */
 export function runStarted(input: {
   readonly runId: string;
   readonly modelId: string;
@@ -134,7 +99,6 @@ export function runStarted(input: {
   return fact("model.started", { attempt, modelId, runId });
 }
 
-/** How a run ended, and what it spent. */
 export interface RunSettlement {
   readonly runId: string;
   readonly outcome: FactOf<"model.settled">["data"]["outcome"];
@@ -144,7 +108,6 @@ export interface RunSettlement {
   readonly usage?: Usage;
 }
 
-/** The facts that settle a run: its end, then what it spent. */
 export function runSettledFacts(input: RunSettlement): SessionEvent[] {
   const { usage, ...settled } = input;
   const facts: SessionEvent[] = [fact("model.settled", settled)];
@@ -154,10 +117,6 @@ export function runSettledFacts(input: RunSettlement): SessionEvent[] {
   return facts;
 }
 
-/**
- * What the agent behind a call spent, recorded against the call; without one, spend that arrived
- * after its call settled, which no open entity owns (`delegated-late`).
- */
 export function delegatedUsageFact(callId: string | undefined, usage: Usage): SessionEvent {
   const recorded = usageOf(usage);
   return callId === undefined
@@ -165,16 +124,10 @@ export function delegatedUsageFact(callId: string | undefined, usage: Usage): Se
     : fact("usage.recorded", { kind: "model", owner: { callId }, usage: recorded });
 }
 
-// ---------------------------------------------------------------------------
-// Context changes and controls
-// ---------------------------------------------------------------------------
-
-/** A context change starts. */
 export function contextStarted(data: FactOf<"context.started">["data"]): SessionEvent {
   return fact("context.started", data);
 }
 
-/** A control's admission: the delivery it arrived as, its kind, and who sent it. */
 export function controlAdmitted(delivery: ControlDelivery, control: string): SessionEvent {
   const data: DeliveryAdmittedData = {
     deliveryId: delivery.deliveryId,
@@ -184,16 +137,13 @@ export function controlAdmitted(delivery: ControlDelivery, control: string): Ses
   return fact("delivery.admitted", data);
 }
 
-/** A control's admission and settlement, recorded together. */
 export interface ControlSettlement {
   readonly control: ControlDelivery;
-  /** The control's kind as it arrived; an owner may receive one it doesn't know. */
   readonly source: string;
   readonly outcome: "ignored" | "applied" | "failed";
   readonly reason?: string;
 }
 
-/** A control that finishes without a step of its own, admitted and settled together. */
 export function controlSettled(settlement: ControlSettlement): SessionEvent[] {
   const { control, outcome, reason, source } = settlement;
   return [
@@ -206,7 +156,6 @@ export function controlSettled(settlement: ControlSettlement): SessionEvent[] {
   ];
 }
 
-/** A control or callback delivery's settlement once what it asked has happened. */
 export function deliveryApplied(deliveryId: string): SessionEvent {
   return fact("delivery.settled", { deliveryId, outcome: "applied" });
 }

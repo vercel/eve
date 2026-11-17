@@ -149,7 +149,6 @@ export async function nonturnRetryWorkflow(context: Record<string, unknown>): Pr
   return sessionId;
 }
 
-/** The session's values before its first step. */
 async function initialValues(context: Record<string, unknown>) {
   "use step";
   const sessionId = getWorkflowMetadata().workflowRunId;
@@ -160,7 +159,6 @@ async function initialValues(context: Record<string, unknown>) {
   };
 }
 
-/** Publishes two commits, then only the first once its retry decides differently. */
 async function publishLessOnRetry(
   values: Awaited<ReturnType<typeof initialValues>>,
   replay: "prefix" | "none",

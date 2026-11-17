@@ -4,7 +4,6 @@ import { endsTurn } from "#client/session-utils.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import type { ReadRecord } from "#protocol/session-events/envelope.js";
 
-/** One reusable service-owned connection to a durable session-line stream. */
 export interface DevelopmentMessageStream {
   readonly resourceUrl: string;
   readonly closed: boolean;
@@ -101,7 +100,6 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
           this.#boundaryCount += 1;
           if (!collect && this.#boundaryCount >= startAfter) collect = true;
         }
-        // Consume the whole commit before stopping, including its terminal session fact.
         if (stop) return events;
       }
       return events;

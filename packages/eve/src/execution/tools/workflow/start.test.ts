@@ -66,7 +66,6 @@ describe("startWorkflowToolRun", () => {
   });
 });
 
-// https://github.com/vercel/eve/issues/4820
 describe("startFailureResult", () => {
   it("keeps the name of the error the start threw", () => {
     const error = Object.assign(new Error("no capacity"), { name: "CapacityError" });

@@ -19,20 +19,6 @@ import { cancelRun } from "#internal/workflow/runtime.js";
 
 const log = createLogger("execution.session-inbox.stranded-replay-guard");
 
-/**
- * Makes the World acknowledge, without replaying, queue deliveries for
- * top-level eve session runs that another eve version started. Worlds that
- * re-enqueue their active runs at startup (local, Postgres) would otherwise
- * replay such a run on this build's code and fail it as `CORRUPTED_EVENT_LOG`.
- * A top-level session stays active until ingress replaces it or its timeout
- * ends it. Subagent sessions and workflow tool runs are cancelled instead:
- * no later user message can replace their interrupted work. Ingress refuses
- * the same owners by the same verdict, so preserved owners cannot admit work.
- * Timeout workflows remain runnable so they can end preserved sessions.
- *
- * Mutates and returns `world`; only its `createQueueHandler` changes. Worlds
- * that replay each run on its own deployment are returned untouched.
- */
 export function guardStrandedSessionReplay<TWorld extends World>(world: TWorld): TWorld {
   if (routesToOwnerDeployment(world)) return world;
   const { name } = resolveInstalledPackageInfo();
@@ -59,7 +45,6 @@ export function guardStrandedSessionReplay<TWorld extends World>(world: TWorld):
 
 type GuardedWorkflow = "session" | "tool";
 
-/** Applies {@link strandedReplayAction}; true when the delivery must not replay. */
 async function skipRetiredRun(
   world: World,
   runId: string,
@@ -79,12 +64,6 @@ async function skipRetiredRun(
   }
 }
 
-/**
- * What to do with a delivery for a retired run. Only an active run needs a
- * verdict. A top-level session parks so ingress or its timeout can replace or
- * end it; a subagent session or workflow tool run is retired, because no
- * later user message can replace its interrupted work.
- */
 function strandedReplayAction(
   run: OwnerRun,
   workflow: GuardedWorkflow,
@@ -95,14 +74,11 @@ function strandedReplayAction(
     : "park";
 }
 
-/** The run when another eve version started it; `undefined` when this build can replay it. */
 async function readRetiredRun(world: World, runId: string): Promise<OwnerRun | undefined> {
   try {
     return await findRetiredOwnerRun(world, runId);
   } catch (error) {
-    // A resilient start enqueues before its run is readable; such a run is new.
     if (isMissingWorkflowRunError(error)) return undefined;
-    // Anything else is retried by the queue: replaying a retired run would corrupt it.
     throw error;
   }
 }
@@ -113,7 +89,6 @@ async function retireRun(world: World, run: OwnerRun): Promise<void> {
       cancelReason: "Run retired: its eve deployment is no longer available",
     });
   } catch (error) {
-    // A concurrent cancellation or completion has already retired the run.
     if (!isInactiveWorkflowRunError(error)) throw error;
   }
   log.warn("Retired stranded descendant run", {

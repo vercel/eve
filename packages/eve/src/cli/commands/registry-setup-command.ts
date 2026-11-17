@@ -190,7 +190,6 @@ function handlePresentation(
   }
 }
 
-/** Executes a trusted setup binary while the parent prompter owns all terminal interaction. */
 export async function runRegistrySetupCommand(
   appRoot: string,
   setup: RegistrySetupCommand,

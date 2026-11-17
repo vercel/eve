@@ -52,7 +52,6 @@ export function defineState<T>(name: string, initial: () => T): StateHandle<T> {
   return createStateHandle(name, initial);
 }
 
-/** Internal registration of generated, mount-owned keys. */
 export function defineMountedState<T>(
   mountId: string,
   name: string,
@@ -61,7 +60,6 @@ export function defineMountedState<T>(
   return createStateHandle(mountedStateKeyName(mountId, name), initial);
 }
 
-/** Durable context key name of one mount's state slot. */
 export function mountedStateKeyName(mountId: string, name: string): string {
   return `eve:mount.v1:${encodeURIComponent(mountId)}:${encodeURIComponent(name)}`;
 }
@@ -84,9 +82,6 @@ function createStateHandle<T>(name: string, initial: () => T): StateHandle<T> {
 
 function loadStateContext(): AlsContext {
   if (isInWorkflowStep()) {
-    // A step's context is never saved to the session, so a read would see
-    // `initial()` and a write would be lost. `fatal` stops the Workflow SDK
-    // from retrying a misuse that would fail the same way.
     throw Object.assign(
       new Error(
         'defineState() get() and update() are unavailable inside a "use step" function. ' +

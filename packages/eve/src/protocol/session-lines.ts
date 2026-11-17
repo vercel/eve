@@ -1,20 +1,11 @@
-// How published events become stored lines, and how readers get them back. A run of facts is
-// one commit; each progress record is its own line. Readers rebuild each event with where it
-// sits and when it was written.
-
 import { isFactType, isProgressType } from "#protocol/session-events/catalog.js";
 import type { CommitLine, ProgressLine, StoredLine } from "#protocol/session-events/envelope.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 
-/** True for a record this version knows: a v27 fact or progress type. */
 export function isKnownRecordType(type: unknown): boolean {
   return isFactType(type) || isProgressType(type);
 }
 
-/**
- * The lines one publication writes: each run of facts as one commit, each progress record as its
- * own line, in order.
- */
 export function linesOf(
   events: readonly SessionEvent[],
   at: string,
@@ -38,11 +29,6 @@ export function linesOf(
   return lines;
 }
 
-/**
- * The events a line carries, each with its position and time; a progress record takes
- * `progressAt`, the time of the latest commit. Records of types this version doesn't know are
- * skipped, as every reader skips them.
- */
 export function eventsOfLine(
   line: StoredLine,
   position: number,
@@ -67,7 +53,6 @@ export function eventsOfLine(
   return events;
 }
 
-/** Reads events from consecutive lines, keeping the time progress records inherit. */
 export function createEventReader(progressAt = new Date(0).toISOString()): {
   read(line: StoredLine, position: number): SessionStreamEvent[];
 } {

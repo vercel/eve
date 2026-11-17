@@ -117,8 +117,6 @@ describe("extractTextFromHtml", () => {
   });
 
   const KIB_256 = 256 * 1024;
-  // Most of these took seconds before the linear scan (quadratic regex
-  // backtracking). The 1 s bound is deliberately loose to avoid CI flake.
   it.each([
     ["<script x", "<script x".repeat(KIB_256 / 9)],
     ["<", "<".repeat(KIB_256)],
@@ -205,7 +203,6 @@ describe("executeWebFetchTool", () => {
   it("converts HTML served without a Content-Type", async () => {
     const script = "const ignored = 1;\n".repeat(MAX_OUTPUT_LINES + 500);
     const html = `\n<!DOCTYPE html><html><head><script>${script}</script></head><body><h1>Visible title</h1></body></html>`;
-    // Bytes, because a string body would get an implicit text/plain header.
     requestPublicUrlMock.mockResolvedValueOnce(new Response(new TextEncoder().encode(html)));
 
     const result = await executeWebFetchTool({ url: "https://example.com" });

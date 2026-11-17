@@ -1,7 +1,6 @@
 import { ResponseSegment } from "#client/session-utils.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 
-/** Reads the commit that admits this delivery through its settlement's whole commit. */
 export async function* deliveryEvents(
   source: AsyncIterable<SessionStreamEvent>,
   deliveryId: string,

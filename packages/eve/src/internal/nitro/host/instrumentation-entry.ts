@@ -11,17 +11,11 @@ interface EntryPluginContext {
   load(options: { id: string }): Promise<{ exports: readonly string[] | null }>;
 }
 
-/**
- * Awaits instrumentation before importing the preset's server dependency
- * graph: the module swaps Nitro's entry for a wrapper the plugin loads.
- */
 export function createInstrumentationEntry(instrumentationPath: string) {
   let presetEntry: string | undefined;
   const module: NitroModule = {
     name: "eve:instrumentation-entry",
     setup(nitro) {
-      // Module hooks run after preset hooks, which finish selecting the
-      // runtime entry in build:before; the bundler reads the entry afterward.
       nitro.hooks.hook("build:before", () => {
         if (nitro.options.entry === INSTRUMENTATION_ENTRY) return;
         presetEntry = nitro.options.entry;
@@ -38,7 +32,6 @@ export function createInstrumentationEntry(instrumentationPath: string) {
         if (presetEntry === undefined) throw new Error("Nitro built before selecting its entry.");
         const entry = await this.resolve(presetEntry);
         if (entry === null) throw new Error(`Cannot resolve Nitro entry ${presetEntry}`);
-        // Re-export every preset binding, e.g. node-middleware exposes only named exports.
         const { exports } = await this.load(entry);
         return [
           `await import(${stringifyEsmImportSpecifier(instrumentationPath)});`,
@@ -52,6 +45,5 @@ export function createInstrumentationEntry(instrumentationPath: string) {
       },
     },
   };
-  // Nitro's development preset otherwise collapses both startup phases into one module.
   return { inlineDynamicImports: false, module, plugin } as const;
 }

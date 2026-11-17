@@ -11,11 +11,6 @@ import type {
 } from "#public/channels/slack/interactions.js";
 import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
 
-/**
- * What a settled card shows in place of its controls: the line that replaces
- * them, the notification text of the update, such as `Answered: Saturday` or
- * `No longer active`, and who answered when the card credits someone.
- */
 export interface SettledCard {
   readonly label: string;
   readonly text: string;
@@ -83,7 +78,6 @@ function actionsContainActionId(actions: unknown, actionId: string): boolean {
   return actions.some((element) => isObjectRecord(element) && element.action_id === actionId);
 }
 
-/** Retires an answered `card` in place: same single block, buttons replaced by the answer. */
 export function answeredBlocksFromActionBlock(input: {
   readonly answerLabel: string;
   readonly block: unknown;
@@ -137,7 +131,6 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** Replaces a pressed HITL card's controls with `card`. */
 export async function settleHitlCard(
   interaction: ParsedBlockActionsPayload,
   deps: InteractionHandlerDeps,
@@ -160,7 +153,6 @@ export async function settleHitlCard(
   });
 }
 
-/** Replaces a freeform card's controls with `card`. */
 export async function settleFreeformCard(input: {
   readonly card: SettledCard;
   readonly channelId: string;

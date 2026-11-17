@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import type { ConnectionProtocol } from "#shared/connection-types.js";
 
-/** Builds the opaque, reconstruction-stable identity for one resolved connection instance. */
 export function createConnectionInstanceId(input: {
   readonly connectionName: string;
   readonly instanceKey?: string;

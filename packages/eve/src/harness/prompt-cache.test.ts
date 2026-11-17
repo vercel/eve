@@ -121,8 +121,6 @@ describe("applyLastToolCacheBreakpoint", () => {
       { providerOptions: Record<string, unknown> } | undefined
     >;
 
-    // The marker's namespaces override any existing ones; foreign namespaces
-    // are preserved.
     expect(result.only?.providerOptions).toEqual({
       ...marker,
       openai: { something: 2 },
@@ -202,13 +200,10 @@ describe("applyConversationCacheControl", () => {
     ];
     const out = applyConversationCacheControl(messages, fiveMinutes);
 
-    // The trailing tool-result message carries the final breakpoint.
     expect((out[2] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
 
-    // The most recent assistant (index 1) is the advancement anchor.
     expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
 
-    // The user message is untouched.
     expect(out[0]).toEqual(messages[0]);
   });
 
@@ -242,7 +237,6 @@ describe("applyConversationCacheControl", () => {
     expect(messages[0]).toBe(originalRef0);
     expect(messages[1]).toBe(originalRef1);
     expect(out).not.toBe(messages);
-    // Unmarked messages keep their identity; marked messages are copies.
     expect(out[0]).toBe(originalRef0);
     expect(out[1]).not.toBe(originalRef1);
   });

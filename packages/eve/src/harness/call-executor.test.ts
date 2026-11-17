@@ -65,7 +65,6 @@ it.each([
     expect(results.parts[0]?.output).toEqual({ type: "text", value: "saved" });
   } else if (outcome === "deny") {
     expect(results.parts[0]?.output).toMatchObject({ type: "execution-denied", reason });
-    // A refusal is told apart from a body that ran and failed: it rejects, and never starts.
     expect(events.map((event) => event.type)).not.toContain("call.started");
     expect(events.find((event) => event.type === "call.settled")?.data).toMatchObject({
       cause: { policy: "approval" },

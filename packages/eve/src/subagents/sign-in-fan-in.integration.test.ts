@@ -25,10 +25,6 @@ import type { AuthorizationDefinition, TokenResult } from "#shared/connection-ty
 import { defineTool } from "#tools/definition.js";
 import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 
-// A parent runs three children at once, and each child's tool needs a Weather sign-in for the
-// same person, and with `parentAsks` the parent's own tool needs it too. Each sign-in relays to the parent as its own card, and the person's answer on one
-// reaches every child waiting on the same grant. The authorization provider is faked at its edge.
-
 vi.setConfig({ testTimeout: 90_000 });
 
 const CHILDREN = 3;
@@ -89,7 +85,6 @@ describe("one sign-in answer for parallel children", () => {
         const before = await signInCards(stream, CHILDREN);
         const [card] = before.filter(isSignInOpened);
         await completeSignIn(card!, { code: "oauth-code" });
-        // The answered child's call holds after its sign-in completes; the others still run.
         await app.othersRan();
         expect(app.executions(), "calls that ran while one held").toHaveLength(CHILDREN - 1);
         app.release();
@@ -117,7 +112,6 @@ describe("one sign-in answer for parallel children", () => {
       try {
         const before = await signInCards(stream, CHILDREN);
         const [card, ...others] = before.filter(isSignInOpened);
-        // The first delivery to one other child fails, as a storage fault would.
         const faulty = await failOnce(callbackToken(others[0]!));
 
         await completeSignIn(card!, { code: "oauth-code" });
@@ -210,7 +204,6 @@ describe("one sign-in answer for parallel children", () => {
       try {
         const events = [...(await signInCards(stream, 1))];
         await completeSignIn(events.find(isSignInOpened)!, { code: "oauth-code" });
-        // The child's next call finds the grant revoked, so it asks again.
         events.push(...(await signInCards(stream, 1)));
         const cards = events.filter(isSignInOpened);
         expect(cards, "sign-in cards in the parent").toHaveLength(2);
@@ -464,7 +457,6 @@ describe("one sign-in answer for parallel children", () => {
         await completeSignIn(card!, { error: "access_denied" });
         const after = await stream.nextUntil("parent turn", isTurnSettled);
 
-        // Each child read its first call's refusal and called again.
         const retries = app.retries();
         expect(Object.keys(retries).toSorted(), "children that called again").toEqual(
           Array.from({ length: CHILDREN }, (_, index) => `${index}`),
@@ -515,7 +507,6 @@ describe("one sign-in answer for parallel children", () => {
           waiting.map(({ outcome }) => outcome),
           "how the waiting sign-ins closed",
         ).toEqual(Array.from({ length: CHILDREN - 1 }, () => "failed"));
-        // Each waiting child's sign-in hears the shown card's error, not a code.
         expect(app.callbacks(), "the callbacks each child's exchange read").toEqual([
           { code: "oauth-code" },
           ...Array.from({ length: CHILDREN - 1 }, () => ({ error: failure })),
@@ -555,7 +546,6 @@ describe("one sign-in answer for parallel children", () => {
         await vi.waitFor(() => expect(app.executions()).toEqual(["Lisbon 0"]), {
           timeout: 30_000,
         });
-        // The held child asks for the same grant only now, after the card settled.
         app.releaseLate();
         events.push(...(await stream.nextUntil("parent turn", isTurnSettled)));
 
@@ -578,7 +568,6 @@ describe("one sign-in answer for parallel children", () => {
 
 let restoreWorld = async () => {};
 
-/** Fails the first lookup of the hook `token` names, as a storage fault would. */
 async function failOnce(token: string) {
   let thrown = 0;
   const world = await getWorld();
@@ -597,7 +586,6 @@ async function failOnce(token: string) {
   return { thrown: () => thrown };
 }
 
-/** The hook token a sign-in card's callback URL names. */
 function callbackToken(card: SessionStreamEvent): string {
   if (card.type !== "interaction.opened") throw new Error("Expected a sign-in card.");
   const url = card.data.request.signIn?.callbackUrl;
@@ -607,7 +595,6 @@ function callbackToken(card: SessionStreamEvent): string {
   return callback.token;
 }
 
-/** Reads the stream until the parent shows `count` sign-in cards. */
 async function signInCards(
   stream: ReturnType<typeof captureEvents>,
   count: number,
@@ -618,7 +605,6 @@ async function signInCards(
   return events;
 }
 
-/** The parent's own card, then the children's, which ask only once it is open. */
 async function parentCardFirst(
   app: { readonly releaseChildren: () => void },
   stream: ReturnType<typeof captureEvents>,
@@ -631,7 +617,6 @@ async function parentCardFirst(
   return [...parent, ...(await signInCards(stream, CHILDREN))];
 }
 
-/** How the parent's sign-in cards closed and why, in the order they closed. */
 function signInSettlements(events: readonly SessionStreamEvent[]) {
   const cards = new Set(events.filter(isSignInOpened).map(signInId));
   return filterEventsByType(events, "interaction.settled")
@@ -639,7 +624,6 @@ function signInSettlements(events: readonly SessionStreamEvent[]) {
     .map(({ data }) => ({ outcome: data.outcome, reason: data.reason }));
 }
 
-/** How the parent's sign-in cards closed, in the order they closed. */
 function signInOutcomes(events: readonly SessionStreamEvent[]): string[] {
   const cards = new Set(events.filter(isSignInOpened).map(signInId));
   return filterEventsByType(events, "interaction.settled")
@@ -649,13 +633,6 @@ function signInOutcomes(events: readonly SessionStreamEvent[]): string[] {
 
 type Prompt = LanguageModelV4CallOptions["prompt"];
 
-/**
- * The parent starts `children` children in one step and waits for their reports. A child, whose
- * conversation starts with the parent's message, checks the weather and reports; with `again`,
- * child 0 then checks Porto's under another scope of the same grant. With `parentAsks`, the
- * parent checks Lisbon's weather itself while the children run. With `retry`, a child calls
- * `get_weather` once more after its first call's result, and `retry` hears that second result.
- */
 function scriptedModel(
   children: number,
   again: boolean,
@@ -735,25 +712,16 @@ function scriptedModel(
   );
 }
 
-/**
- * Connect is faked at its edge: a callback with a `code` stores the grant, and a token is read
- * from the stored grant. With `again`, the grant is revoked when child 0 asks for Porto's weather.
- */
 async function createApp(
   name: string,
   options: {
     readonly again?: boolean;
     readonly children?: number;
-    /** The token exchange for a callback with a code throws this, as a provider outage would. */
     readonly exchangeFails?: string;
     readonly grant?: string;
-    /** The last child asks for its token only after `releaseLate`. */
     readonly lateChild?: boolean;
-    /** The parent's own tool needs the sign-in too; with `first`, the children ask after it. */
     readonly parentAsks?: boolean | "first";
-    /** The first call to get a token holds until `release`, as a long command would. */
     readonly holdFirst?: boolean;
-    /** Each child calls `get_weather` once more after its first call's result. */
     readonly retryAfterRefusal?: boolean;
   },
 ) {
@@ -769,7 +737,6 @@ async function createApp(
   });
   let granted = false;
   let revoked = false;
-  // With `parentAsks: "first"`, the children ask once the test has seen the parent's card.
   let releaseChildren = () => {};
   const childrenAsk = new Promise<void>((resolve) => {
     releaseChildren = resolve;
@@ -902,7 +869,6 @@ async function startParent(name: string) {
   ]);
 }
 
-/** Calls the callback URL a sign-in card names, as the provider redirects back to it. */
 async function completeSignIn(
   card: SessionStreamEvent,
   params: Readonly<Record<string, string>>,
@@ -930,7 +896,6 @@ function isSignInOpened(event: SessionStreamEvent): boolean {
   return event.type === "interaction.opened" && event.data.request.kind === "sign-in";
 }
 
-/** A sign-in a channel shows a card for: one that waits on no card already shown. */
 function isShownCard(card: SessionStreamEvent): boolean {
   return waitsOnOf(card) === undefined;
 }
@@ -940,7 +905,6 @@ function waitsOnOf(card: SessionStreamEvent): string | undefined {
   return card.data.request.signIn?.waitsOn;
 }
 
-/** A sign-in the parent asked itself, rather than one it relays for a child. */
 function isOwnSignIn(card: SessionStreamEvent): boolean {
   return card.type === "interaction.opened" && card.data.origin === undefined;
 }

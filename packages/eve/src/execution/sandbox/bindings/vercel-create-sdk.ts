@@ -36,10 +36,6 @@ export async function createVercelEveImageSandbox(input: {
     fetch: getVercelSandboxFetch(input.createOptions),
   };
 
-  /*
-   * `runtime`, `image`, and a snapshot source are mutually exclusive in the
-   * SDK.
-   */
   if (source?.type === "snapshot") {
     return await input.sandboxModule.Sandbox.create({ ...options, source });
   }

@@ -18,7 +18,6 @@ const ALIAS_MARKER = "workflow-alias-resolved";
 const WORKFLOW_ASSET_MARKER = "workflow-raw-asset-embedded";
 const STEP_ASSET_MARKER = "step-raw-asset-embedded";
 
-/** The driver code the workflow build writes beside its entrypoint. */
 function readWorkflowCode(buildDir: string): Promise<string> {
   return readFile(join(buildDir, "workflows.code.txt"), "utf8");
 }
@@ -148,8 +147,6 @@ export async function deliver() {
     }
   });
 
-  // A workspace member without its own package.json shares the enclosing
-  // package, so its workflow may import modules and assets from outside the app root.
   it.each([
     { layout: "a standalone app", member: "", toPackageRoot: "../.." },
     { layout: "a workspace member", member: "agents/probe/", toPackageRoot: "../../../.." },
@@ -179,12 +176,9 @@ export async function deliver() {
         .map((file) => readFile(join(outputDir, "server", file), "utf8")),
     );
     expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
-    // The host bundles the driver code as a plain string, so the marker appears in the output.
     expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
   });
 
-  // The host and workflow bundles leave dependency imports to the host bundler,
-  // but an authored import of an installed package's file is still authored.
   it("embeds ?raw assets from node_modules imported by workflow and step modules", async () => {
     const app = await scenarioApp({
       name: "workflow-dependency-raw-assets",

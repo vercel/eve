@@ -1,17 +1,9 @@
-/**
- * The pinned message-queue panel: messages submitted while the agent is still
- * starting. Each queued message waits for the agent to become ready, where the
- * whole queue coalesces into the first turn's message.
- */
-
 import type { Theme } from "./theme.js";
 import { TOOL_COLUMN_LEAD } from "./rail.js";
 import { clipVisible, stripTerminalControls } from "#cli/ui/terminal-text.js";
 
-/** Most messages the queue holds; Enter on a full queue keeps the draft. */
 export const MESSAGE_QUEUE_LIMIT = 5;
 
-/** Read-only projection consumed by {@link renderMessageQueueRows}. */
 export interface MessageQueueView {
   readonly messages: readonly string[];
   readonly full: boolean;
@@ -24,14 +16,12 @@ export class MessageQueue {
     return this.#messages.length >= MESSAGE_QUEUE_LIMIT;
   }
 
-  /** Queues one message; returns false (draft stays put) when full. */
   enqueue(message: string): boolean {
     if (this.full) return false;
     this.#messages.push(message);
     return true;
   }
 
-  /** Every queued message coalesced into one prompt; clears the queue. */
   takePrompt(): string | undefined {
     if (this.#messages.length === 0) return undefined;
     const combined = this.#messages.join("\n\n");
@@ -50,11 +40,6 @@ export interface MessageQueuePanelRowsInput {
   readonly theme: Theme;
 }
 
-/**
- * Paints the pinned queue panel, indented so its marks share the tool
- * column. Queued messages ride a `│` rail under the header (one clipped
- * line each) and the last closes it with `└`.
- */
 export function renderMessageQueueRows(input: MessageQueuePanelRowsInput): string[] {
   const { view, width, theme } = input;
   if (view.messages.length === 0) return [];

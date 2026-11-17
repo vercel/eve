@@ -7,17 +7,10 @@ import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts
 
 const BUNDLED_MANIFEST_SOURCE = "bundled compiled manifest";
 
-/**
- * Input for loading the compiled source manifest from disk or the bundled
- * runtime alias.
- */
 interface LoadCompiledManifestInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }
 
-/**
- * Error raised when the compiled manifest cannot be loaded or validated.
- */
 export class LoadCompiledManifestError extends Error {
   readonly manifestPath?: string;
 
@@ -31,9 +24,6 @@ export class LoadCompiledManifestError extends Error {
   }
 }
 
-/**
- * Loads and validates the compiler-owned source manifest.
- */
 export async function loadCompiledManifest(
   input: LoadCompiledManifestInput,
 ): Promise<CompiledAgentManifest> {
@@ -61,8 +51,6 @@ export async function loadCompiledManifest(
 
   const bundledArtifacts = readBundledCompiledArtifacts();
 
-  // The build that bundled this manifest is the same eve version as this runtime, and it checked
-  // the manifest's shape before bundling it, so only the cheap semantic check runs here.
   if (bundledArtifacts !== null) {
     return checkCompiledManifest(bundledArtifacts.manifest, BUNDLED_MANIFEST_SOURCE);
   }
@@ -73,7 +61,6 @@ export async function loadCompiledManifest(
   );
 }
 
-/** Checks a manifest read from disk, which an older or newer eve may have written. */
 async function parseCompiledManifest(
   value: unknown,
   manifestPath: string,

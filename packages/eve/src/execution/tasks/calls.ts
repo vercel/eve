@@ -4,13 +4,8 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
-/** How long a wait that omits `timeoutSeconds` lasts, so a task that never reports can't hold a turn open for good. */
 export const TASK_WAIT_DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000;
 
-/**
- * Calls to the task tools. They defer out of the model step like
- * workflow tool calls; the session answers them instead of a workflow run.
- */
 export type TaskToolCall =
   | {
       readonly callId: string;
@@ -23,12 +18,6 @@ export type TaskToolCall =
       readonly taskId: string;
     };
 
-/**
- * The task tool calls a parked step's response still waits on. The response
- * is the one record of these calls: a call without a result is pending, and
- * a call with invalid input already carries its error result. The `eve`
- * namespace is reserved, so no authored tool's call matches.
- */
 export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToolCall[] {
   const answered = new Set<string>();
   for (const message of messages) {
@@ -47,7 +36,6 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
         const taskId = String(Reflect.get(input, "taskId"));
         calls.push({ callId: part.toolCallId, kind: TASK_CANCEL_TOOL_NAME, taskId });
       } else if (part.toolName === TASK_WAIT_TOOL_NAME) {
-        // Seconds, to match `sleep`.
         const timeoutSeconds: unknown = Reflect.get(input, "timeoutSeconds");
         calls.push({
           callId: part.toolCallId,
@@ -63,11 +51,9 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
   return calls;
 }
 
-/** Why an `eve__task_wait` call, or a held turn, stopped waiting. */
 export type TaskWaitResult =
   | {
       readonly status: "settled";
-      /** Tasks whose results follow; both lists are empty when nothing was working. */
       readonly settled: readonly {
         readonly id: string;
         readonly status: "completed" | "failed";
@@ -82,7 +68,6 @@ export interface TaskCancelResult {
   readonly tool: string;
 }
 
-// Built directly: the workflow body can't import the harness's result helpers.
 export function taskToolResult(
   callId: string,
   toolName: string,

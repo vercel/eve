@@ -6,29 +6,7 @@ interface ToolBlockDisplayGroup {
   readonly display: DisplayBlock;
 }
 
-/**
- * Coalesces presentation only; each member keeps its call id and lifecycle.
- *
- * A contiguous run of equivalent tool calls is partitioned by status, so a
- * batch with interleaved outcomes renders as one succeeded aggregate and one
- * failed aggregate instead of fragmenting on every status flip. Captured log
- * writes coalesce per
- * {@link GroupToolBlocksOptions.logCoalescing}. Because of all this, a
- * group's members are not always contiguous in the input: callers that
- * consume a group must remove its members by identity, never by prefix
- * length.
- */
 interface GroupToolBlocksOptions {
-  /**
-   * How captured log writes coalesce. `"window"` (the default, for the live
-   * block window) merges every write of one source across the whole input
-   * into a single section appended after the rest — a process stream is
-   * continuous, so interleaved activity must not fragment it — and the
-   * section commits as one cluster at the turn boundary. `"runs"` (for
-   * committed-transcript rebuilds) merges only contiguous writes, so a
-   * `/loglevel` toggle re-renders history at its committed positions instead
-   * of relocating every past write to the end.
-   */
   readonly logCoalescing?: "window" | "runs";
 }
 
@@ -37,11 +15,6 @@ export function groupToolBlocksForDisplay(
   options: GroupToolBlocksOptions = {},
 ): ToolBlockDisplayGroup[] {
   if ((options.logCoalescing ?? "window") === "window") {
-    // Bucket every write by (source, visibility) and anchor each bucket's
-    // ready-made merged group at its NEWEST member: the section renders
-    // where the last write landed, so everything that happened after it
-    // displays after it. Non-anchor members simply drop from the walk —
-    // they ride the anchored group's member list.
     const buckets = new Map<string, Block[]>();
     for (const block of blocks) {
       if (!isGroupableLogWrite(block)) continue;
@@ -68,8 +41,6 @@ function groupBlocks(
     const first = blocks[index]!;
     if (isGroupableLogWrite(first)) {
       if (logAnchors !== undefined) {
-        // Window mode: only a bucket's newest member emits its prebuilt
-        // merged group, at the last write's position.
         const group = logAnchors.get(first);
         if (group !== undefined) groups.push(group);
         index += 1;
@@ -99,10 +70,6 @@ function groupBlocks(
       run.push(candidate);
     }
 
-    // A run with any call still executing accumulates as one group — mixed
-    // settled/running statuses must not fragment the batch mid-flight. Only a
-    // fully settled run partitions by outcome (collapsed successes, itemized
-    // failures).
     const running = run.some((block) => block.status === "running");
     if (running && run.length > 1) {
       groups.push({ members: run, display: aggregateLiveToolBlocks(run) });
@@ -131,12 +98,10 @@ function sameRun(first: Block, candidate: Block): boolean {
     candidate.depth === first.depth &&
     candidate.live === first.live &&
     candidate.subagentCallId === first.subagentCallId &&
-    // Copy derives from the tool name, so name equality implies equal copy.
     candidate.toolName === first.toolName
   );
 }
 
-/** Splits one run into per-status groups, ordered by each status's first call. */
 function partitionRunByStatus(run: readonly Block[]): ToolBlockDisplayGroup[] {
   const partitions = new Map<Block["status"], Block[]>();
   for (const block of run) {
@@ -159,28 +124,14 @@ function partitionRunByStatus(run: readonly Block[]): ToolBlockDisplayGroup[] {
   }));
 }
 
-/**
- * An ordinary captured write. In-place log status blocks (the dev rebuild
- * cycle) carry an id and must never merge into a run.
- */
 function isGroupableLogWrite(block: Block): boolean {
   return block.kind === "log" && block.id === undefined;
 }
 
-/** The (source, visibility) identity a write merges under. */
 function logBucketKey(block: Block): string {
   return `${block.title ?? ""}\u0000${block.logLevel ?? ""}\u0000${block.logVisibility ?? ""}`;
 }
 
-/**
- * Coalesces captured writes into one section per (source, visibility)
- * bucket, so a stream renders as a single `○ stderr` section instead of one
- * per write. Bucketing keeps the concise/raw diagnostic twins apart — only
- * one of the pair is visible under any log filter, and a merged display can
- * carry only one visibility. The section shows only the NEWEST write —
- * every stored diagnostic points at the log file, so history on screen is
- * redundant — with earlier writes collapsed into the elided count.
- */
 function coalesceLogWrites(run: readonly Block[]): ToolBlockDisplayGroup[] {
   const buckets = new Map<string, Block[]>();
   for (const block of run) {
@@ -195,7 +146,6 @@ function coalesceLogWrites(run: readonly Block[]): ToolBlockDisplayGroup[] {
   return [...buckets.values()].map(coalesceLogBucket);
 }
 
-/** One already-bucketed stream's merged group: the newest write, counted. */
 function coalesceLogBucket(members: readonly Block[]): ToolBlockDisplayGroup {
   if (members.length === 1) return { members, display: members[0]! };
   const newest = members.at(-1)!;
@@ -224,11 +174,6 @@ function aggregateToolBlocks(members: readonly Block[]): DisplayBlock {
   };
 }
 
-/**
- * The accumulating form of an in-flight batch: one counted header whose items
- * list every announced call, newest first, so fresh calls surface at the top
- * of the rail while earlier ones slide toward the elision line.
- */
 function aggregateLiveToolBlocks(members: readonly Block[]): DisplayBlock {
   return {
     ...aggregateToolBlocks(members),
@@ -237,11 +182,6 @@ function aggregateLiveToolBlocks(members: readonly Block[]): DisplayBlock {
   };
 }
 
-/**
- * The settled form of a successful batch: the counted header alone, past
- * tense, with the item rail dropped — completed activity compresses to one
- * line in the transcript.
- */
 function collapseSettledToolBlocks(members: readonly Block[]): DisplayBlock {
   const first = members[0]!;
   const group = first.toolGroup!;
@@ -256,20 +196,14 @@ function collapseSettledToolBlocks(members: readonly Block[]): DisplayBlock {
   };
 }
 
-/** The (past verb, noun) copy one condensed-count entry renders with. */
 interface CondensedKindCopy {
   readonly pastVerb: string;
   readonly singularNoun: string;
   readonly pluralNoun: string;
 }
 
-/** How many tool kinds the condensed row names before "and more". */
 const maxCondensedKinds = 3;
 
-/**
- * The counted multi-kind summary of a settled child-tool run:
- * `Ran 17 commands, Read 10 files, Wrote 6 files, and more`.
- */
 function condensedRunTitle(run: readonly Block[]): string {
   const counts = new Map<string, { copy: CondensedKindCopy; count: number }>();
   for (const block of run) {
@@ -293,11 +227,6 @@ function condensedRunTitle(run: readonly Block[]): string {
   return ranked.length > maxCondensedKinds ? `${named.join(", ")}, and more` : named.join(", ");
 }
 
-/**
- * What an agent did, for the line its task ends on: counted settled work plus
- * a failure count, so an error folds into the summary without vanishing from
- * it. `undefined` when the agent ran no tools.
- */
 export function summarizeChildTools(children: readonly Block[]): string | undefined {
   const tools = children.filter((block) => block.kind === "subagent-tool");
   if (tools.length === 0) return undefined;
@@ -324,23 +253,16 @@ function condensedKindCopy(block: Block): CondensedKindCopy {
   return { pastVerb: "Used", singularNoun: "tool", pluralNoun: "tools" };
 }
 
-/** A block's activity stamp; unstamped (test-built) blocks all tie at 0. */
 function updateRecency(block: Block): number {
   return block.updateSeq ?? 0;
 }
 
-/**
- * Most recently active call first: the rail reads bottom-up, like changes
- * arriving. Activity stamps put a just-settled parallel call ahead of a
- * later-announced one still idle.
- */
 function newestFirstItems(members: readonly Block[]): ToolGroupItem[] {
   return members
     .map((member, position) => ({ member, order: updateRecency(member), position }))
     .sort((a, b) => b.order - a.order || b.position - a.position)
     .map(({ member }): ToolGroupItem => {
       const item: ToolGroupItem = { text: member.toolGroup!.item };
-      // Failed calls keep their individual error summaries visible per row.
       return member.status === "error" && member.result !== undefined
         ? { ...item, result: member.result }
         : item;

@@ -9,12 +9,6 @@ import { formatCapabilityError } from "#internal/capability-error.js";
 
 const log = createLogger("execution.subagent-adapter");
 
-/**
- * Framework adapter that bridges a child subagent session to its parent.
- *
- * It relays every interaction fact the child publishes, so the parent channel can render each
- * request, route answers back down, and close its copy when the child settles it.
- */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
   async "interaction.opened"(event, ctx) {
@@ -43,7 +37,6 @@ async function relay(event: SessionEvent, ctx: ChannelAdapterContext): Promise<v
     events: relayed,
     kind: "subagent-interaction",
     subagentName: state.subagentName,
-    // A person answers a request through this session: the parent routes it back here.
     ...(relayed.some(
       (fact) => fact.type === "interaction.opened" && fact.data.request.kind !== "sign-in",
     ) && {
@@ -62,7 +55,6 @@ async function relay(event: SessionEvent, ctx: ChannelAdapterContext): Promise<v
   });
 }
 
-/** Forwards one relayed interaction fact to the parent via the durable `resumeHook` path. */
 async function forwardToParentStep(input: {
   readonly hookPayload: SubagentInteractionHookPayload;
   readonly parentContinuationToken: string;
@@ -70,8 +62,6 @@ async function forwardToParentStep(input: {
   "use step";
 
   try {
-    // The workflow runtime loads only when a child forwards, so the channel adapters every
-    // session context restores stay free of it.
     const { resumeHook } = await import("#internal/workflow/runtime.js");
     await resumeHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {

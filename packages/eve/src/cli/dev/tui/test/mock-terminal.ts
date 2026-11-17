@@ -30,7 +30,6 @@ export class MockUserInput extends EventEmitter implements TerminalInput {
     this.emit("data", Buffer.from(text));
   }
 
-  /** Emits a raw key sequence (e.g. an escape sequence) as one chunk. */
   send(sequence: string) {
     this.emit("data", Buffer.from(sequence));
   }
@@ -78,7 +77,6 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
   rows: number;
   #rawOutput = "";
   #lines: string[] = [];
-  /** Parallel to `#lines`: `d` marks a cell drawn dim (SGR 2), a space any other cell. */
   #dimCells: string[] = [];
   #dim = false;
   #cursorLine = 0;
@@ -126,16 +124,11 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     this.emit("resize");
   }
 
-  /**
-   * The visible grid as text. `hideDim` blanks dim cells, leaving what the
-   * screen draws at full weight, such as option labels without descriptions.
-   */
   snapshot({ hideDim = false }: { readonly hideDim?: boolean } = {}) {
     if (!hideDim) return this.#lines.join("\n");
     return this.#lines
       .map((line, index) => {
         const dim = this.#dimCells[index] ?? "";
-        // Index by UTF-16 unit: a cell's marks repeat for each unit it occupies.
         return line.replace(/./gsu, (cell, column: number) =>
           dim[column] === "d" ? " ".repeat(cell.length) : cell,
         );
@@ -147,18 +140,8 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     return this.#rawOutput;
   }
 
-  /**
-   * Resolves once the runner parks at an idle prompt: a column-0 `❯` row
-   * with no live turn bar on screen. A streaming turn keeps an identical
-   * `❯` prompt anchored (Enter inert), so the glyph alone cannot signal
-   * readiness — the bar's absence is the discriminator.
-   */
   async waitForIdlePrompt(timeoutMs = 1000) {
-    // Match the activity row even while its dot is hidden, without treating
-    // the completed coda, a prompt, or ordinary prose as active work.
     const liveTurnBar = /^[•* ] (?:Thinking|Generating|Running) \(\d/mu;
-    // Unicode glyphs only: the ASCII prompt mark (`>`) is ambiguous with the
-    // ASCII brand mark, and every TUI smoke script pins EVE_TUI_UNICODE=1.
     const idle = () => {
       const snapshot = this.snapshot();
       return /^[❯]/mu.test(snapshot) && !liveTurnBar.test(snapshot);
@@ -241,14 +224,6 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     }
   }
 
-  /**
-   * Interprets the subset of ANSI control sequences the inline scrollback
-   * renderer emits: absolute/relative cursor movement, carriage-return-style
-   * line jumps (CPL/CNL), column moves, and the line / screen erases used to
-   * redraw the live region. Private-mode toggles (synchronized updates, cursor
-   * visibility) and any other sequences are consumed and ignored so they never
-   * corrupt the emulated grid.
-   */
   #applyEscape(input: string, startIndex: number) {
     const match = input.slice(startIndex).match(ansiControlSequencePattern);
 
@@ -257,15 +232,12 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     }
 
     const [sequence, rawParameters = "", , command] = match;
-    // Private-mode sequences (e.g. `?2026h`, `?25l`) carry no grid effect.
     const isPrivate = rawParameters.startsWith("?");
     const parameters = rawParameters && !isPrivate ? rawParameters.split(";") : [];
     const first = (fallback: number) =>
       parameters[0] === undefined || parameters[0] === "" ? fallback : Number(parameters[0]);
 
     if (isPrivate) {
-      // The alternate screen swaps the grid: entering starts the modal view
-      // from a blank screen, leaving restores the transcript snapshot.
       if (rawParameters === "?1049" && (command === "h" || command === "l")) {
         if (command === "h") {
           this.#mainScreen = {
@@ -295,27 +267,27 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
         this.#cursorLine = first(1) - 1;
         this.#cursorColumn = (parameters[1] ? Number(parameters[1]) : 1) - 1;
         break;
-      case "A": // cursor up
+      case "A":
         this.#cursorLine = Math.max(0, this.#cursorLine - first(1));
         break;
-      case "B": // cursor down
+      case "B":
         this.#cursorLine += first(1);
         break;
-      case "C": // cursor forward
+      case "C":
         this.#cursorColumn += first(1);
         break;
-      case "D": // cursor back
+      case "D":
         this.#cursorColumn = Math.max(0, this.#cursorColumn - first(1));
         break;
-      case "E": // cursor next line (column 0)
+      case "E":
         this.#cursorLine += first(1);
         this.#cursorColumn = 0;
         break;
-      case "F": // cursor previous line (column 0)
+      case "F":
         this.#cursorLine = Math.max(0, this.#cursorLine - first(1));
         this.#cursorColumn = 0;
         break;
-      case "G": // cursor horizontal absolute
+      case "G":
         this.#cursorColumn = first(1) - 1;
         break;
       case "J":
@@ -334,11 +306,6 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     return startIndex + sequence.length;
   }
 
-  /**
-   * Tracks only intensity: 2 starts dim; 0 and 22 end it, as in a real terminal
-   * where bold (1) leaves faint on. Extended colors (38, 48, 58) carry a
-   * `5;n` or `2;r;g;b` payload whose numbers are not SGR codes.
-   */
   #applySgr(parameters: readonly string[]) {
     const codes = (parameters.length === 0 ? [""] : parameters).map((parameter) =>
       parameter === "" ? 0 : Number(parameter),
@@ -366,7 +333,6 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     }
 
     if (mode === 1) {
-      // Cursor to start of screen.
       for (let line = 0; line < this.#cursorLine; line += 1) {
         this.#lines[line] = "";
         this.#dimCells[line] = "";
@@ -375,8 +341,6 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       return;
     }
 
-    // mode 0: cursor to end of screen — truncate current line at the cursor
-    // and drop every line below it.
     this.#eraseInLine(0);
     this.#lines.length = Math.min(this.#lines.length, this.#cursorLine + 1);
     this.#dimCells.length = Math.min(this.#dimCells.length, this.#cursorLine + 1);
@@ -390,7 +354,6 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       } else if (mode === 1) {
         grid[this.#cursorLine] = " ".repeat(this.#cursorColumn) + line.slice(this.#cursorColumn);
       } else {
-        // mode 0: clear from cursor to end of line.
         grid[this.#cursorLine] = line.slice(0, this.#cursorColumn);
       }
     }

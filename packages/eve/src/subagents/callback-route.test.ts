@@ -124,8 +124,6 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
   });
 
   it("passes a protocol 2 callback as is to a parent run from before v27", async () => {
-    // Its URL names no protocol: the run reads protocol 2 input itself, as its own deployment's
-    // route passed it, so the child's request reaches it across the parent's upgrade.
     const nested = {
       ...approvalRequest,
       remote: {
@@ -155,7 +153,6 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       subagentName: "deployer",
     };
     await post(approved, "https://parent.example.com/eve/v1/callback/parent-hook");
-    // Such a run reads an approval's own settlement too.
     expect(resumeRunnableHook).toHaveBeenCalledWith("parent-hook", approved);
   });
 
@@ -194,7 +191,6 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     resumeRunnableHook.mockRejectedValue(new Error("hook not found"));
     const response = await post(approvalRequest);
     expect(response.status).toBe(404);
-    // The same message as every protocol's route, now with a code a child can read.
     await expect(response.json()).resolves.toEqual({
       code: "CALLBACK_NOT_PENDING",
       error: "Session callback not pending.",

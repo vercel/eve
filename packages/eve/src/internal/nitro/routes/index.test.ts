@@ -73,8 +73,6 @@ describe("buildHomePageResponse", () => {
   });
 
   it("prefers x-forwarded-host / x-forwarded-proto over the raw request URL", async () => {
-    // Vercel's edge forwards the public-facing host on these headers; the
-    // raw `request.url` Nitro sees is the internal route target.
     const body = await buildResponseForRequest("http://0.0.0.0:3000/", {
       "x-forwarded-host": "agent.production.example",
       "x-forwarded-proto": "https",
@@ -107,9 +105,6 @@ describe("buildHomePageResponse", () => {
   it("does not leak any agent configuration", async () => {
     const body = await buildResponseForRequest("https://my-agent.example.com/").text();
 
-    // The deployed URL is reachable by anonymous callers, so the response
-    // must not advertise model/provider details, instructions text, or the
-    // authenticated eve API surface.
     expect(body).not.toMatch(/openai|anthropic|gpt|claude/i);
     expect(body).not.toMatch(/instructions/i);
     expect(body).not.toMatch(/\/eve\/v1\//);
@@ -121,9 +116,6 @@ describe("buildHomePageResponse", () => {
 
     expect(body).toContain('<meta name="robots" content="noindex">');
     expect(body).toContain('<meta name="referrer" content="no-referrer">');
-    // No external fonts, scripts, or images — the deployment must not
-    // leak its origin to a third party just by being visited. The only
-    // script is the inline copy-button handler, which has no `src`.
     expect(body).not.toMatch(/<script[^>]+src=/i);
     expect(body).not.toMatch(/<img[\s>]/i);
     expect(body).not.toMatch(/<link[^>]+href=["']https?:/i);
@@ -135,8 +127,6 @@ describe("buildHomePageResponse", () => {
 
     expect(body).toContain('<button type="button" class="terminal-copy"');
     expect(body).toContain("navigator.clipboard.writeText");
-    // The handler reads from the DOM rather than re-serializing the command,
-    // so the script carries no request-derived, unescaped value.
     expect(body).toContain("command.textContent");
   });
 });

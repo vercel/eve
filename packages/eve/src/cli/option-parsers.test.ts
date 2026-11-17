@@ -9,7 +9,6 @@ describe("parseSubagentDisplayMode", () => {
       "collapsed",
       "hidden",
     ]);
-    // `auto-collapsed` was removed: it never differed from `collapsed`.
     expect(() => parseSubagentDisplayMode("auto-collapsed")).toThrow(
       'Expected one of full, collapsed, hidden, received "auto-collapsed".',
     );

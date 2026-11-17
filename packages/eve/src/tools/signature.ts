@@ -1,25 +1,9 @@
-/**
- * Renders a tool's input and output JSON Schemas as a compact TypeScript
- * signature, e.g.
- * `list_issues(input: { teamId: string; first?: number /* maximum: 50 *\/ }): Promise<unknown>`.
- *
- * Constraints the model must respect (`minimum`, `maximum`, `pattern`, …) stay
- * as comments. Rendering is deterministic, so the same schemas always produce
- * the same text.
- */
-
 import { isObject } from "#shared/guards.js";
 
 type Schema = Record<string, unknown>;
 
 const MAX_DEPTH = 6;
-/**
- * Bounds rendering work, not just output: shared `$ref` targets can otherwise
- * expand exponentially within {@link MAX_DEPTH}. Anything past this many
- * schema nodes would exceed {@link MAX_SIGNATURE_LENGTH} anyway.
- */
 const MAX_NODES = 1_000;
-/** Bounds what one remote schema can add to model context. */
 const MAX_SIGNATURE_LENGTH = 4_000;
 const MAX_DESCRIPTION_LENGTH = 120;
 const CONSTRAINT_KEYS = [
@@ -38,7 +22,6 @@ const CONSTRAINT_KEYS = [
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/u;
 
 interface RenderContext {
-  /** Shared across one schema's render; counts down to zero. */
   readonly budget: { remaining: number };
   readonly depth: number;
   readonly descriptions: boolean;
@@ -55,8 +38,6 @@ interface SignatureInput {
 export function renderToolSignature(input: SignatureInput): string {
   const signature = renderSignature(input, true);
   if (signature.length <= MAX_SIGNATURE_LENGTH) return signature;
-  // A field missing from the signature reads as a field the tool doesn't have,
-  // so property names outrank their descriptions.
   const compact = renderSignature(input, false);
   return compact.length > MAX_SIGNATURE_LENGTH
     ? `${compact.slice(0, MAX_SIGNATURE_LENGTH - 3)}...`
@@ -175,11 +156,6 @@ function propertyComment(property: Schema, context: RenderContext): string {
   return ` /* ${parts.join("; ").replaceAll("*/", "* /")} */`;
 }
 
-/**
- * A property merged with the `$ref` targets it chains through, since a
- * referenced property is described by its target. Keywords nearer the
- * property win.
- */
 function describedSchema(property: Schema, context: RenderContext): Schema {
   let schema = property;
   const refs = new Set(context.refs);

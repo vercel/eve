@@ -6,13 +6,10 @@ import { slackSessionToken } from "#public/channels/slack/api.js";
 
 const log = createLogger("slack.interactions");
 
-/** `action_id` of the sign-in prompt's Cancel button; outside eve's `eve_input:` HITL prefix. */
 export const SIGN_IN_CANCEL_ACTION_ID = "eve_sign_in:cancel";
 
-/** The held turn a sign-in prompt's Cancel button cancels. */
 export type SignInCancelTarget = SlackSessionTarget & { readonly turnId: string };
 
-/** Reads a Cancel click's target from a sign-in prompt's button value. */
 export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | undefined {
   if (typeof value !== "string") return undefined;
   let parsed: unknown;
@@ -28,10 +25,6 @@ export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | un
   return typeof threadTs === "string" ? { channelId, threadTs, turnId } : undefined;
 }
 
-/**
- * Handles a click on a sign-in prompt's Cancel button in the background.
- * Returns false for any other interaction.
- */
 export function dispatchSignInCancel(
   raw: Record<string, unknown>,
   ctx: {
@@ -50,10 +43,6 @@ interface SignInCancel {
   readonly target: SignInCancelTarget;
 }
 
-/**
- * Reads a click on a sign-in prompt's Cancel button. The prompt is ephemeral,
- * so the payload has no message; its target rides on the button value.
- */
 function readSignInCancel(raw: Record<string, unknown>): SignInCancel | undefined {
   const actions = Array.isArray(raw.actions) ? (raw.actions as unknown[]) : [];
   const action = actions.find(
@@ -68,10 +57,6 @@ function readSignInCancel(raw: Record<string, unknown>): SignInCancel | undefine
   };
 }
 
-/**
- * Cancels the turn held on the sign-in, then removes the private prompt. A turn
- * that already ended needs no cancel, so its prompt is removed too.
- */
 async function cancelHeldSignIn(
   cancel: SignInCancel,
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
