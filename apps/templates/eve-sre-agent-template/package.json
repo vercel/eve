@@ -34,7 +34,7 @@
     "typescript": "7.0.2",
     "ultracite": "^7.10.5"
   },
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@12.21.0",
   "engines": {
     "node": ">=24"
   }

@@ -175,7 +175,7 @@ async function createReleaseFixture(t) {
       name: "release-fixture",
       private: true,
       type: "module",
-      packageManager: "pnpm@12.17.0",
+      packageManager: "pnpm@12.21.0",
     }),
   );
   // The fixture borrows the repository's node_modules through a symlink. Without

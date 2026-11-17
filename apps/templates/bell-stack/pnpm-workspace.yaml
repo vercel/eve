@@ -1,11 +1,15 @@
 packages:
   - "."
+overrides:
+  "undici@>=7 <7.30.1": "7.30.1"
+  "undici@>=8 <8.12.2": "8.12.2"
+  "zod@>=4 <4.6.6": "4.6.7"
 minimumReleaseAgeExclude:
   - eve
   - ai
   - "@ai-sdk/*"
   - "@stripe/link-integrations-eve@0.5.0"
   - "@stripe/link-sdk@3.1.0"
-onlyBuiltDependencies:
-  - esbuild
-  - unrs-resolver
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

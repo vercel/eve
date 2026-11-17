@@ -29,7 +29,7 @@ passwords out of the model's context. You can read the code to see how it works.
 
 ## Repository compatibility
 
-Use Node.js 24 and the pinned pnpm 12.17.0. `pnpm typecheck` generates Next.js
+Use Node.js 24 and the pinned pnpm 12.21.0. `pnpm typecheck` generates Next.js
 route types before checking the app. `pnpm lint:app` selects
 `oxlint.template.jsonc` explicitly so the enclosing eve repository can apply
 its own lint rules without loading template-only plugins.
@@ -337,7 +337,7 @@ format; re-run it after the upgrade.
 
 Local development requires:
 
-- Node.js 24 and pnpm 11.24.0
+- Node.js 24 and pnpm 12.21.0
 - Docker Desktop or another running Docker Compose installation
 - Kernel credentials from a [Kernel API key](https://kernel.sh) or a linked
   Vercel Marketplace resource
