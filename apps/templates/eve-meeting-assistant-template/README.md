@@ -90,6 +90,8 @@ pnpm dev
 
 Expose the dev server with an HTTPS tunnel and set `RECALL_WEBHOOK_URL` to `https://<your-tunnel>/eve/v1/recall`.
 
+`pnpm test` runs the unit tests for which replies are spoken and how they're split into sentences.
+
 ## Limits
 
 - Each participant is their own principal, `recall:<botId>:<participantId>`, but display names prove nothing. Anyone in the meeting can use the Linear connector's access, so scope its Linear user accordingly.
