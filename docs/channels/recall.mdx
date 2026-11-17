@@ -178,14 +178,18 @@ The same operations are exported as standalone functions for code outside the ch
 
 ## Extra routes
 
-`routes` mounts more routes beside the webhook route. They run as the channel, so their handlers can find a meeting's session by bot id with `resolveSession(botId)` and follow it with `session.stream()`. For example, a page the bot streams through Output Media can read the agent's replies as they're written:
+To serve more routes beside the webhook route, add them to the channel's `routes`. They run as the channel, so their handlers can find a meeting's session by bot id with `resolveSession(botId)` and follow it with `session.stream()`. For example, a page the bot streams through Output Media can read the agent's replies as they're written:
 
 ```ts title="agent/channels/recall.ts"
 import { recallChannel, type RecallChannelState } from "@eve/recall";
 import { GET } from "eve/channels";
 
-export default recallChannel({
+const recall = recallChannel();
+
+const channel: typeof recall = {
+  ...recall,
   routes: [
+    ...recall.routes,
     GET<RecallChannelState>(
       "/eve/v1/recall/replies/:botId",
       async (request, { params, resolveSession }) => {
@@ -196,10 +200,12 @@ export default recallChannel({
       },
     ),
   ],
-});
+};
+
+export default channel;
 ```
 
-A route on the channel is public like any other, so authorize each request against the meeting it reads.
+Keep the webhook route from `recall.routes`. A route on the channel is public like any other, so authorize each request against the meeting it reads.
 
 ## Webhook handling
 

@@ -6,19 +6,24 @@
     "build": "eve build",
     "dev": "eve dev",
     "start": "eve start",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@eve/recall": "^0.1.0-rc.0",
-    "@vercel/connect": "^2.5.0",
-    "ai": "7.0.139",
-    "eve": "^1.0.0-rc.14",
-    "zod": "4.4.3"
+    "@eve/recall": "^0.1.1",
+    "@vercel/connect": "^2.9.3",
+    "ai": "7.0.173",
+    "eve": "^1.0.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@types/node": "26.x",
     "microsandbox": "^0.5.10",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "^5.0.3"
   },
-  "packageManager": "pnpm@11.25.0"
+  "engines": {
+    "node": "26.x"
+  },
+  "packageManager": "pnpm@12.17.0"
 }

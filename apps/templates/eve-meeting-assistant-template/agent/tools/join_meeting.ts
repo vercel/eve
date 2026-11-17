@@ -13,7 +13,8 @@ export default defineTool({
   }),
   async execute({ meetingUrl }, ctx) {
     // Keep people in one meeting from sending the bot to others.
-    if (ctx.session.auth.initiator?.authenticator === "recall-webhook") {
+    const { current, initiator } = ctx.session.auth;
+    if ([current, initiator].some((auth) => auth?.authenticator === "recall-webhook")) {
       throw new Error("Join other meetings from outside a meeting.");
     }
     const bot = await createRecallBot({

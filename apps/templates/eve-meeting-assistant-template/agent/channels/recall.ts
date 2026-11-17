@@ -1,15 +1,14 @@
 import { recallChannel } from "@eve/recall";
 import { decide } from "eve/ai";
+import { deliveries, type SessionView } from "eve/events";
 
-import { replyModeOf } from "../lib/reply-mode.js";
+import { isChatOnly, replyModeOf } from "../lib/reply-mode.js";
 import { VOICE_ENABLED } from "../lib/voice-mode.js";
 import { voiceRoutes } from "../lib/voice.js";
 
 // Lines that don't start a turn are kept as recent transcript for the next
 // one, so "open a ticket for that" has context.
-export default recallChannel({
-  // The page the bot shows as its camera, which also plays spoken replies; see `lib/voice.ts`.
-  routes: voiceRoutes(),
+const recall = recallChannel({
   async shouldRespond({ event, line, transcript, botName }) {
     if (event.type === "chat") return true;
     if (event.type !== "speech") return false;
@@ -29,7 +28,7 @@ export default recallChannel({
     return answers.addressed.probability >= 0.5;
   },
   events: {
-    async "content.completed"({ data }, { channel }) {
+    async "content.completed"({ data, scope }, { channel, view }) {
       if (data.kind !== "text" || typeof data.value !== "string") return;
       // With voice off, every reply goes to the chat, as text before a tool call does.
       if (!VOICE_ENABLED) {
@@ -38,13 +37,34 @@ export default recallChannel({
       }
       // With voice on, the agent tags each message `[voice]`, `[chat]`, or
       // `[both]`; see `lib/reply-mode.ts`. A spoken message also goes to the
-      // chat when it has a link, which isn't read aloud. An untagged message,
-      // usually the model thinking aloud, only posts for its link.
+      // chat when it has a link, which isn't read aloud. An untagged message
+      // goes where the request came from: the page speaks it for a spoken
+      // request, and it posts here for a chat one, so a forgotten tag never
+      // loses an answer.
       const { mode, text } = replyModeOf(data.value);
       if (!text.trim()) return;
-      if (mode === "chat" || mode === "both" || /https?:\/\//u.test(text)) {
-        await channel.recall.sendChatMessage(text);
-      }
+      const chat =
+        mode === "chat" ||
+        mode === "both" ||
+        /https?:\/\//u.test(text) ||
+        (mode === null && turnIsChatOnly(view, scope?.turnId));
+      if (chat) await channel.recall.sendChatMessage(text);
     },
   },
 });
+
+/** Whether only chat messages started the turn, as the voice page judges it too. */
+function turnIsChatOnly(view: SessionView, turnId: string | undefined): boolean {
+  if (turnId === undefined) return false;
+  const lines = deliveries(view, { turnId }).flatMap((delivery) =>
+    (delivery.parts ?? []).flatMap((part) => (part.kind === "text" ? [part.text] : [])),
+  );
+  return isChatOnly(lines) === true;
+}
+
+// The page the bot shows as its camera, which also plays spoken replies; see
+// `lib/voice.ts`. It's mounted beside the channel's webhook route, so its
+// handlers can find a meeting's session by bot id.
+const channel: typeof recall = { ...recall, routes: [...recall.routes, ...voiceRoutes()] };
+
+export default channel;

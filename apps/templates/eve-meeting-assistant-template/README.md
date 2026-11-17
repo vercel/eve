@@ -18,12 +18,13 @@ Recall joins the call, transcribes it, and posts each final utterance and chat m
 
 The bot shows a page from the agent as its camera, using Recall's [Output Media](https://docs.recall.ai/docs/stream-media). The page holds one request open to `/eve/v1/recall/voice/stream`, which follows the meeting's session. It draws a dot-matrix waveform that follows whoever is talking and shows when eve is thinking.
 
-With voice on, the same route cuts the model's streamed reply into sentences and synthesizes each through [AI Gateway](https://vercel.com/docs/ai-gateway) speech models, so the first sentence plays while the model is still writing the rest. The agent starts each message with `[voice]`, `[chat]`, or `[both]`: it speaks only to answer spoken questions, confirms actions in the chat, answers chat messages in the chat, and switches to the chat when someone asks it to stay quiet or people are talking with each other. When someone talks over eve, the page stops playback and drops the rest of that reply.
+With voice on, the same route cuts the model's streamed reply into sentences and synthesizes each through [AI Gateway](https://vercel.com/docs/ai-gateway) speech models, so the first sentence plays while the model is still writing the rest. The agent starts each message with `[voice]`, `[chat]`, or `[both]`: it speaks only to answer spoken questions, confirms actions in the chat, answers chat messages in the chat, and switches to the chat when someone asks it to stay quiet or people are talking with each other. A message without a tag goes where the request came from. When someone talks over eve, the page stops playback and drops the rest of that message.
 
 The main pieces are:
 
-- `agent/channels/recall.ts`: `recallChannel()` from `@eve/recall`, with the page routes, the `shouldRespond` check for which lines get an answer, and which replies go to the chat
-- `agent/lib/voice.ts`: the bot config with Output Media, the page and stream routes, sentence splitting, and speech synthesis
+- `agent/channels/recall.ts`: `recallChannel()` from `@eve/recall`, with the `shouldRespond` check for which lines get an answer, which replies go to the chat, and the page routes added beside the webhook route
+- `agent/lib/voice.ts`: the bot config with Output Media, the page and stream routes, and speech synthesis
+- `agent/lib/speech-segmenter.ts` and `agent/lib/reply-mode.ts`: which messages are spoken, and splitting them into sentences
 - `agent/lib/voice-page.ts`: the page the bot streams
 - `agent/lib/voice-mode.ts`: the `MEETING_VOICE` toggle
 - `agent/tools/join_meeting.ts`: sends a bot to a meeting on request, for testing
@@ -69,7 +70,7 @@ Recall posts to `/eve/v1/recall` at the production URL, and the bot loads its pa
 
 ## Join meetings
 
-Use Recall's [calendar integration](https://docs.recall.ai/docs/calendar-integration) so the bot joins meetings automatically, such as every meeting its calendar is invited to. Configure those bots with the body `meetingBotConfig` from `agent/lib/voice.ts` builds, as `agent/tools/join_meeting.ts` does, with `webhookUrl` set to `https://<your-project>.vercel.app/eve/v1/recall`. Previews send their own bots' webhooks to themselves.
+Use Recall's [calendar integration](https://docs.recall.ai/docs/calendar-integration) so the bot joins meetings automatically, such as every meeting its calendar is invited to. Build each scheduled bot's config with `meetingBotConfig` from `agent/lib/voice.ts`, as `agent/tools/join_meeting.ts` does, passing `webhookUrl: "https://<your-project>.vercel.app/eve/v1/recall"` when the code runs outside the deployment. Call it once per bot: each body carries its own page key, and a page whose key matches more than one bot shows "this page is not linked to a meeting". Previews send their own bots' webhooks to themselves.
 
 To test without a calendar, open the terminal UI against the deployment and ask the agent to join a meeting, then admit the bot:
 
@@ -94,6 +95,8 @@ Expose the dev server with an HTTPS tunnel and set `RECALL_WEBHOOK_URL` to `http
 - Each participant is their own principal, `recall:<botId>:<participantId>`, but display names prove nothing. Anyone in the meeting can use the Linear connector's access, so scope its Linear user accordingly.
 - Every final utterance makes one decision-model call. If it fails or takes over three seconds, the channel falls back to answering speech that names "eve".
 - A spoken reply takes a few seconds: transcription, the `decide` check, the model's first sentence, and speech synthesis.
-- Talking over eve is detected by loudness, so background noise can cut it off. An interrupted reply stays whole in the session's history.
+- Talking over eve is detected by loudness, so background noise can cut it off. An interrupted message stays whole in the session's history, and later messages in the same turn still play.
+- The page holds the stream route open for the whole meeting, so each meeting keeps a function running, which counts toward your function duration. The page reconnects when the function times out, backing off if the stream keeps failing.
+- The stream route looks up the page's bot in Recall's List Bots API, which Recall rate-limits, and caches the result for a minute per function instance. Once the meeting ends, the page stops.
 - Approvals, questions, and sign-ins go to the meeting chat as text.
 - The bot runs Recall's `web_4_core` variant so the page animates and plays audio smoothly, which Recall bills at a higher rate.

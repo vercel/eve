@@ -39,7 +39,7 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
   let cursor = null;
 
   function enqueue(message) {
-    if (interrupted.has(message.turnId)) return;
+    if (interrupted.has(message.partId)) return;
     const bytes = Uint8Array.from(atob(message.audio), (c) => c.charCodeAt(0));
     queue.push({ ...message, buffer: audio.decodeAudioData(bytes.buffer) });
     if (playing === null) playNext();
@@ -71,11 +71,13 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     source.start();
   }
 
-  // Someone talking over eve stops it, like a person would, and drops the rest of that reply.
+  // Someone talking over eve stops it, like a person would, and drops the rest of
+  // that message. A later message in the same turn, such as a question after a
+  // tool call, still plays.
   function interrupt() {
     if (playing === null) return;
-    interrupted.add(playing.turnId);
-    for (const item of queue) interrupted.add(item.turnId);
+    interrupted.add(playing.partId);
+    for (const item of queue) interrupted.add(item.partId);
     queue.length = 0;
     const current = playing;
     playing = null;
@@ -258,28 +260,42 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     }
   }
 
+  // Reconnects back off while the stream keeps failing or ending early, so a
+  // broken stream can't hammer the agent or Recall: up to 5 seconds while the
+  // meeting hasn't started, so the page is ready soon after the bot is admitted,
+  // and up to 30 seconds otherwise.
   async function follow() {
+    let delay = 1000;
+    let maxDelay = 30000;
     for (;;) {
       const url = new URL(location.pathname.replace(/\\/$/, "") + "/stream" + location.search, location.origin);
       if (cursor !== null) url.searchParams.set("cursor", String(cursor));
+      const startedAt = performance.now();
       try {
         const response = await fetch(url);
         if (response.status === 404) {
           status.textContent = "this page is not linked to a meeting";
           return;
         }
+        if (response.status === 410) {
+          status.textContent = "the meeting has ended";
+          return;
+        }
+        maxDelay = response.status === 425 ? 5000 : 30000;
         if (!response.ok || response.body === null) {
           status.textContent = response.status === 425 ? "waiting for the meeting" : "reconnecting";
-          await sleep(2000);
-          continue;
+        } else {
+          status.textContent = "";
+          await read(response.body);
+          // A stream that stayed open a while ended normally, such as at a function timeout.
+          if (performance.now() - startedAt > 30000) delay = 1000;
         }
-        status.textContent = "";
-        await read(response.body);
       } catch (error) {
         console.error("speech stream failed", error);
         status.textContent = "reconnecting";
-        await sleep(1000);
       }
+      await sleep(delay * (0.75 + Math.random() * 0.5));
+      delay = Math.min(delay * 2, maxDelay);
     }
   }
 

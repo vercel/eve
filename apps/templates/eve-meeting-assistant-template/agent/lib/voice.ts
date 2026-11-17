@@ -9,7 +9,7 @@ import {
 import { gateway, generateSpeech } from "ai";
 import { GET, type RouteDefinition, type RouteHandlerArgs } from "eve/channels";
 
-import { isChatLine, readReplyMode, replyModeOf, type ReplyMode } from "./reply-mode.js";
+import { SpeechSegmenter } from "./speech-segmenter.js";
 import { VOICE_ENABLED } from "./voice-mode.js";
 import { VOICE_PAGE_HTML } from "./voice-page.js";
 
@@ -17,21 +17,28 @@ import { VOICE_PAGE_HTML } from "./voice-page.js";
 const VOICE_KEY = "eve_voice_key";
 const SPEECH_MODEL = process.env.VOICE_SPEECH_MODEL ?? "openai/tts-1";
 const SPEECH_VOICE = process.env.VOICE_SPEECH_VOICE ?? "alloy";
-/** A long sentence is spoken in pieces so the first words don't wait on the rest. */
-const MAX_SEGMENT_CHARS = 240;
+/** How long a key's bot lookup is reused, so reconnects don't each call Recall's List Bots. */
+const BOT_LOOKUP_TTL_MS = 60_000;
+/** Bot statuses after which the meeting is over and its page has nothing left to play. */
+const ENDED_STATUSES = new Set(["call_ended", "done", "fatal"]);
+/** How long the stream waits for the session to fail on open before answering 200. */
+const STREAM_OPEN_GRACE_MS = 1_000;
 
 /**
- * The `POST /bot/` body for the meeting bot: the channel's config plus an
+ * The `POST /bot/` body for one meeting bot: the channel's config plus an
  * Output Media page at `<webhook route>/voice`. The page URL carries a random
  * key, stored in the bot's metadata, that the page trades for the bot's
- * session. The webhook URL's query, such as a protection bypass, carries over.
+ * session, so build a new body for every bot. The webhook URL's query, such as
+ * a protection bypass, carries over. `webhookUrl` defaults to
+ * `RECALL_WEBHOOK_URL`, or the production URL on Vercel.
  */
 export function meetingBotConfig(input: {
   readonly meetingUrl: string;
   readonly greeting?: string;
+  readonly webhookUrl?: string;
 }): Record<string, unknown> {
   const key = randomUUID();
-  const webhookUrl = resolveRecallWebhookUrl();
+  const webhookUrl = resolveRecallWebhookUrl(input.webhookUrl);
   const pageUrl = new URL(webhookUrl);
   pageUrl.pathname = `${pageUrl.pathname.replace(/\/+$/u, "")}/voice`;
   pageUrl.searchParams.set("key", key);
@@ -74,43 +81,65 @@ async function streamSpeech(
   const query = new URL(request.url).searchParams;
   const key = query.get("key") ?? "";
   if (!/^[0-9a-f-]{36}$/u.test(key)) return new Response("not found", { status: 404 });
-  const botId = await botIdForKey(key);
-  if (botId === undefined) return new Response("not found", { status: 404 });
+  const bot = await botForKey(key);
+  if (bot === undefined) return new Response("not found", { status: 404 });
+  if (bot.ended) return new Response("meeting ended", { status: 410 });
   // The session starts with the bot's first meeting event; the page retries until then.
-  const session = await resolveSession(botId);
+  const session = await resolveSession(bot.id);
   if (session === undefined) return new Response("not ready", { status: 425 });
 
   const cursor = Number(query.get("cursor") ?? Number.NaN);
   const resuming = Number.isInteger(cursor) && cursor >= 0;
   const encoder = new TextEncoder();
-  const events = session.stream({
-    signal: request.signal,
-    startIndex: resuming ? cursor : -1,
-  });
+  const events = session
+    .stream({ signal: request.signal, startIndex: resuming ? cursor : -1 })
+    [Symbol.asyncIterator]();
+  // A stream that fails to open, such as for a stranded session, fails at once.
+  // Answer that with an error the page backs off from, not an empty 200.
+  const first = events.next();
+  const failed = await Promise.race([
+    first.then(
+      () => undefined,
+      (error: unknown) => ({ error }),
+    ),
+    new Promise<undefined>((resolve) => setTimeout(resolve, STREAM_OPEN_GRACE_MS)),
+  ]);
+  if (failed !== undefined) {
+    console.error("voice: session stream failed to open", failed.error);
+    void events.return?.().catch(() => undefined);
+    return new Response("stream unavailable", { status: 503 });
+  }
 
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
-      // Speech is generated in parallel but written in order.
+      // Speech is generated in parallel but written in order. Each message's
+      // failure is handled as soon as it's created, since a later one can fail
+      // while an earlier one is still pending.
       let chain: Promise<void> = Promise.resolve();
       const write = (message: Promise<object | undefined>) => {
+        const settled = message.catch((error: unknown) => {
+          console.error("voice: speech failed", error);
+          return undefined;
+        });
         chain = chain.then(async () => {
-          const value = await message.catch((error: unknown) => {
-            console.error("voice: speech failed", error);
-            return undefined;
-          });
+          const value = await settled;
           if (value === undefined || request.signal.aborted) return;
           controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
         });
       };
-      const segmenter = new SpeechSegmenter((turnId, text) => {
-        if (VOICE_ENABLED)
-          write(speak(text).then((audio) => ({ audio, text, turnId, type: "say" })));
-      });
+      const segmenter = new SpeechSegmenter(
+        ({ partId, text, turnId }) => {
+          if (VOICE_ENABLED)
+            write(speak(text).then((audio) => ({ audio, partId, text, turnId, type: "say" })));
+        },
+        { resumed: resuming },
+      );
 
       // Starting at the tail rereads its last line, which was already played.
       let skipLine: number | undefined;
       try {
-        for await (const event of events) {
+        for (let next = await first; next.done !== true; next = await events.next()) {
+          const event = next.value;
           const { line } = event.meta.position;
           if (!resuming) skipLine ??= line;
           if (line === skipLine) continue;
@@ -132,8 +161,8 @@ async function streamSpeech(
             if (typeof value === "string") segmenter.complete(event.scope?.turnId, partId, value);
           }
           if (event.meta.endOfLine !== false) {
-            const next = event.meta.next ?? line + 1;
-            write(Promise.resolve({ cursor: next, type: "cursor" }));
+            const nextLine = event.meta.next ?? line + 1;
+            write(Promise.resolve({ cursor: nextLine, type: "cursor" }));
           }
         }
       } catch (error) {
@@ -148,13 +177,45 @@ async function streamSpeech(
   });
 }
 
-/** The bot whose metadata holds `key`, so a page URL only ever reads its own meeting. */
-async function botIdForKey(key: string): Promise<string | undefined> {
-  const page = await callRecallApi<{ results?: { id: string }[] }>({
+interface RecallBotSummary {
+  readonly id: string;
+  readonly status?: { readonly code?: string };
+  readonly status_changes?: readonly { readonly code?: string }[];
+}
+
+const botLookups = new Map<
+  string,
+  { readonly bot: { id: string; ended: boolean } | undefined; readonly expires: number }
+>();
+
+/**
+ * The bot whose metadata holds `key`, so a page URL only ever reads its own
+ * meeting. Lookups are cached briefly per instance, since Recall limits how
+ * often List Bots can be called.
+ */
+async function botForKey(key: string): Promise<{ id: string; ended: boolean } | undefined> {
+  const now = Date.now();
+  const cached = botLookups.get(key);
+  if (cached !== undefined && cached.expires > now) return cached.bot;
+  for (const [stale, entry] of botLookups) if (entry.expires <= now) botLookups.delete(stale);
+
+  const page = await callRecallApi<{ results?: RecallBotSummary[] }>({
     path: `/bot/?metadata__${VOICE_KEY}=${encodeURIComponent(key)}`,
   });
   const bots = page.results ?? [];
-  return bots.length === 1 ? bots[0]!.id : undefined;
+  if (bots.length !== 1) {
+    // Several bots share a key when one `meetingBotConfig` body was reused; build one per bot.
+    console.warn(
+      bots.length === 0
+        ? "voice: no Recall bot has this page's key"
+        : `voice: ${bots.length} Recall bots share this page's key; build a new meetingBotConfig body for each bot`,
+    );
+  }
+  const found = bots.length === 1 ? bots[0]! : undefined;
+  const code = found?.status?.code ?? found?.status_changes?.at(-1)?.code;
+  const bot = found && { ended: code !== undefined && ENDED_STATUSES.has(code), id: found.id };
+  botLookups.set(key, { bot, expires: now + BOT_LOOKUP_TTL_MS });
+  return bot;
 }
 
 async function speak(text: string): Promise<string> {
@@ -166,111 +227,4 @@ async function speak(text: string): Promise<string> {
     voice: SPEECH_VOICE,
   });
   return audio.base64;
-}
-
-/**
- * Cuts the agent's streamed text into sentences as they finish, so the first
- * one is spoken while the model is still writing the rest. Narration before a
- * tool call, such as "On it, let me check.", is spoken too. A message tagged
- * `[chat]` is never spoken.
- */
-class SpeechSegmenter {
-  /**
-   * Only a part's first delta names its kind and turn. `text` is unknown for
-   * a part whose first delta this reader missed, such as after a reconnect.
-   * `mode` is unknown until the start of the message rules a tag in or out.
-   */
-  private readonly parts = new Map<
-    string,
-    {
-      buffer: string;
-      text: boolean | undefined;
-      turnId: string | undefined;
-      mode: ReplyMode | undefined;
-    }
-  >();
-  /** Turns that someone started by speaking, rather than only in the chat. */
-  private readonly spokenTurns = new Set<string>();
-  private readonly say: (turnId: string, text: string) => void;
-
-  constructor(say: (turnId: string, text: string) => void) {
-    this.say = say;
-  }
-
-  heard(turnId: string, lines: readonly string[]): void {
-    if (lines.some((line) => !isChatLine(line))) this.spokenTurns.add(turnId);
-  }
-
-  /** Where an untagged message goes: aloud for a spoken request, nowhere for a chat one. */
-  private untagged(turnId: string | undefined): ReplyMode {
-    return turnId !== undefined && !this.spokenTurns.has(turnId) ? "chat" : "voice";
-  }
-
-  delta(
-    turnId: string | undefined,
-    data: { readonly partId: string; readonly kind?: string; readonly delta: string },
-  ): void {
-    let part = this.parts.get(data.partId);
-    if (part === undefined) {
-      const text = data.kind === undefined ? undefined : data.kind === "text";
-      part = { buffer: "", mode: undefined, text, turnId };
-      this.parts.set(data.partId, part);
-    }
-    if (part.text !== true || part.mode === "chat") return;
-    part.buffer += data.delta;
-    if (part.mode === undefined) {
-      const read = readReplyMode(part.buffer);
-      if (read === undefined) return;
-      part.mode = read.mode ?? this.untagged(part.turnId);
-      part.buffer = read.text;
-      if (part.mode === "chat") return;
-    }
-    for (;;) {
-      const cut = sentenceEnd(part.buffer);
-      if (cut === -1) break;
-      this.emit(part.turnId, part.buffer.slice(0, cut));
-      part.buffer = part.buffer.slice(cut);
-    }
-  }
-
-  complete(turnId: string | undefined, partId: string, value: string): void {
-    const part = this.parts.get(partId);
-    this.parts.delete(partId);
-    if (part?.text === true && part.mode !== undefined) {
-      if (part.mode !== "chat") this.emit(part.turnId ?? turnId, part.buffer);
-      return;
-    }
-    // A part this reader didn't follow from its start, or one too short to
-    // have ruled out a tag, is read from its final value.
-    const owner = part?.turnId ?? turnId;
-    const { mode, text } = replyModeOf(value);
-    if ((mode ?? this.untagged(owner)) !== "chat") this.emit(owner, text);
-  }
-
-  private emit(turnId: string | undefined, text: string): void {
-    const spoken = toSpeech(text);
-    if (spoken) this.say(turnId ?? "", spoken);
-  }
-}
-
-/** Where the first complete sentence in `text` ends, or -1. */
-function sentenceEnd(text: string): number {
-  const match = /[.!?…](?=\s)|\n/u.exec(text);
-  if (match !== null) return match.index + match[0].length;
-  if (text.length < MAX_SEGMENT_CHARS) return -1;
-  const pause = Math.max(
-    text.lastIndexOf(", ", MAX_SEGMENT_CHARS),
-    text.lastIndexOf(" ", MAX_SEGMENT_CHARS),
-  );
-  return pause > 0 ? pause + 1 : MAX_SEGMENT_CHARS;
-}
-
-/** Drops what reads badly aloud: links, which go to the chat instead, and Markdown. */
-function toSpeech(text: string): string {
-  return text
-    .replace(/\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/https?:\/\/\S+/gu, "")
-    .replace(/[*_`#>]+/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
 }
