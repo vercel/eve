@@ -3,7 +3,7 @@ title: "Self-Host eve"
 description: "Run an eve agent as a Node service on your own infrastructure, and choose the Workflow world and sandbox it uses."
 ---
 
-Self-host eve by running the Node server that `eve build` produces on your own servers, container platform, or behind your own reverse proxy. The server runs every session as a durable workflow, so conversations, human approvals, and subagent work survive process restarts. eve backs that durability with a [Workflow world](/docs/guides/deployment/workflow-worlds) and runs shell and file tools in a [sandbox](/docs/sandbox). Both have self-hosted defaults, and you can replace either one without changing your agent's behavior.
+Self-host eve by running the Node server that `eve build` produces on your own servers, container platform, or behind your own reverse proxy. A [Workflow world](/docs/guides/deployment/workflow-worlds) preserves conversations, human approvals, and subagent work across process restarts, and a [sandbox](/docs/sandbox) runs shell and file tools. Both have self-hosted defaults, and you can replace either one without changing your agent's behavior.
 
 ## What a self-hosted deployment needs
 
@@ -45,7 +45,7 @@ Run the process under the same process manager or container platform you use for
 
 ### Build inside a container image
 
-A `RUN eve build` step in a Dockerfile usually has no Docker daemon, so the build records no sandbox provider, even when the running container later mounts `/var/run/docker.sock`. Select `DockerSandbox.environment()` explicitly in that setup:
+A Dockerfile's `RUN eve build` step usually cannot reach Docker, so it builds without a sandbox provider, and mounting `/var/run/docker.sock` at runtime doesn't change that selection. Select `DockerSandbox.environment()` explicitly in that setup:
 
 ```typescript title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
@@ -113,7 +113,7 @@ Connection sign-in links and the callback URLs a parent passes to [remote agents
 WORKFLOW_LOCAL_BASE_URL=https://support.example.com eve start --host 0.0.0.0
 ```
 
-With the local world, queued work is also delivered to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes), and keep a single process behind that origin; see [Use the local world](/docs/guides/deployment/workflow-worlds#use-the-local-world). The Postgres world delivers queued work inside each process, so its deliveries don't use this origin.
+With the local world, queued work reaches that origin through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes), and keep a single process behind that origin; see [Use the local world](/docs/guides/deployment/workflow-worlds#use-the-local-world). The Postgres world processes queued work within each server process without using this origin.
 
 For an agent mounted under a path prefix, also set `EVE_PUBLIC_ROUTE_PREFIX`; see [Run workspace members](/docs/guides/deployment/self-hosted-operations#run-workspace-members).
 

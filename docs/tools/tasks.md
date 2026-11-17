@@ -48,11 +48,7 @@ and [Resumable tasks](/docs/tools/workflows#resumable-tasks-serve) for `serve` b
 
 ## Order work that depends on a result
 
-Because agent calls are tasks, the model decides when to wait for them. An instruction such as
-"publish only after the review approves" holds only as long as the model follows it. When an order
-must always hold, write a workflow tool that runs the first step through
-[`ctx.agent`](/docs/tools/workflows#delegate-work-ctxagent) and then acts. Don't expose the side
-effect as a separate tool:
+Because agent calls are tasks, the model decides when to wait for them. To guarantee publication happens only after approval, write a workflow tool that awaits a review through [`ctx.agent`](/docs/tools/workflows#delegate-work-ctxagent) before publishing, rather than relying on a model instruction alone. Don't expose the side effect as a separate tool:
 
 ```ts title="agent/tools/publish_reviewed_notes.ts"
 import { defineWorkflowTool } from "eve/tools";
@@ -104,8 +100,8 @@ A workflow tool body receives its signals from its context or, in a `serve` body
   `ctx.ask(request, { signal })` also withdraws it when `signal` aborts. In a `serve` body,
   `ctx.reply()` withdraws the open questions of the calls it answers. A withdrawn question resolves
   as `{ status: "cancelled" }`, and the stream reports `interaction.settled` with
-  `outcome: "withdrawn"` so channels stop offering it. A person's answer that reached the session
-  first still wins, so branch on `status`, not on the signal.
+  `outcome: "withdrawn"` so channels stop offering it. If the session received the person's answer
+  before cancellation, the question remains answered. Check `status` to determine the outcome.
 
 After a steering message, the call ends with what the body returns. See
 [Stop early for a new message](/docs/tools/workflows#stop-early-for-a-new-message). A
@@ -138,8 +134,8 @@ reads the session:
   when it has nothing to say until a result arrives. It tells the model to reply now when the person
   should hear from it, such as to confirm that work is underway.
 - **Child sessions and a schedule's sessions:** only the turn's final reply reaches the caller. The
-  block tells the model to call `eve__task_wait` instead of replying while tasks work. Text the
-  model writes while its turn holds for tasks is narration (`content.completed` with
+  block tells the model to call `eve__task_wait` instead of replying while tasks work. Text written
+  while the turn waits for tasks is narration (`content.completed` with
   `phase: "narration"`). Clients that render the stream show it, and channels don't post it.
 
 **Receipts.** A task call returns a receipt with a `taskId`; call a resumable task again with that ID.
@@ -159,9 +155,9 @@ to withhold a message from the user while waiting for a result. Tasks keep runni
 results reach the model without it.
 
 The call pauses the turn until any task has a result, a new message arrives, or `timeoutSeconds`
-(a whole number of at least 1) pass. It returns at once when a result is already waiting, and it
-never stops a task. The model reads which tasks finished and which are still working, and, while
-a task works, that it should wait again if its reply needs the rest:
+(a whole number of at least 1) pass. It returns immediately if a result is available and doesn't
+stop tasks. The response lists finished and working tasks and tells the model to wait again if its
+reply needs a pending result:
 
 ```text
 deploy-4hd8sa completed; its result follows. 1 task is still working: researcher-7k2m9q. If your reply needs its result, call eve__task_wait again before replying.
@@ -184,11 +180,11 @@ The note returns after [compaction](/docs/concepts/default-harness#compaction).
 
 **Errors.** Two error codes are specific to tasks:
 
-| Code             | When                                                                                    |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `UNKNOWN_TASK`   | A call's `taskId` names no unfinished resumable task that the same tool started         |
-| `UNKNOWN_TASK`   | `eve__task_cancel`'s `taskId` names no task; a finished or idle one has no work to stop |
-| `TOO_MANY_TASKS` | A call would start a task, or make an idle one work, while 32 tasks are working         |
+| Code             | When                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `UNKNOWN_TASK`   | The call's `taskId` doesn't identify an unfinished resumable task started by the same tool             |
+| `UNKNOWN_TASK`   | The `taskId` passed to `eve__task_cancel` doesn't identify a task; finished or idle tasks have no work |
+| `TOO_MANY_TASKS` | A call would start a task, or make an idle one work, while 32 tasks are working                        |
 
 An `eve__reply` call made while tasks are working returns an error that names them.
 
@@ -200,7 +196,7 @@ then adds the results and calls the model again in the same turn. No result ever
 its own. An idle resumable task doesn't hold the turn.
 
 A held turn keeps running while it waits on its tasks, and pauses only for questions and sign-ins. The next
-`model.requested` for the same `turnId` means the turn took its results, and `turn.settled` comes
+`model.requested` with the same `turnId` means the model is continuing with the task results, and `turn.settled` comes
 only when the turn ends. The model's text before the wait depends on the session:
 
 - **Root sessions:** the text completes as an ordinary reply part (`phase: "reply"`), including text

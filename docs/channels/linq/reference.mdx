@@ -4,7 +4,7 @@ description: "Linq channel options, credentials, webhook verification, steering,
 type: reference
 ---
 
-This page documents every part of `linqChannel` from `eve/channels/linq`. For setup and common tasks, start with [Linq](/docs/channels/linq).
+Import `linqChannel` from `eve/channels/linq`. For setup and common tasks, see [Linq](/docs/channels/linq).
 
 The Linq channel connects your agent to iMessage and SMS conversations through `agent/channels/linq.ts`.
 
@@ -115,7 +115,7 @@ export default linqChannel({
 | Field               | Value                                                                                          |
 | ------------------- | ---------------------------------------------------------------------------------------------- |
 | `tapback.tapback`   | `love`, `like`, `dislike`, `laugh`, `emphasize`, `question`, or the emoji for an emoji tapback |
-| `tapback.messageId` | The message the tapback is on                                                                  |
+| `tapback.messageId` | The message receiving the tapback                                                              |
 | `tapback.author`    | The person who sent it                                                                         |
 
 The agent reads an accepted tapback as iMessage's text form, such as `Tapback: Loved “See you at 7”` or `Tapback: Removed a like tapback from a message`. The quoted text appears when Linq can return the original message. An accepted tapback starts or steers a turn like any other message, following `turnPolicy`.
@@ -136,7 +136,7 @@ The model can send a tapback alongside a reply; to let a tapback be the whole an
 
 ### Answer approvals with a tapback
 
-Return `answer` from `onTapback` to answer the approval or question in the message the tapback is on. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `deny`, so a like or dislike on the approval prompt can approve or deny it:
+Return `answer` from `onTapback` to respond to the approval or question attached to that message. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `deny`, so a like or dislike on the approval prompt can approve or deny it:
 
 ```ts title="agent/channels/linq.ts"
 import { connectLinqCredentials } from "@vercel/connect/eve";
@@ -156,7 +156,7 @@ export default linqChannel({
 
 `answer` answers only the request posted in that message, and only while that request is still open and offers that option. A tapback on any other message, or on an answered prompt, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the sender may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids.
 
-Return `message` to replace the text the agent receives for a tapback. Don't set `message` to an option's id, label, or number, because eve reads that text like a typed reply. A typed reply answers the first waiting approval, no matter which message the tapback is on.
+Return `message` to replace the text the agent receives for a tapback. Don't set `message` to an option's id, label, or number, because eve reads that text like a typed reply. A typed reply answers the first waiting approval, regardless of which message received the tapback.
 
 ## What to read next
 

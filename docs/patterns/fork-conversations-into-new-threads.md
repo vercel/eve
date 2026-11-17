@@ -5,8 +5,7 @@ description: "Copy a conversation into a new thread from a tool, so each convers
 
 Forking copies a conversation into a new session in a new thread, such as a side thread in the same
 channel or a thread in someone's direct messages. The new session starts with the conversation so
-far. After the fork, each conversation continues on its own: a later message in one never reaches
-the other.
+far. After the fork, later messages reach only the conversation they are sent to.
 
 A fork needs a target that always starts a new session. A Slack target with only a `channelId`
 starts a new thread in any channel the app is in, or in a DM. Many other built-in channels reuse one
@@ -124,21 +123,17 @@ a mention, and needs the `message.im` event and the `im:history` scope; see
 The fork's first model call sees the copied messages as earlier user and assistant turns, followed
 by the message. `toHistory` keeps the text of user messages and assistant replies, including the
 message that asked for the fork. It leaves out tool calls, files, and reasoning. `ctx.messages`
-also carries eve's context messages, such as request context and recalled memory, and a tool can't
-tell them apart from the conversation yet, so the fork sees them too. The fork's agent can repeat
-anything in the copied history, so only fork into a channel whose members may see that
-conversation, including a DM's. See [Start from prior history](../channels/eve#start-from-prior-history) for how history
+also carries eve's context messages, such as request context and recalled memory; a tool can't
+distinguish them from conversation messages, so they are copied too. The fork's agent can repeat
+any copied content, so fork only into channels or DMs whose participants may see the full copied
+history. See [Start from prior history](../channels/eve#start-from-prior-history) for how history
 joins a session.
 
-After the fork, the original conversation and the fork are separate sessions:
+The original session and the fork both retain the conversation from before the fork and receive
+only messages sent to their own thread.
 
-- A message in the original thread reaches only its session.
-- A message in the fork's thread reaches only the fork's session.
-- Both keep the conversation from before the fork.
-
-The fork runs the root agent with the auth you pass, here the caller's. Only a tool on the root
-agent can fork: `ctx.to()` throws in a subagent, a root copy, or a remote agent call, since the
-fork would outlive the delegation and act for the caller.
+The fork runs the root agent with the auth you pass, here the caller's. Only tools on the root
+agent can fork; `ctx.to()` throws in subagent, root-copy, and remote-agent calls.
 
 ## Retries and repeated forks
 
@@ -155,5 +150,5 @@ In a [workflow tool](../tools/workflows), call `ctx.to()` in a `"use step"` help
 
 ## Fork from an earlier point
 
-To leave out the latest turns, slice `ctx.messages` before converting it. `ctx.messages` reflects
-history projection and compaction, so a long conversation arrives as the model last saw it.
+To leave out the latest turns, slice `ctx.messages` before converting it. `ctx.messages` contains
+the conversation as the model last saw it, including any compaction.

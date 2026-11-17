@@ -39,7 +39,7 @@ Some Slack messages reach you without a mention. Their `<guidance>` says why.
 - In a channel you're listening to, answer only when a goal applies and you
   have something specific and useful to add.
 - To stay quiet, call `no_reply`. Never write "No reply needed." or explain
-  why you're staying quiet: any text you write is posted.
+  why you're staying quiet, because any text you write is posted.
 ```
 
 A deferred turn that ends with `no_reply` posts nothing and shows no status.
@@ -48,7 +48,7 @@ Add policies for your application separately. For example, you might require an 
 
 ## Define channel goals
 
-This example defines an application-owned `Goal` type, not an eve configuration API. `wakeWhen` describes what the agent listens for; `engagement` describes how it answers. The filter reads `wakeWhen`, and the agent reads both:
+`Goal` is an application-defined type used by this example. `wakeWhen` describes what the agent listens for; `engagement` describes how it answers. The filter reads `wakeWhen`, and the agent reads both:
 
 ```text
 agent/
@@ -280,7 +280,7 @@ Start with one watched channel. Review skipped messages and the agent's replies 
 | How many messages the filter skips | `SKIP_BELOW` and the filter questions                          |
 | Which decision model filters       | `model` on `decide`; defaults to `typesafe-ai/jev`             |
 
-Keep `SKIP_BELOW` low: raising it saves turns but risks dropping messages the agent should see. Letting a borderline message through gives the agent a chance to call `no_reply`; skipping it removes that chance.
+Keep `SKIP_BELOW` low so borderline messages reach the agent, which can call `no_reply`. Raising the threshold saves turns but may drop relevant messages.
 
 | What you see                              | What to change                                                                             |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -289,7 +289,7 @@ Keep `SKIP_BELOW` low: raising it saves turns but risks dropping messages the ag
 | A missed message that reached the agent   | Add an example to the goal or instructions.                                                |
 | More `error` or `incomplete-context` logs | Check decision-model errors or thread reads; more messages are passing through unfiltered. |
 
-Use the `ambient.filter` logs to find skipped messages in Slack and review a sample, especially those just below the threshold.
+Use the `ambient.filter` logs to find skipped messages in Slack and review a sample, especially those slightly below the threshold.
 
 Optionally, when using Vercel AI Gateway, add `providerOptions: { gateway: { tags: ["ambient-filter"] } }` to `decide` to track filter spend separately.
 

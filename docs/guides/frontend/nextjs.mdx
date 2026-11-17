@@ -65,7 +65,7 @@ Before you deploy, replace the placeholder auth the installer generates. Until t
 
 ### With Vercel services
 
-Leave `next.config.ts` alone. Add a `vercel.ts` at the project root that tells Vercel where your app lives:
+Keep your existing `next.config.ts`. Add a `vercel.ts` at the project root that tells Vercel where your app lives:
 
 ```ts title="vercel.ts"
 import { withEve } from "eve/vercel";
@@ -191,7 +191,7 @@ export function SessionChat({ sessionId }: { readonly sessionId: string }) {
 }
 ```
 
-Three things to get right:
+Configure conversation navigation as follows:
 
 - **Change the URL without the router.** Once `/s` creates a session, switch the address to `/s/{sessionId}` with the browser's own `replaceState`. Next.js patches `window.history`, and going through its router would remount the page and cut off the reply:
 
@@ -252,7 +252,7 @@ const agent = useEveAgent({
 
 ### Sign in with Vercel
 
-Choose **Sign in with Vercel** in the installer to let members of your Vercel team sign in, with nothing to build. It needs a linked Vercel project. Local development skips sign-in. See [Web Chat with Sign in with Vercel](../../channels/eve#web-chat-with-sign-in-with-vercel) for details.
+Choose **Sign in with Vercel** in the installer to let members of your Vercel team sign in. It needs a linked Vercel project. Local development skips sign-in. See [Web Chat with Sign in with Vercel](../../channels/eve#web-chat-with-sign-in-with-vercel) for details.
 
 ## Save conversations
 
@@ -272,8 +272,8 @@ type SavedChat = {
 Then:
 
 1. **Create the chat record before the first message.** If the user reloads mid-reply, the page can still find the conversation.
-2. **Save as things happen.** Save `session` in `onSessionChange` and each event in `onEvent`. Don't wait for the reply to finish: a turn waiting on the user hasn't finished.
-3. **Load on the server.** Read the saved chat in a Server Component, and pass `events` and `session` to the Client Component as `initialEvents` and `initialSession`, with `resume: true`. Saved messages show at once, and the live reply picks up from there.
+2. **Save as things happen.** Save `session` in `onSessionChange` and each event in `onEvent`. Save while the reply is in progress, including while the turn waits for user input.
+3. **Load on the server.** Read the saved chat in a Server Component, and pass `events` and `session` to the Client Component as `initialEvents` and `initialSession`, with `resume: true`. Saved messages appear immediately while the live reply resumes.
 4. **Store `session` as eve gives it to you.** Don't compute the cursor from the number of events.
 
 See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for how saved events and catch-up fit together.

@@ -27,7 +27,7 @@ The three constructors create the same Docker environment. They differ only in h
 
 When `agent/sandbox/Dockerfile` exists, eve builds it during preparation with `agent/sandbox/` as the build context. The result is the base image for every constructor, and it overrides any `image` you pass, including `DockerSandbox.image(ref)`. To use an existing image, remove the Dockerfile.
 
-Use `DockerSandbox.dockerfile()`, which takes no `image` option, to make the sandbox file show that it uses the Dockerfile.
+Use `DockerSandbox.dockerfile()` to declare that the sandbox uses the Dockerfile. It doesn't accept an `image` option.
 
 ## eve's default image
 
@@ -84,7 +84,7 @@ const environment = DockerSandbox.environment({ image: DEFAULT_EVE_GIT_SANDBOX_I
 export default defineSandbox(() => environment.open());
 ```
 
-To add your own layers, start your `agent/sandbox/Dockerfile` from the image with `FROM ghcr.io/vercel/eve-git:latest`. Docker caches prepared templates by the Dockerfile text, so a template built from `latest` is reused after `latest` moves and never picks up the new image. Pin a tag in `FROM` to choose when the image changes.
+To add your own layers, start your `agent/sandbox/Dockerfile` from the image with `FROM ghcr.io/vercel/eve-git:latest`. If the Dockerfile is unchanged, Docker reuses the prepared template even after `latest` points to a new image. Pin a tag in `FROM` to choose when the image changes.
 
 The default image doesn't include `gh`, so `installCodeTooling` from `eve/extensions/code/sandbox` installs it with `apt-get` during the first build unless you use this image. For Vercel Sandbox, see [the eve-git image on Vercel Sandbox](/docs/sandbox/vercel#the-eve-git-image).
 

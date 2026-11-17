@@ -97,7 +97,7 @@ To let a tapback be the agent's whole answer, also add the [`no_reply`](/docs/co
 
 ## Approve requests with tapbacks
 
-eve ignores tapbacks people send until you add `onTapback`. Return `answer` to answer the approval in the message the tapback is on, so a like approves and a dislike denies:
+eve ignores tapbacks people send until you add `onTapback`. Return `answer` to respond to the approval attached to that message, so a like approves and a dislike denies:
 
 ```ts title="agent/channels/photon.ts"
 import { connectPhotonCredentials } from "@vercel/connect/eve";
@@ -119,4 +119,4 @@ Any other tapback reaches the agent as text, such as `Tapback: Loved “See you 
 
 ## Reference
 
-The [Photon reference](/docs/channels/photon/reference) covers options, webhook verification, retried deliveries, attachments, tapback fields, approval answers, and portable credentials.
+The [Photon reference](/docs/channels/photon/reference) covers options, webhook verification, retried messages, attachments, tapback fields, approval answers, and portable credentials.

@@ -64,7 +64,7 @@ eve generates `SKILL.md` from `content`. A static `defineSkill` module runs once
 
 eve ignores other frontmatter, so skills written for other Agent Skills clients import unchanged.
 
-A flat markdown skill without `description` uses the body's first non-empty line that isn't a code fence marker. eve strips any leading `#`, `>`, `*`, or `-` marker from that line. A body with no such line gives `Instructions for the <name> skill.`, which is a weak hint. Add a `description` when the model must choose the skill by intent.
+In a flat markdown skill, omit `description` to use the first non-empty line of the body. Set `description` explicitly when that line does not describe when to use the skill.
 
 ## How loading works
 
@@ -78,7 +78,7 @@ The description tells the model when to load the skill. Write it as the task tha
 Use when the user needs a release checklist or changelog workflow.
 ```
 
-Loading a skill adds instructions, never tools. Tools stay visible whether or not a skill is loaded.
+Loading a skill adds instructions to the turn; it does not change which tools are available.
 
 ## Supporting files
 
@@ -86,9 +86,9 @@ Supporting files are for the model. It reads a loaded skill's references, assets
 
 The files are under `$HOME/.agents/skills/<skill>/` in the sandbox. When `$HOME` is unavailable, they are under `skills/<skill>/` in the workspace root. A relative path inside `SKILL.md`, such as `references/checklist.md`, starts from the directory that holds that `SKILL.md`.
 
-Listing and loading skills don't need a sandbox. Only reading supporting files does.
+Only reading supporting files requires a sandbox; listing and loading skills do not.
 
-Tools and hooks have no API to read skill files. When your code needs the same data, import it from a module in `lib/`.
+Tools and hooks cannot read skill files directly. To share data with application code, import it from `lib/`.
 
 ## Skills are scoped per agent
 

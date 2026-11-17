@@ -1,6 +1,6 @@
 ---
 title: "Remote Agents"
-description: "Call another eve deployment as a subagent with defineRemoteAgent: the same tool call as a local subagent, with outbound auth and durable callbacks."
+description: "Call another eve deployment as a subagent with defineRemoteAgent, outbound authentication, and callbacks that survive restarts."
 ---
 
 A remote agent is a separately deployed eve agent that your agent calls as a subagent. Define one with `defineRemoteAgent` in a file under `agent/subagents/`. The tool name comes from the file path, so `agent/subagents/weather.ts` is the `weather` tool.
@@ -75,7 +75,7 @@ export default defineRemoteAgent({
   url: "https://site-ops.example.com",
   description: "Executes site operations as the requesting user.",
   auth: vercelOidc(), // transport trust: authenticates *this* deployment
-  forwardPrincipal: true, // identity: asserts the current session principal
+  forwardPrincipal: true, // forwards the current caller's identity
 });
 ```
 
@@ -161,7 +161,7 @@ On Vercel, spans from a remote agent and its local subagents carry the remote se
 
 ## Preserving trace content
 
-With `forwardPrincipal: true`, a sampled remote call forwards its audience and the most input and output content the next hop may record, as [W3C Baggage](https://www.w3.org/TR/baggage/). The receiver uses this policy only from a trusted caller:
+With `forwardPrincipal: true`, a sampled remote call sends its audience and input/output recording limits through [W3C Baggage](https://www.w3.org/TR/baggage/). The receiver uses this policy only from a trusted caller:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -190,9 +190,9 @@ The parent stream shows the same `task.started`, `child.opened`, and `call.settl
 
 The callback URL must use `http` or `https` and reach the parent at a public address. The remote refuses a callback host that is, or resolves to, a private, link-local, or reserved IP address, and a refused callback fails without retries. Loopback hosts such as `localhost` and `127.0.0.1` work only when the remote runs `eve dev` or `vercel dev`. A parent and remote on a private network can't exchange callbacks.
 
-The parent's callback route takes requests without authentication, so the callback URL is the only credential. For each message to a remote agent, eve generates a random token in a workflow step of its own, and the route delivers only to a call that waits on one of those tokens. A request for any other token gets `404` with `code: "CALLBACK_NOT_PENDING"`, including the token of a hook you create with `createHook`.
+The parent's callback route takes requests without authentication, so the callback URL is the only credential. Each message receives a random callback token, and the callback route accepts a result only while the corresponding call is waiting. A request for any other token gets `404` with `code: "CALLBACK_NOT_PENDING"`, including the token of a hook you create with `createHook`.
 
-A callback URL carries only the message's callback capability, never the parent's deployment protection bypass secret. To let callbacks reach a parent behind Vercel Deployment Protection, configure Trusted Sources on the parent to admit the remote's project and environment.
+A callback URL authorizes a reply to one message and excludes the parent's deployment protection bypass secret. To let callbacks reach a parent behind Vercel Deployment Protection, configure Trusted Sources on the parent to admit the remote's project and environment.
 
 On the remote deployment, set `EVE_CALLBACK_TRUSTED_ORIGINS` to a comma-separated list of parent HTTPS origins, such as `https://parent.example.com`. Each entry is an exact origin, or starts with a `*.` label as described below. The remote attaches its own short-lived Vercel OIDC token only to those origins and to its own deployment origins. An exact entry doesn't trust other ports or subdomains. Keep the remote's Vercel OIDC token available at runtime. Callbacks don't follow redirects.
 
@@ -224,7 +224,7 @@ Unsupported versions fail at start with an error naming both versions.
 
 A receiver on an older protocol can reject the create request with `409 REMOTE_AGENT_PROTOCOL_MISMATCH` before it accepts the child. eve then sends one more request with that receiver's version and fresh credentials. eve doesn't try again after an accepted response, an unreadable receipt, a rejection that names a session, or an unsupported version.
 
-With a protocol-2 child, the person answers relayed requests in the parent's session. The child still decides who may answer, so an answer its approval policy refuses leaves the approval open. The child reports when approvals and sign-ins end, but not questions or budget prompts. The parent closes those when the child accepts the answer. Cancelling the parent's call withdraws the relayed requests.
+With a protocol-2 child, the person answers relayed requests in the parent's session. The child's approval policy determines who may answer; if it rejects an answer, the approval remains open. The child reports when approvals and sign-ins end, but not questions or budget prompts. The parent closes those when the child accepts the answer. Cancelling the parent's call withdraws the relayed requests.
 
 ### Upgrading callers and remote agents
 

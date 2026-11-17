@@ -3,7 +3,7 @@ title: "Operate a Self-Hosted Agent"
 description: "Upgrade, scale, and troubleshoot an eve agent that runs on your own infrastructure."
 ---
 
-Use this guide after your agent runs with [`eve start`](./self-hosting). It covers upgrades, replicas, schedules, workspace members, run data, and common failures.
+Use this guide after your agent runs with [`eve start`](./self-hosting) to upgrade builds, run replicas and schedules, manage workspace members and run data, and troubleshoot failures.
 
 ## Upgrade a self-hosted agent
 
@@ -68,7 +68,7 @@ research.example.com {
 
 Apply the [authentication, Workflow world, and sandbox configuration](./self-hosting) to each member. With the default local Workflow world, persist each member's own `.eve/.workflow-data` directory.
 
-If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents#vercel-workspace-peers) with the peer's URL and credentials, because the default transport requires Vercel. Remote agent callbacks must reach a public address. Outside `eve dev`, eve refuses callback hosts that are, or resolve to, loopback, private, link-local, or reserved addresses. So callbacks between services over a private network or `127.0.0.1` don't work. See [How remote dispatch and callbacks work](../remote-agents#how-remote-dispatch-and-callbacks-work) and [Set the public callback origin](./self-hosting#set-the-public-callback-origin).
+If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents#vercel-workspace-peers) with the peer's URL and credentials, because the default transport requires Vercel. Outside `eve dev`, callbacks require public addresses; loopback, private, link-local, and reserved destinations are rejected. See [How remote dispatch and callbacks work](../remote-agents#how-remote-dispatch-and-callbacks-work) and [Set the public callback origin](./self-hosting#set-the-public-callback-origin).
 
 ### Add a peer frontend
 
@@ -92,7 +92,7 @@ eve can ask the world to delete a run's inputs, outputs, and stream contents whe
 | Symptom                                                                         | Check                                                                                                                                | Next action                                                                                                                  |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | Sandbox tools fail with `DefaultSandbox has no sandbox provider for this build` | Whether `eve build` could reach a Docker daemon, for example inside a Dockerfile `RUN` step                                          | Rebuild where Docker is reachable, or [select a provider explicitly](./self-hosting#build-inside-a-container-image)          |
-| Workflow deliveries fail with HTTP 401 with the local world                     | Whether `WORKFLOW_LOCAL_BASE_URL` reaches a load balancer in front of several processes                                              | Serve the agent from one process, or use the [Postgres world](./workflow-worlds#use-the-postgres-world) for replicas         |
+| Queued Workflow work fails with HTTP 401 when using the local world             | Whether `WORKFLOW_LOCAL_BASE_URL` reaches a load balancer in front of several processes                                              | Serve the agent from one process, or use the [Postgres world](./workflow-worlds#use-the-postgres-world) for replicas         |
 | Sign-in links or remote agent callbacks point at `localhost`                    | Whether `WORKFLOW_LOCAL_BASE_URL` is set                                                                                             | [Set the public callback origin](./self-hosting#set-the-public-callback-origin)                                              |
 | A session starts but never responds behind a proxy                              | With `WORKFLOW_LOCAL_BASE_URL` pointing at the proxy, whether the proxy forwards `/.well-known/workflow/` without rewriting the path | Forward both [proxy route prefixes](./self-hosting#configure-proxy-routes)                                                   |
 | Requests return `409` with `code: "session_stranded"` after an upgrade          | The eve version in the response                                                                                                      | End the session, or send a new message to its channel address; see [Recover a stranded session](#recover-a-stranded-session) |

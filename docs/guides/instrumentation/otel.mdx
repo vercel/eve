@@ -84,7 +84,7 @@ export default localTraces({
 | `attribute` | `{ emit: false }`                                                | Remove the attribute.                  |
 | `attribute` | `{ replace: true, value }`                                       | Change the attribute's value.          |
 
-A redaction decision implies emission and needs at least one direction.
+`{ redact: true }` keeps the span and requires `inputs: true`, `outputs: true`, or both.
 
 ## Local traces
 
@@ -160,7 +160,7 @@ export default otelIntegration({
 
 The resolver receives the channel, session, final model input, `run: { id, attempt }`, and optional turn. Its input type is `InstrumentationModelStartedInput` from `eve/instrumentation`. Model input content is `unknown`, so narrow provider-specific messages before you read them. Content that `otel({ tracePolicy })` excludes isn't available to the resolver.
 
-`input.session.auth.current` is the turn's caller, with the attributes the channel set for its message. eve calls the resolver synchronously before each model attempt, inside the session, so it can also read [`defineState`](/docs/concepts/state) values, such as a decision a [`turn.started` hook](/docs/guides/hooks#execution-order) made for the turn. Return the values directly: eve ignores a returned Promise. A resolver that throws adds nothing to that attempt; eve logs a warning and the model call runs.
+`input.session.auth.current` is the turn's caller, with the attributes the channel set for its message. eve calls the resolver synchronously before each model attempt, inside the session, so it can also read [`defineState`](/docs/concepts/state) values, such as a decision a [`turn.started` hook](/docs/guides/hooks#execution-order) made for the turn. Return values synchronously because eve ignores a returned `Promise`. A resolver that throws adds nothing to that attempt; eve logs a warning and the model call runs.
 
 Your values appear under `ai.settings.context.*`, next to `ai.settings.context.eve.environment`. Keys that begin with `eve.` are reserved. Channel, session, step, turn, and version IDs are regular span attributes, not runtime context.
 
@@ -180,7 +180,7 @@ invoke_agent <agent>
   └── agent.approval
 ```
 
-A `chat` span directly under `invoke_agent` is a [compaction](../concepts/execution-model-and-durability#compaction-handoff) summary request made during the turn. It carries `ai.settings.context.eve.compaction.request=summary`, so you can sum or exclude compaction usage and cost. A compaction between turns, such as one `session.compact()` starts, has no turn and exports no span.
+A `chat` span directly under `invoke_agent` is a [compaction](../concepts/execution-model-and-durability#compaction-handoff) summary request made during the turn. It carries `ai.settings.context.eve.compaction.request=summary`, so you can sum or exclude compaction usage and cost. Compaction between turns, including compaction started by `session.compact()`, belongs to neither a turn nor an exported span.
 
 Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.
 
@@ -199,9 +199,9 @@ A remote child starts a separate trace with a root `invoke_agent` span. Its firs
 
 The trace schema is version 4.
 
-Memory spans (`search_memory` for recall, `upsert_memory` for capture) and the `execute_tool` spans of a slot's provider tools carry `gen_ai.memory.store.id` and `agent.memory.slot` whatever the content policy. The store ID is the slot's opaque memory scope key, never the raw scope values, so it identifies which calls share memory without revealing who they belong to.
+Memory spans (`search_memory` for recall, `upsert_memory` for capture) and the `execute_tool` spans of a slot's provider tools carry `gen_ai.memory.store.id` and `agent.memory.slot` regardless of the content policy. The store ID is the slot's opaque memory scope key, never the raw scope values, so it identifies which calls share memory without revealing who they belong to.
 
-eve adds `gen_ai.conversation.id` to spans created during model, tool, and memory work, including spans from third-party instrumentation. The conversation ID grants no access to message history, agent state, or credentials, and no authorization. Remote requests carry it in W3C Baggage. `trustedForwarders` controls whether the receiver accepts parent session data and the trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
+eve adds `gen_ai.conversation.id` to spans created during model, tool, and memory work, including spans from third-party instrumentation. The conversation ID is correlation metadata and cannot authorize access to message history, agent state, or credentials. Remote requests carry it in W3C Baggage. `trustedForwarders` controls whether the receiver accepts parent session data and the trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
 
 Gateway-routed model calls pass the configured OpenTelemetry context on each provider request. eve removes its own baggage first. AI Gateway decides whether its spans are sampled and which destinations receive them.
 
@@ -228,10 +228,10 @@ When a session moves to a new workflow run, after a deployment change or [compac
 
 Join the two runs with `eve.session.id` and `eve.handoff.attempt_key`. `workflow.run.id` identifies the run that emitted the event, and submission events also include `eve.handoff.destination_run_id`. Counts and part indexes describe the transfer without message content. Step retries can repeat events, so tell them apart by step ID and `eve.handoff.step_attempt` instead of counting events.
 
-The new run records `eve.handoff.applied_at_ms` on Workflow's replay-stable clock (`eve.handoff.applied_at_clock: workflow`). That value is logical event time, not host time. The event's own timestamp is when the next turn step exports it, so the new run emits no event until a later turn step runs. An abandoned handover emits no success event.
+The new run records `eve.handoff.applied_at_ms` on Workflow's replay-stable clock (`eve.handoff.applied_at_clock: workflow`). That value is logical event time, not host time. The event is exported during a later turn step, and its timestamp records that export time. An abandoned handover doesn't emit a success event.
 
 ## What to read next
 
-- [Instrumentation](/docs/observability/instrumentation): handle eve lifecycle events.
+- [Instrumentation](/docs/observability/instrumentation): handle eve runtime events.
 - [Agent Runs](./agent-runs): configure Vercel's built-in trace destination.
 - [Local development](../guides/dev-tui): inspect local traces in the TUI.

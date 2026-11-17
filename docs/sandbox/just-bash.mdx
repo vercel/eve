@@ -3,7 +3,7 @@ title: "just-bash Sandbox"
 description: "Use a pure-JavaScript shell and virtual filesystem."
 ---
 
-`JustBashSandbox.environment()` gives each session a pure-JavaScript shell and a virtual filesystem that keeps its files between turns. It starts no container or VM.
+`JustBashSandbox.environment()` gives each session a pure-JavaScript shell and a virtual filesystem that keeps its files between turns. It doesn't start a container or VM.
 
 ```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
@@ -13,7 +13,7 @@ export const environment = JustBashSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-just-bash can't use OCI images or Dockerfiles, runs no native processes, and provides no network isolation. Its session has no `setNetworkPolicy()`.
+just-bash doesn't support OCI images, Dockerfiles, native processes, network isolation, or `setNetworkPolicy()`.
 
 ## Automatic installation
 

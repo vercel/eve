@@ -161,7 +161,7 @@ The parameter `name` must exactly match the placeholder. If the spec omits an `i
 
 ## Application-provided operation arguments
 
-Some operation parameters should come from the application, not the model, such as a tenant or organization ID. Set those values with `toolCall.providedArguments`:
+Your application should supply parameters such as tenant or organization IDs. Set those values with `toolCall.providedArguments`:
 
 ```ts title="agent/connections/crm.ts"
 import { defineOpenAPIConnection } from "eve/connections";
@@ -179,13 +179,13 @@ export default defineOpenAPIConnection({
 
 Values may be JSON values, promises, or callbacks. Callbacks receive the session context, the bare operation `toolName`, and a `callId`. The `callId` is unique to the tool call and stays the same if eve runs the call again, so it works as an idempotency key.
 
-Keys name top-level operation inputs: path, query, header, and cookie parameters, plus `body` for a request body. The model doesn't see these keys in any operation's input schema. eve adds their values just before it builds each request and overwrites any value the model sent. Approval policies see only the model's input.
+Keys name top-level operation inputs: path, query, header, and cookie parameters, plus `body` for a request body. The model doesn't see these keys in any operation's input schema. eve adds their values before building each request and overwrites any value the model sent. Approval policies see only the model's input.
 
 Use `headers` instead for transport-wide headers that the spec doesn't declare as operation parameters.
 
 ## Schema annotations
 
-eve removes `default` and `example` annotations whose values don't match the declared schema type, so invalid examples don't mislead the model. A boolean property with `default: "false"` loses the annotation; `default: false` keeps it. eve doesn't coerce annotation values.
+eve removes `default` and `example` annotations whose values don't match the declared schema type, so invalid examples don't mislead the model. For a boolean property, eve removes `default: "false"` and preserves `default: false`. eve doesn't coerce annotation values.
 
 ## What to read next
 

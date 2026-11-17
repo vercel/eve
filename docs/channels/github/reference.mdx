@@ -1,14 +1,14 @@
 ---
 title: "GitHub Reference"
-description: "GitHub channel options, credentials, inbound hooks, CI events, delivery, PR context, sandbox checkout, and proactive sessions."
+description: "GitHub channel options, credentials, inbound hooks, CI events, replies, PR context, sandbox checkout, and proactive sessions."
 type: reference
 ---
 
-This page documents every part of `githubChannel` from `eve/channels/github`. For setup and common tasks, start with [GitHub](/docs/channels/github).
+Import `githubChannel` from `eve/channels/github`. For setup and common tasks, see [GitHub](/docs/channels/github).
 
 The GitHub channel lets people reach your agent from issues and pull requests. It lives in `agent/channels/github.ts`. Write the agent's invocation token, such as `@my-agent`, in a new issue, PR, or review comment, and the agent replies in that thread. It sees the PR diff and works in a checkout of the repo.
 
-[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the GitHub App, its token, and webhook checks, so you hold no private key or webhook secret. See [Channels](/docs/channels) for what all channels share.
+[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the GitHub App, its token, and webhook checks, so you don't need to store a private key or webhook secret. See [Channels](/docs/channels) for what all channels share.
 
 ## Guided Connect setup
 
@@ -128,7 +128,7 @@ GitHub comments have no buttons or cards, so an approval or question posts as a 
 
 ## Proactive sessions
 
-To start a session without a comment, call `to(github, target).send(message, { auth })` from a schedule's `run` handler. From another channel, call `ctx.to(github, target).send(message, { auth })`. The target needs `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`. This sends a message to the agent, not a comment to GitHub.
+To start a session without a comment, call `to(github, target).send(message, { auth })` from a schedule's `run` handler. From another channel, call `ctx.to(github, target).send(message, { auth })`. The target needs `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`. The message becomes agent input, and the agent posts its response to GitHub.
 
 To post without invoking the model, use `ctx.channel.thread.post(...)` inside a GitHub event handler. To retry and deduplicate notifications across providers yourself, see [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications).
 

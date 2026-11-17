@@ -20,7 +20,7 @@ The sandbox is the isolated side. It has its own `/workspace` filesystem but no 
 
 Only shell commands execute in the sandbox. The built-in `bash`, `read_file`, `write_file`, and `edit_file` tools, and opt-in tools such as `glob` and `grep`, run in the app runtime and _proxy_ into the sandbox.
 
-The model sees only tool definitions and results. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`, and the call never touches the sandbox.
+The model sees only tool definitions and results. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`, and the call does not use the sandbox.
 
 The [just-bash provider](../sandbox/just-bash) has a weaker boundary. Its shell is a JavaScript interpreter with a virtual filesystem inside the app runtime process, with no network isolation. Any `experimental.customCommands` you register run as host application code outside the virtual filesystem. Use a Vercel or Docker sandbox when the model runs commands you would not run in the app runtime.
 
@@ -75,13 +75,13 @@ A [channel](/docs/channels) authenticates its own inbound traffic. The built-in 
   signature or token. Never use a `principalId` (or similar) from the request
   body, because a body field is attacker-controlled.
 
-## A turn runs as one principal
+## A turn runs as one caller
 
-A turn's principal (its authenticator, issuer, principal type and id) never changes while the turn runs; only its claims may update. Only that principal's messages steer the turn or answer its pending questions by text. In a shared thread, another person's message waits for the turn to end and then runs as their own turn, so their text never drives the turn's credentials and the turn never continues under their identity. Another person can still settle a pending request with a button or structured answer; they are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
+A turn's caller identity (its authenticator, issuer, `principalType`, and `principalId`) never changes while the turn runs; only its claims may update. Only that caller's messages can steer the turn or answer its pending questions by text. In a shared thread, another user's message waits for the turn to finish and starts a separate turn under their own identity. Another user can still answer a pending approval or question with a button or structured response; they are recorded as the responder while the turn keeps its original caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 
 ## Authored markdown is data
 
-[Skill](../skills) and [schedule](../schedules) frontmatter is data: it must parse to a plain YAML object. A fence that names any language other than YAML, such as `---js`, throws instead of evaluating code.
+[Skill](../skills) and [schedule](../schedules) frontmatter must parse to a plain YAML object. A fence that names any language other than YAML, such as `---js`, throws instead of evaluating code.
 
 ## Auth fails closed
 

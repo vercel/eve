@@ -1,11 +1,11 @@
 ---
-title: "Durable cross-channel notifications"
+title: "Cross-Channel Notifications"
 description: "Send a notification to another platform without starting an agent turn, using an application-owned outbox for retries and deduplication."
 ---
 
 A cross-channel notification posts to another platform's API without starting an agent turn. Your application first saves the notification in an outbox table, so the notification survives a crash. eve has no built-in queue for these messages. `ctx.to(channel, target).send(...)` starts or resumes an agent session on the destination instead.
 
-The outbox sends each notification at least once, not exactly once. If the provider accepts a request but the response is lost, the dispatcher cannot know whether to retry. Use a provider idempotency key when one is available. Otherwise, make duplicates harmless or reconcile the destination before retrying an ambiguous request.
+The outbox sends each notification at least once. Retries can produce duplicates if the provider accepts a request but its response is lost. Use a provider idempotency key when one is available. Otherwise, make duplicates harmless or reconcile the destination before retrying an ambiguous request.
 
 This example posts to Slack and requires `SLACK_REVIEW_CHANNEL_ID` and `SLACK_BOT_TOKEN`. If your channel uses Vercel Connect, pass the connector's `botToken` resolver to `callSlackApi` instead.
 
@@ -90,7 +90,7 @@ export default defineSchedule({
 });
 ```
 
-The storage adapter is your application code. It must keep these rules:
+Implement the storage adapter in your application with these guarantees:
 
 - `enqueue` inserts each `key` once.
 - `claim` atomically leases pending rows, so overlapping schedule runs do not send the same row at the same time.
@@ -98,7 +98,7 @@ The storage adapter is your application code. It must keep these rules:
 - `release` saves the error and makes the row eligible after `retryAt`.
 - Expired leases return to the pending set.
 
-## Handle ambiguous delivery
+## Handle uncertain send results
 
 An error that proves the provider did not accept the request is safe to retry. A timeout, connection reset, or crash after the request leaves your process is ambiguous, because the provider may have accepted it. Handle that case in this order:
 

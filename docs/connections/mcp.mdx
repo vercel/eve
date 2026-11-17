@@ -92,9 +92,9 @@ This connection always asks before a delete, asks before a publish only when the
 ```ts title="agent/connections/social.ts"
 import { defineMcpClientConnection } from "eve/connections";
 
-// Bare tool names whose effects are irreversible — always gate these.
+// Always require approval for these irreversible tools.
 const DELETE_TOOLS = ["delete_draft", "delete_thread"];
-// Tools that can publish — gate only when the call schedules a post.
+// Require approval only when these tools schedule a post.
 const PUBLISH_TOOLS = ["create_draft", "edit_draft"];
 
 // Read `requestBody.publish_at` without trusting the input's shape.
@@ -164,7 +164,7 @@ If you don't control the server, replace that operation with an authored tool th
 
 ## Application-provided tool arguments
 
-Some MCP servers require arguments that come from the application, not the model. For example, UCP servers expect the agent profile in `arguments.meta` on every tool call. Set those values with `toolCall.providedArguments`:
+Some MCP servers require application-supplied arguments. For example, UCP servers expect the agent profile in `arguments.meta` on every tool call. Set those values with `toolCall.providedArguments`:
 
 ```ts title="agent/connections/storefront.ts"
 import { defineMcpClientConnection } from "eve/connections";
@@ -188,7 +188,7 @@ export default defineMcpClientConnection({
 
 Values may be JSON values, promises, or callbacks. Callbacks receive the session context, the bare remote `toolName`, and a `callId`. The `callId` is unique to the tool call and stays the same if eve runs the call again, so it works as an idempotency key.
 
-The model doesn't see these keys in any tool's input schema. eve adds their values just before each call and overwrites any value the model sent. Approval policies see only the model's input.
+The model doesn't see these keys in any tool's input schema. eve adds their values before each call and overwrites any value the model sent. Approval policies see only the model's input.
 
 ## Configure protocol discovery
 
@@ -221,7 +221,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-The `eve-forwarded-principal` header on every request names the turn's user, and the person who started the session when that differs. An anonymous turn, or one with no caller, sends no header. The server must list the identity this deployment authenticates as in `trustedForwarders`, or it refuses the request with `403`. See [Forwarded principals](../channels/mcp#forwarded-principals).
+The `eve-forwarded-principal` header on every request names the turn's user, and the person who started the session when that differs. eve omits the header for anonymous turns and turns without a caller. The server must list the identity this deployment authenticates as in `trustedForwarders`, or it refuses the request with `403`. See [Forwarded principals](../channels/mcp#forwarded-principals).
 
 A request that carries the header fails instead of following a redirect, so the header never reaches another host. If the encoded user is over 16 KiB, the call fails before it is sent; trim the user's attributes.
 

@@ -78,7 +78,7 @@ export default selfModification({
 | `credentials`           | Required. An object with a `resolve({ capability, repository })` function that returns a GitHub token, or `{ pat: true }` to read `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from the deployment environment. |
 | `model`, `reasoning`    | Optional model and reasoning level for the deployed subagent. It defaults to the parent agent's model.                                                                                                  |
 
-The deployed subagent is never offered during `eve dev`. It requires Vercel, because Vercel Sandbox keeps the GitHub token out of the sandbox. eve applies the token only while it checks out or publishes, so sandbox commands can't read it. Builds succeed on any host. Outside Vercel, the subagent fails with an error naming this requirement when it opens its sandbox, so don't mount it in self-hosted deployments.
+The deployed subagent is never offered during `eve dev`. It requires Vercel Sandbox, which makes the GitHub token available only for checkout and publishing so sandbox commands cannot read it. Builds succeed on any host. Outside Vercel, the subagent fails with an error naming this requirement when it opens its sandbox, so don't mount it in self-hosted deployments.
 
 ## Run without self-modification
 

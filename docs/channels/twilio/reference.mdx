@@ -1,10 +1,10 @@
 ---
 title: "Twilio Reference"
-description: "Twilio channel options, credentials, routes, inbound hooks, delivery, human-in-the-loop, proactive sessions, and media."
+description: "Twilio channel options, credentials, routes, inbound hooks, replies, human-in-the-loop, proactive sessions, and media."
 type: reference
 ---
 
-This page documents every part of `twilioChannel` from `eve/channels/twilio`. For setup and common tasks, start with [Twilio](/docs/channels/twilio).
+Import `twilioChannel` from `eve/channels/twilio`. For setup and common tasks, see [Twilio](/docs/channels/twilio).
 
 The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve checks `X-Twilio-Signature` on every request first. See [Channels](/docs/channels) for what every channel shares.
 

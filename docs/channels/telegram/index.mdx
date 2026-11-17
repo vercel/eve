@@ -22,7 +22,7 @@ eve add channel/telegram
 eve deploy
 ```
 
-Setup links a Vercel project and stores the bot token in a Telegram connector. Connect registers the bot's webhook and forwards updates to `/eve/v1/telegram`, so your deployment holds no bot token or webhook secret. Setup writes the channel file:
+Setup links a Vercel project and stores the bot token in a Telegram connector. Connect registers the bot's webhook and forwards updates to `/eve/v1/telegram`, so your deployment doesn't store a bot token or webhook secret. Setup writes the channel file:
 
 ```ts title="agent/channels/telegram.ts"
 import { connectTelegramCredentials } from "@vercel/connect/eve";
@@ -69,7 +69,7 @@ By default, the agent answers every message in a private chat. In a group, a mes
 - To customize which commands, mentions, or replies wake the agent, override `onMessage`. See [Dispatch](/docs/channels/telegram/reference#dispatch).
 - To change how replies are sent, see [Delivery](/docs/channels/telegram/reference#delivery).
 
-## Human-in-the-loop interactions
+## Approvals and questions
 
 By default, tool approvals and option questions appear as inline-keyboard buttons. Freeform questions use a reply prompt, and the person's reply becomes the answer.
 
@@ -118,4 +118,4 @@ export default telegramChannel({
 
 ## Reference
 
-The [Telegram reference](/docs/channels/telegram/reference) covers options, credentials, dispatch rules, model context, delivery, human-in-the-loop, proactive session anchoring, and attachments.
+The [Telegram reference](/docs/channels/telegram/reference) covers options, credentials, dispatch rules, model context, replies, human-in-the-loop, proactive session anchoring, and attachments.

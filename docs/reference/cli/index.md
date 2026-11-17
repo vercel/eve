@@ -286,9 +286,9 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 
 Bundled development extensions mount without adding files to your project; pass `--no-default-extensions` to disable them. See [Self-Modification](/docs/guides/self-modification).
 
-A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`; chat needs no Vercel project, channels, or integrations. Use `/model` to change models and settings, and `/add` to install an addition. `--input` text stays editable in the prompt. See [Terminal UI](/docs/guides/dev-tui) for credential precedence and login options.
+A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`; you can start chatting without configuring a Vercel project, channels, or integrations. Use `/model` to change models and settings, and `/add` to install an addition. `--input` text stays editable in the prompt. See [Terminal UI](/docs/guides/dev-tui) for credential precedence and login options.
 
-### Local development lifecycle
+### Development servers and rebuilds
 
 A second interactive `eve dev` for the same app root reconnects to the running server when it is on loopback and healthy. Each terminal UI gets a fresh client session on the shared server. Passing `--host`, `--port`, or a `PORT` value skips reconnection and reports the running server instead.
 
@@ -361,7 +361,7 @@ eve logs --dump     # prepend the log's environment dump
 eve logs --events   # interleave session events from the local workflow store
 ```
 
-Each interactive `eve dev` process writes a private JSON Lines diagnostic log under `.eve/logs/`, whatever the transcript shows. It captures stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records. Each line is one JSON record with `at` and `source` fields.
+Each interactive `eve dev` process writes a private JSON Lines diagnostic log under `.eve/logs/`, regardless of the transcript's log display setting. It captures stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records. Each line is one JSON record with `at` and `source` fields.
 
 A log id is the file name without `.log`, such as `dev-2026-07-15T12-00-00.000Z-123`. `eve logs show <logid>` also accepts the file name or the `.eve/logs/...` path printed in the dev transcript. It also accepts an unambiguous id prefix with or without `dev-`, so `eve logs 2026-07-15` works when one log matches. An ambiguous prefix fails and lists the candidates.
 
@@ -423,7 +423,7 @@ eve link
 eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]
 ```
 
-Links the current directory to a Vercel project. After you select a team, create a project named for the agent or link an existing one. The picker shows recent projects; type a name and choose **Search for `'<name>'`** to search the rest of the team's projects. eve verifies the linked project ID, then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links with fresh pickers.
+Links the current directory to a Vercel project. After you select a team, create a project named for the agent or link an existing one. The picker shows recent projects; type a name and choose **Search for `'<name>'`** to search the rest of the team's projects. eve verifies the linked project ID, then pulls the project's environment, which saves an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) in `.env.local`. Running it again re-links with fresh pickers.
 
 For CI or an agent, pass `--non-interactive` and `--project`. Like `vercel link`, `--project` accepts a Vercel project name or ID, and `--team` accepts a team ID or slug. This mode never opens a picker or browser. A running `eve dev` reloads env files automatically after the pull.
 
@@ -452,7 +452,7 @@ Runs the given evals, or all discovered evals when you omit ids. Ids match exact
 | `1`       | An eval failed: a failed check, an execution error, or a `--strict` miss |
 | `2`       | Configuration error                                                      |
 
-Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed after the run unless you pass `--keep-state`. A kept directory, including Workflow data in `.workflow-data/`, stays until a later `eve eval` in the same app cleans it up. The server runs beside an `eve dev` session for the same agent without touching it.
+Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed after the run unless you pass `--keep-state`. A kept directory, including Workflow data in `.workflow-data/`, stays until a later `eve eval` in the same app cleans it up. The eval server runs independently of any `eve dev` session for the same agent.
 
 | Flag                     | Type   | Default | Description                                                    |
 | ------------------------ | ------ | ------- | -------------------------------------------------------------- |

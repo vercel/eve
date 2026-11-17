@@ -33,13 +33,13 @@ The transcript stays in your terminal scrollback after you exit. Before your fir
 
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` work only in local `eve dev`, not through `eve remote connect`.
 
-A [stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) accepts no new messages or approvals. When a message or a stream reconnect reaches one, the TUI says why and, when known, which eve version built it. Run `/new` to end it; your next message starts a fresh session. `/clear` is refused because it would keep the stranded session. A message accepted before the upgrade is not redelivered. A session from an earlier `eve dev` process built by the same eve version is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery).
+A [stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) cannot accept new messages or approvals. When a message or a stream reconnect reaches one, the TUI says why and, when known, which eve version built it. Run `/new` to end it; your next message starts a fresh session. `/clear` is refused because it would keep the stranded session. A message accepted before the upgrade is not redelivered. A session from an earlier `eve dev` process built by the same eve version is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery).
 
 ## Set up a new agent
 
 After interactive `eve init`, the TUI opens directly. eve keeps the connection already selected for the project, including a project OIDC connection. Without one, it checks credentials set in the environment, the saved machine default, and then the Vercel CLI's current team. With the Vercel CLI team, eve checks account access but doesn't create or link a Vercel project.
 
-During startup, a progress indicator names the connection being checked. Messages you send before the agent is ready are queued. A picker takes over input when a choice or API key is needed, then your draft returns. If setup is cancelled or fails, queued messages return to the draft.
+During startup, a progress indicator names the connection being checked. Messages you send before the agent is ready are queued. When setup needs a choice or API key, a picker temporarily replaces the composer, then restores your draft. If setup is cancelled or fails, queued messages return to the draft.
 
 If no connection is ready, `/login` offers:
 

@@ -1,10 +1,10 @@
 ---
 title: "Telegram Reference"
-description: "Telegram channel options, credentials, dispatch rules, delivery, human-in-the-loop, proactive sessions, and attachments."
+description: "Telegram channel options, credentials, dispatch rules, replies, human-in-the-loop, proactive sessions, and attachments."
 type: reference
 ---
 
-This page documents every part of `telegramChannel` from `eve/channels/telegram`. For setup and common tasks, start with [Telegram](/docs/channels/telegram).
+Import `telegramChannel` from `eve/channels/telegram`. For setup and common tasks, see [Telegram](/docs/channels/telegram).
 
 The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`, receives Bot API webhooks at `POST /eve/v1/telegram`, and replies with `sendMessage`. See [Channels](/docs/channels) for what every channel shares.
 
@@ -14,7 +14,7 @@ Create a bot by sending `/newbot` to [@BotFather](https://t.me/BotFather), then 
 
 ### Vercel Connect
 
-This path needs an authenticated Vercel CLI. eve links a Vercel project, stores the token in a [Vercel Connect](https://vercel.com/docs/connect) Telegram connector, and routes its triggers to `/eve/v1/telegram`. Connect registers the bot's webhook and forwards each update with a Vercel OIDC token that `connectTelegramCredentials` verifies, so your deployment holds no bot token or webhook secret:
+This path needs an authenticated Vercel CLI. eve links a Vercel project, stores the token in a [Vercel Connect](https://vercel.com/docs/connect) Telegram connector, and routes its triggers to `/eve/v1/telegram`. Connect registers the bot's webhook and forwards each update with a Vercel OIDC token that `connectTelegramCredentials` verifies, so your deployment doesn't store a bot token or webhook secret:
 
 ```ts title="agent/channels/telegram.ts"
 import { connectTelegramCredentials } from "@vercel/connect/eve";
@@ -103,7 +103,7 @@ A text reply to a pending `ForceReply` prompt answers it. A reply to any other b
 
 To start a session without an incoming message, call `to(telegram, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(telegram, target).send(message, { auth })` from another channel. `target.chatId` is required; add `messageThreadId` to post in a forum topic.
 
-A private-chat session is keyed to the chat, or the chat and topic. A group or supergroup session is keyed to the bot message Telegram returns. Replies to different bot messages can resume different sessions in one chat. If Telegram returns no recognized chat type, the session stays unanchored.
+A private-chat session is keyed to the chat, or the chat and topic. A group or supergroup session is keyed to the bot message Telegram returns. Replies to different bot messages can resume different sessions in one chat. If Telegram doesn't return a recognized chat type, eve can't associate later replies with the session.
 
 ## Attachments
 

@@ -57,7 +57,7 @@ interface ScheduleHandlerArgs {
 }
 ```
 
-A schedule with `content` needs no code at runtime. A schedule with `run` stays loaded at runtime so the handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+A `content` schedule runs only at build time. A `run` schedule also runs at runtime when the schedule fires. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 `cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. Set `timezone` to an IANA timezone to keep a local time across daylight saving changes:
 
@@ -81,7 +81,7 @@ The name comes from the path under `schedules/`, so `agent/schedules/billing/swe
 
 ## Handler form (`run`)
 
-Use a handler when the schedule sends to a channel, branches on conditions, or computes its message when it fires. A handler has no channel of its own. It selects a channel target with `to(...)` and sends through the returned handle:
+Use a handler when the schedule sends to a channel, branches on conditions, or computes its message when it fires. Select a channel target with `to(...)` and send through the returned handle:
 
 ```ts title="agent/schedules/critical-alerts.ts"
 import { defineSchedule } from "eve/schedules";
@@ -105,11 +105,11 @@ export default defineSchedule({
 
 The `auth` option sets which identity the session runs as. `appAuth` is the app's own identity (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`), for work the agent does for itself. When scheduled work needs a user's grants, pass that user's auth instead. The session still records that a schedule started it.
 
-Every run sends the agent's reply to the channel. To skip a run with nothing to report, check in the handler before you call `send`. When only the agent can tell, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool and ask the agent to call it, so the run posts nothing.
+Every run sends the agent's reply to the channel. To skip a run with nothing to report, check in the handler before you call `send`. When only the agent can tell, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool and instruct the agent to call it to skip posting a reply.
 
 A handler-form session can pause and wait like any other session, for example while a Slack thread waits for a reply.
 
-### Detect the app principal
+### Detect the app identity
 
 `isScheduleAuth(auth)` returns `true` when `auth` is the app identity that schedules pass as `appAuth`. Markdown-form sessions also run as that identity. Use it in tools, hooks, or channel handlers to treat the agent's own work differently from a user's:
 
@@ -140,11 +140,11 @@ curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
 
 An unknown name returns `404` with `availableScheduleIds`, which lists the app's schedules.
 
-The route exists only in development. Production builds never include it. It needs no auth because the dev server is local-only.
+This route is registered only during `eve dev` and does not require authentication because the dev server is local-only.
 
 ## On Vercel
 
-Hosted Vercel builds run every schedule with [Vercel Schedules](https://vercel.com/docs/schedules). Each schedule becomes its own Vercel schedule in `.vercel/output/config.json`. The schedule invokes a private function that has no public route, so no `CRON_SECRET` is needed. Each schedule runs in its own invocation, so one failing schedule doesn't affect the others. Failed invocations aren't retried.
+Hosted Vercel builds run every schedule with [Vercel Schedules](https://vercel.com/docs/schedules). Each schedule becomes its own Vercel schedule in `.vercel/output/config.json`. The schedule invokes a private function without a public route, so `CRON_SECRET` is not required. Each schedule runs in its own invocation, so one failing schedule doesn't affect the others. Failed invocations aren't retried.
 
 Vercel Schedules is in beta. Each run starts within a short [jitter window](https://vercel.com/docs/schedules/concepts#jitter) after its scheduled time, and plan [limits](https://vercel.com/docs/schedules/limits) apply. On Hobby, a schedule can run at most once every 15 minutes.
 

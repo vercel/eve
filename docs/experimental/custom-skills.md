@@ -10,7 +10,7 @@ description: "Let the people who talk to your agent save their own versioned ski
 - **Application modes.** An `always` skill is in the system prompt on every turn, such as a persona. An `on-demand` skill is listed for the model to load when it's relevant. A `deferred` skill stays out of the prompt until the model searches for it.
 - **Approval.** Publishing, rolling back, deleting, and anything that goes live in a shared scope wait for approval. The approval card shows the content that would apply.
 
-It ships inside the `eve` package. This extension is experimental and may change: import it from `eve/experimental/extensions/custom-skills`.
+This extension ships in the `eve` package and is experimental.
 
 ## Mount it
 
@@ -35,25 +35,25 @@ Give each agent that shares a Blob store its own `namespace`, or the agents shar
 
 The mount name prefixes everything. Mounted as `skills`, the agent gets:
 
-| Name               | What it does                                                                                       |
-| ------------------ | -------------------------------------------------------------------------------------------------- |
-| `skills__create`   | Saves a new version of a skill.                                                                    |
-| `skills__list`     | Lists a scope's skills, with their IDs, versions, drafts, and modes.                               |
-| `skills__publish`  | Makes an exact version live: a newer draft, or an earlier version to roll back. Asks for approval. |
-| `skills__read`     | Reads one version, with a list of every version. Deferred.                                         |
-| `skills__set_mode` | Changes how the live version applies. Deferred.                                                    |
-| `skills__remove`   | Deletes skills with every version. Asks for approval. Deferred.                                    |
-| `skills__manage`   | A skill with the lifecycle rules, which the model loads before changing skills.                    |
+| Name               | What it does                                                                                                      |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `skills__create`   | Saves a new version of a skill.                                                                                   |
+| `skills__list`     | Lists a scope's skills, with their IDs, versions, drafts, and modes.                                              |
+| `skills__publish`  | Makes an exact version live: a newer draft, or an earlier version to roll back. Asks for approval.                |
+| `skills__read`     | Reads one version, with a list of every version. Deferred.                                                        |
+| `skills__set_mode` | Changes how the live version applies. Deferred.                                                                   |
+| `skills__remove`   | Deletes skills with every version. Asks for approval. Deferred.                                                   |
+| `skills__manage`   | A skill explaining how to create, publish, and manage custom skills, which the model loads before making changes. |
 
 Deferred tools stay out of the tool list until the model finds them with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill), so the extension adds three tools to every request.
 
-People's skills load as `skills__<name>`, or `skills__channel_<name>` for shared ones, so they can't shadow the agent's own skills or each other. Keep the mount name short: a loadable skill name is at most 64 characters, so with the default 40-character skill names, the mount name has 14.
+Custom skills load as `skills__<name>`, or `skills__channel_<name>` for shared skills, so they don't shadow the agent's skills or each other. Keep the mount name to 14 characters or fewer so loadable skill names stay within the 64-character limit with the default 40-character `maxNameLength`.
 
-`publish`, `set_mode`, and `remove` take a skill's `id` as well as its name, which the model reads from `list` or `create`. An approval then applies only to the skill its card showed: if someone deletes the skill and saves a new one under the same name while the approval waits, the approved call is refused.
+`publish`, `set_mode`, and `remove` require both the skill's `id` and `name`, which `list` and `create` return. Binding approvals to the `id` ensures that if a skill is deleted and recreated under the same name before approval finishes, the approved call is rejected.
 
 ## Scopes
 
-By default, every signed-in person has a `personal` scope. Anonymous callers and runtime principals, such as a schedule that runs as the app, have none, so one run can't leave skills for every later run. When the conversation happens in a shared place, such as a Slack, Discord, or Teams channel or a group chat, the caller also has a `channel` scope that everyone there shares. It comes from the conversation's [space](/docs/channels#spaces), so direct messages have no shared scope.
+By default, every signed-in user gets a `personal` scope. Anonymous callers and runtime callers, such as schedules running as the app, don't get a scope, so one run cannot save skills that affect later runs. In a shared conversation [space](/docs/channels#spaces) such as a Slack, Discord, or Teams channel or group chat, the caller also gets a `channel` scope shared with everyone in that space. Direct messages do not have a shared scope.
 
 Pass `scopes` to change which scopes apply. Compose with the built-in ones from `eve/experimental/extensions/custom-skills/policies`, for example to add read-only company skills:
 
@@ -80,7 +80,7 @@ export default customSkills({
 });
 ```
 
-A scope's `key` says where its skills are stored and must be unique per owner. `label` is how the model and approval cards name who the skills are for. `shared` marks a scope many people use, which the default approval rule treats more carefully. `readOnly` lists and loads skills but refuses changes, and `loadPrefix` keeps the scope's load names apart from other scopes'.
+A scope's `key` sets its storage path and must be unique per user or shared group. `label` describes the scope's audience to the model and in approval cards. `shared` marks a multi-user scope so the default approval policy requires stricter approval. `readOnly` allows listing and loading skills while rejecting modifications, and `loadPrefix` prefixes the scope's loaded skill names so scopes don't collide.
 
 ## Approval
 
@@ -101,11 +101,11 @@ export default customSkills({
 });
 ```
 
-`defaultSkillApproval` asks before publishing, rolling back, or removing, and before anything goes live in a shared scope. A personal first version and a personal mode change run without asking, and a draft never asks. A shared change is refused when its approval card, at most 3,000 characters including the skill's description, can't show it in full, so whoever approves reads everything.
+`defaultSkillApproval` requires approval before publishing, rolling back, or removing a skill, and before any change goes live in a shared scope. Saving a draft, creating the first version of a personal skill, and changing a personal skill's mode do not require approval. Shared changes are rejected if the approval card (up to 3,000 characters, including the description) cannot display the full content.
 
-`approval.response` is an eve [approval response policy](/docs/human-in-the-loop#authorizing-approval-responses) that decides who may answer. By default, only the person who asked can approve a personal change, and a shared change needs someone else, so no one person can put text into everyone's prompt alone. Approvals are judged without the conversation, so the tool checks the approver again against the scope the change really targets before it runs. For admin-only shared skills, check `response.principal` in your own policy.
+`approval.response` is an [approval response policy](/docs/human-in-the-loop#authorizing-approval-responses) that controls who can approve a change. By default, only the requester can approve a personal change, and a different user must approve a shared change. Before executing, the tool also verifies that the approver is authorized for the target scope. For admin-only shared skills, check `response.principal` in your own policy.
 
-The tools check their change again when they run, against the state their approval rule judged. If the skills changed in the meantime, the change fails and the model tries again; a first version that now needs approval nobody gave is saved as a draft instead.
+When a tool runs, it rechecks the skill state that was evaluated for approval. If the skill changed while waiting, the tool call fails so the model can retry; if creating a first version now requires approval, it is saved as a draft instead.
 
 ## Validation
 
@@ -190,6 +190,6 @@ for (const scope of (await skills.listScopes?.()) ?? []) {
 
 If a scope's storage can't be read, such as during a Blob outage, its skills are skipped for that turn and the model is told they're unavailable; other scopes and the rest of the turn are unaffected. A catalog entry or version that doesn't parse is skipped and left in place for repair.
 
-Deleting a skill overwrites its versions with empty documents, because memory document stores have no delete. A store that keeps object history still holds the old content.
+Deleting a skill overwrites its versions with empty documents because `MemoryDocumentBackend` does not have a delete operation. If your storage backend retains version history, older object versions still contain the previous content.
 
 To keep skills in your own database, implement `SkillRepository` from `eve/experimental/extensions/custom-skills/repository` and pass it as `repository`. Its documentation covers the contract: never reuse an ID, number versions without gaps, and reject a stale `expectedRevision` with `SkillConflictError` so concurrent changes can't exceed the limits.

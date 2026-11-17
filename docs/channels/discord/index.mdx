@@ -129,7 +129,7 @@ The bot answers DMs, mentions of its user, replies to its messages, and messages
 
 Thread follow-ups without a mention need the privileged **Message Content** intent. Setup turns it on when Discord allows it.
 
-## Human-in-the-loop interactions
+## Approvals and questions
 
 By default, approvals and option questions appear as buttons, `display: "select"` questions as a select, and freeform questions as a button that opens a modal. Approvals are requester-only, so only the person who asked can approve. When a tool needs a connection the person hasn't authorized, a DM shows the sign-in link directly. In a server, the shared message has a **Sign in** button, and only the person who needs to sign in sees the link.
 
@@ -182,4 +182,4 @@ Slash commands go through `onCommand` instead, so filter them there too. If you 
 
 ## Reference
 
-The [Discord reference](/docs/channels/discord/reference) covers options, manual setup, the Gateway relay inside and outside of Vercel, session grouping, thread options, your own relay, command hooks, delivery, human-in-the-loop, sign-ins, and proactive sessions.
+The [Discord reference](/docs/channels/discord/reference) covers options, manual setup, the Gateway relay inside and outside of Vercel, session grouping, thread options, your own relay, command hooks, replies, approvals and questions, sign-ins, and proactive sessions.

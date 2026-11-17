@@ -1,6 +1,6 @@
 ---
 title: "Workflows as Tools"
-description: "Define durable workflow tools that wait for people, webhooks, or timers without holding compute."
+description: "Define workflow tools that survive restarts and wait for people, webhooks, or timers without holding compute."
 url: /tools/workflows
 ---
 
@@ -14,11 +14,11 @@ returns in one step, use [`defineTool`](/docs/tools) instead.
 
 A workflow tool defines exactly one entry point, which decides how its calls run:
 
-| Entry point           | How a call runs                                                                                             |
-| --------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `execute(input, ctx)` | The turn waits until the workflow finishes, then gets its output as the tool result. Waits hold no compute. |
-| `task(input, ctx)`    | A [task](#run-calls-as-tasks-task): the model gets a receipt at once, and the result arrives later.         |
-| `serve(receive, ctx)` | A [resumable task](#resumable-tasks-serve) that the model can send more calls by its `taskId`.              |
+| Entry point           | How a call runs                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `execute(input, ctx)` | The turn waits until the workflow finishes, then gets its output as the tool result. Waiting holds no compute. |
+| `task(input, ctx)`    | A [task](#run-calls-as-tasks-task): the model gets a receipt immediately, and the result arrives later.        |
+| `serve(receive, ctx)` | A [resumable task](#resumable-tasks-serve) that the model can send more calls by its `taskId`.                 |
 
 See [Tasks](/docs/tools/tasks) for choosing between them and for what the model sees while tasks
 work.
@@ -84,12 +84,12 @@ continues, deploys, and returns one tool result.
   step. The workflow body replays and must stay deterministic, so put side effects, clocks,
   randomness, `process.env`, and Node.js APIs in steps. Keep values you need after a wait in local
   variables in the body.
-- Import durable primitives such as `createHook`, `sleep`, and `FatalError` from `eve/workflow` in
+- Import workflow primitives such as `createHook`, `sleep`, and `FatalError` from `eve/workflow` in
   the body. Call `start`, `getRun`, and `resumeHook` from `eve/workflow/api` in routes or steps, not
-  in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
+  in the body. Both use eve's bundled Workflow SDK, so your app doesn't need a `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
-- A `defineDynamic` function can return a workflow tool that a top-level `const` holds; see
+- A `defineDynamic` function can return a workflow tool assigned to a top-level `const`; see
   [Return a workflow tool](/docs/guides/dynamic-capabilities#return-a-workflow-tool).
   `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
   handler fails the build. To start a session from a channel or schedule, use the
@@ -120,7 +120,7 @@ step helpers.
 
 ### Workflow imports
 
-Import durable primitives from `eve/workflow`, and run and hook operations from `eve/workflow/api`:
+Import workflow primitives from `eve/workflow`, and run and hook operations from `eve/workflow/api`:
 
 ```ts
 import { createHook, sleep } from "eve/workflow";
@@ -155,7 +155,7 @@ To keep the conversation going while a call works, [define `task` instead](#run-
 
 ### How suspension works
 
-A workflow pauses, holding no compute, when it awaits an unresolved `ctx.ask`, hook, webhook, or
+A workflow pauses without holding compute while it awaits an unresolved `ctx.ask`, hook, webhook, or
 `sleep`. When the answer, event, or timer arrives, the workflow replays, reuses recorded step
 results, and continues past the wait. Put side effects in `"use step"` functions so replay doesn't
 repeat them.
@@ -212,15 +212,15 @@ returns nothing. Otherwise `endsTurn` works as it does on
 [`defineTool`](/docs/tools#end-the-turn-after-a-tool-call), including when eve ignores it. Only an
 `execute` entry point accepts it; `task` and `serve` reject it.
 
-A message the user sends while the call waits still gets a reply: it withdraws the open question,
-the body returns without an `outcome`, and the function returns `false`.
+If the user sends a message while the call waits, it withdraws the open question. The body returns
+without an `outcome`, so `endsTurn` returns `false` and the agent can reply.
 
 ## Run calls as tasks: `task`
 
 Define `task(input, ctx)` in place of `execute` when the conversation should continue while a call
-works. Examples are a twenty-minute deploy or research the model may not need right away. Waiting
-alone doesn't need a task, because a question, sleep, or approval in an `execute` call already holds
-no compute.
+works. Examples are a twenty-minute deploy or research the model may not need right away. An
+`execute` call can already wait for a question, sleep, or approval without holding compute; use a
+task when the conversation should continue during that wait.
 
 ```ts title="agent/tools/deploy.ts"
 import { defineWorkflowTool } from "eve/tools";
@@ -244,7 +244,7 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
 
 - **Receipt:** the call's tool result is a receipt, such as
   `Started task deploy-4hd8sa. Its result will arrive in a <task_result> message.`, and the model
-  continues at once.
+  continues immediately.
 - **Result:** the body's return value or its error arrives later as a `<task_result>` block in a
   `task.result` message. eve adds the message before the model's next step. `toModelOutput` applies
   to the result, not the receipt.
@@ -426,12 +426,12 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
 - A response carries only the option `id`, so choose ids that read well on their own, such as
   `approve`. If a person answers after the question ended, for example from an old Slack menu, the
   agent receives the `id` as a new message.
-- A response never steers. A new message that answers no open question follows the session's
+- A response never steers. A new message that doesn't answer an open question follows the session's
   `turnPolicy`. Steering withdraws the questions of the `execute` calls the turn waits on, such as
   `ask_question`'s, but not a task's. See [Stop early for a new message](#stop-early-for-a-new-message).
-- An aborted `signal` asks the session to withdraw the question. If a person's answer reached the
-  session first, the ask resolves as `answered` and the channel shows it answered. Branch on
-  `status`, not on the signal.
+- An aborted `signal` asks the session to withdraw the question. If the session received the
+  person's answer before cancellation, `ctx.ask` resolves as `answered` and the channel shows it
+  answered. Check `status` to determine the outcome.
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
 and can only show the model's input. Use both together: `approval` before the run, `ctx.ask` inside
@@ -637,7 +637,7 @@ export default defineWorkflowTool({
 
 The decision runs in a step, so replay reuses it instead of repeating the routing request. The parent model sees only `agent-router`, and the selected subagent's reply becomes its tool result.
 
-`ctx.agents` holds agent metadata as it was when the session accepted the call, and replay doesn't change it. In a `serve` task, it follows the call being served. It includes agents hidden with `tool: false` or `disableTool()`, but no model definitions, credentials, or callbacks. In a top-level root workflow, `ctx.agents.agent` always exists as the root-copy target. A delegated root copy omits `agent`, so `agentRouter()` can't select another root copy. `ctx.agent()` still checks each target's availability.
+`ctx.agents` holds agent metadata as it was when the session accepted the call, and replay doesn't change it. In a `serve` task, `ctx.agents` contains the metadata for the current call. It includes agents hidden with `tool: false` or `disableTool()`, but no model definitions, credentials, or callbacks. In a top-level root workflow, `ctx.agents.agent` always exists as the root-copy target. A delegated root copy omits `agent`, so `agentRouter()` can't select another root copy. `ctx.agent()` still checks each target's availability.
 
 #### Route across every agent target
 
@@ -653,7 +653,7 @@ Its input is `{ message: string }`. `agentRouter()` considers only targets with 
 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
-This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
+The parent model decides whether to delegate, and Jev selects the specialist. To route every incoming request through Jev, run routing before the parent model.
 
 ## Add a runtime-generated workflow tool
 
@@ -818,7 +818,7 @@ stop.
 
 A steering message is one sent with `turnPolicy: "steer"` (the default) that answers no open
 question. It aborts the `ctx.abortSignal` of each `execute` call the turn waits on. A message that
-answers a question never stops a call, and steering never touches a
+answers a question never stops a call, and steering doesn't interrupt a
 [task](#run-calls-as-tasks-task).
 
 Steering does not cancel the call or end the turn. The call ends with what the body returns, and the
@@ -831,9 +831,8 @@ model reads the new message after the step's workflow tool calls finish:
 - **Paused bodies:** a body paused on a hook or a `sleep` doesn't see the signal, and it keeps the
   turn waiting until it finishes.
 
-The body doesn't need to tell a steering message from a cancel: stop and return what you have.
-After a cancel, eve discards the result. The provided `sleep` tool races its timer against the
-signal:
+On either steering or cancellation, stop work and return the available result; eve discards the
+result after cancellation. The provided `sleep` tool races its timer against the signal:
 
 ```ts
 import { sleep } from "eve/workflow";
@@ -999,10 +998,10 @@ export default defineWorkflowTool({
 });
 ```
 
-`createWebhook` mints a URL under `/.well-known/workflow/v1/webhook/` that eve serves. The external
-system posts to it when it is done, and nothing runs in between. Use `createHook` with `resumeHook`
-for a deterministic token. To customize the HTTP response, pass `respondWith: new Response(...)` to
-`createWebhook`.
+`createWebhook` creates a URL under `/.well-known/workflow/v1/webhook/` that eve serves. The
+workflow waits without holding compute until the external system posts its result. Use `createHook`
+with `resumeHook` for a deterministic token. To customize the HTTP response, pass
+`respondWith: new Response(...)` to `createWebhook`.
 
 ### Ask now, act when answered
 
@@ -1055,8 +1054,8 @@ An interrupted dispatch can start a second run for the same call, and both runs 
 application idempotency key for side effects that must happen only once.
 
 The workflow id comes from the entry point's module path and function name. Inline entry points use
-the tool module and the name `execute`, `task`, or `serve`. For a tool that a top-level `const`
-holds, the name also carries the `const`, such as `escalate$execute`. Imported ones use their
+the tool module and the name `execute`, `task`, or `serve`. For a tool assigned to a top-level
+`const`, the workflow name includes the constant's name, such as `escalate$execute`. Imported ones use their
 declaring module and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
 deployment that started them. A run that resumes on a deployment without its tool fails with an
 error naming the missing workflow.

@@ -48,7 +48,7 @@ interface HookBaseContext extends SessionContext {
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
   /** Where the event sits on the stream: its line, and its index in that line. */
   readonly position: { readonly line: number; readonly index: number };
-  /** Immutable session snapshot as of the whole commit the event is in. */
+  /** Immutable session snapshot after all events in this stream line are applied. */
   readonly view: SessionView;
   readonly turn: DynamicTurn | null;
   readonly now: Date;
@@ -156,7 +156,7 @@ export default defineHook({
 
 Reading the stream again yields the same positions, so the key removes duplicates. After an interruption, eve doesn't run hooks again for events it already published. Some handlers for an event may have run and others not, so effects are not exactly-once.
 
-Pass `ctx.occurrence.idempotencyKey`, which identifies this handler's run for this event, to services that support idempotency. For one effect per turn or call, key on `turnId` or `callId` instead. An effect such as one alert per session needs state you store yourself. `ctx.memo` caches lookups, not records of effects, and a deployment change can discard it.
+Pass `ctx.occurrence.idempotencyKey`, which identifies this handler's run for this event, to services that support idempotency. For one effect per turn or call, key on `turnId` or `callId` instead. An effect such as one alert per session needs state you store yourself. Use `ctx.memo` for cached lookups; store records of completed effects separately because deployment changes can discard memo values.
 
 See [Positions](../concepts/sessions-runs-and-streaming#positions) for the full contract.
 
@@ -171,7 +171,7 @@ eve handles each recorded line of the stream in this order:
 
 Hooks run after the line is saved, so a hook that throws can't corrupt the stream. [Dynamic functions](./dynamic-capabilities) don't subscribe to events; they run before each model call.
 
-The turn waits for a line's hooks before it continues. A `turn.started` hook finishes before the turn's first model call, so [state](../concepts/state) it writes is what the turn's dynamic functions, tools, and [OpenTelemetry `runtimeContext`](../observability/otel#add-runtime-context) read. This lets a hook decide something once per turn, such as a model rollout keyed on the session, and every model call of the turn use it:
+The turn waits for a line's hooks before it continues. A `turn.started` hook finishes before the turn's first model call, so [state](../concepts/state) it writes is what the turn's dynamic functions, tools, and [OpenTelemetry `runtimeContext`](../observability/otel#add-runtime-context) read. Use the hook to save a decision once per turn, such as a session-based model rollout, for all model calls in that turn:
 
 ```ts title="agent/lib/turn-model.ts"
 import { defineState } from "eve/context";
@@ -240,7 +240,7 @@ The event's other handlers still run. Then eve cancels the turn as [`session.can
 
 - eve stops model and tool work in progress.
 - eve cancels child turns the turn delegated to.
-- The turn ends with `outcome: "cancelled"` and `cause: { hook }` naming the hook, and eve records no failure.
+- The turn ends with `outcome: "cancelled"` and `cause: { hook }` naming the hook, without recording a failure.
 
 A cancel from `turn.started` or `model.requested` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
 
@@ -253,7 +253,7 @@ Rules for `ctx.cancel()`:
 - Repeated calls cancel that turn once and never a later turn.
 - `ctx.compact` and `ctx.once` aren't available in hooks.
 
-A plain-text answer to a pending question, such as one from `ask_question`, is recorded as `delivery.consumed` before the question receives it. Only the turn's own sender can answer by text; anyone else's text waits and runs as its own turn. The answer updates the claims on `ctx.session.auth.current` for that event's hooks and the rest of the turn, as a follow-up message does. Calling `ctx.cancel()` from that event's hook cancels the turn: the question ends as `interrupted`, and the waiting tool call never gets the text. In the same way, `ctx.cancel()` from a hook for a workflow tool's `call.progress` cancels the turn, and the run's result never reaches the model.
+A plain-text answer to a pending question, such as one from `ask_question`, is recorded as `delivery.consumed` before the question receives it. Only the turn's own sender can answer by text; anyone else's text waits and runs as its own turn. The answer updates the claims on `ctx.session.auth.current` for that event's hooks and the rest of the turn, as a follow-up message does. Calling `ctx.cancel()` from that event's hook cancels the turn, ends the question as `interrupted`, and prevents the waiting tool call from receiving the text. In the same way, `ctx.cancel()` from a hook for a workflow tool's `call.progress` cancels the turn, and the run's result never reaches the model.
 
 ## Scope side effects to a channel
 
@@ -327,9 +327,9 @@ export default defineHook({
 });
 ```
 
-Only `turn.settled` and `*` handlers receive `ctx.continue`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. Without `auth`, the continuation names no sender and the turn runs as the session's current identity.
+Only `turn.settled` and `*` handlers receive `ctx.continue`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. If you omit `auth`, the continuation has no specified sender, and the turn uses the session's current identity.
 
-The continuation waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or ended, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and a note in the turn's history tells the model no person wrote it. Like other hook effects, a continuation is lost if the step that settled the turn is interrupted before it's saved. Bound loops yourself, as the example does.
+The continuation waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or ended, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and a note in the turn's history tells the model no person wrote it. The continuation is lost if the step that ended the turn is interrupted before the continuation is saved. Bound loops yourself, as the example does.
 
 A turn can be continued when it completed, or when the same hook cancelled it, so a hook can `ctx.cancel()` the agent mid-turn and continue with a correction. When several hooks continue the same turn, their messages share the next turn.
 
@@ -344,7 +344,7 @@ A subagent's approvals, questions, and sign-ins appear on the parent stream as t
 - `subject` names the parent call that waits on it.
 - `origin` names the child session and request, and `origin.call` names the child's call.
 
-While the parent's turn waits on that child, the relayed request makes it wait for the person too. When the child's request ends, the parent stream records `interaction.settled`.
+If the parent turn is waiting for the child, it also waits for the relayed request to be answered. When the child's request ends, the parent stream records `interaction.settled`.
 
 ## Hook vs tool vs provider
 

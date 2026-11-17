@@ -11,7 +11,7 @@ A channel connects a platform to your agent. For conversations, it:
 
 A channel can also receive events and pass them to another channel without starting a conversation of its own.
 
-eve ships a base HTTP channel and first-class platform channels, and you can author your own. Browse them in the [Integrations](/integrations) gallery with the Channels filter.
+eve ships a base HTTP channel and built-in platform channels, and you can author your own. Browse them in the [Integrations](/integrations) gallery with the Channels filter.
 
 Every channel runs the same agent, so tools and instructions need no channel-specific logic.
 
@@ -64,7 +64,7 @@ A space has a stable `id`, namespaced by platform and workspace so it is unique 
 
 A session started with `receive()` reports a space only when its target names the workspace, such as Slack's `installationTeamId` or Teams' `tenantId`, so it never reports a different space than the conversations already in that place. Discord sessions started with `receive()` report none, and so do Chat SDK sessions started from a thread ID whose adapter can't tell DMs apart. Other built-in channels report no space. A [custom channel](/docs/channels/custom#conversation-space) reports its own. Like the audience, the space is fixed when the session is created, and a local subagent inherits its parent's.
 
-A space identifies a place, not who may act there. Check the caller in `ctx.session.auth.current` before you let them change data that everyone in the space shares.
+Check `ctx.session.auth.current` before allowing the caller to change shared data. A space ID doesn't grant permission.
 
 ## Sign-ins
 
@@ -76,7 +76,7 @@ When a tool needs a connection the person hasn't authorized, the built-in channe
 - On GitHub, where every comment is public, the status says the person who asked must sign in.
 - When the sign-in ends, eve edits the status where it can, or posts how it ended. Once the person connects, it shows the turn resuming.
 
-Linear uses its native sign-in prompt. A sign-in that an approval's responder needs appears with that approval's prompt.
+Linear uses its native sign-in prompt. If someone needs to sign in to answer an approval, the sign-in appears with the approval prompt.
 
 ## Overlapping messages
 
@@ -134,7 +134,7 @@ Build a channel with `defineChannel` from `eve/channels` when you need your own 
 
 eve uses the [Chat SDK's card-builder components](https://chat-sdk.dev/docs/api/cards) (Cards, Buttons, Actions, etc.) to compose rich Slack messages. Cards you build with the [Slack channel](/docs/channels/slack) are converted to Slack Block Kit at post time.
 
-eve's first-class channels handle webhooks, verification, event parsing, and threads themselves. The optional [Chat SDK channel](/docs/channels/chat-sdk) instead accepts a Chat SDK adapter and exposes its `Chat` and `Thread` primitives. Use `slackChannel` for eve's Slack integration, `defineChannel(...)` for an eve-native custom channel, or `chatSdkChannel` when you want a Chat SDK adapter and runtime.
+eve's built-in channels handle webhooks, verification, event parsing, and threads. The optional [Chat SDK channel](/docs/channels/chat-sdk) instead accepts a Chat SDK adapter and exposes its `Chat` and `Thread` primitives. Use `slackChannel` for eve's Slack integration, `defineChannel(...)` for an eve-native custom channel, or `chatSdkChannel` when you want a Chat SDK adapter and runtime.
 
 ## Which channel?
 
@@ -142,8 +142,8 @@ eve's first-class channels handle webhooks, verification, event parsing, and thr
 | ------------------------------------------- | ---------------------------------------------------------------- |
 | A web app / browser chat UI                 | eve channel + [`useEveAgent`](/docs/guides/frontend)             |
 | Local tooling, SDK clients, `curl`          | [eve HTTP channel](/docs/channels/eve) (default)                 |
-| MCP clients handing off long-running work   | [MCP](/docs/channels/mcp)                                        |
-| A2A agents delegating durable tasks         | [A2A](/docs/channels/a2a)                                        |
+| MCP clients delegating long-running work    | [MCP](/docs/channels/mcp)                                        |
+| A2A agents delegating tasks across restarts | [A2A](/docs/channels/a2a)                                        |
 | Slack mentions, DMs, buttons                | [Slack](/docs/channels/slack)                                    |
 | iMessage and SMS                            | [Linq](/docs/channels/linq)                                      |
 | iMessage                                    | [Photon](/docs/channels/photon)                                  |
@@ -169,8 +169,8 @@ Where an eve agent communicates with people, the law may require you to disclose
 - [Slack](/docs/channels/slack): the most common platform channel, end to end
 - [MCP](/docs/channels/mcp): let MCP clients hand long-running work to the agent
 - [A2A](/docs/channels/a2a): publish the agent as an Agent2Agent server for other agents
-- [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [Recall.ai](/docs/channels/recall), [GitHub](/docs/channels/github), and [Linear](/docs/channels/linear): the other first-class platform channels
-- [Chat SDK adapters](/docs/channels/chat-sdk): reach services eve has no first-class channel for
+- [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [Recall.ai](/docs/channels/recall), [GitHub](/docs/channels/github), and [Linear](/docs/channels/linear): the other built-in platform channels
+- [Chat SDK adapters](/docs/channels/chat-sdk): reach services without a built-in eve channel
 - [Custom channels](/docs/channels/custom): build a channel for any surface with `defineChannel`
 - [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
 - [Frontend](/docs/guides/frontend): browser chat on the eve channel with `useEveAgent`

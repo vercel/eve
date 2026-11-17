@@ -82,8 +82,7 @@ If one user can switch between orgs, authenticate the selected org on every
 request that creates or continues a session. Set the selected `tenantId` on
 the current turn.
 
-This is not connection OAuth. The user is already signed in to your app, and
-eve uses that user to pick the outbound credential.
+eve selects the outbound credential using the user's existing app sign-in, without a separate connection OAuth flow.
 
 ## Build tenant connection auth
 
@@ -284,7 +283,7 @@ Implement the provider with the secret system your application already trusts.
 Examples are a cloud secret manager, an encrypted database table, a token broker,
 or an out-of-band OAuth flow you own.
 
-The provider must fail closed for unknown tenants, keep secrets out of logs and errors, and rotate or refresh credentials before `expiresAt`. Prefer credentials that are themselves restricted to one remote tenant. Treat workspace headers as routing, not authorization.
+The provider must fail closed for unknown tenants, keep secrets out of logs and errors, and rotate or refresh credentials before `expiresAt`. Prefer credentials that are themselves restricted to one remote tenant. Use workspace headers to select the destination workspace, and authorize access separately.
 
 ## What the model can and cannot see
 

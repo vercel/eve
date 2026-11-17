@@ -123,7 +123,7 @@ Every `t.session()` or `t.send()` call starts a new, separate conversation (a se
 
 `t.session()` and `t.send()` options accept per-request `headers` and `signal`. Omit `signal` to use the eval's timeout signal.
 
-`session.cancel()` throws `SessionNotActiveError` when the session is no longer active, and `session.compact()` also throws. Assert on a compaction with `.event("context.settled", { data: { kind: "compaction", outcome: "completed" } })`.
+`session.cancel()` and `session.compact()` throw `SessionNotActiveError` when the session is inactive. Assert on a compaction with `.event("context.settled", { data: { kind: "compaction", outcome: "completed" } })`.
 
 `session.agent(...)` uses the eval's credentials, so unlike `t.target.attach(...).watch()`, it also reaches subagents on another deployment. `requireInteraction` filters match tool name, tool input, prompt, display, and option ids.
 

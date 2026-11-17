@@ -4,7 +4,7 @@ description: "Bridge any Vercel Chat SDK adapter, such as email, WhatsApp, or Go
 type: integration
 ---
 
-The Chat SDK channel connects your agent to any [Vercel Chat SDK](https://chat-sdk.dev) adapter. Use it for a surface eve has no first-class channel for, such as email or WhatsApp, or when you want to manage credentials and state with Chat SDK primitives instead of Vercel Connect. The adapter owns provider auth, webhook verification, and delivery. eve owns sessions, streaming replies, typing indicators, and approvals.
+The Chat SDK channel connects your agent to any [Vercel Chat SDK](https://chat-sdk.dev) adapter. Use it for a platform without a built-in eve channel, such as email or WhatsApp, or when you want to manage credentials and state with Chat SDK primitives instead of Vercel Connect. The adapter handles provider authentication, webhook verification, and posting messages. eve manages sessions, streaming replies, typing indicators, and approvals.
 
 For information on all configuration and customization options, see the [Chat SDK reference](/docs/channels/chat-sdk/reference).
 
@@ -48,7 +48,7 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 export default channel;
 ```
 
-Each adapter serves its webhook at `/eve/v1/{adapterName}`, so this one is `/eve/v1/resend`. Point the provider's webhook there and deploy with `eve deploy`. Use a durable state adapter, such as Redis, in production so thread subscriptions survive restarts.
+Each adapter serves its webhook at `/eve/v1/{adapterName}`, so this one is `/eve/v1/resend`. Point the provider's webhook there and deploy with `eve deploy`. Use a persistent state adapter, such as Redis, in production so thread subscriptions survive restarts.
 
 ## Continue threads
 
@@ -58,7 +58,7 @@ Each adapter serves its webhook at `/eve/v1/{adapterName}`, so this one is `/eve
 
 Replies stream by default: eve posts a message and edits it as text arrives. Set `streaming: false` for surfaces that can't edit sent messages, such as email and WhatsApp, so the reply posts once.
 
-## Human-in-the-loop interactions
+## Approvals and questions
 
 By default, approvals and questions render as a Chat SDK card with buttons, and a click resumes the session. Adapters that can't show cards get numbered options, and a reply with an option's number or label answers.
 
@@ -143,4 +143,4 @@ bot.onNewMention(async (thread, message) => {
 
 ## Reference
 
-The [Chat SDK reference](/docs/channels/chat-sdk/reference) covers every option, webhook routes, `send` and `respond` options, steering, delivery, custom event handlers, sign-in rules, attachment downloads, and audience.
+The [Chat SDK reference](/docs/channels/chat-sdk/reference) covers every option, webhook routes, `send` and `respond` options, steering, replies, custom event handlers, sign-in rules, attachment downloads, and audience.

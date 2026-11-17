@@ -97,7 +97,7 @@ Before the first model call, each turn checks out the relevant ref into the sand
 
 For any GitHub API the channel doesn't wrap, call `ctx.github.request({ method, path, body })` with the installation token.
 
-## Human-in-the-loop interactions
+## Approvals and questions
 
 By default, approvals and questions post as a comment prompt, since GitHub comments have no buttons. The person's reply comment answers the pending request.
 
@@ -127,4 +127,4 @@ export default defineSchedule({
 
 ## Reference
 
-The [GitHub reference](/docs/channels/github/reference) covers options, credentials, every inbound hook, CI event fields, delivery, PR context, sandbox checkout, and proactive sessions.
+The [GitHub reference](/docs/channels/github/reference) covers options, credentials, every inbound hook, CI event fields, replies, PR context, sandbox checkout, and proactive sessions.

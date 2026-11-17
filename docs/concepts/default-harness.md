@@ -22,9 +22,9 @@ When history passes the threshold, eve summarizes the older turns. eve measures 
 
 The summary prompt asks the compaction model to separate completed progress and decisions from remaining work. It also asks the model to keep the constraints, preferences, data, and references needed to continue. A later compaction passes the previous summary in full and replaces it with an updated one. Omit `compaction.model` to summarize with the active turn model.
 
-After compacting, the harness keeps the most recent messages word for word next to the summary. It keeps up to 20,000 tokens or half the threshold, whichever is smaller, and shortens their tool results to 2,000 characters. The summarizer reads the kept messages too, so nothing a compaction drops is lost. A compaction that keeps recent messages must bring the input down to half the model's context window, so the next one is far off. eve checks this on its character estimate, scaled by the ratio of the provider's last reported input tokens to that estimate. When the kept messages don't fit under that, the harness keeps only their text, and then only the summary, which only has to fit under the threshold. If the first model call after a compaction is already over the threshold, the next compaction skips the option that fell short. The current user message is always kept. When that message alone exceeds the budget, the harness keeps its start and end with a note at the cut. It summarizes the middle with the older turns.
+After compacting, the harness keeps the summary plus recent messages (up to 20,000 tokens or half the threshold, with tool results shortened to 2,000 characters). If keeping full recent messages would exceed half the context window, the harness keeps only their text, or only the summary. The current user message is always kept; if it exceeds the budget on its own, the harness keeps its beginning and end and summarizes the middle.
 
-If the agent's instructions, tools, memory, and context leave the conversation no room under the threshold, eve logs a warning and compacts against the model's context window instead. Compaction then runs only when the request is over the window. When eve doesn't know the model's context window, it sends the request as it is. To keep the headroom the threshold gives, raise `compaction.threshold` or shorten the agent's instructions, tools, or memory.
+If the agent's instructions, tools, and memory already exceed `compaction.threshold`, eve logs a warning and compacts only when the request exceeds the model's full context window. Shorten instructions, tools, or memory, or raise `compaction.threshold`, to restore threshold headroom.
 
 If the instructions, tools, memory, and context alone don't fit the model's context window, eve doesn't call the provider. The turn fails with `COMPACTION_FAILED`, and the session can receive another message.
 
@@ -32,7 +32,7 @@ If the provider rejects a request as longer than the model's context window, the
 
 The summary call retries transient provider errors like any model call. If it fails for another reason, the turn fails with `MODEL_CALL_FAILED` and the history stays uncompacted. After a transient error such as a 429, the session waits for the next message.
 
-[Memory](../memory) stays outside history, so the summarizer never sees it. eve asks providers to capture before compaction rewrites history, and what earlier turns recalled follows the checkpoint.
+[Memory](../memory) stays outside history and is not summarized. Memory providers can capture history before compaction rewrites it, and recalled memory from earlier turns remains in context after the checkpoint.
 
 Clients and channels can request compaction between turns with `ClientSession.compact()`, a channel route's `compact(address)`, or `attachSession(sessionId).compact()`. The request doesn't append a user message. If a turn is running, eve queues the request until that turn ends. On the stream, manual and automatic compaction are the same context change: `context.started` and `context.settled` with `kind: "compaction"`.
 

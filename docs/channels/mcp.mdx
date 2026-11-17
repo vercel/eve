@@ -3,7 +3,7 @@ title: "MCP Channel"
 description: "Publish an eve agent as an MCP server with auth support."
 ---
 
-The MCP channel publishes your agent as an MCP server, so clients such as Claude Code can hand it long-running work. It lives in `agent/channels/mcp.ts`. Clients start and follow that work with four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. The channel can also [publish the agent's tools](#publish-the-agents-tools) for clients to call directly, and [its skills](#publish-the-agents-skills) for clients to read.
+The MCP channel publishes your agent as an MCP server, so clients such as Claude Code can delegate long-running work to it. It lives in `agent/channels/mcp.ts`. Clients start and follow that work with four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. The channel can also [publish the agent's tools](#publish-the-agents-tools) for clients to call directly, and [its skills](#publish-the-agents-skills) for clients to read.
 
 Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server. To let agents that speak the Agent2Agent protocol delegate work instead, use the [A2A channel](./a2a).
 
@@ -71,13 +71,13 @@ A tool result with `isError: true` means eve rejected the call, so fix the call.
 | `conflict`      | The invocation is not in the expected state; read it with `agent_get` first. | `true`      |
 | `internal`      | eve failed; `errorId` correlates with server logs. No details are exposed.   | `false`     |
 
-Limits: the MCP request body is 1 MiB, `message` 64 KiB, each response `text` 16 KiB (both in UTF-8 bytes), and one `agent_update` 64 responses. Oversized bodies get a JSON-RPC `413`, and oversized fields fail input validation before any work starts.
+The MCP request body limit is 1 MiB. `message` allows 64 KiB, and each response's `text` allows 16 KiB, measured in UTF-8 bytes. Each `agent_update` accepts up to 64 responses. Oversized bodies get a JSON-RPC `413`, and oversized fields fail input validation before any work starts.
 
 Tool arguments may contain at most 10,000 array elements and object members in total, including nested collections. Larger inputs return `isError: true` before the tool runs.
 
 ### Durability guarantees
 
-- Once `agent_start` returns, the work survives restarts and redeploys. Only `agent_cancel` stops it. A dropped connection, client restart, or closed MCP session doesn't.
+- Once `agent_start` returns, work survives restarts, redeploys, dropped connections, client restarts, and closed MCP sessions. Use `agent_cancel` to stop it.
 - `agent_start` isn't idempotent. If its response is lost, a second call starts a second invocation, so ask the user before you start again.
 - `agent_update` answers one set of open requests. Re-sending accepted answers returns the current state. Different answers for a set that was already answered return `conflict`.
 - `agent_cancel` asks the work to stop, so it can race with completion. Poll `agent_get` until the status is `cancelled`, `completed`, or `failed`, not only `cancelled`.
@@ -341,7 +341,7 @@ A tool session lets several `tools/call` requests share one sandbox, so a file o
 
 Calls share a session only when they have the same key and run as the same caller. That caller is the authenticated caller, or a [forwarded user](#forwarded-principals) together with the router that the channel's `auth` verified. Two forwarded users with one key, or one user forwarded by two routers, get separate sessions. eve ignores a key from a client that didn't declare the extension. Clients on the 2025-11-25 protocol send no per-request capabilities, so each call gets its own session.
 
-Tool sessions need an authenticated caller. With `auth: none()`, the key alone would name the session, so anyone who knew it could read another client's sandbox. eve denies a keyed anonymous call with the `denied` code before anything runs. Unkeyed anonymous calls get a one-off session.
+Tool sessions require authentication. With `auth: none()`, a keyed call returns `denied` before the tool runs. An unkeyed anonymous call gets its own session.
 
 In a tool session:
 
@@ -355,7 +355,7 @@ In a tool session:
 
 Tool sessions need Vercel Sandbox, just-bash, or a [custom provider](/docs/sandbox/custom-providers#keep-sandboxes-for-keyed-tool-calls) that sets `toolSessions: true`. On another provider, a keyed call fails with `Sandbox provider "<name>" cannot keep a sandbox between invokeTool calls` when the tool opens its sandbox. Tools that never open one still run.
 
-On Vercel Sandbox, a tool-session sandbox's saved filesystem expires a day after its last use, whatever `snapshotExpiration` `sandbox.ts` sets. The next call with the key then gets a fresh, empty sandbox. If two calls find the expired filesystem at once, both can replace the sandbox, and the first one's files can be lost. Conversation sessions keep the authored `snapshotExpiration`.
+On Vercel Sandbox, a tool-session sandbox's saved filesystem expires a day after its last use, regardless of the `snapshotExpiration` value in `sandbox.ts`. The next call with the key then gets a fresh, empty sandbox. If two calls find the expired filesystem concurrently, both can replace the sandbox, and the first one's files can be lost. Conversation sessions keep the authored `snapshotExpiration`.
 
 just-bash keeps tool-session sandboxes on the local disk and never removes them. On Vercel Functions, a just-bash tool session lasts only as long as the function instance.
 
@@ -386,7 +386,7 @@ The channel declares the `io.modelcontextprotocol/skills` extension and serves t
 
 Every skill and resource method carries the same private, 5-minute cache hint as `tools/list`. The `resources` capability declares `listChanged: false`, so clients re-read after the hint expires. A file removed after eve indexed the skill is an unknown resource (`-32602`).
 
-eve serves a skill whole or not at all. It leaves out a skill, and logs a warning with the reason, when:
+eve excludes a skill and logs a warning with the reason if:
 
 - Its `SKILL.md` frontmatter doesn't meet the Agent Skills format. The `name` must be up to 64 lowercase letters, digits, and single hyphens, and the `description` 1 to 1024 characters.
 - It has more than 512 files or more than 16 MiB in total.

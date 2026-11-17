@@ -96,12 +96,12 @@ Sandbox template "..." for provider "docker" is not available to this runtime.
 
 The build recorded an artifact, but the provider can't find its template. When the provider knows the cause, the message includes it:
 
-| Provider  | Common cause                                                                                                                                    |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Docker    | The Docker daemon has no image with that name: it was removed, for example by `docker image prune -a`, or the build used another Docker daemon. |
-| Vercel    | The Vercel Sandbox snapshot expired or was deleted.                                                                                             |
-| just-bash | The template directory under `.eve/sandbox-cache/` was deleted, or the build ran on another machine.                                            |
-| Custom    | The image, snapshot, or template that the artifact names no longer exists, so the provider threw `SandboxTemplateNotProvisionedError`.          |
+| Provider  | Common cause                                                                                                                           |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker    | The image was removed, possibly by `docker image prune -a`, or the build used a different Docker daemon.                               |
+| Vercel    | The Vercel Sandbox snapshot expired or was deleted.                                                                                    |
+| just-bash | The template directory under `.eve/sandbox-cache/` was deleted, or the build ran on another machine.                                   |
+| Custom    | The image, snapshot, or template that the artifact names no longer exists, so the provider threw `SandboxTemplateNotProvisionedError`. |
 
 The runtime never recreates a template. Run `eve build` again and deploy its output.
 

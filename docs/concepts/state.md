@@ -1,11 +1,11 @@
 ---
 title: "State"
-description: "Durable per-session memory with defineState: get() and update(), persisted across step boundaries."
+description: "Read and update per-session state across turns and restarts with defineState."
 ---
 
 `defineState` declares a typed, named slot of per-session memory. Use it when the agent has to remember something between turns, such as a running budget, a glossary, or a checklist, without an external store. Values survive crashes, redeploys, and days-long sessions.
 
-Use state for facts your agent owns, such as budgets and counters. Don't use it to mirror facts eve already tracks, such as the active turn, call status, or open interactions; read those with [session views & selectors](/docs/concepts/session-views-and-selectors) wherever a view is available. A view is an operational snapshot with bounded retention, so store a historical record yourself when you need one.
+Use state for values your agent owns, such as budgets and counters. Do not duplicate session state that eve already tracks, such as the active turn, call status, or open requests for input; read those with [session views & selectors](/docs/concepts/session-views-and-selectors). A view is an operational snapshot with bounded retention, so store a historical record yourself when you need one.
 
 ```ts
 import { defineState } from "eve/context";
@@ -92,7 +92,7 @@ export default defineHook({
 
 ## Reset state between turns
 
-State persists across turns. For a clean slate every turn, overwrite it from a [hook](../guides/hooks) on `turn.started`:
+State persists across turns. To reset it on every turn, overwrite it from a `turn.started` [hook](../guides/hooks):
 
 ```ts title="agent/hooks/reset-budget.ts"
 import { defineHook } from "eve/hooks";
@@ -115,12 +115,12 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 
 ## State vs. connection-side storage
 
-`defineState` holds working memory that lives and dies with the session, such as counters, the current plan, and what the user said. For context that must outlive a session, configure a [memory provider](../memory): the built-in file provider, a third-party provider, or a custom one. Use a [connection](../connections) instead when the model should query the data only through explicit tool calls rather than recall it automatically.
+`defineState` holds working state scoped to a single session, such as counters, the current plan, and user preferences from the conversation. For context that must outlive a session, configure a [memory provider](../memory): the built-in file provider, a third-party provider, or a custom one. Use a [connection](../connections) instead when the model should query the data only through explicit tool calls rather than recall it automatically.
 
 ## What to read next
 
-- Vary tools, skills, and instructions per session → [Dynamic capabilities](../guides/dynamic-capabilities)
-- How turns checkpoint and resume → [Execution model & durability](../concepts/execution-model-and-durability)
-- The `ctx` accessors available alongside state → [TypeScript API Reference](../reference/typescript-api)
-- Tenant-scoped long-term memory with any provider → [Multi-tenant memory](../patterns/multi-tenant-memory)
-- First-class recall, capture, and provider tools → [Memory](../memory)
+- [Dynamic capabilities](../guides/dynamic-capabilities): vary tools, skills, and instructions per session
+- [Execution model & durability](../concepts/execution-model-and-durability): how turns checkpoint and resume
+- [TypeScript API Reference](../reference/typescript-api): `ctx` accessors available alongside state
+- [Multi-tenant memory](../patterns/multi-tenant-memory): tenant-scoped long-term memory with any provider
+- [Memory](../memory): cross-session recall, capture, and provider tools

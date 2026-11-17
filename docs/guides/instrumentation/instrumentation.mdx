@@ -1,6 +1,6 @@
 ---
 title: "Instrumentation"
-description: "Configure lifecycle instrumentation, handle runtime events, and control the content each destination receives."
+description: "Configure instrumentation, handle runtime events, and control the content each destination receives."
 url: "/observability/instrumentation"
 ---
 
@@ -8,11 +8,11 @@ An instrumentation file is a file under `agent/instrumentation/` that receives e
 
 ## Add instrumentation
 
-eve names each file by its filename. A lifecycle-event file must default-export `defineInstrumentation(...)` or `disableInstrumentation()`. See [OpenTelemetry](./otel) for the OTel files.
+eve names each file by its filename. An event-handler file must default-export `defineInstrumentation(...)` or `disableInstrumentation()`. See [OpenTelemetry](./otel) for the OTel files.
 
 ```text
 agent/instrumentation/
-  audit.ts  lifecycle instrumentation
+  audit.ts  event handlers
 ```
 
 This file measures how long each call takes from request to finish, including any approval wait. It doesn't receive arguments or results:
@@ -116,7 +116,7 @@ Return `{ emit: false }` to skip the trace for this file, or `{ emit: true, reco
 
 Inputs include model prompts, tool arguments, call labels (which can contain input-derived text), channel input, and user responses. Outputs include model responses, tool results, requests for user input, model provider metadata, and error details. Content that isn't recorded is absent from the event.
 
-The channel sets the audience once, when it creates the session. The audience controls content capture, not access. See [Audience](/docs/channels#audience) for how the channel picks `public`, `private`, or `unknown`.
+The channel sets the audience once, when it creates the session. The audience determines which content is recorded; authorization is configured separately. See [Audience](/docs/channels#audience) for how the channel picks `public`, `private`, or `unknown`.
 
 ### AI SDK telemetry integrations
 
@@ -171,4 +171,4 @@ When the destination needs no content in one direction, set `recordInputs: false
 - [OpenTelemetry](/docs/observability/otel): configure process-wide settings and third-party destinations.
 - [Agent Runs](/docs/observability/agent-runs): configure Vercel's built-in trace destination.
 - [Local development](../guides/dev-tui): inspect local traces in the TUI
-- [Hooks](../guides/hooks): react to runtime events outside the instrumentation lifecycle
+- [Hooks](../guides/hooks): run application code in response to session events

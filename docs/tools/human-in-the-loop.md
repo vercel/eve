@@ -1,6 +1,6 @@
 ---
 title: "Human-in-the-Loop"
-description: "Pause a run for a person — gate a tool on approval or have the agent ask a question — and resume durably when they answer."
+description: "Pause a run for approval or a question, then resume when the person answers, even after a process restart."
 url: /human-in-the-loop
 ---
 
@@ -167,7 +167,7 @@ export default defineAgent({
 
 For each call, eve runs this policy and the tool's own `approval` and keeps the stricter result: denied, then user approval, then approved. The agent's policy can add a gate but never remove one, and `undefined` leaves the tool's decision. When both ask, the tool's prompt and response policy apply.
 
-A plain `"user-approval"` from the agent's policy asks on every call, like `always()`, even for a tool whose `once()` a person already approved. To let one approval cover the rest of the session, return `once()`'s status from the agent's policy; it shares the tool's `once()` memory:
+A plain `"user-approval"` from the agent's policy asks on every call, like `always()`, even if the person already approved that tool through `once()`. To let one approval cover the rest of the session, return `once()`'s status from the agent's policy; it shares the tool's `once()` memory:
 
 ```ts
 import { once } from "eve/tools/approval";
@@ -177,7 +177,7 @@ const askOnce = once();
 approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx) : undefined),
 ```
 
-`auto()` works here too, but it runs a decision model before every call, including reads, and asks a person when the model errors, times out, or the input is over 64 KB. A direct `invokeTool` call it would ask about is rejected. Put cheap rules first and call `auto()` only for the calls that need it.
+`auto()` works here too, but it runs a decision model before every call, including reads, and asks a person when the model errors, times out, or the input is over 64 KB. A direct `invokeTool` call is rejected if `auto()` would require human approval. Put cheap rules first and call `auto()` only for the calls that need it.
 
 - Local subagent sessions run under the root agent's policy too. A subagent's own `approval` in its `agent.ts` adds to it and can't loosen it.
 - A [remote agent](/docs/guides/remote-agents) runs in its own deployment under that deployment's policy. Your policy gates the call to the remote agent, not the calls it makes.
@@ -196,7 +196,7 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 
 eve remembers only prompts that `once()`'s own status asked for. It remembers nothing for an `always()` prompt, or for a wrapping policy that calls `once()` but returns a different status. When you wrap `once()`, pass the policy context through and return its status object unchanged.
 
-A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions.
+Authorize the current caller on every call, even when eve remembers an approval. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions.
 
 ### Authorizing approval responses
 
@@ -404,7 +404,7 @@ For approvals, a follow-up message that matches no option steers the turn, even 
 
 On the stream, each request's `request.kind` is `approval`, `question`, `budget`, or `sign-in`. Its `subject` names the call, task, or turn that the request is about. Clients read the same `request.kind` on an `Interaction` to choose behavior and display. Keep a default branch, because a later release can add a kind.
 
-Traces record each request as an `agent.approval` span that lasts until the request settles, with `agent.approval.kind` set to `tool-approval`, `question`, `budget`, or `sign-in`, and `gen_ai.agent.name` set to the agent that asked. A sign-in span also names its connection in `eve.connection.name`. See [OpenTelemetry trace topology](/docs/observability/otel#trace-topology).
+Traces record each request as an `agent.approval` span that lasts until the request ends, with `agent.approval.kind` set to `tool-approval`, `question`, `budget`, or `sign-in`, and `gen_ai.agent.name` set to the agent that asked. A sign-in span also names its connection in `eve.connection.name`. See [OpenTelemetry trace topology](/docs/observability/otel#trace-topology).
 
 `interactionId` identifies the request to answer, and `call.callId`, when present, identifies its call. Neither ID encodes what the request means.
 

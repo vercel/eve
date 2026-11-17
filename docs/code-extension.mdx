@@ -20,7 +20,7 @@ The benchmark uses eve-bench and the DeepSWE-lean dataset. DeepSWE-lean has 12 f
 - Each harness does each task 3 times.
 - Each attempt runs in a new Vercel Sandbox.
 - Each attempt has a limit of 20 minutes.
-- The DeepSWE verifier examines the files that the agent leaves.
+- The DeepSWE verifier checks the workspace files after the agent finishes.
 - An attempt passes only when the verifier passes.
 - A crash or a timeout is a failure.
 
@@ -90,7 +90,7 @@ import git from "eve/extensions/git";
 export default git({});
 ```
 
-`git({})` adds no tool and assumes the agent's shell already has GitHub credentials. The agent uses the `gh` and `git` CLIs in `bash`, and `git__pr` commits, pushes, and opens a draft with `gh pr create --draft`.
+`git({})` does not add the `gh` tool and assumes the agent's shell already has GitHub credentials. The agent uses the `gh` and `git` CLIs in `bash`, and `git__pr` commits, pushes, and opens a draft with `gh pr create --draft`.
 
 Configure `github` to get GitHub tokens through Vercel Connect instead. The extension then adds the authenticated `git__gh` tool and tells the agent to use it for every authenticated GitHub operation. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures.
 
@@ -107,7 +107,7 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 
 With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
 
-Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
+Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication supports only firewall delivery.
 
 ### Control access with `authorize`
 
@@ -142,7 +142,7 @@ The GitHub App is the author of commits that the `gh` tool makes. Return a verif
 `gh-signed-commit` messages and to `gh pr create` bodies passed through `--body` or `--body-file`.
 The callback receives the tool context, including `ctx.session.auth.current` and `ctx.getToken`.
 Return `null` to omit attribution. eve keeps existing co-author trailers. Commands without a body
-flag and direct `gh api` calls get no attribution.
+flag and direct `gh api` calls do not receive attribution.
 
 For example, resolve the author through your application's user mapping:
 
@@ -161,7 +161,7 @@ export default git({
 });
 ```
 
-For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected. When the command's own input is refused before it runs, such as shell syntax, a `workingDirectory` outside the workspace, a `gh-signed-commit` directory that is not a repository root, or a missing `--body-file`, `executeGitHubShell` throws `GitHubCommandInputError`; detect it with `isGitHubCommandInputError(error)` to tell the agent's mistakes apart from configuration, Connect, and sandbox failures.
+For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected. `executeGitHubShell` throws `GitHubCommandInputError` when command input is invalid, such as shell syntax, a `workingDirectory` outside the workspace, a non-root `gh-signed-commit` directory, or a missing `--body-file`. Use `isGitHubCommandInputError(error)` to distinguish invalid agent input from configuration, Connect, or sandbox errors.
 
 ## Prepare the sandbox
 

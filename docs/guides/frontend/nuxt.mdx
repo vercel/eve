@@ -3,7 +3,7 @@ title: "Nuxt"
 description: "Run an eve agent and a Nuxt app as one project with the eve/nuxt module."
 ---
 
-The `eve/nuxt` module runs a Nuxt frontend and an eve agent as one project, with one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so you configure no CORS or URL env vars.
+The `eve/nuxt` module runs a Nuxt frontend and an eve agent as one project, with one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so you don't need to configure CORS or URL environment variables.
 
 ## Prerequisites
 
@@ -84,7 +84,7 @@ The browser still needs a production authentication policy. See [Authenticate br
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` starts an eve dev server for each agent beside `nuxt dev` and proxies the eve routes to it. The browser talks only to the Nuxt origin. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
+- **Local dev.** `npm run dev` starts an eve dev server for each agent alongside `nuxt dev` and proxies the eve routes to it. The browser talks only to the Nuxt origin. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
 - **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds, the module adds an eve [service](https://vercel.com/docs/services) per agent and routes its transport requests to it before filesystem routing. The Nuxt app serves everything else, and no `vercel.json` is required. When `vercel.json` declares services, or a `vercel.ts` composes them with `withEve` from `eve/vercel`, the module generates nothing and that configuration controls routing. By default, each generated service runs the installed eve binary from its agent root, so agent directories don't need their own `package.json`. When the agents need their own build step, set `eveBuildCommand`:
 
   ```ts
