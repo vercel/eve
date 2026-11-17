@@ -237,6 +237,31 @@ describe("statusMessage", () => {
     ).resolves.toBe("Writing a reply...");
   });
 
+  it("stops saying it is writing a reply once a later model step starts", async () => {
+    await expect(
+      statusMessageOf(
+        completed("t-1", "text", "Started the export; I'll report back.", "reply"),
+        runSettled,
+        {
+          type: "model.requested",
+          data: { owner: { turnId: "turn-1" }, runId: "run-2" },
+          scope: { turnId: "turn-1" },
+        },
+        {
+          type: "content.completed",
+          data: {
+            kind: "reasoning",
+            partId: "r-2",
+            phase: "narration",
+            runId: "run-2",
+            value: "**Checking the export**",
+          },
+          scope: { runId: "run-2", turnId: "turn-1" },
+        },
+      ),
+    ).resolves.toBe("Checking the export");
+  });
+
   it("keeps naming an approved call while it runs after the turn parked", async () => {
     await expect(
       statusMessageOf(

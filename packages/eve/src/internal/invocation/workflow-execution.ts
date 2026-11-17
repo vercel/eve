@@ -355,7 +355,11 @@ function statusMessage(view: SessionView, previews: SessionPreviews): string | u
   const replyChars = streaming
     .filter((part) => part.kind === "text")
     .reduce((total, part) => total + part.text.length, 0);
-  const replied = turnId !== undefined && (view.turns[turnId]?.reply?.length ?? 0) > 0;
+  const turn = turnId === undefined ? undefined : view.turns[turnId];
+  const replied = (turn?.reply ?? []).some((partId) => {
+    const runId = view.parts[partId]?.runId;
+    return runId !== undefined && view.runs[runId]?.step === (turn?.runs ?? 0) - 1;
+  });
   if (replied || replyChars >= WRITING_REPLY_MIN_CHARS) return "Writing a reply...";
   const live = streaming.findLast((part) => part.kind === "reasoning");
   const done = Object.values(view.parts).findLast(
