@@ -172,26 +172,29 @@ The `session.started` runtime identity does not include a model ID for a dynamic
 
 ### Run the model on each person's credential
 
-Some agents call the model with a credential that belongs to the person using them, such as an API key each person brings or a token [Vercel Connect](https://vercel.com/docs/connect) issues. `defineModel` from `eve/models` puts a connection-style `auth` on a model. eve resolves the credential before each model call and passes it to `create`, which builds the provider model.
+Some agents call the model with a credential that belongs to the person using them, such as their own Vercel access token for AI Gateway. `defineModel` from `eve/models` puts a connection-style `auth` on a model. eve resolves the credential before each model call and passes it to `create`, which builds the provider model.
 
 ```ts title="agent/agent.ts"
-import { createAnthropic } from "@ai-sdk/anthropic";
 import { connect } from "@vercel/connect/eve";
+import { createGateway } from "ai";
 import { defineAgent } from "eve";
 import { defineDynamic, defineModel } from "eve/models";
 
-const ownClaude = defineModel({
+const ownGateway = defineModel({
   id: "anthropic/claude-sonnet-5",
-  auth: connect("anthropic/myagent"),
-  create: ({ token }) => createAnthropic({ apiKey: token })("claude-sonnet-5"),
+  auth: connect("vercel/myagent"), // your Vercel Connect connector for Sign in with Vercel
+  create: ({ token }) =>
+    createGateway({ apiKey: token, teamIdOrSlug: "acme" })("anthropic/claude-sonnet-5"),
 });
 
 export default defineAgent({
   model: defineDynamic((ctx) =>
-    ctx.session.auth.current?.attributes.plan === "byo" ? ownClaude : "anthropic/claude-sonnet-5",
+    ctx.session.auth.current?.principalType === "user" ? ownGateway : "anthropic/claude-sonnet-5",
   ),
 });
 ```
+
+A signed-in person's calls reach AI Gateway with their own Vercel access token, and `teamIdOrSlug` scopes the call to the `acme` team. Every other session uses the project's credential.
 
 | Field     | Purpose                                                                                                                                                                                                                           |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -202,7 +205,7 @@ export default defineAgent({
 
 A `ModelDefinition` goes wherever a session's turn model goes: `defineAgent({ model })`, a dynamic model's result, and `auto()` and `agent({ models })` options. `compaction.model`, `auto()`'s decision model, and a dynamic subagent's config take a model ID or instance, because their calls can't hold the turn for a sign-in.
 
-When the caller has no credential, eve opens the same sign-in as a connection, with the turn as its subject and before `model.requested`, and continues the turn after the callback under the same `turnId`. The sign-in's name is `eve__model__` followed by `authKey`, or by the cleaned connector, so `connect("anthropic/myagent")` signs in as `eve__model__anthropic_myagent`. The card shows `auth.displayName`, then the challenge's `displayName`.
+When the caller has no credential, eve opens the same sign-in as a connection, with the turn as its subject and before `model.requested`, and continues the turn after the callback under the same `turnId`. The sign-in's name is `eve__model__` followed by `authKey`, or by the cleaned connector, so `connect("vercel/myagent")` signs in as `eve__model__vercel_myagent`. The card shows `auth.displayName`, then the challenge's `displayName`.
 
 - A message during the sign-in withdraws it, and the step runs again with the message in the turn.
 - When the provider answers a model call with `401`, eve drops the token, calls `auth.evict`, resolves the credential again, and retries the call once. A second `401` asks the person to sign in again. When the provider rejects the credential right after that sign-in, the turn fails.

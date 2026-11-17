@@ -42,14 +42,15 @@ export interface ModelDefinition {
  * model's result, or an `auto()` or `agent({ models })` option.
  *
  * ```ts
- * import { createAnthropic } from "@ai-sdk/anthropic";
  * import { connect } from "@vercel/connect/eve";
+ * import { createGateway } from "ai";
  * import { defineModel } from "eve/models";
  *
- * export const ownClaude = defineModel({
+ * export const ownGateway = defineModel({
  *   id: "anthropic/claude-sonnet-5",
- *   auth: connect("anthropic/myagent"),
- *   create: ({ token }) => createAnthropic({ apiKey: token })("claude-sonnet-5"),
+ *   auth: connect("vercel/myagent"),
+ *   create: ({ token }) =>
+ *     createGateway({ apiKey: token, teamIdOrSlug: "acme" })("anthropic/claude-sonnet-5"),
  * });
  * ```
  */
