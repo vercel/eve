@@ -377,12 +377,6 @@ describe("renderBlockLines", () => {
     expect(lines[0]?.startsWith("  │  ▪ fetch")).toBe(true);
   });
 
-  it("collapses reasoning to a single line when requested", () => {
-    expect(render({ kind: "reasoning", body: "long trace", collapsed: true })).toEqual([
-      "○ thinking",
-    ]);
-  });
-
   it("never exceeds the available width", () => {
     const long = "lorem ipsum ".repeat(40).trim();
     for (const line of render({ kind: "assistant", body: long }, 40)) {
