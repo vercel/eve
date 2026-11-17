@@ -142,7 +142,8 @@ the function returned. It settles the sign-in as `failed` with reason `model_sel
 and continues with the selected model, which resolves its own credential. That outcome stays
 retryable, so if the function selects the first model again later in the turn, eve can ask again.
 A Vercel Connect grant is not lost: `connect(...)` completes by reading the token again, so the
-next `getToken` returns it.
+next `getToken` returns it. An `auth` that redeems a one-time code in `completeAuthorization` does
+lose that consent, and asks again.
 
 ### Sign-in name and label
 
