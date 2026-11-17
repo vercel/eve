@@ -104,7 +104,7 @@ export const environment = AcmeSandbox.environment({
 export default defineSandbox(() => environment.open({ egress: "deny-all" }));
 ```
 
-`environment(options)` receives the caller's options without `prepare`, or `{}` when the sandbox file passes none. It also receives `idleTimeoutMs` when the caller sets it, and eve uses the value only when the provider implements [`onSessionIdle()`](#onsessionidle). Make every field optional, or require the caller to pass it.
+`environment(options)` receives the caller's options without `prepare` and `idleTimeoutMs`, which eve handles, or `{}` when the sandbox file passes none. Make every field optional, or require the caller to pass it. An `idleTimeoutMs` other than a non-negative number or `false` throws from `environment()`, and eve uses the value only when the provider implements [`onSessionIdle()`](#onsessionidle).
 
 TypeScript infers the option, artifact, state, and extension types from the implementation. Write `start()` before `resume()` so the state type comes from `start()`'s return value, or annotate `resume()`'s `state` parameter.
 
@@ -209,7 +209,6 @@ async onSessionIdle(ctx, state, { signal }) {
 - eve calls it once per idle period and doesn't retry it. eve logs a failure, and the backend's own limits still apply.
 - eve waits up to 120 seconds for the call, then aborts `signal` and moves on. Pass `signal` to the requests and commands that stop compute, so an abandoned call doesn't keep running.
 - eve never calls it for a keyed `invokeTool` sandbox, or from a subagent that shares its parent's sandbox.
-- With it, `idleTimeoutMs` must be a non-negative number or `false`, and any other value throws from `environment()`.
 
 The sets of `reason` and `ctx.kind` values, like other values eve passes into a provider, can grow in a minor release, so handle unknown values instead of switching exhaustively. See [Stability policy](/docs/reference/typescript-api#stability-policy).
 

@@ -10,12 +10,9 @@ import {
   type SandboxJson,
   type SandboxProvider,
   type SandboxProviderImplementation,
-  type SandboxSessionContext,
-  type SandboxSessionIdleOptions,
-  type SandboxSessionEndOptions,
 } from "#public/sandbox/provider.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
-import { withAdoptedSandboxSessionStates, withSessionArtifact } from "#sandbox/state.js";
+import { withAdoptedSandboxSessionStates, withRecordedSandboxProvider } from "#sandbox/state.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
@@ -93,17 +90,6 @@ export const DefaultSandbox: SandboxProvider<
 > = defineSandboxProvider({
   name: "default",
   environment(options: Omit<DefaultSandboxEnvironmentOptions, "prepare">) {
-    for (const [key, nested] of Object.entries({
-      docker: options.docker,
-      justBash: options.justBash,
-      vercel: options.vercel,
-    })) {
-      if (nested !== undefined && Reflect.get(nested, "idleTimeoutMs") !== undefined) {
-        throw new Error(
-          `DefaultSandbox takes idleTimeoutMs at the top level, not in its ${key} options. Use DefaultSandbox.environment({ idleTimeoutMs }).`,
-        );
-      }
-    }
     if (
       options.justBash &&
       Object.keys(options.justBash).some((key) => key !== "autoInstall" && key !== "prepare")
@@ -130,36 +116,16 @@ export const DefaultSandbox: SandboxProvider<
       return inner;
     }
 
-    function recordedProvider(
-      state: DefaultSandboxSessionState | null,
-      artifact: DefaultSandboxPreparedArtifact | undefined,
-    ) {
-      const name = state?.provider ?? artifact?.provider ?? null;
+    function recordedProvider(state: SandboxJson | null, artifact: SandboxJson | undefined) {
+      const recorded = isDefaultSandboxSessionState(state) ? state : null;
+      const name =
+        recorded?.provider ??
+        (isDefaultSandboxPreparedArtifact(artifact) ? artifact.provider : null);
       if (name === null) return undefined;
       const inner = provider(name);
       const innerState =
-        state?.stateProtocolVersion === inner.stateProtocolVersion ? state.state : null;
+        recorded?.stateProtocolVersion === inner.stateProtocolVersion ? recorded.state : null;
       return { implementation: inner.implementation, state: innerState };
-    }
-
-    async function endSession(
-      context: SandboxSessionContext,
-      state: DefaultSandboxSessionState | null,
-      artifact: DefaultSandboxPreparedArtifact | undefined,
-      endOptions: SandboxSessionEndOptions,
-    ) {
-      const inner = recordedProvider(state, artifact);
-      await inner?.implementation.onSessionEnd(context, inner.state, endOptions);
-    }
-
-    async function idleSession(
-      context: SandboxSessionContext,
-      state: DefaultSandboxSessionState | null,
-      artifact: DefaultSandboxPreparedArtifact | undefined,
-      idleOptions: SandboxSessionIdleOptions,
-    ) {
-      const inner = recordedProvider(state, artifact);
-      await inner?.implementation.onSessionIdle?.(context, inner.state, idleOptions);
     }
 
     const implementation: SandboxProviderImplementation<
@@ -168,10 +134,14 @@ export const DefaultSandbox: SandboxProvider<
       DefaultSandboxSessionState,
       NetworkPolicyExtensions
     > = {
-      onSessionEnd: (context, state, endOptions) =>
-        endSession(context, state, undefined, endOptions),
-      onSessionIdle: (context, state, idleOptions) =>
-        idleSession(context, state, undefined, idleOptions),
+      async onSessionEnd(context, state, endOptions) {
+        const inner = recordedProvider(state, undefined);
+        await inner?.implementation.onSessionEnd(context, inner.state, endOptions);
+      },
+      async onSessionIdle(context, state, idleOptions) {
+        const inner = recordedProvider(state, undefined);
+        await inner?.implementation.onSessionIdle?.(context, inner.state, idleOptions);
+      },
       async prepare(context) {
         const name = selectProvider();
         if (name === null) {
@@ -216,27 +186,7 @@ export const DefaultSandbox: SandboxProvider<
       toolSessions: true,
     };
 
-    withSessionArtifact(implementation, {
-      onSessionEnd: async (context, state, { artifact, reason }) => {
-        await endSession(
-          context,
-          isDefaultSandboxSessionState(state) ? state : null,
-          isDefaultSandboxPreparedArtifact(artifact) ? artifact : undefined,
-          { reason },
-        );
-      },
-      onSessionIdle: async (context, state, { artifact, signal }) => {
-        await idleSession(
-          context,
-          isDefaultSandboxSessionState(state) ? state : null,
-          isDefaultSandboxPreparedArtifact(artifact) ? artifact : undefined,
-          { signal },
-        );
-      },
-      stopsIdle: (state) =>
-        !isDefaultSandboxSessionState(state) ||
-        provider(state.provider).implementation.onSessionIdle !== undefined,
-    });
+    withRecordedSandboxProvider(implementation, recordedProvider);
     return withAdoptedSandboxSessionStates(implementation, (record) => {
       const name = record.providerName;
       if (!isSelectedProvider(name)) return undefined;

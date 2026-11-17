@@ -1,5 +1,5 @@
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineTool } from "#tools/definition.js";
@@ -7,7 +7,11 @@ import { always } from "#tools/approval/policies.js";
 import { z } from "zod";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
+import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import type { HarnessSession } from "#harness/types.js";
+import { applyValueDelta } from "#shared/value-delta.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -29,7 +33,28 @@ import {
 import { getWorld } from "#internal/workflow/runtime.js";
 import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 
+const stopStep = vi.hoisted(() => ({ calls: 0, rejects: false }));
+
+vi.mock("#execution/session/idle-sandbox-step.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#execution/session/idle-sandbox-step.js")>();
+  return {
+    ...actual,
+    stopIdleSessionSandboxStep: async (
+      input: Parameters<typeof actual.stopIdleSessionSandboxStep>[0],
+    ) => {
+      stopStep.calls += 1;
+      if (stopStep.rejects) throw new Error("The idle stop step failed.");
+      return await actual.stopIdleSessionSandboxStep(input);
+    },
+  };
+});
+
 vi.setConfig({ testTimeout: 60_000 });
+
+afterEach(() => {
+  vi.useRealTimers();
+  stopStep.rejects = false;
+});
 
 type TestAppDescriptor = NonNullable<Parameters<typeof createTestRuntime>[0]>;
 
@@ -394,10 +419,11 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
   it.runIf(host === "workflow")(
     "stops a sandbox that only a workflow tool run opened",
     async () => {
-      const model = markMockModel(
-        new MockLanguageModelV4({
-          doStream: async ({ prompt }) =>
-            prompt.some((message) => message.role === "tool")
+      await withSession(
+        host,
+        {
+          agent: scriptedAgent((prompt) =>
+            prompt.includes('"role":"tool"')
               ? textStreamResult("The service is prepared.")
               : toolCallsStreamResult([
                   {
@@ -406,18 +432,7 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
                     toolName: "prepare",
                   },
                 ]),
-          modelId: "scripted",
-          provider: "eve-test",
-        }),
-      );
-      await withSession(
-        host,
-        {
-          agent: {
-            definition: defineAgent({
-              model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
-            }),
-          },
+          ),
           input: { message: "Alice asks to prepare the api service." },
           modules: [
             {
@@ -558,26 +573,72 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
       },
     );
   });
+});
 
-  it("waits out the idle window before stopping the sandbox", async () => {
-    const windowMs = 1_500;
+describe("idle sandbox stop step", () => {
+  it("aborts the provider call, returns, and clears the marker when the provider never finishes stopping", async () => {
+    const called = Promise.withResolvers<AbortSignal | undefined>();
+    const runtime = await createTestRuntime({
+      sandboxIdle: {
+        idleTimeoutMs: 0,
+        onSessionIdle: async (_sessionId, signal) => {
+          called.resolve(signal);
+          await new Promise<never>(() => {});
+        },
+      },
+    });
+    await runtime.run(async () => {
+      const serializedContext = {
+        ...buildSerializedContext({ channelKind: "http" }),
+        "eve.sessionId": "idle-stop-hung-provider",
+      };
+      const checkpoint: HarnessSession = {
+        compaction: {},
+        continuationToken: "idle-stop-hung-provider",
+        history: [],
+        sandboxState: { running: { idleTimeoutMs: 0 }, session: null },
+        sessionId: serializedContext["eve.sessionId"],
+      };
+      const sessionState = createDurableSessionState({ session: checkpoint });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+      const step = stopIdleSessionSandboxStep({ serializedContext, sessionState });
+      const signal = await called.promise;
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(120_000);
+      const { stateDelta } = await step;
+
+      expect(signal?.aborted).toBe(true);
+      const next = applyValueDelta(sessionState, stateDelta.sessionState);
+      expect(readDurableSession(next).sandboxState).not.toHaveProperty("running");
+      expect(runtime.sandboxEvents).toEqual([`idle:${checkpoint.sessionId}`]);
+    });
+  });
+
+  it("keeps the session running when the step rejects, and tries again only after the next turn", async () => {
+    stopStep.calls = 0;
+    stopStep.rejects = true;
     await withSession(
-      host,
+      "in-process",
       {
         input: { message: "Alice opens the project notes." },
-        modules: [sandboxOnTurns()],
-        name: `idle-window-${host}`,
-        sandboxIdle: { idleTimeoutMs: windowMs },
+        modules: [sandboxOnTurns((turn) => turn === 1)],
+        name: "idle-stop-rejected",
+        sandboxIdle: { idleTimeoutMs: 0 },
       },
       async (session) => {
         await session.nextTurn();
-        const settledAt = Date.now();
-        expect(session.events()).toEqual(["definition", "start"]);
+        await vi.waitFor(() => expect(stopStep.calls).toBe(1));
 
-        await vi.waitFor(() => expect(session.events()).toEqual(["definition", "start", "idle"]), {
-          timeout: 10_000,
-        });
-        expect(Date.now() - settledAt).toBeGreaterThanOrEqual(windowMs - 100);
+        await session.cancel();
+        await settle();
+        expect(stopStep.calls).toBe(1);
+
+        stopStep.rejects = false;
+        await session.send("Alice asks for a short greeting.");
+        await session.nextTurn();
+        await vi.waitFor(() => expect(session.events()).toEqual(["definition", "start", "idle"]));
+        expect(stopStep.calls).toBe(2);
       },
     );
   });

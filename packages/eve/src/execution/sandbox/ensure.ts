@@ -29,8 +29,9 @@ import type {
   SandboxSessionContext,
 } from "#sandbox/provider.js";
 import {
-  getSessionArtifactLifecycle,
+  recordedSandboxStopsIdle,
   resolvePersistedSandboxSessionState,
+  resolveRecordedSandboxProvider,
   type SandboxAccess,
   type SandboxSessionEndReason,
   type SandboxSessionState,
@@ -92,14 +93,6 @@ function idleStop(
   return { idleTimeoutMs, provider };
 }
 
-function recordedSandboxStopsIdle(
-  provider: SandboxProviderRuntime,
-  recorded: SandboxSessionState | null | undefined,
-): boolean {
-  if (recorded === null || recorded === undefined) return true;
-  return getSessionArtifactLifecycle(provider.implementation)?.stopsIdle(recorded.state) ?? true;
-}
-
 export function sandboxIdleTimeoutMs(
   registry: RuntimeSandboxRegistry,
   sessionId: string,
@@ -130,15 +123,10 @@ export async function ensureSandboxAccess(
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
   const idle = input.ownsSandbox === false ? undefined : idleStop(input.registry, input.sessionId);
   const idleTimeoutMs = idle?.idleTimeoutMs;
-  let runningGeneration = input.state?.running?.generation;
+  let running = input.state?.running !== undefined;
   const captured = (): SandboxState =>
-    runningGeneration !== undefined &&
-    idle !== undefined &&
-    recordedSandboxStopsIdle(idle.provider, persisted)
-      ? {
-          session: persisted,
-          running: { generation: runningGeneration, idleTimeoutMs: idle.idleTimeoutMs },
-        }
+    running && idle !== undefined && recordedSandboxStopsIdle(idle.provider, persisted)
+      ? { session: persisted, running: { idleTimeoutMs: idle.idleTimeoutMs } }
       : { session: persisted };
   if (registered === null) {
     return {
@@ -360,7 +348,7 @@ export async function ensureSandboxAccess(
 
   function requireOpened(): Promise<OpenedSandbox> {
     if (requiring !== undefined) return requiring;
-    runningGeneration ??= randomUUID();
+    running = true;
     requiring = resolveOpened().catch((error: unknown) => {
       requiring = undefined;
       throw error;
@@ -412,22 +400,22 @@ export async function ensureSandboxAccess(
     stopped = undefined;
     untrackActiveSandboxConnection({ providerName, sessionId: input.sessionId });
     persisted = null;
-    runningGeneration = undefined;
+    running = false;
   }
 
-  function recordedState(provider: SandboxProviderRuntime): SandboxJson | null {
-    return persisted?.providerName === provider.providerName &&
+  async function recordedProvider(provider: SandboxProviderRuntime) {
+    const state =
+      persisted?.providerName === provider.providerName &&
       persisted.stateProtocolVersion === provider.stateProtocolVersion
-      ? persisted.state
-      : null;
-  }
-
-  async function loadRecordedArtifact(provider: SandboxProviderRuntime) {
-    return await loadSandboxPreparedArtifact({
-      compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: ownerNodeId,
-      providerName: provider.providerName,
-    });
+        ? persisted.state
+        : null;
+    return await resolveRecordedSandboxProvider(provider, state, () =>
+      loadSandboxPreparedArtifact({
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId: ownerNodeId,
+        providerName: provider.providerName,
+      }),
+    );
   }
 
   return {
@@ -456,15 +444,14 @@ export async function ensureSandboxAccess(
         });
       });
       const provider = getSandboxEnvironmentRuntime(activeDefinition().environment);
-      const state = recordedState(provider);
-      const context = providerContext("sandbox-cleanup");
-      const lifecycle = getSessionArtifactLifecycle(provider.implementation);
-      if (lifecycle === undefined) {
-        await provider.implementation.onSessionEnd(context, state, { reason });
-      } else {
-        const artifact = await loadRecordedArtifact(provider);
-        await lifecycle.onSessionEnd(context, state, { artifact, reason });
-      }
+      const recorded = await recordedProvider(provider);
+      await recorded?.implementation.onSessionEnd(
+        providerContext("sandbox-cleanup"),
+        recorded.state,
+        {
+          reason,
+        },
+      );
       forgetSandbox(provider.providerName);
     },
     async get() {
@@ -502,7 +489,7 @@ export async function ensureSandboxAccess(
       await preparations;
       const current = await requireOpened();
       await current.stop();
-      runningGeneration = undefined;
+      running = false;
       forgetOpened();
       if (!current.closable) {
         stopped = current;
@@ -516,21 +503,14 @@ export async function ensureSandboxAccess(
     },
     async stopIdle({ signal }) {
       if (idle === undefined) return;
-      runningGeneration = undefined;
-      const { provider } = idle;
-      const state = recordedState(provider);
-      const context = providerContext("sandbox-idle");
-      const lifecycle = getSessionArtifactLifecycle(provider.implementation);
-      if (lifecycle === undefined) {
-        await provider.implementation.onSessionIdle?.(context, state, { signal });
-      } else {
-        const artifact = await loadRecordedArtifact(provider);
-        await lifecycle.onSessionIdle(context, state, { artifact, signal });
-      }
-      untrackActiveSandboxConnection({
-        providerName: provider.providerName,
-        sessionId: input.sessionId,
-      });
+      const recorded = await recordedProvider(idle.provider);
+      await recorded?.implementation.onSessionIdle?.(
+        providerContext("sandbox-idle"),
+        recorded.state,
+        {
+          signal,
+        },
+      );
     },
   };
 

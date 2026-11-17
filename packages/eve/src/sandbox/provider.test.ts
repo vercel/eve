@@ -105,59 +105,33 @@ describe("defineSandboxProvider", () => {
     expect(received).toEqual([{}, {}, { region: "iad1" }]);
   });
 
-  it("passes idleTimeoutMs to the provider, defaults it to five minutes, and rejects invalid values only when the provider stops idle sandboxes", () => {
+  it("keeps idleTimeoutMs from the provider's environment(), defaults it to five minutes, and rejects invalid values", () => {
     const received: object[] = [];
-    const define = (stopsIdle: boolean) =>
-      defineSandboxProvider({
-        name: stopsIdle ? "stopping" : "keeping",
-        environment(options: { readonly idleTimeoutMs?: unknown }) {
-          received.push(options);
-          return {
-            prepare: async () => null,
-            start: async () => ({ connection: recordingConnection().connection, state: null }),
-            resume: async () => recordingConnection().connection,
-            onSessionEnd: async () => {},
-            ...(stopsIdle && { onSessionIdle: async () => {} }),
-          };
-        },
-      });
-    const stopping = define(true);
+    const provider = defineSandboxProvider({
+      name: "keeping",
+      environment(options: { readonly region?: string }) {
+        received.push(options);
+        return {
+          prepare: async () => null,
+          start: async () => ({ connection: recordingConnection().connection, state: null }),
+          resume: async () => recordingConnection().connection,
+          onSessionEnd: async () => {},
+        };
+      },
+    });
     const windowOf = (environment: SandboxEnvironmentIdentity) =>
       getSandboxEnvironmentRuntime(environment).idleTimeoutMs;
 
     expect([
-      windowOf(stopping.environment()),
-      windowOf(stopping.environment({ idleTimeoutMs: 0 })),
-      windowOf(stopping.environment({ idleTimeoutMs: false })),
-      windowOf(stopping.environment({ idleTimeoutMs: 90_000, prepare: async () => {} })),
-    ]).toEqual([300_000, 0, false, 90_000]);
-    expect(received).toEqual([
-      {},
-      { idleTimeoutMs: 0 },
-      { idleTimeoutMs: false },
-      { idleTimeoutMs: 90_000 },
-    ]);
+      windowOf(provider.environment()),
+      windowOf(provider.environment({ idleTimeoutMs: 0 })),
+      windowOf(provider.environment({ idleTimeoutMs: false, region: "iad1" })),
+    ]).toEqual([300_000, 0, false]);
+    expect(received).toEqual([{}, {}, { region: "iad1" }]);
     for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, "5m", true, null]) {
-      expect(() => stopping.environment({ idleTimeoutMs: invalid as never })).toThrow(
-        'Sandbox provider "stopping" received idleTimeoutMs',
+      expect(() => provider.environment({ idleTimeoutMs: invalid as never })).toThrow(
+        'Sandbox provider "keeping" received idleTimeoutMs',
       );
-    }
-    expect(() => define(false).environment({ idleTimeoutMs: "custom" as never })).not.toThrow();
-  });
-
-  it("takes DefaultSandbox's idleTimeoutMs only at the top level", () => {
-    expect(
-      getSandboxEnvironmentRuntime(DefaultSandbox.environment({ idleTimeoutMs: 0 })),
-    ).toMatchObject({ idleTimeoutMs: 0 });
-    for (const nested of ["docker", "justBash", "vercel"] as const) {
-      expect(() => DefaultSandbox.environment({ [nested]: { idleTimeoutMs: 0 } } as never)).toThrow(
-        `DefaultSandbox takes idleTimeoutMs at the top level, not in its ${nested} options.`,
-      );
-    }
-    for (const nested of ["docker", "vercel"] as const) {
-      expect(() =>
-        DefaultSandbox.environment({ [nested]: { idleTimeoutMs: undefined } } as never),
-      ).not.toThrow();
     }
   });
 

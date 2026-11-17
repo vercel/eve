@@ -17,7 +17,7 @@ import {
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
 } from "#shared/sandbox-environment.js";
-import { getSessionArtifactLifecycle } from "#sandbox/state.js";
+import { resolveRecordedSandboxProvider } from "#sandbox/state.js";
 import type { SandboxProviderResourceFile } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
@@ -91,16 +91,16 @@ export function createSandboxEnvironmentHarness<
       readonly signal?: AbortSignal;
       readonly state: State | null;
     }): Promise<void> {
-      const context = sessionContext(input.appRoot, input.sandboxName);
-      const lifecycle = getSessionArtifactLifecycle(implementation);
-      if (lifecycle === undefined) {
-        await implementation.onSessionIdle?.(context, input.state, { signal: input.signal });
-        return;
-      }
-      await lifecycle.onSessionIdle(context, input.state, {
-        artifact: preparedArtifact,
-        signal: input.signal,
-      });
+      const recorded = await resolveRecordedSandboxProvider(
+        runtime,
+        input.state,
+        async () => preparedArtifact,
+      );
+      await recorded?.implementation.onSessionIdle?.(
+        sessionContext(input.appRoot, input.sandboxName),
+        recorded.state,
+        { signal: input.signal },
+      );
     },
     async prepare(input: {
       readonly appRoot: string;

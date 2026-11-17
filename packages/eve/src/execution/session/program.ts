@@ -264,8 +264,7 @@ async function runSessionLoop(
   });
 
   let prewarmedSandbox: SandboxRunning | undefined;
-  let idleWindow: { readonly elapsed: Promise<void>; readonly generation: string } | undefined;
-  let idleStopFailed = false;
+  let idleWindow: Promise<void> | "attempted" | undefined;
   const sandboxMayBeRunning = (): SandboxRunning | undefined =>
     readDurableSession(cursor.sessionState).sandboxState?.running ?? prewarmedSandbox;
   const sessionBusy = (): boolean =>
@@ -281,31 +280,23 @@ async function runSessionLoop(
         continue;
       }
       const running = sandboxMayBeRunning();
-      if (running === undefined || idleStopFailed || sessionBusy()) return;
+      if (running === undefined) idleWindow = undefined;
+      if (running === undefined || idleWindow === "attempted" || sessionBusy()) return;
       if (inbox.awaitingHandover) {
         if (!(await beforeInbox(inbox.whenHandoverSettled()))) return;
         continue;
       }
       if (running.idleTimeoutMs > 0) {
-        if (idleWindow?.generation !== running.generation) {
-          idleWindow = {
-            elapsed: host.until(Date.now() + running.idleTimeoutMs),
-            generation: running.generation,
-          };
-        }
-        if (!(await beforeInbox(idleWindow.elapsed)) || inbox.hasPending()) return;
+        idleWindow ??= host.until(Date.now() + running.idleTimeoutMs);
+        if (!(await beforeInbox(idleWindow)) || inbox.hasPending()) return;
       }
-      const stopped = await cursor
+      idleWindow = "attempted";
+      prewarmedSandbox = undefined;
+      await cursor
         .advance(({ serializedContext, sessionState }) =>
           stopIdleSessionSandboxStep({ serializedContext, sessionState }),
         )
-        .then(
-          () => true,
-          () => false,
-        );
-      idleStopFailed = !stopped;
-      prewarmedSandbox = undefined;
-      idleWindow = undefined;
+        .catch(() => undefined);
       return;
     }
   };
@@ -374,7 +365,6 @@ async function runSessionLoop(
     const control = turnControl;
     turnControl = undefined;
     idleWindow = undefined;
-    idleStopFailed = false;
     progress.turnId =
       payload?.control === undefined
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId

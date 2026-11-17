@@ -243,8 +243,8 @@ export interface SandboxProviderDefinition<
   readonly stateProtocolVersion?: number;
   /**
    * Receives the environment options without `prepare`, which eve runs in
-   * `ctx.populate()`, and with `idleTimeoutMs` when the caller sets it. Always
-   * an object: `{}` when the caller passes none.
+   * `ctx.populate()`, and without `idleTimeoutMs`, which eve applies. Always an
+   * object: `{}` when the caller passes none.
    */
   environment(
     options: EnvironmentOptions,
@@ -287,15 +287,10 @@ export interface SandboxProviderRuntime {
 
 const DEFAULT_SANDBOX_IDLE_TIMEOUT_MS = 5 * 60_000;
 
-function resolveIdleTimeoutMs(
-  providerName: string,
-  implementation: SandboxProviderRuntime["implementation"],
-  value: unknown,
-): number | false {
+function resolveIdleTimeoutMs(providerName: string, value: unknown): number | false {
   if (value === undefined) return DEFAULT_SANDBOX_IDLE_TIMEOUT_MS;
   if (value === false || (typeof value === "number" && Number.isFinite(value) && value >= 0))
     return value;
-  if (implementation.onSessionIdle === undefined) return false;
   throw new Error(
     `Sandbox provider "${providerName}" received idleTimeoutMs ${typeof value === "string" ? JSON.stringify(value) : String(value)}. ` +
       "Pass a non-negative number of milliseconds, 0 to stop the sandbox as soon as the session goes idle, or false to never stop it.",
@@ -326,17 +321,12 @@ export function defineSandboxProvider<
   return {
     name: definition.name,
     environment(options?: WithPrepareOption<EnvironmentOptions, Session>) {
-      const { prepare, ...environmentOptions } = options ?? {};
-      const implementation = definition.environment(
-        environmentOptions as EnvironmentOptions,
-      ) as SandboxProviderRuntime["implementation"];
+      const { idleTimeoutMs, prepare, ...environmentOptions } = options ?? {};
       return createSandboxEnvironment<OpenOptions, Session>({
-        idleTimeoutMs: resolveIdleTimeoutMs(
-          definition.name,
-          implementation,
-          options?.idleTimeoutMs,
-        ),
-        implementation,
+        idleTimeoutMs: resolveIdleTimeoutMs(definition.name, idleTimeoutMs),
+        implementation: definition.environment(
+          environmentOptions as EnvironmentOptions,
+        ) as SandboxProviderRuntime["implementation"],
         prepare: prepare as SandboxProviderRuntime["prepare"],
         providerName: definition.name,
         stateProtocolVersion: definition.stateProtocolVersion ?? 1,

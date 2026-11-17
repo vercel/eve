@@ -7,7 +7,7 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import type { EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
-import { hydrateDurableSession, projectToDurableSession } from "#execution/session.js";
+import { hydrateDurableSession } from "#execution/session.js";
 import type { SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { createLogger } from "#internal/logging.js";
@@ -52,36 +52,24 @@ async function stopIdleSessionSandbox(
   input: IdleSandboxInput,
 ): Promise<{ readonly sessionState: DurableSessionState }> {
   const durable = readDurableSession(input.sessionState);
-  const report = (error: unknown) => {
+  try {
+    const ctx = await deserializeContext(input.serializedContext);
+    await withContextScope(ctx, hydrateDurableSession(durable), async (session) => {
+      const access = ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined;
+      if (access !== undefined)
+        await withinIdleStopTimeout((signal) => access.stopIdle({ signal }));
+      return { result: undefined, session };
+    });
+  } catch (error) {
     log.warn("failed to stop an idle session sandbox; the provider's own timeout still applies", {
       error,
       sessionId: input.sessionState.sessionId,
     });
-  };
-  try {
-    const ctx = await deserializeContext(input.serializedContext);
-    const scoped = await withContextScope(ctx, hydrateDurableSession(durable), async (session) => {
-      const access = ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined;
-      if (access !== undefined)
-        await withinIdleStopTimeout((signal) => access.stopIdle({ signal })).catch(report);
-      return { result: undefined, session };
-    });
-    return {
-      sessionState: replaceDurableSessionSnapshot({
-        session: {
-          ...projectToDurableSession(scoped.session),
-          sandboxState: clearSandboxRunning(scoped.session.sandboxState),
-        },
-        state: input.sessionState,
-      }),
-    };
-  } catch (error) {
-    report(error);
-    return {
-      sessionState: replaceDurableSessionSnapshot({
-        session: { ...durable, sandboxState: clearSandboxRunning(durable.sandboxState) },
-        state: input.sessionState,
-      }),
-    };
   }
+  return {
+    sessionState: replaceDurableSessionSnapshot({
+      session: { ...durable, sandboxState: clearSandboxRunning(durable.sandboxState) },
+      state: input.sessionState,
+    }),
+  };
 }

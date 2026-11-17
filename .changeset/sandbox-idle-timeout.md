@@ -8,4 +8,4 @@ Set `idleTimeoutMs` on the sandbox environment to choose the window. `0` stops t
 
 A `turn.settled` hook that calls `ctx.getSandbox()` and `stop()` to limit sandbox cost is no longer needed. Remove it, because opening the sandbox to stop it resumes or creates the sandbox on turns that never used it.
 
-Custom sandbox providers can implement the new optional `onSessionIdle(ctx, state, { signal })` method to stop compute without starting it. eve aborts `signal` if the call takes longer than 120 seconds. A provider without it behaves as before. A provider whose environment already takes an option named `idleTimeoutMs` keeps receiving it, and its type must be compatible with `number | false`.
+Custom sandbox providers can implement the new optional `onSessionIdle(ctx, state, { signal })` method to stop compute without starting it. eve aborts `signal` if the call takes longer than 120 seconds. A provider without it behaves as before. eve reserves `idleTimeoutMs`, as it does `prepare`, and a provider's `environment()` doesn't receive it.

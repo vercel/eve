@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
-
 import type { SandboxSession } from "#public/definitions/sandbox.js";
-import type { SandboxProviderRuntime, SandboxSessionContext } from "#sandbox/provider.js";
+import type { SandboxProviderRuntime } from "#sandbox/provider.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
 
@@ -15,7 +13,6 @@ export interface SandboxSessionState {
 }
 
 export interface SandboxRunning {
-  readonly generation: string;
   readonly idleTimeoutMs: number;
 }
 
@@ -33,13 +30,9 @@ export function markSandboxRunning<Session extends { readonly sandboxState?: San
   idleTimeoutMs: number | undefined,
 ): Session {
   if (idleTimeoutMs === undefined) return session;
-  const generation = session.sandboxState?.running?.generation ?? randomUUID();
   return {
     ...session,
-    sandboxState: {
-      session: session.sandboxState?.session ?? null,
-      running: { generation, idleTimeoutMs },
-    },
+    sandboxState: { session: session.sandboxState?.session ?? null, running: { idleTimeoutMs } },
   };
 }
 
@@ -78,40 +71,44 @@ export function resolvePersistedSandboxSessionState(
       };
 }
 
-interface SandboxSessionArtifactLifecycle {
-  onSessionEnd(
-    context: SandboxSessionContext,
-    state: SandboxPreparedArtifact | null,
-    options: {
-      readonly artifact: SandboxPreparedArtifact | undefined;
-      readonly reason: SandboxSessionEndReason;
-    },
-  ): Promise<void>;
-  onSessionIdle(
-    context: SandboxSessionContext,
-    state: SandboxPreparedArtifact | null,
-    options: {
-      readonly artifact: SandboxPreparedArtifact | undefined;
-      readonly signal?: AbortSignal;
-    },
-  ): Promise<void>;
-  stopsIdle(state: SandboxPreparedArtifact): boolean;
+interface RecordedSandboxProvider {
+  readonly implementation: SandboxProviderRuntime["implementation"];
+  readonly state: SandboxPreparedArtifact | null;
 }
 
-const sessionArtifactLifecycles = new WeakMap<object, SandboxSessionArtifactLifecycle>();
+type RecordedSandboxProviderLookup = (
+  state: SandboxPreparedArtifact | null,
+  artifact: SandboxPreparedArtifact | undefined,
+) => RecordedSandboxProvider | undefined;
 
-export function withSessionArtifact<Implementation extends object>(
+const recordedSandboxProviderLookups = new WeakMap<object, RecordedSandboxProviderLookup>();
+
+export function withRecordedSandboxProvider<Implementation extends object>(
   implementation: Implementation,
-  lifecycle: SandboxSessionArtifactLifecycle,
+  lookup: RecordedSandboxProviderLookup,
 ): Implementation {
-  sessionArtifactLifecycles.set(implementation, lifecycle);
+  recordedSandboxProviderLookups.set(implementation, lookup);
   return implementation;
 }
 
-export function getSessionArtifactLifecycle(
-  implementation: object,
-): SandboxSessionArtifactLifecycle | undefined {
-  return sessionArtifactLifecycles.get(implementation);
+export async function resolveRecordedSandboxProvider(
+  provider: Pick<SandboxProviderRuntime, "implementation">,
+  state: SandboxPreparedArtifact | null,
+  loadArtifact: () => Promise<SandboxPreparedArtifact | undefined>,
+): Promise<RecordedSandboxProvider | undefined> {
+  const lookup = recordedSandboxProviderLookups.get(provider.implementation);
+  if (lookup === undefined) return { implementation: provider.implementation, state };
+  return lookup(state, await loadArtifact());
+}
+
+export function recordedSandboxStopsIdle(
+  provider: Pick<SandboxProviderRuntime, "implementation">,
+  recorded: SandboxSessionState | null | undefined,
+): boolean {
+  if (recorded === null || recorded === undefined) return true;
+  const lookup = recordedSandboxProviderLookups.get(provider.implementation);
+  const resolved = lookup === undefined ? provider : lookup(recorded.state, undefined);
+  return resolved === undefined || resolved.implementation.onSessionIdle !== undefined;
 }
 
 export type SandboxPreparation = (open: () => Promise<SandboxSession>) => Promise<void>;

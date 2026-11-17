@@ -825,32 +825,6 @@ describe("createVercelSandbox", () => {
       );
     });
 
-    it("keeps idleTimeoutMs out of the template key and Vercel create options", async () => {
-      vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");
-      vi.stubEnv("VERCEL_TEAM_ID", "team_golden");
-      vi.stubEnv("VERCEL_TOKEN", "token_golden");
-      const created = async (environment: ReturnType<typeof VercelSandbox.environment>) => {
-        const fake = createFakeVercelProvider();
-        sdk.module = fake.sandboxModule;
-        const provider = createSandboxEnvironmentHarness(environment);
-        await provider.prepare({
-          appRoot,
-          workspace: [{ content: "notes", relativePath: "notes.md" }],
-        });
-        await provider.start({ appRoot, sandboxName: "session_golden" });
-        return fake.sandboxModule.Sandbox.create.mock.calls.map(([options]) => options);
-      };
-
-      const plain = await created(VercelSandbox.environment());
-      const idle = await created(VercelSandbox.environment({ idleTimeoutMs: 0 }));
-
-      const stableNames = (calls: typeof plain) =>
-        calls.map((options) => options.name).filter((name) => !/-[0-9a-f]{8}$/u.test(name));
-      expect(stableNames(idle)).toEqual(stableNames(plain));
-      expect(stableNames(idle)).toHaveLength(2);
-      for (const options of idle) expect(options).not.toHaveProperty("idleTimeoutMs");
-    });
-
     it("lets DefaultSandbox stop the Vercel sandbox it selected, from recorded state or from its prepared artifact", async () => {
       vi.stubEnv("VERCEL", "1");
       vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");

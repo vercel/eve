@@ -695,14 +695,14 @@ describe("idle stop marker", () => {
     const { access } = await open(value.registry);
     const recorded = await access.captureState();
     expect(recorded).toEqual({
-      running: { generation: expect.any(String), idleTimeoutMs: 60_000 },
+      running: { idleTimeoutMs: 60_000 },
       session: expect.objectContaining({ providerName: "test" }),
     });
 
     const later = await unopened(fixture({ idleTimeoutMs: 0, stopsIdle: true }).registry, recorded);
     await expect(later.captureState()).resolves.toEqual({
       ...recorded,
-      running: { generation: recorded.running?.generation, idleTimeoutMs: 0 },
+      running: { idleTimeoutMs: 0 },
     });
     for (const off of [
       fixture({ idleTimeoutMs: false, stopsIdle: true }),
@@ -739,20 +739,17 @@ describe("idle stop marker", () => {
   it("clears the marker when the session stops or deletes its sandbox", async () => {
     const value = fixture({ idleTimeoutMs: 0, stopsIdle: true });
     const stopped = await open(value.registry);
-    const before = (await stopped.access.captureState()).running?.generation;
     await stopped.access.stop();
     await expect(stopped.access.captureState()).resolves.not.toHaveProperty("running");
     await stopped.access.get();
-    const after = (await stopped.access.captureState()).running?.generation;
-    expect(after).toEqual(expect.any(String));
-    expect(after).not.toBe(before);
+    await expect(stopped.access.captureState()).resolves.toHaveProperty("running");
 
     const deleted = await open(value.registry, "session-2");
     await deleted.access.delete?.();
     await expect(deleted.access.captureState()).resolves.toEqual({ session: null });
   });
 
-  it("stops the recorded sandbox without opening it, lets the server forget it, and clears the marker", async () => {
+  it("stops the recorded sandbox without opening it", async () => {
     const value = fixture({ idleTimeoutMs: 0, stopsIdle: true });
     const { access } = await open(value.registry);
     const recorded = await access.captureState();
@@ -773,30 +770,11 @@ describe("idle stop marker", () => {
     );
     expect(value.start).not.toHaveBeenCalled();
     expect(value.resume).not.toHaveBeenCalled();
-    await expect(idle.captureState()).resolves.toEqual({ session: recorded.session });
-    await shutdownActiveSandboxConnections();
-    expect(value.stopSandbox).not.toHaveBeenCalled();
-  });
-
-  it("keeps the connection for server shutdown when the idle stop fails", async () => {
-    const value = fixture({ idleTimeoutMs: 0, stopsIdle: true });
-    const { access } = await open(value.registry);
-    const recorded = await access.captureState();
-    await access.release();
-    value.onSessionIdle.mockRejectedValueOnce(new Error("docker stop failed"));
-
-    const { signal } = new AbortController();
-    await expect((await unopened(value.registry, recorded)).stopIdle({ signal })).rejects.toThrow(
-      "docker stop failed",
-    );
-    await shutdownActiveSandboxConnections();
-
-    expect(value.stopSandbox).toHaveBeenCalledOnce();
   });
 
   it("leaves the sandbox alone when this deployment turned the idle stop off", async () => {
     const value = fixture({ idleTimeoutMs: false, stopsIdle: true });
-    const recorded = { running: { generation: "generation-1", idleTimeoutMs: 0 }, session: null };
+    const recorded = { running: { idleTimeoutMs: 0 }, session: null };
 
     await (
       await unopened(value.registry, recorded)
