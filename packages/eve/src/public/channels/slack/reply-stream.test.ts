@@ -39,7 +39,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Slack calls in order, as `operation` and decoded body, skipping status updates. */
 function calls(): Array<[string, Record<string, unknown>]> {
   return fetchMock.mock.calls
     .map(([url, init]) => {

@@ -520,7 +520,6 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (
       before < WRITING_REPLY_MIN_CHARS &&
       stream.replyChars >= WRITING_REPLY_MIN_CHARS &&
-      // A streaming reply shows itself.
       !isSlackReplyStreaming(channel.state)
     ) {
       await showStatus(channel, "Writing a reply...");
