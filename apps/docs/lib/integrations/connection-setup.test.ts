@@ -261,6 +261,7 @@ describe("Sanity Context extension setup", () => {
     expect(integration.quickStart).toContain("SANITY_ORGANIZATION_TOKEN");
     expect(integration.quickStart).toContain('import sanityContext from "@sanity/context-eve"');
     expect(integration.quickStart).toContain("agent/extensions/sanity-context.ts");
+    expect(integration.configure).toContain("All tools are read-only.");
     expect(integration.relatedResources?.map((resource) => resource.href)).toContain(
       "/integrations/sanity",
     );
