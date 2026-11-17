@@ -256,6 +256,20 @@ describe("vercelScheduleProvider", () => {
     );
   });
 
+  it("returns the timing of a schedule without a stored payload, and fails only when the envelope is read", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(schedule({})));
+    const stored = await vercelScheduleProvider({ fetch: fetchImpl }).get(
+      context,
+      "review-prs-daily",
+    );
+
+    expect(stored?.expression).toMatchObject({ type: "cron" });
+    expect(() => stored?.envelope).toThrow("Invalid scheduled collection payload");
+  });
+
   it("returns null for a schedule the Schedules API doesn't have", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");

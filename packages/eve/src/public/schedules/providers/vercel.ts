@@ -7,6 +7,7 @@ import type {
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
 import type {
+  ScheduleEnvelope,
   ScheduleExpression,
   SchedulePage,
   ScheduleProvider,
@@ -84,11 +85,11 @@ export function vercelScheduleProvider(
       );
       if (response === null) return null;
       const dispatched = response.payload as { readonly payload?: unknown } | undefined;
-      const { envelope } = parseSchedulePayload(dispatched?.payload, {
-        application: context.target.key,
-        collection: context.collection,
-      });
-      return { ...fromVercelSchedule(response), envelope };
+      const target = { application: context.target.key, collection: context.collection };
+      return Object.defineProperty(fromVercelSchedule(response), "envelope", {
+        enumerable: true,
+        get: () => parseSchedulePayload(dispatched?.payload, target).envelope,
+      }) as ScheduleRecord & { readonly envelope: ScheduleEnvelope };
     },
     async update(context, name, patch) {
       const expression = patch.expression;

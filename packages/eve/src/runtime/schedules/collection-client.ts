@@ -55,7 +55,10 @@ export interface PreparedScheduleUpdate<TPrepared = unknown> {
 
 export type PreparedScheduleWrite = PreparedScheduleCreate | PreparedScheduleUpdate;
 
-export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleClient<TInput> {
+export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleClient<
+  TInput,
+  TPrepared
+> {
   prepareCreate(input: ScheduleClientCreate<unknown>): Promise<PreparedScheduleCreate<TPrepared>>;
   create(
     input: ScheduleClientCreate<TInput>,
@@ -286,7 +289,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       return {
         ...projectScheduleRecord(record),
         creator: envelope.principal,
-        payload: envelope.payload as TPayload,
+        payload: envelope.payload as TPrepared,
       };
     },
     async invoke(name) {

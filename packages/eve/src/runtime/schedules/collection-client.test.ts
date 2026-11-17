@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
@@ -229,6 +229,43 @@ describe("dynamic schedules client", () => {
     const [listed] = (await alice.list()).data;
     expect(listed).not.toHaveProperty("creator");
     expect(listed).not.toHaveProperty("payload");
+  });
+
+  it("updates a schedule whose stored payload a provider can't read back", async () => {
+    const { provider, client } = setup();
+    const created = await client.create(input);
+    const get = provider.get.bind(provider);
+    vi.spyOn(provider, "get").mockImplementation(async (context, name) => {
+      const stored = await get(context, name);
+      if (stored === null) return null;
+      const { envelope: _envelope, ...record } = stored;
+      return Object.defineProperty(record, "envelope", {
+        get: () => {
+          throw new Error("Invalid scheduled collection payload.");
+        },
+      }) as typeof stored;
+    });
+    await expect(
+      client.update(created.name, { expression: { type: "delay", minutes: 10 } }),
+    ).resolves.toMatchObject({ name: created.name });
+    await expect(client.update(created.name, { payload })).resolves.toMatchObject({
+      name: created.name,
+    });
+  });
+
+  it("returns the payload as preparePayload stored it, typed as the prepared shape", async () => {
+    const prepared = defineDynamicSchedules({
+      provider: inMemoryScheduleProvider(),
+      inputSchema: z.object({ task: z.string().min(1), destination: z.enum(["my-dm"]) }).strict(),
+      preparePayload: (value) => ({ version: 1 as const, instructions: value.task }),
+      auth: () => null,
+      run: async () => {},
+    });
+    const client = createScheduleCollectionClient(prepared, callContext);
+    const created = await client.create(input);
+    const detail = await client.get(created.name);
+    expectTypeOf(detail!.payload).toEqualTypeOf<{ version: 1; instructions: string }>();
+    expect(detail?.payload).toEqual({ version: 1, instructions: payload.task });
   });
 
   it("tells preparePayload the timing a write leaves the schedule with", async () => {

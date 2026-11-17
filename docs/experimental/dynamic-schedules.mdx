@@ -226,7 +226,7 @@ await client.update(created.name, {
 
 ## Update and control schedules
 
-`get` returns identity, timing, state, and timestamps, plus `creator` and the stored `payload`, so a caller that passed `scope` can check who the schedule runs as and what it runs. `list` returns the same fields without `creator` and `payload`. New schedules are always active. Use `disable` to pause future runs.
+`get` returns identity, timing, state, and timestamps, plus `creator` and the stored `payload` (as `preparePayload` returned it, and typed that way), so a caller that passed `scope` can check who the schedule runs as and what it runs. `list` returns the same fields without `creator` and `payload`. New schedules are always active. Use `disable` to pause future runs.
 
 `client.update(name, patch)` changes timing, replaces the whole payload, or both. Timing-only updates keep the stored payload and creator and skip `preparePayload`. Payload replacement isn't a merge. It validates the complete new input, reruns preparation, and makes the updating caller the new creator. In a shared `scope`, permission to replace the payload is also permission to change who the schedule runs as.
 
