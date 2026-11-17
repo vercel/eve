@@ -37,7 +37,7 @@ sys.exit(code if code >= 0 else 128 - code)
 `;
 
 export interface PseudoTerminal {
-  /** Types into the terminal, as raw bytes (`\\r` for Enter, `\\x1b` for Escape). */
+  /** Types into the terminal, as raw bytes (`\r` for Enter, `\x1b` for Escape). */
   write(input: string): void;
   /** Called with each chunk the child paints, in order. */
   onData(listener: (chunk: string) => void): void;
