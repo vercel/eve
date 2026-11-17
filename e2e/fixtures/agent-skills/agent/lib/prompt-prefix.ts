@@ -15,7 +15,7 @@ export const prefixModel: ReturnType<typeof mockModel> = mockModel({
     }
     const prefix = prefixSchema.parse(result.output);
     const hasAnnouncement = prefix.some(
-      (message) => message.role === "user" && message.text.startsWith("Available skills"),
+      (message) => message.role === "user" && message.text.startsWith("<skills_update>"),
     );
     const stable =
       JSON.stringify(request.messages.slice(0, prefix.length)) === JSON.stringify(prefix);

@@ -3,6 +3,7 @@ import { catalogReach, catalogTools } from "#execution/catalog/catalog-tools.js"
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import { type Callable, callableOf } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { type Definition, type DefinitionContext, once } from "./definition.js";
 
 export const catalog: Definition = {
@@ -29,6 +30,7 @@ export const catalog: Definition = {
                 catalog: catalogAnnouncements(callable),
                 skills: dynamicSkillAnnouncements(
                   [...callable.skills.values()].filter(({ source }) => source !== undefined),
+                  { listedInSystem: listsStaticSkills(ctx) },
                 ),
               }),
             ].filter(([name]) => !table.entries.has(name));
@@ -41,6 +43,12 @@ export const catalog: Definition = {
   id: "eve.catalog",
   label: "eve's catalog tools",
 };
+
+function listsStaticSkills(ctx: DefinitionContext): boolean {
+  return (compiledBundleOf(ctx.container)?.resolvedAgent.skills ?? []).some(
+    ({ deferred }) => deferred !== true,
+  );
+}
 
 async function offered(ctx: DefinitionContext, callable: Callable): Promise<OfferedCatalogTools> {
   const reach = catalogReach(callable);
