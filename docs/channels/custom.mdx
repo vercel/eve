@@ -640,7 +640,7 @@ A custom channel owns its token format; write a function that joins the platform
 
 To let another identity address a session, call `channel.continuation?.alias(rawToken)`. The new token belongs to the same channel and becomes `channel.continuation.token` for later handlers. Earlier addresses still reach the same session and accept the same payloads. `end` ends the session and frees all its addresses for later `send()` calls. `cancel` stops only the running turn and keeps the session, history, and addresses.
 
-The `context(state, channel)` config option builds the per-step `ctx.channel` that event handlers read. Its second argument is `ChannelContext` from `eve/channels`: the current `session.id` and `session.auth`, plus `continuation`, without session commands. Keep a reference to `channel.continuation` for callbacks that run later, or call `ctx.channel.continuation?.alias(token)` from an event handler. eve adds `ChannelContinuationOps` to the returned context and saves changes you make to `state`.
+The `context(state, channel)` config option builds the per-step `ctx.channel` that event handlers read. Its second argument is `ChannelContext` from `eve/channels`: the current `session.id` and `session.auth`, plus `continuation`, without session commands. Keep a reference to `channel.continuation` for callbacks that run later, or call `ctx.channel.continuation?.alias(token)` or `release(token)` from an event handler. eve adds `ChannelContinuationOps` to the returned context and saves changes you make to `state`.
 
 ```ts
 import { defineChannel } from "eve/channels";
@@ -667,7 +667,14 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-The new address joins the session at the next workflow boundary. If another active session already uses the token, the session that called `alias()` fails instead of taking it over. Every address stays active until the session ends. Sessions with continuation addresses stay on their current deployment.
+The new address joins the session at the next workflow boundary. If another active session already uses the token, the session that called `alias()` fails instead of taking it over. An address stays active until the session ends or releases it. Sessions with continuation addresses stay on their current deployment.
+
+To hand an address to another session, call `channel.continuation?.release(rawToken)`. The session stops answering at that address at the next workflow boundary, and the next `send()` to it starts or reaches another session. Payloads the address already accepted stay with the releasing session. A session can't release its current address, so alias the new address first, then release the old one. The handle reads the current address live, so one kept handle can do both:
+
+```ts
+channel.continuation?.alias(newRef);
+channel.continuation?.release(oldRef);
+```
 
 Tokens must be nonempty. A session supports up to 256 addresses, including its stable inbox; repeating an existing alias doesn't use another address.
 

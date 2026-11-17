@@ -361,6 +361,46 @@ describe("buildChannelContext", () => {
     ]);
   });
 
+  it("releases an earlier address but never the current one", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ContinuationTokenKey, "slack:C1:T1");
+    const channel = buildChannelContext(ctx);
+
+    channel.continuation?.alias("code:C2");
+    channel.continuation?.release("C1:T1");
+    channel.continuation?.release("C1:never-claimed");
+
+    expect(ctx.get(ContinuationTokenKey)).toBe("slack:code:C2");
+    expect(ctx.get(ContinuationHookTokensKey)).toEqual(["slack:code:C2"]);
+    expect(() => channel.continuation?.release("code:C2")).toThrow(/current address/);
+    expect(() => channel.continuation?.release("")).toThrow(/nonempty/);
+  });
+
+  it("releases the old address through the same handle that aliased the new one", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ContinuationTokenKey, "slack:C1:T1");
+    const continuation = buildChannelContext(ctx).continuation;
+
+    continuation?.alias("code:C2");
+    continuation?.release("C1:T1");
+
+    expect(ctx.get(ContinuationHookTokensKey)).toEqual(["slack:code:C2"]);
+  });
+
+  it("re-claims a released address through the same handle, reading the current address live", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ContinuationTokenKey, "slack:C1:T1");
+    const continuation = buildChannelContext(ctx).continuation;
+
+    continuation?.alias("code:C2");
+    continuation?.release("C1:T1");
+    continuation?.alias("C1:T1");
+
+    expect(continuation?.token).toBe("C1:T1");
+    expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
+    expect(ctx.get(ContinuationHookTokensKey)).toEqual(["slack:code:C2", "slack:C1:T1"]);
+  });
+
   it("throws clearly when no namespaced placeholder token exists", () => {
     const ctx = new ContextContainer();
     const channel = buildChannelContext(ctx);

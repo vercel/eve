@@ -203,7 +203,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 
 Exported types ship from the entry point that owns them, such as `ToolDefinition` and `ToolContext` from `eve/tools`. Import event and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return.
 
-Types for reading sent messages and sessions live in `eve/sessions`; client factories and transport-specific types stay in `eve/client`. `SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session. `ChannelContext` from `eve/channels` holds the session's `id` and `auth`, plus an optional `continuation` routing token that `alias()` can extend.
+Types for reading sent messages and sessions live in `eve/sessions`; client factories and transport-specific types stay in `eve/client`. `SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session. `ChannelContext` from `eve/channels` holds the session's `id` and `auth`, plus an optional `continuation` routing token whose addresses `alias()` adds and `release()` removes.
 
 `HistoryMessage`, `EveLanguageModel`, `TokenUsage`, and the sandbox session, process, result, and method-option types are eve-owned. So are the `SpanProcessor`, `SpanProcessorOrName`, and `SpanExporter` types from `eve/instrumentation/otel`, and the Linq and Photon credential and webhook-verifier types. Their declarations don't change with your app's AI SDK, OpenTelemetry, or channel-adapter versions. Named judge, mock-model, approval, and disabled-marker types are public for reusable helpers and declaration emission.
 
