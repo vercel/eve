@@ -126,5 +126,5 @@ function sharedModuleAppFiles(counter: string): Record<string, string> {
 }
 
 function sharedModuleEvaluations(counter: string): number {
-  return (globalThis as Record<string, unknown>)[counter] as number;
+  return ((globalThis as Record<string, unknown>)[counter] as number | undefined) ?? 0;
 }
