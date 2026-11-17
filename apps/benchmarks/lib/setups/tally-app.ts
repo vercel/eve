@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,14 +6,6 @@ import { fileURLToPath } from "node:url";
 import type { AuthoringSetup } from "../authoring-case.js";
 
 const fixtureRoot = fileURLToPath(new URL("../../fixtures/tally/", import.meta.url));
-const workspaceCatalog = readFileSync(
-  new URL("../../../../pnpm-workspace.yaml", import.meta.url),
-  "utf8",
-);
-const aiVersion = workspaceCatalog.match(/^  ai: "\^(\d+\.\d+\.\d+)"$/m)?.[1];
-if (aiVersion === undefined) {
-  throw new Error("The Tally benchmark needs a pinned ai version from the workspace catalog.");
-}
 
 /** The Tally app's source files, keyed by their path inside the app. */
 export function tallyAppFiles(): Record<string, string> {
@@ -30,6 +23,23 @@ export function tallyAppFiles(): Record<string, string> {
  * coding agent's own installs don't swap in a different release.
  */
 export function tallyPackageJson(packageSpec: string): string {
+  const tarball = execFileSync("curl", ["-fsSL", "--max-time", "30", packageSpec], {
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  const manifest = JSON.parse(
+    execFileSync("tar", ["-xzOf", "-", "package/package.json"], {
+      input: tarball,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }),
+  );
+  const aiVersion = /^\^(\d+\.\d+\.\d+)$/.exec(manifest.peerDependencies?.ai)?.[1];
+  if (aiVersion === undefined) {
+    throw new Error(
+      `The eve canary ${packageSpec} must declare a caret ai peer range, got ${JSON.stringify(manifest.peerDependencies?.ai)}.`,
+    );
+  }
+
   const packageJson = {
     name: "tally",
     version: "0.1.0",
@@ -60,7 +70,7 @@ export function tallyPackageJson(packageSpec: string): string {
 
 /** An existing Next.js invoicing app in the case's project directory, with dependencies installed. */
 export const tallyAppSetup: AuthoringSetup = {
-  id: "tally-app-v1",
+  id: "tally-app-v2",
   async onSession({ packageSpec, run, workspace, write }) {
     const files = { ...tallyAppFiles(), "package.json": tallyPackageJson(packageSpec) };
     for (const [path, content] of Object.entries(files)) await write(path, content);
