@@ -40,7 +40,7 @@ described in its guide. Operator SDK/CLI access remains separate and is unavaila
 
 ## Development
 
-Use Node.js 24 and pnpm 10.33.4:
+Use Node.js 24 and pnpm 12.21.0:
 
 ```sh
 pnpm install --frozen-lockfile
