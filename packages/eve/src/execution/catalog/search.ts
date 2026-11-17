@@ -94,7 +94,7 @@ interface UnavailableConnection {
   readonly error: string;
 }
 
-interface SearchOutput {
+export interface SearchOutput {
   readonly results: readonly SearchResult[];
   /** Matches past `limit`. */
   readonly remaining: number;

@@ -48,7 +48,7 @@ export default defineTool({
 `execute` gets a `ctx` with these accessors:
 
 - `ctx.session`: session metadata, turn, auth, and parent agent.
-- `ctx.callId`: the call's id, also on its [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
+- `ctx.callId`: the call's id, also on its [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context. A call from an [`eve__execute`](/docs/concepts/built-in-tools#eve__execute) program has the id `<callId>/<n>`, which stays the same when the program resumes or runs again after a crash.
 - `ctx.toolName`: the name the model called, with any namespace prefix.
 - `ctx.messages`: the model input for the step that requested this call, as a [dynamic tool's](/docs/guides/dynamic-capabilities) `ctx.messages()` sees it.
 - `ctx.abortSignal`: aborts when the turn is cancelled. Pass it to work that supports cancellation. Sandbox sessions from `ctx.getSandbox()` already use it.
@@ -80,7 +80,7 @@ Retry inside the tool when the operation is safe to repeat. Otherwise, return or
 
 Protect non-idempotent operations, such as charges or emails, with the strongest mechanism the service supports:
 
-1. Pass a stable idempotency key to the upstream API.
+1. Pass a stable idempotency key to the upstream API. For a call from an `eve__execute` program, `${ctx.session.id}:${ctx.callId}` is stable across resumes and crash recovery.
 2. Otherwise, record a unique application operation before writing, and check it on every attempt.
 3. Use human approval when a person must authorize each execution. Approval doesn't replace deduplication after an unclear network result.
 
@@ -326,6 +326,32 @@ eve leaves a deferred tool out of the tool list and doesn't name it in context. 
 
 The option works with `defineTool`, `defineWorkflowTool`, and dynamic tool entries. To defer an agent, set [`tool: "deferred"`](/docs/subagents#declared-subagents) on its `defineAgent` definition.
 
+### Declare output types for code mode
+
+With [`codeMode`](/docs/concepts/built-in-tools#eve__execute) on, the model writes programs that read tool results as data. Add an `outputSchema` so the model knows a result's shape before it writes the program:
+
+```ts title="agent/tools/get_weather.ts"
+export default defineTool({
+  description: "Get the current weather for a city.",
+  inputSchema: z.object({ city: z.string().min(1) }),
+  outputSchema: z.object({ city: z.string(), condition: z.string(), temperatureF: z.number() }),
+  async execute({ city }) {
+    return { city, condition: "Sunny", temperatureF: 72 };
+  },
+});
+```
+
+For a tool in the model's tool list that a program can call, eve adds this line, after a blank line, to the description the model sees:
+
+```text
+In eve__execute, tools.get_weather(input) resolves to: { city: string; condition: string; temperatureF: number }
+```
+
+- A [deferred](#keep-a-tool-out-of-the-tool-list) tool gets no added line. Its `signature` in search results carries the same type.
+- Without an `outputSchema`, a program reads the result as `unknown`. The model has to check the shape in the program, or return the value and read it in its next step.
+- In a program, a result that doesn't match the tool's `outputSchema` rejects the call with `InvalidToolOutput: "get_weather" returned a value that doesn't match its output schema`, followed by the mismatch.
+- For an agent with code mode on, `eve build` and `eve dev` warn once for each tool you author that a program can call and that has no `outputSchema`: `Tool "get_weather" has no outputSchema, so programs run by eve__execute read its result as unknown. Add an outputSchema to type it.`
+
 ### Hide a tool from delegated agents
 
 Set `availableInSubagents: false` when only a top-level root session should call a tool:
@@ -396,11 +422,12 @@ In a workflow body, keep values needed after a wait in local variables, because 
 
 ## Troubleshooting
 
-| What you see                                  | What to do                                                                                                |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| The build rejects `deferred` on a tool        | Remove it from provider tools such as `webSearch()`, because the provider has to see their definition.    |
-| eve rejects a file part                       | Pass the file as a base64 string. Raw bytes (`Uint8Array`, `Buffer`) can't be saved as JSON.              |
-| Later model calls fail after a `fileUrl` part | Use a URL that stays readable for the whole session. A presigned URL that expires makes later calls fail. |
+| What you see                                                                                                 | What to do                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The build rejects `deferred` on a tool                                                                       | Remove it from provider tools such as `webSearch()`, because the provider has to see their definition.                                                               |
+| eve rejects a file part                                                                                      | Pass the file as a base64 string. Raw bytes (`Uint8Array`, `Buffer`) can't be saved as JSON.                                                                         |
+| Later model calls fail after a `fileUrl` part                                                                | Use a URL that stays readable for the whole session. A presigned URL that expires makes later calls fail.                                                            |
+| `workflow() was removed. Set codeMode: true in agent.ts; programs call agents as tools.<name>({ message }).` | Delete the tool file the error names and set [`codeMode: true`](/docs/concepts/built-in-tools#eve__execute) in `agent.ts`, so the model calls agents from a program. |
 
 ## When to use a connection or skill instead
 

@@ -102,7 +102,7 @@ agent/
   channels/                 # Slack (Vercel Connect) and the default HTTP channel (dev TUI, evals)
   connections/notion.ts     # Notion workspace, user-scoped OAuth
   memory/preferences.ts     # per-person standing preferences (eve file memory)
-  tools/                    # brand context, artifact reader, and the workflow tool
+  tools/                    # brand context and the artifact reader
   subagents/
     product-marketer/       # positioning, messaging, and the shared brand context document
     content-marketer/       # long-form, written into Notion

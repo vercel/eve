@@ -1,7 +1,9 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { DiscoverDiagnostic, DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
-import type { AgentSourceDescriptor } from "#compiler/source-graph.js";
+import type { CompiledToolDefinition } from "#compiler/manifest.js";
+import type { AgentModuleBinding, AgentSourceDescriptor } from "#compiler/source-graph.js";
+import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 const compilerDiagnosticSeveritySchema = z.enum(["error", "warning"]);
 
@@ -66,6 +68,38 @@ export function createChannelRouteShadowedDiagnostic(input: {
   };
 }
 
+/**
+ * For an agent with code mode on: one warning for each of `tools` the application authors.
+ * `tools` are those a program can call and reads as `unknown`, for want of an output schema.
+ */
+export function createCodeModeUntypedToolDiagnostics(input: {
+  readonly bindings: Readonly<Record<string, AgentModuleBinding>>;
+  readonly nodeId: string;
+  readonly tools: readonly CompiledToolDefinition[];
+}): CompilerDiagnostic[] {
+  return input.tools.flatMap((tool) => {
+    const binding = input.bindings[tool.sourceId];
+    // An extension's tools are its author's to type, not the application's.
+    if (binding?.owner.kind !== "application") {
+      return [];
+    }
+    return [
+      {
+        code: "compile/code-mode-untyped-tool",
+        message: `Tool "${tool.name}" has no outputSchema, so programs run by ${EXECUTE_TOOL_NAME} read its result as unknown. Add an outputSchema to type it.`,
+        severity: "warning",
+        sources: [
+          toDiagnosticSource(input.nodeId, {
+            backing: binding.backing,
+            logicalPath: tool.logicalPath,
+            sourceId: tool.sourceId,
+          }),
+        ],
+      },
+    ];
+  });
+}
+
 export function summarizeCompilerDiagnostics(
   diagnostics: readonly CompilerDiagnostic[],
 ): DiscoverDiagnosticsSummary {
@@ -80,7 +114,7 @@ export function summarizeCompilerDiagnostics(
 
 function toDiagnosticSource(
   nodeId: string,
-  source: AgentSourceDescriptor,
+  source: Pick<AgentSourceDescriptor, "backing" | "logicalPath" | "sourceId">,
 ): CompilerDiagnosticSource {
   return {
     logicalPath: source.logicalPath,

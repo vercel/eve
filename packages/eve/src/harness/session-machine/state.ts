@@ -6,7 +6,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 
 // Execution state the session machine keeps between steps. Lifecycle facts (whether a turn is
 // open, whether a request is answered, how a call ended) are the projection's; this holds only
@@ -82,6 +82,80 @@ export interface SuspendedStep {
   readonly responseAuthRequiredRequestIds?: readonly string[];
   /** The caller whose turn parked the step; `null` when unauthenticated. */
   readonly requester?: SessionAuthContext | null;
+  /**
+   * Set on a batch of calls a program waits on, naming the program's `eve__execute` call. The
+   * step's messages are those calls alone, never a model response: once each has a result the
+   * results resume the program, and nothing of the step reaches history.
+   */
+  readonly program?: {
+    readonly callId: string;
+    /** The program runs in the background: the batch doesn't keep the model from running. */
+    readonly background?: true;
+  };
+}
+
+/** How one of a program's calls came out, as the program reads it when it resumes. */
+export type ProgramCallResult =
+  | { readonly status: "completed"; readonly output: JsonValue }
+  | {
+      readonly status: "failed";
+      readonly error: string;
+      /** How the call settled when it didn't complete; `failed` when absent. */
+      readonly outcome?: "rejected" | "interrupted" | "abandoned";
+    };
+
+/** A call of a program that didn't complete, as the program's result reports it. */
+export interface ProgramUnfinishedCall {
+  readonly tool: string;
+  readonly outcome: string;
+  /** The call's input as JSON text, cut to what the model needs to tell calls apart. */
+  readonly input: string;
+}
+
+/** What an interrupted attempt of a program step published about one of the program's calls. */
+export interface RecoveredProgramCall {
+  readonly name: string;
+  readonly started: boolean;
+  readonly outcome?: string;
+  readonly output?: JsonValue;
+  readonly error?: string;
+}
+
+/**
+ * A program an `eve__execute` call runs, from the model step that made the call until the call
+ * settles. Its code and call id are saved before its first call runs, so a step that runs it
+ * again runs the same program under the same id.
+ */
+export interface ProgramRun {
+  /** The `eve__execute` call. */
+  readonly callId: string;
+  readonly code: string;
+  /** The model step that made the call. */
+  readonly event: StepCoordinates;
+  /** Signs the program's continuations. Never shown to the program. */
+  readonly security: { readonly maxAgeMs?: number; readonly signingKey: string };
+  /** Where the program parked, with every result recorded so far. Absent until it parks. */
+  readonly continuation?: string;
+  /** The calls the program parked on, by the interruption each raised. */
+  readonly pending: readonly { readonly interruptionId: string; readonly callId: string }[];
+  /** The results of parked calls, ready for the program step that resumes it. */
+  readonly resolutions: readonly {
+    readonly interruptionId: string;
+    readonly result: ProgramCallResult;
+  }[];
+  /** How many of the program's calls settled each way. */
+  readonly counts: Readonly<Record<string, number>>;
+  /** How many of its calls reached an agent. */
+  readonly agentCalls: number;
+  /** The first calls that didn't complete. */
+  readonly unfinished: readonly ProgramUnfinishedCall[];
+  /** What an interrupted program step published about the program's calls, by call id. */
+  readonly recovered?: Readonly<Record<string, RecoveredProgramCall>>;
+  /**
+   * The task the program became when a new message arrived while it was unfinished. Its
+   * `eve__execute` call was answered with the task's receipt, and its result is the task's.
+   */
+  readonly background?: { readonly taskId: string };
 }
 
 export interface TurnState {
@@ -93,6 +167,8 @@ export interface TurnState {
   readonly suspended: readonly SuspendedStep[];
   /** People's approval decisions, under the keys their requests named, for the session. */
   readonly remembered: Readonly<Record<string, RememberedApproval>>;
+  /** The programs the turn's `eve__execute` calls run. Absent when it runs none. */
+  readonly programs?: readonly ProgramRun[];
 }
 
 export const EMPTY_TURN_STATE: TurnState = { remembered: {}, suspended: [] };
@@ -109,6 +185,7 @@ export function writeTurnState<T extends { readonly state?: SessionStateMap }>(
   if (
     turn.suspended.length === 0 &&
     turn.queued === undefined &&
+    (turn.programs?.length ?? 0) === 0 &&
     Object.keys(turn.remembered).length === 0
   ) {
     delete state[TURN_STATE_KEY];

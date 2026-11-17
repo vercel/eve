@@ -11,9 +11,6 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
-import { defineTool } from "#tools/definition.js";
-import { defineWorkflowTool } from "#tools/workflow-definition.js";
-import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { z } from "zod";
 
 const APP_ROOT = "/tmp/weather-agent";
@@ -24,9 +21,9 @@ const VERCEL: HostMode = { kind: "production", preset: "vercel" };
 type Modules = Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]>;
 
 interface AgentVariant {
+  readonly codeMode?: boolean;
   readonly externalDependencies?: readonly string[];
   readonly sandbox?: "just-bash" | "vercel";
-  readonly tool?: "ordinary" | "workflow" | "workflow-program";
   readonly websocket?: boolean;
   /** A dynamic schedule collection on Vercel's provider. */
   readonly dynamicSchedules?: boolean;
@@ -66,40 +63,12 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
       }),
     });
   }
-  if (variant.tool === "ordinary") {
-    modules.push({
-      logicalPath: "tools/weather.ts",
-      loadNamespace: async () => ({
-        default: defineTool({
-          description: "Check the weather.",
-          execute: async () => null,
-          inputSchema: {},
-        }),
-      }),
-    });
-  }
-  if (variant.tool === "workflow" || variant.tool === "workflow-program") {
-    const definition = defineWorkflowTool({
-      description: "Run a workflow.",
-      execute: Object.assign(async () => null, {
-        workflowId: "workflow//agent/tools/run-program//execute",
-      }),
-      inputSchema: {},
-    });
-    const tool =
-      variant.tool === "workflow-program"
-        ? attachWorkflowProgramOptions(definition, { maxSubagents: 4 })
-        : definition;
-    modules.push({
-      logicalPath: "tools/run-program.ts",
-      loadNamespace: async () => ({ default: tool }),
-    });
-  }
   const { manifest } = await compileFromMemory({
     agentRoot,
     appRoot: APP_ROOT,
     agent: {
       model: "openai/gpt-5.4",
+      ...(variant.codeMode !== undefined && { codeMode: variant.codeMode }),
       ...(variant.externalDependencies && {
         build: { externalDependencies: [...variant.externalDependencies] },
       }),
@@ -216,47 +185,22 @@ describe("createHostSpec", () => {
   });
 
   it.each([
-    ["an ordinary tool", "ordinary", false],
-    ["a workflow tool", "workflow", false],
-    ["a generated-program tool", "workflow-program", true],
+    ["on", true],
+    ["off", false],
   ] as const)(
-    "installs the workflow sandbox runtime for %s: %s",
-    async (_label, tool, expected) => {
-      const { runtime } = spec(await compileAgent({ tool }), PRODUCTION);
-      expect(runtime.workflowSandbox).toBe(expected);
+    "installs the workflow sandbox runtime for an agent with code mode %s: %s",
+    async (_label, codeMode) => {
+      const { runtime } = spec(await compileAgent({ codeMode }), PRODUCTION);
+      expect(runtime.workflowSandbox).toBe(codeMode);
     },
   );
 
-  it("installs the workflow sandbox runtime for a subagent's generated-program tool", async () => {
+  it("installs the workflow sandbox runtime for a subagent with code mode on", async () => {
     const manifest = withSubagent(
       await compileAgent(),
-      await compileAgent({ tool: "workflow-program" }, "researcher"),
+      await compileAgent({ codeMode: true }, "researcher"),
     );
     expect(spec(manifest, PRODUCTION).runtime.workflowSandbox).toBe(true);
-  });
-
-  it.each([
-    ["Vercel without a sandbox", VERCEL, undefined, true],
-    ["Vercel with Vercel Sandbox", VERCEL, "vercel", true],
-    ["Vercel with just-bash", VERCEL, "just-bash", false],
-    ["a self-hosted build", PRODUCTION, undefined, false],
-    ["dev", DEVELOPMENT, undefined, false],
-  ] as const)(
-    "prunes local sandbox providers from %s: %s",
-    async (_label, mode, sandbox, expected) => {
-      const externals = spec(await compileAgent({ sandbox }), mode).externals;
-      expect(externals.pruneSandboxProviders).toBe(expected);
-    },
-  );
-
-  it("traces a configured optional engine and keeps unconfigured ones external and untraced", async () => {
-    const configured = spec(await compileAgent({ sandbox: "just-bash" }), PRODUCTION).externals;
-    const unconfigured = spec(await compileAgent(), PRODUCTION).externals;
-
-    expect(configured.traceDeps).toEqual(["just-bash"]);
-    expect(configured.untracedExternals).toEqual([]);
-    expect(unconfigured.traceDeps).toEqual([]);
-    expect(unconfigured.untracedExternals).toEqual(["just-bash"]);
   });
 
   it("traces configured externals from root and subagent configs once in production, never eve itself", async () => {

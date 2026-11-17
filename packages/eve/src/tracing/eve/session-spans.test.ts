@@ -314,6 +314,38 @@ describe("a session's spans, from its committed lines", () => {
     ]);
   });
 
+  it("hangs a program's calls under its eve__execute call, after the step that made it ended", async () => {
+    const { commit, spans } = session();
+    await commit(...opening);
+    await commit(requested("call_program", "eve__execute"));
+    // The model run ends with its step; the program's calls start in a later step.
+    await commit({
+      data: { outcome: "completed", runId: "run_0" },
+      scope: run,
+      type: "model.settled",
+    } as SessionEvent);
+    await commit({
+      data: {
+        callId: "call_program/1",
+        capability: { kind: "tool", name: "lookup_order" },
+        input: { id: "a" },
+        owner: { callId: "call_program" },
+      },
+      scope: turn,
+      type: "call.requested",
+    } as SessionEvent);
+    await commit(settled("call_program/1", { outcome: "completed", output: { total: 4 } }));
+    await commit(settled("call_program", { outcome: "completed", output: { result: 4 } }));
+    await commit(turnSettled({ outcome: "completed" }));
+
+    expect(tree(await spans())).toEqual([
+      "invoke_agent weather completed",
+      "  agent.step",
+      "    execute_tool eve__execute completed",
+      "      execute_tool lookup_order completed",
+    ]);
+  });
+
   it.each([
     ["accepted", "approved"],
     ["declined", "denied"],

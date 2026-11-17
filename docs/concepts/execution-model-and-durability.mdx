@@ -11,7 +11,7 @@ Work nests in three levels:
 
 - **session**: the whole conversation or task. It can span many requests over days or weeks without losing context.
 - **turn**: one user message and all the work it triggers (model calls, tool calls, reasoning) until the agent produces its response.
-- **step**: a saved checkpoint inside a turn. By default, it contains one model call and the inline tool calls that follow it.
+- **step**: a saved checkpoint inside a turn. By default, it contains one model call and the inline tool calls that follow it. An [`eve__execute`](./built-in-tools#eve__execute) program runs in steps of its own: the step whose model call wrote the program saves it, and a later step runs it each time it starts or resumes.
 
 Every session runs as one workflow on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). The workflow runs each turn and saves progress at step boundaries. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session can pause and resume underneath them.
 
@@ -215,11 +215,31 @@ Checkpoints and recovery need no configuration; checkpoint batching is an explic
 
 For ordinary tools, eve manages the workflow around your executor. Use [`defineWorkflowTool`](../tools/workflows) when your own tool body needs waits that survive restarts, such as a timer, webhook, or human answer. Tools read the current session's metadata (id, turn, auth, parent lineage) through `ctx.session`. [`defineState`](./state) reads and writes per-session state.
 
+### Programs after a crash
+
+When a step that runs an [`eve__execute`](./built-in-tools#eve__execute) program is interrupted, the step runs again as the same `eve__execute` call. eve saved the program before its first call ran, so the model isn't asked to write it again and reads no note about the interruption. Each call the program makes again gets what the stream recorded for it:
+
+| What the stream recorded for the call  | What the program gets                                                                                                             |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Its outcome                            | The recorded output or error. The call doesn't run again.                                                                         |
+| A completed outcome without its output | A rejection: `This call completed, but its result was lost when the step running it was interrupted.` The call doesn't run again. |
+| Its start, but no outcome              | A rejection: `The step running this call was interrupted. The call may or may not have taken effect.` The call doesn't run again. |
+| Its request, but no start              | The call runs, under the same id.                                                                                                 |
+| Nothing                                | The call runs.                                                                                                                    |
+
+A call that rejects with one of those two messages counts as `abandoned` in [the program's result](./built-in-tools#what-the-model-reads-back). The program can catch the rejection, and the model reads the call's input under `notCompleted` either way.
+
+Each call keeps its id, `<callId>/<n>`, when the step runs again, so a tool can pass [`ctx.callId`](../tools#the-ctx-parameter) to its upstream API as an idempotency key. A program that makes a different call than it made before the interruption gets `EXECUTE_REPLAY_DIVERGED` for that call, which doesn't run.
+
+The rules above still apply. A turn fails with `STEP_INTERRUPTED` after more than three interrupted steps, and a call whose start hadn't reached the stream can run again.
+
 ## Parked work
 
 Some work has to wait, such as a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks and holds no compute until the input arrives, even much later. The conversation then picks up where it left off.
 
 A workflow tool can suspend too, with its tool call pending and the turn parked until the workflow finishes. `defineTool` always executes inside its initiating step. A workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)` doesn't park the turn. Its call returns a receipt and the run keeps working. The turn parks only when the model calls `eve__task_wait` or tries to end the turn while the task works. See [tasks](../tools/workflows#run-calls-as-tasks-task).
+
+An [`eve__execute`](./built-in-tools#calls-that-wait) program parks when one of its calls has to wait for an approval, a sign-in, a workflow tool, an agent, or a question. It resumes when every call it parked on has a result.
 
 An awaited workflow operation provides the wait, and a generator's `yield` reports progress. See [durable waits](../tools#durable-waits) and [workflow suspension](../tools/workflows#how-suspension-works) for the execution and result rules.
 

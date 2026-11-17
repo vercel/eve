@@ -13,9 +13,9 @@ import { LEAD_MODEL } from "#lib/models/config.js";
  * is compacted once it reaches 90% of the context window.
  *
  * `defaultTools: false` turns off every optional built-in, including the root-copy `agent` tool.
- * The lead works through its authored tools, `workflow`, and the specialists, and has no use for a
- * shell, the sandbox file tools, or the web. A built-in that a later eve release adds stays off
- * until someone opts in.
+ * The lead works through its authored tools and the specialists, and has no use for a shell, the
+ * sandbox file tools, or the web. A built-in that a later eve release adds stays off until someone
+ * opts in.
  *
  * The agent-level `approval` adds one gate: removing a saved preference pauses for the user, the
  * same as any other delete on this team. It returns `undefined` for every other call, which leaves

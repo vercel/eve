@@ -12,7 +12,9 @@ import {
   turnCoordinates,
   type SessionProjection,
 } from "#protocol/session-projection.js";
+import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import { openRequests } from "#protocol/session-projection/reader.js";
 import {
   readTurnState,
@@ -136,7 +138,20 @@ export interface RuntimeWait {
   readonly event: StepCoordinates;
   readonly callIds: readonly string[];
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+  /** The step that made each of `tasks`, in the same order. */
+  readonly taskEvents: readonly StepCoordinates[];
   readonly taskToolCalls: readonly TaskToolCall[];
+  /**
+   * The calls among `callIds` that programs wait on, one batch per program. A batch settles on
+   * its own, and a background program's batch doesn't keep the model from running.
+   */
+  readonly batches: readonly ProgramBatchWait[];
+}
+
+/** The calls of one program's batch the runtime still runs. */
+export interface ProgramBatchWait {
+  readonly background: boolean;
+  readonly callIds: readonly string[];
 }
 
 /** The calls suspended steps wait on the runtime for, or `undefined` when none do. */
@@ -151,11 +166,32 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
   const tasks = waiting.flatMap((entry) => entry.tasks);
   const taskToolCalls = waiting.flatMap((entry) => entry.taskToolCalls);
   return {
+    batches: waiting.flatMap(({ step, tasks: running }) =>
+      step.program === undefined
+        ? []
+        : [
+            {
+              background: step.program.background === true,
+              callIds: running.map((task) => task.callId),
+            },
+          ],
+    ),
     callIds: [...tasks.map((task) => task.callId), ...taskToolCalls.map((call) => call.callId)],
     event: first.step.event,
+    taskEvents: waiting.flatMap((entry) => entry.tasks.map(() => entry.step.event)),
     taskToolCalls,
     tasks,
   };
+}
+
+/** Whether the runtime still runs a call that keeps the model from running. */
+export function waitsInForeground(state: SessionStateMap | undefined): boolean {
+  const waiting = runtimeWait(state);
+  if (waiting === undefined) return false;
+  const background = new Set(
+    waiting.batches.flatMap((batch) => (batch.background ? batch.callIds : [])),
+  );
+  return waiting.callIds.some((callId) => !background.has(callId));
 }
 
 /** The suspended step whose approval `interactionId` names. */
@@ -175,11 +211,20 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
       .filter(
         (row) =>
           row.origin === undefined &&
-          interactionOwner(view.projection.view, row).taskId === undefined &&
+          ownedBySession(view.projection.view, row) &&
           !view.relayedRequestIds.has(row.interactionId),
       )
       .map((row) => row.interactionId),
   );
+}
+
+/**
+ * Whether the session itself asked `row`: no task did, or a background program's task, whose
+ * calls the session's own steps make.
+ */
+export function ownedBySession(tables: SessionProjection["view"], row: InteractionRow): boolean {
+  const { taskId } = interactionOwner(tables, row);
+  return taskId === undefined || tables.tasks[taskId]?.name === EXECUTE_TOOL_NAME;
 }
 
 /**

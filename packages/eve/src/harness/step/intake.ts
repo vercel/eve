@@ -1,3 +1,4 @@
+import { programsOf } from "#harness/session-machine/programs.js";
 import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
 import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
@@ -18,6 +19,7 @@ import {
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
 import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine/runs.js";
 import { activeTurnId, parkedCallsAnswered, runtimeWait } from "#harness/session-machine/view.js";
+import { stepCallIds } from "#harness/session-machine/suspended-steps.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
@@ -50,16 +52,41 @@ export async function settleRuntimeWork(
     const { delegatedUsage: _usage, ...rest } = input;
     return { endsTurn: false, input: rest, waited: false };
   }
-  const ready = resolveRuntimeActionResultsForCallIds({
-    pendingCallIds: runtime.callIds,
-    results: input?.runtimeActionResults ?? [],
-  });
-  if (ready === undefined) return undefined;
+  // Each program's batch settles on its own, so a background program resumes while the model's
+  // calls still run. Every other call settles with the rest, as one.
+  const arrived = input?.runtimeActionResults ?? [];
+  const batched = new Set(runtime.batches.flatMap((batch) => batch.callIds));
+  const others = runtime.callIds.filter((callId) => !batched.has(callId));
+  const groups = [others, ...runtime.batches.map((batch) => batch.callIds)].map((pendingCallIds) =>
+    pendingCallIds.length === 0
+      ? []
+      : resolveRuntimeActionResultsForCallIds({ pendingCallIds, results: arrived }),
+  );
+  const othersRun = groups[0] === undefined;
+  const ready = groups.flatMap((group) => group ?? []);
+  if (ready.length === 0) {
+    // Without a program, calls that still run hold the step: input queued behind them waits.
+    // With one, the step goes on, since a new message moves it to the background and a
+    // background program's approval takes its answer, while those calls keep the model waiting.
+    if (othersRun && programsOf(step.view().turn).length === 0) return undefined;
+    await recordLateSpend(step, input?.delegatedUsage, new Set());
+    if (input === undefined) return { endsTurn: false, input, waited: false };
+    const { delegatedUsage: _spent, runtimeActionResults: _none, ...rest } = input;
+    return { endsTurn: false, input: rest, waited: false };
+  }
   const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
   const catalog = await stepCatalog(step);
-  const results = await runtimeResultCalls(ready, catalog);
+  // A program reads each call's own output, never its projection for the model.
+  const programCalls = new Set(
+    step
+      .view()
+      .turn.suspended.flatMap((parked) =>
+        parked.program === undefined ? [] : [...stepCallIds(parked)],
+      ),
+  );
+  const results = await runtimeResultCalls(ready, catalog, programCalls);
   const staged = await stageToolResultMedia([
     { role: "tool", content: results.map(({ part }) => part) },
   ]);
@@ -82,9 +109,12 @@ export async function settleRuntimeWork(
   // one of them ends the turn. A provider-run call's outcome keeps the model in the loop. A call
   // that ran before the step parked ends the turn through the step's `endsTurn` once it commits.
   const settledIds = new Set(results.map(({ part }) => part.toolCallId));
+  // A program's batch is no response: it neither ends the turn nor keeps a response from it.
+  const responses = suspended.filter((parked) => parked.program === undefined);
   const endsTurn =
-    suspended.length > 0 &&
-    parkedCallsAnswered(suspended, settledIds) &&
+    !othersRun &&
+    responses.length > 0 &&
+    parkedCallsAnswered(responses, settledIds) &&
     (await callsEndTurn(
       results.map(({ part, result }) => ({
         failed: result.isError === true,

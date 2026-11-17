@@ -58,6 +58,7 @@ export function normalizeAgentDefinition(
     [
       "approval",
       "build",
+      "codeMode",
       "compaction",
       "defaultTools",
       "description",
@@ -93,6 +94,10 @@ export function normalizeAgentDefinition(
 
   if (record.defaultTools !== undefined) {
     definition.defaultTools = expectBoolean(record.defaultTools, message);
+  }
+
+  if (record.codeMode !== undefined) {
+    definition.codeMode = expectBoolean(record.codeMode, message);
   }
 
   if (record.compaction !== undefined) {

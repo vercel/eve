@@ -38,8 +38,6 @@ Ask them the other way round and you'll match the deliverable to a specialist an
 
 When there is an order, run it: call the first, wait, and put what it produced into the second's brief, including any artifact id. Don't brief both in parallel and hope they agree. Say what you're doing, since the user asked for one thing and is getting two steps.
 
-When you can write every brief up front, apart from what the earlier step hands back, `workflow` runs the whole chain as one program. Call the specialists one at a time instead when you need to read the first result before you know what the second step should be.
-
 A subagent starts in a fresh session and works from its `message` alone, so pack that message with everything it needs:
 
 - what you want produced, and what it's for

@@ -79,6 +79,19 @@ describe("buildAgentInfoResponse", () => {
     );
   });
 
+  it("reports code mode, which evals read to know the agent has eve__execute", async () => {
+    const { manifest } = await compileFromMemory({
+      agent: { codeMode: true, model: "openai/gpt-5.4" },
+      model: "openai/gpt-5.4",
+    });
+    const response = buildAgentInfoResponse(
+      { manifest, schedules: [] },
+      { gatewayCredentials: { apiKey: false, oidc: false }, mode: "production" },
+    );
+
+    expect(AgentInfoResultSchema.parse(response).agent.codeMode).toBe(true);
+  });
+
   it("reports a memory", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",

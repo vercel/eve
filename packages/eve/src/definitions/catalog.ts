@@ -1,14 +1,17 @@
 import type { OfferedCatalogTools } from "#context/keys.js";
-import { catalogReach, catalogTools } from "#execution/catalog/catalog-tools.js";
+import { catalogReach, catalogTools, executeTool } from "#execution/catalog/catalog-tools.js";
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import { type Callable, callableOf } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
+import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { type Definition, type DefinitionContext, once } from "./definition.js";
 
 /**
  * eve's catalog tools, `eve__search`, `eve__tool`, and `eve__skill`, each where what the step can
- * run reaches it, after every tool of the step's. `eve__search` announces what the catalog holds,
- * and `eve__skill` the dynamic skills. It arranges: what it adds reads every tool before it.
+ * run reaches it, after every tool of the step's, and then `eve__execute` for an agent with code
+ * mode on. `eve__search` announces what the catalog holds, and `eve__skill` the dynamic skills.
+ * It arranges: what it adds reads every tool before it.
  */
 export const catalog: Definition = {
   contribute: (ctx) => {
@@ -29,13 +32,17 @@ export const catalog: Definition = {
         return {
           tools: async () => {
             const { callable, offered, table } = await reached();
+            // Code mode is the agent's static setting, so the tool is in every step's list or none.
+            const codeMode =
+              compiledBundleOf(ctx.container)?.resolvedAgent.config?.codeMode === true;
             const added = [
               ...catalogTools(callable, offered, {
-                catalog: catalogAnnouncements(callable),
+                catalog: catalogAnnouncements(callable, { codeMode }),
                 skills: dynamicSkillAnnouncements(
                   [...callable.skills.values()].filter(({ source }) => source !== undefined),
                 ),
               }),
+              ...(codeMode ? [[EXECUTE_TOOL_NAME, executeTool()] as const] : []),
             ].filter(([name]) => !table.entries.has(name));
             return { ...table, entries: new Map([...table.entries, ...added]) };
           },

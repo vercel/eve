@@ -2,7 +2,12 @@ import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { type AlsContext, contextStorage } from "#context/container.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory } from "#harness/compaction/step.js";
-import { readTaskTable, takeTaskResults, writeTaskTable } from "#execution/tasks/table.js";
+import {
+  readTaskTable,
+  takeTaskResults,
+  tasksWithResults,
+  writeTaskTable,
+} from "#execution/tasks/table.js";
 import { runModelStep } from "#harness/model-call/run.js";
 import { withUsageSink } from "#harness/usage-sink.js";
 import type { Publish } from "#harness/session-machine/commit.js";
@@ -22,6 +27,8 @@ import {
   withoutTurnInput,
 } from "#harness/hitl/index.js";
 import { blocked, hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { dropCancelledPrograms, moveToBackground, runProgramStep } from "#harness/program-step.js";
+import { programsOf, runnableProgram } from "#harness/session-machine/programs.js";
 import {
   clear,
   controlDeliveryFor,
@@ -150,6 +157,26 @@ export function createKernel(config: KernelConfig): StepFn {
     if (hookFailure !== undefined) return hookFailure;
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
+    // A program whose calls all have results runs before anything else the turn holds: it is the
+    // step's whole work. A new message goes first instead: each unfinished program moves to the
+    // background, where it keeps running as a task, and the model reads the message.
+    const steered = turn.messages.length > 0 || step.view().turn.queued?.message !== undefined;
+    const turnId = activeTurnIdOf(step.view().projection);
+    if (steered) {
+      await moveProgramsToBackground(step);
+    } else {
+      const program = runnableProgram(step.view().turn, turnId);
+      // A background program's steps run between the model's: the model goes first while it
+      // has something to read and nothing keeps it from running.
+      if (
+        program !== undefined &&
+        (program.background === undefined ||
+          blocked(step.view(), step.session.state) ||
+          !modelReadsNext(step))
+      ) {
+        return runProgramStep(step, program);
+      }
+    }
     if (blocked(step.view(), step.session.state)) return park(step);
     // Read input held behind approved calls before the model can ask for more work. The step's
     // own input waits as this step prepared it, its attachments already staged. A provider tool's
@@ -164,6 +191,10 @@ export function createKernel(config: KernelConfig): StepFn {
     // working task holds the turn open until it settles.
     const endsTurn = runtime.endsTurn || committedEndingStep(step.view(), ending);
     if (endsTurn && turn.messages.length === 0 && !hasQueuedTurnInput(step.view())) {
+      // A background program that can run does, before the turn waits on its task.
+      if (runnableProgram(step.view().turn, turnId) !== undefined) {
+        return { next: step.runStep, session: step.session };
+      }
       const workingTasks = workingTaskIds(step.session);
       if (workingTasks.length > 0) {
         return {
@@ -183,6 +214,25 @@ export function createKernel(config: KernelConfig): StepFn {
   return runStep;
 }
 
+/** Whether the model has something to read: its calls' results, queued input, or a task's result. */
+function modelReadsNext(step: Step): boolean {
+  return (
+    step.session.history.at(-1)?.role === "tool" ||
+    hasQueuedTurnInput(step.view()) ||
+    tasksWithResults(readTaskTable(step.session.state)).length > 0
+  );
+}
+
+/** Each unfinished program of the open turn moves to the background, where it runs as a task. */
+async function moveProgramsToBackground(step: Step): Promise<void> {
+  const turnId = activeTurnIdOf(step.view().projection);
+  for (const program of programsOf(step.view().turn)) {
+    if (program.background === undefined && program.event.turnId === turnId) {
+      await moveToBackground(step, program);
+    }
+  }
+}
+
 /** A stage's result when the step ends there. */
 interface Ended {
   readonly ended: StepResult;
@@ -194,6 +244,8 @@ interface Ended {
  */
 async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
   const runtime = await settleRuntimeWork(step, input);
+  // A task `eve__task_cancel` or the turn's end cancelled takes its program with it.
+  await dropCancelledPrograms(step);
   if (runtime === undefined) return { ended: { next: null, session: step.session } } as Ended;
   await step.apply(openDeferredApprovals(step.view()));
   return runtime;
@@ -225,7 +277,15 @@ async function answers(
     input = withoutTurnInput(input);
     message = undefined;
   }
-  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+  // A new message doesn't wait for a program's calls: the program moves to the background.
+  if (message !== undefined) await moveProgramsToBackground(step);
+  // A program that can run doesn't wait behind what its turn still asks a person.
+  const program = runnableProgram(step.view().turn, activeTurnIdOf(step.view().projection));
+  if (
+    decided.approved.length === 0 &&
+    program === undefined &&
+    blocked(step.view(), step.session.state)
+  ) {
     await step.apply(queueInput(step.view(), compactInput(input)));
     return { ended: await park(step) } as Ended;
   }

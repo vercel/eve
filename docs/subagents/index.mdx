@@ -47,11 +47,11 @@ Rules:
 
 To choose how the parent model sees the subagent, set `tool` in its `agent.ts`:
 
-| `tool`       | The parent model                                                                                                                                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| omitted      | Sees it as a tool.                                                                                                                                                                                                   |
-| `"deferred"` | Doesn't see it in its tool list, but can find it with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and call it with `eve__tool`. Use this when a parent has many specialists. |
-| `false`      | Can't call it. An authored [workflow tool](/docs/tools/workflows) can still call it with `ctx.agent("researcher", ...)`.                                                                                             |
+| `tool`       | The parent model                                                                                                                                                                                                                                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| omitted      | Sees it as a tool.                                                                                                                                                                                                                                                                                                                                                  |
+| `"deferred"` | Doesn't see it in its tool list, but can find it with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and call it with `eve__tool`. An [`eve__execute`](/docs/concepts/built-in-tools#agents-in-programs) program can call it too. Use this when a parent has many specialists, or when only programs should call the subagent. |
+| `false`      | Can't call it, directly or from a program. An authored [workflow tool](/docs/tools/workflows) can still call it with `ctx.agent("researcher", ...)`.                                                                                                                                                                                                                |
 
 A tool file with the same name, such as `agent/tools/researcher.ts`, collides with the subagent and fails the build. To wrap the subagent in your own tool, set the subagent's `tool: false` and author the tool; `ctx.agent("researcher", ...)` still reaches the subagent. To hide it completely, export `disableTool()` from that path instead. When a dynamic subagent and a dynamic tool collide, eve logs the collision and skips that result.
 
@@ -164,7 +164,7 @@ See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels ta
 
 The subagent tool's description is the subagent's `description`, plus a note that the child doesn't see the conversation and that `taskId` continues a task. The model, approvals, logs, and evals all use the tool's name, such as `researcher` or `crm__reviewer`.
 
-To require structured output, call the child from an authored workflow tool with [`ctx.agent(name)`](./tools/workflows#delegate-work-ctxagent) and pass `outputSchema` to `send()`.
+To require structured output, call the child from an authored workflow tool with [`ctx.agent(name)`](./tools/workflows#delegate-work-ctxagent) and pass `outputSchema` to `send()`. The model can also pass `outputSchema` beside `message` when it calls the child from an [`eve__execute`](/docs/concepts/built-in-tools#agents-in-programs) program.
 
 Approvals, questions, and sign-ins from a child appear on the parent session, so the parent's channel can prompt for them. On text-only channels, typing an option of the first open prompt, such as `approve` or `deny`, answers that prompt; each message answers one prompt. A tool approval stays open until the child accepts the answer, because the child's approval policy decides who may answer.
 

@@ -24,10 +24,6 @@ import {
 import type { InternalToolDefinition, ToolExecuteFn } from "#tools/definition.js";
 import { readToolBehavior, type CompiledToolBehavior } from "#tools/behavior.js";
 import {
-  readWorkflowProgramOptions,
-  type WorkflowProgramOptions,
-} from "#tools/workflow-program-input.js";
-import {
   serializeInputSchema,
   serializeModelInputSchema,
   serializeOutputSchema,
@@ -54,7 +50,6 @@ type NormalizedAuthoredTool = Readonly<
     /** The input schema as eve sends it to a model, from the live authored schema. */
     readonly modelInputSchema: JsonObject;
     readonly workflow?: CompiledWorkflowEntry;
-    readonly workflowProgram?: WorkflowProgramOptions;
   }
 >;
 
@@ -164,7 +159,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (workflow?.entryPoint === "serve") assertNoOwnTaskIdInput(inputSchema, message);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
-  const workflowProgram = readWorkflowProgramOptions(value);
   // A workflow tool's entry point is its executor; the runtime loads the module for its hooks.
   const hasExecute = workflow !== undefined || record.execute !== undefined;
   if (!hasExecute && behavior?.handling?.kind !== "dispatch") {
@@ -195,9 +189,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   };
   if (behavior !== undefined) {
     definition.behavior = behavior;
-  }
-  if (workflowProgram !== undefined) {
-    definition.workflowProgram = workflowProgram;
   }
   if (workflow !== undefined) {
     definition.workflow = workflow;

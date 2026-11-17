@@ -108,6 +108,8 @@ export function catalogBundle(
   input: {
     /** The agent's `approval` from `agent.ts`. */
     readonly approval?: ApprovalPolicy;
+    /** The agent's `codeMode` from `agent.ts`. */
+    readonly codeMode?: boolean;
     /** The connections the agent declares. */
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
@@ -127,7 +129,7 @@ export function catalogBundle(
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
-      config: { approval: input.approval, name: "test-agent" },
+      config: { approval: input.approval, codeMode: input.codeMode, name: "test-agent" },
       connections: input.connections ?? [],
       definitions: [],
       instructions: [],
@@ -264,6 +266,7 @@ export function connectionTool(
 export async function catalogContext(
   input: {
     readonly approval?: ApprovalPolicy;
+    readonly codeMode?: boolean;
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
     readonly session?: { readonly rootSessionId?: string };
@@ -285,6 +288,7 @@ export async function catalogContext(
     fromCompiledBundle(
       catalogBundle({
         approval: input.approval,
+        codeMode: input.codeMode,
         connections: input.connections?.map((connection) => connection.definition),
         dynamicSubagents: input.dynamicSubagents,
         skills: input.skills,

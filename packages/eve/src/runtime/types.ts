@@ -23,7 +23,6 @@ import type {
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import type { JsonValue } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -180,8 +179,6 @@ export type ResolvedToolDefinition = Readonly<
      * rehydrated before entering this runtime-owned definition.
      */
     readonly inputSchema: ToolSchema | null;
-    /** Framework-owned input projected before a workflow tool executor starts. */
-    readonly executeInput?: (input: unknown) => JsonValue;
     /** Presentation projected from tool lifecycle values. */
     readonly label?: import("#tools/definition.js").InternalToolLabelDefinition | false;
     /**

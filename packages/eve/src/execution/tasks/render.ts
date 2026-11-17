@@ -82,6 +82,11 @@ export function renderTaskReceipt(task: {
   return `${started} To send it another message, call ${task.tool} again with taskId ${task.id}.`;
 }
 
+/** The receipt an `eve__execute` call gets when a new message moves its program to the background. */
+export function renderProgramTaskReceipt(taskId: string): string {
+  return `A new message arrived, so this program keeps running in the background as task ${taskId}. Its result will arrive in a <task_result> message.`;
+}
+
 /** The receipt for a call that reaches a resumable task by its `taskId`. */
 export function renderTaskSentReceipt(taskId: string): string {
   return `Sent to task ${taskId}. Its reply will arrive in a <task_result> message.`;

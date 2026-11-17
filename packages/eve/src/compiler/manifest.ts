@@ -61,7 +61,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 56;
+export const COMPILED_AGENT_MANIFEST_VERSION = 57;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -236,9 +236,6 @@ export type CompiledToolDefinition = InternalToolDefinition &
     /** The input schema as eve sends it to a model; absent for provider-managed tools. */
     readonly modelInputSchema?: JsonObject;
     readonly requiresApproval: boolean;
-    readonly workflowProgram?: {
-      readonly maxSubagents: number;
-    };
   };
 
 /** The kinds of file eve asks at runtime, each a definition of the agent's. */

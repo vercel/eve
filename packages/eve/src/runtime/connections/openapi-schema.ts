@@ -57,6 +57,32 @@ export function buildInputSchema(
   return schema;
 }
 
+/**
+ * Builds the JSON Schema of an operation's result, `{ status, statusText, body }`, with `body`
+ * typed as the operation's success response. A response with another status returns the same
+ * result around whatever body the server sent. The component schemas `body` refers to sit under
+ * `$defs`.
+ */
+export function buildOutputSchema(
+  body: unknown,
+  defs: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const schema: Record<string, unknown> = {
+    type: "object",
+    properties: {
+      status: { type: "integer" },
+      statusText: { type: "string" },
+      body,
+      location: { type: "string" },
+    },
+    required: ["status", "statusText", "body"],
+  };
+  if (Object.keys(defs).length > 0) {
+    schema.$defs = defs;
+  }
+  return schema;
+}
+
 /** Resolves a single `$ref` node one hop; returns the node unchanged otherwise. */
 export function deref(document: Record<string, unknown>, node: Record<string, unknown>): unknown {
   if (typeof node.$ref !== "string") {

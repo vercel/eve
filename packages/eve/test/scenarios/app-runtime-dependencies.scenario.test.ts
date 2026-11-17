@@ -400,18 +400,15 @@ process.stdout.write(JSON.stringify(globalThis.__fixtureInstrumentationDep ?? nu
   });
 });
 
-describe("the workflow factory", () => {
+describe("an agent with code mode on", () => {
   let outputDir: string;
 
   beforeAll(async () => {
     const appRoot = await writeApp({
-      label: "workflow-factory",
+      label: "code-mode",
       files: {
-        "agent/subagents/researcher/agent.ts":
-          'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Research.", model: "openai/gpt-5.4-mini" });\n',
-        "agent/subagents/researcher/instructions.md": "Research the request.\n",
-        "agent/tools/workflow.ts":
-          'import { workflow } from "eve/tools/workflow";\n\nexport default workflow({ agents: ["researcher"], maxSubagents: 6 });\n',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ codeMode: true, model: "openai/gpt-5.4-mini" });\n',
       },
     });
     outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);

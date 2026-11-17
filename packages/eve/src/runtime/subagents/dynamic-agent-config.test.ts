@@ -17,6 +17,21 @@ describe("normalizeDynamicSubagentAgentConfig", () => {
     );
   });
 
+  it("rejects a selected codeMode", async () => {
+    await expect(
+      normalizeDynamicSubagentAgentConfig({
+        modelMetadata: undefined as never,
+        name: "researcher",
+        state: {} as never,
+        value: defineAgent({
+          codeMode: true,
+          description: "Perform deep research.",
+          model: "openai/gpt-5.5",
+        }),
+      }),
+    ).rejects.toThrow('The "codeMode" field cannot be selected at runtime.');
+  });
+
   it("rejects a selected limits.sessionUsage", async () => {
     await expect(
       normalizeDynamicSubagentAgentConfig({

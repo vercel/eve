@@ -51,14 +51,22 @@ describe("tool-name assertions", () => {
       "eve__skill",
       "Calls through eve__skill are reported as skill loads; use t.calledSkill(name).",
     ],
-    [
-      "eve__execute",
-      "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.calledSkill(name).",
-    ],
   ])("always reject %s, which no call is reported under", (name, message) => {
     expect(() => assertionsFor(undefined).notCalledTool(name)).toThrow(message);
     expect(() => assertionsFor({ dynamic: true, static: [name] }).calledTool(name)).toThrow(
       message,
+    );
+  });
+
+  it("accept eve__execute only for an agent with code mode on, or one whose tools are unknown", () => {
+    const tools = { dynamic: true, static: ["eve__execute"] };
+
+    expect(() =>
+      assertionsFor({ ...tools, codeMode: true }).calledTool("eve__execute"),
+    ).not.toThrow();
+    expect(() => assertionsFor(undefined).toolOrder(["lookup", "eve__execute"])).not.toThrow();
+    expect(() => assertionsFor(tools).notCalledTool("eve__execute")).toThrow(
+      "The agent doesn't have code mode on, so no call is reported under eve__execute. Set codeMode: true in agent.ts to add eve__execute.",
     );
   });
 });

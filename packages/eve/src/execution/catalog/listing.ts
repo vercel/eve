@@ -1,6 +1,11 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
-import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import {
+  CALL_TOOL_NAME,
+  EXECUTE_TOOL_NAME,
+  SEARCH_TOOL_NAME,
+  SKILL_TOOL_NAME,
+} from "#protocol/catalog-tools.js";
 
 import { compareCodeUnits } from "./rank.js";
 import type { Callable } from "./step-catalog.js";
@@ -44,14 +49,23 @@ interface CatalogListing {
  * Connection tools stay unlisted, since listing them needs a network call and
  * maybe a sign-in. An empty catalog the model never heard of has nothing to announce.
  */
-export function catalogAnnouncements(catalog: Listed): Readonly<Record<string, Announcement>> {
+export function catalogAnnouncements(
+  catalog: Listed,
+  options: {
+    /** The agent has code mode on, which the listing's words for calling a tool then say. */
+    readonly codeMode?: boolean;
+  } = {},
+): Readonly<Record<string, Announcement>> {
   const current = listCatalog(catalog);
   const reachable = reachableNames(catalog);
+  const codeMode = options.codeMode === true;
   return {
     [ANNOUNCEMENT_KEY]: {
       initial: EMPTY_LISTING,
+      // Code mode is fixed for each deployment, so it changes the words, never the record.
       value: JSON.stringify(current),
-      render: (previous) => renderCatalogAnnouncement(parseListing(previous), current, reachable),
+      render: (previous) =>
+        renderCatalogAnnouncement(parseListing(previous), current, reachable, codeMode),
     },
   };
 }
@@ -133,30 +147,37 @@ function renderCatalogAnnouncement(
   previous: CatalogListing | undefined,
   current: CatalogListing,
   reachable: ReadonlySet<string>,
+  codeMode: boolean,
 ): string {
   if (isEmpty(current)) {
     return `The catalog changed. It is empty now: ${SEARCH_TOOL_NAME} finds nothing.`;
   }
-  if (previous === undefined || isEmpty(previous)) return renderListing(current);
+  if (previous === undefined || isEmpty(previous)) return renderListing(current, codeMode);
   const gone = [
     ...previous.namespaces.items,
     ...previous.connections.items.map(({ name }) => name),
   ].filter((name) => !reachable.has(name));
   return [
     "The catalog changed.",
-    renderListing(current),
+    renderListing(current, codeMode),
     ...(gone.length > 0 ? [`No longer available: ${gone.join(", ")}`] : []),
   ].join("\n");
 }
 
-function renderListing({ connections, kinds, namespaces }: CatalogListing): string {
+function renderListing(
+  { connections, kinds, namespaces }: CatalogListing,
+  codeMode: boolean,
+): string {
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
+  const several = codeMode
+    ? `, or call several from ${EXECUTE_TOOL_NAME} as \`tools.<name>(input)\``
+    : "";
   const call = !kinds.includes("skills")
-    ? `Call them with ${CALL_TOOL_NAME}({ name, input }).`
+    ? `Call them with ${CALL_TOOL_NAME}({ name, input })${several}.`
     : kinds.length === 1 && connections.items.length === 0
       ? `Load them with ${SKILL_TOOL_NAME}({ name }).`
-      : `Call tools with ${CALL_TOOL_NAME}({ name, input }) and load skills with ${SKILL_TOOL_NAME}({ name }).`;
+      : `Call tools with ${CALL_TOOL_NAME}({ name, input })${several}${codeMode ? "," : ""} and load skills with ${SKILL_TOOL_NAME}({ name }).`;
   const search = ` Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web.`;
   const lines = [`${subject} than are loaded here.${search} ${call}`];
   if (namespaces.items.length > 0) {

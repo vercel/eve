@@ -203,6 +203,7 @@ function createResolvedAgentConfig(
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     approval?: ApprovalPolicy;
+    codeMode?: boolean;
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
@@ -218,6 +219,9 @@ function createResolvedAgentConfig(
 
   if (manifest.config.defaultTools !== undefined) {
     config.defaultTools = manifest.config.defaultTools;
+  }
+  if (manifest.config.codeMode !== undefined) {
+    config.codeMode = manifest.config.codeMode;
   }
   if (approval !== undefined) {
     config.approval = approval;

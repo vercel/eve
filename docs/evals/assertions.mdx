@@ -53,6 +53,8 @@ attached.messageIncludes("Sunny");
 
 A call through [`eve__tool`](../concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported under the name and input of the tool it reaches, such as `linear__list_issues`. Assert on that tool. `eve__search` calls count toward `t.usedNoTools()` and `t.maxToolCalls(n)`; skill loads don't.
 
+With [code mode](../concepts/built-in-tools#eve__execute) on, each call a program makes is reported under its own name and input, so `t.calledTool("send_email")` matches a call from a program. The program's own call is reported as `eve__execute`, and `t.calledTool("eve__execute")` asserts on it. Both count toward `t.usedNoTools()` and `t.maxToolCalls(n)`. For an agent without code mode, an assertion on `eve__execute` throws a `TypeError` that says to set `codeMode: true`.
+
 The tool-name assertions and `turn.requireToolCall` throw a `TypeError` for `eve__tool`, `eve__skill`, and built-in names such as `load_skill`. The error says what to assert instead. eve accepts a name like `load_skill` when the root agent declares a tool by that name or has a dynamic tool resolver.
 
 ## Assert on session state with selectors

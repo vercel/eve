@@ -65,7 +65,14 @@ import {
 } from "#harness/hitl/sign-ins.js";
 import { forwardedFrom, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
-import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
+import type { ApprovedCall, ProgramCallResult, SuspendedStep, TurnState } from "./state.js";
+import {
+  isProgramCall,
+  programOf,
+  programsOf,
+  resumePrograms,
+  withoutPrograms,
+} from "./programs.js";
 import { activeTurnId, answeredCallIds, turnPosition, type SessionView } from "./view.js";
 import {
   isComplete,
@@ -222,13 +229,21 @@ export function fail(
     readonly usage?: Usage;
   },
 ): Transition {
-  // The calls a sign-in stopped never run: the model reads that they stopped.
-  const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
+  // The calls a sign-in stopped never run: the model reads that they stopped. Neither does a
+  // program go on past its turn: the writer closes its calls with the turn.
+  const programs = new Set(programsOf(view.turn).map(({ callId }) => callId));
+  const stopped = view.turn.suspended.filter(
+    (step) =>
+      (step.approved?.length ?? 0) > 0 ||
+      step.program !== undefined ||
+      [...stepCallIds(step)].some((callId) => programs.has(callId)),
+  );
   const error = errorInfoOf(failure);
   const turnId = activeTurnIdOf(view.projection);
   // A terminal failure ends the session, which ends the turn with it, in one commit.
   const runId = turnId === undefined ? undefined : openRunOf(view.projection, turnId);
   const events = [
+    ...programTasksEnded(view, programs, "turn-ended"),
     ...(runId === undefined
       ? []
       : runSettledFacts({ runId, outcome: "failed", error, usage: failure.usage })),
@@ -240,7 +255,7 @@ export function fail(
           outcome: "failed",
         })),
   ];
-  return transition({ ...commitSteps(view.turn, stopped, cancelledTranscript), events });
+  return transition({ ...commitSteps(view.turn, stopped, () => CANCELLED_CALL_RESULT), events });
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +343,7 @@ export function discardAttempt(
  */
 export function suspendStep(
   view: SessionView,
-  step: Pick<SuspendedStep, "endsTurn" | "event" | "messages" | "tasks">,
+  step: Pick<SuspendedStep, "endsTurn" | "event" | "messages" | "program" | "tasks">,
 ): Transition {
   return transition({ events: [], turn: suspend(view.turn, { ...step, requests: [] }) });
 }
@@ -479,6 +494,27 @@ export function endTask(
       taskId: input.taskId,
     }),
   ]);
+}
+
+/**
+ * A background program returned or failed: its `eve__execute` call settles with the task's
+ * outcome, the task ends in the same commit, and the program leaves the turn.
+ */
+export function endBackgroundProgram(
+  view: SessionView,
+  input: {
+    readonly callId: string;
+    readonly outcome: TaskCallOutcome;
+    readonly taskId: string;
+  },
+): Transition {
+  return transition({
+    events: [
+      ...settleTask(view, { calls: [{ callId: input.callId }], outcome: input.outcome }).events,
+      ...endTask(view, { outcome: input.outcome, taskId: input.taskId }).events,
+    ],
+    turn: withoutPrograms(view.turn, new Set([input.callId])),
+  });
 }
 
 /**
@@ -1009,6 +1045,11 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
     )
     .map((row) => withdrawInteraction(row.interactionId, "Cancelled.", "interrupted"));
   events.push(
+    ...programTasksEnded(
+      view,
+      new Set(programsOf(view.turn).map(({ callId }) => callId)),
+      "turn-cancelled",
+    ),
     ...turnSettled(
       projection,
       { cause: input.cause, outcome: "cancelled" },
@@ -1018,7 +1059,7 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
   );
   const { queued: _queued, ...turn } = view.turn;
   return transition({
-    ...commitSteps(turn, stopped, cancelledTranscript),
+    ...commitSteps(turn, stopped, () => CANCELLED_CALL_RESULT),
     events,
     signIns: [],
   });
@@ -1029,11 +1070,6 @@ function unreadSettled(view: SessionView): SessionEvent[] {
   return (view.turn.queued?.deliveries ?? [])
     .filter(({ deliveryId }) => tables.deliveries[deliveryId]?.status === "admitted")
     .map(({ deliveryId }) => fact("delivery.settled", { deliveryId, outcome: "ignored" }));
-}
-
-/** A stopped step's response, each call without a result answered as cancelled. */
-function cancelledTranscript(step: SuspendedStep): ModelMessage[] {
-  return stoppedTranscript(step, () => CANCELLED_CALL_RESULT);
 }
 
 /**
@@ -1049,28 +1085,136 @@ export function stopInterruptedSteps(
     readonly settledInteractions: ReadonlySet<string>;
   },
 ): Transition {
+  // A program's step runs again as the same `eve__execute` call, so that the attempt started the
+  // call stops nothing; a batch of its calls stops like a response, and resumes the program with
+  // what the stream says of each call.
+  const programs = programsOf(view.turn);
+  const runs = (callId: string) => programs.some((program) => program.callId === callId);
   const stopped = view.turn.suspended.filter(
     (step) =>
       step.requests.some((request) => input.settledInteractions.has(request.interactionId)) ||
-      [...stepCallIds(step)].some((callId) => input.calls.get(callId)?.started === true),
+      [...stepCallIds(step)].some(
+        (callId) => !runs(callId) && input.calls.get(callId)?.started === true,
+      ),
   );
+  const { history, turn } = commitSteps(
+    view.turn,
+    stopped,
+    (callId) => interruptedCallResult(input.calls.get(callId)),
+    (callId) => interruptedProgramCall(input.calls.get(callId)),
+  );
+  // What the attempt published about the calls of the programs that go on: the step that runs
+  // one again replays these instead of running the calls a second time.
+  const recovered = programsOf(turn).map((program) => {
+    const calls = [...input.calls].filter(([callId]) => isProgramCall(program.callId, callId));
+    if (calls.length === 0) return program;
+    return {
+      ...program,
+      recovered: {
+        ...program.recovered,
+        ...Object.fromEntries(
+          calls.map(([callId, { error, name, outcome, output, started }]) => [
+            callId,
+            defined({ error, name, outcome, output, started }),
+          ]),
+        ),
+      },
+    };
+  });
+  // A program that stops here took its response with it. The task it had just become, when the
+  // attempt was moving it to the background, ends with it.
+  const kept = new Set(programsOf(turn).map(({ callId }) => callId));
+  const dropped = new Set(programs.flatMap(({ callId }) => (kept.has(callId) ? [] : [callId])));
   return transition({
-    ...commitSteps(view.turn, stopped, (step) =>
-      stoppedTranscript(step, (callId) => interruptedCallResult(input.calls.get(callId))),
-    ),
-    events: [],
+    events: programTasksEnded(view, dropped, "turn-ended"),
+    history,
+    turn: recovered.length === 0 ? turn : { ...turn, programs: recovered },
   });
 }
 
+/**
+ * The tasks of the programs in `callIds` end as cancelled, by what the stream says of them. A
+ * step interrupted while it moved a program to the background published the task before its
+ * record was saved, so the task table can't be what ends it.
+ */
+function programTasksEnded(
+  view: SessionView,
+  callIds: ReadonlySet<string>,
+  reason: "turn-cancelled" | "turn-ended",
+): SessionEvent[] {
+  const tables = view.projection.view;
+  const outcome = { reason, status: "cancelled" } as const;
+  return Object.values(tables.tasks).flatMap((task) => {
+    const { callId } = task.startedBy;
+    if (task.status !== "running" || !callIds.has(callId)) return [];
+    const open = tables.calls[callId] !== undefined && tables.calls[callId].status !== "settled";
+    return [
+      ...settleTask(view, { calls: open ? [{ callId }] : [], outcome }).events,
+      ...endTask(view, { outcome, taskId: task.taskId }).events,
+    ];
+  });
+}
+
+/** What a program reads of a call an interrupted attempt published, by what it published. */
+export function interruptedProgramCall(call: InterruptedCall | undefined): ProgramCallResult {
+  switch (call?.outcome) {
+    case "completed":
+      // The stream holds the output in full, so the program gets the value it would have read.
+      return call.output === undefined
+        ? {
+            error: interruptedCallResult(call),
+            outcome: "abandoned",
+            status: "failed",
+          }
+        : { output: call.output, status: "completed" };
+    case "failed":
+      return { error: call.error ?? interruptedCallResult(call), status: "failed" };
+    case "rejected":
+      return {
+        error: call.error ?? interruptedCallResult(call),
+        outcome: "rejected",
+        status: "failed",
+      };
+    default:
+      return { error: interruptedCallResult(call), outcome: "abandoned", status: "failed" };
+  }
+}
+
+/**
+ * Steps leave the turn. A model response commits to history, each call without a result answered
+ * with `stoppedResultOf` it, and the programs its `eve__execute` calls ran end with it. A batch
+ * of a program's calls reaches no history: its results resume the program.
+ */
 function commitSteps(
   turn: TurnState,
   completed: readonly SuspendedStep[],
-  messages: (step: SuspendedStep) => readonly ModelMessage[] = (step) => step.messages,
+  stoppedResultOf?: (callId: string) => string,
+  stoppedProgramCall: (callId: string) => ProgramCallResult = (callId) => ({
+    error: stoppedResultOf?.(callId) ?? "This call did not run.",
+    outcome: "interrupted",
+    status: "failed",
+  }),
 ): { readonly history: HistoryChange; readonly turn: TurnState } {
   const removed = new Set(completed);
+  const responses = completed.filter((step) => step.program === undefined);
+  const batches = completed.filter((step) => step.program !== undefined);
+  const remaining = { ...turn, suspended: turn.suspended.filter((step) => !removed.has(step)) };
   return {
-    history: { append: completed.flatMap(messages) },
-    turn: { ...turn, suspended: turn.suspended.filter((step) => !removed.has(step)) },
+    history: {
+      append: responses.flatMap((step) =>
+        stoppedResultOf === undefined ? step.messages : stoppedTranscript(step, stoppedResultOf),
+      ),
+    },
+    // A program in the background outlives the response that made its call: the call was
+    // answered with its task's receipt.
+    turn: withoutPrograms(
+      resumePrograms(remaining, batches, stoppedProgramCall),
+      new Set(
+        responses
+          .flatMap((step) => [...stepCallIds(step)])
+          .filter((callId) => programOf(turn, callId)?.background === undefined),
+      ),
+    ),
   };
 }
 

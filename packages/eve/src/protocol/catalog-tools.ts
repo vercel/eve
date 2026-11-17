@@ -3,6 +3,8 @@ export const SEARCH_TOOL_NAME = "eve__search";
 export const CALL_TOOL_NAME = "eve__tool";
 /** Loads a skill by name. */
 export const SKILL_TOOL_NAME = "eve__skill";
+/** Runs a program that calls entries by name, for agents with code mode on. */
+export const EXECUTE_TOOL_NAME = "eve__execute";
 
 /**
  * The name an `eve__skill` call takes once it resolves inside the harness,

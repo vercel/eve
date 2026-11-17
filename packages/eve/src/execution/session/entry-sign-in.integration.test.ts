@@ -1,4 +1,5 @@
 // @linux-only: sign-in flow
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -12,7 +13,12 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { defineDynamic } from "#dynamic/definition.js";
+import { markMockModel } from "#internal/mock-model-identity.js";
+import { installWorkflowSandboxRuntime } from "#internal/nitro/host/workflow-sandbox-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
+import { defineAgent, type AgentDefinition } from "#public/definitions/agent.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
@@ -177,6 +183,76 @@ describe("workflowEntry sign-ins", () => {
       }
     });
   });
+
+  it("parks a program on a call that needs a sign-in, and resumes it with the call's result", async () => {
+    // As eve's host does for agents with code mode on.
+    installWorkflowSandboxRuntime();
+    const results: unknown[] = [];
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          const read = prompt.flatMap((message) =>
+            message.role === "tool"
+              ? message.content.flatMap((part) =>
+                  part.type === "tool-result" ? [part.output] : [],
+                )
+              : [],
+          );
+          if (read.length === 0) {
+            return toolCallStreamResult({
+              input: JSON.stringify({
+                code: 'const weather = await tools.get_weather({ city: "Lisbon" }); return weather.summary;',
+              }),
+              toolCallId: "program",
+              toolName: "eve__execute",
+            });
+          }
+          results.push(read.at(-1));
+          return textStreamResult("Checked.");
+        },
+        modelId: "program-sign-in",
+        provider: "eve-test",
+      }),
+    );
+    const { executions, runtime } = await createWeatherAuthRuntime(
+      "workflow-entry-auth-program",
+      defineAgent({
+        codeMode: true,
+        model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+      }),
+    );
+
+    await runtime.run(async () => {
+      const run = await startWeatherRun("http:workflow-entry-auth-program");
+      const stream = captureEvents(run);
+
+      try {
+        const beforeSignIn = await stream.nextUntil("sign-in", isSignInOpened);
+        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [weatherCallback(signInId(beforeSignIn))],
+        });
+        const afterSignIn = await stream.nextUntil("turn after sign-in", isTurnSettled);
+
+        // The program's call is the call that runs once the sign-in completes: the model wrote
+        // the program once and reads one result.
+        expect(executions()).toEqual([{ city: "Lisbon" }]);
+        expect(
+          filterEventsByType([...beforeSignIn, ...afterSignIn], "model.requested"),
+        ).toHaveLength(2);
+        expect(results).toEqual([
+          {
+            type: "json",
+            value: { calls: { completed: 1 }, result: "authorized with weather-token" },
+          },
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
 });
 
 function isSignInOpened(event: SessionStreamEvent): boolean {
@@ -202,7 +278,10 @@ interface WeatherAuthRuntime {
   readonly runtime: Awaited<ReturnType<typeof createTestRuntime>>;
 }
 
-async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
+async function createWeatherAuthRuntime(
+  agentName: string,
+  definition?: AgentDefinition,
+): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
   const executions: { city: string }[] = [];
   const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
@@ -272,7 +351,7 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
     sourceKind: "module",
   });
   const tools = [weatherTool("get_weather"), weatherTool("get_forecast")];
-  const runtime = await createTestRuntime({ agent: { name: agentName }, tools });
+  const runtime = await createTestRuntime({ agent: { definition, name: agentName }, tools });
   for (const tool of tools) {
     const manifestTool = runtime.manifest.tools.find((entry) => entry.name === tool.name);
     if (manifestTool === undefined) {

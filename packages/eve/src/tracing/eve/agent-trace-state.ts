@@ -54,6 +54,8 @@ export interface AgentActionTraceState {
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
   readonly context: SpanContext;
+  /** The call it runs inside, whose span is its parent in place of the attempt's. */
+  readonly ownerCallId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly stepIndex: number;

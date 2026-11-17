@@ -879,7 +879,8 @@ describe("slackChannel message status and guidance", () => {
 
   // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
   // hook runs, so `deferred` can only keep the rest of the turn quiet. A `hidden` tool sets
-  // `label: false`: it shows no status and doesn't end a deferred turn's quiet.
+  // `label: false`: it shows no status and doesn't end a deferred turn's quiet. A `nested` call is
+  // made inside the last call, as a program's are: its request, progress, and result set none.
   it.each<{
     name: string;
     request: () => Request;
@@ -926,6 +927,14 @@ describe("slackChannel message status and guidance", () => {
       status: "immediate",
       steps: ["turn", "model", "hidden", "model"],
       trace: "post:Thinking... turn:Thinking... model:Thinking... hidden model:Thinking...",
+    },
+    {
+      name: "immediate reply with a call made inside another",
+      request: threadReply,
+      status: "immediate",
+      steps: ["turn", "model", "tool", "nested", "model"],
+      trace:
+        "post:Thinking... turn:Thinking... model:Thinking... tool:Get weather nested model:Get weather",
     },
   ])("$name", async ({ request, status, steps = ["turn", "model", "tool", "model"], trace }) => {
     const edits: unknown[] = [];

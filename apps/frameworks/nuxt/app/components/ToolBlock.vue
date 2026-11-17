@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import type { EveToolPart } from "eve/vue";
+import type { EveMessagePart, EveToolPart } from "eve/vue";
 
 const props = defineProps<{
   part: EveToolPart;
+  /** The message's parts, to find the calls this call ran inside it. */
+  parts: readonly EveMessagePart[];
   canRespond: boolean;
 }>();
 
@@ -15,6 +17,14 @@ const emit = defineEmits<{
     }[],
   ];
 }>();
+
+// The calls this call ran, such as the calls of an `eve__execute` program.
+const nested = computed(() =>
+  props.parts.filter(
+    (other): other is EveToolPart =>
+      other.type === "tool" && other.parentCallId === props.part.callId,
+  ),
+);
 
 const interaction = computed(() => props.part.interaction?.request);
 const answer = computed(() => props.part.interaction?.answer);
@@ -162,5 +172,17 @@ const formattedOutput = computed(() => {
         }}</pre>
       </div>
     </div>
+  </div>
+
+  <!-- Outside the collapsed details, so a nested call waiting for approval stays in view. -->
+  <div v-if="nested.length > 0" class="ml-4 flex flex-col gap-2 border-l pl-4">
+    <ToolBlock
+      v-for="call in nested"
+      :key="call.callId"
+      :part="call"
+      :parts="parts"
+      :can-respond="canRespond"
+      @answers="emit('answers', $event)"
+    />
   </div>
 </template>

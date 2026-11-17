@@ -1,6 +1,12 @@
-import { runtimeWait, type SessionView, ownOpenRequestIds } from "#harness/session-machine/view.js";
+import {
+  type SessionView,
+  ownOpenRequestIds,
+  waitsInForeground,
+} from "#harness/session-machine/view.js";
 import type { HarnessStepInput, StepResult } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
+import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { runnableProgram } from "#harness/session-machine/programs.js";
 import type { Step } from "./context.js";
 
 // Where a step stops when nothing it holds can run. Every rule a step runs only changes the
@@ -44,7 +50,7 @@ export function hasQueuedTurnInput(view: SessionView): boolean {
 
 /** Whether anything open stops the turn from calling the model. */
 export function blocked(view: SessionView, state: Step["session"]["state"]): boolean {
-  return resumesOnPerson(view) || runtimeWait(state) !== undefined;
+  return resumesOnPerson(view) || waitsInForeground(state);
 }
 
 /**
@@ -54,6 +60,10 @@ export function blocked(view: SessionView, state: Step["session"]["state"]): boo
 export function park(step: Step): StepResult {
   const view = step.view();
   if (hasQueuedTurnInput(view) && !holdsMessages(view)) {
+    return { next: step.runStep, session: step.session };
+  }
+  // A program runs in the step after the one that saved it, whatever else the turn waits on.
+  if (runnableProgram(view.turn, activeTurnIdOf(view.projection)) !== undefined) {
     return { next: step.runStep, session: step.session };
   }
   if (resumesOnPerson(view))

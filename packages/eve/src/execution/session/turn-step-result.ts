@@ -39,6 +39,10 @@ export function resolveSessionStepResult(
   }
 
   if (stepResult.held?.kind === "tasks") {
+    // A background program's task works through calls the runtime runs: the turn waits on those,
+    // and on its other tasks beside them.
+    const calls = pausedOnCalls(stepResult.session);
+    if (calls !== undefined) return { action: "paused", ...calls, heldOnTasks: true, ...values };
     return { action: "paused", ...pausedOnTasks(stepResult.held.taskIds), ...values };
   }
   if (stepResult.held?.kind === "request") {

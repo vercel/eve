@@ -4,6 +4,7 @@ import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { stepCatalog } from "#definitions/step.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
+import { collectProgramWorkflowCalls, withOwnOutputs } from "#harness/program-calls.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
 import {
@@ -225,7 +226,9 @@ async function runApproved(
   const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
   const claimed = new Set<string>();
   for (const [parked, approvals] of byStep) {
-    const tools = await toolsOf(step);
+    // A program reads each call's own output, and awaits what the model would start as a task.
+    const tools =
+      parked.program === undefined ? await toolsOf(step) : withOwnOutputs(await toolsOf(step));
     const workflows = new Map<string, { approval: ApprovedCall; clearance: Clearance }>();
     for (const approval of approvals) {
       const tool = tools.get(approval.call.toolName);
@@ -269,6 +272,20 @@ async function runApproved(
       tools,
     });
     if (workflows.size === 0) continue;
+    if (parked.program !== undefined) {
+      tasks.push(
+        ...collectProgramWorkflowCalls(
+          [...workflows.values()].map(({ approval: { call }, clearance }) => ({
+            callId: call.callId,
+            clearance,
+            input: call.input,
+            toolName: call.toolName,
+          })),
+          tools,
+        ),
+      );
+      continue;
+    }
     const dispatched = collectWorkflowCalls({
       clearances: Object.fromEntries(
         [...workflows.entries()].map(([callId, { clearance }]) => [callId, clearance]),

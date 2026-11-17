@@ -356,6 +356,8 @@ export type InternalAgentDefinition = {
   approval?: boolean;
   description?: string;
   build?: AgentBuildDefinition;
+  /** Whether the agent's sessions offer `eve__execute`. */
+  codeMode?: boolean;
   compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
   experimental?: AgentExperimentalDefinition;
@@ -410,6 +412,13 @@ type PublicAgentDefinitionBase = {
    */
   readonly approval?: ApprovalPolicy;
   readonly build?: AgentBuildDefinition;
+  /**
+   * Adds the `eve__execute` tool, which runs a JavaScript program the model writes to call this
+   * agent's tools and return one value, so intermediate results stay out of the conversation.
+   * Applies to the agent that declares it. Fixed for each deployment: dynamic configuration
+   * can't set it. Defaults to `false`.
+   */
+  readonly codeMode?: boolean;
   readonly compaction?: PublicAgentCompactionDefinition;
   /**
    * Whether eve automatically adds its optional default tools. Defaults to `true`.

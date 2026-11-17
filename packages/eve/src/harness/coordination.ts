@@ -66,6 +66,8 @@ export function forgetFinishedRuns(
 export async function runtimeResultCalls(
   results: readonly RuntimeActionResult[],
   tools: HarnessToolLookup | undefined,
+  /** Calls a program made, which reads each tool's own output. */
+  programCalls: ReadonlySet<string> = new Set(),
 ): Promise<{ readonly part: ToolResultPart; readonly result: RuntimeActionResult }[]> {
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
@@ -88,7 +90,9 @@ export async function runtimeResultCalls(
           part: toolResult(
             result,
             result.toolName,
-            await projectToolResultOutput(result, tools?.get(result.toolName)),
+            programCalls.has(result.callId)
+              ? toToolResultOutput(result)
+              : await projectToolResultOutput(result, tools?.get(result.toolName)),
           ),
           result,
         });
@@ -224,7 +228,6 @@ export function createCoordinationRequestFromToolCall(input: {
   return {
     callId: input.toolCall.toolCallId,
     entry: input.entry,
-    executeInput: definition.executeInput?.(input.input),
     input: input.input,
     kind: "workflow-task",
     toolName: input.toolCall.toolName,

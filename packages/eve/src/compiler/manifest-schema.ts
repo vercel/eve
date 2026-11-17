@@ -315,6 +315,7 @@ export const compiledAgentLimitsDefinitionSchema = z
 export const compiledAgentConfigBaseFields = {
   approval: z.boolean().optional(),
   build: compiledAgentBuildDefinitionSchema.optional(),
+  codeMode: z.boolean().optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
   defaultTools: z.boolean().optional(),
   description: z.string().optional(),
@@ -575,12 +576,6 @@ export const compiledToolDefinitionSchema = z
     requiresApproval: z.boolean(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    workflowProgram: z
-      .object({
-        maxSubagents: z.number().int().positive(),
-      })
-      .strict()
-      .optional(),
   })
   .strict();
 

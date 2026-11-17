@@ -15,7 +15,7 @@ const OPTIONS = {
   tools: "full",
 } as const;
 
-function project(events: readonly SessionEvent[]) {
+function projectBlocks(events: readonly SessionEvent[]) {
   const conversation = new Conversation();
   events.forEach((event, index) => conversation.observe(stampTestEvent(event, index)));
   const snapshot: SessionStoreSnapshot = {
@@ -26,13 +26,15 @@ function project(events: readonly SessionEvent[]) {
     status: "idle",
   };
   const view = conversationView(snapshot, tuiSessionData(conversation.state));
-  return new ConversationTranscript()
-    .project(view, OPTIONS)
-    .map((block) =>
-      block.kind === "tool"
-        ? `tool: ${block.title} ${block.status}`
-        : `${block.kind}: ${block.body ?? ""}`,
-    );
+  return new ConversationTranscript().project(view, OPTIONS);
+}
+
+function project(events: readonly SessionEvent[]) {
+  return projectBlocks(events).map((block) =>
+    block.kind === "tool"
+      ? `tool: ${block.title} ${block.status}`
+      : `${block.kind}: ${block.body ?? ""}`,
+  );
 }
 
 describe("ConversationTranscript", () => {
@@ -353,6 +355,64 @@ describe("ConversationTranscript", () => {
       // A call its approver declined reads as denied, not failed.
       "tool: Deploy denied",
       "assistant: Not deployed.",
+    ]);
+  });
+
+  it("shows a program's calls under its row, with the one waiting for approval", () => {
+    const scope = { runId: "run_0", turnId: "turn_0" };
+    const requested = (
+      callId: string,
+      capability: { kind: "tool" | "agent"; name: string },
+      owner: { runId: string } | { callId: string },
+    ): SessionEvent => ({
+      data: { callId, capability, input: {}, owner },
+      scope,
+      type: "call.requested",
+    });
+    const program = { callId: "call_run" };
+    const blocks = projectBlocks([
+      ...testTurnFacts(0, "Ship it.", ["d_0"]).slice(0, 4),
+      requested("call_run", { kind: "tool", name: "eve__execute" }, { runId: "run_0" }),
+      // The model asked for this one beside the program, before the program made any call.
+      requested("call_status", { kind: "tool", name: "status" }, { runId: "run_0" }),
+      { data: { callId: "call_run" }, scope, type: "call.started" },
+      requested("call_run/1", { kind: "tool", name: "check" }, program),
+      {
+        data: { callId: "call_run/1", outcome: "completed", output: "ok" },
+        scope,
+        type: "call.settled",
+      },
+      // A program's agent call starts no task, so it shows as a row.
+      requested("call_run/2", { kind: "agent", name: "reviewer" }, program),
+      requested("call_run/3", { kind: "tool", name: "deploy" }, program),
+      {
+        data: {
+          interactionId: "i_0",
+          request: {
+            kind: "approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "deny", label: "Deny" },
+            ],
+            prompt: "Deploy?",
+          },
+          subject: { callId: "call_run/3" },
+        },
+        scope: { turnId: "turn_0" },
+        type: "interaction.opened",
+      },
+    ] as SessionEvent[]);
+
+    expect(
+      blocks
+        .filter((block) => block.kind === "tool")
+        .map((block) => [block.toolName, block.depth ?? 0, block.status]),
+    ).toEqual([
+      ["eve__execute", 0, "running"],
+      ["check", 1, "done"],
+      ["reviewer", 1, "running"],
+      ["deploy", 1, "approval"],
+      ["status", 0, "running"],
     ]);
   });
 });

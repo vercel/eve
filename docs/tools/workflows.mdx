@@ -10,7 +10,8 @@ it under its path-derived name, such as `deploy`.
 
 Use a workflow tool when a call must wait for input, delegate work to subagents, or run retryable
 steps over a long period. Each call starts a Workflow run that survives restarts. For a tool that
-returns in one step, use [`defineTool`](/docs/tools) instead.
+returns in one step, use [`defineTool`](/docs/tools) instead. To let the model write a program that
+calls tools and agents itself, turn on [`codeMode`](/docs/concepts/built-in-tools#eve__execute).
 
 A workflow tool defines exactly one entry point, which decides how its calls run:
 
@@ -654,62 +655,6 @@ Its input is `{ message: string }`. `agentRouter()` considers only targets with 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
-
-## Add a runtime-generated workflow tool
-
-Export the provided `workflow` factory from `agent/tools/workflow.ts` when the model should write the
-JavaScript program at runtime:
-
-```ts title="agent/tools/workflow.ts"
-import { workflow } from "eve/tools/workflow";
-
-export default workflow({ maxSubagents: 20 });
-```
-
-The model supplies an async function body through the tool's `js` input. Each call runs as a
-[task](#run-calls-as-tasks-task), so the program's return value reaches the model in a
-`task.result` message.
-
-The program can only call `ctx.agent(name, { message, outputSchema? })`. It sends the message to a
-new session with that agent, and resolves to the reply or, when `outputSchema` is set, to the
-structured value. The program can call subagents hidden with `tool: false` or a same-named
-`disableTool()` file, so list their path-derived names in the tool description or agent
-instructions:
-
-```js
-const [triage, review] = await Promise.all([
-  ctx.agent("ticket-triage", { message: JSON.stringify(tickets) }),
-  ctx.agent("ticket-review", { message: JSON.stringify(tickets) }),
-]);
-return { triage, review };
-```
-
-Omit `maxSubagents` to allow `100` agent calls; set an integer from `1` through `128`. The program
-can't use the workflow context, session state, credentials, imports, or ordinary tools. Each
-`ctx.agent` call starts a new child session, so a program can't continue a child from an earlier
-call. Agent authorization, questions, approvals, and cancellation work as they do for sessions an
-authored workflow tool opens with `ctx.agent`.
-
-The program continues after every pending call in the current batch finishes, so `Promise.all`
-supports fan-out followed by fan-in. A `ctx.agent` call still pending when the program returns
-fails the workflow, such as one never awaited or one that loses a `Promise.race` or `Promise.any`.
-
-A failed child turn, an invalid call, or a call over the `maxSubagents` budget throws a catchable
-`WorkflowProgramAgentError` at that `ctx.agent` call. The error message names the cause.
-
-The return value and each `ctx.agent` input pass through `JSON.stringify`, so a `Date` becomes a
-string, and functions and `undefined` members drop. A return value that converts to nothing, such
-as `undefined`, becomes `null`.
-
-| Limit                                     | Value      |
-| ----------------------------------------- | ---------- |
-| Return value or `ctx.agent` input as JSON | 1 MiB      |
-| Child reply as JSON                       | 4 MiB      |
-| Program source                            | 256 KiB    |
-| JavaScript time per start or resume       | 30 seconds |
-| Total time per start or resume            | 5 minutes  |
-
-Time spent waiting for child agents does not count toward either time limit.
 
 ## Start channel sessions: `ctx.to`
 

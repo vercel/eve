@@ -9,7 +9,7 @@ import type { Capability } from "#protocol/session-events/families/call.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
 /** A turn event {@link SlackRenderingHarness.step} fires, in the order a real turn emits them. */
-export type SlackTurnStep = "turn" | "model" | "tool" | "hidden" | "no_reply" | "end";
+export type SlackTurnStep = "turn" | "model" | "tool" | "nested" | "hidden" | "no_reply" | "end";
 
 export interface SlackRenderingHarness {
   /** The context the channel's handlers receive. */
@@ -21,7 +21,8 @@ export interface SlackRenderingHarness {
   /**
    * Fires one turn event: `turn` starts turn `t1`, `model` starts the next model run, `tool`,
    * `hidden` (a tool with `label: false`), and `no_reply` call a tool from the current run and
-   * settle it, and `end` settles the turn.
+   * settle it, `nested` does the same from inside the last call, as a program's calls are made,
+   * reporting labelled progress and a labelled result, and `end` settles the turn.
    */
   step(step: SlackTurnStep): Promise<void>;
 }
@@ -74,6 +75,31 @@ export function slackRenderingHarness(
     });
     await event({ type: "call.settled", data: { callId, outcome: "completed" }, scope });
   };
+  const callNested = async () => {
+    const owner = { callId: `c${call}` };
+    const callId = `${owner.callId}/1`;
+    const scope = { runId: `r${run}`, turnId: "t1" };
+    const capability: Capability = { kind: "tool", name: "read_file" };
+    (tables.calls as Record<string, CallRow>)[callId] = {
+      callId,
+      capability,
+      introducedAt: call,
+      owner,
+      startedAt: new Date(0).toISOString(),
+      status: "requested",
+    };
+    await event({
+      type: "call.requested",
+      data: { callId, owner, capability, input: {} },
+      scope,
+    });
+    await event({ type: "call.progress", data: { callId, label: "Reading", output: {} }, scope });
+    await event({
+      type: "call.settled",
+      data: { callId, outcome: "completed", label: "Read 1 file" },
+      scope,
+    });
+  };
   return {
     channel: channel as SlackEventContext,
     event,
@@ -95,6 +121,8 @@ export function slackRenderingHarness(
         });
       } else if (step === "tool") {
         await callTool("get_weather");
+      } else if (step === "nested") {
+        await callNested();
       } else if (step === "hidden") {
         await callTool("react", true);
       } else if (step === "no_reply") {

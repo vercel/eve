@@ -1,4 +1,9 @@
-import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import {
+  CALL_TOOL_NAME,
+  EXECUTE_TOOL_NAME,
+  SEARCH_TOOL_NAME,
+  SKILL_TOOL_NAME,
+} from "#protocol/catalog-tools.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import type { TargetTools } from "#evals/target.js";
@@ -16,10 +21,6 @@ const UNREPORTED_TOOL_NAMES = new Map([
     SKILL_TOOL_NAME,
     `Calls through ${SKILL_TOOL_NAME} are reported as skill loads; use t.calledSkill(name).`,
   ],
-  [
-    "eve__execute",
-    "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.calledSkill(name).",
-  ],
 ]);
 
 /** Framework tool names eve no longer uses, with what to assert instead. */
@@ -34,14 +35,20 @@ const RETIRED_TOOL_NAMES = new Map([
 
 /**
  * Throws for a tool name no call is reported under, so an assertion on it can't
- * pass or fail without saying why. A retired name outside the `eve` namespace
- * is still an ordinary tool name, so it passes when the root agent declares a
- * tool by that name, has a dynamic tool resolver that might return one, or its
- * tools are unknown.
+ * pass or fail without saying why. `eve__execute` is reported only for an agent
+ * with code mode on, and the calls its program makes under their own names. A
+ * retired name outside the `eve` namespace is still an ordinary tool name, so it
+ * passes when the root agent declares a tool by that name, has a dynamic tool
+ * resolver that might return one, or its tools are unknown.
  */
 export function assertReportedToolName(name: string, tools: TargetTools | undefined): void {
   const unreported = UNREPORTED_TOOL_NAMES.get(name);
   if (unreported !== undefined) throw new TypeError(unreported);
+  if (name === EXECUTE_TOOL_NAME && tools !== undefined && tools.codeMode !== true) {
+    throw new TypeError(
+      `The agent doesn't have code mode on, so no call is reported under ${EXECUTE_TOOL_NAME}. Set codeMode: true in agent.ts to add ${EXECUTE_TOOL_NAME}.`,
+    );
+  }
   const replacement = RETIRED_TOOL_NAMES.get(name);
   if (replacement === undefined || tools === undefined) return;
   if (tools.dynamic || tools.static.includes(name)) return;

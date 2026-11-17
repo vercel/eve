@@ -86,7 +86,11 @@ import {
   withDiagnosticsSummary,
   withExtensionNamespace,
 } from "#compiler/normalize-manifest-helpers.js";
-import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
+import {
+  createCodeModeUntypedToolDiagnostics,
+  summarizeCompilerDiagnostics,
+  type CompilerDiagnostic,
+} from "#compiler/diagnostics.js";
 import {
   listApplicationModulePaths,
   projectAgentSources,
@@ -213,7 +217,7 @@ class AgentGraphCompiler {
     }
     const state = finalizeNodeSourceState(phaseOne, externalDependencies);
     markConfigRuntimeEntries(config, state.evaluation);
-    const resources = await this.compileResources(input, state);
+    const resources = await this.compileResources(input, state, config.codeMode === true);
     const children = await this.compileChildren(input, state, externalDependencies);
     const manifest = createCompiledAgentNodeManifest({
       ...resources,
@@ -322,7 +326,12 @@ class AgentGraphCompiler {
       } else {
         markConfigRuntimeEntries(config, finalState.evaluation);
       }
-      const resources = await this.compileResources(childInput, finalState);
+      // A dynamic config can't turn code mode on.
+      const resources = await this.compileResources(
+        childInput,
+        finalState,
+        config?.codeMode === true,
+      );
       const children = await this.compileChildren(childInput, finalState, externalDependencies);
       const base = {
         backing: projected.candidate.backing,
@@ -458,8 +467,10 @@ class AgentGraphCompiler {
   private async compileResources(
     input: NodeCompileInput,
     state: FinalizedNodeSourceState,
+    codeMode: boolean,
   ): Promise<CompiledAgentResources> {
     const tools: CompiledToolDefinition[] = [];
+    const untypedForPrograms: CompiledToolDefinition[] = [];
     const definitions: CompiledDefinition[] = [];
     const skills: CompiledSkillDefinition[] = [];
     const instructions: CompiledInstructionsDefinition[] = [];
@@ -619,6 +630,7 @@ class AgentGraphCompiler {
             selectedSourceIds.delete(candidate.sourceId);
           } else if (result.kind === "tool") {
             tools.push(result.definition);
+            if (result.untypedForPrograms) untypedForPrograms.push(result.definition);
             if (result.definition.hasExecute) {
               state.evaluation.requireRuntimeEntry(candidate.sourceId);
             }
@@ -646,6 +658,15 @@ class AgentGraphCompiler {
       toolNames: tools.map((tool) => tool.name),
     });
 
+    if (codeMode) {
+      this.diagnostics.push(
+        ...createCodeModeUntypedToolDiagnostics({
+          bindings: state.bindings,
+          nodeId: input.nodeId,
+          tools: untypedForPrograms,
+        }),
+      );
+    }
     const channelRoutes = compileChannelRoutes(state, channels, this.diagnostics, input.nodeId);
     const extensionMounts = compileExtensionMounts(input.manifest, state.composed, input.nodePath);
     for (const mount of extensionMounts) {

@@ -48,6 +48,27 @@ export function waitedCallRuns(session: {
 }
 
 /**
+ * The workflow tool runs the calls of a background program wait on, which cancelling its task
+ * ends. The program's calls are named for its `eve__execute` call.
+ */
+export function programCallRuns(
+  session: { readonly sessionId: string; readonly state?: SessionStateMap },
+  programCallIds: readonly string[],
+): RunStopTarget[] {
+  if (programCallIds.length === 0) return [];
+  try {
+    return getBlockingWorkflowToolRuns(session.state)
+      .filter((run) => programCallIds.some((callId) => run.callId.startsWith(`${callId}/`)))
+      .map((run) => ({ ends: true, run: run.address }));
+  } catch (error) {
+    logError(log, "failed to read the workflow tool calls a cancelled program waits on", error, {
+      sessionId: session.sessionId,
+    });
+    return [];
+  }
+}
+
+/**
  * Stops runs, the same way whoever stops them: each is told to stop, and a run that couldn't be
  * told, such as one that hasn't registered its control hook yet, is cancelled outright. By default
  * a run the stop ends gets until the deadline to finish cleaning up, and one still running then is

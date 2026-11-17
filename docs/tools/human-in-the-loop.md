@@ -182,7 +182,7 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 - Local subagent sessions run under the root agent's policy too. A subagent's own `approval` in its `agent.ts` adds to it and can't loosen it.
 - A [remote agent](/docs/guides/remote-agents) runs in its own deployment under that deployment's policy. Your policy gates the call to the remote agent, not the calls it makes.
 - A call through `eve__tool` runs the resolved entry's policy, such as `linear__create_issue`'s.
-- Not gated: `eve__search`, `eve__skill`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
+- Not gated: `eve__search`, `eve__skill`, `eve__execute`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
 - A channel calling `invokeTool` directly gets the same policy: a call it would ask about is rejected with `approval-required`.
 - With a policy set, eve evaluates it on every call, so keep it fast and pass `abortSignal` to asynchronous work.
 
@@ -197,6 +197,19 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 eve remembers only prompts that `once()`'s own status asked for. It remembers nothing for an `always()` prompt, or for a wrapping policy that calls `once()` but returns a different status. When you wrap `once()`, pass the policy context through and return its status object unchanged.
 
 A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions.
+
+### Approve calls from a program
+
+With [`codeMode`](/docs/concepts/built-in-tools#eve__execute) on, the model can run an `eve__execute` program that makes many tool calls. eve checks each of those calls on its own:
+
+- Each call runs its tool's `approval` and the agent-wide policy, with that call's `toolName`, `toolInput`, and `callId`. The prompt shows that call's input, so a person approving an email sees its recipient.
+- `eve__execute` has no approval of its own, and no policy approves a program as a whole.
+- A call to an agent is gated like the model's own call to that agent.
+- Calls the program starts together, such as with `Promise.all`, ask together. A loop that awaits each call asks one at a time.
+- The program pauses while approvals are open. It resumes after each one has an answer and the approved calls have run.
+- A denied call throws in the program with the denial reason, so the program can skip that item and continue. The model reads the denied call under [`notCompleted`](/docs/concepts/built-in-tools#what-the-model-reads-back).
+- `once()` works as it does for direct calls: after a person approves, later calls to that tool run without asking.
+- A follow-up message that matches no option [stops the program](/docs/concepts/built-in-tools#calls-that-wait). Its unanswered approvals end as `withdrawn`, and those calls don't run.
 
 ### Authorizing approval responses
 

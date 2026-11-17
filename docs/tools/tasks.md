@@ -8,7 +8,8 @@ A task is a tool call that returns a receipt right away and keeps working while 
 continues. Every call to an agent is a task, and so is every call to a
 [workflow tool](/docs/tools/workflows) that defines `task(input, ctx)` or `serve(receive, ctx)`.
 The result reaches the model later, in a `task.result` message. A turn can't end while tasks are
-still working.
+still working. Calls from an [`eve__execute` program](#await-agents-and-tasks-from-a-program) are
+the exception: the program awaits them.
 
 ## Choose how a call runs
 
@@ -23,13 +24,14 @@ defineWorkflowTool({ /* … */ async serve(receive, ctx) {} }); // a task that a
 
 Defining none of the three, or more than one, throws when the tool is defined.
 
-| Call                                                                    | Runs as                   | Result                                            | A new message during the call     |
-| ----------------------------------------------------------------------- | ------------------------- | ------------------------------------------------- | --------------------------------- |
-| `execute` workflow tool, including `sleep` and `ask_question`           | Tool call; the turn waits | The tool result                                   | Aborts the call's `abortSignal`   |
-| `task` workflow tool, including `agentRouter()` and the `workflow` tool | Task                      | A receipt, then a `task.result` message           | Nothing                           |
-| `serve` workflow tool, including every agent tool                       | Resumable task            | A receipt, then a `task.result` message per reply | Nothing                           |
-| `eve__task_wait`                                                        | Wait inside the turn      | Which tasks finished                              | Ends the wait                     |
-| Plain and MCP tools                                                     | Inside the model step     | The tool result                                   | Applied at the next step boundary |
+| Call                                                          | Runs as                   | Result                                            | A new message during the call        |
+| ------------------------------------------------------------- | ------------------------- | ------------------------------------------------- | ------------------------------------ |
+| `execute` workflow tool, including `sleep` and `ask_question` | Tool call; the turn waits | The tool result                                   | Aborts the call's `abortSignal`      |
+| `task` workflow tool, including `agentRouter()`               | Task                      | A receipt, then a `task.result` message           | Nothing                              |
+| `serve` workflow tool, including every agent tool             | Resumable task            | A receipt, then a `task.result` message per reply | Nothing                              |
+| `eve__task_wait`                                              | Wait inside the turn      | Which tasks finished                              | Ends the wait                        |
+| `eve__execute` program                                        | Tool call; the turn waits | The program's result                              | Moves it to the background as a task |
+| Plain and MCP tools                                           | Inside the model step     | The tool result                                   | Applied at the next step boundary    |
 
 Waiting alone doesn't need a task. A question, a `sleep`, or an approval inside an `execute` call
 pauses the turn without holding compute, even across restarts. A new message stops the wait.
@@ -88,6 +90,25 @@ async function publish(notes: string) {
 The publish step can only run after the review returns. Set `tool: false` on the `reviewer`
 subagent if the model shouldn't call it directly. Define `task` in place of `execute` if the
 conversation should continue while the review runs.
+
+## Await agents and tasks from a program
+
+With [`codeMode`](/docs/concepts/built-in-tools#eve__execute) on, the model can call agents and
+`task` workflow tools from an `eve__execute` program. There, a call isn't a task:
+
+- An agent call resolves to the agent's reply, and a `task` workflow tool call resolves to its
+  result. Neither returns a receipt.
+- An agent call takes `{ message, outputSchema? }` and starts a new child session every time. It
+  takes no `taskId`.
+- The work belongs to the `eve__execute` call, which holds the turn until the program ends.
+  `task.started`, `eve__task_wait`, `eve__task_cancel`, and the `[Tasks]` note don't cover it.
+- A new message doesn't stop the program. The whole program
+  [moves to the background](/docs/concepts/built-in-tools#a-new-message-moves-the-program-to-the-background)
+  as one task, which `eve__task_wait` and `eve__task_cancel` do cover.
+- A program can't call a `serve` workflow tool that isn't an agent.
+
+See [Agents in programs](/docs/concepts/built-in-tools#agents-in-programs) for the input and the
+errors.
 
 ## Pass signals to the work
 

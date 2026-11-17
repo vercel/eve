@@ -1,5 +1,10 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { latestTaskResult, playScript } from "@eve-e2e/config/mock-script";
+import {
+  latestTaskResult,
+  playScript,
+  programResultOf,
+  runProgram,
+} from "@eve-e2e/config/mock-script";
 import { defineAgent, defineDynamic, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
@@ -58,24 +63,21 @@ const dynamicSubagentProbe = mockModel({
   },
 });
 
-// Runs the eval's program unchanged: the eval checks eve's subagent budget, not
-// whether a model agrees to exceed it.
-const WORKFLOW_LIMIT_PROBE = "E2E_WORKFLOW_SUBAGENT_LIMIT";
-const workflowLimitParent = mockModel({
-  modelId: "workflow-subagent-limit-parent",
+// Runs the program in the eval directive's `js` fence unchanged as one `eve__execute` call, so
+// the eval checks how eve runs a program's agent calls on every world, not what a model chooses
+// to write.
+const PROGRAM_AGENT_CALLS_PROBE = "E2E_PROGRAM_AGENT_CALLS";
+const programParent = mockModel({
+  modelId: "program-agent-calls-parent",
   respond(request) {
     const directive = request.messages.find(
-      (message) => message.role === "user" && message.text.includes(WORKFLOW_LIMIT_PROBE),
+      (message) => message.role === "user" && message.text.includes(PROGRAM_AGENT_CALLS_PROBE),
     );
-    const js = directive?.text.match(/```js\n([\s\S]*?)\n```/u)?.[1];
-    if (js === undefined) throw new Error("The workflow limit directive has no js program.");
-    return playScript(
-      request,
-      [
-        { id: "workflow-limit-run", name: "workflow", input: () => ({ js }) },
-        { id: "workflow-limit-wait", name: "eve__task_wait" },
-      ],
-      (finished) => latestTaskResult(finished, "workflow") ?? "No workflow result.",
+    const code = directive?.text.match(/```js\n([\s\S]*?)\n```/u)?.[1];
+    if (code === undefined) throw new Error("The program directive has no js program.");
+    // The call holds the turn until the program returns, so its result is the call's own.
+    return playScript(request, [runProgram("program-agent-calls", code)], (finished) =>
+      JSON.stringify(programResultOf(finished, "program-agent-calls")),
     );
   },
 });
@@ -269,6 +271,9 @@ function findListedTaskId(
 
 const agent: DefinedAgent = defineAgent({
   ...agentConfig,
+  // `eve__execute` programs call this agent's tools and subagents as `tools.<name>(input)` in
+  // the turn.
+  codeMode: true,
   // The remote continuation eval reattaches to a retired keeper, a root session of this
   // deployment reached through remote-loopback, so its run must outlive the session.
   experimental: {
@@ -291,8 +296,8 @@ const agent: DefinedAgent = defineAgent({
     if (messages.some((message) => message.includes(DYNAMIC_SUBAGENT_PROBE))) {
       return scripted(dynamicSubagentProbe);
     }
-    if (messages.some((message) => message.includes(WORKFLOW_LIMIT_PROBE))) {
-      return scripted(workflowLimitParent);
+    if (messages.some((message) => message.includes(PROGRAM_AGENT_CALLS_PROBE))) {
+      return scripted(programParent);
     }
     if (messages.some((message) => message.includes(MODEL_AGENT_PROBE))) {
       return scripted(modelSelectingParent);

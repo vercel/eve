@@ -6,6 +6,8 @@ import {
   loadSkills,
   outputOf,
   playScript,
+  programResultOf,
+  runProgram,
 } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
@@ -39,6 +41,19 @@ function reportTask(
   return result === undefined
     ? { toolCalls: [{ name: TASK_WAIT_TOOL, input: {} }] }
     : `${label} ${result}`;
+}
+
+/** Runs `code` as one `eve__execute` program, then reports the one value it returned. */
+function reportProgram(
+  request: MockModelRequest,
+  id: string,
+  code: string,
+): MockModelResponse | string {
+  return playScript(
+    request,
+    [runProgram(id, code)],
+    (done) => `PROGRAM-RESULT ${JSON.stringify(programResultOf(done, id))}`,
+  );
 }
 
 const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse | string> = {
@@ -110,6 +125,58 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
       (done) =>
         `LEDGER-RESULT ${outputOf(done, "ledger")} INVENTORY-RESULT ${outputOf(done, "inventory")}`,
     ),
+  /** One program reads a deferred tool, a session-scoped deferred tool, and the connection. */
+  "PROGRAM-LEDGER": (request) =>
+    reportProgram(
+      request,
+      "ledger-program",
+      `
+        const [invoice, ledger, inventory] = await Promise.all([
+          tools.lookup_invoice({ invoiceId: "INV-2041" }),
+          tools.ledger__us_west({ month: "2026-09" }),
+          tools.petstore__getInventory({}),
+        ]);
+        console.log("checked", invoice.invoiceId);
+        return { available: inventory.body.available, balance: ledger.balance, status: invoice.status };
+      `,
+    ),
+  /** One program starts two deployments together; a refused one reads as "not deployed". */
+  "PROGRAM-DEPLOY": (request) =>
+    reportProgram(
+      request,
+      "deploy-program",
+      `
+        const outcomes = await Promise.allSettled(
+          ["billing-api", "ledger-api"].map((service) => tools.deploy_service({ service })),
+        );
+        return outcomes.map((outcome) =>
+          outcome.status === "fulfilled" ? outcome.value : "not deployed",
+        );
+      `,
+    ),
+  /** One program awaits a background workflow tool, then uses its result beside another call. */
+  "PROGRAM-RESEARCH": (request) =>
+    reportProgram(
+      request,
+      "research-program",
+      `
+        const findings = await tools.research_report({ topic: "refunds" });
+        const invoice = await tools.lookup_invoice({ invoiceId: "INV-2041" });
+        return { findings, status: invoice.status };
+      `,
+    ),
+  /** One program asks the specialist about two disputes at once. */
+  "PROGRAM-SPECIALISTS": (request) =>
+    reportProgram(
+      request,
+      "specialist-program",
+      `
+        return await Promise.all([
+          tools.billing_specialist({ message: "Review Bob's dispute DSP-17." }),
+          tools.billing_specialist({ message: "Review Alice's dispute DSP-18." }),
+        ]);
+      `,
+    ),
 };
 
 function respond(request: MockModelRequest): MockModelResponse | string {
@@ -121,6 +188,8 @@ const config = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...config,
+  // Adds eve__execute beside the catalog tools: programs call every entry as `tools.<name>(input)`.
+  codeMode: true,
   // Measure Anthropic cache reuse through its native provider (see cache-after-discovery.eval.ts).
   ...(typeof config.model === "string" && config.model.startsWith("anthropic/")
     ? { modelOptions: { providerOptions: { gateway: { only: ["anthropic"] } } } }
