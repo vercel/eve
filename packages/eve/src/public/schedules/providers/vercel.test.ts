@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
+import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
 const oidcToken = `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(
@@ -14,6 +15,18 @@ const context: ScheduleProviderContext = {
   operationId: "operation_1",
   target: { key: "dynamic-schedules" },
 };
+
+const envelope = {
+  version: 3 as const,
+  payload: { task: "Review PRs" },
+  scope: "team",
+  principal: { type: "user", authenticator: "test", principalId: "alice" },
+};
+const storedPayload = createScheduleCollectionPayload({
+  application: "dynamic-schedules",
+  collection: "collection",
+  envelope,
+});
 
 function schedule(overrides: Record<string, unknown> = {}) {
   return {
@@ -210,11 +223,48 @@ describe("vercelScheduleProvider", () => {
 
     await provider.create(context, {
       expression: { type: "single", at: "2026-10-01T12:00:00", timezone: "UTC" },
-      payload: "Review PRs",
+      payload: storedPayload,
       name: "review-prs",
     });
     await expect(
       provider.get({ ...context, operationId: "get" }, "review-prs"),
-    ).resolves.toMatchObject({ name: "review-prs" });
+    ).resolves.toMatchObject({ name: "review-prs", envelope });
+  });
+
+  it("asks the Schedules API for the payload on get and returns its envelope", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      Response.json(
+        schedule({
+          payload: {
+            eve: { application: "dynamic-schedules", collection: "collection", version: 1 },
+            payload: storedPayload,
+          },
+        }),
+      ),
+    );
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+
+    await expect(provider.get(context, "review-prs-daily")).resolves.toMatchObject({
+      name: "review-prs-daily",
+      envelope,
+    });
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe(
+      "https://vercel-schedules.com/v1/schedules/review-prs-daily?namespace=eve-namespace&include=payload",
+    );
+  });
+
+  it("returns null for a schedule the Schedules API doesn't have", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      Response.json({ error: { code: "not_found", message: "Not found." } }, { status: 404 }),
+    );
+    await expect(
+      vercelScheduleProvider({ fetch: fetchImpl }).get(context, "missing"),
+    ).resolves.toBeNull();
   });
 });

@@ -194,7 +194,41 @@ describe("dynamic schedules client", () => {
       client.update(created.name, { expression: { type: "delay", minutes: 0 } }),
     ).rejects.toThrow();
     expect(update).not.toHaveBeenCalled();
-    await expect(client.get(created.name)).resolves.toEqual(created);
+    await expect(client.get(created.name)).resolves.toEqual({
+      ...created,
+      creator: { type: "user", authenticator: "test", principalId: "alice" },
+      payload,
+    });
+  });
+
+  it("returns the payload replacement's caller as creator, and list returns neither", async () => {
+    const { definition } = setup();
+    const shared = { ...definition, scope: () => "shared" };
+    const alice = createScheduleCollectionClient(shared, callContext);
+    const bob = createScheduleCollectionClient(shared, {
+      ...callContext,
+      session: {
+        ...callContext.session,
+        auth: {
+          current: { ...callContext.session.auth.current!, principalId: "bob" },
+          initiator: null,
+        },
+      },
+    });
+    const created = await alice.create(input);
+    const replaced = { ...payload, task: "Summarize the month." };
+    await bob.update(created.name, { payload: replaced });
+    await expect(alice.get(created.name)).resolves.toMatchObject({
+      creator: { principalId: "bob" },
+      payload: replaced,
+    });
+    await alice.update(created.name, { expression: { type: "delay", minutes: 10 } });
+    await expect(alice.get(created.name)).resolves.toMatchObject({
+      creator: { principalId: "bob" },
+    });
+    const [listed] = (await alice.list()).data;
+    expect(listed).not.toHaveProperty("creator");
+    expect(listed).not.toHaveProperty("payload");
   });
 
   it("tells preparePayload the timing a write leaves the schedule with", async () => {

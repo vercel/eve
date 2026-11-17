@@ -9,6 +9,7 @@ import type {
   ScheduleProvider,
   ScheduleRecord,
 } from "#public/schedules/subscription.js";
+import { parseSchedulePayload } from "#runtime/schedules/payload.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
 /**
@@ -79,7 +80,8 @@ export function inMemoryScheduleProvider(
 
     async get(context: ScheduleProviderContext, name: string) {
       const record = schedules.get(scheduleKey(context, name));
-      return record === undefined ? null : publicRecord(record);
+      if (record === undefined) return null;
+      return { ...publicRecord(record), envelope: parseSchedulePayload(record.payload).envelope };
     },
 
     async update<TPayload>(

@@ -14,6 +14,8 @@ export {
   type SchedulePatch,
   type SchedulePreparePayloadContext,
   type ScheduleCreate,
+  type ScheduleDetail,
+  type ScheduleEnvelope,
   type ScheduleExpression,
   type ScheduleHandle,
   type ScheduleTiming,

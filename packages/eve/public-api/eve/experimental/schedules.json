@@ -12,6 +12,8 @@
   "ScheduleCreateApproval",
   "ScheduleDelivery",
   "ScheduleDeliveryTarget",
+  "ScheduleDetail",
+  "ScheduleEnvelope",
   "ScheduleExpression",
   "ScheduleHandle",
   "ScheduleList",

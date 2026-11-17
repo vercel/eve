@@ -280,8 +280,14 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     async get(name) {
       const normalized = validateScheduleName(name);
       const { provider } = await resolveNamespace("get", normalized);
-      const record = await definition.provider.get(provider, normalized);
-      return record === null ? null : projectScheduleRecord(record);
+      const stored = await definition.provider.get(provider, normalized);
+      if (stored === null) return null;
+      const { envelope, ...record } = stored;
+      return {
+        ...projectScheduleRecord(record),
+        creator: envelope.principal,
+        payload: envelope.payload as TPayload,
+      };
     },
     async invoke(name) {
       const normalized = validateScheduleName(name);
