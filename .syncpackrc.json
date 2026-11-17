@@ -23,6 +23,7 @@
         "eve-code",
         "@eve/agent-desktop",
         "@eve/agent-browser",
+        "@eve/takeover",
         "gadget-extension",
         "gizmo-extension",
         "js-only-extension",

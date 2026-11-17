@@ -90,6 +90,19 @@ Every coordinate input is one `"x,y"` string.
 
 Notifications, sessions, tracing, cursor overlays, and `batch` are not exposed yet.
 
+## Hand the desktop to a person
+
+Pass a [`@eve/takeover`](../eve-takeover) configuration and the extension adds a `takeover` tool that hands the desktop to the person who asked over VNC, then takes it back when they press Done.
+
+```ts
+import desktop from "@eve/agent-desktop";
+import { takeover } from "../lib/takeover"; // defineTakeover(...) from @eve/takeover/core
+
+export default desktop({ takeover });
+```
+
+Install `x11vnc` in `prepare` with `installAgentDesktop(sandbox, { extraPackages: [...TAKEOVER_APT_PACKAGES] })`, and mount `@eve/takeover` with the same value to serve the viewer. x11vnc listens on loopback without a VNC password: the takeover proxy's one-use token is the gate.
+
 ## Overrides
 
 Standard eve extension overrides apply. For example, require approval before quitting apps:

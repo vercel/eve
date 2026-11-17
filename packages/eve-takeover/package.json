@@ -1,0 +1,77 @@
+{
+  "name": "@eve/takeover",
+  "version": "0.0.0",
+  "description": "eve extension that lets a person take over the agent's sandboxed browser or desktop to sign in, then hand control back",
+  "keywords": [
+    "agent-browser",
+    "agent-desktop",
+    "eve",
+    "eve-extension",
+    "human-in-the-loop",
+    "sandbox",
+    "takeover"
+  ],
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/eve.git",
+    "directory": "packages/eve-takeover"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./core": {
+      "types": "./dist/core/core.d.ts",
+      "default": "./dist/core/core.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "eve extension build && tsc -p tsconfig.core.json && node ../../scripts/copy-package-license.mjs .",
+    "test": "pnpm run build && pnpm run test:integration",
+    "test:integration": "node --test \"test/*.test.mjs\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@vercel/sandbox": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": ">=1.0.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension",
+      "externalDependencies": [
+        "@vercel/sandbox"
+      ]
+    }
+  }
+}

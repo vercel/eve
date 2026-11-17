@@ -73,7 +73,10 @@ test("ships one tool file per catalog tool it exposes", () => {
   );
   const names = new Set(catalog.tools.map((tool) => tool.name.replace(/^agent_browser_/, "")));
   assert.deepEqual(Object.keys(tools).sort(), files.sort());
-  for (const name of files) assert.ok(names.has(name), `${name} is not in the MCP catalog`);
+  // `takeover` comes from @eve/takeover, not agent-browser's MCP catalog.
+  for (const name of files) {
+    if (name !== "takeover") assert.ok(names.has(name), `${name} is not in the MCP catalog`);
+  }
   for (const name of [
     "open",
     "snapshot",
