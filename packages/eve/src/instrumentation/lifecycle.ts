@@ -524,6 +524,9 @@ export type InstrumentationPointEvent =
   | InstrumentationTurnSettledEvent;
 
 type LifecycleEvent = InstrumentationCorrelatedEvent | InstrumentationPointEvent;
+/**
+ * A lifecycle event instrumentation providers can handle, optionally narrowed to one event `type`.
+ */
 export type InstrumentationEvent<K extends LifecycleEvent["type"] = LifecycleEvent["type"]> =
   Extract<LifecycleEvent, { readonly type: K }>;
 

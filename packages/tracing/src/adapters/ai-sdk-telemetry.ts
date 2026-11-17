@@ -10,6 +10,7 @@ import { modelContent, modelUsage } from "./ai-sdk-payload.js";
 
 type Event<K extends keyof Telemetry> = Parameters<NonNullable<Telemetry[K]>>[0];
 
+/** Options for `aiSdkTelemetry`. */
 export interface AiSdkTelemetryOptions {
   /** The turn a generation records. Called once per AI SDK call. */
   readonly turn: TurnInput | ((call: { readonly callId: string }) => TurnInput);

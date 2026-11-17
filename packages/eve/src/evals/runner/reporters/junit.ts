@@ -7,6 +7,7 @@ import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import { formatAssertionFailureHeadline } from "#evals/runner/reporters/assertion-diagnostics.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
+/** Options for {@link junitReporter}: the XML file to write and an optional testsuite name. */
 export interface JUnitReporterConfig {
   readonly filePath: string;
   readonly suiteName?: string;

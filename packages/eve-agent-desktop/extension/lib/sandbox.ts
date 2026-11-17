@@ -3,6 +3,7 @@ import { runCommand, type CommandSandbox } from "./process.js";
 /** The agent-desktop CLI version this package's tools are written against. */
 export const AGENT_DESKTOP_VERSION = "1.2.0";
 
+/** npm spec `installAgentDesktop` installs when `installSpec` is not set: the pinned {@link AGENT_DESKTOP_VERSION}. */
 export const DEFAULT_AGENT_DESKTOP_INSTALL_SPEC = `agent-desktop@${AGENT_DESKTOP_VERSION}`;
 
 /** Where the managed desktop keeps its logs, session-bus address and runtime directory. */
@@ -47,6 +48,7 @@ export type { SandboxCommandResult, SandboxProcess } from "./process.js";
 /** Structural subset of eve's sandbox session; every `ctx.getSandbox()` result satisfies it. */
 export type DesktopSandbox = CommandSandbox;
 
+/** Options for `installAgentDesktop`. */
 export interface InstallAgentDesktopOptions {
   readonly signal?: AbortSignal;
   /** npm spec for the CLI, such as a tarball or mirror. Defaults to the version this package targets. */
@@ -57,6 +59,7 @@ export interface InstallAgentDesktopOptions {
   readonly extraPackages?: readonly string[];
 }
 
+/** Options for `startDesktop`: the X display to start, defaulting to `:100`, and the screen size in pixels, defaulting to 1280x800. */
 export interface StartDesktopOptions {
   readonly signal?: AbortSignal;
   readonly display?: string;
@@ -202,6 +205,7 @@ async function runOrThrow(
   }
 }
 
+/** Quote a value as a single-quoted POSIX shell argument so it passes through a command line verbatim. */
 export function quoteShellArg(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }

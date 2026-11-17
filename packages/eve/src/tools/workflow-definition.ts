@@ -26,6 +26,7 @@ import {
 
 export type { WorkflowToolEntryPoint };
 
+/** What a workflow tool knows about an agent it can call through `ctx.agent`: its description. */
 export interface WorkflowAgentMetadata {
   readonly description: string;
 }
@@ -313,6 +314,11 @@ type WithInputSchema<TDefinition, TSchema> = Omit<TDefinition, "inputSchema"> & 
   inputSchema: TSchema;
 };
 
+/**
+ * Defines a tool whose entry point runs as a durable workflow and must start with
+ * `"use workflow"`. Provide exactly one of `execute`, `task`, or `serve`; see
+ * {@link WorkflowToolDefinition}.
+ */
 export function defineWorkflowTool<
   TInputSchema extends Schema,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,

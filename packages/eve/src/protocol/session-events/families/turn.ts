@@ -4,6 +4,7 @@ import { cause, conforming, envelopeOf, errorInfo, id, known } from "../common.j
 import type { Cause, Envelope, ErrorInfo } from "../envelope.js";
 import type { TraceContext } from "./session.js";
 
+/** The payload of `turn.started`: a turn begins, with what caused it and the turn it follows. */
 export interface TurnStartedData {
   readonly turnId: string;
   readonly cause: Cause;
@@ -24,8 +25,10 @@ export interface TurnPausedData {
   readonly awaiting: readonly { readonly interactionId: string }[];
 }
 
+/** How a turn ended, as recorded on `turn.settled`. */
 export type TurnOutcome = "completed" | "failed" | "cancelled";
 
+/** The payload of `turn.settled`: a turn ends, with its outcome and the content parts that reply. */
 export interface TurnSettledData {
   readonly turnId: string;
   readonly outcome: TurnOutcome;
@@ -35,9 +38,13 @@ export interface TurnSettledData {
   readonly error?: ErrorInfo;
 }
 
+/** The fact that introduces a turn. */
 export type TurnStarted = Envelope<"turn.started", TurnStartedData>;
+/** The terminal fact of a turn. */
 export type TurnSettled = Envelope<"turn.settled", TurnSettledData>;
+/** The fact recording that a turn waits on interactions. */
 export type TurnPaused = Envelope<"turn.paused", TurnPausedData>;
+/** Any fact in the `turn` family. */
 export type TurnFact = TurnStarted | TurnPaused | TurnSettled;
 
 export const turnSchemas = {

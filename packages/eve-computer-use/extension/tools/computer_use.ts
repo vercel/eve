@@ -250,6 +250,10 @@ const inputSchema = z.union([
   ]),
 ]);
 
+/**
+ * Lets the agent drive the sandbox's Linux desktop with OpenAI computer-use actions, such as screenshots, clicks, typing, and scrolling, plus app launch, window layout, and screen recording.
+ * Each action returns a fresh screenshot path and accessibility grounding, and runs without an approval prompt.
+ */
 export default defineTool({
   description:
     'Pass the selected action inside request, for example {request:{action:"screenshot"}}. ' +

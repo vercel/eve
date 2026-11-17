@@ -5,6 +5,7 @@ import {
   namingAttributes,
   runtimeContextAttributes,
 } from "./attributes.js";
+/** Returns the invocation span name for an agent: `invoke_agent <name>`, or `invoke_agent` when the agent is anonymous. */
 export const invocationName = (name?: string) =>
   name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
 const modelName = (name: string) => `chat ${name}`;

@@ -69,6 +69,7 @@ const inputSchema = z
     }
   });
 
+/** Lets the agent wait for a window, text, or element to appear, for a menu to open or close, or for a fixed time. */
 export default desktopTool({
   description:
     "Wait for a window, text, or element to appear, for a menu to open or close, or for a fixed time. Prefer a condition over a fixed time.",

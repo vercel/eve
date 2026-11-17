@@ -1,6 +1,10 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
+/**
+ * Adds browser automation to an agent: agent-browser tools that open pages, take snapshots, interact with elements, and read content inside the agent's sandbox, plus instructions for the snapshot, act, and verify workflow.
+ * Requires a sandbox that can run Chromium; agent-browser is installed on first use unless `autoInstall` is `false`.
+ */
 export default defineExtension({
   config: z.object({
     /** Domain allowlist passed to every command (wildcards like `*.example.com` supported). */

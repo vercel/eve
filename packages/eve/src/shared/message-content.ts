@@ -19,6 +19,7 @@ export interface MessageFilePart<
   readonly data: TData;
 }
 
+/** One part of a message a person sends: a {@link MessageTextPart} or a {@link MessageFilePart}. */
 export type MessagePart<TData extends MessageFilePart["data"] = MessageFilePart["data"]> =
   | MessageTextPart
   | MessageFilePart<TData>;

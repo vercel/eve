@@ -17,6 +17,7 @@ export interface Answer extends ResponseValue {
   readonly interactionId: string;
 }
 
+/** The payload of `response.submitted`: a person's answer to an interaction arrived. */
 export interface ResponseSubmittedData {
   readonly responseId: string;
   readonly interactionId: string;
@@ -25,10 +26,12 @@ export interface ResponseSubmittedData {
   readonly value?: ResponseValue;
 }
 
+/** The payload of `response.admitted`: the session accepted a submitted response. */
 export interface ResponseAdmittedData {
   readonly responseId: string;
 }
 
+/** How a response ended, as recorded on `response.settled`. */
 export type ResponseOutcome =
   | "applied"
   | "refused"
@@ -37,15 +40,20 @@ export type ResponseOutcome =
   | "abandoned"
   | "expired";
 
+/** The payload of `response.settled`: a response ends, with its outcome. */
 export interface ResponseSettledData {
   readonly responseId: string;
   readonly outcome: ResponseOutcome;
   readonly reason?: string;
 }
 
+/** The fact that introduces a response. */
 export type ResponseSubmitted = Envelope<"response.submitted", ResponseSubmittedData>;
+/** The fact recording that the session accepted a response. */
 export type ResponseAdmitted = Envelope<"response.admitted", ResponseAdmittedData>;
+/** The terminal fact of a response. */
 export type ResponseSettled = Envelope<"response.settled", ResponseSettledData>;
+/** Any fact in the `response` family. */
 export type ResponseFact = ResponseSubmitted | ResponseAdmitted | ResponseSettled;
 
 export const responseSchemas = {

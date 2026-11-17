@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { app, desktopTool, flag, windowId } from "../lib/tool";
 
+/** Lets the agent send a key or key combo, such as `return` or `ctrl+s`, to an app or the focused window. */
 export default desktopTool({
   description:
     "Send a key or key combo, such as return, escape, ctrl+s, or shift+tab, to an app or the focused window.",

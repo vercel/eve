@@ -5,6 +5,7 @@ import { isNonEmptyString } from "#shared/guards.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
+/** Where the agent is running: local development, a preview deployment, or production. */
 export type ConversationEnvironment = "development" | "preview" | "production";
 
 export interface ConversationContext {
@@ -17,6 +18,10 @@ export interface ConversationContext {
   readonly principalType: string;
 }
 
+/**
+ * The caller an audience classifier sees: `anonymous`, or an authenticated principal with its
+ * kind, authenticator, and attributes.
+ */
 export type AudienceCaller =
   | { readonly type: "anonymous" }
   | {

@@ -39,6 +39,7 @@ export interface JustBashFilesystem {
 
 type JustBashEncoding = "ascii" | "base64" | "binary" | "hex" | "latin1" | "utf-8" | "utf8";
 
+/** File metadata returned by {@link JustBashFilesystem} `stat` and `lstat`. */
 export interface JustBashFileStat {
   isDirectory: boolean;
   isFile: boolean;
@@ -48,6 +49,7 @@ export interface JustBashFileStat {
   size: number;
 }
 
+/** Directory entry returned by {@link JustBashFilesystem} `readdirWithFileTypes`. */
 export interface JustBashDirectoryEntry {
   isDirectory: boolean;
   isFile: boolean;
@@ -73,8 +75,16 @@ export interface JustBashLazyCommand {
   load(): Promise<JustBashCommand>;
 }
 
+/**
+ * Custom command for the just-bash sandbox's `experimental.customCommands`: either a
+ * {@link JustBashCommand} or a {@link JustBashLazyCommand} loaded on first run.
+ */
 export type JustBashCustomCommand = JustBashCommand | JustBashLazyCommand;
 
+/**
+ * Context passed to a {@link JustBashCommand} when it runs: the shell's working directory,
+ * environment, filesystem, and an optional abort signal.
+ */
 export interface JustBashCommandContext {
   readonly cwd: string;
   readonly env: ReadonlyMap<string, string>;
@@ -82,6 +92,9 @@ export interface JustBashCommandContext {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * Output of a {@link JustBashCommand}: its exit code and captured standard output and error.
+ */
 export interface JustBashCommandResult {
   readonly exitCode: number;
   readonly stderr: string;

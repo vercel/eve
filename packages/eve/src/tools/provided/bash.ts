@@ -10,6 +10,7 @@ import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Input to the provided `bash` tool: the command to run and how long to wait for it. */
 export interface BashToolInput {
   command: string;
   /**

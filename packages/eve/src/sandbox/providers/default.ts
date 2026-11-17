@@ -25,6 +25,10 @@ import type {
 } from "#shared/sandbox-network-policy.js";
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
 
+/**
+ * Options for a `DefaultSandbox` environment: a shared `prepare`, plus per-provider options for
+ * Vercel Sandbox, Docker, and just-bash, applied to whichever provider is selected.
+ */
 export interface DefaultSandboxEnvironmentOptions {
   readonly docker?: DockerSandboxEnvironmentOptions;
   readonly justBash?: {

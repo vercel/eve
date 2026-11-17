@@ -1,5 +1,6 @@
 import type { AttributeValue, Attributes, FrameworkIdentity, RunIdentity, Usage } from "./types.js";
 const TRACE_SCHEMA_VERSION = 4;
+/** Span attribute names that usage cost and token counts are recorded under. */
 export const USAGE_FIELDS = {
   costUsd: "agent.usage.cost_usd",
   inputTokens: "agent.usage.input_tokens",

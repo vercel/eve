@@ -3,6 +3,7 @@ import { defineTool, type ToolDefinition } from "#public/tools/index.js";
 const NO_REPLY_TOOL_DESCRIPTION =
   "End your turn without sending a reply. Use this when nothing needs to be said, such as when a scheduled check finds nothing to report or an action you already took is the whole answer.";
 
+/** Input to the `no_reply` tool: an optional reason for staying quiet. */
 export interface NoReplyToolInput {
   reason?: string;
 }

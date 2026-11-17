@@ -14,6 +14,7 @@ export type DeliverySource =
   | { readonly control: string }
   | { readonly callback: string };
 
+/** The payload of `delivery.admitted`: the session accepted a delivery, with who sent it and from where. */
 export interface DeliveryAdmittedData {
   readonly deliveryId: string;
   /** Absent for deliveries without auth, such as a sign-in callback. */
@@ -33,6 +34,7 @@ export interface ImportedMessage {
   readonly text: string;
 }
 
+/** The payload of `delivery.consumed`: a turn took in a delivery and what the person sent. */
 export interface DeliveryConsumedData {
   readonly deliveryId: string;
   readonly turnId: string;
@@ -45,6 +47,7 @@ export interface DeliveryConsumedData {
   readonly history?: readonly ImportedMessage[];
 }
 
+/** How a delivery ended, as recorded on `delivery.settled`. */
 export type DeliveryOutcome =
   | "handled"
   | "awaiting-input"
@@ -53,6 +56,7 @@ export type DeliveryOutcome =
   | "refused"
   | "failed";
 
+/** The payload of `delivery.settled`: a delivery ends, with its outcome. */
 export interface DeliverySettledData {
   readonly deliveryId: string;
   readonly outcome: DeliveryOutcome;
@@ -61,9 +65,13 @@ export interface DeliverySettledData {
   readonly reason?: string;
 }
 
+/** The fact that introduces a delivery. */
 export type DeliveryAdmitted = Envelope<"delivery.admitted", DeliveryAdmittedData>;
+/** The fact recording that a turn consumed a delivery. */
 export type DeliveryConsumed = Envelope<"delivery.consumed", DeliveryConsumedData>;
+/** The terminal fact of a delivery. */
 export type DeliverySettled = Envelope<"delivery.settled", DeliverySettledData>;
+/** Any fact in the `delivery` family. */
 export type DeliveryFact = DeliveryAdmitted | DeliveryConsumed | DeliverySettled;
 
 const deliverySource = conforming<DeliverySource>()(

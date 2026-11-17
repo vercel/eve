@@ -9,6 +9,7 @@ import type { TaskOutcome } from "./families/task.js";
 import type { TurnOutcome } from "./families/turn.js";
 import type { Fact, Progress } from "./facts.js";
 
+/** The family a fact or progress record belongs to: the `family` part of its `family.verb` type. */
 export type Family =
   | "session"
   | "delivery"
@@ -29,6 +30,7 @@ export type Family =
  */
 export type FactRole = "introduces" | "updates" | "terminal" | "complete" | "record";
 
+/** How a fact type fits the session lifecycle: its family, its role, and the field naming its entity. */
 export interface FactDescriptor {
   readonly family: Family;
   readonly role: FactRole;
@@ -36,10 +38,12 @@ export interface FactDescriptor {
   readonly idField: string;
 }
 
+/** Every outcome a `session.ended` fact can carry, as a runtime list of {@link SessionOutcome} values. */
 export const SESSION_OUTCOMES = [
   "completed",
   "failed",
 ] as const satisfies readonly SessionOutcome[];
+/** Every outcome a `delivery.settled` fact can carry, as a runtime list of {@link DeliveryOutcome} values. */
 export const DELIVERY_OUTCOMES = [
   "handled",
   "awaiting-input",
@@ -48,17 +52,20 @@ export const DELIVERY_OUTCOMES = [
   "refused",
   "failed",
 ] as const satisfies readonly DeliveryOutcome[];
+/** Every outcome a `turn.settled` fact can carry, as a runtime list of {@link TurnOutcome} values. */
 export const TURN_OUTCOMES = [
   "completed",
   "failed",
   "cancelled",
 ] as const satisfies readonly TurnOutcome[];
+/** Every outcome a `model.settled` fact can carry, as a runtime list of {@link ModelOutcome} values. */
 export const MODEL_OUTCOMES = [
   "completed",
   "failed",
   "interrupted",
   "abandoned",
 ] as const satisfies readonly ModelOutcome[];
+/** Every outcome a `call.settled` fact can carry, as a runtime list of {@link CallOutcome} values. */
 export const CALL_OUTCOMES = [
   "completed",
   "failed",
@@ -66,11 +73,13 @@ export const CALL_OUTCOMES = [
   "interrupted",
   "abandoned",
 ] as const satisfies readonly CallOutcome[];
+/** Every outcome a `task.ended` fact can carry, as a runtime list of {@link TaskOutcome} values. */
 export const TASK_OUTCOMES = [
   "completed",
   "failed",
   "cancelled",
 ] as const satisfies readonly TaskOutcome[];
+/** Every outcome an `interaction.settled` fact can carry, as a runtime list of {@link InteractionOutcome} values. */
 export const INTERACTION_OUTCOMES = [
   "accepted",
   "declined",
@@ -81,6 +90,7 @@ export const INTERACTION_OUTCOMES = [
   "abandoned",
   "expired",
 ] as const satisfies readonly InteractionOutcome[];
+/** Every outcome a `response.settled` fact can carry, as a runtime list of {@link ResponseOutcome} values. */
 export const RESPONSE_OUTCOMES = [
   "applied",
   "refused",
@@ -89,6 +99,7 @@ export const RESPONSE_OUTCOMES = [
   "abandoned",
   "expired",
 ] as const satisfies readonly ResponseOutcome[];
+/** Every outcome a `context.settled` fact can carry, as a runtime list of {@link ContextOutcome} values. */
 export const CONTEXT_OUTCOMES = [
   "completed",
   "failed",
@@ -111,6 +122,7 @@ export const TERMINAL_OUTCOMES: { readonly [TType in TerminalType]: readonly str
   "turn.settled": TURN_OUTCOMES,
 };
 
+/** Every fact type the session stream records, mapped to its {@link FactDescriptor}. */
 export const FACT_CATALOG: { readonly [TType in Fact["type"]]: FactDescriptor } = {
   "call.requested": { family: "call", idField: "callId", role: "introduces" },
   "call.settled": { family: "call", idField: "callId", role: "terminal" },
@@ -142,6 +154,7 @@ export const FACT_CATALOG: { readonly [TType in Fact["type"]]: FactDescriptor } 
   "usage.recorded": { family: "usage", idField: "", role: "record" },
 };
 
+/** How a progress record type maps to its family and the field naming the entity it previews. */
 export interface ProgressDescriptor {
   readonly family: Family;
   readonly idField: string;
@@ -153,7 +166,9 @@ export const PROGRESS_CATALOG: { readonly [TType in Progress["type"]]: ProgressD
   "content.delta": { family: "content", idField: "partId" },
 };
 
+/** The `type` of any fact the session stream records, such as `turn.started`. */
 export type FactType = Fact["type"];
+/** The `type` of any progress record, such as `content.delta`. */
 export type ProgressType = Progress["type"];
 
 export function isFactType(type: unknown): type is FactType {

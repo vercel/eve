@@ -10,8 +10,15 @@ import {
 /** Twilio auth token, materialized directly or from an async secret provider. */
 export type TwilioAuthToken = string | (() => string | Promise<string>);
 
+/**
+ * Public URL Twilio signed the webhook with, or a function of the request that returns it. Set it
+ * behind a proxy so signature verification matches the URL configured in Twilio.
+ */
 export type TwilioWebhookUrl = string | ((request: Request) => string | Promise<string>);
 
+/**
+ * Inbound Twilio webhook whose signature was verified: the raw form body and its parsed parameters.
+ */
 export interface TwilioVerifiedRequest {
   readonly body: string;
   readonly params: URLSearchParams;

@@ -134,6 +134,11 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryI
   return created;
 }
 
+/**
+ * Defines the eve channel, the agent's default HTTP API under `/eve/v1` for creating sessions,
+ * sending messages, and streaming events. Export it from `agent/channels/eve.ts` only to change
+ * the defaults, such as who may call the routes.
+ */
 export function eveChannel(input: EveChannelConfig): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
   const localDevConfigured = (Array.isArray(input.auth) ? input.auth : [input.auth]).some(

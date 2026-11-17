@@ -28,6 +28,10 @@ import { DEFAULT_DECISION_MODEL } from "#ai/decision-adapter.js";
 
 type AutoModelSelection = ModelOptionSelection;
 
+/**
+ * Options for {@link auto}: the model options to choose between, and optionally the decision
+ * model and a fallback selection.
+ */
 export interface AutoConfig<T extends ModelOptions = ModelOptions> {
   /** Decision model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
   readonly model?: DecisionModel;

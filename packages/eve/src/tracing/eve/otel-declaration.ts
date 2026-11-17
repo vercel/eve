@@ -100,6 +100,10 @@ export interface OtelOptions {
   readonly instrumentations?: readonly unknown[];
 }
 
+/**
+ * Options shared by trace destinations, such as `agentRunsIntegration()` and `otelIntegration()`:
+ * the export policies that filter spans before they leave for that destination.
+ */
 export interface ManagedTraceOptions {
   /** One destination policy, or policies applied in declaration order before export. */
   readonly exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[];

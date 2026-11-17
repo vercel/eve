@@ -54,6 +54,10 @@ import {
   readRouteSessionCreator,
   readSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
+/**
+ * Options for {@link mcpChannel}: the required route auth, the route path, and which of the agent's
+ * `agent_*` tools, tools, and skills to publish.
+ */
 export interface McpChannelConfig {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];

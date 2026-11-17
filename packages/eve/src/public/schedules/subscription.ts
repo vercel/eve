@@ -26,6 +26,9 @@ import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
 export type ScheduleScopeValue = string | readonly string[];
 /** Return `null` to deny the current schedule operation. */
 export type ScheduleScopeResolverResult = ScheduleScopeValue | null;
+/**
+ * A schedule management operation; each one is a separate model tool and is authorized by `scope`.
+ */
 export type ScheduleOperation =
   | "create"
   | "get"
@@ -66,6 +69,10 @@ export interface ScheduleEnvelope<TPayload = unknown> {
   readonly principal: SchedulePrincipalReference;
 }
 
+/**
+ * Identifies one firing of a dynamic schedule. Use `executionId` with the schedule identity to
+ * deduplicate side effects, since an occurrence can run more than once.
+ */
 export interface ScheduleOccurrenceIdentity {
   /** Readable schedule label; name remains the unique management identifier. */
   readonly displayName?: string;
@@ -94,6 +101,10 @@ export type ScheduleOccurrenceEventHandler<TPayload = unknown> = (
   event: ScheduleOccurrenceEvent<TPayload>,
 ) => void | Promise<void>;
 
+/**
+ * When a schedule fires: a recurring `cron` expression with an optional timezone and jitter, or a
+ * `single` firing at a date-time.
+ */
 export type ScheduleExpression =
   | {
       readonly type: "cron";
@@ -106,6 +117,10 @@ export type ScheduleExpression =
 export type ScheduleTiming =
   | ScheduleExpression
   | { readonly type: "delay"; readonly minutes: number };
+/**
+ * Whether a schedule fires: `active`, `inactive` after it is disabled, or `completed` once a single
+ * firing has passed.
+ */
 export type ScheduleState = "active" | "inactive" | "completed";
 
 /** Provider projection; payload and creator data are not read back. */
@@ -119,23 +134,31 @@ export interface ScheduleRecord {
   readonly state: ScheduleState;
   readonly updatedAt: number;
 }
+/**
+ * One page of schedules from a provider; pass `cursor` to the next list call, or stop when it is
+ * `null`.
+ */
 export interface SchedulePage {
   readonly cursor: string | null;
   readonly data: readonly ScheduleRecord[];
 }
+/** The schedule a provider's `create` stores: its unique name, timing, and payload. */
 export interface ScheduleCreate<TPayload> {
   readonly expression: ScheduleExpression;
   readonly payload: TPayload;
   readonly name: string;
 }
+/** Fields a provider's `update` replaces; omitted fields stay as they are. */
 export interface SchedulePatch<TPayload> {
   readonly expression?: ScheduleExpression;
   readonly payload?: TPayload;
 }
+/** Paging input for listing schedules, with `limit` from 1 through 100. */
 export interface ScheduleList {
   readonly cursor?: string;
   readonly limit?: number;
 }
+/** The schedule and execution a provider delivers an occurrence for. */
 export interface ScheduleOccurrence {
   readonly executionId: string;
   readonly name: string;
@@ -164,6 +187,7 @@ export interface ScheduleProvider {
   delete(context: ScheduleProviderContext, name: string): Promise<boolean>;
 }
 
+/** Input to create a schedule through the authenticated schedules client. */
 export interface ScheduleClientCreate<TPayload> {
   readonly expression: ScheduleTiming;
   /** Display label. Creation allocates a unique management name returned in the receipt. */
@@ -224,8 +248,13 @@ type SchedulePayloadApproval<TPrepared> =
         context: ApprovalResponseContext & { readonly payload: TPrepared },
       ) => ApprovalResponseDecision | Promise<ApprovalResponseDecision>;
     };
+/** Approval policy for the model's `create` tool; its context includes the prepared payload. */
 export type ScheduleCreateApproval<TPrepared> = SchedulePayloadApproval<TPrepared>;
 
+/**
+ * Approval policies for the model's schedule tools, keyed by operation. By default, reads need no
+ * approval and changes need user approval.
+ */
 export type ScheduleApprovals<TPrepared> = Partial<
   Record<Exclude<ScheduleOperation, "create" | "update">, Approval>
 > & {
@@ -307,6 +336,10 @@ export interface DynamicSchedulesDefinition<
   readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
 }
 
+/**
+ * A dynamic schedules definition returned by `defineDynamicSchedules`, ready to default-export from
+ * `agent/schedules/`.
+ */
 export type DefinedDynamicSchedules<
   TPayload = unknown,
   TSchema extends StandardSchemaV1<unknown, TPayload> = StandardSchemaV1<unknown, TPayload>,

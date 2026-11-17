@@ -592,10 +592,14 @@ export interface EveEvalTarget {
   readonly capabilities: EveEvalTargetCapabilities;
 }
 
+/** Capabilities a live eval target reports, such as whether its dev-only routes are enabled. */
 export interface EveEvalTargetCapabilities {
   readonly devRoutes: boolean;
 }
 
+/**
+ * Result of dispatching an authored schedule from an eval: the schedule and the sessions it started.
+ */
 export interface EveEvalScheduleDispatchResult {
   readonly scheduleId: string;
   readonly sessionIds: readonly string[];

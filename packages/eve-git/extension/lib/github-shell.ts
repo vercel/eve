@@ -19,18 +19,24 @@ import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
 export type { GitHubCoAuthor } from "./attribution.ts";
 
+/** One `gh`, `git`, or `gh-signed-commit` command for {@link executeGitHubShell} to run. */
 export interface GitHubShellInput {
+  /** The command line, using simple argv quoting without pipes, redirects, substitutions, or other shell syntax. */
   readonly command: string;
+  /** The GitHub-side result the command intends to produce. Must not be blank. */
   readonly description: string;
   /** The `owner/name` repository the command acts on, an `owner` for discovery, or omitted. */
   readonly repository?: string;
+  /** Directory to run in, inside the sandbox workspace. Defaults to the workspace root. */
   readonly workingDirectory?: string;
 }
 
+/** Result of a command run by {@link executeGitHubShell}, with the token redacted from its output. */
 export interface GitHubShellOutput {
   readonly exitCode: number;
   readonly stderr: string;
   readonly stdout: string;
+  /** Whether stdout or stderr was cut to its final bytes because it was too long. */
   readonly truncated: boolean;
 }
 
@@ -48,10 +54,12 @@ interface GitHubConfigBase {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
+  /** Installs the given GitHub header-transform rules into the sandbox network policy for one command, then receives `null` to remove them. Must preserve the consumer's other network rules. */
   readonly broker: (
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
   ) => Promise<void>;
+  /** The Connect connector that mints GitHub tokens. */
   readonly connector: string;
 }
 
@@ -74,6 +82,7 @@ export interface GitHubUserConfig extends GitHubConfigBase {
   readonly principalType: "user";
 }
 
+/** Connect-brokered GitHub access: {@link GitHubAppConfig} for installation tokens or {@link GitHubUserConfig} for the caller's own token. */
 export type GitHubConfig = GitHubAppConfig | GitHubUserConfig;
 
 /** What an `authorize` callback sees before a `gh` command runs with the caller's own token. */
@@ -96,6 +105,7 @@ export interface GitHubAppAuthorizeRequest extends Omit<GitHubUserAuthorizeReque
   readonly owner: string;
 }
 
+/** What an `authorize` callback receives before a `gh` command runs, for either principal type. */
 export type GitHubAuthorizeRequest = GitHubAppAuthorizeRequest | GitHubUserAuthorizeRequest;
 
 /** Decides whether the session's caller may run one `gh` command; the agent's only access control. */
@@ -103,6 +113,7 @@ export type GitHubAuthorize<Request extends GitHubAuthorizeRequest = GitHubAutho
   request: Request,
 ) => boolean | Promise<boolean>;
 
+/** One network-policy rule for a GitHub host: requests that match get the given headers set. Passed to the `broker` callback. */
 export interface GitHubLeaseRule {
   readonly match?: {
     readonly headers?: readonly {
@@ -147,6 +158,7 @@ const leaseQueues = new Map<string, Promise<void>>();
 const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
 const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
 
+/** Approval check for a GitHub shell tool: denies input that is not a valid `gh`, `git`, or `gh-signed-commit` command, and otherwise requires no approval of its own. */
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;
   try {
@@ -160,6 +172,10 @@ export function githubShellApproval(input: GitHubShellInput | undefined) {
   }
 }
 
+/**
+ * Runs one `gh`, `git`, or `gh-signed-commit` command in the sandbox with a Connect-brokered GitHub token.
+ * The command runs only when the config's `authorize` callback returns `true`; the sandbox process sees a placeholder token that the `broker` network rules swap for the real one. Throws when GitHub access is not configured, the input is invalid, or the caller is not authorized.
+ */
 export async function executeGitHubShell(
   input: GitHubShellInput,
   config: GitHubConfig | undefined,

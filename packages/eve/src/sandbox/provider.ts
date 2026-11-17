@@ -126,6 +126,7 @@ export interface SandboxPrepareContext {
   templateKey(identity: SandboxIdentity): string;
 }
 
+/** What eve passes to `onSessionEnd()`: why the sandbox's session ended, and an abort signal. */
 export interface SandboxSessionEndOptions {
   readonly signal?: AbortSignal;
   readonly reason: "completed" | "expired" | "failed" | "deleted";
@@ -182,6 +183,7 @@ export interface SandboxProviderImplementation<
   readonly toolSessions?: true;
 }
 
+/** The standard `prepare` option every sandbox environment accepts, for customizing its template. */
 export interface SandboxPrepareOption<Session> {
   /** Runs once per template, after eve seeds workspace and skill files. */
   readonly prepare?: (sandbox: Session) => void | Promise<void>;
@@ -191,6 +193,10 @@ export interface SandboxPrepareOption<Session> {
 export type WithPrepareOption<Options extends object, Session> = Options &
   SandboxPrepareOption<Session>;
 
+/**
+ * What {@link defineSandboxProvider} takes: the provider's name and an `environment()` factory
+ * that returns the sandbox lifecycle for a set of environment options.
+ */
 export interface SandboxProviderDefinition<
   EnvironmentOptions extends object,
   OpenOptions extends object | undefined,
@@ -216,6 +222,10 @@ type SandboxOptionArguments<Options extends object | undefined> = Options extend
     ? [options?: Readonly<Options>]
     : [options: Readonly<Options>];
 
+/**
+ * A sandbox provider returned by {@link defineSandboxProvider}. Call `environment()` to get a
+ * {@link SandboxEnvironment} an agent can use.
+ */
 export interface SandboxProvider<
   EnvironmentOptions extends object | undefined,
   OpenOptions extends object | undefined,

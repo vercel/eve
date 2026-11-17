@@ -224,9 +224,9 @@
  *             reference.
  *
  * Baselines for rules with pre-existing violations live in
- * `guard-invariants-baseline.json`, and for rules 66 and 67 in
- * `guard-comments-baseline.json`. Counts and allowlists in those files
+ * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
+ * Rules 66 and 67 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";

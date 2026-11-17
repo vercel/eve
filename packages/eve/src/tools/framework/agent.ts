@@ -5,6 +5,10 @@ import {
 } from "#tools/framework/agent-contract.js";
 import { attachToolBehavior } from "#tools/behavior.js";
 
+/**
+ * The framework `agent` tool, which lets the agent delegate a focused subtask to a copy of itself
+ * running as a child session. Only root sessions receive it.
+ */
 export const agent = attachToolBehavior(
   frameworkTool(
     stampToolDefinition(

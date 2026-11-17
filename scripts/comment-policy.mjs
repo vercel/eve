@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,7 +11,6 @@ const require = createRequire(import.meta.url);
 const ts = createRequire(require.resolve("@microsoft/api-extractor/package.json"))("typescript");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const packagesDir = join(root, "packages");
-export const BASELINE_PATH = join(root, "scripts/guard-comments-baseline.json");
 
 const SOURCE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
@@ -318,14 +316,6 @@ function publicDocs() {
   return { allowed, undocumented, issues };
 }
 
-/** @param {string} text */
-function fingerprint(text) {
-  return createHash("sha256")
-    .update(text.replace(/\s+/g, " ").trim())
-    .digest("base64url")
-    .slice(0, 10);
-}
-
 /** @param {string} path */
 function scriptKind(path) {
   if (path.endsWith(".tsx")) return ts.ScriptKind.TSX;
@@ -341,7 +331,7 @@ function scriptKind(path) {
 export async function collectCommentState() {
   await syncExtensions();
   const { allowed, undocumented, issues } = publicDocs();
-  /** @type {Map<string, { hash: string; line: number }[]>} */
+  /** @type {Map<string, { pos: number; end: number; text: string; line: number }[]>} */
   const comments = new Map();
   for (const path of sourceFiles()) {
     const text = await readFile(join(root, path), "utf8");
@@ -353,7 +343,6 @@ export async function collectCommentState() {
       if (isJsDoc(comment.text) && positions?.has(comment.pos)) continue;
       found.push({
         ...comment,
-        hash: fingerprint(comment.text),
         line: file.getLineAndCharacterOfPosition(comment.pos).line + 1,
       });
     }
@@ -362,82 +351,32 @@ export async function collectCommentState() {
   return { comments, undocumented, issues };
 }
 
-/** @param {Map<string, { hash: string }[]>} comments */
-export function commentBaseline(comments, undocumented) {
-  return {
-    _description:
-      "Comments and undocumented public exports that predate rules 66 and 67. Entries may only be removed: delete the comment or document the export, then run node scripts/comment-policy.mjs --write.",
-    comments: Object.fromEntries(
-      [...comments].map(([file, found]) => [file, found.map((item) => item.hash).sort()]),
-    ),
-    undocumentedExports: [...undocumented.keys()].sort(),
-  };
-}
-
-/** @param {{ write?: boolean }} [options] */
-export async function checkComments({ write = false } = {}) {
+/** Returns every comment outside the public API (rule 66) and every undocumented published export (rule 67). */
+export async function checkComments() {
   const { comments, undocumented, issues } = await collectCommentState();
-  const baseline = JSON.parse(await readFile(BASELINE_PATH, "utf8"));
-  const kept = new Map();
-  let stale = 0;
-
-  for (const file of new Set([...comments.keys(), ...Object.keys(baseline.comments)])) {
-    const remaining = new Map();
-    for (const hash of baseline.comments[file] ?? [])
-      remaining.set(hash, (remaining.get(hash) ?? 0) + 1);
-    const keptHashes = [];
-    for (const comment of comments.get(file) ?? []) {
-      const count = remaining.get(comment.hash) ?? 0;
-      if (count > 0) {
-        remaining.set(comment.hash, count - 1);
-        keptHashes.push(comment);
-        continue;
-      }
+  for (const [file, found] of comments)
+    for (const comment of found)
       issues.push({ rule: 66, file, line: comment.line, message: COMMENT_MESSAGE });
-    }
-    stale += [...remaining.values()].reduce((sum, count) => sum + count, 0);
-    if (keptHashes.length > 0) kept.set(file, keptHashes);
-  }
-
-  const baselineUndocumented = new Set(baseline.undocumentedExports);
-  const keptUndocumented = new Set();
-  for (const [key, item] of undocumented) {
-    if (baselineUndocumented.has(key)) {
-      keptUndocumented.add(key);
-      continue;
-    }
+  for (const item of undocumented.values())
     issues.push({
       rule: 67,
       file: item.file,
       line: item.line,
       message: `${item.name} is exported from ${item.entry} without JSDoc. Every published export needs a doc comment that tells users what it is for.`,
     });
-  }
-  stale += [...baselineUndocumented].filter((key) => !undocumented.has(key)).length;
-
-  if (write) {
-    await writeFile(
-      BASELINE_PATH,
-      `${JSON.stringify(commentBaseline(kept, keptUndocumented), null, 2)}\n`,
-    );
-  } else if (stale > 0) {
-    issues.push({
-      rule: 66,
-      file: relative(root, BASELINE_PATH),
-      message: `${stale} baseline entr${stale === 1 ? "y no longer matches" : "ies no longer match"} the source. Run node scripts/comment-policy.mjs --write to shrink the baseline.`,
-    });
-  }
   return issues;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.argv.slice(2).some((arg) => arg !== "--write"))
-    throw new Error("Usage: node scripts/comment-policy.mjs [--write]");
-  const issues = await checkComments({ write: process.argv.includes("--write") });
+  if (process.argv.length > 2) throw new Error("Usage: node scripts/comment-policy.mjs");
+  const issues = await checkComments();
   for (const issue of issues)
     process.stderr.write(
       `rule ${issue.rule} ${issue.file}${issue.line ? `:${issue.line}` : ""}: ${issue.message}\n`,
     );
   if (issues.length > 0) process.exitCode = 1;
-  else process.stdout.write("[eve:comment-policy] ok — no new comments outside the public API.\n");
+  else
+    process.stdout.write(
+      "[eve:comment-policy] ok — comments are public API docs and every published export has JSDoc.\n",
+    );
 }

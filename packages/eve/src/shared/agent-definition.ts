@@ -88,6 +88,10 @@ export interface EveLanguageModel {
 /** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
 export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
+/**
+ * A model together with settings that apply only when it is selected, such as reasoning effort
+ * and provider options.
+ */
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;
   /** Override the agent reasoning effort for this selection; omitted values inherit it. */
@@ -98,6 +102,10 @@ export interface PublicAgentModelSelectionDefinition {
   readonly modelOptions?: AgentModelOptionsDefinition;
 }
 
+/**
+ * What a dynamic model function returns: a model ID or instance, or a
+ * {@link PublicAgentModelSelectionDefinition}.
+ */
 export type PublicAgentDynamicModelResult =
   | PublicAgentStaticModelDefinition
   | PublicAgentModelSelectionDefinition;

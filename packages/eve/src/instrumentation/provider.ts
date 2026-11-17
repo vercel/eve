@@ -46,12 +46,21 @@ export interface InstrumentationSetupContext {
   readonly frameworkVersion: string;
 }
 
+/**
+ * Durable JSON state an instrumentation handler can carry from an operation's start event to
+ * its terminal event.
+ */
 export interface InstrumentationState {
+  /** Reads this operation's JSON value, or `undefined` when none is set. */
   get(): JsonValue | undefined;
   /** Stages a JSON value; `undefined` releases this operation's slot. */
   set(value: JsonValue | undefined): void;
 }
 
+/**
+ * Context passed to each {@link InstrumentationHandler}, including the operation's
+ * {@link InstrumentationState}.
+ */
 export interface InstrumentationContext {
   readonly state: InstrumentationState;
 }

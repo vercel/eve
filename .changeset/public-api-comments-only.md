@@ -5,4 +5,4 @@
 "@vercel/agent-runs": patch
 ---
 
-Remove source comments outside the public API; published declarations keep their JSDoc and runtime behavior is unchanged.
+Every published export now has JSDoc, and source comments outside the public API are removed; runtime behavior is unchanged.

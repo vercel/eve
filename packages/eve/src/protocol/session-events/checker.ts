@@ -26,7 +26,9 @@ import {
   rowOf,
 } from "../session-projection/tree.js";
 
+/** A way a session stream broke the event contract: where it happened, which rule, and why. */
 export interface Violation {
+  /** The position of the line that broke the rule. */
   readonly position: number;
   /** The fact's index in its commit; absent for a progress record or the whole line. */
   readonly index?: number;
@@ -35,6 +37,7 @@ export interface Violation {
   readonly message: string;
 }
 
+/** The contract rule a {@link Violation} broke. */
 export type ViolationRule =
   | "envelope"
   | "schema"
@@ -52,6 +55,7 @@ export type ViolationRule =
   | "batch-settles-together"
   | "cleared-before-start";
 
+/** Checks a session stream line by line against the event contract, reporting each {@link Violation}. */
 export interface StreamChecker {
   /** Checks the next line. Positions must increase; a repeated position is a duplicate, skipped. */
   check(line: StoredLine, position: number): readonly Violation[];

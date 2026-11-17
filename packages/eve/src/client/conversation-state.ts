@@ -3,6 +3,10 @@ import type { DeliveryOutcome } from "#protocol/session-events/families/delivery
 import type { CallRow, DeliveryRow, TaskRow } from "#protocol/session-projection/tables.js";
 import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 
+/**
+ * A child agent session linked from a followed session, passed to a {@link FollowAgents}
+ * predicate to decide whether the client observes it.
+ */
 export interface FollowedChild {
   /** Root depth is zero; its immediate children have depth one. */
   readonly depth: number;
@@ -14,6 +18,7 @@ export interface FollowedChild {
 /** A synchronous selection policy, evaluated once per relationship at each known reachable depth. */
 export type FollowAgents = boolean | ((child: FollowedChild) => boolean);
 
+/** Why a child agent session is not followed, or why its observation stopped or is unavailable. */
 export type AgentObservationReason =
   | "predicate"
   | "depth-limit"
@@ -25,6 +30,10 @@ export type AgentObservationReason =
   | "transport"
   | "detached";
 
+/**
+ * The client's view of one child agent session: `not-followed` when it is not observed, otherwise
+ * its observation status with the child's conversation state and committed read position.
+ */
 export type AgentObservation =
   | { readonly status: "not-followed"; readonly reason?: AgentObservationReason }
   | {
@@ -109,6 +118,11 @@ export type AgentCallActivity =
   | { readonly status: "unlinked" }
   | { readonly status: "linked"; readonly sessions: readonly AgentCallSession[] };
 
+/**
+ * Returns the child activity a call caused, as this reader has seen it: each child session the
+ * call sent work to, with its deliveries and the child turns that consumed them. See
+ * {@link AgentCallActivity}.
+ */
 export function agentCallActivity(state: ConversationState, callId: string): AgentCallActivity {
   const sessions = Object.values(sessionTables(state.view).children).flatMap(
     (child): AgentCallSession[] => {

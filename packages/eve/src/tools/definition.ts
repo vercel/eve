@@ -48,6 +48,7 @@ interface ToolDefinitionBase {
   readonly description: string;
 }
 
+/** Activity text for a tool's calls, shown by channels while a call runs and after it completes. */
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   /** Returns the presentation-safe label when one action invocation starts. */
   start(input: Readonly<TInput>): string;

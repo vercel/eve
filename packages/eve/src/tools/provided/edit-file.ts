@@ -5,16 +5,22 @@ import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 import { frameworkTool } from "./framework-tool.js";
 import { refreshReadFileStamp } from "./write-file.js";
 
+/**
+ * One targeted replacement in an `edit_file` call: exact text in the original file and its
+ * replacement.
+ */
 export interface EditFileToolEdit {
   newText: string;
   oldText: string;
 }
 
+/** Input to the provided `edit_file` tool: the file to edit and the replacements to apply. */
 export interface EditFileToolInput {
   edits: EditFileToolEdit[];
   path: string;
 }
 
+/** Result of the provided `edit_file` tool: the edited path and how many replacements were made. */
 export interface EditFileToolOutput {
   /** The path as the model gave it. */
   path: string;

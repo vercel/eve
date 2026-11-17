@@ -168,8 +168,7 @@ CI.
     while fixing a bug or refactoring; well-named code is the documentation.
     Express an invariant as code that fails when it breaks: a named assert that
     throws with the reason in its message, a type, or a `pnpm guard:invariants`
-    rule. Rules 66 and 67 enforce this; existing comments are baselined in
-    `scripts/guard-comments-baseline.json` and may only be removed.
+    rule. Rules 66 and 67 enforce this with no baseline.
 
 11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
     spec, one ordered plugin list, and one route table. Follow the foundation

@@ -23,6 +23,9 @@ export type AgentModelsTool = WorkflowServeToolDefinition<AgentModelsToolInput, 
 /** One model an `agent({ models })` tool offers. */
 export type AgentToolModel = ModelOption;
 
+/**
+ * Options for {@link agent}. Pass `models` to let the model choose which model each new task runs on.
+ */
 export interface AgentToolOptions<
   TModels extends Readonly<Record<string, AgentToolModel>> = Readonly<
     Record<string, AgentToolModel>

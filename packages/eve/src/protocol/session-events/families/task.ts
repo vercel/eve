@@ -3,6 +3,7 @@ import { z } from "#compiled/zod/index.js";
 import { conforming, envelopeOf, errorInfo, id, known } from "../common.js";
 import type { Envelope, ErrorInfo } from "../envelope.js";
 
+/** The payload of `task.started`: a call started a task, such as a subagent or an authored tool. */
 export interface TaskStartedData {
   readonly taskId: string;
   /** The call that started the task; it also gets `call.started {taskId}`. */
@@ -12,8 +13,10 @@ export interface TaskStartedData {
   readonly name: string;
 }
 
+/** How a task ended, as recorded on `task.ended`. */
 export type TaskOutcome = "completed" | "failed" | "cancelled";
 
+/** The payload of `task.ended`: a task ends, with its outcome. */
 export interface TaskEndedData {
   readonly taskId: string;
   readonly outcome: TaskOutcome;
@@ -22,9 +25,11 @@ export interface TaskEndedData {
   readonly error?: ErrorInfo;
 }
 
+/** The fact that introduces a task. */
 export type TaskStarted = Envelope<"task.started", TaskStartedData>;
 /** A task ends once; individual calls it serves settle separately with `call.settled`. */
 export type TaskEnded = Envelope<"task.ended", TaskEndedData>;
+/** Any fact in the `task` family. */
 export type TaskFact = TaskStarted | TaskEnded;
 
 export const taskSchemas = {

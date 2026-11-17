@@ -9,12 +9,17 @@ import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Input to the provided `read_file` tool: the file to read and an optional line range. */
 export interface ReadFileToolInput {
   filePath: string;
   limit?: number;
   offset?: number;
 }
 
+/**
+ * Result of the provided `read_file` tool: the file's content with paging details, or file
+ * metadata for an image or PDF the model reads natively.
+ */
 export interface ReadFileToolOutput {
   content: string;
   /** Set when the file is a PNG, JPEG, GIF, or WebP image or a PDF that the model reads natively. */

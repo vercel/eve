@@ -623,6 +623,10 @@ export interface SlackAnswerContext extends SlackContext {
   readonly defaultAuth: SessionAuthContext;
 }
 
+/**
+ * One action from a Slack interactive payload, such as a button click or select choice, passed to
+ * `onInteraction`.
+ */
 export interface SlackInteractionAction {
   readonly actionId: string;
   readonly value?: string;
@@ -787,6 +791,10 @@ export type SlackChannelInternalEvents = {
   ) => void | Promise<void>;
 };
 
+/**
+ * Where eve delivers an input request: the session's `"thread"`, or a `"direct-message"` to the
+ * Slack user who triggered the active turn.
+ */
 export type SlackApprovalChannel = "direct-message" | "thread";
 
 /** Input request passed to a {@link SlackApprovalChannelResolver}. */
@@ -798,6 +806,10 @@ export type SlackApprovalChannelResolver = (
   ctx: SessionContext,
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
+/**
+ * Options for {@link slackChannel}: credentials, routing, message and interaction hooks, and
+ * rendering overrides.
+ */
 export interface SlackChannelConfig {
   /** Slack API transport overrides: base URLs and a custom fetch. */
   readonly api?: SlackTransportOptions;

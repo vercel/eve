@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, ref, timeoutMs } from "../lib/tool";
 
+/** Lets the agent scroll a scrollable element with wheel input. Requires the extension to run `headed` on Linux. */
 export default desktopTool({
   description:
     "Scroll a scrollable element. On Linux this sends wheel input and needs the extension to run headed; prefer scroll_to.",

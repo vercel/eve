@@ -14,6 +14,10 @@ import type {
 } from "./core/types.js";
 
 type Completion = ScopeTerminal & { errorType?: string; result?: ModelResult };
+/**
+ * A handle to one traced operation, such as a turn, attempt, model call, or tool call.
+ * Use it to run work inside the operation's span, add attributes, and complete or fail it.
+ */
 export interface Operation {
   readonly type: ScopeData["type"];
   readonly reference: TraceReference;
@@ -36,6 +40,7 @@ export interface WrappedOperation<I, H extends Operation> {
   ): Promise<T>;
 }
 type MemoryInput = Extract<ScopeData, { type: "memory" }>["options"];
+/** Identifies one attempt of a turn's step by step index and attempt number, with optional runtime context, channel, and links. */
 export interface AttemptInput {
   readonly stepIndex: number;
   readonly attempt: number;
@@ -43,6 +48,7 @@ export interface AttemptInput {
   readonly channel?: StepOptions["channel"];
   readonly links?: readonly TraceLink[];
 }
+/** A traced agent turn. Start attempts, memory calls, and turn-level approvals under it. */
 export interface TurnOperation extends Operation {
   attempt: WrappedOperation<AttemptInput, AttemptOperation>;
   /** Returns an open attempt without starting one. Durable turns only. */
@@ -72,6 +78,7 @@ export interface ApprovalInput {
 export interface ToolInput extends ToolOptions {
   readonly startTimeMs?: number;
 }
+/** A traced attempt of one turn step. Start model calls, model streams, tool calls, agent delegations, and memory calls under it. */
 export interface AttemptOperation extends Operation {
   tool: WrappedOperation<ToolInput, ToolOperation>;
   callSubAgent: WrappedOperation<{ callId: string; agentName: string }, ToolOperation>;
@@ -87,6 +94,7 @@ export interface AttemptOperation extends Operation {
   ): Promise<T>;
   memory: WrappedOperation<MemoryInput, MemoryOperation>;
 }
+/** A traced tool call. Start approvals, nested tool calls, and memory calls under it. */
 export interface ToolOperation extends Operation {
   approval: WrappedOperation<ApprovalInput, ApprovalOperation>;
   /** Returns an open approval without starting one. Durable turns only. */
@@ -95,13 +103,19 @@ export interface ToolOperation extends Operation {
   tool: WrappedOperation<ToolInput, ToolOperation>;
   memory: WrappedOperation<MemoryInput, MemoryOperation>;
 }
+/** A traced model call, as returned by `AttemptOperation.modelCall` without a callback. */
 export type ModelOperation = Operation;
+/** A traced wait on a person, such as a tool approval or a sign-in. */
 export type ApprovalOperation = Operation;
+/** A traced memory search or write. */
 export type MemoryOperation = Operation;
+/** A traced call to a decision model, such as choosing a model for a turn. */
 export type DecisionOperation = Operation;
+/** What a `modelCall` callback returns: the call's `result` with its finish reason, usage, and optional response metadata and content. */
 export interface ModelCallReturn<T> extends ModelResult {
   readonly result: T;
 }
+/** What a `modelStream` callback returns: the stream as `result`, returned unchanged, and a `completion` promise that settles with the model result when the stream ends. */
 export interface ModelStreamReturn<T> {
   readonly result: T;
   readonly completion: PromiseLike<ModelResult>;

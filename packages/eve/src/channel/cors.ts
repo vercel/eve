@@ -29,6 +29,10 @@ export interface ChannelCorsOptions {
   };
 }
 
+/**
+ * CORS setting for a channel's routes: `true` enables CORS with default options, `false` disables it,
+ * and a {@link ChannelCorsOptions} object configures it explicitly.
+ */
 export type ChannelCors = boolean | ChannelCorsOptions;
 
 export interface NormalizedChannelCorsOptions {

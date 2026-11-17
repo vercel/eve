@@ -29,6 +29,7 @@ type Context = OtelContext;
 const ACTIVE_OPERATION = createContextKey("agent.tracing.active-operation");
 const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
 
+/** Returns `context` with a capture decision that allows or declines recording error content, such as exception messages, for spans started under it. */
 export function withErrorContent<T extends { setValue(key: symbol, value: unknown): T }>(
   context: T,
   allowed: boolean,
@@ -40,6 +41,11 @@ function suppressTracing(context: Context): Context {
   return context.setValue(SUPPRESS_TRACING_KEY, true);
 }
 
+/**
+ * Returns the agent tracing operation active in an OpenTelemetry context, defaulting to the current one,
+ * or `undefined` outside any operation. Use it to read the active span's reference and capture decision
+ * from spans the host runs itself.
+ */
 export function activeTraceOperation(
   host: Pick<Context, "getValue"> = context.active(),
 ): ActiveOperation | undefined {
@@ -97,6 +103,7 @@ function onVercel(): boolean {
   return env?.VERCEL_ENV !== undefined;
 }
 
+/** Options for `otelTelemetry`. */
 export interface OtelTelemetryOptions {
   /** Defaults to the global tracer provider. */
   readonly provider?: TracerProvider;

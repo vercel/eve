@@ -29,6 +29,9 @@ export const VERCEL_SCHEDULES_CLIENT_HEADERS: Readonly<Record<string, string>> =
   "x-vss-framework": "eve",
 };
 
+/**
+ * Options for `vercelScheduleProvider()`, which stores and fires schedules with Vercel Schedules.
+ */
 export interface VercelScheduleProviderOptions {
   /** Overrides the public Vercel Schedules endpoint. */
   readonly baseUrl?: string;

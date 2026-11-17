@@ -18,6 +18,7 @@ export type VercelSandboxEnvironmentOptions = WithPrepareOption<
 >;
 export type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
 
+/** Sandbox provider that runs each session's sandbox as a persistent Vercel Sandbox. */
 export const VercelSandbox: SandboxProvider<
   VercelSandboxEnvironmentOptions | undefined,
   VercelSandboxRuntimeOptions,

@@ -5,11 +5,15 @@ import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Input to the provided `write_file` tool: the file path and its full new content. */
 export interface WriteFileToolInput {
   content: string;
   filePath: string;
 }
 
+/**
+ * Result of the provided `write_file` tool: the written path and whether the file already existed.
+ */
 export interface WriteFileToolOutput {
   existed: boolean;
   path: string;

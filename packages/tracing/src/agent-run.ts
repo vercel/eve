@@ -27,6 +27,7 @@ import type {
   TraceReference,
 } from "./core/types.js";
 
+/** Options for {@link createAgentRun}. */
 export interface AgentRunOptions {
   /** Span output and context propagation. Defaults to the global OpenTelemetry provider. */
   readonly telemetry?: AgentTelemetry;
@@ -39,13 +40,16 @@ export interface AgentRunOptions {
   readonly checkpointer?: TraceCheckpointer;
   /** Defaults to the AI SDK content serializer. */
   readonly serializer?: ContentSerializer;
+  /** Receives tracing failures, which never reach the traced work. See {@link TraceErrorHandler}. */
   readonly onError?: TraceErrorHandler;
 }
 
+/** Describes one agent turn for `AgentRun.turn`: its run identity, sequence, and optional capture, lineage, and trace placement. */
 export interface TurnInput {
   readonly identity: RunIdentity;
   /** Names the invocation span. Omit for an anonymous agent. */
   readonly agentName?: string;
+  /** Position of this turn within the run. */
   readonly sequence: number;
   readonly framework?: FrameworkIdentity;
   readonly capture?: CaptureDecision;
@@ -73,6 +77,7 @@ export interface TurnInput {
   readonly context?: ExecutionContext;
 }
 
+/** Identifies a saved durable turn for `AgentRun.resume`. */
 export interface ResumeInput {
   readonly identity: RunIdentity;
   readonly context?: ExecutionContext;
@@ -110,6 +115,10 @@ export interface DecisionInput {
   readonly context?: ExecutionContext;
 }
 
+/**
+ * Traces agent execution: start turns, resume saved durable turns, record memory and decision calls,
+ * and flush or shut down the telemetry. Create one with {@link createAgentRun}.
+ */
 export interface AgentRun {
   turn: WrappedOperation<TurnInput, TurnOperation>;
   /** Returns a saved durable turn, without starting one. */
@@ -119,6 +128,7 @@ export interface AgentRun {
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
+/** Records a memory search or write as one memory span around `execute`, under the active operation unless `parent` is given. */
 export interface AgentMemoryTracing {
   search<T>(data: MemoryInput<T>, execute: () => T | PromiseLike<T>): Promise<T>;
   write<T>(data: MemoryInput<T>, execute: () => T | PromiseLike<T>): Promise<T>;
@@ -138,6 +148,10 @@ interface LiveTurn {
 
 const REVISIONS_PER_TURN = 10000;
 
+/**
+ * Creates an {@link AgentRun} that records agent turns, attempts, model calls, and tool calls as spans.
+ * Pass a `checkpointer` to make turns durable across processes.
+ */
 export function createAgentRun(input: AgentRunOptions): AgentRun {
   const telemetry = input.telemetry ?? otelTelemetry();
   const checkpointer = input.checkpointer;

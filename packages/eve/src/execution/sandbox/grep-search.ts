@@ -24,6 +24,10 @@ interface GrepCommandInput {
   readonly pattern: string;
 }
 
+/**
+ * Result of a `grep` search: the formatted matches, how many matched, the output mode and
+ * path searched, and whether the output was truncated.
+ */
 export interface GrepSearchResult {
   readonly content: string;
   readonly matchCount: number;
@@ -32,6 +36,10 @@ export interface GrepSearchResult {
   readonly truncated: boolean;
 }
 
+/**
+ * Input to the `grep` tool: the pattern to search for and options that scope the search and
+ * shape its output.
+ */
 export interface GrepToolInput {
   readonly context?: number;
   readonly glob?: string;

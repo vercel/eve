@@ -27,6 +27,7 @@ export interface SessionPredecessor {
   readonly sessionId: string;
 }
 
+/** The payload of `session.started`: the session begins, with its parent, predecessor, runtime, and trace when known. */
 export interface SessionStartedData {
   /** The call whose agent opened this session, for a child session. */
   readonly parent?: { readonly sessionId: string; readonly callId: string };
@@ -39,8 +40,10 @@ export interface SessionStartedData {
   readonly trace?: TraceContext;
 }
 
+/** How a session ended, as recorded on `session.ended`. */
 export type SessionOutcome = "completed" | "failed";
 
+/** The payload of `session.ended`: the session ends, with its outcome and, for a failure, what failed. */
 export interface SessionEndedData {
   readonly outcome: SessionOutcome;
   /**
@@ -52,8 +55,11 @@ export interface SessionEndedData {
   readonly error?: ErrorInfo;
 }
 
+/** The first fact of a session stream. */
 export type SessionStarted = Envelope<"session.started", SessionStartedData>;
+/** The terminal fact of a session stream. */
 export type SessionEnded = Envelope<"session.ended", SessionEndedData>;
+/** Any fact in the `session` family. */
 export type SessionFact = SessionStarted | SessionEnded;
 
 const sessionStartedData = conforming<SessionStartedData>()(

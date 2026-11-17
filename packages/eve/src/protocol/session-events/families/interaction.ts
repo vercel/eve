@@ -22,6 +22,7 @@ export type InteractionDisplay = "confirmation" | "select" | "text";
 /** How an option suggests looking. A hint: a newer eve can add one. */
 export type InteractionOptionStyle = "primary" | "danger" | "default";
 
+/** One choice a person can pick to answer an interaction. */
 export interface InteractionOption {
   readonly id: string;
   readonly label: string;
@@ -80,6 +81,7 @@ export interface InteractionOrigin {
   readonly call?: { readonly callId: string; readonly name: string; readonly input?: JsonValue };
 }
 
+/** The payload of `interaction.opened`: a person is asked something, such as an approval, question, or sign-in. */
 export interface InteractionOpenedData {
   readonly interactionId: string;
   readonly subject: InteractionSubject;
@@ -90,6 +92,7 @@ export interface InteractionOpenedData {
   readonly audience?: { readonly principalIds: readonly string[] };
 }
 
+/** How an interaction ended, as recorded on `interaction.settled`. */
 export type InteractionOutcome =
   | "accepted"
   | "declined"
@@ -100,6 +103,7 @@ export type InteractionOutcome =
   | "abandoned"
   | "expired";
 
+/** The payload of `interaction.settled`: an interaction ends, with its outcome and what decided it. */
 export interface InteractionSettledData {
   readonly interactionId: string;
   readonly outcome: InteractionOutcome;
@@ -111,8 +115,11 @@ export interface InteractionSettledData {
   readonly response?: { readonly [key: string]: JsonValue };
 }
 
+/** The fact that introduces an interaction. */
 export type InteractionOpened = Envelope<"interaction.opened", InteractionOpenedData>;
+/** The terminal fact of an interaction. */
 export type InteractionSettled = Envelope<"interaction.settled", InteractionSettledData>;
+/** Any fact in the `interaction` family. */
 export type InteractionFact = InteractionOpened | InteractionSettled;
 
 const subject = conforming<InteractionSubject>()(

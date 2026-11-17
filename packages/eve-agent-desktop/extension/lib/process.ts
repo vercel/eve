@@ -26,6 +26,7 @@ export interface CommandSandbox {
   }): PromiseLike<SandboxProcess>;
 }
 
+/** Exit code and captured output of a finished sandbox command. */
 export interface SandboxCommandResult {
   readonly exitCode?: number;
   readonly stderr?: string;

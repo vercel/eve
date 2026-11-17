@@ -48,8 +48,8 @@ export interface TelegramMessageResult {
 }
 
 /**
- * Body for Telegram's `sendMessage`. Only `text` is required; the remaining
- * snake_case fields are forwarded to Telegram unchanged.
+ * `sendMessage` fields that show a group or supergroup response to only one
+ * member, as an ephemeral message.
  */
 export interface TelegramEphemeralMessageParameters {
   /** Callback query that grants this ephemeral response's 15-second delivery window. */
@@ -58,6 +58,10 @@ export interface TelegramEphemeralMessageParameters {
   readonly receiver_user_id: number | string;
 }
 
+/**
+ * Body for Telegram's `sendMessage`. Only `text` is required; the remaining snake_case fields are
+ * forwarded to Telegram unchanged.
+ */
 export interface TelegramMessageBody {
   readonly disable_notification?: boolean;
   /** Delivers this group or supergroup response only to one member. */

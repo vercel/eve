@@ -27,10 +27,12 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MARKER = "... [truncated]";
 
+/** Returns the UTF-8 byte length of `text`. */
 export function telemetryByteLength(text: string): number {
   return encoder.encode(text).length;
 }
 
+/** Truncates `text` to at most `maxBytes` UTF-8 bytes without splitting a character, ending it with a `... [truncated]` marker when it is cut. */
 export function truncateTelemetryText(text: string, maxBytes: number): string {
   const prefix = text.slice(0, maxBytes + 1);
   const bytes = encoder.encode(prefix);
@@ -41,6 +43,7 @@ export function truncateTelemetryText(text: string, maxBytes: number): string {
   return decoder.decode(bytes.subarray(0, end)) + marker;
 }
 
+/** Returns `value` when it is a non-empty string of at most 1024 characters and 1024 UTF-8 bytes, and `undefined` otherwise, so an identifier is safe to record on a span. */
 export function boundedPrincipalId(value: unknown): string | undefined {
   return typeof value === "string" &&
     value.length > 0 &&
