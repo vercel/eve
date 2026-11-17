@@ -64,23 +64,17 @@ Read [OpenAPI connections](/docs/connections/openapi) for `defineOpenAPIConnecti
 
 ## Choose app vs. user auth
 
-A connection credential belongs to the agent or to the person using it. Per-user credentials depend on route auth: eve gets a user's token only when `ctx.session.auth.current?.principalType === "user"`.
-
 | Whose credential | Use when                                                   | Auth shape                                                                                                                                                   |
 | ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | App              | The agent uses one shared service, bot, or app credential. | `auth: { getToken }` (the default `principalType: "app"`), or `connect({ connector, principalType: "app" })`.                                                |
 | User             | Each end-user signs in with their own third-party account. | `connect("linear/myagent")`, or `auth: { principalType: "user", getToken }`.                                                                                 |
 | User from a job  | Background work uses the grant of the user who started it. | Start or resume the session through a channel whose route auth resolved that user, or pass an explicit user auth context when dispatching through a channel. |
 
-`principalType: "user"` uses the token of the user already signed in on the session. It doesn't mean "ask a human later."
-
-On a connection, `principalType` says whose credential it is, for both `getToken` auth and `connect()` from `@vercel/connect/eve`. In route auth, `principalType` describes the caller.
+`principalType: "user"` requires `ctx.session.auth.current?.principalType === "user"` from route auth and uses that signed-in user's token.
 
 ## Static-token auth
 
-`getToken` returns a `TokenResult` (`{ token, expiresAt? }`), as in the example at the top of this page. eve calls it on each connection attempt, so it can read the token from an env var, a secrets manager, or your own OAuth exchange.
-
-Set `expiresAt` (milliseconds since epoch) when the token has a known TTL. After that time, eve calls `getToken` again before the next request, including on an MCP client that is already open.
+`getToken` returns `{ token, expiresAt? }` (`TokenResult`). eve calls it on each connection attempt, and again after `expiresAt` (milliseconds since epoch) elapses, including on an open MCP client.
 
 ## No auth
 
@@ -317,16 +311,12 @@ The callback URL never carries `VERCEL_AUTOMATION_BYPASS_SECRET`, because the us
 
 ### Signaling authorization state
 
-Throw these error classes from `eve/connections` in `getToken` or `completeAuthorization`:
+Throw these error classes from `eve/connections` in `getToken` or `completeAuthorization` (and narrow caught errors with `isConnectionAuthorizationRequiredError(err)` or `isConnectionAuthorizationFailedError(err)`):
 
-- `ConnectionAuthorizationRequiredError(connectionName)`: the user must sign in. Throw it from `getToken` to send an `interaction.opened` event with `request.kind: "sign-in"`.
-- `ConnectionAuthorizationFailedError(connectionName, { reason?, retryable? })`: sign-in failed. `reason` is a stable code, such as `"access_denied"`. It appears as the reason on the sign-in's `interaction.settled` event and on the failed tool result. Traces record it as `agent.connection.authorization.reason` on the failed sign-in's `agent.approval` span and on the failed call's `execute_tool` span, next to `eve.connection.name`. A reason that isn't a code, such as an error message, stays off the span.
+- `ConnectionAuthorizationRequiredError(connectionName)`: prompts the user to sign in (`interaction.opened` with `request.kind: "sign-in"`).
+- `ConnectionAuthorizationFailedError(connectionName, { reason?, retryable? })`: fails sign-in and records `reason` (such as `"access_denied"`) on `interaction.settled`, the failed tool result, and `agent.connection.authorization.reason` on the `agent.approval` and `execute_tool` spans.
 
-Omit `retryable` to allow retries. Set it to `false` when retrying can't help, such as when the user denies access. `interaction.settled` then carries `response.retryable: false`. Later calls in the same turn that need the same grant for the same user fail without asking again. The next turn asks again.
-
-A sign-in that ends without being completed, such as one cancelled because the user sent a new message while it was open, works the same way. Later calls in that turn that need the same grant fail with `reason: "sign_in_cancelled"` and tell the model to say the action needs that access. The next turn asks again.
-
-Schedule-started turns don't prompt for sign-in. Calls that need one fail with `reason: "sign_in_unavailable"`, and the model is told to say the action needs that access. A scheduled send into an existing conversation counts as scheduled too.
+Set `retryable: false` when retrying cannot help (such as access denial); later calls in the same turn that need the same grant fail without prompting again until the next turn. A cancelled sign-in fails later calls in that turn with `reason: "sign_in_cancelled"`, and schedule-started turns fail calls requiring sign-in with `reason: "sign_in_unavailable"`.
 
 ```ts
 import { ConnectionAuthorizationFailedError } from "eve/connections";
@@ -336,8 +326,6 @@ throw new ConnectionAuthorizationFailedError("linear", {
   retryable: false,
 });
 ```
-
-To narrow a caught error, use `isConnectionAuthorizationRequiredError(err)` and `isConnectionAuthorizationFailedError(err)`. They match on `err.name`, so they work after bundling, where `instanceof` can fail.
 
 ### Handling a revoked token mid-call
 

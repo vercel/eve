@@ -288,24 +288,16 @@ A reply of `1`, an option's label, or its ID answers the request. Showing a diff
 
 ## Operation semantics
 
-- `cancel` asks the running turn to stop. Confirm it with `turn.settled` and
-  `outcome: "cancelled"`; the session accepts another message afterward.
-- `compact` summarizes model context without adding a user message. The stream
-  shows `context.started`, then `context.settled` with `kind: "compaction"`.
-- `clear` cancels the running turn and every working task, then removes
-  model-message history in place. It keeps the system prompt, skills, tools,
-  state, limits, addresses, and session sandbox.
-- `end` ends the current session for good. A later `send()` to the address creates
-  a new session; a fixed `Session` handle still points at the ended ID.
+- `cancel` stops the running turn (`turn.settled` with `outcome: "cancelled"`, or `outcome: "ignored"` when idle).
+- `compact` summarizes model context without adding a user message (`context.started` and `context.settled` with `kind: "compaction"`).
+- `clear` cancels the running turn and working tasks, then removes model-message history in place while keeping the system prompt, skills, tools, state, limits, addresses, and sandbox.
+- `end` permanently retires the session and frees its channel addresses. Authenticate and deduplicate command webhooks before calling `end` so a delayed duplicate cannot end a newer session at the same address.
 
-Control operations never create a session. Unknown or inactive targets throw
-`SessionNotActiveError`. A cancel with nothing to stop ends with `outcome: "ignored"`. Authenticate and deduplicate command webhooks before
-calling `end`, because a delayed duplicate can end a newer session at the same address.
+Control operations never create a session and throw `SessionNotActiveError` on unknown or inactive targets.
 
 ## Retried deliveries
 
-After verifying a webhook, pass its stable event ID as `idempotencyKey`. Reuse the key
-when retrying a failed or timed-out send:
+After verifying a webhook, pass its stable event ID as `idempotencyKey` (1–256 characters, prefixed if IDs can overlap across sources) on `send()` or `respond()`:
 
 ```ts
 const session = await from(conversationId).send(message, {
@@ -314,11 +306,7 @@ const session = await from(conversationId).send(message, {
 });
 ```
 
-Channel and fixed-session `send()` and `respond()` accept `idempotencyKey`, as does the Chat SDK bridge. A key has 1–256 characters and identifies one message or answer; prefix IDs with the provider or event type if they can overlap.
-
-Reusing a remembered key ignores the new input, even if the message changed. It returns a new receipt whose result is `ignored`, and doesn't repeat the original reply. Use `result()` to read how a send ended. Each session remembers its last 1,024 keys. An older key runs again, and so does a key reused after the session ends or in another session. All replicas must use the same Workflow World.
-
-Await `send()` before acknowledging a webhook when the provider allows it, because acknowledging sooner can lose work. Keys don't make tool calls, outbound posts, or work done before `send()` exactly once.
+Each session remembers its last 1,024 keys across replicas sharing a Workflow World. Reusing a remembered key ignores the new input and returns a receipt whose `result()` is `ignored`, without repeating the original reply or deduplicating work done before `send()`. Await `send()` before acknowledging a webhook when the provider allows it.
 
 ## File uploads
 
@@ -380,21 +368,9 @@ async function fetchUpload(url: string) {
 }
 ```
 
-The model then reads `Attachment report.pdf could not be retrieved: The file is over 100 MB. Ask for a smaller file.` The message reaches the model as written. Keep it to details the person can act on, such as a size limit or a missing permission. Never include URLs, tokens, or upstream response text. Pass the original error as `attachmentError(message, { cause })` to keep it in operator logs. Any other thrown error becomes a generic note, with the original in operator logs.
+`fetchFile(url, { state, session })` receives the URL string (`href`) from a `URL` object or scheme-prefixed string in `data`. Return `{ bytes }` to save the file to the sandbox, or `null` to let eve download public `https:` URLs (up to 10 URLs per message, 25 MB each, 30-second timeout, no private or reserved addresses).
 
-`fetchFile` receives the URL as a string (its `href`), so the example matches with `url.startsWith(...)`. A string with a URL scheme in `data`, such as `https://...` or `myapp-file:abc`, works the same as a `URL` object. The second argument carries the channel's `state` and the attachment's `session`, so a resolver can check a file against the caller in `session.auth`.
-
-Return bytes to save the file to the sandbox. Return `null` for a URL your channel doesn't resolve, and eve downloads a public `https:` URL itself. eve's downloads have these limits:
-
-- 25 MB by default, with a 30-second timeout.
-- No private or reserved addresses.
-- At most 10 URLs per message, fetched one at a time.
-
-Any other URL, or a failed download, reaches the model as a note. The model provider never fetches an attachment, so a link that expires or needs credentials can't fail later model calls.
-
-Set `uploadPolicy` on `defineChannel` to cap what eve saves for the channel, for example `uploadPolicy: { maxBytes: 10 * 1024 * 1024, allowedMediaTypes: ["image/*", "application/pdf"] }`. eve checks every saved file, including its own downloads, by its actual bytes and detected media type. A violating file reaches the model as a note. Omit `uploadPolicy` to rely on your `fetchFile` checks, with eve's own downloads capped at 25 MB.
-
-See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
+If `fetchFile` throws `attachmentError(message, { cause? })`, the model sees `Attachment <name> could not be retrieved: <message>` (keep `message` free of URLs, tokens, or upstream responses); any other error produces a generic note and logs the original error. Set `uploadPolicy` (`{ maxBytes, allowedMediaTypes }`) to cap saved files by their actual bytes and detected media type. See [Inbound attachments](../sandbox#inbound-attachments).
 
 ## Cross-channel hand-off
 

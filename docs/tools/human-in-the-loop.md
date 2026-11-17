@@ -39,12 +39,9 @@ export default defineTool({
 
 Rules:
 
-- A call that waits for approval hasn't started, and a denied call never runs.
-- Other calls from the same model response that need no approval run while it waits.
-- Omitted `approval` behaves like `never()`, so tool calls run without human approval by default. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
-- An [agent-wide policy](#gate-every-call-from-one-policy) can add a gate to any call, including one whose tool omits `approval`.
-- Approval doesn't make a charge or email happen exactly once. Give non-idempotent side effects their own idempotency keys.
-- Approval is consent only. The approved call, its policy recheck, and the rest of the turn run with the requesting user's identity, connections, and credentials, never the approver's. See [Act as the approver](#act-as-the-approver).
+- A call waiting for approval hasn't started, a denied call never runs, and other unguarded calls from the same model response run while it waits.
+- Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions, and give non-idempotent side effects their own idempotency keys.
+- Approved calls and the rest of the turn run with the requesting user's identity and credentials, never the approver's. See [Act as the approver](#act-as-the-approver).
 
 ### Let a decision model review calls
 
@@ -179,12 +176,9 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 
 `auto()` works here too, but it runs a decision model before every call, including reads, and asks a person when the model errors, times out, or the input is over 64 KB. A direct `invokeTool` call is rejected if `auto()` would require human approval. Put cheap rules first and call `auto()` only for the calls that need it.
 
-- Local subagent sessions run under the root agent's policy too. A subagent's own `approval` in its `agent.ts` adds to it and can't loosen it.
-- A [remote agent](/docs/guides/remote-agents) runs in its own deployment under that deployment's policy. Your policy gates the call to the remote agent, not the calls it makes.
-- A call through `eve__tool` runs the resolved entry's policy, such as `linear__create_issue`'s.
-- Not gated: `eve__search`, `eve__skill`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
-- A channel calling `invokeTool` directly gets the same policy: a call it would ask about is rejected with `approval-required`.
-- With a policy set, eve evaluates it on every call, so keep it fast and pass `abortSignal` to asynchronous work.
+- Local subagent sessions inherit the root agent's policy; a subagent's own `approval` in `agent.ts` can only tighten it. A [remote agent](/docs/guides/remote-agents) runs under its own deployment's policy.
+- Calls through `eve__tool` run the resolved entry's policy (such as `linear__create_issue`), and direct `invokeTool` calls that require approval are rejected with `approval-required`.
+- Not gated by agent-wide `approval`: `eve__search`, `eve__skill`, task controls, `ask_question`, `no_reply`, `sleep`, connection sign-in, provider-executed tools, and `ctx.agent()` in workflow code (though a local child's own tool calls are gated).
 
 ### Remember approval for a tool
 
@@ -371,22 +365,13 @@ An answered `ctx.ask()` returns `responder`, when available: the signed-in respo
 
 ## Answering from a client or channel
 
-Every [channel](/docs/channels) turns requests into native UI and sends the user's choice back as the answer. Slack, for example, shows approvals as buttons and questions as select menus.
-
-In your own frontend, use `openInteractions(view)` and `respond([{ interactionId, optionId }])` on the same session. A request stays `open` until its `interaction.settled` event, and you can answer while other work runs. See [Building a frontend](/docs/guides/frontend#human-in-the-loop-prompts).
+Built-in [channels](/docs/channels) render requests as buttons, selects, or numbered prompts. In a custom frontend, read `openInteractions(view)` and call `respond([{ interactionId, optionId }])` on the session; see [Building a frontend](/docs/guides/frontend#human-in-the-loop-prompts).
 
 ## How pause and resume works
 
-Approvals and questions pause and resume the same way:
+When a tool requires approval or calls `ctx.ask()`, eve emits `interaction.opened` for each request followed by `turn.paused`. After the answer arrives (via `answers` or a matching follow-up `message`), the turn resumes under the same `turnId`. Cancelling the turn ends open approvals as `interrupted`.
 
-1. A tool call needs approval, or a workflow tool such as `ask_question` calls `ctx.ask()`.
-2. eve emits an `interaction.opened` event for each waiting request.
-3. The stream emits `turn.paused` for those requests. After the answer, the turn continues with the same `turnId`.
-4. The client answers with `answers`, each naming its `interactionId`, or with a follow-up `message`. A message whose text matches an option ID, option label, or option number answers automatically. This includes approval options such as `approve` and `deny`.
-
-To tell the model why you denied a call, send `text` with the `deny` answer: `{ interactionId, optionId: "deny", text: "Only the three-pack." }`. The model gets the note quoted in the denial result, attributed to the person who denied the call. That person may not be the user. Anyone who can read the session stream sees the note in `response.submitted` and `interaction.settled`.
-
-Cancelling the turn ends its approvals as `interrupted`. The call doesn't run, and a later answer approves nothing.
+To include a denial reason for the model, pass `text` with `deny`: `{ interactionId, optionId: "deny", text: "Only the three-pack." }`. The note is attributed to the responder and appears in `response.submitted` and `interaction.settled`.
 
 ### Follow-up messages
 

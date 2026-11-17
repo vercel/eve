@@ -201,51 +201,21 @@ const response = await session.send("Run the long operation.", {
 
 ## Open a stream manually
 
-Use `session.stream()` to attach to an existing stream from a saved cursor:
+Use `session.stream({ startIndex?, follow?, signal?, reconnect? })` to attach to an existing stream from a saved cursor or an explicit `startIndex` (`0` for the start, or a negative offset such as `-1` for the latest line without reconnecting or advancing `streamIndex`):
 
 ```ts
 const session = client.sessions.attach("wrun_01ARYZ6S41TSV4RRFFQ69G5FAV", {
   streamIndex: 10,
 });
 
-for await (const event of session.stream()) {
-  console.log(event.type);
-}
-```
-
-Pass `startIndex` to override the stored cursor:
-
-```ts
-for await (const event of session.stream({ startIndex: 0 })) {
-  console.log(event.type);
-}
-```
-
-Nonnegative values are line positions. Negative values read relative to the stream's current tail, so `-1` reads the latest line:
-
-```ts
-for await (const event of session.stream({ startIndex: -1 })) {
-  console.log(event.type);
-  break;
-}
-```
-
-Tail-relative reads don't reconnect or advance the session's stored `streamIndex`. Break after the event you need.
-
-## Bounded catch-up reads
-
-Pass `follow: false` to read from the cursor to the stream's current end and then stop, instead of following the live stream (the default):
-
-```ts
 for await (const event of session.stream({ follow: false })) {
   console.log(event.type);
 }
-// Returns once every line recorded before the stream opened is consumed.
 ```
 
-The server reports that end when the first connection opens, and reconnects keep it. The stored `streamIndex` still advances, so a later `stream()` or `send()` picks up where the bounded read ended. When the cursor is already at or past that end, the iterator returns without yielding.
+### Bounded catch-up reads
 
-`follow: false` throws with a negative `startIndex`, because a tail-relative cursor can't be bounded. It also fails when the server doesn't report the stream's end, as an agent on an older eve version doesn't.
+Pass `follow: false` to read from the cursor to the stream's recorded tail and then stop while still advancing `streamIndex`. If the cursor is already at or past the tail, the iterator returns immediately. `follow: false` rejects negative `startIndex` values and servers that don't report the tail index.
 
 ## Snapshot a session
 

@@ -249,23 +249,9 @@ export default defineAgent({
 });
 ```
 
-`sessionTimeoutMs` sets how long any session, including a delegated session,
-may sit idle before eve completes it. Omit it for 30 days, or set it to `false`
-to disable the timeout. The idle window starts when the session is created. It
-restarts each time a turn ends, including turns that clear or compact the
-context or are cancelled. A session never expires while a turn is open, such as while its
-[tasks](./tools/tasks) work or it waits for a person to answer. Process restarts
-don't change the window.
+`sessionTimeoutMs` sets how long a session (including a delegated session) may sit idle between turns before eve completes it (`session.ended` with `outcome: "completed"`) and releases its channel addresses. Omit it for 30 days, or set `false` to disable it. A session never expires while a turn is open, and process restarts don't reset the window.
 
-When the window elapses, eve emits `session.ended` with `outcome: "completed"`
-and releases the channel addresses, such as a Slack thread, that route messages
-to the session. The next message at that address starts a new session. To carry the earlier conversation over, pass it as
-[prior history](./channels/eve#start-from-prior-history). A session with
-[zero retention](#run-data-retention) loses its stored payloads when it ends.
-
-`sessionUsage` gets two `TokenUsage` records, a type exported from `eve`. `total` is everything the session has
-spent, and `window` is what it spent since the last approved continuation. Each
-record has these fields:
+`sessionUsage` receives `{ total, window }` (`TokenUsage`, exported from `eve`), where `total` is lifetime session usage and `window` is usage since the session's own budget prompt was last approved (equal to `total` before the first approval):
 
 | Field              | Meaning                                                                                                                                            |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -275,21 +261,7 @@ record has these fields:
 | `outputTokens`     | Generated output.                                                                                                                                  |
 | `costUsd`          | Model token cost in US dollars that AI Gateway reports with each step. Excludes tool and infrastructure spend. Unset when no step reported a cost. |
 
-`window` is `total` minus the session's
-[total](./concepts/sessions-runs-and-streaming#replies-and-narration) when its
-own budget prompt was last accepted. Before the first approval, it equals
-`total`. Accepting a budget prompt that a subagent passed up starts the
-subagent's window, not the parent's. The window survives redeploys and
-replays.
-
-Omit `sessionUsage` to stop at `40_000_000` new input tokens per window:
-
-```ts
-({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000;
-```
-
-`sessionUsage` can raise its threshold after each approval. This limit asks
-at 20,000 new input tokens, then at 40,000, 80,000, and so on:
+Omit `sessionUsage` to stop at `40_000_000` new input tokens per window (`window.inputTokens - window.cacheReadTokens >= 40_000_000`), or set `sessionUsage: false` to leave sessions uncapped. `sessionUsage` can also raise its threshold after each approval:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({

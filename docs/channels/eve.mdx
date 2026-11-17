@@ -138,42 +138,22 @@ export default eveChannel({
 
 ### Stream events
 
-Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
+Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming#stream-a-session) for the event set, cursors, reconnection, and retention (`410 session_expired` once expired).
 
-Following a stranded session's stream returns `409 session_stranded`, and the TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead. The response ends at the last recorded event and carries the `x-eve-stream-tail-index` header. It doesn't change the session, so it works before you end the session.
+On a [stranded session](../concepts/execution-model-and-durability#stranded-sessions), following the stream returns `409 session_stranded`; pass `follow=false` to read recorded history through `x-eve-stream-tail-index`. Sessions started before stream version 27 are translated to v27 lines on read (completed parts only, with `position` markers for untranslated deltas).
 
-Ending a stranded session tries to append these events, then closes the stream so existing readers finish:
-
-1. `delivery.admitted` with `source: { control: "reset" }`, then `delivery.settled`, for the end request.
-2. `session.ended` with `outcome: "failed"`, error code `session_stranded`, and cause `{ deliveryId }`.
-
-A session started by an eve version before v27 stores v26 events, and the stream route serves them as v27 lines. Translation covers messages, reasoning, tool calls and results, approvals, questions, sign-ins, subagents, clears, and compactions.
-
-- Streamed text previews aren't translated, so a running v26 session shows each part once it completes.
-- Cursors count stored lines. A stored event with nothing to translate, such as a streamed delta, arrives as a `position` marker.
-- When no running deployment can add to the stream, a follow ends at the last event with `stream.ended`, so clients stop reconnecting.
-
-The World keeps an ended session's stream only for its retention period. After that, reading it returns `410 session_expired`, and the TypeScript client fails with a `ClientError` whose `code` is `"session_expired"`, without retrying.
-
-### Cancel a turn
-
-Post to `/eve/v1/session/:sessionId/cancel` to cancel the active turn. Include the observed `turnId` so a late request can't cancel a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.settled` with `outcome: "cancelled"`.
-
-See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for receipts, HTTP status codes, subagent cancellation, and race behavior.
-
-### Clear context
-
-Post to `/eve/v1/session/:sessionId/clear` to cancel a running turn and every working task, then remove model-message history. The session ID, system prompt, tools, skills, state, limits, and sandbox stay. On a stranded session, clear returns `409 session_stranded` and changes nothing; use `end` instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
-
-### Compact context
-
-Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for a running turn to finish and reports its result on the stream. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+### Session controls
 
 <a id="reset-a-session" />
 
-### End a session
+| Route                                     | Effect                                                                                                                                         |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /eve/v1/session/:sessionId/cancel`  | Asynchronously cancels the active turn (pass `{ turnId }` to guard against cancelling a newer turn); confirms with `turn.settled` `cancelled`. |
+| `POST /eve/v1/session/:sessionId/clear`   | Cancels active work and removes model-message history while keeping the session ID, system prompt, tools, skills, state, limits, and sandbox.  |
+| `POST /eve/v1/session/:sessionId/compact` | Summarizes history without adding a user message, waiting for any active turn to finish first.                                                 |
+| `POST /eve/v1/session/:sessionId/end`     | Permanently retires the session (and cancels the workflow run on a stranded session).                                                          |
 
-Post to `/eve/v1/session/:sessionId/end` to end that session for good. Ending doesn't create a replacement; create a new session for a fresh conversation. On a stranded session, eve cancels the workflow run directly. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) and [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ## Authentication
 
@@ -205,9 +185,7 @@ eve add channel/web
 
 `eve init --channel-web-nextjs` scaffolds the app without authentication; sign-in setup runs only through `eve add channel/web` or the channel picker.
 
-The generated Next.js app signs users in with Better Auth. The agent's eve channel accepts the same sign-in, and still accepts Vercel OIDC and local development requests. In an agent workspace, setup configures only the selected agent.
-
-Setup registers `/api/auth/callback/vercel` as a project redirect URI, so Vercel validates callbacks against the project's deployment domains. The app uses the `authorization_code` grant, `client_secret_post` authentication, and the `openid`, `email`, and `profile` scopes. Setup writes `VERCEL_APP_CLIENT_ID`, `VERCEL_APP_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` to production and preview as sensitive values, and never prints them or writes them to source. Run `eve deploy` after setup to publish the app. Local development runs without browser sign-in.
+Setup registers `/api/auth/callback/vercel` on the project, writes `VERCEL_APP_CLIENT_ID`, `VERCEL_APP_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` to production and preview, and configures Better Auth in the Next.js app alongside Vercel OIDC and `localDev()` on the eve channel. Run `eve deploy` after setup to publish the app; local development runs without browser sign-in.
 
 For automation, supply the setup answers explicitly:
 

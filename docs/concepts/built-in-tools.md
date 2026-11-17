@@ -75,7 +75,7 @@ A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies
 
 The wrapper also keeps the plain-text view through the spread `toModelOutput`. If your `execute` returns a string, the model sees that text. Any other shape, including a `bash` result with extra fields, reaches the model as JSON; set your own [`toModelOutput`](../tools#shape-what-the-model-sees-with-tomodeloutput) to change that.
 
-Disable only `bash`:
+Disable `bash` (or any other default tool by placing the same file at `agent/tools/<name>.ts`):
 
 ```ts title="agent/tools/bash.ts"
 import { disableTool } from "eve/tools";
@@ -85,24 +85,11 @@ export default disableTool();
 
 ### `read_file`
 
-`read_file` reads sandbox text files with line-numbered output. It also shows the model images and PDFs as files:
-
-- PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side
-- PDFs up to 20 MiB
-
-It detects images and PDFs from their bytes, so the filename extension doesn't matter.
-
-It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `$HOME/`. Results and errors name the resolved absolute path.
+`read_file` reads sandbox text files with line-numbered output, and returns PNG, JPEG, GIF, and WebP images (up to 3 MiB and 8000 pixels per side) and PDFs (up to 20 MiB) as file parts, detected from their bytes regardless of filename extension. It accepts absolute paths, workspace-relative paths, and `$HOME/` paths, and reports the resolved absolute path.
 
 ```sh
 eve add tool/read_file
 ```
-
-```ts title="agent/tools/read_file.ts"
-export { default } from "eve/tools/read_file";
-```
-
-Override it:
 
 ```ts title="agent/tools/read_file.ts"
 import { defineTool } from "eve/tools";
@@ -114,27 +101,13 @@ export default defineTool({
 });
 ```
 
-Disable it:
-
-```ts title="agent/tools/read_file.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`.
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`. If you disable or wrap `write_file` to restrict writes, do the same for `edit_file`.
 
 ```sh
 eve add tool/write_file
 ```
-
-```ts title="agent/tools/write_file.ts"
-export { default } from "eve/tools/write_file";
-```
-
-Override it:
 
 ```ts title="agent/tools/write_file.ts"
 import { defineTool } from "eve/tools";
@@ -157,33 +130,13 @@ export default defineTool({
 });
 ```
 
-Disable it:
-
-```ts title="agent/tools/write_file.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
-`edit_file` also changes existing files. If you disable or wrap `write_file` to limit writes, do the same for `edit_file`.
-
 ### `edit_file`
 
-`edit_file` edits one sandbox file by exact text replacement. To add it back after `defaultTools: false`:
+`edit_file` edits one sandbox file by exact text replacement:
 
 ```sh
 eve add tool/edit_file
 ```
-
-```ts title="agent/tools/edit_file.ts"
-export { default } from "eve/tools/edit_file";
-```
-
-The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. `edit_file` preserves the byte order mark, uses the file's first line ending across all lines, and rejects files that are not valid UTF-8.
-
-Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first. After it changes a file the session already read, `write_file` can overwrite that file without another `read_file` call. A failed edit leaves the file unchanged and returns an error naming the missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
-
-Customize it by wrapping the framework definition:
 
 ```ts title="agent/tools/edit_file.ts"
 import { defineTool } from "eve/tools";
@@ -193,27 +146,15 @@ import { editFile } from "eve/tools/edit_file";
 export default defineTool({ ...editFile, approval: always() });
 ```
 
-Disable it:
-
-```ts title="agent/tools/edit_file.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
+The model passes `path` (workspace-relative, absolute, or `~`/`$HOME`) and `edits`, a list of non-overlapping `{ oldText, newText }` replacements. Each `oldText` must match one region of the file (falling back to normalized trailing whitespace, quotes, dashes, and spaces when no exact match exists). `edit_file` preserves the byte order mark, uses the file's first line ending across all lines, and rejects non-UTF-8 files. It doesn't require `read_file` first, and after it edits a file the session already read, `write_file` can overwrite that file without another `read_file`. A failed edit leaves the file unchanged and names the missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks receive `{ path, replacements }` on `call.settled`.
 
 ### `web_fetch`
 
-`web_fetch` fetches URLs from the app runtime. It follows up to ten redirects and checks every destination for SSRF safety. Non-success responses return plain text with the response body when available.
+`web_fetch` fetches URLs from the app runtime, following up to ten redirects and checking every destination for SSRF safety. Non-success responses return plain text with the response body when available.
 
 ```sh
 eve add tool/web_fetch
 ```
-
-```ts title="agent/tools/web_fetch.ts"
-export { default } from "eve/tools/web_fetch";
-```
-
-Override it:
 
 ```ts title="agent/tools/web_fetch.ts"
 import { defineTool } from "eve/tools";
@@ -232,17 +173,9 @@ export default defineTool({
 });
 ```
 
-Disable it:
-
-```ts title="agent/tools/web_fetch.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
 ### `web_search`
 
-`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Parallel unless you set `provider`; direct provider models use their native search.
+`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models default to `"parallel"`, while direct OpenAI, Anthropic, and Gemini 3+ models use their native search (other direct models omit `web_search`):
 
 ```sh
 eve add tool/web_search
@@ -251,70 +184,22 @@ eve add tool/web_search
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "parallel" });
-```
-
-Choose another AI Gateway search provider:
-
-```ts title="agent/tools/web_search.ts"
-import { webSearch } from "eve/tools/web_search";
-
-export default webSearch({ provider: "exa" });
-```
-
-Select Browserbase Search in the same slot:
-
-```ts title="agent/tools/web_search.ts"
-import { webSearch } from "eve/tools/web_search";
-
-export default webSearch({ provider: "browserbase" });
-```
-
-Browserbase Search requires a [Gateway model ID](../agent-config#set-the-model). AI Gateway runs the search with `AI_GATEWAY_API_KEY` or Vercel project OIDC credentials, so no `BROWSERBASE_API_KEY` is needed. See [Browserbase Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-search).
-
-Select Tako Search to search the web and Tako's knowledge graph of structured data in one call:
-
-```ts title="agent/tools/web_search.ts"
-import { webSearch } from "eve/tools/web_search";
-
-export default webSearch({ provider: "tako" });
-```
-
-Results include web pages and Tako data cards. Each card names its sources and links an embeddable chart. The model chooses the search effort and whether to return a card's rows in the result. Deep searches and card rows cost more than a fast search, so say in your agent instructions when to use them. Tako Search requires a [Gateway model ID](../agent-config#set-the-model). AI Gateway runs the search with its usual credentials, so no Tako API key is needed. See [Tako Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-tako-search).
-
-Select the model vendor's own hosted search for a model routed through AI Gateway:
-
-```ts title="agent/tools/web_search.ts"
-import { webSearch } from "eve/tools/web_search";
-
-export default webSearch({ provider: "native" });
-```
-
-The vendor runs the search server-side and returns citations:
-
-| Model vendor               | Search                  |
-| -------------------------- | ----------------------- |
-| OpenAI                     | OpenAI web search       |
-| Anthropic                  | Anthropic web search    |
-| Google, Gemini 3 and later | Google Search grounding |
-
-AI Gateway uses its usual credentials, so no `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or Google key is needed. Other Gateway models, including dynamically selected models and Gemini models before Gemini 3, do not receive `web_search`.
-
-eve picks the search tool from the requested model. A call that AI Gateway's `models` fallback serves with another vendor's model can therefore run without search.
-
-Anthropic web search runs only on Anthropic's own API. AI Gateway tries another host when Amazon Bedrock or Google Vertex AI rejects the tool. If no host accepts it, eve retries the step without `web_search`.
-
-Set `fallback` to give models without native search a provider that works with any Gateway model (`"exa"`, `"parallel"`, `"browserbase"`, or `"tako"`):
-
-```ts title="agent/tools/web_search.ts"
-import { webSearch } from "eve/tools/web_search";
-
 export default webSearch({ provider: "native", fallback: "exa" });
 ```
 
-The `provider` setting applies only to AI Gateway models. Direct OpenAI, Anthropic, and Gemini 3 and later models always use their native search; other direct models omit `web_search`.
+For AI Gateway models, `webSearch({ provider, fallback? })` runs through Gateway's credentials (`AI_GATEWAY_API_KEY` or Vercel OIDC) without separate search API keys:
 
-eve identifies a direct model's vendor by its AI SDK provider name. A `createOpenAI()` model pointed at an OpenAI-compatible endpoint, such as Amazon Bedrock's, therefore gets OpenAI web search. When the endpoint rejects it, eve retries the step without `web_search`, so each step makes one rejected call first. To avoid that, give the provider a custom name so eve omits `web_search`:
+| `provider`      | Behavior on AI Gateway models                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"parallel"`    | Default. Parallel web search on any Gateway model.                                                                                                                  |
+| `"exa"`         | Exa web search on any Gateway model.                                                                                                                                |
+| `"browserbase"` | [Browserbase Search](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-search) on any Gateway model.                             |
+| `"tako"`        | [Tako Search](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-tako-search) (web pages plus structured data cards and charts) on any model. |
+| `"native"`      | Model vendor's server-side search for OpenAI, Anthropic (Anthropic API only), and Gemini 3+; other Gateway models use `fallback` or omit `web_search`.              |
+
+eve selects the search tool from the requested model, so a Gateway `models` fallback to another vendor can run without search. On Anthropic models, AI Gateway tries another host if Bedrock or Vertex AI rejects native search, or retries the step without `web_search`.
+
+eve identifies a direct model's vendor by its AI SDK provider name. If you point `createOpenAI()` at an OpenAI-compatible endpoint that rejects OpenAI web search (such as Amazon Bedrock), give the provider a custom `name` so eve omits `web_search`:
 
 ```ts title="agent/agent.ts"
 import { createOpenAI } from "@ai-sdk/openai";
@@ -329,27 +214,7 @@ const mantle = createOpenAI({
 export default defineAgent({ model: mantle("openai.gpt-5.6-sol") });
 ```
 
-Replace provider-managed search with an authored implementation:
-
-```ts title="agent/tools/web_search.ts"
-import { defineTool } from "eve/tools";
-
-export default defineTool({
-  description: "Search the internal documentation index.",
-  inputSchema: { type: "object" },
-  async execute(input) {
-    return { results: [], query: input };
-  },
-});
-```
-
-Disable it:
-
-```ts title="agent/tools/web_search.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
+You can also export `defineTool({ ... })` from `agent/tools/web_search.ts` to replace provider-managed search with your own implementation, or `disableTool()` to disable it.
 
 ### `agent`
 

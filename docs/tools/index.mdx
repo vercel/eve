@@ -31,17 +31,9 @@ export default defineTool({
 });
 ```
 
-- Tools run in your app runtime, not in the [sandbox](/docs/sandbox). They can read `process.env` and import shared code from `lib/`.
-- `inputSchema` is a Zod schema, any Standard Schema, or a plain JSON Schema object. Zod and Standard Schema infer the `input` type, and a plain JSON Schema types it as `Record<string, unknown>`.
-- eve validates the input before `execute` runs. Zod and Standard Schema use their own library, so any installed Zod version works.
-- eve sends a plain JSON Schema to the model without its `$schema` keyword. It validates with JSON Schema 2020-12 rules, which cover draft-07 keywords.
-- For a JSON Schema, eve fills omitted properties from their `default` values. `format` is an annotation only.
-- An unknown `type` name or an unresolvable `$ref` stops eve from checking a JSON Schema. The model still receives the schema, and `execute` gets the input unchecked.
-- Optional input fields stay optional, because eve turns off provider strict mode for function tools.
-- Tool outputs must be JSON-serializable. Convert `Date`, `Map`, `Set`, `NaN`, and cyclic values before you return them.
-- Add an `outputSchema` for structured output. With Zod or Standard Schema, it also types the `execute` return.
-- Schemas can come from helper modules and be composed with Zod.
-- Import SDK clients inside `execute`, not at the top of the file. See [Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
+- Tools run in the app runtime with `process.env` and `lib/` access, not in the [sandbox](/docs/sandbox). Import heavy SDK clients inside `execute`; see [Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
+- `inputSchema` accepts a Zod schema, any Standard Schema, or a plain JSON Schema object (validated with JSON Schema 2020-12 rules, filling `default` values and stripping `$schema`; unknown `type` or unresolvable `$ref` skips validation). Optional fields stay optional.
+- Tool outputs must be JSON-serializable. Add `outputSchema` to validate and type the return value.
 
 ### The `ctx` parameter
 
@@ -214,11 +206,7 @@ export default defineTool({
 
 The call's `capability` carries `hidden: true` and no label. Channels hide its status, as they do for `eve__task_wait` and `eve__task_cancel`, and the call preserves silence on deferred turns, such as Slack turns with `status: "deferred"`. Use `showsActivity(call)` from `eve/events` to apply the same rule in your own renderer. It accepts a call, its `capability`, or a message part from `eve/react`, `eve/vue`, or `eve/svelte`, which also carries `hidden: true`. The call stays in the session's events and history. If the tool needs [approval](#gate-a-tool-on-human-approval), people are still asked, and the default prompt names the tool in readable form, such as `Approve React?`.
 
-The provided `bash`, `edit_file`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
-
-- An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5`.
-- A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`.
-- A connection's sign-in entry shows `Sign in to Linear`.
+Built-in tools and catalog entries (`eve__search`, `eve__skill`, and connection sign-in) provide default labels, and calls through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) use the target tool's label.
 
 ### Stream preliminary tool results
 
@@ -381,18 +369,13 @@ See [Fork conversations into a new thread](/docs/patterns/fork-conversations-int
 
 ### Durable waits
 
-A tool call with an `execute` function finishes before the model continues. The definition decides whether the executor can pause and wait:
+`defineTool` executors run inside a single step and cannot suspend. Use `defineWorkflowTool` when a call needs to wait for a person (`ctx.ask`), webhook, or timer across restarts:
 
-| Definition           | Can wait inside `execute`                                | What the model receives            |
-| -------------------- | -------------------------------------------------------- | ---------------------------------- |
-| `defineTool`         | No; the executor runs inside the step that started it.   | Executor output after it finishes. |
-| `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes. |
+- `execute(input, ctx)` pauses the turn until the workflow finishes and returns the tool result.
+- `task(input, ctx)` returns a receipt immediately and delivers the output later in a `task.result` message.
+- `serve(receive, ctx)` runs a [resumable task](/docs/tools/workflows#resumable-tasks-serve) that accepts additional calls by `taskId` (the same model used by subagent tools).
 
-A workflow tool that defines `task(input, ctx)` instead runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task). The call returns a receipt immediately, and the output arrives later in a `task.result` message. One that defines `serve(receive, ctx)` runs a [resumable task](/docs/tools/workflows#resumable-tasks-serve), which accepts additional calls addressed by its `taskId`.
-
-Subagent tools, whether built-in, declared, or remote, run as resumable tasks, so the child's reply also arrives in `task.result`. In an authored workflow, awaiting a [`ctx.agent` session's `response.result()`](/docs/tools/workflows#delegate-work-ctxagent) waits for the child's turn to end instead.
-
-In a workflow body, keep values needed after a wait in local variables, because workflow replay rebuilds them. Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an answer from a person.
+Keep values needed after a wait in local variables in the workflow body so replay rebuilds them.
 
 ## Troubleshooting
 

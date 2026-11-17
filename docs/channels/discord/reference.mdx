@@ -196,16 +196,7 @@ export default discordChannel({
 });
 ```
 
-Each forwarded message names its author, so whoever passes `gateway.auth` can send messages as any Discord user. The default accepts only `localDev()` and Vercel OIDC tokens from the same project and environment, so a preview deployment can't call production. Keep a custom `gateway.auth` as narrow.
-
-| `gateway` option          | Default                                              | What it does                                                                                                    |
-| ------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `auth`                    | `localDev()` and same-environment Vercel OIDC tokens | Accepts a relay that [runs outside Vercel](#run-the-relay-outside-vercel).                                      |
-| `route`                   | `/eve/v1/discord/gateway`                            | Path of the relay route.                                                                                        |
-| `onMessage(ctx, message)` | Answers [addressed messages](#who-the-bot-answers)   | Returns `{ auth }` to run the agent, or `null` to ignore the message.                                           |
-| `startThread`             | `true`                                               | Answers a mention in a text channel in a [new thread](#reply-in-threads). Set `false` to answer in the channel. |
-
-Omit `credentials` to read `DISCORD_APPLICATION_ID` and `DISCORD_BOT_TOKEN` in the channel and `DISCORD_BOT_TOKEN` in the relay.
+Each forwarded message names its author, so whoever passes `gateway.auth` can send messages as any Discord user. The default accepts only `localDev()` and Vercel OIDC tokens from the same project and environment; keep any custom `gateway.auth` equally narrow. Omit `credentials` to read `DISCORD_APPLICATION_ID` and `DISCORD_BOT_TOKEN` from the environment.
 
 ### Run the relay as a Vercel Daemon
 

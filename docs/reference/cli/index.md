@@ -161,42 +161,7 @@ Run `eve info` first when something behaves unexpectedly. It shows which files e
 | `messaging`        | object           | Session route patterns: `{ create, messages, stream }`                                    |
 | `artifacts`        | object or `null` | Paths to the compiled manifest, discovery manifest, diagnostics, module map, and metadata |
 
-`toolInputSchemas.root` maps each root agent tool name, including namespaced extension tools, to its JSON Schema. `toolInputSchemas.subagents` holds the same map for each declared subagent, keyed by its path from the root. For example, a `reviewer` that `forecaster` declares is `forecaster/reviewer`.
-
-Each schema is the form eve sends to the model:
-
-- Validation-library schemas such as Zod set `additionalProperties: false` on closed objects.
-- Plain JSON Schema stays as written.
-- Tools that run as `serve` tasks, including agent tools, include the optional `taskId` input.
-
-```json
-{
-  "tools": ["get_weather"],
-  "toolInputSchemas": {
-    "root": {
-      "get_weather": {
-        "type": "object",
-        "properties": { "city": { "type": "string" } },
-        "required": ["city"],
-        "additionalProperties": false
-      }
-    },
-    "subagents": {
-      "forecaster": {},
-      "forecaster/reviewer": {
-        "check_source": {
-          "type": "object",
-          "properties": { "url": { "type": "string" } },
-          "required": ["url"],
-          "additionalProperties": false
-        }
-      }
-    }
-  }
-}
-```
-
-`toolInputSchemas` covers only tools compiled from tool files. It omits provider-managed tools such as `web_search`, dynamic tools, connection tools, the runtime-generated subagent and remote agent tools, and `eve__task_wait` and `eve__task_cancel`. It also doesn't reflect transformations a model provider applies before the model reads a schema.
+`toolInputSchemas.root` maps each compiled root tool name (including namespaced extension tools) to the JSON Schema eve sends to the model, and `toolInputSchemas.subagents` maps each declared subagent path (such as `forecaster/reviewer`) to its tools' schemas. Validation-library schemas such as Zod set `additionalProperties: false` on closed objects, and `serve` task tools include the optional `taskId` input. Provider-managed tools (`web_search`), dynamic tools, connection tools, subagent/remote-agent tools, and `eve__task_*` are omitted.
 
 ## `eve build`
 

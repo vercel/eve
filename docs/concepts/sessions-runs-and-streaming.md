@@ -332,15 +332,9 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/end \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes history without adding a user message. If a turn is active, eve queues the request until that turn ends. User-role instructions are ordinary history and may be summarized, and eve adds them again before the next model call; system-role instructions stay outside it. Recalled [memory](../memory) stays outside history, so the summary never includes it, and a memory provider can capture history before compaction rewrites it. On the stream, compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the compaction ends `failed` and the session keeps its previous history.
+Compaction summarizes history without adding a user message (queued if a turn is active) and emits `context.started` and `context.settled` with `kind: "compaction"`. Clear cancels any active turn and working tasks, withdraws pending approvals and sign-ins, and removes model-message history in place (`kind: "clear"`) while keeping the session identity, system-role instructions, tools, skills, [`defineState`](./state) values, limits, and sandbox. Neither deletes external memory-provider data, and user-role instructions are re-inserted before the next model call.
 
-Clear removes model-message history in place, including static and dynamic user-role instructions. It keeps the session identity, system-role instructions, tools, skills, [`defineState`](./state) values, limits, and sandbox. eve adds user-role instructions again before the next model call. Clear doesn't delete data from a memory provider's external store, and the next turn recalls again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn. Unlike a compaction, clear doesn't wait for a running turn. It cancels the turn, which ends `cancelled`, stops the calls it waits on, and ends working tasks with `task.ended`. A stopped task never reports into the cleared conversation. On the stream, clear is a context change with `kind: "clear"`.
-
-A cancel stops turns, not a compaction or clear. A cancel that arrives while either runs ends `ignored`, and the compaction or clear finishes. A cancel, clear, or compact sent to a prewarmed session before its first message ends `ignored` once the session starts.
-
-End permanently retires the session ID; create another session for a fresh conversation. Every control returns a delivery receipt when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
-
-A [stranded session](./execution-model-and-durability#stranded-sessions) can't run commands, so clear and compact can't repair it. End still works: eve retires the stranded session and returns the end's delivery receipt. The delivery ends after the session is retired and its addresses are released.
+`cancel` stops turns, not a running compaction or clear, and controls sent to a prewarmed session before its first message end `ignored`. `end` permanently retires the session ID (including on a [stranded session](./execution-model-and-durability#stranded-sessions), where `clear` and `compact` are rejected). Inactive targets throw `SessionNotActiveError` or return `409 session_not_active`.
 
 ## Reconnect and rewind
 

@@ -329,24 +329,16 @@ eve never falls back to app identity. Manual `invoke` runs as the creator, not t
 
 ## Prepare payloads and destinations
 
-Without `preparePayload`, eve validates payloads before saving and again before each run. Each saved write, including timing and payload, is limited to 64 KB. Store JSON data and stable references, not credentials or sensitive recipient details.
+Without `preparePayload`, eve validates payloads against `inputSchema` before saving (up to 64 KB including timing and payload) and checks JSON validity and size before each run. Store JSON data and stable references, not credentials.
 
-`preparePayload(input, context)` checks application policy, reads the caller's context, and returns the shape eve saves. It runs on creation and payload replacement, after input validation and `scope` authorization:
+`preparePayload(input, context)` validates application policy, reads caller context (including `context.expression`, the schedule's post-write timing), and returns the saved payload on `create` and payload-replacing `update` calls:
 
 | Caller                    | When preparation runs                                                                                                                                                                             |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Model tool call           | Before approval, so errors reach the model before a person is asked, and again before writing. Approval policies receive the prepared payload. eve rejects the call if the second result differs. |
 | Authenticated client code | Once, before writing, with no approval.                                                                                                                                                           |
 
-Preparation can repeat when a write is retried, so avoid irreversible effects. Reads, timing-only updates, state changes, and runs never call it.
-
-`context.expression` is the timing the schedule has after the write: the one the caller passed, or the stored one when an update replaces only the payload. Read `context.expression.type` to tell a recurring schedule (`"cron"`) from a one-time one, so the payload doesn't need a field for it. A relative delay arrives as written, not resolved to a time.
-
-A timing-only update doesn't call `preparePayload`, so a value you derive from `context.expression` keeps the timing it was prepared with. Vercel Schedules rejects an update that changes a schedule between recurring and one-time. With another provider, send the payload again when you change a schedule's kind.
-
-`auth`, `run`, and occurrence events infer the prepared return type. Declare `preparePayload` before them, or give it an explicit return type. Without preparation, the payload type comes from the schema.
-
-Before each run, eve checks only the saved payload's size and JSON validity, not `inputSchema`. Validate the prepared shape yourself if needed.
+Declare `preparePayload` before `auth`, `run`, and `events` (or give it an explicit return type) so they infer the prepared payload type. Keep `preparePayload` free of irreversible side effects, because write retries can re-run it; timing-only updates, state changes, reads, and runs do not call it.
 
 ```ts
 preparePayload(input, context) {
@@ -356,11 +348,7 @@ preparePayload(input, context) {
 },
 ```
 
-For channel messages, `preparePayload` can check trusted caller context and save channel and workspace references that the model-facing schema doesn't expose. Reject callers that lack the required channel context, including delegated work when appropriate. Payload replacement captures the destination and creator again from the updating caller.
-
-Destination IDs are optional. `run` can derive a DM from the creator, pick an authorized configured channel, or look up a destination from another payload value. A schema may expose explicit IDs, but a valid ID doesn't prove access, and `scope` doesn't authorize sending everywhere. Check model-selected destinations against the creator's current permissions.
-
-eve doesn't save the conversation that created a schedule. To reply in that thread, save an authorized thread reference through `preparePayload` or application code. Save a destination reference whenever the destination must stay fixed, because lookups at run time follow configuration changes.
+Use `preparePayload` to capture authorized channel, thread, or workspace references from the caller's context, since eve does not automatically save the originating conversation and `scope` does not authorize arbitrary model-chosen destination IDs.
 
 ## Troubleshooting
 

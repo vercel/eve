@@ -109,13 +109,9 @@ Exercise caution for agents that process non-public, sensitive, regulated, or pr
 
 ### `localDev()`
 
-Accepts the request as a stand-in `local-dev` caller, but only on a local development server: `eve dev` (which sets `EVE_DEV=1`) or `vercel dev` (`VERCEL=1` and `VERCEL_ENV=development` together). No request header can change this. A production deployment (`eve start`, a Vercel deployment, or any container host) sets neither flag, so every request falls through to the next entry.
+Accepts requests as a stand-in `local-dev` caller only under `eve dev` (`EVE_DEV=1`) or `vercel dev` (`VERCEL=1` with `VERCEL_ENV=development`); production processes fall through to the next entry.
 
-On a development server, `localDev()` refuses browser requests for another website. It refuses a request when its host or `Origin` is neither a loopback host nor one of this machine's addresses. A web page the developer opens can't call the local agent, even through DNS rebinding. A frontend on any loopback host and port, such as `http://localhost:3000` calling `http://127.0.0.1:2000`, still authenticates.
-
-On `eve dev`, `localDev()` also refuses connections from another machine, so LAN callers of `eve dev --host 0.0.0.0` aren't accepted as `local-dev`. A tunnel or reverse proxy on the same machine, such as ngrok or a local nginx, connects locally, so its callers still get `local-dev`.
-
-`localDev()` is safe to leave in the walk. Still put a real authenticator ahead of it so production traffic has something to match.
+On a development server, `localDev()` rejects requests whose host or `Origin` is neither loopback nor a local machine address, and on `eve dev` it also rejects connections from other machines on the LAN. A local frontend on any loopback port (such as `http://localhost:3000` calling `http://127.0.0.1:2000`) or a same-machine tunnel/proxy (such as ngrok or local nginx) is accepted as `local-dev`. Put a real authenticator ahead of `localDev()` before exposing a tunnel or deploying.
 
 ### `vercelOidc()`
 
