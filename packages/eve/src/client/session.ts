@@ -19,6 +19,7 @@ import {
   sleep,
   type FollowedEvent,
   type OpenedStream,
+  type PendingStream,
 } from "#client/open-stream.js";
 import { prewarmClientSession, sendClientControl } from "#client/session-controls.js";
 import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
@@ -46,7 +47,7 @@ const SEND_STREAM_HOLD_MS = 10_000;
 
 interface FollowSessionOptions extends SessionStreamOptions {
   readonly headers?: Readonly<Record<string, string>>;
-  readonly opened?: Promise<OpenedStream | undefined>;
+  readonly opened?: PendingStream;
   readonly onCaughtUp?: () => void;
   readonly resolveReconnectPolicy?: () => SessionStreamOptions["reconnect"];
   readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
@@ -217,13 +218,14 @@ export class ClientSession {
   }
 
   #openEarlyStream(startIndex: number, input: SendTurnOptions): EarlyStream {
-    return earlyStream(() =>
+    return earlyStream((signal) =>
       openStreamBody({
         baseUrl: this.#context.baseUrl,
         path: createEveSessionStreamRoutePath(this.#state.sessionId),
         redirect: this.#context.redirect,
         resolveHeaders: () => this.#context.resolveHeaders(input.headers),
         retryPolicy: { ...DEFAULT_STREAM_RECONNECT_POLICY, maxAttempts: 1 },
+        signal,
         startIndex,
       }),
     );
@@ -340,7 +342,7 @@ export class ClientSession {
     input: SendTurnOptions,
     deliveryId: string,
     follow = true,
-    opened?: Promise<OpenedStream | undefined>,
+    opened?: PendingStream,
   ): AsyncGenerator<SessionStreamEvent> {
     return deliveryEvents(
       this.#streamAndAdvance({
@@ -383,7 +385,7 @@ export class ClientSession {
 
   #readStream(input: {
     readonly onCaughtUp?: () => void;
-    readonly opened?: Promise<OpenedStream | undefined>;
+    readonly opened?: PendingStream;
     readonly resolveReconnectPolicy?: () => SessionStreamOptions["reconnect"];
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
@@ -565,15 +567,23 @@ function createMessageBody(
 }
 
 interface EarlyStream {
-  take(): Promise<OpenedStream | undefined> | undefined;
+  take(): PendingStream | undefined;
   release(): void;
   releaseAfter(ms: number): void;
 }
 
 const NO_EARLY_STREAM: EarlyStream = { take: () => undefined, release() {}, releaseAfter() {} };
 
-function earlyStream(open: () => Promise<OpenedStream>): EarlyStream {
-  let pending: Promise<OpenedStream | undefined> | undefined = open().catch(() => undefined);
+function earlyStream(open: (signal: AbortSignal) => Promise<OpenedStream>): EarlyStream {
+  const controller = new AbortController();
+  const opened = open(controller.signal).catch(() => undefined);
+  let pending: PendingStream | undefined = {
+    opened,
+    cancel() {
+      controller.abort();
+      void opened.then((unused) => unused?.close());
+    },
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const take = () => {
     const taken = pending;
@@ -581,7 +591,7 @@ function earlyStream(open: () => Promise<OpenedStream>): EarlyStream {
     clearTimeout(timer);
     return taken;
   };
-  const release = () => void take()?.then((unused) => unused?.close());
+  const release = () => take()?.cancel();
   return {
     take,
     release,

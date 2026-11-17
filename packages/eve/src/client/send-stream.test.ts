@@ -86,6 +86,21 @@ describe("a send's stream", () => {
     await vi.waitFor(() => expect(cancelled).toHaveBeenCalled());
   });
 
+  it("aborts an open still waiting for its response when the send fails", async () => {
+    const getStarted = Promise.withResolvers<AbortSignal | undefined>();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") {
+        await getStarted.promise;
+        return Response.json({ error: "Failed.", ok: false }, { status: 500 });
+      }
+      getStarted.resolve(init?.signal ?? undefined);
+      return await new Promise<Response>(() => {});
+    });
+
+    await expect(session().send("report")).rejects.toThrow();
+    expect((await getStarted.promise)?.aborted).toBe(true);
+  });
+
   it("is opened again by a read that finds it failed", async () => {
     let gets = 0;
     const calls = routes(
@@ -127,15 +142,19 @@ describe("a send's stream", () => {
   it("stops a read whose signal aborts while the connection opens", async () => {
     const opening = Promise.withResolvers<Response>();
     const cancelled = vi.fn();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
-      init?.method === "POST" ? accepted() : await opening.promise,
-    );
+    let getSignal: AbortSignal | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") return accepted();
+      getSignal = init?.signal ?? undefined;
+      return await opening.promise;
+    });
 
     const delivery = await session().send("report");
     const controller = new AbortController();
     const reading = delivery.result({ signal: controller.signal });
     controller.abort();
     await expect(reading).rejects.toThrow();
+    expect(getSignal?.aborted).toBe(true);
     opening.resolve(stream([], cancelled));
     await vi.waitFor(() => expect(cancelled).toHaveBeenCalled());
   });

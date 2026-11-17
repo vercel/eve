@@ -85,7 +85,7 @@ interface FollowStreamInput {
   readonly signal?: AbortSignal;
   readonly startIndex: number;
   readonly follow?: boolean;
-  readonly opened?: Promise<OpenedStream | undefined>;
+  readonly opened?: PendingStream;
 }
 
 interface OpenStreamInput extends FollowStreamInput {
@@ -130,9 +130,9 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
         early === undefined
           ? undefined
           : requestTailIndex
-            ? void early.then((unused) => unused?.close())
-            : await waitWithSignal(early, input.signal).catch((error: unknown) => {
-                void early.then((unused) => unused?.close());
+            ? void early.cancel()
+            : await waitWithSignal(early.opened, input.signal).catch((error: unknown) => {
+                early.cancel();
                 throw error;
               });
       connection =
@@ -253,6 +253,11 @@ export async function* followStreamIterable(
       yield { cursor: index === lineEvents.length - 1 ? position + 1 : position, event };
     }
   }
+}
+
+export interface PendingStream {
+  readonly opened: Promise<OpenedStream | undefined>;
+  cancel(): void;
 }
 
 export interface OpenedStream {
