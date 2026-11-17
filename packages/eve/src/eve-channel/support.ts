@@ -7,7 +7,7 @@ import type { DeliveryReceipt } from "#protocol/delivery.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#execution/workflow-references.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   type ClientContextValue,

@@ -7,17 +7,21 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { withPublished } from "#internal/testing/session-machine.js";
 import { DefinitionsStateKey } from "#definitions/state.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { ChannelKey, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 it("binds dynamic remote credentials to the dispatch checkpoint's parent view", async () => {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, "parent-session");
   ctx.set(ChannelKey, { kind: "http", state: {} } as never);
-  ctx.set(BundleKey, {
-    resolvedAgent: { config: {} },
-    turnAgent: { id: "parent", tools: [], system: "Help Alice.", model: { id: "test/model" } },
-    subagentRegistry: { subagentsByName: new Map() },
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      resolvedAgent: { config: {} },
+      turnAgent: { id: "parent", tools: [], system: "Help Alice.", model: { id: "test/model" } },
+      subagentRegistry: { subagentsByName: new Map() },
+    } as never),
+  );
   ctx.set(DefinitionsStateKey, {
     latest: {},
     slots: {

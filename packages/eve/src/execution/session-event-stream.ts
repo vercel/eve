@@ -1,7 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
-import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { sessionLineStore } from "#execution/hosts.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-history.js";
 import { isV26Line } from "#protocol/v26-lines.js";
@@ -23,7 +22,9 @@ export function readSessionRecords(
   sessionId: string,
   startIndex?: number,
 ): ReadableStream<unknown> {
-  return parseNdjsonStream<unknown>(() => getRun(sessionId).getReadable({ startIndex }));
+  return parseNdjsonStream<unknown>(() =>
+    sessionLineStore(sessionId).readable(sessionId, startIndex),
+  );
 }
 
 export function readSessionEventStream(
@@ -112,29 +113,11 @@ export function readSessionRecordHistory(
 }
 
 export async function readSessionStreamTailIndex(sessionId: string): Promise<number> {
-  const readable = getRun(sessionId).getReadable();
-  try {
-    const [, tailIndex] = await Promise.all([
-      assertSessionHistoryReadable(sessionId),
-      readable.getTailIndex(),
-    ]);
-    return tailIndex;
-  } finally {
-    await readable.cancel().catch(() => {});
-  }
+  return await sessionLineStore(sessionId).tail(sessionId);
 }
 
 export async function assertSessionHistoryReadable(sessionId: string): Promise<void> {
-  const world = await getWorld();
-  const run = await world.runs.get(sessionId, { resolveData: "none" });
-  if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
-    throw new RunExpiredError(
-      "Session history is no longer available.",
-      sessionId,
-      run.status,
-      run.expiredAt,
-    );
-  }
+  await sessionLineStore(sessionId).assertReadable(sessionId);
 }
 
 export async function* streamSessionLines(

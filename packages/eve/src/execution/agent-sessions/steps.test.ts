@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { agent } from "#public/tools/agent.js";
+import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
 import {
   openAgentSessionStep,
   sendAgentSessionMessageStep,
@@ -26,7 +27,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getStepMetadata: () => ({ stepId: "step_0" }),
-  getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
+  getWorkflowMetadata: () => ({ url: "https://parent.example", workflowRunId: "run_0" }),
 }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/workflow-runtime.js")>()),
@@ -158,8 +159,16 @@ describe("openAgentSessionStep", () => {
         model: "anthropic/claude-opus-5.5",
         name: "reviewer",
       }),
-    ).rejects.toBeInstanceOf(FatalError);
+    ).rejects.toBeInstanceOf(NonRetryableError);
     expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("opens no remote agent under a reply token that names a local agent's reply hook", async () => {
+    mocks.targetKind = "remote";
+
+    const opening = open();
+    await expect(opening).rejects.toBeInstanceOf(NonRetryableError);
+    await expect(opening).rejects.toThrow("can't take a remote agent's reply");
   });
 
   it("rejects an invalid model selection without retrying", async () => {
@@ -169,7 +178,7 @@ describe("openAgentSessionStep", () => {
         model: "",
         name: "reviewer",
       }),
-    ).rejects.toBeInstanceOf(FatalError);
+    ).rejects.toBeInstanceOf(NonRetryableError);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 });
@@ -269,7 +278,7 @@ describe("openAgentSessionStep with an agent({ models }) option", () => {
   });
 
   it("rejects a model the tool doesn't list, even a Gateway ID, without retrying", async () => {
-    await expect(open("openai/gpt-6-sol")).rejects.toBeInstanceOf(FatalError);
+    await expect(open("openai/gpt-6-sol")).rejects.toBeInstanceOf(NonRetryableError);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
@@ -330,5 +339,21 @@ describe("commands to a session that opened without waiting", () => {
       'Agent "reviewer" can no longer receive messages; its session ended.',
     );
     expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("agentSessionsOver", () => {
+  it("refuses a remote agent on a host that can't reach one, saying why", async () => {
+    mocks.targetKind = "remote";
+    const local = { command: vi.fn(), commandLate: vi.fn(), start: vi.fn() };
+    const sessions = agentSessionsOver({
+      deliveryId: (kind, sessionId) => `in-process:${sessionId}:${kind}`,
+      local,
+      remote: undefined,
+    });
+    await expect(sessions.open({ ...message, name: "crm" })).rejects.toThrow(
+      'Agent "reviewer" is remote, and this host can\'t reach remote agents yet.',
+    );
+    expect(local.start).not.toHaveBeenCalled();
   });
 });

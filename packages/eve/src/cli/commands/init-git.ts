@@ -69,7 +69,27 @@ async function runGitStage(
   }
 }
 
-export async function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
+export interface GitInitialization {
+  commit(): Promise<GitInitResult>;
+  settled(): Promise<void>;
+}
+
+export function startGitInitialization(projectPath: string): GitInitialization {
+  const prepared = prepareRepository(projectPath);
+  prepared.catch(() => undefined);
+  return {
+    commit: async () => (await prepared) ?? (await commitInitialFiles(projectPath)),
+    settled: async () => {
+      await prepared.catch(() => undefined);
+    },
+  };
+}
+
+export function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
+  return startGitInitialization(projectPath).commit();
+}
+
+async function prepareRepository(projectPath: string): Promise<GitInitResult | undefined> {
   const gitPath = join(projectPath, ".git");
   const gitMetadataExists = await stat(gitPath).then(
     () => true,
@@ -88,15 +108,12 @@ export async function tryInitializeGit(projectPath: string): Promise<GitInitResu
   if (initFailure !== undefined) return initFailure;
 
   if (!(await hasConfiguredDefaultBranch(projectPath))) {
-    const branchFailure = await runGitStage(
-      projectPath,
-      "default-branch",
-      ["checkout", "-b", "main"],
-      true,
-    );
-    if (branchFailure !== undefined) return branchFailure;
+    return await runGitStage(projectPath, "default-branch", ["checkout", "-b", "main"], true);
   }
+  return undefined;
+}
 
+async function commitInitialFiles(projectPath: string): Promise<GitInitResult> {
   const stageFailure = await runGitStage(projectPath, "stage", ["add", "-A"], true);
   if (stageFailure !== undefined) return stageFailure;
 

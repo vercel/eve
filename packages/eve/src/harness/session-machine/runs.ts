@@ -5,6 +5,7 @@ import {
   runSettledFacts,
   runStarted,
   type RunSettlement,
+  runUsageRecorded,
 } from "#harness/facts.js";
 import type { Commit } from "#harness/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -27,8 +28,13 @@ export function retryRun(input: {
   readonly attempt: number;
   readonly error: ErrorInfo;
   readonly runId: string;
+  readonly usage?: Usage;
 }): Commit {
-  return commitOf([fact("model.retried", input)]);
+  const { usage, ...retried } = input;
+  return commitOf([
+    fact("model.retried", retried),
+    ...(usage === undefined ? [] : [runUsageRecorded(input.runId, usage)]),
+  ]);
 }
 
 export function settleRun(

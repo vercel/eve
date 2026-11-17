@@ -31,7 +31,8 @@ import {
   type AgentSessionRequest,
 } from "#execution/agent-sessions/requests.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
-import { relayedAnswers, signInsAnswered } from "#subagents/event-proxy-step.js";
+import { signInsAnswered } from "#harness/hitl/index.js";
+import { relayedAnswers } from "#subagents/event-proxy-step.js";
 import { respondToRemoteAgentSession } from "#execution/agent-sessions/remote.js";
 import { remoteAnswers } from "#execution/proxied-deliver-step.js";
 import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol.js";

@@ -1115,6 +1115,38 @@ const callerRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
+async function spacesSeenBy(conversation: ChannelConversation, people: readonly Person[]) {
+  await lookUpNotesAs(conversation, people);
+  return conversation.spacesOf(PLAIN_TOOL);
+}
+
+const spaceRules = [
+  {
+    rule: "a tool sees the conversation's space as the platform names it",
+    source: "docs/channels/index.mdx#spaces",
+    requires: [],
+    variesByConversation: true,
+    async run(conversation) {
+      const [space] = await spacesSeenBy(conversation, ["alice"]);
+      expect(space, `${PLAIN_TOOL} saw the space ${JSON.stringify(space)}`).toEqual(
+        conversation.space ?? null,
+      );
+    },
+  },
+  {
+    rule: "another person in the conversation sees the same space",
+    source: "docs/channels/index.mdx#spaces",
+    requires: ["another-person"],
+    async run(conversation) {
+      const spaces = await spacesSeenBy(conversation, ["alice", "bob"]);
+      expect(spaces, `${PLAIN_TOOL} saw the spaces ${JSON.stringify(spaces)}`).toEqual([
+        conversation.space ?? null,
+        conversation.space ?? null,
+      ]);
+    },
+  },
+] as const satisfies readonly ContractRule[];
+
 const attachmentRules = [
   {
     rule: "an image a person sends reaches the agent with its bytes and type",
@@ -1174,6 +1206,7 @@ export const channelContractSections = [
   { title: "Budget prompts", rules: budgetRules },
   { title: "Sign-ins", rules: signInRules },
   { title: "Tool callers", rules: callerRules },
+  { title: "Conversation spaces", rules: spaceRules },
   { title: "Attachments", rules: attachmentRules },
 ] as const;
 

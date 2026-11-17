@@ -489,6 +489,7 @@ function unwrapJsonString(raw: string | undefined): string | undefined {
 }
 
 function isModelSpan(span: LocalTraceSpan): boolean {
+  if (span.attributes["ai.settings.context.eve.compaction.request"] !== undefined) return false;
   return (
     (span.name.startsWith("ai.") && span.name.includes("do")) ||
     span.attributes["gen_ai.operation.name"] === "chat"

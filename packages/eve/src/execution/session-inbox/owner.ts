@@ -1,5 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { readInboxHandle } from "#execution/session-inbox/handle.js";
+import { readInboxHandle, type InboxHook } from "#execution/session-inbox/handle.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
@@ -36,19 +36,20 @@ export async function resumeRunnableHook(
   token: string,
   payload: unknown,
   inbox?: string,
+  remembered?: InboxHook,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
-  const world = inbox !== undefined ? await getWorld() : undefined;
+  const world = inbox !== undefined || remembered !== undefined ? await getWorld() : undefined;
   if (
-    inbox !== undefined &&
-    inbox.length <= 8_192 &&
     world !== undefined &&
     routesToOwnerDeployment(world) &&
     world.capabilities !== undefined &&
     "resolvedHookResume" in world.capabilities &&
     world.capabilities.resolvedHookResume === true
   ) {
-    const parsed = readInboxHandle(inbox);
-    const cached = parsed?.token === token ? parsed : undefined;
+    const parsed =
+      inbox !== undefined && inbox.length <= 8_192 ? readInboxHandle(inbox) : undefined;
+    const cached =
+      parsed?.token === token ? parsed : remembered?.token === token ? remembered : undefined;
     if (cached !== undefined) {
       try {
         return await resumeHook(cached, payload);

@@ -13,8 +13,8 @@ export interface RunWatch {
 export function watchRunEnd(runId: string): RunWatch {
   let stopped = false;
   const ended = (async () => {
-    while (!stopped) {
-      await sleep(RUN_WATCH_INTERVAL);
+    for (let first = true; !stopped; first = false) {
+      if (!first) await sleep(RUN_WATCH_INTERVAL);
       if (stopped) break;
       const ended = await hasRunEndedStep({ runId }).catch(() => false);
       if (ended && !stopped) return;

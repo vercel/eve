@@ -4,12 +4,13 @@ import {
   type CrossChannelToFn,
 } from "#channel/cross-channel-receive.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import type { CreateRuntime } from "#execution/node-step.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 
 export function createToolChannelTo(input: {
+  readonly createRuntime: CreateRuntime;
   readonly delegated: boolean;
-  readonly loadBundle: () => CompiledRuntimeAgentBundle | Promise<CompiledRuntimeAgentBundle>;
+  readonly loadAgent: () => SessionAgent | Promise<SessionAgent>;
 }): CrossChannelToFn {
   return (channel, target) => {
     if (input.delegated) {
@@ -21,9 +22,14 @@ export function createToolChannelTo(input: {
     }
     return {
       async send(message, options) {
-        const bundle = await input.loadBundle();
+        const bundle = (await input.loadAgent()).compiled;
+        if (bundle === undefined) {
+          throw new Error(
+            "ctx.to() reaches the channels of an agent compiled from files; an agent this process holds has none.",
+          );
+        }
         const to = createCrossChannelToFn(
-          createWorkflowRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
+          input.createRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
           toCrossChannelTargets(bundle.graph.root.channels),
         );
         return await contextStorage.run(new ContextContainer(), () =>

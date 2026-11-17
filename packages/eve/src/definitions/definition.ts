@@ -177,7 +177,6 @@ export function renderSystem(sections: readonly Section[]): string | readonly st
     .map(({ section }) => section);
   const base = sorted.filter((section) => section.part === "base");
   const own = sorted.filter((section) => section.part === "own").map((section) => section.text);
-  if (base.length === 0) return own;
   const joined = base
     .map((section) => section.text)
     .filter((text) => text !== "")

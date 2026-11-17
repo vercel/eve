@@ -19,7 +19,11 @@ import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   truncateMessageText,
 } from "#public/channels/slack/limits.js";
-import { deliverPrivateInteraction } from "#public/channels/slack/private-approval-delivery.js";
+import {
+  deliverEphemeralInteraction,
+  deliverPrivateInteraction,
+  type PrivateInteractionDelivery,
+} from "#public/channels/slack/private-approval-delivery.js";
 import type {
   SlackCardMessage,
   SlackInteractionCard,
@@ -51,6 +55,11 @@ const log = createLogger("slack.request-cards");
 type RequestCardContext = ChannelEventContext<SlackEventContext>;
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
+type PrivateDestination = Exclude<SlackApprovalChannel, "thread">;
+
+const COMPACT_CARD_BYTES = 1000;
+const CONTROLS_MESSAGE_EXTRA_BYTES = 2000;
+
 export async function postRequestCards(
   batch: RequestBatch,
   ctx: RequestCardContext,
@@ -58,15 +67,21 @@ export async function postRequestCards(
   approvalChannel: SlackApprovalChannelResolver | undefined,
 ): Promise<void> {
   forgetSettledCards(ctx);
-  const directMessageRequests: Interaction[] = [];
+  const privateRequests: { request: Interaction; destination: PrivateDestination }[] = [];
   const threadRequests: Interaction[] = [];
   for (const request of batch.requests) {
     const destination =
       approvalChannel === undefined ? "thread" : await approvalChannel(request, ctx);
-    (destination === "direct-message" ? directMessageRequests : threadRequests).push(request);
+    if (destination === "direct-message" || destination === "ephemeral") {
+      privateRequests.push({ destination, request });
+    } else {
+      threadRequests.push(request);
+    }
   }
   await postThreadCards(threadRequests, ctx, chain);
-  for (const request of directMessageRequests) await postDirectMessageCard(request, ctx, chain);
+  for (const { destination, request } of privateRequests) {
+    await postPrivateCard(request, destination, ctx, chain);
+  }
 }
 
 interface CardEntry extends RenderedRequestCard {
@@ -129,7 +144,8 @@ async function postGroups(
     const ts = await post(joinParts(parts));
     if (ts) posted(parts, ts);
   };
-  for (const group of groupParts(entries, (entry) => entry.parts[kind])) {
+  const extraBytes = kind === "controls" ? CONTROLS_MESSAGE_EXTRA_BYTES : Infinity;
+  for (const group of groupParts(entries, (entry) => entry.parts[kind], extraBytes)) {
     try {
       await send(group);
     } catch (error) {
@@ -139,7 +155,9 @@ async function postGroups(
       const unchanged = members.every((entry) => sameJson(entry.parts[kind], entry.fallback[kind]));
       if (refusedPayloadError(error) === undefined || unchanged) throw error;
       logError(log, "Slack refused rendered input requests; posting eve's defaults", error);
-      for (const retry of groupParts(members, (entry) => entry.fallback[kind])) await send(retry);
+      for (const retry of groupParts(members, (entry) => entry.fallback[kind], extraBytes)) {
+        await send(retry);
+      }
     }
   }
 }
@@ -147,19 +165,28 @@ async function postGroups(
 function groupParts(
   entries: readonly CardEntry[],
   messageOf: (entry: CardEntry) => SlackCardMessage | undefined,
+  extraBytes: number,
 ): CardPart[][] {
   const groups: CardPart[][] = [];
   let blocks = 0;
+  let extra = 0;
   for (const entry of entries) {
     const message = messageOf(entry);
     if (message === undefined) continue;
+    const excess = Math.max(0, JSON.stringify(message.blocks).length - COMPACT_CARD_BYTES);
     const current = groups.at(-1);
-    if (current && blocks + message.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
+    if (
+      current &&
+      blocks + message.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE &&
+      extra + excess <= extraBytes
+    ) {
       current.push({ interactionId: entry.interactionId, message });
       blocks += message.blocks.length;
+      extra += excess;
     } else {
       groups.push([{ interactionId: entry.interactionId, message }]);
       blocks = message.blocks.length;
+      extra = excess;
     }
   }
   return groups;
@@ -172,49 +199,108 @@ function joinParts(parts: readonly CardPart[]): SlackCardMessage {
   };
 }
 
-async function postDirectMessageCard(
+async function postPrivateCard(
   request: Interaction,
+  destination: PrivateDestination,
   ctx: RequestCardContext,
   chain: SlackInteractionCardChain,
 ): Promise<void> {
   const { channel } = ctx;
-  const reviewer =
-    slackUserIdFromAuthContext(ctx.session.auth.current) ?? channel.state.triggeringUserId;
+  const reviewer = reviewerOf(ctx);
   if (!reviewer) {
-    log.warn("direct-message input request not delivered because no reviewer was resolved", {
+    log.warn(`${destination} input request not delivered because no reviewer was resolved`, {
       requestId: request.interactionId,
       sessionId: ctx.session.id,
     });
     return;
   }
   const route = slackSessionTargetOf(channel.slack);
-  const delivery = await deliverPrivateInteraction({
-    card: renderRequestCard(chain, cardOf(request, "direct-message", ctx), route),
-    previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
-    reviewer,
-    slack: channel.slack,
-  });
-  const record: SlackInteractionCardRecord = {
+  const card = renderRequestCard(chain, cardOf(request, destination, ctx), route);
+  let announcementTs: string | undefined;
+  let delivery: PrivateInteractionDelivery;
+  if (destination === "ephemeral") {
+    announcementTs = await announcePrivateRequest(request, reviewer, ctx);
+    try {
+      delivery = await deliverEphemeralInteraction({
+        card,
+        channelId: channel.slack.channelId,
+        reviewer,
+        thread: channel.thread,
+      });
+    } catch (error) {
+      if (announcementTs !== undefined && channel.state.channelId !== null) {
+        await callSlack(channel, "chat.delete", request.interactionId, {
+          channel: channel.state.channelId,
+          ts: announcementTs,
+        });
+      }
+      throw error;
+    }
+  } else {
+    delivery = await deliverPrivateInteraction({
+      card,
+      previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
+      reviewer,
+      slack: channel.slack,
+    });
+    announcementTs = await announcePrivateRequest(request, reviewer, ctx);
+  }
+  const record: Mutable<SlackInteractionCardRecord> = {
     channelId: delivery.channelId,
-    destination: "direct-message",
+    destination,
     requests: [cardRequest(request.interactionId, delivery.blocks, delivery.detailsTs)],
     route,
     ts: delivery.ts,
   };
+  if (announcementTs !== undefined) record.announcementTs = announcementTs;
   remember(channel.state, record);
+}
+
+function reviewerOf(ctx: RequestCardContext): string | null | undefined {
+  return slackUserIdFromAuthContext(ctx.session.auth.current) ?? ctx.channel.state.triggeringUserId;
+}
+
+async function announcePrivateRequest(
+  request: Interaction,
+  reviewer: string,
+  ctx: RequestCardContext,
+): Promise<string | undefined> {
   try {
-    const announcement = await channel.thread.post(
+    const announcement = await ctx.channel.thread.post(
       `Waiting on ${request.request.kind === "approval" ? "approval" : "a response"} from <@${reviewer}>…`,
     );
-    if (announcement.id) {
-      replace(channel.state, record, { ...record, announcementTs: announcement.id });
-    }
+    return announcement.id || undefined;
   } catch (error) {
     logError(log, "failed to announce private input request", error, {
       requestId: request.interactionId,
       sessionId: ctx.session.id,
     });
+    return undefined;
   }
+}
+
+async function repostEphemeralCard(
+  record: SlackInteractionCardRecord,
+  interactionId: string,
+  ctx: RequestCardContext,
+  chain: SlackInteractionCardChain,
+): Promise<SlackInteractionCardRecord> {
+  const interaction = interactionOf(sessionTables(ctx.view), interactionId);
+  const reviewer = reviewerOf(ctx);
+  if (interaction === undefined || !reviewer) return record;
+  const card = cardOf(interaction, "ephemeral", ctx);
+  if (card.interaction.answer !== undefined) return record;
+  const delivery = await deliverEphemeralInteraction({
+    card: renderRequestCard(chain, card, record.route),
+    channelId: record.channelId,
+    reviewer,
+    thread: ctx.channel.thread,
+  });
+  return {
+    ...record,
+    requests: [cardRequest(interactionId, delivery.blocks, undefined)],
+    ts: delivery.ts,
+  };
 }
 
 export async function showAnswerChange(
@@ -226,7 +312,11 @@ export async function showAnswerChange(
   const record = recordOf(ctx.channel.state, interactionId);
   if (record === undefined) return;
   if (sessionTables(ctx.view).interactions[interactionId]?.status !== "open") return;
-  replace(ctx.channel.state, record, await writeRequests(ctx, chain, record, [interactionId]));
+  const next =
+    record.destination === "ephemeral"
+      ? await repostEphemeralCard(record, interactionId, ctx, chain)
+      : await writeRequests(ctx, chain, record, [interactionId]);
+  replace(ctx.channel.state, record, next);
 }
 
 export async function settleRequestCard(
@@ -288,6 +378,7 @@ async function writeRequests(
   record: SlackInteractionCardRecord,
   ids: readonly string[],
 ): Promise<SlackInteractionCardRecord> {
+  if (record.destination === "ephemeral") return record;
   const tables = sessionTables(ctx.view);
   const changes = ids.flatMap((id): RequestChange[] => {
     const interaction = interactionOf(tables, id);
@@ -400,9 +491,7 @@ function cardOf(
   const standing = standingOf(tables, interaction);
   const card: Mutable<SlackInteractionCard> = {
     audience:
-      destination === "direct-message"
-        ? "private"
-        : normalizeChannelAudience(ctx.channel.state.audience),
+      destination === "thread" ? normalizeChannelAudience(ctx.channel.state.audience) : "private",
     destination,
     interaction: standing.interaction,
     view: ctx.view,

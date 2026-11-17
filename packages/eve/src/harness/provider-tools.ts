@@ -51,7 +51,7 @@ export function resolveWebSearchOutputSchema(
 
 export function resolveWebSearchBackend(
   profile: ModelProfile,
-  selection: WebSearchSelection = { provider: "exa" },
+  selection: WebSearchSelection = { provider: "parallel" },
 ): WebSearchBackend | null {
   if (!profile.gateway) return resolveNativeWebSearchBackend(profile);
   if (selection.provider !== "native") return selection.provider;

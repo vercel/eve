@@ -1,4 +1,7 @@
-import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
+import { isSignInCallbackToken } from "#execution/callback-hook-tokens.js";
+import { deliverToHostedHook } from "#execution/hosts.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 
 import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
@@ -24,21 +27,27 @@ export async function handleConnectionCallbackRequest(
     );
   }
 
+  if (!isSignInCallbackToken(token)) return callbackNotPending();
+
   const callback = await projectAuthorizationCallback(request);
 
+  const payload: AuthorizationCallbackPayload = {
+    kind: "authorization-callback",
+    payloads: [{ authorizationCallback: { attemptId, callback, connectionName: name } }],
+  };
   try {
-    const authorizationCallback = { attemptId, callback, connectionName: name };
-    await resumeAuthorizationCallback(token, {
-      kind: "authorization-callback" as const,
-      payloads: [{ authorizationCallback }],
-    });
+    if (!(await deliverToHostedHook(token, payload))) await resumeRunnableHook(token, payload);
   } catch {
-    return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
+    return callbackNotPending();
   }
 
   return buildAuthorizationCompletePage(
     callback.params.error === undefined ? "authorized" : "failed",
   );
+}
+
+function callbackNotPending(): Response {
+  return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
 }
 
 async function projectAuthorizationCallback(request: Request): Promise<AuthorizationCallback> {

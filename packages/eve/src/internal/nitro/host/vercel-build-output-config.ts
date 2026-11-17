@@ -12,6 +12,14 @@ import {
 
 export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
 
+type FunctionRule = {
+  environment: Record<string, string>;
+  experimentalTriggers?: ReturnType<(typeof QUEUE_TRIGGERS)[HostRouteVercelFunction]>[];
+  maxDuration?: "max";
+};
+
+export const VERCEL_SCHEDULES_FUNCTION_ROUTE = "/_vercel/tasks";
+
 const QUEUE_TRIGGERS = {
   "workflow-queue": createEveWorkflowQueueTrigger,
   "schedule-queue": createEveScheduleQueueTrigger,
@@ -21,7 +29,7 @@ export function createEveVercelOptions(input: {
   agentName: string;
   enabled: boolean;
   publicRoutePrefix?: string;
-  routeTable: Pick<HostRouteTable, "cronHandlerRoute" | "routes">;
+  routeTable: Pick<HostRouteTable, "routes" | "scheduleTasks">;
   workspaceMember?: boolean;
 }) {
   if (!input.enabled) {
@@ -40,30 +48,47 @@ export function createEveVercelOptions(input: {
     environment[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] = "1";
   }
 
+  const functionRules: Record<string, FunctionRule> = Object.fromEntries([
+    ...Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
+      input.routeTable.routes
+        .filter((route) => "vercelFunction" in route && route.vercelFunction === vercelFunction)
+        .map((route) => [
+          route.path,
+          {
+            maxDuration: "max" as const,
+            experimentalTriggers: [createTrigger(input.agentName)],
+            environment,
+          },
+        ]),
+    ),
+    ...(input.routeTable.scheduleTasks.length > 0
+      ? [[VERCEL_SCHEDULES_FUNCTION_ROUTE, { environment }]]
+      : []),
+  ]);
+
+  const schedules = Object.fromEntries(
+    input.routeTable.scheduleTasks
+      .filter((task) => task.timezone !== undefined)
+      .map((task) => [
+        task.nitroTaskName,
+        {
+          schedule: task.cron,
+          timezone: task.timezone,
+          function: VERCEL_SCHEDULES_FUNCTION_ROUTE.slice(1),
+        },
+      ]),
+  );
+
   return {
     config: {
       version: 3 as const,
+      ...(Object.keys(schedules).length > 0 && { schedules }),
       framework: {
         slug: EVE_PACKAGE_NAME,
         version: resolveInstalledPackageInfo().version,
       },
     },
-    ...(input.routeTable.cronHandlerRoute !== undefined && {
-      cronHandlerRoute: input.routeTable.cronHandlerRoute,
-    }),
-    functionRules: Object.fromEntries(
-      Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
-        input.routeTable.routes
-          .filter((route) => "vercelFunction" in route && route.vercelFunction === vercelFunction)
-          .map((route) => [
-            route.path,
-            {
-              maxDuration: "max" as const,
-              experimentalTriggers: [createTrigger(input.agentName)],
-              environment,
-            },
-          ]),
-      ),
-    ),
+    schedules: "private" as const,
+    functionRules,
   };
 }

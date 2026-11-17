@@ -13,7 +13,6 @@ async function discoverDeclarationFiles({ distDir }) {
 export default {
   packageName: "@vercel/blob",
   compiledPath: "@vercel/blob",
-  bundling: "standalone",
   copyDeclarations: createDeclarationCopier({
     files: discoverDeclarationFiles,
     rewrites: {

@@ -28,7 +28,7 @@ export interface SelectGuard {
 }
 
 function toPromptState(state: State): PromptState {
-  return state;
+  return state === "validating" ? "active" : state;
 }
 
 export class SelectComponent extends Prompt<string | string[]> {

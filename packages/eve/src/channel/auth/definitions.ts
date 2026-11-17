@@ -750,6 +750,15 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
   return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
 }
 
+/** @internal */
+export function declaredAuthChallenges(
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+): readonly UnauthorizedChallenge[] {
+  return collectDeclaredChallenges(
+    Array.isArray(auth) ? (auth as readonly AuthFn<Request>[]) : [auth as AuthFn<Request>],
+  );
+}
+
 const LOCAL_DEV_AUTH_SYMBOL = Symbol.for("eve.channels.auth.localDev");
 
 /**

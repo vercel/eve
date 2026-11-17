@@ -5,6 +5,7 @@
     "project-structure",
     "execution-model-and-durability",
     "sessions-runs-and-streaming",
+    "session-views-and-selectors",
     "state",
     "default-harness",
     "built-in-tools",

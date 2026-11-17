@@ -1,3 +1,4 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
@@ -32,16 +33,26 @@ function acquireCommand(owner: string): string {
   ].join("\n");
 }
 
+const RELEASE_MARGIN_SECONDS = 60;
+const FRESH_BELOW_SECONDS = STALE_AFTER_SECONDS - RELEASE_MARGIN_SECONDS;
+
 function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
   const id = shellQuote(owner);
   return [
+    `age() { now=$(date +%s); echo $(( now - $(date -r "$1" +%s 2>/dev/null || echo "$now") )); }`,
     `guarded=0`,
-    `for _ in $(seq 20); do if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi; sleep 0.1; done`,
+    `for _ in $(seq 20); do`,
+    `  if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi`,
+    `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
+    `  sleep 0.1`,
+    `done`,
+    `fresh=0`,
+    `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
     `held=0`,
     `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
-    `printf '%s %s' "$guarded" "$held"`,
+    `printf '%s %s %s' "$guarded" "$held" "$fresh"`,
   ].join("\n");
 }
 
@@ -82,23 +93,45 @@ export async function withSandboxLeaseLock<T>(
 ): Promise<T> {
   const deadline = Date.now() + LEASE_WAIT_MS;
   const command = acquireCommand(owner);
-  for (;;) {
-    signal?.throwIfAborted();
-    const attempt = signal
-      ? await sandbox.run({ command, signal })
-      : await sandbox.run({ command });
-    if (attempt.exitCode === 0) break;
-    if (attempt.exitCode !== BUSY_EXIT_CODE) {
-      throw new Error(
-        `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
-      );
+  const span = trace.getTracer("eve.git").startSpan("agent.github.lease.wait");
+  let attempts = 0;
+  let outcome: "acquired" | "timed_out" | "cancelled" | "failed" = "failed";
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      attempts += 1;
+      const attempt = signal
+        ? await sandbox.run({ command, signal })
+        : await sandbox.run({ command });
+      if (attempt.exitCode === 0) {
+        outcome = "acquired";
+        break;
+      }
+      if (attempt.exitCode !== BUSY_EXIT_CODE) {
+        throw new Error(
+          `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
+        );
+      }
+      if (Date.now() >= deadline) {
+        outcome = "timed_out";
+        throw new Error(
+          "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
+        );
+      }
+      await waitForRetry(signal);
     }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
-      );
+  } catch (error) {
+    if (signal?.aborted) outcome = "cancelled";
+    throw error;
+  } finally {
+    span.setAttributes({
+      "agent.github.lease.attempts": attempts,
+      "agent.github.lease.outcome": outcome,
+    });
+    if (outcome === "timed_out" || outcome === "failed") {
+      span.setStatus({ code: SpanStatusCode.ERROR });
     }
-    await waitForRetry(signal);
+    span.end();
   }
   try {
     return await run();
@@ -113,17 +146,20 @@ async function release(
   cleanup: (() => PromiseLike<void>) | undefined,
 ): Promise<void> {
   let guarded = false;
-  let held = true;
+  let held: boolean | undefined;
+  let fresh = false;
   try {
     const begun = await sandbox.run({ command: beginReleaseCommand(owner) });
-    const [guard, holder] = begun.stdout.trim().split(" ");
-    if (begun.exitCode === 0 && holder !== undefined) {
+    const [guard, holder, young] = begun.stdout.trim().split(" ");
+    if (begun.exitCode === 0 && young !== undefined) {
       guarded = guard === "1";
       held = holder === "1";
+      fresh = young === "1";
     }
   } catch {}
+  if (held !== undefined && !guarded && !fresh) return;
   try {
-    if (held) await cleanup?.();
+    if (held === undefined || held) await cleanup?.();
   } finally {
     await Promise.resolve(sandbox.run({ command: finishReleaseCommand(owner, guarded) })).catch(
       () => undefined,

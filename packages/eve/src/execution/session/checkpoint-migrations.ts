@@ -1,4 +1,7 @@
-import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+} from "#execution/session/checkpoint.js";
 import {
   importPreV27Checkpoint,
   isPreV27CheckpointVersion,

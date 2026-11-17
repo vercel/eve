@@ -85,6 +85,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "recall",
+    name: "Recall.ai",
+    kind: "channel",
+    tagline: "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
+    surfaces: { scaffoldable: false, registry: true, gallery: false },
+  },
+  {
     slug: "blooio",
     name: "Blooio",
     kind: "channel",
@@ -209,7 +216,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "chat-sdk-lark",
     name: "Lark / Feishu",
     kind: "channel",
-    tagline: "Lark and Feishu chats with native card streaming via the Chat SDK.",
+    tagline: "Lark and Feishu chats via the Chat SDK.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -258,7 +265,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "browserbase",
     name: "Browserbase",
     kind: "extension",
-    tagline: "Search, fetch, and automate the web with Browserbase and Stagehand.",
+    tagline: "Automate and inspect browser pages with Browserbase and Stagehand.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -345,6 +352,22 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "memco",
+    name: "memco",
+    kind: "memory",
+    tagline:
+      "Give agents shared memory to learn from work and each other, with separate networks for each customer.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "claude-mem",
+    name: "claude-mem",
+    kind: "memory",
+    tagline:
+      "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",
@@ -427,7 +450,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       openapi: {
         spec: "https://developers.notion.com/openapi.json",
         baseUrl: "https://api.notion.com",
-        headers: { "Notion-Version": "2022-06-28" },
+        headers: { "Notion-Version": "2026-03-11" },
       },
     },
   },
@@ -439,7 +462,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description: "Datadog: query metrics, monitors, logs, and incidents.",
-      mcp: { url: "https://mcp.datadoghq.com/api/mcp" },
+      mcp: { url: "https://mcp.datadoghq.com/v1/mcp" },
     },
   },
   {
@@ -528,7 +551,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Cloudinary: manage, transform, and deliver image and video assets.",
-      mcp: { url: "https://asset-management.mcp.cloudinary.com/sse" },
+      mcp: { url: "https://asset-management.mcp.cloudinary.com/mcp" },
     },
   },
   {
@@ -552,6 +575,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       description:
         "context.dev: search the live web, scrape and crawl sites, extract structured data, parse files, retrieve brand intelligence, monitor changes, and run batch jobs.",
       mcp: { url: "https://mcp.context.dev/mcp" },
+    },
+  },
+  {
+    slug: "context7",
+    name: "Context7",
+    kind: "connection",
+    tagline: "Look up up-to-date, version-specific library docs and code examples.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Context7: up-to-date, version-specific library documentation and code examples.",
+      mcp: { url: "https://mcp.context7.com/mcp" },
     },
   },
   {
@@ -628,7 +663,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Make: run scenarios and manage automations.",
-      mcp: { url: "https://mcp.make.com" },
+      mcp: { url: "https://mcp.make.com/v2" },
     },
   },
   {
@@ -684,7 +719,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description:
         "Natural: agentic payments — send and request payments, check balances, and move funds.",
-      mcp: { url: "https://mcp.natural.com/mcp" },
+      mcp: { url: "https://mcp.natural.com" },
     },
   },
   {
@@ -706,7 +741,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Netlify: create, deploy, manage, and secure sites.",
-      mcp: { url: "https://netlify-mcp.netlify.app/mcp" },
+      mcp: { url: "https://mcp.netlify.com/mcp" },
     },
   },
   {
@@ -818,6 +853,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Stripe: payments, customers, billing, and financial infrastructure.",
       mcp: { url: "https://mcp.stripe.com" },
+    },
+  },
+  {
+    slug: "stacktree",
+    name: "Stacktree",
+    kind: "connection",
+    tagline: "Publish and update unlisted HTML pages through Stacktree's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Stacktree: publish HTML pages to unlisted links, update them in place, set optional passcode or email gates, and manage feedback.",
+      mcp: { url: "https://api.stacktr.ee/mcp" },
     },
   },
   {

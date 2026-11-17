@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { expect, it, vi } from "vitest";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
@@ -27,6 +28,7 @@ vi.mock("#execution/workflow-registry.js", async () => {
 vi.mock("#execution/agent-sessions/steps.js", () => ({
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
+  stopLateAgentSessionStep: async () => {},
   openAgentSessionStep: async ({
     message,
     model,
@@ -71,6 +73,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 const agentContext = {
   agents: {},
   capabilities: { requestInput: false },
+  remoteAgents: [] as readonly string[],
   parent: {
     callId: "call-1",
     rootSessionId: "session",
@@ -86,6 +89,7 @@ const alice: SessionAuth = {
 
 const input: WorkflowBodyInput = {
   agentContext,
+  host: workflowRunHost,
   callId: "call-1",
   entry: { entryPoint: "serve", taskId: "reviewer-7k2m9q" },
   input: { message: "Review the release plan." },

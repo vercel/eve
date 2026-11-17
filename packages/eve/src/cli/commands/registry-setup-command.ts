@@ -5,15 +5,18 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { z } from "#compiled/zod/index.js";
+import { searchActionValue } from "#setup/cli/select-state.js";
 import { createProcessOutputBuffer } from "#setup/primitives/process-output.js";
-import type { Prompter, PrompterValue } from "#setup/prompter.js";
+import type { Prompter, PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
 import {
   isRegistrySetupChildMessage,
   REGISTRY_SETUP_PROTOCOL_VERSION,
+  REGISTRY_SETUP_SEARCH_QUERY,
   type RegistrySetupChildMessage,
   type RegistrySetupCompletion,
   type RegistrySetupParentMessage,
   type RegistrySetupBlocker,
+  type RegistrySetupSelectOptions,
 } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -70,6 +73,21 @@ function send(child: ChildProcess, message: RegistrySetupParentMessage): void {
   if (child.connected) child.send(message);
 }
 
+function parentSingleSelectOptions(
+  options: Exclude<RegistrySetupSelectOptions, { multiple: true }>,
+): SingleSelectOptions<PrompterValue> {
+  const { searchAction, ...rest } = options;
+  const labelTemplate = searchAction?.labelTemplate;
+  if (typeof labelTemplate !== "string") return rest;
+  return {
+    ...rest,
+    searchAction: {
+      label: (query) => labelTemplate.replaceAll(REGISTRY_SETUP_SEARCH_QUERY, () => query),
+      value: searchActionValue,
+    },
+  };
+}
+
 async function answerPrompt(
   child: ChildProcess,
   prompter: Prompter,
@@ -87,9 +105,10 @@ async function answerPrompt(
         value = await prompter.password(request);
         break;
       case "select":
-        value = request.options.multiple
-          ? await prompter.select(request.options)
-          : await prompter.select(request.options);
+        value =
+          request.options.multiple === true
+            ? await prompter.select(request.options)
+            : await prompter.select(parentSingleSelectOptions(request.options));
         break;
       case "editable-select":
         if (prompter.selectEditable === undefined) {

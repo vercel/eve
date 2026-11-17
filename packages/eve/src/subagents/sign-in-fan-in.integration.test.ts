@@ -8,14 +8,16 @@ import {
   ConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
-import { workflowEntry } from "#execution/session/entry.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import {
+  startTestSession,
+  type TestSessionHostKind,
+} from "#internal/testing/test-session-hosts.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
@@ -23,7 +25,8 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
-import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 
 vi.setConfig({ testTimeout: 90_000 });
 
@@ -107,7 +110,7 @@ describe("one sign-in answer for parallel children", () => {
     const app = await createApp("sign-in-fan-in-retry", { grant: "oauth/weather" });
 
     await app.runtime.run(async () => {
-      const run = await startParent(app.name);
+      const run = await startParent(app.name, "workflow");
       const stream = captureEvents(run);
       try {
         const before = await signInCards(stream, CHILDREN);
@@ -381,8 +384,7 @@ describe("one sign-in answer for parallel children", () => {
       try {
         const before = await parentCardFirst(app, stream);
         const inbox = sessionInboxHookToken(`http:${app.name}`);
-        await waitForHook({ runId: run.runId }, { token: inbox });
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -851,22 +853,20 @@ async function createApp(
   };
 }
 
-async function startParent(name: string) {
-  return await startSessionOwner(workflowEntry, [
-    {
-      kind: "initial",
-      ownerDeploymentId: "dpl_inline",
-      input: { message: "Ask three helpers for the weather in Lisbon." },
-      serializedContext: {
-        ...buildSerializedContext({
-          auth: ALICE,
-          channelKind: "http",
-          continuationToken: `http:${name}`,
-        }),
-        "eve.capabilities": { requestInput: true },
-      },
+async function startParent(name: string, host: TestSessionHostKind = "in-process") {
+  return await startTestSession(host, {
+    kind: "initial",
+    ownerDeploymentId: "dpl_inline",
+    input: { message: "Ask three helpers for the weather in Lisbon." },
+    serializedContext: {
+      ...buildSerializedContext({
+        auth: ALICE,
+        channelKind: "http",
+        continuationToken: `http:${name}`,
+      }),
+      "eve.capabilities": { requestInput: true },
     },
-  ]);
+  });
 }
 
 async function completeSignIn(
@@ -878,18 +878,16 @@ async function completeSignIn(
   if (callbackUrl === undefined) throw new Error("Expected the sign-in to name its callback.");
   const callback = parseEveConnectionCallbackRoutePath(new URL(callbackUrl).pathname);
   if (callback === undefined) throw new Error(`Expected a callback route: ${callbackUrl}`);
-  await resumeAuthorizationCallback(callback.token, {
-    kind: "authorization-callback",
-    payloads: [
-      {
-        authorizationCallback: {
-          attemptId: callback.attemptId,
-          callback: { method: "GET", params },
-          connectionName: callback.name,
-        },
-      },
-    ],
+  const url = new URL(callbackUrl);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  const response = await handleConnectionCallbackRequest(new Request(url), {
+    params: { attemptId: callback.attemptId, name: callback.name, token: callback.token },
+    requestIp: null,
+    waitUntil() {},
   });
+  if (response.status !== 200) {
+    throw new Error(`The callback route answered ${String(response.status)} for ${callbackUrl}.`);
+  }
 }
 
 function isSignInOpened(event: SessionStreamEvent): boolean {

@@ -23,7 +23,7 @@ The eve server hands storage, isolation, model access, scheduling, and tracing t
 | Workflow world   | Stores sessions, queues their work, and resumes them after restarts | Vercel Workflow                              | [Local, Postgres, or another world package](/docs/guides/deployment/workflow-worlds) |
 | Sandbox provider | Runs the `bash`, `read_file`, `write_file`, and `edit_file` tools   | Vercel Sandbox                               | Docker by default, or another [provider](/docs/sandbox)                              |
 | Model access     | Sends model calls                                                   | AI Gateway via OIDC                          | AI Gateway API key or an AI SDK provider package                                     |
-| Schedules        | Runs authored [schedules](/docs/schedules)                          | Vercel Cron                                  | The schedule runner in `eve start`                                                   |
+| Schedules        | Runs authored [schedules](/docs/schedules)                          | Vercel Schedules                             | The schedule runner in `eve start`                                                   |
 | Observability    | Records traces of sessions, turns, and tool calls                   | [Agent Runs](/docs/observability/agent-runs) | [OpenTelemetry](/docs/observability/otel)                                            |
 
 Self-hosted defaults store workflow state on disk, and run sandboxes in Docker when Docker is available during the build. See [Self-host eve](/docs/guides/deployment/self-hosting) for the persistent storage and sandbox setup your host must provide.

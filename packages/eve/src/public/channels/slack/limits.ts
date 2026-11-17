@@ -16,6 +16,8 @@ export const SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12000;
 
 export const SLACK_MAX_BLOCKS_PER_MESSAGE = 50;
 
+export const SLACK_CONTAINER_TITLE_MAX_LENGTH = 150;
+
 export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;
 
 export function truncateTypingStatus(status: string): string {
@@ -48,6 +50,10 @@ export function truncateCardSubtext(value: string): string {
 
 export function truncateMessageText(value: string): string {
   return truncateWithEllipsis(value, SLACK_MESSAGE_TEXT_MAX_LENGTH);
+}
+
+export function truncateContainerTitle(value: string): string {
+  return truncateWithEllipsis(value, SLACK_CONTAINER_TITLE_MAX_LENGTH);
 }
 
 export function truncateModalTitle(value: string): string {

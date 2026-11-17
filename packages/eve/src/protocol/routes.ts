@@ -1,7 +1,5 @@
 export const EVE_ROUTE_PREFIX = "/eve/v1";
 
-export const EVE_PRODUCTION_CRON_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/cron/:token`;
-
 export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
@@ -129,3 +127,7 @@ export function createEveCallbackRoutePath(token: string): string {
 export function createEveSessionStubsRoutePath(sessionId: string): string {
   return `${createEveSessionRoutePath(sessionId)}/stubs`;
 }
+
+export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = `${EVE_ROUTE_PREFIX}/dev/internal/workflow-world`;
+
+export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;

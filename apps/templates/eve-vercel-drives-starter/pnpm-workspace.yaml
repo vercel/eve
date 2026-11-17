@@ -1,0 +1,7 @@
+minimumReleaseAge: 0
+allowBuilds:
+  lefthook: false
+
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - "node-liblzma"

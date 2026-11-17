@@ -1,8 +1,8 @@
-import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 import {
   mayContainWorkflowDirective,
   readWorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
+import { parseWorkflowSourceAst } from "#internal/workflow-bundle/workflow-source-ast.js";
 import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
 function formatEntryPointMethods(): string {
@@ -14,36 +14,39 @@ function formatEntryPointMethods(): string {
 const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 
 type AstNode = {
-  async?: boolean;
-  generator?: boolean;
-  body?: AstNode | AstNode[] | null;
-  computed?: boolean;
-  declaration?: AstNode | null;
-  declarations?: AstNode[];
-  directive?: string;
-  end?: number;
-  expression?: AstNode | boolean | null;
-  id?: AstNode | null;
-  imported?: AstNode | null;
-  key?: AstNode | null;
-  kind?: string;
-  local?: AstNode | null;
-  method?: boolean;
-  name?: string;
-  params?: AstNode[];
-  properties?: AstNode[];
-  returnType?: AstNode | null;
-  specifiers?: AstNode[];
-  start?: number;
-  type?: string;
-  typeParameters?: AstNode | null;
-  value?: unknown;
-  arguments?: AstNode[];
-  callee?: AstNode;
-  source?: AstNode;
+  readonly async?: boolean;
+  readonly generator?: boolean;
+  readonly body?: AstNode | readonly AstNode[] | null;
+  readonly computed?: boolean;
+  readonly declaration?: AstNode | null;
+  readonly declarations?: readonly AstNode[];
+  readonly directive?: string;
+  readonly end?: number;
+  readonly expression?: AstNode | boolean | null;
+  readonly id?: AstNode | null;
+  readonly imported?: AstNode | null;
+  readonly init?: AstNode | null;
+  readonly key?: AstNode | null;
+  readonly kind?: string;
+  readonly local?: AstNode | null;
+  readonly method?: boolean;
+  readonly name?: string;
+  readonly object?: AstNode;
+  readonly params?: readonly AstNode[];
+  readonly properties?: readonly AstNode[];
+  readonly property?: AstNode;
+  readonly returnType?: AstNode | null;
+  readonly specifiers?: readonly AstNode[];
+  readonly start?: number;
+  readonly type?: string;
+  readonly typeParameters?: AstNode | null;
+  readonly value?: unknown;
+  readonly arguments?: readonly AstNode[];
+  readonly callee?: AstNode;
+  readonly source?: AstNode;
 };
 
-type AstProgram = { body?: AstNode[] };
+type AstProgram = { readonly body?: readonly AstNode[] };
 
 interface DirectiveFunctionNode {
   readonly directive: string;
@@ -52,7 +55,9 @@ interface DirectiveFunctionNode {
 
 interface EntryPointMethod {
   readonly fn: AstNode;
+  readonly hoistedName: string;
   readonly name: string;
+  readonly owner: string;
   readonly property: AstNode;
 }
 
@@ -66,11 +71,15 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
-  if (!mayContainWorkflowDirective(input.source) && !input.source.includes("workflow")) {
+  if (
+    !mayContainWorkflowDirective(input.source) &&
+    !input.source.includes("workflow") &&
+    !input.source.includes("defineWorkflowTool")
+  ) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
-  const program = (await parseWithRolldownAst(parsePath, input.source)) as AstProgram;
+  const program = (await parseWorkflowSourceAst(parsePath, input.source)) as AstProgram;
   const body = program.body ?? [];
   visit(program as AstNode, (node) => {
     const specifier =
@@ -121,10 +130,16 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     if (declaration !== undefined) allowed.add(declaration);
   }
 
-  const entryPoints = findDefaultExportEntryPoints(body);
+  const definers = workflowToolDefiners(body);
+  const entryPoints = [
+    ...findDefaultExportEntryPoints(body),
+    ...findTopLevelToolEntryPoints(body, definers),
+  ];
   for (const entryPoint of entryPoints) {
     allowed.add(entryPoint.fn);
   }
+
+  assertWorkflowToolEntryPoints(input.filePath, body, program as AstNode, definers);
 
   const found = collectDirectiveFunctions(program as AstNode);
   if (found.length === 0) {
@@ -133,10 +148,17 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   const hasWorkflowDirective = found.some((entry) => entry.directive === "use workflow");
   for (const entry of found) {
     if (!allowed.has(entry.fn)) {
+      const nested = nestedToolEntryPoint(program as AstNode, definers, entry.fn);
+      if (nested !== undefined) {
+        throw new Error(
+          `${JSON.stringify(entry.directive)} in "${input.filePath}" marks the "${nested}" of a defineWorkflowTool() that isn't declared at the top level of the module, such as one created inside defineDynamic(). ` +
+            `A workflow can't read the variables around it, so eve can only compile it at the top level: assign the defineWorkflowTool() to a top-level const, and return that const from defineDynamic().`,
+        );
+      }
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
           `Workflow directives must mark a top-level "async function" declaration` +
-          ` or the ${formatEntryPointMethods()} method of a default-exported defineWorkflowTool().`,
+          ` or the ${formatEntryPointMethods()} method of a defineWorkflowTool() that is the default export or a top-level const.`,
       );
     }
     if (entry.fn.async !== true) {
@@ -148,16 +170,16 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     const entryPoint = entryPoints.find((candidate) => candidate.fn === entry.fn);
     if (entryPoint !== undefined && entry.directive !== "use workflow") {
       throw new Error(
-        `"use step" in "${input.filePath}" marks the default export's "${entryPoint.name}" method. ` +
+        `"use step" in "${input.filePath}" marks ${entryPoint.owner}'s "${entryPoint.name}" method. ` +
           `A tool's "${entryPoint.name}" can be a workflow ("use workflow"); steps are the helper functions it calls.`,
       );
     }
   }
 
-  const hoisted = entryPoints.find((entryPoint) =>
+  const hoisted = entryPoints.filter((entryPoint) =>
     found.some((entry) => entry.fn === entryPoint.fn),
   );
-  if (hoisted === undefined) {
+  if (hoisted.length === 0) {
     return {
       hasDirectives: true,
       hasWorkflowDirective,
@@ -165,18 +187,127 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     };
   }
 
-  if (declaresTopLevelBinding(body, hoisted.name)) {
-    throw new Error(
-      `"use workflow" in "${input.filePath}" marks the "${hoisted.name}" method, but the module also declares a top-level "${hoisted.name}" binding. ` +
-        `eve hoists that method to a top-level "async function ${hoisted.name}"; rename the existing binding.`,
-    );
+  for (const method of hoisted) {
+    if (declaresTopLevelBinding(body, method.hoistedName)) {
+      throw new Error(
+        `"use workflow" in "${input.filePath}" marks the "${method.name}" method, but the module also declares a top-level "${method.hoistedName}" binding. ` +
+          `eve hoists that method to a top-level "async function ${method.hoistedName}"; rename the existing binding.`,
+      );
+    }
   }
 
   return {
     hasDirectives: true,
     hasWorkflowDirective,
-    source: hoistEntryPointMethod(input.source, hoisted),
+    source: hoistEntryPointMethods(input.source, hoisted),
   };
+}
+
+function assertWorkflowToolEntryPoints(
+  filePath: string,
+  body: readonly AstNode[],
+  program: AstNode,
+  definers: WorkflowToolDefiners,
+): void {
+  if (definers.names.size === 0 && definers.namespaces.size === 0) return;
+  const exported = body.find((statement) => statement.type === "ExportDefaultDeclaration");
+  visit(program, (node) => {
+    if (node.type !== "CallExpression" || node === exported?.declaration) return;
+    if (!isWorkflowToolDefiner(node.callee, definers)) return;
+    const definition = node.arguments?.[0];
+    if (definition?.type !== "ObjectExpression") return;
+    for (const property of definition.properties ?? []) {
+      if (property.type !== "Property" || property.computed === true) continue;
+      const name = readPropertyName(property.key);
+      if (name === undefined || !WORKFLOW_TOOL_ENTRY_POINTS.some((entry) => entry === name)) {
+        continue;
+      }
+      const value = unwrapExpression(property.value);
+      const fn = localFunction(body, value);
+      if (fn === undefined) continue;
+      const directive = readLeadingDirective(fn);
+      if (directive === "use workflow" || (directive !== undefined && fn === value)) continue;
+      throw new Error(
+        `The "${name}" of a defineWorkflowTool() in "${filePath}" is ${fn.type === "FunctionDeclaration" ? `the function "${fn.id?.name}"` : describeFunction(fn)} without "use workflow", so it can't run as a workflow. ` +
+          `Declare it as a top-level "async function" that starts with "use workflow", and pass that function as "${name}".`,
+      );
+    }
+  });
+}
+
+interface WorkflowToolDefiners {
+  readonly names: ReadonlySet<string>;
+  readonly namespaces: ReadonlySet<string>;
+}
+
+function workflowToolDefiners(body: readonly AstNode[]): WorkflowToolDefiners {
+  const names = new Set<string>();
+  const namespaces = new Set<string>();
+  for (const statement of body) {
+    if (statement.type !== "ImportDeclaration") continue;
+    const source = statement.source?.value;
+    if (source !== "eve" && source !== "eve/tools") continue;
+    for (const specifier of statement.specifiers ?? []) {
+      const local = specifier.local?.name;
+      if (local === undefined) continue;
+      if (specifier.type === "ImportNamespaceSpecifier") namespaces.add(local);
+      if (
+        specifier.type === "ImportSpecifier" &&
+        specifierName(specifier) === "defineWorkflowTool"
+      ) {
+        names.add(local);
+      }
+    }
+  }
+  return { names, namespaces };
+}
+
+function isWorkflowToolDefiner(
+  callee: AstNode | undefined,
+  definers: WorkflowToolDefiners,
+): boolean {
+  if (callee?.type === "Identifier") return definers.names.has(callee.name ?? "");
+  if (callee?.type !== "MemberExpression" || callee.computed === true) return false;
+  return (
+    callee.object?.type === "Identifier" &&
+    definers.namespaces.has(callee.object.name ?? "") &&
+    readPropertyName(callee.property) === "defineWorkflowTool"
+  );
+}
+
+function localFunction(body: readonly AstNode[], value: AstNode | undefined): AstNode | undefined {
+  if (value === undefined) return undefined;
+  if (isFunctionLike(value)) return value;
+  if (value.type !== "Identifier") return undefined;
+  for (const statement of body) {
+    const declaration =
+      statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
+    if (declaration === null || declaration === undefined) continue;
+    if (declaration.type === "FunctionDeclaration" && declaration.id?.name === value.name) {
+      return declaration;
+    }
+    if (declaration.type !== "VariableDeclaration") continue;
+    for (const declarator of declaration.declarations ?? []) {
+      if (declarator.id?.name !== value.name) continue;
+      const init = unwrapExpression(declarator.init);
+      return init !== undefined && isFunctionLike(init) ? init : undefined;
+    }
+  }
+  return undefined;
+}
+
+function unwrapExpression(value: unknown): AstNode | undefined {
+  let node = isAstNode(value) ? value : undefined;
+  while (
+    node !== undefined &&
+    (node.type === "TSAsExpression" ||
+      node.type === "TSSatisfiesExpression" ||
+      node.type === "TSNonNullExpression" ||
+      node.type === "ParenthesizedExpression")
+  ) {
+    node = isAstNode(node.expression) ? node.expression : undefined;
+  }
+  return node;
 }
 
 function findDefaultExportEntryPoints(body: readonly AstNode[]): EntryPointMethod[] {
@@ -184,8 +315,37 @@ function findDefaultExportEntryPoints(body: readonly AstNode[]): EntryPointMetho
   const declaration = exported?.declaration;
   const definition =
     declaration?.type === "CallExpression" ? declaration.arguments?.[0] : declaration;
-  if (definition?.type !== "ObjectExpression") return [];
+  return inlineEntryPoints(definition ?? undefined, "the default export", (name) => name);
+}
 
+function findTopLevelToolEntryPoints(
+  body: readonly AstNode[],
+  definers: WorkflowToolDefiners,
+): EntryPointMethod[] {
+  const methods: EntryPointMethod[] = [];
+  for (const statement of body) {
+    const declaration =
+      statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
+    if (declaration?.type !== "VariableDeclaration" || declaration.kind !== "const") continue;
+    for (const declarator of declaration.declarations ?? []) {
+      const binding = declarator.id?.type === "Identifier" ? declarator.id.name : undefined;
+      const call = unwrapExpression(declarator.init);
+      if (binding === undefined || call?.type !== "CallExpression") continue;
+      if (!isWorkflowToolDefiner(call.callee, definers)) continue;
+      methods.push(
+        ...inlineEntryPoints(call.arguments?.[0], `"${binding}"`, (name) => `${binding}$${name}`),
+      );
+    }
+  }
+  return methods;
+}
+
+function inlineEntryPoints(
+  definition: AstNode | undefined,
+  owner: string,
+  hoistedName: (name: string) => string,
+): EntryPointMethod[] {
+  if (definition?.type !== "ObjectExpression") return [];
   const methods: EntryPointMethod[] = [];
   for (const property of definition.properties ?? []) {
     if (property.type !== "Property" || property.kind !== "init" || property.computed === true) {
@@ -195,13 +355,48 @@ function findDefaultExportEntryPoints(body: readonly AstNode[]): EntryPointMetho
     const fn = property.value;
     if (name === undefined || !WORKFLOW_TOOL_ENTRY_POINTS.some((entry) => entry === name)) continue;
     if (!isAstNode(fn) || !isFunctionLike(fn)) continue;
-    methods.push({ fn, name, property });
+    methods.push({ fn, hoistedName: hoistedName(name), name, owner, property });
   }
   return methods;
 }
 
-function hoistEntryPointMethod(source: string, method: EntryPointMethod): string {
-  const { fn, name, property } = method;
+function nestedToolEntryPoint(
+  program: AstNode,
+  definers: WorkflowToolDefiners,
+  fn: AstNode,
+): string | undefined {
+  let found: string | undefined;
+  visit(program, (node) => {
+    if (found !== undefined || node.type !== "CallExpression") return;
+    if (!isWorkflowToolDefiner(node.callee, definers)) return;
+    const definition = node.arguments?.[0];
+    if (definition?.type !== "ObjectExpression") return;
+    for (const property of definition.properties ?? []) {
+      if (property.type === "Property" && property.value === fn) {
+        found = readPropertyName(property.key);
+      }
+    }
+  });
+  return found;
+}
+
+function hoistEntryPointMethods(source: string, methods: readonly EntryPointMethod[]): string {
+  const ordered = [...methods].sort((a, b) => (b.property.start ?? 0) - (a.property.start ?? 0));
+  let rewritten = source;
+  const declarations: string[] = [];
+  for (const method of ordered) {
+    const hoisted = hoistEntryPointMethod(rewritten, method);
+    rewritten = hoisted.source;
+    declarations.unshift(hoisted.declaration);
+  }
+  return `${rewritten}${declarations.map((declaration) => `\n${declaration}\n`).join("")}`;
+}
+
+function hoistEntryPointMethod(
+  source: string,
+  method: EntryPointMethod,
+): { readonly declaration: string; readonly source: string } {
+  const { fn, hoistedName, name, property } = method;
   if (
     property.start === undefined ||
     property.end === undefined ||
@@ -223,9 +418,13 @@ function hoistEntryPointMethod(source: string, method: EntryPointMethod): string
   const returnTypeText = sliceNode(source, fn.returnType);
   const bodyText = source.slice(fn.body.start, fn.body.end);
   const star = fn.generator === true ? "*" : "";
-  const declaration = `async function${star} ${name}${typeParametersText}(${paramsText})${returnTypeText} ${bodyText}`;
+  const declaration = `async function${star} ${hoistedName}${typeParametersText}(${paramsText})${returnTypeText} ${bodyText}`;
+  const reference = hoistedName === name ? name : `${name}: ${hoistedName}`;
 
-  return `${source.slice(0, property.start)}${name}${source.slice(property.end)}\n${declaration}\n`;
+  return {
+    declaration,
+    source: `${source.slice(0, property.start)}${reference}${source.slice(property.end)}`,
+  };
 }
 
 function sliceNode(source: string, node: AstNode | null | undefined): string {

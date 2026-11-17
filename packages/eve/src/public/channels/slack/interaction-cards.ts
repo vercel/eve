@@ -1,3 +1,4 @@
+import { sendSlackResponseUrl } from "#compiled/@chat-adapter/slack/api.js";
 import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import { callSlackApi } from "#public/channels/slack/api.js";
 import { buildAnsweredBlocks, isHitlAction } from "#public/channels/slack/hitl.js";
@@ -69,7 +70,9 @@ function blockContainsActionId(block: unknown, actionId: string): boolean {
   if (!isObjectRecord(block)) return false;
   return (
     actionsContainActionId(block.elements, actionId) ||
-    actionsContainActionId(block.actions, actionId)
+    actionsContainActionId(block.actions, actionId) ||
+    (Array.isArray(block.child_blocks) &&
+      block.child_blocks.some((child) => blockContainsActionId(child, actionId)))
   );
 }
 
@@ -83,6 +86,14 @@ export function answeredBlocksFromActionBlock(input: {
   readonly block: unknown;
   readonly userId?: string;
 }): unknown[] | undefined {
+  if (isObjectRecord(input.block) && input.block.type === "container") {
+    const { subtitle: _subtitle, ...container } = withoutContainerActions(input.block);
+    const answer = {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: formatAnsweredCardSubtext(input) }],
+    };
+    return [{ ...container, child_blocks: [...container.child_blocks, answer] }];
+  }
   if (!isObjectRecord(input.block) || input.block.type !== "card") return undefined;
 
   const { actions: _actions, subtext: _subtext, ...blockWithoutActions } = input.block;
@@ -116,7 +127,18 @@ function formatAnsweredCardSubtext(input: {
   );
 }
 
+function withoutContainerActions(
+  block: Record<string, unknown>,
+): Record<string, unknown> & { child_blocks: unknown[] } {
+  const children = Array.isArray(block.child_blocks) ? block.child_blocks : [];
+  return {
+    ...block,
+    child_blocks: children.filter((child) => !isObjectRecord(child) || child.type !== "actions"),
+  };
+}
+
 function promptBlocksFromActionBlock(block: unknown): unknown[] {
+  if (isObjectRecord(block) && block.type === "container") return [withoutContainerActions(block)];
   if (!isObjectRecord(block) || block.type !== "card") return [];
 
   const { actions: _actions, ...blockWithoutActions } = block;
@@ -150,6 +172,8 @@ export async function settleHitlCard(
     deps,
     installationTeamId: interaction.installationTeamId,
     messageTs: hitlAction.messageTs,
+    responseUrl: interaction.ephemeral ? hitlAction.responseUrl : undefined,
+    threadTs: interaction.threadTs,
   });
 }
 
@@ -159,6 +183,8 @@ export async function settleFreeformCard(input: {
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId?: string;
   readonly messageTs: string;
+  readonly responseUrl?: string;
+  readonly threadTs?: string;
 }): Promise<void> {
   await updateSettledCard({
     ...input,
@@ -177,7 +203,18 @@ async function updateSettledCard(input: {
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId?: string;
   readonly messageTs: string;
+  readonly responseUrl?: string | undefined;
+  readonly threadTs?: string | undefined;
 }): Promise<void> {
+  if (input.responseUrl !== undefined) {
+    await sendSlackResponseUrl(input.responseUrl, {
+      blocks: input.blocks,
+      replaceOriginal: true,
+      text: input.card.text,
+      ...(input.threadTs && input.threadTs !== input.messageTs && { threadTs: input.threadTs }),
+    });
+    return;
+  }
   await callSlackApi({
     api: input.deps.api,
     botToken: input.deps.config.credentials?.botToken,

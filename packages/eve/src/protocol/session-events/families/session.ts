@@ -62,6 +62,12 @@ export type SessionEnded = Envelope<"session.ended", SessionEndedData>;
 /** Any fact in the `session` family. */
 export type SessionFact = SessionStarted | SessionEnded;
 
+export const traceContext = z.object({
+  spanId: z.string(),
+  traceFlags: z.number().int(),
+  traceId: z.string(),
+});
+
 const sessionStartedData = conforming<SessionStartedData>()(
   z.object({
     parent: z.object({ callId: id, sessionId: id }).optional(),
@@ -80,9 +86,7 @@ const sessionStartedData = conforming<SessionStartedData>()(
         eveVersion: z.string(),
       })
       .optional(),
-    trace: z
-      .object({ spanId: z.string(), traceFlags: z.number().int(), traceId: z.string() })
-      .optional(),
+    trace: traceContext.optional(),
   }),
 );
 

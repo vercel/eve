@@ -60,6 +60,10 @@ export function codeIs(...codes: readonly string[]): LinkPredicate {
   return (link) => link.code !== undefined && codes.includes(link.code);
 }
 
+export function statusCodeIs(...statusCodes: readonly number[]): LinkPredicate {
+  return (link) => link.statusCode !== undefined && statusCodes.includes(link.statusCode);
+}
+
 export function typeIs(...types: readonly string[]): LinkPredicate {
   return (link) => link.type !== undefined && types.includes(link.type);
 }

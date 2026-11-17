@@ -5,10 +5,8 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
-import {
-  startWorkflowOnCurrentDeployment,
-  sessionTimeoutWorkflowReference,
-} from "#execution/workflow-runtime.js";
+import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
+import { sessionTimeoutWorkflowReference } from "#execution/workflow-references.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session/timeout-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";

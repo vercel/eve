@@ -8,15 +8,15 @@ import {
 
 describe("reconcileNodeEngine", () => {
   it.each<[unknown, NodeEngineReconciliation]>([
-    ["24.x", { kind: "unchanged" }],
-    ["^24.5.0", { kind: "unchanged" }],
-    [">=24 <25", { kind: "unchanged" }],
-    [">=24", { kind: "overridden", previous: ">=24", next: "24.x" }],
-    ["25.x", { kind: "overridden", previous: "25.x", next: "24.x" }],
-    ["22.x", { kind: "overridden", previous: "22.x", next: "24.x" }],
-    ["not-semver", { kind: "overridden", previous: "not-semver", next: "24.x" }],
-    [null, { kind: "overridden", previous: null, next: "24.x" }],
-    [undefined, { kind: "added", next: "24.x" }],
+    ["26.x", { kind: "unchanged" }],
+    ["^26.5.0", { kind: "unchanged" }],
+    [">=26 <27", { kind: "unchanged" }],
+    [">=24", { kind: "overridden", previous: ">=24", next: "26.x" }],
+    ["24.x", { kind: "overridden", previous: "24.x", next: "26.x" }],
+    ["22.x", { kind: "overridden", previous: "22.x", next: "26.x" }],
+    ["not-semver", { kind: "overridden", previous: "not-semver", next: "26.x" }],
+    [null, { kind: "overridden", previous: null, next: "26.x" }],
+    [undefined, { kind: "added", next: "26.x" }],
   ])("reconciles %s → %o", (existing, expected) => {
     expect(reconcileNodeEngine(existing, ">=24")).toEqual(expected);
   });
@@ -24,12 +24,12 @@ describe("reconcileNodeEngine", () => {
 
 describe("pinnedNodeEngineMajor", () => {
   it.each<[string, string]>([
-    [">=24", "24.x"],
-    ["24.x", "24.x"],
-    [">=25", "25.x"],
-    [">=24.5.0", "25.x"],
-    [">=24.5.0 <27", "25.x"],
+    [">=24", "26.x"],
+    [">=24.5.0 <27", "26.x"],
+    ["26.x", "26.x"],
+    ["25.x", "25.x"],
     ["24.5.x || 25.x", "25.x"],
+    [">=26.5.0", "27.x"],
     ["24.5.0 || >=27.2.0", "28.x"],
   ])("pins %s → %s", (range, expected) => {
     expect(pinnedNodeEngineMajor(range)).toBe(expected);

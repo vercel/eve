@@ -268,6 +268,109 @@ function runKeyFailure(reason: string) {
   );
 }
 
+describe("remembering a continuation's owner", () => {
+  const guardedWorld = { capabilities: { deploymentAffinity: true, resolvedHookResume: true } };
+  function routableHook(runId: string, token: string, sessionId: string) {
+    return {
+      createdAt: new Date("2026-11-01T00:00:00Z"),
+      environment: "preview",
+      hookId: `hook-${runId}`,
+      metadata: Promise.resolve({ sessionId }),
+      ownerId: "team_test",
+      projectId: "prj_test",
+      resumeContext: {
+        deploymentId: "dpl_test",
+        encryptionPublicKey: "public-key",
+        workflowName: "session",
+      },
+      runId,
+      token,
+    };
+  }
+  const send = { kind: "send", payload: { message: "Alice follows up in the thread." } } as const;
+
+  it("resumes the owner it resolved before without a lookup", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:remembered");
+    const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect((await resumeSessionInbox("slack:remembered", send)).sessionId).resolves.toBe(
+        "session-1",
+      );
+    }
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([token, descriptor]);
+  });
+
+  it("reports a remembered owner whose deployment was deleted as stranded", async () => {
+    getWorldMock.mockResolvedValue({
+      ...guardedWorld,
+      getEncryptionKeyForRun: vi.fn().mockRejectedValue(runKeyFailure("Deployment not found.")),
+      runs: { get: vi.fn(async (runId: string) => ({ attributes: {}, runId })) },
+    });
+    const token = sessionInboxHookToken("slack:deleted");
+    const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
+    await expect((await resumeSessionInbox("slack:deleted", send)).sessionId).resolves.toBe(
+      "session-1",
+    );
+    const receipt = await resumeSessionInbox("slack:deleted", send);
+    await expect(receipt.sessionId).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+    expect(resumeHookMock.mock.calls[1]?.[0]).toEqual(descriptor);
+  });
+
+  it("resolves the owner again after the remembered one refuses", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:moved");
+    const { metadata: _metadata, ...first } = routableHook("owner-1", token, "session-1");
+    const { metadata: _successorMetadata, ...successor } = routableHook(
+      "owner-2",
+      token,
+      "session-2",
+    );
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockRejectedValueOnce(new HookNotFoundError(token))
+      .mockResolvedValue(routableHook("owner-2", token, "session-2"));
+    for (const expected of ["session-1", "session-2", "session-2"]) {
+      await expect((await resumeSessionInbox("slack:moved", send)).sessionId).resolves.toBe(
+        expected,
+      );
+    }
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([
+      token,
+      first,
+      token,
+      successor,
+    ]);
+  });
+
+  it("forgets a refused owner even when no caller reads the session", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:handed-off");
+    const { metadata: _metadata, ...first } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockRejectedValueOnce(new HookNotFoundError(token))
+      .mockResolvedValue(routableHook("owner-2", token, "session-2"));
+    await (
+      await resumeSessionInbox("slack:handed-off", send)
+    ).sessionId;
+    await resumeSessionInbox("slack:handed-off", send);
+    await resumeSessionInbox("slack:handed-off", send);
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([
+      token,
+      first,
+      token,
+      token,
+    ]);
+  });
+});
+
 function sessionHook(runId: string, token: string, metadata: Record<string, unknown>) {
   return {
     hookId: `hook-${runId}`,

@@ -62,8 +62,8 @@ async function forwardToParentStep(input: {
   "use step";
 
   try {
-    const { resumeHook } = await import("#internal/workflow/runtime.js");
-    await resumeHook(input.parentContinuationToken, input.hookPayload);
+    const { resumeRoutedHook } = await import("#execution/hosts.js");
+    await resumeRoutedHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     log.warn("failed to forward a child's interaction to its parent", {
       callId: input.hookPayload.callId,

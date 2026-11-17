@@ -76,6 +76,7 @@ export interface AgentInfoInstructionsEntry extends AgentInfoEntry {
 /** An inspected schedule. */
 export interface AgentInfoScheduleEntry extends AgentInfoEntry {
   readonly cron: string;
+  readonly timezone?: string;
   readonly hasRun: boolean;
   readonly markdown?: string;
 }

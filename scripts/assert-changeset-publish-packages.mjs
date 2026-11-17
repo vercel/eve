@@ -6,6 +6,7 @@ const allowedPublicPackages = new Set([
   "@vercel/agent-runs",
   "@eve/agent-desktop",
   "@eve/agent-browser",
+  "@eve/recall",
 ]);
 const workspaceRoots = ["apps", "packages"];
 

@@ -107,7 +107,14 @@ function entrySources(packageDir, key, value) {
   if (types === undefined)
     return exportTargets(value).some((target) => CODE_RE.test(target)) ? undefined : [];
   const rest = types.replace(/^\.\/dist\//, "").replace(/\.d\.ts$/, "");
-  for (const candidate of [`${rest}.ts`, `${rest}.tsx`, `${rest}/index.ts`, `${rest}.d.ts`]) {
+  for (const candidate of [
+    `${rest}.ts`,
+    `${rest}.tsx`,
+    `${rest}/index.ts`,
+    `${rest}.d.ts`,
+    `src/${rest}.ts`,
+    `src/${rest}/index.ts`,
+  ]) {
     if (existsSync(join(packageDir, candidate))) return [join(packageDir, candidate)];
   }
   const extensionDir = join(packageDir, "extension");
@@ -138,7 +145,7 @@ function publicEntries() {
       const sources = entrySources(packageDir, key, value);
       if (sources === undefined) {
         issues.push({
-          rule: 66,
+          rule: 67,
           file: toRepoPath(manifestPath),
           message: `Cannot map export "${key}" of ${manifest.name} to a source file, so its public declarations are unknown. Extend entrySources() in scripts/comment-policy.mjs.`,
         });
@@ -313,7 +320,7 @@ function publicDocs() {
     const moduleSymbol = sourceFile && checker.getSymbolAtLocation(sourceFile);
     if (moduleSymbol === undefined) {
       issues.push({
-        rule: 66,
+        rule: 67,
         file: toRepoPath(source),
         message: `Public entry ${entry} does not resolve to a module, so its public declarations are unknown.`,
       });
@@ -384,20 +391,20 @@ export async function collectCommentState() {
   return { comments, undocumented, issues };
 }
 
-/** Returns every comment outside the public API (rule 66) and every undocumented published export (rule 67). */
+/** Returns every comment outside the public API (rule 67) and every undocumented published export (rule 68). */
 export async function checkComments() {
   const { comments, undocumented, issues } = await collectCommentState();
   for (const [file, found] of comments)
     for (const comment of found)
       issues.push({
-        rule: 66,
+        rule: 67,
         file,
         line: comment.line,
         message: /@internal\b/.test(comment.text) ? INTERNAL_MESSAGE : COMMENT_MESSAGE,
       });
   for (const item of undocumented.values())
     issues.push({
-      rule: 67,
+      rule: 68,
       file: item.file,
       line: item.line,
       message: `${item.name} is exported from ${item.entry} without JSDoc. Every published export needs a doc comment that tells users what it is for.`,

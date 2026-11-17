@@ -1,0 +1,10 @@
+import { agentToolServeWorkflowReference } from "#runtime/subagents/workflow-reference.js";
+import { serveAgentTool } from "#runtime/subagents/workflow.js";
+import { askQuestionBody } from "#tools/provided/ask-question-body.js";
+import { executeAskQuestionTool } from "#tools/provided/ask-question-workflow.js";
+import { workflowBodyOf, type WorkflowBody } from "#tools/workflow-body.js";
+
+export const FRAMEWORK_WORKFLOW_BODIES: readonly WorkflowBody[] = [
+  { body: serveAgentTool, workflowId: agentToolServeWorkflowReference.workflowId },
+  workflowBodyOf(executeAskQuestionTool, askQuestionBody),
+].filter((body) => body !== undefined);

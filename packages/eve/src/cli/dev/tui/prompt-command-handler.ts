@@ -12,6 +12,7 @@ import type {
   PromptCommandOutcome,
 } from "./runner.js";
 import { isPromptCommandAvailableFor, type PromptCommand } from "./prompt-commands.js";
+import { runSetupFlowCommand } from "./run-setup-flow-command.js";
 import type { TuiSetupCommandInput, TuiSetupFlows } from "./setup-commands.js";
 import type { DevelopmentTuiTarget } from "./target.js";
 
@@ -120,41 +121,23 @@ export function createPromptCommandHandler(
         return { message: `/${command.name} is not supported by this renderer.` };
       }
 
-      let setupCommands: typeof import("./setup-commands.js");
-      try {
-        setupCommands = await import("./setup-commands.js");
-      } catch (error) {
-        return { message: `/${command.name} failed: ${toErrorMessage(error)}` };
+      const commandInput: Omit<TuiSetupCommandInput, "renderer"> = {
+        command: command.name,
+        appRoot: target.workspaceRoot,
+        withExclusiveTerminal: context.withExclusiveTerminal,
+        chatGptAccountLabel: context.chatGptAccountLabel,
+      };
+      if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
+      if (context.initialModelStep !== undefined) {
+        commandInput.initialModelStep = context.initialModelStep;
       }
-      const { runTuiSetupCommand } = setupCommands;
-      flow.begin("");
-      let preserveFlowDiagnostics = true;
-      try {
-        const commandInput: TuiSetupCommandInput = {
-          command: command.name,
-          appRoot: target.workspaceRoot,
-          renderer: flow,
-          withExclusiveTerminal: context.withExclusiveTerminal,
-          chatGptAccountLabel: context.chatGptAccountLabel,
-        };
-        if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
-        if (context.initialModelStep !== undefined) {
-          commandInput.initialModelStep = context.initialModelStep;
-        }
-        if (context.onOnboardingScreen !== undefined) {
-          commandInput.onOnboardingScreen = context.onOnboardingScreen;
-        }
-        if (command.name === "add") commandInput.initialRegistryAddress = command.argument;
-        if (loginConnection !== undefined) commandInput.initialLoginConnection = loginConnection;
-        if (options.flows !== undefined) commandInput.flows = options.flows;
-        const result = await runTuiSetupCommand(commandInput);
-        preserveFlowDiagnostics = result.preserveFlowDiagnostics;
-        const { preserveFlowDiagnostics: _preserve, partial: _partial, ...outcome } = result;
-        if (context.settleOutcome !== undefined) return await context.settleOutcome(outcome);
-        return outcome;
-      } finally {
-        flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
+      if (context.onOnboardingScreen !== undefined) {
+        commandInput.onOnboardingScreen = context.onOnboardingScreen;
       }
+      if (command.name === "add") commandInput.initialRegistryAddress = command.argument;
+      if (loginConnection !== undefined) commandInput.initialLoginConnection = loginConnection;
+      if (options.flows !== undefined) commandInput.flows = options.flows;
+      return await runSetupFlowCommand(flow, commandInput, context.settleOutcome);
     },
   };
 }

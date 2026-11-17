@@ -51,6 +51,12 @@ async function waitForPrewarmStep(runId: string): Promise<void> {
       const steps = await world.steps.list({ runId });
       const step = steps.data.find((entry) => entry.stepName.endsWith("//prewarmSessionStep"));
       expect(step?.status).toBe("completed");
+      const events = await world.events.listByCorrelationId({
+        correlationId: step!.stepId,
+        resolveData: "none",
+        runId,
+      });
+      expect(events.data.map((event) => event.eventType)).toContain("step_completed");
     },
     { timeout: 10_000 },
   );
@@ -72,10 +78,13 @@ function sandboxHook() {
 }
 
 describe("session prewarmers", () => {
-  it("starts a prewarmed session's sandbox before its first message, which the turn resumes", async () => {
+  it.each([
+    { usage: "uses", modules: [sandboxHook()], expected: ["resume"] },
+    { usage: "never uses", modules: [], expected: [] },
+  ])("prewarms the sandbox before a turn that $usage it", async ({ modules, expected }) => {
     const runtime = await createTestRuntime({
       agent: { name: "prewarm-sandbox" },
-      modules: [sandboxHook()],
+      modules,
     });
     await runtime.run(async () => {
       const run = await startSessionOwner(workflowEntry, [
@@ -98,9 +107,11 @@ describe("session prewarmers", () => {
           handoffFollowUp("dpl_inline", "Alice opens the project notes.", "prewarm-first"),
         );
         await stream.nextTurn();
-        expect(runtime.sandboxEvents).toEqual([...prewarmed, `resume:${run.runId}`]);
+        const afterTurn = [...prewarmed, ...expected.map((event) => `${event}:${run.runId}`)];
+        expect(runtime.sandboxEvents).toEqual(afterTurn);
         await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
         await expect(run.returnValue).resolves.toEqual({ output: "" });
+        expect(runtime.sandboxEvents).toEqual([...afterTurn, `end:${run.runId}`]);
         expect(runtime.sandboxCleanups).toEqual([run.runId]);
       } finally {
         stream.dispose();
@@ -427,7 +438,7 @@ describe("first turn abort hooks", () => {
     { firstMessage: undefined, start: "a prewarmed session" },
     { firstMessage: "Say hello.", start: "a session started with a message" },
   ])(
-    "registers each turn's abort hooks before its message for $start",
+    "registers the abort hooks before the first message and reuses them for $start",
     async ({ firstMessage }) => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
 
@@ -454,9 +465,7 @@ describe("first turn abort hooks", () => {
           for (const message of ["Say hello.", "Say hello again."].slice(turns)) {
             await vi.waitFor(async () => {
               const hooks = (await world.hooks.list({ runId: run.runId })).data;
-              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(
-                2 * (turns + 1),
-              );
+              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(2);
             });
             await resumeHook(
               inboxToken,
@@ -486,7 +495,8 @@ describe("first turn abort hooks", () => {
               abortHooksBeforeEachTurn.push(abortHooks);
             }
           }
-          expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
+          expect(abortHooksBeforeEachTurn).toEqual([2, 2]);
+          expect(abortHooks).toBe(2);
         } finally {
           stream.dispose();
           await run.cancel();

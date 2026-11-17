@@ -21,27 +21,33 @@ function lastUserMessageText(data: Pick<ConversationState, "messages">) {
   }
 }
 
+function isSessionGone(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "session_stranded" || code === "session_expired" || code === "session_not_active";
+}
+
 export function createEveChatSession(
   chatId: MaybeRefOrGetter<string>,
   options?: MaybeRefOrGetter<ChatSessionOptions | undefined>,
 ): ChatSession {
   const id = computed(() => toValue(chatId));
   const resolvedOptions = computed(() => toValue(options));
-  const agent = computed(() =>
-    getOrCreateEveAgent(id.value, {
-      initialSession: resolvedOptions.value?.initialSession,
-      initialEvents: resolvedOptions.value?.initialEvents,
-    }),
-  );
-
-  const messages = computed(() => toUIMessages(agent.value.messages.value));
+  const binding = computed(() => getOrCreateEveAgent(id.value, resolvedOptions.value));
+  const agent = computed(() => binding.value.agent);
+  const historyMessages = computed(() => binding.value.historyMessages.value);
+  const messages = computed(() => [
+    ...historyMessages.value,
+    ...toUIMessages(agent.value.messages.value),
+  ]);
 
   const status = computed(() =>
-    agent.value.error.value !== undefined
-      ? "error"
-      : agent.value.status.value === "idle"
-        ? "ready"
-        : "streaming",
+    binding.value.busy.value
+      ? "streaming"
+      : agent.value.error.value !== undefined
+        ? "error"
+        : agent.value.status.value === "idle"
+          ? "ready"
+          : "streaming",
   );
   const error = computed(() => agent.value.error.value);
 
@@ -50,7 +56,37 @@ export function createEveChatSession(
   async function sendMessage(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
-    await agent.value.send(trimmed);
+    await deliver(trimmed);
+  }
+
+  async function deliver(text: string) {
+    const current = binding.value;
+    if (current.busy.value) return;
+    current.busy.value = true;
+    let generation = current.generation;
+    try {
+      try {
+        await current.agent.send(text);
+      } catch (error) {
+        if (generation !== current.generation) return;
+        // Only definitive rejection is safe to resend; a network failure may have been accepted.
+        if (!isSessionGone(error)) {
+          current.indeterminate = true;
+          throw error;
+        }
+        if (!(await current.restart())) return;
+        generation = current.generation;
+        try {
+          await current.agent.send(text);
+        } catch (replacementError) {
+          if (generation === current.generation && !isSessionGone(replacementError))
+            current.indeterminate = true;
+          throw replacementError;
+        }
+      }
+    } finally {
+      current.busy.value = false;
+    }
   }
 
   async function sendInputResponses(responses: AgentInputResponse[]) {
@@ -62,16 +98,32 @@ export function createEveChatSession(
   }
 
   function reset() {
-    agent.value.newSession();
+    binding.value.reset();
   }
 
   async function retry() {
     if (isBusy.value) return;
 
+    const current = binding.value;
+    // Idle only describes the observed stream. A failed POST can still have been accepted.
+    // Catch-up cannot prove non-delivery, so repeated retries remain reconnect-only.
+    if (
+      current.indeterminate ||
+      (current.agent.status.value === "busy" && !isSessionGone(current.agent.error.value))
+    ) {
+      current.busy.value = true;
+      try {
+        await current.agent.resume();
+      } finally {
+        current.busy.value = false;
+      }
+      return;
+    }
+
     const text = lastUserMessageText({ messages: agent.value.messages.value });
     if (!text) return;
 
-    await agent.value.send(text);
+    await deliver(text);
   }
 
   return {

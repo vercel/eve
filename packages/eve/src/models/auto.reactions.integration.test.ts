@@ -4,13 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 
-import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineTool } from "#tools/definition.js";
 
@@ -119,22 +119,20 @@ async function runTwoTurns(): Promise<{ readonly log: string[]; readonly decisio
   });
   const continuationToken = "http:auto-routing";
   await runtime.run(async () => {
-    const run = await start(workflowEntry, [
-      {
-        input: { message: "Alice needs a routine summary." },
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        serializedContext: buildSerializedContext({
-          auth: ALICE,
-          channelKind: "http",
-          continuationToken,
-        }),
-      },
-    ]);
+    const run = await startTestSession("in-process", {
+      input: { message: "Alice needs a routine summary." },
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      serializedContext: buildSerializedContext({
+        auth: ALICE,
+        channelKind: "http",
+        continuationToken,
+      }),
+    });
     const inbox = sessionInboxHookToken(continuationToken);
     try {
       await until(log, "tool:lookup", 1);
-      await resumeHook(inbox, {
+      await resumeRoutedHook(inbox, {
         auth: ALICE,
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",
@@ -143,7 +141,7 @@ async function runTwoTurns(): Promise<{ readonly log: string[]; readonly decisio
       log.push("steered");
       await until(log, "call:small", 2);
       await new Promise((resolve) => setTimeout(resolve, 200));
-      await resumeHook(inbox, {
+      await resumeRoutedHook(inbox, {
         auth: ALICE,
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",
@@ -219,18 +217,16 @@ describe("auto() as the agent's model", () => {
       ],
     });
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "Alice needs a routine summary." },
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken: "http:model-drift",
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        input: { message: "Alice needs a routine summary." },
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken: "http:model-drift",
+        }),
+      });
       try {
         await until(log, "call:large", 1);
       } finally {

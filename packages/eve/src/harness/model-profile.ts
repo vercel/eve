@@ -21,12 +21,14 @@ export function resolveModelProfile(
   const modelId = typeof model === "string" ? model : lowerCaseOrEmpty(model.modelId);
   const topLevelProvider = provider.split(".")[0]!;
   if (topLevelProvider === "gateway") {
+    const vendor = modelId.split("/")[0]!;
+    const oneHour = vendor === "anthropic" && promptCache?.anthropic?.ttl === "1h";
     return {
-      anthropicCache: undefined,
+      anthropicCache: oneHour ? { ttl: "1h" } : undefined,
       filesOutsideToolResults: false,
       gateway: true,
       googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
-      provider: modelId.split("/")[0]!,
+      provider: vendor,
     };
   }
   const anthropic =

@@ -8,7 +8,7 @@ import {
   type ScenarioAppDescriptor,
   useScenarioApp,
 } from "../../src/internal/testing/scenario-app.js";
-import { startEveDev } from "./dev-server-harness.js";
+import { startEveDev } from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;

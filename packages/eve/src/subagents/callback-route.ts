@@ -1,3 +1,4 @@
+import { isRemoteReplyHookToken } from "#execution/callback-hook-tokens.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -91,6 +92,7 @@ export async function handleSessionCallbackRequest(
   if (typeof token !== "string" || token.length === 0) {
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
   }
+  if (!isRemoteReplyHookToken(token)) return callbackNotPending();
 
   let body: unknown;
   try {
@@ -113,13 +115,17 @@ export async function handleSessionCallbackRequest(
       forwarded ?? { kind: "runtime-action-result", results: [result] },
     );
   } catch {
-    return Response.json(
-      { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
-      { status: 404 },
-    );
+    return callbackNotPending();
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+function callbackNotPending(): Response {
+  return Response.json(
+    { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
+    { status: 404 },
+  );
 }
 
 function readInteractionCallback(

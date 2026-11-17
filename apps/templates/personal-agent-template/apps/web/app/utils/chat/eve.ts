@@ -4,13 +4,17 @@ import type { EveToolUIPart } from "~/composables/chat/providers/eve/adapter";
 
 export function hasVisibleParts(parts: UIMessage["parts"]): boolean {
   return parts.some((part) => {
-    if (part.type === "text" || part.type === "reasoning") return true;
+    if (part.type === "text" || part.type === "file") return true;
+    if (part.type === "reasoning") return part.text.trim().length > 0;
     return isToolUIPart(part) || isDynamicToolUIPart(part);
   });
 }
 
 export function normalizeEveParts(parts: UIMessage["parts"]): UIMessage["parts"] {
-  return parts.filter((part) => part.type !== "step-start");
+  return parts.filter(
+    (part) =>
+      part.type !== "step-start" && (part.type !== "reasoning" || part.text.trim().length > 0),
+  );
 }
 
 export function shouldShowToolInput(part: EveToolUIPart): boolean {

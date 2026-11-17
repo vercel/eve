@@ -162,6 +162,12 @@ export function slackDriver(
   return {
     name: dm ? "slack-dm" : codeChannel ? "slack-code-channel" : "slack",
     personId: PERSON,
+    space: {
+      id: `slack:${TEAM}:${CHANNEL}`,
+      type: dm ? "direct" : "shared",
+      visibility: dm ? "private" : "public",
+      workspaceId: `slack:${TEAM}`,
+    },
     capabilities: dm
       ? ["attachments", "buttons", "sign-in-cancel", "text-replies"]
       : ["attachments", "another-person", "buttons", "sign-in-cancel", "text-replies"],

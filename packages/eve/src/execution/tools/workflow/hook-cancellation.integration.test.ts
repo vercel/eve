@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import { describe, expect, it, vi } from "vitest";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { workflowEntry } from "#execution/session/entry.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import {
+  confirmDeployBody,
   confirmDeployWorkflow,
+  reportingDeployBody,
   reportingDeployWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -15,6 +19,8 @@ import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
 } from "#internal/testing/workflow-tool-run-harness.js";
+
+const WORKFLOWS = [confirmDeployBody(), reportingDeployBody()];
 
 describe("workflow hook cancellation", () => {
   it.each(["button", "text"] as const)(
@@ -33,7 +39,8 @@ describe("workflow hook cancellation", () => {
           principalType: "user" as const,
           issuer: "test",
         };
-        const run = await startSessionOwner(workflowEntry, [
+        const run = await startTestSession(
+          "in-process",
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -47,7 +54,8 @@ describe("workflow hook cancellation", () => {
               "eve.auth": alice,
             },
           },
-        ]);
+          { workflows: WORKFLOWS },
+        );
         const stream = captureTurnEvents(run);
         try {
           const asked = await stream.nextTurn();
@@ -55,7 +63,7 @@ describe("workflow hook cancellation", () => {
             (event) => event.data.request.kind === "question",
           );
           expect(question).toBeDefined();
-          await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
             kind: "send",
             auth: alice,
             delivery: { channelKind: "http", channelName: "test", deliveryId: "answer-delivery" },
@@ -139,7 +147,8 @@ describe("workflow hook cancellation", () => {
     });
 
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
+      const run = await startTestSession(
+        "in-process",
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -149,12 +158,13 @@ describe("workflow hook cancellation", () => {
             requestInput: true,
           }),
         },
-      ]);
+        { workflows: WORKFLOWS },
+      );
       const stream = captureTurnEvents(run);
       try {
         const asked = await stream.nextTurn();
         expect(filterEventsByType(asked, "interaction.opened")).toHaveLength(1);
-        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
           kind: "send",
           payload: { message: "Deploy" },
@@ -203,7 +213,8 @@ describe("workflow hook cancellation", () => {
     });
 
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
+      const run = await startTestSession(
+        "in-process",
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -213,11 +224,12 @@ describe("workflow hook cancellation", () => {
             requestInput: true,
           }),
         },
-      ]);
+        { workflows: WORKFLOWS },
+      );
       const stream = captureTurnEvents(run);
       try {
         await stream.nextTurn();
-        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           deliveryMetadata: [
             {
               channelKind: "http",
@@ -274,7 +286,8 @@ describe("workflow hook cancellation", () => {
     });
 
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
+      const run = await startTestSession(
+        "in-process",
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -283,7 +296,8 @@ describe("workflow hook cancellation", () => {
             continuationToken: "http:workflow-tool-guarded-progress",
           }),
         },
-      ]);
+        { workflows: WORKFLOWS },
+      );
       const stream = captureTurnEvents(run);
       try {
         const settled = await stream.nextTurn();
@@ -340,7 +354,8 @@ describe("workflow typed answers", () => {
       });
 
       await runtime.run(async () => {
-        const run = await startSessionOwner(workflowEntry, [
+        const run = await startTestSession(
+          "in-process",
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -353,12 +368,13 @@ describe("workflow typed answers", () => {
               "eve.auth": asker,
             },
           },
-        ]);
+          { workflows: WORKFLOWS },
+        );
         const stream = captureTurnEvents(run);
         try {
           await stream.nextTurn();
           seen.length = 0;
-          await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
             auth: { ...asker, attributes: { msg: "answering request" } },
             delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
             kind: "send",
@@ -366,7 +382,9 @@ describe("workflow typed answers", () => {
           });
 
           await stream.nextTurn();
-          expect(seen.at(-1)).toEqual(["turn.settled", "answering request"]);
+          await vi.waitFor(() =>
+            expect(seen.at(-1)).toEqual(["turn.settled", "answering request"]),
+          );
           expect(new Set(seen.map(([, msg]) => msg))).toEqual(new Set(["answering request"]));
         } finally {
           stream.dispose();
@@ -430,7 +448,8 @@ describe("workflow typed answers", () => {
       });
 
       await runtime.run(async () => {
-        const run = await startSessionOwner(workflowEntry, [
+        const run = await startTestSession(
+          "in-process",
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -443,7 +462,8 @@ describe("workflow typed answers", () => {
               "eve.auth": alice,
             },
           },
-        ]);
+          { workflows: WORKFLOWS },
+        );
         const stream = captureTurnEvents(run);
         try {
           const asked = await stream.nextTurn();
@@ -456,7 +476,7 @@ describe("workflow typed answers", () => {
             [bob, answers.bob],
             [alice, answers.alice],
           ] as const) {
-            await resumeSessionInbox(inbox, {
+            await resumeRoutedHook(sessionInboxHookToken(inbox), {
               auth,
               delivery: { channelKind: "http", channelName: "test", deliveryId: auth.principalId },
               kind: "send",
@@ -470,12 +490,14 @@ describe("workflow typed answers", () => {
           );
           expect(result?.data.output).toEqual(output);
           await stream.nextTurn();
-          expect(seen).toEqual([
-            ["delivery.consumed", "alice"],
-            ["turn.settled", "alice"],
-            ["delivery.consumed", "bob"],
-            ["turn.settled", "bob"],
-          ]);
+          await vi.waitFor(() =>
+            expect(seen).toEqual([
+              ["delivery.consumed", "alice"],
+              ["turn.settled", "alice"],
+              ["delivery.consumed", "bob"],
+              ["turn.settled", "bob"],
+            ]),
+          );
         } finally {
           stream.dispose();
           await run.cancel();

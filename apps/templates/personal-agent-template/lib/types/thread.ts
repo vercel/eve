@@ -5,7 +5,10 @@ export interface ThreadSummary {
   createdAt: number;
 }
 
+/** eve's `ClientSessionState`, persisted as is so a restored session keeps its `inbox` handle. */
 export interface EveSessionCursor {
+  /** Opaque routing handle the server issues; pass it back unchanged. */
+  inbox?: string;
   sessionId: string;
   streamIndex: number;
 }
@@ -13,6 +16,8 @@ export interface EveSessionCursor {
 export interface ThreadState {
   session: EveSessionCursor;
   events: unknown[];
+  /** Retired sessions stay separate: each event stream has its own cursor and inbox. */
+  history?: Array<{ session: EveSessionCursor; events: unknown[] }>;
 }
 
 export interface ThreadRecord extends ThreadSummary {

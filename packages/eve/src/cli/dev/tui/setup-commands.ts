@@ -52,6 +52,7 @@ export interface TuiSetupCommandInput {
   onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
   chatGptAccountLabel?: string;
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
+  signal?: AbortSignal;
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   flows?: Partial<TuiSetupFlows>;
 }
@@ -134,6 +135,12 @@ export async function runTuiSetupCommand(
     warnings,
   );
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
+  const stopFromOutside = () => {
+    interrupted = true;
+    controller.abort(new WizardCancelledError());
+  };
+  if (input.signal?.aborted === true) stopFromOutside();
+  input.signal?.addEventListener("abort", stopFromOutside, { once: true });
 
   let cancelActiveRegistryItem: (() => void) | undefined;
   const runRegistryItem = async <T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T> => {
@@ -188,6 +195,7 @@ export async function runTuiSetupCommand(
       if (rearm) interrupt = input.renderer.waitForInterrupt();
     }
   } finally {
+    input.signal?.removeEventListener("abort", stopFromOutside);
     input.renderer.setStatus(undefined);
   }
 }

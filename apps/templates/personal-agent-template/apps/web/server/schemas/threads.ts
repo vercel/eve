@@ -10,6 +10,7 @@ export const createThreadBodySchema = z.object({
 });
 
 const eveSessionSchema = z.object({
+  inbox: z.string().min(1).optional(),
   sessionId: z.string().trim().min(1),
   streamIndex: z.number().int().min(0),
 });
@@ -17,6 +18,9 @@ const eveSessionSchema = z.object({
 export const threadStateSchema = z.object({
   session: eveSessionSchema,
   events: z.array(z.unknown()),
+  history: z
+    .array(z.object({ session: eveSessionSchema, events: z.array(z.unknown()) }))
+    .optional(),
 });
 
 export const patchThreadBodySchema = z.object({

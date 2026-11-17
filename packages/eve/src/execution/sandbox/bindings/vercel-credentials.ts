@@ -18,20 +18,32 @@ export async function getVercelSandboxCredentials(
   const projectId =
     readNonEmptyString(createOptions, "projectId") ??
     readNonEmptyEnvironmentVariable("VERCEL_PROJECT_ID");
-  const envToken =
-    readNonEmptyString(createOptions, "token") ??
-    readNonEmptyEnvironmentVariable("VERCEL_OIDC_TOKEN") ??
-    readNonEmptyEnvironmentVariable("VERCEL_TOKEN");
+  const withIds = (token: string | undefined): VercelSandboxCredentials | undefined =>
+    token && teamId && projectId ? { projectId, teamId, token } : undefined;
 
-  if (envToken && teamId && projectId) {
-    return { projectId, teamId, token: envToken };
+  const explicit = withIds(readNonEmptyString(createOptions, "token"));
+  if (explicit) {
+    return explicit;
   }
 
-  const oidcToken = await getVercelOidcToken({
-    project: projectId,
-    team: teamId,
-  });
-  return getVercelSandboxCredentialsFromOidcToken(oidcToken);
+  const accessToken = withIds(readNonEmptyEnvironmentVariable("VERCEL_TOKEN"));
+  if (accessToken && !readNonEmptyEnvironmentVariable("VERCEL_OIDC_TOKEN")) {
+    return accessToken;
+  }
+
+  try {
+    const oidcToken = await getVercelOidcToken({
+      project: projectId,
+      team: teamId,
+      expirationBufferMs: 5 * 60_000,
+    });
+    return withIds(oidcToken) ?? getVercelSandboxCredentialsFromOidcToken(oidcToken);
+  } catch (error) {
+    if (accessToken) {
+      return accessToken;
+    }
+    throw error;
+  }
 }
 
 export async function resolveVercelSandboxCredentials(

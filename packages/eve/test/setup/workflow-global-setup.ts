@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { initDataDir } from "@workflow/world-local";
@@ -40,7 +40,6 @@ export default async function setupWorkflowTests(): Promise<void> {
   });
 
   await builder.build();
-  await inlineWorkflowDriverCode(join(outDir, "workflows.mjs"));
   await bundleWorkflowStepRegistrations({
     builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
     discoveredEntries: await discoverWorkflowEntries(),
@@ -50,20 +49,6 @@ export default async function setupWorkflowTests(): Promise<void> {
     workingDir: packageRoot,
   });
   await initDataDir(resolveLocalWorkflowWorldDataDirectory(packageRoot));
-}
-
-async function inlineWorkflowDriverCode(entrypointPath: string): Promise<void> {
-  const source = await readFile(entrypointPath, "utf8");
-  const match = /^import workflowCode from ("text:[^"]+");$/m.exec(source);
-  if (match === null) {
-    throw new Error(`Expected ${entrypointPath} to import its driver code with "text:".`);
-  }
-  const codePath = (JSON.parse(match[1]!) as string).slice("text:".length);
-  const code = await readFile(codePath, "utf8");
-  await writeFile(
-    entrypointPath,
-    source.replace(match[0], () => `const workflowCode = ${JSON.stringify(code)};`),
-  );
 }
 
 async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntries> {

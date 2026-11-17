@@ -100,9 +100,13 @@ const EXCLUDED_FILE_PATTERNS = [
   /\.scenario\.test\.ts$/,
   /\.e2e\.test\.ts$/,
   /\/setup\/build\.ts$/,
+  /\/execution\/workflow-host\/step-boundary\.ts$/,
 ];
 
-const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
+const EXCLUDED_DIRECTORIES = new Set([
+  join("internal", "testing"),
+  join("execution", "in-process"),
+]);
 
 const EXTERNAL_PACKAGES = new Set([
   "@nuxt/kit",

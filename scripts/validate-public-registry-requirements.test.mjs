@@ -18,6 +18,20 @@ test("accepts public requirements satisfied by the published Eve version", () =>
   );
 });
 
+test("accepts bounded provider support without requiring the current release to support it", () => {
+  assert.doesNotThrow(() =>
+    validatePublicRegistryRequirements(registry(">=0.84.1 <1.0.0-0"), "1.0.0-rc.9"),
+  );
+  assert.throws(
+    () => validatePublicRegistryRequirements(registry(">=1.0.0 <1.0.0-0"), "1.0.0"),
+    /empty Eve requirement/u,
+  );
+  assert.throws(
+    () => validatePublicRegistryRequirements(registry(">=1.1.0 <2.0.0-0"), "1.0.0"),
+    /registry\.staged-requirements\.json/u,
+  );
+});
+
 test("rejects public requirements for an unpublished Eve version with staging guidance", () => {
   assert.throws(
     () => validatePublicRegistryRequirements(registry(">=0.31.4"), "0.31.3"),

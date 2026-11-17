@@ -151,8 +151,6 @@ describe("collectOtelPipeline", () => {
     expect(collected.declared).toBe(true);
     expect(collected.settings).toStrictEqual({
       functionId: undefined,
-      recordInputs: true,
-      recordOutputs: true,
       traceChannelRequests: false,
     });
   });
@@ -175,8 +173,6 @@ describe("collectOtelPipeline", () => {
     });
     expect(collected.settings).toStrictEqual({
       functionId: "weather",
-      recordInputs: false,
-      recordOutputs: false,
       traceChannelRequests: true,
     });
   });

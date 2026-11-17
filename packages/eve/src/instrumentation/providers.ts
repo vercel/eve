@@ -8,7 +8,11 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
 import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentation-runtime.js";
-import { collectOtelPipeline } from "#tracing/eve/otel-declaration.js";
+import {
+  collectOtelPipeline,
+  isOtelDeclaration,
+  isOtelIntegration,
+} from "#tracing/eve/otel-declaration.js";
 import {
   isInstrumentationDisabled,
   type InstrumentationProvider,
@@ -87,7 +91,9 @@ export function finalizeInstrumentationProviders(input: {
   readonly serviceName: string;
 }): InstrumentationRuntime {
   const registered = getInstrumentationProviders();
-  const providerDefinitions = registered.map(toProviderDefinition);
+  const providerDefinitions = registered
+    .filter((entry) => !isOtelDeclaration(entry.provider) && !isOtelIntegration(entry.provider))
+    .map(toProviderDefinition);
   const collected = collectOtelPipeline(registered.map((entry) => entry.provider));
   return installInstrumentationRuntime({
     collected,

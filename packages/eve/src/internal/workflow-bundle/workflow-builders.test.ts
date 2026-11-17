@@ -48,10 +48,18 @@ describe("applyWorkflowTransform", () => {
       transformed.code.replace(/^import[^;]+;\n/gm, "").replace(/^export /gm, ""),
     );
     const registered = new Map<string, Function>();
-    new Function("registerStepFunction", "withWorkflowStepAuthorization", executable)(
+    let installs = 0;
+    new Function(
+      "registerStepFunction",
+      "withWorkflowStepAuthorization",
+      "installWorkflowHost",
+      executable,
+    )(
       (id: string, execute: Function) => registered.set(id, execute),
       withWorkflowStepAuthorization,
+      () => installs++,
     );
+    expect(installs).toBe(1);
 
     await expect(
       registered.get("__builtin_response_json")!.call(Response.json({ ok: true })),
@@ -65,6 +73,7 @@ describe("applyWorkflowTransform", () => {
 
     const workflow = await applyWorkflowTransform(filename, source, "workflow");
     expect(workflow.code).not.toContain("workflowToolStep");
+    expect(workflow.code).not.toContain("installWorkflowHost");
     for (const name of registered.keys()) {
       expect(workflow.code).toContain(
         `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(name)})`,

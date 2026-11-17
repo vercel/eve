@@ -9,7 +9,6 @@ const wrapperEntry = fileURLToPath(
 export default {
   packageName: "@vercel/oidc",
   compiledPath: "@vercel/oidc",
-  bundling: "standalone",
   entries: [
     {
       input: wrapperEntry,

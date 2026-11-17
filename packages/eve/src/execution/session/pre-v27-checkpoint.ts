@@ -5,7 +5,11 @@ import {
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
 import { CheckpointRefusal, refuse } from "#execution/session/checkpoint-refusal.js";
 import { normalizeHistory } from "#execution/session/imported-conversation.js";
-import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+} from "#execution/session/checkpoint.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isObject } from "#shared/guards.js";
@@ -13,6 +17,7 @@ import { isObject } from "#shared/guards.js";
 export interface PreV27Checkpoint<C = SessionCheckpoint> {
   readonly checkpoint: C;
   readonly turnCount: number;
+  readonly retiredRuns?: readonly TaskRunAddress[];
 }
 
 export type PreV27CheckpointImport =
@@ -87,8 +92,7 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
   if (typeof sessionState.sessionId !== "string") refuse("session id is missing");
   const state = session.state === undefined ? {} : readRecord(session, "state");
   const turnCount = readTurnCount(sessionState, state);
-  if (holdsRunningTask(state["eve.taskTable"]))
-    throw new SessionBusy("session holds a running task");
+  const retiredRuns = retireIdleTasks(state["eve.taskTable"]);
   const history = Array.isArray(checkpoint.history) ? checkpoint.history : session.history;
   if (!Array.isArray(history)) refuse("session history is missing");
   const context = readRecord(checkpoint, "serializedContext");
@@ -137,6 +141,7 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
       version: SESSION_CHECKPOINT_VERSION,
     },
     turnCount,
+    ...(retiredRuns.length > 0 && { retiredRuns }),
   };
 }
 
@@ -158,15 +163,36 @@ function readCount(value: unknown): number {
   return value;
 }
 
-function holdsRunningTask(table: unknown): boolean {
-  if (table === undefined) return false;
+function retireIdleTasks(table: unknown): TaskRunAddress[] {
+  if (table === undefined) return [];
   if (!isObject(table) || !Array.isArray(table.tasks)) refuse("task table is malformed");
-  return table.tasks.some(
-    (task) =>
+  const tasks: readonly unknown[] = table.tasks;
+  if (
+    tasks.some((task) => isObject(task) && Array.isArray(task.results) && task.results.length > 0)
+  )
+    throw new SessionBusy("session holds task results the model hasn't read");
+  return tasks.flatMap((task) => {
+    if (isObject(task) && task.run === undefined && !isWorking(task)) return [];
+    const run = isObject(task) ? task.run : undefined;
+    if (
       !isObject(task) ||
-      task.run !== undefined ||
-      (Array.isArray(task.held) && task.held.length > 0) ||
-      (Array.isArray(task.calls) && task.calls.length > 0),
+      isWorking(task) ||
+      task.resumable !== true ||
+      task.cancelled === true ||
+      !isObject(run) ||
+      run.started !== true ||
+      typeof run.hookToken !== "string" ||
+      typeof run.runId !== "string"
+    )
+      throw new SessionBusy("session holds a running task");
+    return [{ hookToken: run.hookToken, runId: run.runId }];
+  });
+}
+
+function isWorking(task: CheckpointRecord): boolean {
+  return (
+    (Array.isArray(task.held) && task.held.length > 0) ||
+    (Array.isArray(task.calls) && task.calls.length > 0)
   );
 }
 

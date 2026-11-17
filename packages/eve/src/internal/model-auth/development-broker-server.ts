@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER } from "#internal/application/dev-transport.js";
 import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import { resolveModelApiKey } from "./api-key.js";
 import { resolveGatewayModelCredential } from "./gateway-credential.js";

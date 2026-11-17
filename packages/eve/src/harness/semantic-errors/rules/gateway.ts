@@ -2,6 +2,7 @@ import {
   allOf,
   anyOf,
   codeIs,
+  messageIs,
   messageMatches,
   nameIs,
   typeIs,
@@ -126,5 +127,15 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     when: codeIs("gateway_stream_timeout"),
     message: "AI Gateway ended the model stream before the response finished.",
     hint: "eve already retried the request. Split the task into smaller turns, or switch models with `/model` in `eve dev`.",
+  },
+  {
+    id: "gateway-stream-terminated",
+    name: "AI Gateway stream terminated",
+    tags: ["gateway", "transient"],
+    when: anyOf(
+      codeIs("gateway_stream_terminated"),
+      messageIs("Upstream stream ended before terminal chunk"),
+    ),
+    message: "AI Gateway's stream from the model provider ended before the response finished.",
   },
 ];

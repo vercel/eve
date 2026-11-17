@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@nuxthub/db";
-import type { ThreadRecord, ThreadState, ThreadSummary } from "#eve/types/thread";
+import type { EveSessionCursor, ThreadRecord, ThreadState, ThreadSummary } from "#eve/types/thread";
 import { truncateThreadTitle } from "#eve/types/thread";
 
 const LIST_LIMIT = 50;
@@ -23,15 +23,11 @@ function serializeThreadState(state: ThreadState | undefined) {
 }
 
 function mergeThreadState(incoming: ThreadState): ThreadState {
-  const session = incoming.session;
+  const { inbox, sessionId, streamIndex } = incoming.session;
+  const session: EveSessionCursor = { sessionId, streamIndex };
+  if (inbox) session.inbox = inbox;
 
-  return {
-    session: {
-      sessionId: session.sessionId,
-      streamIndex: session.streamIndex,
-    },
-    events: incoming.events,
-  };
+  return { session, events: incoming.events, history: incoming.history };
 }
 
 function rowToSummary(row: typeof schema.threads.$inferSelect): ThreadSummary {

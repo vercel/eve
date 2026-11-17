@@ -10,6 +10,7 @@ const PREFIX = "agent_browser_";
 const APP_OWNED_ARGUMENTS = new Set([
   "allowedDomains",
   "caCert",
+  "capture",
   "clearCaCert",
   "extraArgs",
   "idleTimeout",

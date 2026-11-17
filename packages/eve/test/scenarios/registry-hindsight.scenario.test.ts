@@ -8,7 +8,7 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
 const REGISTRY_ROOT = fileURLToPath(new URL("../../../../apps/docs/", import.meta.url));
-const ITEM_NAME = "memory/hindsight";
+const ITEMS = ["memory/hindsight", "memory/memanto", "memory/arcana", "memory/supermemory"];
 
 const scenarioApp = useScenarioApp();
 
@@ -25,38 +25,47 @@ function dependencyEntry(specifier: string): [string, string] {
     : [specifier, "latest"];
 }
 
-describe(`registry ${ITEM_NAME}`, () => {
-  it("builds the agent the registry item installs", async () => {
-    const registry = JSON.parse(await readFile(join(REGISTRY_ROOT, "registry.json"), "utf8")) as {
-      readonly items: readonly RegistryItem[];
-    };
-    const item = registry.items.find((candidate) => candidate.name === ITEM_NAME);
-    if (item === undefined) throw new Error(`apps/docs/registry.json must define ${ITEM_NAME}.`);
+describe("registry memory providers", () => {
+  it.each(ITEMS)(
+    "builds the agent installed by %s",
+    async (itemName) => {
+      const registry = JSON.parse(await readFile(join(REGISTRY_ROOT, "registry.json"), "utf8")) as {
+        readonly items: readonly RegistryItem[];
+      };
+      const item = registry.items.find((candidate) => candidate.name === itemName);
+      if (item === undefined) throw new Error(`apps/docs/registry.json must define ${itemName}.`);
 
-    const files: Record<string, string> = {
-      "agent/agent.ts": `import { defineAgent } from "eve";\n\nexport default defineAgent({ model: "openai/gpt-5.4-mini" });\n`,
-      "agent/instructions.md": "You are a helpful assistant.\n",
-      "pnpm-workspace.yaml": "minimumReleaseAge: 0\n",
-    };
-    for (const file of item.files) {
-      files[file.target] = await readFile(join(REGISTRY_ROOT, file.path), "utf8");
-    }
+      const files: Record<string, string> = {
+        "agent/agent.ts": `import { defineAgent } from "eve";\n\nexport default defineAgent({ model: "openai/gpt-5.4-mini" });\n`,
+        "agent/instructions.md": "You are a helpful assistant.\n",
+        "pnpm-workspace.yaml": "minimumReleaseAge: 0\n",
+      };
+      for (const file of item.files) {
+        files[file.target] = await readFile(join(REGISTRY_ROOT, file.path), "utf8");
+      }
 
-    const app = await scenarioApp({
-      dependencies: Object.fromEntries((item.dependencies ?? []).map(dependencyEntry)),
-      files,
-      installDependencies: true,
-      name: "registry-hindsight",
-    });
+      const app = await scenarioApp({
+        dependencies: Object.fromEntries((item.dependencies ?? []).map(dependencyEntry)),
+        files,
+        installDependencies: true,
+        name: `registry-${itemName.slice("memory/".length)}`,
+      });
 
-    await runPnpmCommand({
-      args: ["exec", "eve", "build", "--skip-sandbox-prewarm"],
-      cwd: app.appRoot,
-      env: {
-        ...process.env,
-        HINDSIGHT_API_KEY: "placeholder",
-        HINDSIGHT_API_URL: "http://127.0.0.1:8888",
-      },
-    });
-  }, 300_000);
+      await runPnpmCommand({
+        args: ["exec", "eve", "build", "--skip-sandbox-prewarm"],
+        cwd: app.appRoot,
+        env: {
+          ...process.env,
+          HINDSIGHT_API_KEY: "placeholder",
+          HINDSIGHT_API_URL: "http://127.0.0.1:8888",
+          MOORCHEH_API_KEY: "placeholder",
+          MEMANTO_BASE_URL: "http://127.0.0.1:8888",
+          ARCANA_API_KEY: "placeholder",
+          ARCANA_WORKSPACE: "test-workspace",
+          SUPERMEMORY_API_KEY: "placeholder",
+        },
+      });
+    },
+    300_000,
+  );
 });

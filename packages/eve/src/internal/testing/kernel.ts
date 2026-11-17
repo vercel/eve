@@ -6,7 +6,9 @@ import { foldPublication } from "#harness/session-machine/current.js";
 import type { KernelConfig, StepFn, StepResult } from "#harness/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 
 export interface TestKernelConfig extends KernelConfig {
   readonly agent: { readonly model: RuntimeModelReference } & AgentSettings;
@@ -17,14 +19,14 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
   const run: StepFn = async (session, input) => {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
-      if (!ctx.has(BundleKey)) ctx.set(BundleKey, agentBundle(agent));
+      if (!ctx.has(SessionAgentKey)) ctx.set(SessionAgentKey, testAgent(agent));
       if (!ctx.has(ConnectionRegistryKey)) {
         ctx.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
       }
       return continued(await step(session, input));
     }
     const own = new ContextContainer();
-    own.set(BundleKey, agentBundle(agent));
+    own.set(SessionAgentKey, testAgent(agent));
     own.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
     const folding = createKernel({
       ...config,
@@ -40,8 +42,8 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
   return run;
 }
 
-function agentBundle(agent: TestKernelConfig["agent"]) {
-  return {
+function testAgent(agent: TestKernelConfig["agent"]): SessionAgent {
+  return fromCompiledBundle({
     graph: { nodesByNodeId: new Map() },
     modelMetadata: async () => ({}),
     nodeId: "root",
@@ -59,5 +61,5 @@ function agentBundle(agent: TestKernelConfig["agent"]) {
       model: agent.model,
       reasoning: agent.reasoning,
     },
-  } as never;
+  } as never);
 }

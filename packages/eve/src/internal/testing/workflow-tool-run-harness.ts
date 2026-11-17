@@ -39,6 +39,7 @@ export function buildWorkflowToolSerializedContext(input: {
 
 export async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
+  readonly endsTurn?: WorkflowExecuteToolDefinition["endsTurn"];
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly modules?: readonly ProgrammaticAgentModule[];
@@ -53,6 +54,7 @@ export async function createWorkflowToolRuntime(input: {
         loadNamespace: async () => ({
           default: defineWorkflowTool({
             description: `Deploys a service (${input.toolName}).`,
+            endsTurn: input.endsTurn,
             execute: input.execute as WorkflowExecuteToolDefinition["execute"],
             inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
           }),

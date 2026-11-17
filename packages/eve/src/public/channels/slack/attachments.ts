@@ -71,7 +71,7 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): MessageFil
 }
 
 export async function collectInboundFileParts(input: {
-  readonly mention: Pick<SlackMessage, "attachments" | "ts">;
+  readonly mention: Pick<SlackMessage, "attachments" | "threadTs" | "ts">;
   readonly thread: SlackThread;
   readonly policy: UploadPolicy;
   readonly isMentioned: boolean;
@@ -84,6 +84,7 @@ export async function collectInboundFileParts(input: {
   const fromMention = collectSlackFileParts(input.mention.attachments, input.policy);
   if (fromMention.length > 0 || !input.isMentioned) return fromMention;
   if (isUploadsDisabled(input.policy)) return [];
+  if (input.mention.threadTs === input.mention.ts) return [];
 
   if (input.thread.recentMessages.length === 0) {
     try {

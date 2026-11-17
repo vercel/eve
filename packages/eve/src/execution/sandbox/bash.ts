@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
+  capLineLength,
+  MAX_LINE_LENGTH,
   MAX_OUTPUT_BYTES,
   MAX_OUTPUT_LINES,
   truncateTail,
@@ -77,14 +79,13 @@ type BashResult =
       readonly message: string;
     });
 
-interface RawStreams {
-  readonly stderr: string;
-  readonly stdout: string;
-}
+type StreamTail =
+  | { readonly text: string; readonly totalLines: number }
+  | { readonly text: string; readonly omittedBytes: number };
 
-interface StreamTail {
-  readonly omittedBytes: number;
-  readonly text: string;
+interface StreamTails {
+  readonly stderr: StreamTail;
+  readonly stdout: StreamTail;
 }
 
 export async function executeBashOnSandbox(
@@ -182,12 +183,18 @@ async function claimRunningJob(
   if (match === null) return undefined;
   const pid = Number(match[1]);
   const stdout = raw.stdout.slice(match.index + match[0].length);
-  const omitted = {
-    stderr: Math.max(0, Number(match[3]) - Buffer.byteLength(raw.stderr)),
-    stdout: Math.max(0, Number(match[2]) - Buffer.byteLength(stdout)),
+  const tails = {
+    stderr: {
+      omittedBytes: Math.max(0, Number(match[3]) - Buffer.byteLength(raw.stderr)),
+      text: raw.stderr,
+    },
+    stdout: {
+      omittedBytes: Math.max(0, Number(match[2]) - Buffer.byteLength(stdout)),
+      text: stdout,
+    },
   };
   return {
-    ...formatStreams({ stderr: raw.stderr, stdout }, omitted, directory),
+    ...formatStreams(tails, directory),
     message:
       `The command is still running after ${waitSeconds} seconds as process group ${pid}; this result includes its output so far. ` +
       `It keeps writing to ${directory}/stdout and ${directory}/stderr, and writes its exit code to ${directory}/exit when it finishes. ` +
@@ -200,23 +207,47 @@ async function claimRunningJob(
 }
 
 async function readTail(stream: ReadableStream<Uint8Array>): Promise<StreamTail> {
-  let chunks: Uint8Array[] = [];
-  let bytes = 0;
-  let omittedBytes = 0;
-  const keepTail = () => {
-    const tail = Buffer.concat(chunks).subarray(-MAX_OUTPUT_BYTES);
-    omittedBytes += bytes - tail.byteLength;
-    chunks = [tail];
-    bytes = tail.byteLength;
-    return tail;
+  const decoder = new TextDecoder();
+  const lines: { readonly text: string; readonly bytes: number }[] = [];
+  let first = 0;
+  let keptBytes = 0;
+  let current = "";
+  let newlines = 0;
+  const append = (text: string) => {
+    if (current.length <= MAX_LINE_LENGTH)
+      current += text.slice(0, MAX_LINE_LENGTH + 1 - current.length);
   };
-  for await (const chunk of stream) {
-    chunks.push(chunk);
-    bytes += chunk.byteLength;
-    if (bytes > 2 * MAX_OUTPUT_BYTES) keepTail();
-  }
-  const text = new TextDecoder().decode(keepTail());
-  return { omittedBytes, text };
+  const finishLine = () => {
+    const bytes = Buffer.byteLength(capLineLength(current)) + 1;
+    lines.push({ bytes, text: current });
+    keptBytes += bytes;
+    current = "";
+    newlines++;
+    while (
+      keptBytes - lines[first]!.bytes > MAX_OUTPUT_BYTES ||
+      lines.length - first > MAX_OUTPUT_LINES
+    ) {
+      keptBytes -= lines[first]!.bytes;
+      first++;
+    }
+    if (first > lines.length - first) {
+      lines.splice(0, first);
+      first = 0;
+    }
+  };
+  const decode = (text: string) => {
+    let start = 0;
+    for (let end = text.indexOf("\n"); end !== -1; end = text.indexOf("\n", start)) {
+      append(text.slice(start, end));
+      finishLine();
+      start = end + 1;
+    }
+    append(text.slice(start));
+  };
+  for await (const chunk of stream) decode(decoder.decode(chunk, { stream: true }));
+  decode(decoder.decode());
+  const text = [...lines.slice(first).map((line) => line.text), current].join("\n");
+  return { text, totalLines: newlines + (current === "" ? 0 : 1) };
 }
 
 async function waitUpTo<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
@@ -242,11 +273,9 @@ async function completed(
     stdout,
   }: { readonly exitCode: number; readonly stderr: StreamTail; readonly stdout: StreamTail },
 ): Promise<BashResult> {
-  const raw = { stderr: stderr.text, stdout: stdout.text };
-  const omitted = { stderr: stderr.omittedBytes, stdout: stdout.omittedBytes };
-  let streams = formatStreams(raw, omitted);
+  let streams = formatStreams({ stderr, stdout });
   if (streams.truncated && (await hasJobOutput(sandbox, directory))) {
-    streams = formatStreams(raw, omitted, directory);
+    streams = formatStreams({ stderr, stdout }, directory);
   }
   return { ...streams, exitCode, status: "completed" };
 }
@@ -260,13 +289,9 @@ async function hasJobOutput(sandbox: SandboxSession, directory: string): Promise
   }
 }
 
-function formatStreams(
-  streams: RawStreams,
-  omittedBytes: { readonly stderr: number; readonly stdout: number },
-  outputDirectory?: string,
-): BashStreams {
-  const stdout = formatStream("stdout", streams.stdout, omittedBytes.stdout, outputDirectory);
-  const stderr = formatStream("stderr", streams.stderr, omittedBytes.stderr, outputDirectory);
+function formatStreams(streams: StreamTails, outputDirectory?: string): BashStreams {
+  const stdout = formatStream("stdout", streams.stdout, outputDirectory);
+  const stderr = formatStream("stderr", streams.stderr, outputDirectory);
   return {
     stderr: stderr.output,
     stdout: stdout.output,
@@ -276,24 +301,24 @@ function formatStreams(
 
 function formatStream(
   name: "stderr" | "stdout",
-  text: string,
-  omittedBytes: number,
+  tail: StreamTail,
   outputDirectory: string | undefined,
 ): { readonly output: string; readonly truncated: boolean } {
-  const result = truncateTail(text);
-  if (!result.truncated && omittedBytes === 0) {
+  const result = truncateTail(tail.text);
+  const totalLines =
+    "totalLines" in tail
+      ? tail.totalLines
+      : tail.omittedBytes === 0
+        ? result.totalLines
+        : undefined;
+  if (totalLines !== undefined && result.outputLines >= totalLines) {
     return { output: result.output, truncated: false };
   }
   const shown =
-    omittedBytes === 0
-      ? `showing last ${result.outputLines} of ${result.totalLines} lines`
-      : `showing last ${result.outputLines} lines`;
-  const rest =
-    outputDirectory === undefined
-      ? omittedBytes === 0
-        ? ""
-        : "; earlier output omitted"
-      : `; full output: ${outputDirectory}/${name}`;
+    totalLines === undefined
+      ? `showing last ${result.outputLines} lines`
+      : `showing last ${result.outputLines} of ${totalLines} lines`;
+  const rest = outputDirectory === undefined ? "" : `; full output: ${outputDirectory}/${name}`;
   return { output: `[${name} truncated: ${shown}${rest}]\n${result.output}`, truncated: true };
 }
 

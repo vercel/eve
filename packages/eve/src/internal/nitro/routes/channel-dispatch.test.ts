@@ -29,7 +29,7 @@ import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
@@ -100,8 +100,6 @@ function registerChannelRequestTracing(enabled: boolean): void {
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,
-      recordInputs: false,
-      recordOutputs: false,
       traceChannelRequests: enabled,
     },
     runInContext: (_operation, execute) => execute(),

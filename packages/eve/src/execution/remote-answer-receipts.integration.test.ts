@@ -47,7 +47,7 @@ async function forwardingParent() {
   };
   const relayed = async (events: SubagentInteractionHookPayload["events"]) => {
     const published = await emitProxiedSubagentEvent({
-      ...(await restoreSessionStep(step)),
+      ...(await restoreSessionStep({ ...step, rerun: false })),
       hookPayload: {
         callId: "probe",
         childSessionId: remote.sessionId,

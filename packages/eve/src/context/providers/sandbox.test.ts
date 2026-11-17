@@ -5,10 +5,11 @@ import type { HarnessSession } from "#harness/types.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import {
-  BundleKey,
   ChannelKey,
   type CompiledBundle,
+  SessionAgentKey,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { ContextContainer } from "#context/container.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
@@ -57,7 +58,6 @@ describe("sandboxProvider", () => {
       stop: vi.fn().mockResolvedValue(undefined),
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
     });
   });
@@ -67,7 +67,10 @@ describe("sandboxProvider", () => {
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
     const parentSandboxState = { initialized: true, session: null };
 
-    ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
+    ctx.set(
+      SessionAgentKey,
+      fromCompiledBundle(createBundle({ agentName: "weather-agent", registry })),
+    );
     ctx.set(ChannelKey, {
       kind: "subagent",
       state: { parentSandboxState, sandboxSessionId: "root-sandbox-session" },
@@ -97,10 +100,12 @@ describe("sandboxProvider", () => {
       stop: vi.fn().mockResolvedValue(undefined),
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
     });
-    ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
+    ctx.set(
+      SessionAgentKey,
+      fromCompiledBundle(createBundle({ agentName: "weather-agent", registry })),
+    );
     ctx.set(ChannelKey, { kind: "slack" });
     ctx.set(SessionIdKey, "session_1");
 
@@ -114,7 +119,10 @@ describe("sandboxProvider", () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
 
-    ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
+    ctx.set(
+      SessionAgentKey,
+      fromCompiledBundle(createBundle({ agentName: "weather-agent", registry })),
+    );
     ctx.set(ChannelKey, { kind: "slack" });
     ctx.set(SessionIdKey, "session_1");
 
@@ -131,8 +139,10 @@ describe("sandboxProvider", () => {
   it("closes the step's connection when the scope ends, without throwing", async () => {
     const ctx = new ContextContainer();
     ctx.set(
-      BundleKey,
-      createBundle({ agentName: "weather-agent", registry: createStubSandboxRegistry() }),
+      SessionAgentKey,
+      fromCompiledBundle(
+        createBundle({ agentName: "weather-agent", registry: createStubSandboxRegistry() }),
+      ),
     );
     ctx.set(SessionIdKey, "session_1");
     const release = vi
@@ -146,7 +156,6 @@ describe("sandboxProvider", () => {
       release,
       open: vi.fn(),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn(),
       stop: vi.fn(),
     });

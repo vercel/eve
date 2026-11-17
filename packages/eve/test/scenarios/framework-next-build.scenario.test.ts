@@ -8,7 +8,7 @@ import { createNextEveProxyDescriptor } from "../../src/internal/testing/scenari
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
-const VERCEL_GENERATED_SERVICES_VERSION = "56.4.0";
+const VERCEL_GENERATED_SERVICES_VERSION = "65.14.0";
 const VERCEL_PNPM_10_PROJECT_CREATED_AT = Date.UTC(2026, 6, 13);
 const scenarioApp = useScenarioApp();
 
@@ -30,7 +30,7 @@ const NEXT_EVE_MIDDLEWARE_DESCRIPTOR = {
           buildCommand: "pnpm exec next build",
           createdAt: VERCEL_PNPM_10_PROJECT_CREATED_AT,
           framework: "nextjs",
-          nodeVersion: "24.x",
+          nodeVersion: "26.x",
           outputDirectory: null,
           rootDirectory: null,
         },
@@ -54,7 +54,7 @@ const NEXT_EVE_NAMED_SCHEDULES_DESCRIPTOR = {
           buildCommand: "pnpm exec next build",
           createdAt: VERCEL_PNPM_10_PROJECT_CREATED_AT,
           framework: "nextjs",
-          nodeVersion: "24.x",
+          nodeVersion: "26.x",
           outputDirectory: null,
           rootDirectory: null,
         },
@@ -177,19 +177,18 @@ describe("framework-next build", () => {
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const config = await readVercelOutputConfig(outputRoot);
-    expect(config.crons).toHaveLength(3);
-    expect(config.crons).toEqual(
-      expect.arrayContaining([
-        { path: "/api/user-cleanup", schedule: "0 0 * * *" },
-        {
-          path: expect.stringMatching(/^\/eve\/billing\/v1\/cron\/[A-Za-z0-9_-]+$/),
-          schedule: "*/10 * * * *",
-        },
-        {
-          path: expect.stringMatching(/^\/eve\/support\/v1\/cron\/[A-Za-z0-9_-]+$/),
-          schedule: "*/5 * * * *",
-        },
-      ]),
-    );
+    expect(config.crons).toEqual([{ path: "/api/user-cleanup", schedule: "0 0 * * *" }]);
+    expect(config.schedules).toEqual({
+      "eve.billing.sweep": {
+        function: "_vercel/tasks",
+        schedule: "*/10 * * * *",
+        service: "eve-billing",
+      },
+      "eve.support.triage": {
+        function: "_vercel/tasks",
+        schedule: "*/5 * * * *",
+        service: "eve-support",
+      },
+    });
   }, 240_000);
 });

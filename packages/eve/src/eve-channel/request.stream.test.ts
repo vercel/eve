@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InternalSession as Session } from "#channel/session.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
-import { createSessionStreamResponse } from "#eve-channel/request.js";
+import { createSessionStreamResponse, rememberCurrentSession } from "#eve-channel/request.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/session-http.js";
 
 afterEach(() => vi.useRealTimers());
@@ -13,12 +13,19 @@ const line = (deliveryId: string) => ({
   facts: [{ data: { deliveryId }, type: "delivery.admitted" }],
 });
 
-function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean } = {}) {
+let sessionCount = 0;
+
+function sessionOf(
+  lines: readonly unknown[],
+  options: { readonly id?: string; readonly open?: boolean } = {},
+) {
   const starts: number[] = [];
+  const cancels: number[] = [];
   const follows: (boolean | undefined)[] = [];
   let tailLookups = 0;
+  sessionCount += 1;
   const session = {
-    id: "session_1",
+    id: options.id ?? `session_${sessionCount}`,
     async getLineStream({
       follow,
       startIndex,
@@ -33,6 +40,7 @@ function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean
           for (const stored of lines.slice(startIndex)) controller.enqueue(stored);
           if (options.open !== true) controller.close();
         },
+        cancel: () => void cancels.push(startIndex),
       });
     },
     async getStreamTailIndex() {
@@ -41,6 +49,7 @@ function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean
     },
   };
   return {
+    cancels,
     follows,
     session: session as Session,
     starts,
@@ -143,6 +152,74 @@ describe("createSessionStreamResponse", () => {
     await live.response.body?.cancel();
   });
 
+  it.each([0, 6_000])(
+    "stops a version check of an empty stream at its timeout, opened after %ims",
+    async (openDelayMs) => {
+      vi.useFakeTimers();
+      const { cancels, session } = sessionOf([], { open: true });
+      const slow = {
+        ...session,
+        getLineStream: async (options: {
+          readonly follow?: boolean;
+          readonly startIndex: number;
+        }) => {
+          if (options.startIndex === 0)
+            await new Promise((resolve) => setTimeout(resolve, openDelayMs));
+          return await session.getLineStream(options);
+        },
+      } as Session;
+      const response = createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=1"),
+        slow,
+      );
+      await vi.advanceTimersByTimeAsync(6_001);
+      await (await response).body?.cancel();
+      expect(cancels).toEqual(expect.arrayContaining([0, 1]));
+    },
+  );
+
+  it("checks the version of a stranded earlier eve's session resumed past its first line", async () => {
+    const v26 = { data: {}, meta: { at }, type: "session.started" };
+    const { session } = sessionOf([v26, v26, v26]);
+    const stranded = {
+      ...session,
+      getLineStream: (options: { readonly follow?: boolean; readonly startIndex: number }) =>
+        options.follow === false
+          ? session.getLineStream(options)
+          : Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
+      hasRunnableOwner: async () => false,
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      stranded,
+    );
+    expect(response.status).toBe(200);
+    expect((await records(response)).at(-1)).toEqual({ $eve: "stream.ended" });
+  });
+
+  it("answers a missing session resumed past its first line without a bounded version check", async () => {
+    const { follows, session } = sessionOf([]);
+    const missing = Object.assign(new Error("Run not found."), {
+      name: "WorkflowRunNotFoundError",
+    });
+    const gone = {
+      ...session,
+      getLineStream: async (options: {
+        readonly follow?: boolean;
+        readonly startIndex: number;
+      }) => {
+        await session.getLineStream(options);
+        throw missing;
+      },
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      gone,
+    );
+    expect(response.status).toBe(404);
+    expect(follows).toEqual([true, true]);
+  });
+
   it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {
     vi.useFakeTimers();
     const v26 = (type: string, data: object) => ({
@@ -182,6 +259,35 @@ describe("createSessionStreamResponse", () => {
     );
     expect(reconnected).toEqual([completed, { $eve: "stream.lease-ended" }]);
     expect(starts.at(-1)).toBe(3);
+  });
+
+  it("checks a session's version once, after reading a current first line", async () => {
+    const { follows, session, starts } = sessionOf([line("a"), line("b")]);
+    const read = async (startIndex: number) =>
+      await records(
+        await createSessionStreamResponse(
+          new Request(`https://eve.test/eve/v1/session/s/stream?startIndex=${startIndex}`),
+          session,
+        ),
+      );
+
+    expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
+    expect(starts).toEqual([1, 0]);
+    expect(follows).toEqual([true, true]);
+    expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
+    expect(starts).toEqual([1, 0, 1]);
+  });
+
+  it("checks no version for a session this eve created", async () => {
+    const { session, starts } = sessionOf([line("a")]);
+    rememberCurrentSession(session.id);
+    await records(
+      await createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/s/stream?startIndex=0"),
+        session,
+      ),
+    );
+    expect(starts).toEqual([0]);
   });
 
   it("serves a fresh stream with no lines yet without a version check failing it", async () => {

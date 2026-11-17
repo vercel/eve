@@ -15,24 +15,17 @@ import type {
   WorkflowToolRunInput,
 } from "#execution/tools/workflow/types.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import {
-  startWorkflowOnCurrentDeployment,
-  workflowToolRunWorkflowReference,
-} from "#execution/workflow-runtime.js";
 
 const log = createLogger("execution.workflow-tool-run");
 
-export async function startWorkflowToolRun(
+export type StartWorkflowToolRun = (
   input: Omit<WorkflowToolRunInput, "hookToken">,
-): Promise<WorkflowToolRunAddress> {
-  const hookToken =
-    input.entry.entryPoint === "execute"
-      ? crypto.randomUUID()
-      : taskRunHookToken(input.session.id, input.entry.taskId);
-  const run = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
-    { ...input, hookToken },
-  ]);
-  return { hookToken, runId: run.runId };
+) => Promise<WorkflowToolRunAddress>;
+
+export function workflowToolRunHookToken(input: Omit<WorkflowToolRunInput, "hookToken">): string {
+  return input.entry.entryPoint === "execute"
+    ? crypto.randomUUID()
+    : taskRunHookToken(input.session.id, input.entry.taskId);
 }
 
 function taskRunHookToken(sessionId: string, taskId: string): string {
@@ -51,6 +44,7 @@ export interface StartWorkflowTaskInput {
   readonly parentSession: SessionParent | undefined;
   readonly prestarted?: PrestartedWorkflowToolRun;
   readonly session: HarnessSessionBase;
+  readonly startRun: StartWorkflowToolRun;
   readonly task: RuntimeWorkflowTaskRequest;
 }
 
@@ -71,7 +65,7 @@ export async function startWorkflowToolCallRun(
     return await prestarted.run;
   }
   const { task, batchEvent, session } = input;
-  return await startWorkflowToolRun({
+  return await input.startRun({
     agentContext: input.agentContext,
     callId: task.callId,
     entry,

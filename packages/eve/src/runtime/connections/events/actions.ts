@@ -1,3 +1,4 @@
+import { installedDurableHost } from "#execution/hosts.js";
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
@@ -11,7 +12,7 @@ import {
 } from "#compiled/@ai-sdk/mcp/index.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition, ResolvedConnectionEvents } from "#runtime/types.js";
 import type {
   ConnectionToolExecuteOptions,
@@ -62,7 +63,7 @@ export class ConnectionEventActions {
   private scope() {
     const ctx = contextStorage.getStore();
     if (ctx === undefined) throw new Error("Event subscriptions require an active eve session.");
-    if (ctx.get(BundleKey)?.nodeId !== undefined)
+    if (ctx.get(SessionAgentKey)?.nodeId !== undefined)
       throw new Error(
         "Experimental event subscriptions currently require a root-agent connection.",
       );
@@ -177,16 +178,19 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    const { findConnectionEventOwner, startConnectionEventOwner, retireConnectionEventOwner } =
-      await import("#runtime/connections/events/owner.js");
+    const owners = installedDurableHost()?.connectionEvents;
+    if (owners === undefined)
+      throw new Error(
+        "This host keeps no connection event subscriptions: watch events from a deployed agent.",
+      );
     if (name === GET || name === STOP) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
-      const handler = await findConnectionEventOwner(bindingId);
+      const handler = await owners.find(bindingId);
       if (handler === undefined || !sameEventOwner(handler.owner, caller))
         throw new Error("Unknown subscription for this caller and account.");
       if (name === STOP) {
-        if (!(await retireConnectionEventOwner(bindingId)))
+        if (!(await owners.retire(bindingId)))
           throw new Error("Unknown subscription for this caller and account.");
         return { id: bindingId, status: "stopping" as const };
       }
@@ -257,9 +261,9 @@ export class ConnectionEventActions {
           context: { eve: { version: 1, sessionId, bindingId: id } },
         },
       };
-      const subscription = await startConnectionEventOwner(
+      const subscription = await owners.start(
         binding,
-        ctx.require(BundleKey),
+        requireCompiledBundle(ctx),
         options.abortSignal,
       );
       return subscription === undefined

@@ -230,6 +230,10 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     return "retry";
   }
 
+  if (readErrorName(error) === "AI_TypeValidationError") {
+    return "retry";
+  }
+
   const signals = readModelCallErrorSignals(error);
   if (signals.statusCode === 402) {
     return "recoverable";

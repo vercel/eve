@@ -17,13 +17,17 @@ import {
   TraceRootKey,
 } from "#context/keys.js";
 import { ensureOtelIntegration } from "#instrumentation/ai-sdk-telemetry.js";
-import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationProviderDefinition,
+} from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
   registerInstrumentationRuntime,
   type ExecutionInstrumentation,
 } from "#instrumentation/runtime.js";
 import { decide } from "#public/ai/index.js";
+import { decideFor } from "#ai/decide.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
@@ -57,6 +61,7 @@ let sampleTrace: boolean;
 function useRuntime(
   tracePolicy?: TraceCapturePolicy,
   stateStore: AgentTraceStateStore = new ContextAgentTraceStateStore(),
+  authored: readonly InstrumentationProviderDefinition[] = [],
 ) {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
   const agent = createAgentOtelInstrumentation({
@@ -71,11 +76,12 @@ function useRuntime(
   });
   return registerInstrumentationRuntime({
     ...agent,
-    hooks: createInstrumentationHooks([agent.hook]),
+    hooks: createInstrumentationHooks({
+      serialBefore: [{ ...agent.hook, name: "internal:otel" }],
+      parallel: authored,
+    }),
     ownsAgentSpans: true,
     otelSettings: {
-      recordInputs: true,
-      recordOutputs: true,
       traceChannelRequests: false,
       tracePolicy,
     },
@@ -196,6 +202,8 @@ describe("decide tracing", () => {
       "gen_ai.usage.output_tokens": 3,
       "gen_ai.generation.id": "gen_alice",
       "gen_ai.usage.cost": 0.0004,
+      "agent.turn.id": "turn-1",
+      "agent.decision.purpose": "custom",
     });
     const request = exporter.getFinishedSpans().find((span) => span.name === "decision request")!;
     expect(request.parentSpanContext?.spanId).toBe(decision.spanContext().spanId);
@@ -347,6 +355,56 @@ describe("decide tracing", () => {
     },
   );
 
+  it.each([true, false])(
+    "records decision results only when outputs are recorded (%s)",
+    async (recordOutputs) => {
+      runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs }));
+      const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
+      await inSession(async () => {
+        await decideFor("model-selection", { model, questions, state });
+      });
+      const span = decisions()[0]!;
+      expect(span.attributes).toMatchObject({
+        "agent.decision.purpose": "model-selection",
+        "agent.turn.id": "turn-1",
+      });
+      expect(span.attributes["gen_ai.decision.results"]).toBe(
+        recordOutputs
+          ? JSON.stringify([
+              { question_index: 0, question_name: "team", type: "choice", value: "billing" },
+            ])
+          : undefined,
+      );
+    },
+  );
+
+  it("records a refusal as a result, not a failure, when outputs are recorded", async () => {
+    runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs: true }));
+    const model = new Experimental_DecisionMockModelV4({
+      doDecide: async () => ({
+        ...answer,
+        answers: { ...answer.answers, urgent: { type: "refusal" } },
+      }),
+    });
+    await inSession(async () => {
+      await expect(
+        decide({
+          model,
+          state,
+          questions: {
+            ...questions,
+            urgent: { type: "boolean", instructions: "Does Alice need an urgent response?" },
+          },
+        }),
+      ).rejects.toMatchObject({ questionIds: ["urgent"] });
+    });
+    const span = decisions()[0]!;
+    expect(span.status.code).toBe(SpanStatusCode.UNSET);
+    expect(JSON.parse(String(span.attributes["gen_ai.decision.results"]))).toEqual([
+      { question_index: 1, question_name: "urgent", type: "refusal" },
+    ]);
+  });
+
   it("keeps a partial model refusal distinct from a request failure", async () => {
     const model = new Experimental_DecisionMockModelV4({
       doDecide: async () => ({
@@ -397,6 +455,41 @@ describe("decide tracing", () => {
         expect(result.answers.team.choice).toBe("billing");
       });
       expect(decisions()).toHaveLength(0);
+    },
+  );
+});
+
+describe("decide AI SDK integration content", () => {
+  const allowsContent: InstrumentationProviderDefinition = {
+    name: "sentry",
+    tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+  };
+
+  it.each([
+    ["declared", "no file allows", [], false],
+    ["declared", "a file allows", [allowsContent], true],
+    ["undeclared", "no file allows", [], false],
+    ["undeclared", "a file allows", [allowsContent], true],
+  ] as const)(
+    "with OpenTelemetry %s, follows whether %s private content",
+    async (otel, _files, authored, recordsContent) => {
+      const seen: { recordInputs?: boolean; recordOutputs?: boolean }[] = [];
+      vi.stubGlobal("AI_SDK_TELEMETRY_INTEGRATIONS", [
+        {
+          experimental_onDecisionModelCallStart: (event: (typeof seen)[number]) => seen.push(event),
+        },
+      ]);
+      runtime = useRuntime(undefined, undefined, authored);
+      if (otel === "undeclared") runtime.otelSettings = undefined;
+      const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
+
+      await inSession(() => decide({ model, questions, state }));
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({
+        recordInputs: recordsContent,
+        recordOutputs: recordsContent,
+      });
     },
   );
 });

@@ -314,7 +314,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #agentHeader?: AgentHeaderOptions;
   #initialPromptPlaceholder = "Send a message…";
   #subagentNames?: readonly string[];
-  #startupPhase?: "starting" | "connecting" | "updating";
+  #startupPhase?: "installing" | "starting" | "connecting" | "updating";
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
   #startupStartedAt = 0;
@@ -357,6 +357,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #isInteractive = false;
   #everInteractive = false;
   #partingLinePrinted = false;
+  #handingOff = false;
+  #frameKept = false;
+  #startupPreamble: readonly string[] = [];
+  #pendingCommittedRows: string[] = [];
+  #composerPending = false;
+  #paintDeferred = false;
   #exitRequested = false;
   #exitArmed = false;
   #armExitOnNextPrompt = false;
@@ -508,7 +514,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       : [];
   }
 
-  setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
+  setStartupPhase(phase: "installing" | "starting" | "connecting" | "updating" | undefined): void {
     this.#startupPhase = phase;
     if (phase === undefined) this.#stopTicker();
     else this.#startTicker();
@@ -537,14 +543,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     this.#agentHeaderRendered = true;
     this.#agentHeaderBody = body;
-    this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
+    this.#pendingCommittedRows.push(...this.#renderAgentHeaderRows());
+    this.#paint();
   }
 
-  beginStartupDraft(options: { initialDraft?: string; title: string }): void {
+  beginStartupDraft(options: {
+    initialDraft?: string;
+    queued?: readonly string[];
+    title: string;
+    phase?: "installing" | "starting";
+    preamble?: readonly string[];
+  }): void {
+    for (const message of options.queued ?? []) this.#startupQueue.enqueue(message);
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
-    this.#startupPhase = "starting";
+    this.#startupPhase = options.phase ?? "starting";
+    this.#startupPreamble = options.preamble ?? [];
     this.#startupHeader = { name: options.title };
     this.#startupStartedAt = Date.now();
     let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
@@ -594,10 +609,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#attachInput();
   }
 
-  finishStartupDraft(): { draft: string; queuedPrompt: string | undefined } {
+  finishStartupDraft(): { draft: string; queued: readonly string[] } {
     const result = {
       draft: this.#startupEditor?.text ?? this.#inputText,
-      queuedPrompt: this.#startupQueue.takePrompt(),
+      queued: this.#startupQueue.take(),
     };
     this.#startupEditor = undefined;
     this.#startupConsumer = undefined;
@@ -605,10 +620,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#stopCaretBlink();
     this.#inputActive = false;
     this.#promptPlaceholderActive = false;
+    if (this.#isInteractive) {
+      this.#composerPending = true;
+      queueMicrotask(() => this.#releaseComposerHold());
+    }
     return result;
   }
 
+  #releaseComposerHold(): void {
+    if (!this.#composerPending) return;
+    this.#composerPending = false;
+    if (!this.#paintDeferred) return;
+    this.#paintDeferred = false;
+    this.#paint();
+  }
+
   async readInput(options?: AgentTUISessionOptions): Promise<AgentTUIInput | undefined> {
+    this.#composerPending = false;
+    this.#paintDeferred = false;
     this.#start(options);
     if (this.#view?.working !== true) this.#commitTurnStats();
     this.#inputActive = true;
@@ -1042,7 +1071,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const sectionKey = questionSectionId(question.requestId);
 
     let mode: "select" | "text" = hasOptions ? "select" : "text";
-    let cursorIndex = 0;
+    let cursorIndex = Math.max(
+      0,
+      optionList.findIndex((option) => option.id === question.initialOptionId),
+    );
     let editor = EMPTY_LINE;
 
     const isOnFreeformRow = () => hasFreeformRow && cursorIndex === optionList.length;
@@ -2448,6 +2480,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  handOff(committedRows?: readonly string[]): void {
+    this.#handingOff = true;
+    this.#partingLinePrinted = true;
+    if (committedRows === undefined) return;
+    this.#composerPending = false;
+    this.#startupPreamble = [];
+    this.#pendingCommittedRows.push(...committedRows);
+    this.#paint();
+    this.#frameKept = true;
+  }
+
   requestInterrupt(): void {
     if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });
     this.#stop();
@@ -2566,12 +2609,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     for (const block of this.#blocks) {
       if (block.kind === "log" && block.id === undefined) block.live = false;
     }
+    this.#composerPending = false;
     this.#paint();
 
-    this.#live.clear();
-    this.#live.showCursor();
+    if (this.#frameKept) {
+      this.#live.release();
+    } else {
+      this.#live.clear();
+      this.#live.showCursor();
+    }
     this.#removeLogCapture();
-    this.#live.newline();
+    if (!this.#handingOff) this.#live.newline();
 
     if (this.#input.isTTY) {
       this.#live.emitBracketedPaste(false);
@@ -2847,7 +2895,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #paint() {
-    if (!this.#isInteractive) return;
+    if (!this.#isInteractive || this.#frameKept) return;
+    if (this.#composerPending) {
+      this.#paintDeferred = true;
+      return;
+    }
 
     if (this.#painting) {
       this.#paintAgain = true;
@@ -2875,9 +2927,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
+    const startupHeader =
+      this.#startupHeader === undefined
+        ? []
+        : [
+            ...this.#startupPreamble.map((row) => clip(row, width)),
+            ...this.#renderAgentHeaderRows(),
+          ];
     const maxBlockRows = Math.max(0, this.#height() - startupHeader.length - footer.length);
-    const committed: string[] = [];
+    const committed: string[] = this.#pendingCommittedRows.splice(0);
     let previous = this.#lastCommitted;
 
     const groups = groupToolBlocksForDisplay(this.#blocks);
@@ -3078,6 +3136,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const elapsedMs = Date.now() - startedAtMs;
         const elapsed = elapsedMs >= 5_000 ? ` ${formatTurnDuration(elapsedMs)}` : "";
         status = { ...flowStatus, text: `${flowStatus.text}${elapsed}`, indicator };
+      } else if (this.#startupPhase === "installing") {
+        status = { text: "Installing dependencies…", indicator };
       }
       let content: FlowPanelContent;
       if (flow.question !== undefined) {
@@ -3279,6 +3339,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushStatusLine(rows: string[], width: number): void {
     if (this.#startupPhase !== undefined) {
       const labels = {
+        installing: "Installing dependencies…",
         starting: "Starting agent…",
         connecting: "Reading saved connection…",
         updating: "Loading selected model…",

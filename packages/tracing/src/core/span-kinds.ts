@@ -21,6 +21,7 @@ const CONTENT_FIELDS = {
   approvalRequest: "agent.approval.request",
   approvalResponse: "agent.approval.response",
   memoryRecords: "gen_ai.memory.records",
+  decisionResults: "gen_ai.decision.results",
 } as const;
 export function applyAttributes(
   span: { setAttribute(key: string, value: Exclude<Attributes[string], undefined>): unknown },
@@ -153,7 +154,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   model: {
-    parents: ["step"],
+    parents: ["step", "activation"],
     prepare({ options }, context) {
       const inputMessages =
         context.capture.recordInputs && options.messages !== undefined
@@ -167,6 +168,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           ...namingAttributes(modelName(options.modelId), "chat"),
           "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "chat",
+          "agent.turn.id": context.identity.turnId,
           "gen_ai.provider.name": options.provider,
           "gen_ai.request.model": options.modelId,
           ...runtimeContextAttributes(options.runtimeContext),
@@ -280,18 +282,28 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
   decision: {
     parents: ["activation", "step", "tool"],
     prepare({ options }, context) {
+      const inRun = context.identity.runId !== "";
       return {
         name: decisionName(options.modelId),
         kind: "CLIENT",
         attributes: {
-          ...(context.identity.runId === "" ? undefined : context.attributes),
+          ...(inRun ? context.attributes : undefined),
           ...namingAttributes(decisionName(options.modelId), "decision"),
+          "agent.turn.id": inRun ? context.identity.turnId || undefined : undefined,
+          "agent.decision.purpose": options.purpose,
           "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "decision",
           "gen_ai.provider.name": options.provider,
           "gen_ai.request.model": options.modelId,
         },
       };
+    },
+    complete(span, _data, result, context) {
+      if (!context.capture.recordOutputs || !Array.isArray(result.output) || !result.output.length)
+        return;
+      applyAttributes(span, {
+        [CONTENT_FIELDS.decisionResults]: context.serializer.json(result.output),
+      });
     },
   },
   memory: {

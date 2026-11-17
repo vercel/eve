@@ -37,6 +37,7 @@ export interface VercelEveInstructionsEntry {
 export interface VercelEveScheduleEntry {
   readonly name: string;
   readonly cron: string;
+  readonly timezone?: string;
   readonly logicalPath: string;
 }
 

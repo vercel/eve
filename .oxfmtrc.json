@@ -1,5 +1,11 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "overrides": [
+    {
+      "files": ["docs/patterns/ambient-listening.mdx"],
+      "options": { "printWidth": 80 }
+    }
+  ],
   "ignorePatterns": [
     "packages/eve/CHANGELOG.md",
     "packages/eve/src/internal/testing/channel-conformance/MATRIX.md",

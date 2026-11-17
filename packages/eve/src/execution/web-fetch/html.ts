@@ -1,19 +1,3 @@
-import TurndownService from "#compiled/turndown/index.js";
-
-export function convertHtmlToMarkdown(html: string): string {
-  const service = new TurndownService({
-    bulletListMarker: "-",
-    codeBlockStyle: "fenced",
-    emDelimiter: "*",
-    headingStyle: "atx",
-    hr: "---",
-  });
-
-  service.remove(["script", "style", "meta", "link"]);
-
-  return service.turndown(html);
-}
-
 export function extractTextFromHtml(html: string): string {
   let text = stripTags(html);
 

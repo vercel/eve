@@ -17,21 +17,34 @@ type AnthropicCache = NonNullable<ModelProfile["anthropicCache"]>;
 
 export function mergeGatewayAutoCaching(
   base: Readonly<Record<string, unknown>> | undefined,
+  provider: string,
 ): Record<string, unknown> {
   const baseGateway =
     base?.gateway !== undefined && typeof base.gateway === "object" && base.gateway !== null
       ? (base.gateway as Record<string, unknown>)
       : undefined;
 
-  const mergedGateway: Record<string, unknown> = {
-    ...baseGateway,
-    caching: baseGateway?.caching ?? "auto",
-  };
+  const caching = baseGateway?.caching ?? "auto";
+  const mergedGateway: Record<string, unknown> = { ...baseGateway, caching };
+  if (caching === "auto" && provider === "anthropic") {
+    mergedGateway.cacheAnchorMessageIndex = baseGateway?.cacheAnchorMessageIndex ?? 0;
+  }
 
   return {
     ...base,
     gateway: mergedGateway,
   };
+}
+
+export function omitGatewayAutoCaching(
+  providerOptions: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const gateway = providerOptions.gateway;
+  if (gateway === null || typeof gateway !== "object" || Array.isArray(gateway)) {
+    return { ...providerOptions };
+  }
+  const { caching, ...rest } = gateway as Record<string, unknown>;
+  return { ...providerOptions, gateway: caching === "auto" ? rest : gateway };
 }
 
 export function applyLastToolCacheBreakpoint(tools: ToolSet, cache: AnthropicCache): ToolSet {

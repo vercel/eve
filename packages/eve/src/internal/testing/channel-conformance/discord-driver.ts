@@ -193,6 +193,13 @@ export function discordDriver(
 
   return {
     name: `discord${gateway ? `-${transport}` : ""}${dm ? "-dm" : ""}`,
+    space: dm
+      ? { id: `discord:${channelId}`, type: "direct", visibility: "private" }
+      : {
+          id: `discord:G_CONFORMANCE:${threads ? `T_CONFORMANCE_${channelId}` : channelId}`,
+          type: "shared",
+          workspaceId: "discord:G_CONFORMANCE",
+        },
     personId: PERSON.id,
     capabilities: [
       "attachments",

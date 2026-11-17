@@ -1,13 +1,13 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
-import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
+import { publishSessionEvents, type SessionStepInput } from "#execution/publish-session-events.js";
 import { planAdmission } from "#execution/session/delivery-facts.js";
 import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 
 export async function settleDuplicateDeliveryStep(
-  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+  input: SessionStepInput & { readonly delivery: DeliverHookPayload },
 ) {
   "use step";
   return await withSessionStateDelta(input, (state) => {

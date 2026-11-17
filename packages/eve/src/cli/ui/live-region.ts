@@ -62,6 +62,11 @@ export class LiveRegion {
     this.#liveRowCount = 0;
   }
 
+  release(): void {
+    this.#write(this.#moveToTop());
+    this.#liveRowCount = 0;
+  }
+
   clearAll(): void {
     this.#write(`${CLEAR_SCROLLBACK}${CLEAR_SCREEN}${CURSOR_HOME}`);
     this.#liveRowCount = 0;

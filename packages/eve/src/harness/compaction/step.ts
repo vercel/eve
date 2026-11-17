@@ -5,7 +5,7 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey } from "#context/keys.js";
 import { changeHistory } from "#harness/session-machine/history.js";
-import { type CompactionConfig, type StepResult } from "#harness/types.js";
+import { type CompactionConfig, type CompactionStage, type StepResult } from "#harness/types.js";
 import {
   type HarnessModelMessage,
   isUserModelMessage,
@@ -13,7 +13,7 @@ import {
 } from "#harness/messages.js";
 import { type Step, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
-import { compactionConfig } from "#harness/compaction/config.js";
+import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
@@ -23,6 +23,7 @@ import {
 import {
   compactMessages,
   type CompactionSummarizer,
+  estimateRatio,
   getInputTokenCount,
   shouldCompact,
 } from "#harness/compaction/engine.js";
@@ -51,6 +52,7 @@ import {
 } from "#harness/session-machine/context-changes.js";
 import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 
 const log = createLogger("harness.tool-loop");
 export function assertFixedPartFits(input: {
@@ -61,7 +63,7 @@ export function assertFixedPartFits(input: {
   const fixed = input.requestEnvelopeTokens + input.protectedTokens;
   if (fixed >= input.threshold) {
     throw new CompactionOverLimitError(
-      `The agent's system prompt, tools, memory and context take ~${Math.round(fixed)} tokens, over this model's ~${input.threshold}-token compaction limit. Shorten the instructions, remove tools or trim memory.`,
+      `The agent's system prompt, tools, memory and context take ~${Math.round(fixed)} tokens, over this model's ~${input.threshold}-token compaction limit. Shorten the instructions, remove tools or trim memory, or raise \`compaction.threshold\`.`,
     );
   }
 }
@@ -87,14 +89,16 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   try {
     const resolvedModel = await resolveEffectiveRuntimeModel(step);
     step.model = resolvedModel.choice;
+    const compaction = compactionConfig(step);
     await summarizeHistory(step, {
+      compaction,
       betweenTurns: true,
       change,
       compact: true,
       messages,
       model: resolvedModel.model,
       promptMessages: messages,
-      requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
+      requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
   } catch (error) {
     outcome = "failed";
@@ -107,18 +111,59 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   return { next: null, session: step.session };
 }
 
+interface HistoryBeforeCallInput {
+  readonly messages: readonly HarnessModelMessage[];
+  readonly promptMessages: readonly HarnessModelMessage[];
+  readonly model: LanguageModel;
+  readonly requestEnvelopeTokens: number;
+}
+
 export async function historyBeforeCall(
   step: Step,
-  input: {
-    readonly messages: readonly HarnessModelMessage[];
-    readonly promptMessages: readonly HarnessModelMessage[];
-    readonly model: LanguageModel;
-    readonly requestEnvelopeTokens: number;
-  },
+  input: HistoryBeforeCallInput,
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
-  const previousEnvelope = step.session.compaction.requestEnvelopeTokens;
-  const config = compactionConfig(step);
+  const config = compactionConfig(step, {
+    messages: prompt,
+    requestEnvelopeTokens: input.requestEnvelopeTokens,
+  });
+  try {
+    return await compactUnder(step, input, prompt, config);
+  } catch (error) {
+    if (!(error instanceof CompactionOverLimitError)) throw error;
+    const window = config.contextWindowTokens;
+    const scope = { sessionId: step.session.sessionId, turnId: step.position().turnId };
+    if (window === undefined) {
+      log.warn(
+        `${error.message} eve doesn't know this model's context window, so it sends the request as it is. Set \`modelContextWindowTokens\` in \`agent.ts\` to compact against it.`,
+        scope,
+      );
+      return undefined;
+    }
+    if (window > config.threshold) {
+      log.warn(
+        `${error.message} eve compacts against the model's ~${window}-token context window instead.`,
+        scope,
+      );
+      try {
+        return await compactUnder(step, input, prompt, againstWindow(config, window));
+      } catch (overWindow) {
+        if (!(overWindow instanceof CompactionOverLimitError)) throw overWindow;
+      }
+    }
+    throw new CompactionOverLimitError(
+      `The agent's system prompt, tools, memory and context leave no room for the conversation in this model's ~${window}-token context window. Shorten the instructions, remove tools or trim memory.`,
+    );
+  }
+}
+
+async function compactUnder(
+  step: Step,
+  input: HistoryBeforeCallInput,
+  prompt: HarnessModelMessage[],
+  config: CompactionConfig,
+): Promise<HarnessModelMessage[] | undefined> {
+  const previousEnvelope = config.requestEnvelopeTokens;
   if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
   }
@@ -133,6 +178,7 @@ export async function historyBeforeCall(
   });
   return await summarizeHistory(step, {
     change,
+    compaction: config,
     messages: input.messages,
     model: input.model,
     promptMessages: prompt,
@@ -180,6 +226,7 @@ async function summarizeHistory(
     readonly betweenTurns?: true;
     readonly change: LazyChange;
     readonly compact?: true;
+    readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
     readonly model: LanguageModel;
     readonly promptMessages: readonly HarnessModelMessage[];
@@ -189,7 +236,7 @@ async function summarizeHistory(
 ): Promise<HarnessModelMessage[] | undefined> {
   const { change } = input;
   const before = validateHarnessModelMessages(input.messages);
-  const compaction = compactionConfig(step);
+  const { compaction } = input;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   let executor: Awaited<ReturnType<typeof summaryExecutor>> | undefined;
   let runOpen = false;
@@ -217,18 +264,20 @@ async function summarizeHistory(
   };
 
   let messages: HarnessModelMessage[];
+  let stage: CompactionStage;
   try {
-    const rewrite = historyContext(compaction, { ...input, threshold: compaction.threshold });
-    messages = (await compactMessages(
+    const compacted = await compactMessages(
       before,
-      rewrite.config,
+      historyConfig(compaction, input),
       summarize,
       input.compact === true,
-      rewrite.historyTokens,
       input.betweenTurns !== true,
-    )) as HarnessModelMessage[];
+    );
+    messages = compacted.messages as HarnessModelMessage[];
+    stage = compacted.stage;
     if (!isDeepStrictEqual(messages, before)) await change.open();
   } catch (error) {
+    throwIfSessionStreamDead(error);
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
     if (change.opened) {
@@ -247,7 +296,8 @@ async function summarizeHistory(
     await settleChange(step, { ...input, runOpen, summaryUsage }, unchanged ? before : messages);
   }
   if (unchanged) return undefined;
-  step.session = changeHistory(step.session, { rewrite: messages });
+  const rewritten = changeHistory(step.session, { rewrite: messages });
+  step.session = { ...rewritten, compaction: { ...rewritten.compaction, lastStage: stage } };
   return messages;
 }
 
@@ -276,47 +326,26 @@ async function settleChange(
   );
 }
 
-function historyContext(
+function historyConfig(
   compaction: CompactionConfig,
   input: {
     readonly messages: readonly HarnessModelMessage[];
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
-    readonly threshold: number;
   },
-): { readonly config: CompactionConfig; readonly historyTokens?: number } {
+): CompactionConfig {
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const protectedTokens = Math.max(
     0,
     estimateTokens(input.promptMessages) - estimateTokens(input.messages),
   );
-  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold: input.threshold });
-  const config: CompactionConfig = {
-    ...compaction,
-    threshold: Math.max(1, input.threshold - requestEnvelopeTokens - protectedTokens),
-    lastKnownInputTokens:
-      compaction.lastKnownInputTokens === undefined
-        ? undefined
-        : Math.max(
-            0,
-            compaction.lastKnownInputTokens -
-              Math.min(compaction.requestEnvelopeTokens ?? 0, requestEnvelopeTokens),
-          ),
-  };
-  const promptTokens =
-    input.requestEnvelopeTokens === undefined
-      ? undefined
-      : getInputTokenCount(
-          input.promptMessages,
-          compaction,
-          requestEnvelopeTokens,
-          compaction.requestEnvelopeTokens,
-        );
+  const { threshold } = compaction;
+  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold });
+  const fixedTokens = requestEnvelopeTokens + protectedTokens;
   return {
-    config,
-    ...(promptTokens !== undefined && {
-      historyTokens: Math.max(0, promptTokens - requestEnvelopeTokens - protectedTokens),
-    }),
+    ...compaction,
+    target: Math.max(1, Math.floor(compaction.target - fixedTokens * estimateRatio(compaction))),
+    threshold: Math.max(1, threshold - fixedTokens),
   };
 }
 
@@ -353,6 +382,7 @@ async function summaryExecutor(
     telemetry: step.instrumentation?.prepareAttempt({
       attempt: 0,
       runId: input.change.runId,
+      runtimeContext: { "eve.compaction.request": "summary" },
       ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
     }).telemetry,
   };

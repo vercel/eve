@@ -16,6 +16,7 @@ import type {
   FetchFileFunction,
 } from "#shared/channel-definition.js";
 import type { ChannelAudienceProjector } from "#channel/audience.js";
+import type { ChannelSpaceProjector } from "#channel/space.js";
 
 const log = createLogger("channel.adapter");
 
@@ -77,6 +78,7 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
   readonly instrumentation?: {
     readonly metadata?: ChannelInstrumentationMetadataProjector;
     readonly audience?: ChannelAudienceProjector;
+    readonly space?: ChannelSpaceProjector;
   };
 } & ChannelEventHandlers<TCtx>;
 

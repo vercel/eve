@@ -3,7 +3,8 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
   publishFromSessionStep,
   restoreSessionStep,
-  type SessionHistoryStepState,
+  type Entered,
+  type SessionHistoryStepInput,
 } from "#execution/publish-session-events.js";
 import { type WithSessionStateDelta } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
@@ -23,7 +24,7 @@ export interface CancelledTurnSettleResult {
   readonly usage?: TokenUsage;
 }
 
-interface CancelledTurnSettleInput extends SessionHistoryStepState {
+interface CancelledTurnSettleInput extends SessionHistoryStepInput {
   readonly reportUsage: boolean;
   readonly control?: ControlDelivery;
 }
@@ -36,7 +37,7 @@ export async function settleCancelledTurnStep(
 }
 
 export async function settleCancelledTurn(
-  input: CancelledTurnSettleInput,
+  input: Entered<CancelledTurnSettleInput>,
 ): Promise<CancelledTurnSettleResult> {
   const step = { ...(await restoreSessionStep(input)), history: input.history };
   const durableState = step.durableSession.state;

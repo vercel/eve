@@ -414,6 +414,7 @@ export const compiledSkillSourceSchema: z.ZodType<CompiledSkillDefinition> = z.d
 
 export const compiledScheduleBaseFields = {
   cron: z.string(),
+  timezone: z.string().optional(),
   hasRun: z.boolean(),
   name: z.string(),
   logicalPath: z.string(),
@@ -446,6 +447,7 @@ export const compiledScheduleCollectionDefinitionSchema = z
     providerKind: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+    namedScope: z.object({ definition: z.string(), name: z.string() }).strict().optional(),
     tools: z.union([z.boolean(), z.literal("deferred")]).optional(),
   })
   .strict();

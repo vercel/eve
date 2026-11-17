@@ -2,7 +2,6 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
   InstrumentationScope,
   InstrumentationContextRunner,
@@ -18,6 +17,7 @@ import {
   type BuildTelemetryRuntimeContextInput,
 } from "#instrumentation/runtime-context.js";
 import {
+  aiSdkCapture,
   ensureOtelIntegration,
   getRegisteredTelemetryIntegrations,
 } from "#instrumentation/ai-sdk-telemetry.js";
@@ -49,7 +49,10 @@ import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/o
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
-import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  defaultContentCapture,
+} from "#shared/forwarded-trace-policy.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import {
@@ -197,10 +200,10 @@ export function bindInstrumentationRuntime(
   };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
     return (
-      baseHooks.forTrace?.({
-        agentName: boundSession.agentName,
-        ...sessionContext.conversation,
-      }) ?? baseHooks
+      baseHooks.forTrace?.(
+        { agentName: boundSession.agentName, ...sessionContext.conversation },
+        { ceiling: sessionContext.forwardedTracePolicy?.ceiling },
+      ) ?? baseHooks
     );
   };
   const captureExecutionRuntime = () => {
@@ -318,7 +321,10 @@ export function bindInstrumentationRuntime(
         );
         const conversation = sessionContext.conversation;
         const audience = conversation.audience;
-        const capturesContent = shouldCaptureInstrumentationContent(conversation);
+        const defaultContent = defaultContentCapture(
+          conversation,
+          sessionContext.forwardedTracePolicy?.ceiling,
+        );
         const effectiveDecision =
           decision === undefined
             ? decision
@@ -330,7 +336,7 @@ export function bindInstrumentationRuntime(
               );
         const capturesRuntimeContextInput =
           effectiveDecision === undefined
-            ? capturesContent
+            ? defaultContent.recordInputs
             : effectiveDecision.action === "record" && effectiveDecision.recordInputs;
         const dropsTrace = decision?.action === "drop";
         const content = {
@@ -338,15 +344,17 @@ export function bindInstrumentationRuntime(
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordInputs
-              : capturesContent) &&
-            (settings?.recordInputs ?? false),
+              : defaultContent.recordInputs),
           recordOutputs:
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordOutputs
-              : capturesContent) &&
-            (settings?.recordOutputs ?? false),
+              : defaultContent.recordOutputs),
         };
+        const aiSdkContent =
+          settings !== undefined && !executionRuntime.ownsAgentSpans
+            ? content
+            : aiSdkCapture(content, hooks);
         const telemetry = (telemetryInput: {
           readonly bridgeIntegration?: Telemetry;
           readonly runtimeContext?: Readonly<Record<string, unknown>>;
@@ -377,8 +385,8 @@ export function bindInstrumentationRuntime(
                   : undefined
                 : [telemetryInput.bridgeIntegration, ...integrations()],
             isEnabled: true,
-            recordInputs: content.recordInputs,
-            recordOutputs: content.recordOutputs,
+            recordInputs: aiSdkContent.recordInputs,
+            recordOutputs: aiSdkContent.recordOutputs,
           };
         };
         const attemptSession = {

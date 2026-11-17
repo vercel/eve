@@ -33,7 +33,6 @@ import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.j
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { usageOf } from "#harness/facts.js";
 import { retryRun } from "#harness/session-machine/runs.js";
 import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
@@ -49,9 +48,11 @@ import {
   emitStepActions,
   type HarnessStepResult,
   readGatewayGenerationId,
+  runUsageOf,
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
@@ -77,7 +78,8 @@ import {
   type InlineCallResults,
   NO_INLINE_CALLS,
 } from "#harness/call-executor.js";
-import { extractGatewayCostUsd, extractTokenUsageDelta, type TokenUsageDelta } from "./usage.js";
+import { extractGatewayCostUsd } from "./usage.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 
@@ -112,7 +114,7 @@ export class ModelCaller {
   modelMessages: ModelMessage[] = [];
   requestEnvelopeTokens = 0;
   private system: string | readonly string[] = "";
-  private interruptedUsage: TokenUsageDelta | undefined;
+  private unkeptUsage: Usage | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
   private attemptIndex = 0;
   private started: number | undefined;
@@ -157,6 +159,7 @@ export class ModelCaller {
           this.input.generation.signal,
         );
       } catch (error) {
+        throwIfSessionStreamDead(error);
         if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
@@ -173,15 +176,16 @@ export class ModelCaller {
     const runId = step.position().runId;
     const attempt = this.started;
     this.started = undefined;
+    const usage = this.takeUnkeptUsage();
     if (runId === undefined) return;
     if (this.acceptedOutput) {
-      await step.apply(discardAttempt(step.view(), { ending: "retried", runId }));
+      await step.apply(discardAttempt(step.view(), { ending: "retried", runId, usage }));
       this.acceptedOutput = false;
       await this.input.newRun();
       return;
     }
     if (attempt === undefined) return;
-    await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId }));
+    await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId, usage }));
   }
 
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
@@ -201,11 +205,7 @@ export class ModelCaller {
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
-        discardAttempt(step.view(), {
-          ending: "steered",
-          runId,
-          usage: this.interruptedUsage === undefined ? undefined : usageOf(this.interruptedUsage),
-        }),
+        discardAttempt(step.view(), { ending: "steered", runId, usage: this.takeUnkeptUsage() }),
       );
     }
     return {
@@ -215,8 +215,10 @@ export class ModelCaller {
     };
   }
 
-  clearInterruptedUsage(): void {
-    this.interruptedUsage = undefined;
+  takeUnkeptUsage(): Usage | undefined {
+    const usage = this.unkeptUsage;
+    this.unkeptUsage = undefined;
+    return usage;
   }
 
   private async buildRequest(): Promise<void> {
@@ -247,9 +249,9 @@ export class ModelCaller {
       : options.extraSystemNote;
     return {
       instructions: modelInstructions({
-        anthropicCache: this.profile.anthropicCache,
         extraSystemNote,
         instructions: this.system,
+        profile: this.profile,
       }),
       messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
     };
@@ -353,7 +355,7 @@ export class ModelCaller {
       ),
       onLanguageModelCallEnd: (event: LanguageModelCallEndEvent) => {
         if (generation.interrupted) return;
-        this.interruptedUsage = extractTokenUsageDelta({
+        this.unkeptUsage = runUsageOf({
           costUsd: extractGatewayCostUsd(event.providerMetadata),
           usage: event.usage,
         });
@@ -378,6 +380,7 @@ export class ModelCaller {
     try {
       return await this.stream(agent, callMessages, hooks.stepResult, attempt?.telemetry);
     } catch (error) {
+      throwIfSessionStreamDead(error);
       generation.check();
       if (isAbortError(error) && !generation.signal.aborted) {
         throw new ModelStreamStalledError({ cause: error });
@@ -431,6 +434,7 @@ export class ModelCaller {
       telemetry,
     });
     const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
+    this.unkeptUsage = undefined;
     await emitStepActions(step.publish, step.position(), stepResult, notRun);
     return withCallResults({
       answers: [...trailingInlineToolResultParts, ...notRun],

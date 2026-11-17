@@ -8,6 +8,11 @@ const RUNNABLE_OWNER_CACHE_LIMIT = 10_000;
 
 const runnableOwnerRunIds = new Set<string>();
 
+/** @internal */
+export function forgetRunnableOwnerRun(runId: string): void {
+  runnableOwnerRunIds.delete(runId);
+}
+
 export function routesToOwnerDeployment(world: Pick<World, "capabilities">): boolean {
   return world.capabilities?.deploymentAffinity === true;
 }

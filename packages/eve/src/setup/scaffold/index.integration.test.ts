@@ -295,6 +295,7 @@ describe("ensureChannel", () => {
     );
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).not.toContain('"better-auth"');
+    expect(packageJson).not.toContain('"@opentelemetry/api"');
     expect(packageJson).toContain('"next": "16.2.6"');
     expect(packageJson).toContain('"shiki": "3.23.0"');
     expect(packageJson).toContain('"@shikijs/core": "3.23.0"');
@@ -304,7 +305,7 @@ describe("ensureChannel", () => {
     expect(packageJson).toContain('"dev": "next dev"');
     expect(packageJson).toContain('"dev:eve": "eve dev"');
     expect(packageJson).toContain('"start:eve": "eve start"');
-    expect(JSON.parse(packageJson)).toMatchObject({ engines: { node: "24.x" } });
+    expect(JSON.parse(packageJson)).toMatchObject({ engines: { node: "26.x" } });
     const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
       include?: string[];
     };
@@ -355,6 +356,7 @@ describe("ensureChannel", () => {
       dependencies: Record<string, string>;
     };
     expect(packageJson.dependencies["better-auth"]).toBe("1.6.26-test");
+    expect(packageJson.dependencies["@opentelemetry/api"]).toBe("1.9.0");
     expect(packageJson.dependencies.next).toBe("16.3.0");
 
     const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
@@ -426,10 +428,10 @@ describe("ensureChannel", () => {
 
     expect(result).toMatchObject({
       kind: "web",
-      nodeEngineOverride: { previous: "22.x", next: "24.x" },
+      nodeEngineOverride: { previous: "22.x", next: "26.x" },
     });
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x", npm: ">=10" },
+      engines: { node: "26.x", npm: ">=10" },
     });
   });
 
@@ -442,7 +444,7 @@ describe("ensureChannel", () => {
         {
           name: "demo",
           type: "module",
-          engines: { node: "24.x", npm: ">=10" },
+          engines: { node: "26.x", npm: ">=10" },
         },
         null,
         2,
@@ -459,7 +461,7 @@ describe("ensureChannel", () => {
 
     expect(result).not.toHaveProperty("nodeEngineOverride");
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x", npm: ">=10" },
+      engines: { node: "26.x", npm: ">=10" },
     });
   });
 
@@ -778,11 +780,11 @@ describe("ensureChannel", () => {
     expect(projectPackageJson.dependencies.eve).toBe("^0.25.0");
     expect(projectPackageJson.engines).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(result.nodeEngineOverride).toEqual({
       kind: "overridden",
-      next: "24.x",
+      next: "26.x",
       previous: "22.x",
     });
   });
@@ -1081,7 +1083,7 @@ describe("scaffoldExtensionProject", () => {
         prepare: "eve extension build",
         typecheck: "tsc",
       },
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(packageJson.devDependencies?.eve).toBe("0.25.0");
     expect(packageJson.peerDependenciesMeta).toBeUndefined();
@@ -1147,9 +1149,9 @@ describe("scaffoldBaseProject", () => {
         typecheck: "tsc",
       },
       devDependencies: { typescript: "7.0.2" },
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
-    expect(packageJson).toContain('"@types/node": "24.x"');
+    expect(packageJson).toContain('"@types/node": "26.x"');
     const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
       compilerOptions: { types?: string[] };
       include?: string[];
@@ -1268,7 +1270,7 @@ describe("scaffoldBaseProject", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
   });
 
@@ -1309,7 +1311,7 @@ describe("scaffoldBaseProject", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
   });
 
@@ -1362,7 +1364,7 @@ describe("scaffoldBaseProject", () => {
         overrides?: unknown;
         resolutions?: unknown;
       };
-      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
     },
@@ -1419,7 +1421,7 @@ describe("scaffoldBaseProject", () => {
         workspaces?: string[];
       };
       expect(rootPackageJson.workspaces).toEqual(["apps/*", "agents/*"]);
-      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
     },
@@ -1445,7 +1447,7 @@ describe("scaffoldBaseProject", () => {
     expect(agentSource).toContain('"anthropic": [{ apiKey: process.env.ANTHROPIC_API_KEY! }]');
 
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
-    expect(packageJson).toContain('"@types/node": "24.x"');
+    expect(packageJson).toContain('"@types/node": "26.x"');
   });
 
   test("derives the byok provider block from the model's provider prefix", async () => {
@@ -1473,7 +1475,7 @@ describe("scaffoldBaseProject", () => {
       model: "anthropic/claude-opus-4.8",
       byokProvider: true,
       targetDirectory,
-      evePackage: { version: "0.25.0", nodeEngine: ">=24.5.0" },
+      evePackage: { version: "0.25.0", nodeEngine: ">=26.5.0" },
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
@@ -1483,8 +1485,8 @@ describe("scaffoldBaseProject", () => {
       devDependencies: Record<string, string>;
       engines: { node: string };
     };
-    expect(packageJson.devDependencies["@types/node"]).toBe("25.x");
-    expect(packageJson.engines.node).toBe("25.x");
+    expect(packageJson.devDependencies["@types/node"]).toBe("27.x");
+    expect(packageJson.engines.node).toBe("27.x");
   });
 
   test("writes npm dist-tags without semver range decoration", async () => {

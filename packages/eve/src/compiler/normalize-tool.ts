@@ -8,6 +8,7 @@ import {
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
+import { WEB_SEARCH_TOOL_DESCRIPTION } from "#tools/provided/web-search.js";
 
 export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
@@ -59,8 +60,7 @@ export async function compileToolEntry(
           availability: [],
           handling: { kind: "provider-tool", ...entry.selection },
         },
-        description:
-          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
+        description: WEB_SEARCH_TOOL_DESCRIPTION,
         exportName: source.exportName,
         hasExecute: false,
         hasModelOutputProjection: false,

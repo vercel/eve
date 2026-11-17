@@ -109,6 +109,7 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
+    admission: z.object({ callId: z.string(), fingerprint: z.string() }).strict().optional(),
     clearedBy: clearedBySchema.optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),

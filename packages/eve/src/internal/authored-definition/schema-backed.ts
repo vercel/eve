@@ -3,7 +3,7 @@ import {
   readWorkflowToolEntryPoints,
   type WorkflowToolEntryPoint,
 } from "#tools/workflow-definition.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { TASK_ID_INPUT, withTaskIdSchema } from "#execution/tasks/task-id-input.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -108,9 +108,13 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
     );
   }
-  if (workflow !== undefined && record.endsTurn !== undefined) {
+  if (
+    workflow !== undefined &&
+    workflow.entryPoint !== "execute" &&
+    record.endsTurn !== undefined
+  ) {
     throw new Error(
-      `${message} "endsTurn" is not supported on defineWorkflowTool(). Workflow tools resume the turn when they finish; use defineTool() for a tool that ends the turn.`,
+      `${message} "endsTurn" applies only to execute(); task() calls return a receipt and serve() calls settle later, so they can't end the turn.`,
     );
   }
   expectOnlyKnownKeys(
@@ -227,7 +231,7 @@ function modelInputSchemaOf(source: unknown, serve: boolean): JsonObject {
   return serializeModelInputSchema(serve ? withTaskIdSchema(schema) : schema);
 }
 
-function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
+export function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
   const properties = inputSchema?.properties;
   if (!isObject(properties) || !(TASK_ID_INPUT in properties)) return;
   throw new Error(

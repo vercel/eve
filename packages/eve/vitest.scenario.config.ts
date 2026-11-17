@@ -1,25 +1,28 @@
 import { defineConfig } from "vitest/config";
 
+import {
+  FRAMEWORK_SCENARIO_FILES,
+  PACKAGING_SCENARIO_FILES,
+  PRODUCTION_BUILD_SCENARIO_FILES,
+  PUBLIC_TYPES_SCENARIO_FILES,
+  SCENARIO_ALIASES,
+  SCENARIO_TEST_OPTIONS,
+} from "./vitest.scenario-shared.ts";
+
 export default defineConfig({
   resolve: {
-    alias: [
-      {
-        find: /^#compiled\/(.+)\.js$/,
-        replacement: new URL("./.generated/compiled/$1.js", import.meta.url).pathname,
-      },
-      {
-        find: /^#(.+)\.js$/,
-        replacement: new URL("./src/$1.ts", import.meta.url).pathname,
-      },
-    ],
+    alias: SCENARIO_ALIASES,
   },
   test: {
-    environment: "node",
-    exclude: ["**/node_modules/**"],
-    globalSetup: ["./test/setup/pack-scenario-tarball.ts"],
+    ...SCENARIO_TEST_OPTIONS,
+    exclude: [
+      ...SCENARIO_TEST_OPTIONS.exclude,
+      ...FRAMEWORK_SCENARIO_FILES,
+      ...PACKAGING_SCENARIO_FILES,
+      ...PRODUCTION_BUILD_SCENARIO_FILES,
+      ...PUBLIC_TYPES_SCENARIO_FILES,
+    ],
     include: ["src/**/*.scenario.test.ts", "test/scenarios/**/*.scenario.test.ts"],
     maxWorkers: 4,
-    setupFiles: ["./test/setup/mock-ai-gateway.ts"],
-    testTimeout: 120_000,
   },
 });

@@ -1,9 +1,13 @@
 [
+  "DEFAULT_EVE_GIT_SANDBOX_IMAGE",
   "GitHubCoAuthor",
+  "GitHubCommandInputError",
   "GitHubConfig",
   "GitHubLeaseRule",
   "GitHubShellInput",
   "GitHubShellOutput",
+  "VERCEL_EVE_GIT_SANDBOX_IMAGE",
   "executeGitHubShell",
-  "githubShellApproval"
+  "githubShellApproval",
+  "isGitHubCommandInputError"
 ]

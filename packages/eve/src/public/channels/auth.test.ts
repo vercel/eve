@@ -12,7 +12,7 @@ import { installMockedVercelIssuer } from "#internal/testing/mock-vercel-oidc-is
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { EveAuthFn, EveAuthResult } from "#public/channels/eve.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
@@ -39,6 +39,7 @@ import {
   verifyHttpBasic,
   verifyJwtEcdsa,
   verifyJwtHmac,
+  verifyOidc,
   verifyVercelOidc,
   withAuthChallenges,
 } from "#public/channels/auth.js";
@@ -1348,6 +1349,50 @@ describe("verifyVercelOidc", () => {
       );
 
       await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    } finally {
+      issuer.restore();
+    }
+  });
+});
+
+describe("verifyOidc", () => {
+  it("authenticates a token from its issuer through discovery", async () => {
+    const issuer = await installMockedVercelIssuer("same-issuer");
+    try {
+      const result = await verifyOidc(
+        await issuer.signToken({}, { audience: "agent-framework-bench" }),
+        { audiences: ["agent-framework-bench"], issuer: issuer.issuer },
+      );
+      expect(result.ok).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${issuer.issuer}/.well-known/openid-configuration`,
+        expect.anything(),
+      );
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it.each([
+    [
+      "another issuer's token",
+      (sign: (claims: Record<string, unknown>) => Promise<string>) => sign({}),
+    ],
+    ["a malformed token", async () => "not-a-jwt"],
+    [
+      "a token with no issuer",
+      () => new SignJWT({}).setProtectedHeader({ alg: "HS256" }).sign(new Uint8Array(32)),
+    ],
+  ])("refuses %s without fetching this issuer's keys", async (_, createToken) => {
+    const issuer = await installMockedVercelIssuer("another-issuer");
+    try {
+      await expect(
+        verifyOidc(await createToken(issuer.signToken), {
+          audiences: ["agent-framework-bench"],
+          issuer: "https://token.actions.githubusercontent.com",
+        }),
+      ).resolves.toEqual({ ok: false });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     } finally {
       issuer.restore();
     }

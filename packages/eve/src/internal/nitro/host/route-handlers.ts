@@ -133,14 +133,17 @@ export function renderHostHandler(input: {
   ].join("\n");
 }
 
-export function renderScheduleTaskModule(input: { readonly description: string }): string {
+export function renderScheduleTaskModule(input: {
+  readonly description: string;
+  readonly taskName: string;
+}): string {
   return [
     `import { dispatchScheduleTask } from ${importSourceModule("src/internal/nitro/routes/schedule-task.ts")};`,
     importRouteConfig,
     `export default {`,
     `  meta: { description: ${JSON.stringify(input.description)} },`,
     `  async run(event) {`,
-    `    return { result: await dispatchScheduleTask(event.name, config) };`,
+    `    return { result: await dispatchScheduleTask(${JSON.stringify(input.taskName)}, config) };`,
     `  },`,
     `};`,
   ].join("\n");

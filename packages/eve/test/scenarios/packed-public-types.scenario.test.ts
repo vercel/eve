@@ -213,6 +213,7 @@ describe("packed public declarations", () => {
           compilerOptions: {
             strict: true,
             skipLibCheck: false,
+            skipDefaultLibCheck: true,
             noEmit: true,
             types: group.name === "core" ? ["node", "eve/workflow-modules"] : ["node"],
             target: "ES2024",

@@ -1,9 +1,9 @@
-import { templateGalleryUrl } from "../templates/links";
+import { dataAgentTemplateUrl, templateGalleryUrl } from "../templates/links";
 import { defaultLanguage } from "./languages";
 
 interface DocsRedirect {
   destination: string;
-  permanent: true;
+  permanent: boolean;
   source: string;
 }
 
@@ -56,6 +56,7 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/project-layout", "/getting-started"),
   ...createDocsRedirects("/reference/project-layout", "/getting-started"),
   ...createDocsRedirects("/dynamic-capabilities", "/guides/dynamic-capabilities"),
+  ...createDocsRedirects("/patterns/dynamic-scheduling", "/experimental/dynamic-schedules"),
   ...createDocsRedirects("/guides/state", "/concepts/state"),
   ...createDocsRedirects("/dynamic-workflows", "/concepts/built-in-tools"),
   ...createDocsRedirects("/guides/dynamic-workflows", "/concepts/built-in-tools"),
@@ -159,6 +160,13 @@ export const compatibilityRedirects: DocsRedirect[] = [
         permanent: true as const,
       })),
     ),
+    // The data agent has no gallery listing yet, so it goes to its source.
+    ...extensions.map((extension) => ({
+      source: `${prefix}/templates/eve-data-agent-template${extension}`,
+      destination: dataAgentTemplateUrl,
+      // Temporary, so browsers don't cache it past the gallery listing going live.
+      permanent: false as const,
+    })),
     ...extensions.map((extension) => ({
       source: `${prefix}/templates${extension}`,
       destination: templateGalleryUrl,

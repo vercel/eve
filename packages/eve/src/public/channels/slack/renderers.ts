@@ -16,6 +16,7 @@ import type {
 
 /** The session events a Slack renderer can handle, in no particular order. */
 const SLACK_RENDERED_EVENTS = [
+  "call.input",
   "call.progress",
   "call.requested",
   "call.started",
@@ -95,8 +96,8 @@ export interface SlackInteractionCard {
    */
   readonly destination: SlackApprovalChannel;
   /**
-   * Who reads the message. A direct message is always `private`; a thread request has the
-   * thread's audience. Same meaning as `TaskCard.audience`.
+   * Who reads the message. A direct-message or ephemeral request is always `private`; a thread
+   * request has the thread's audience. Same meaning as `TaskCard.audience`.
    */
   readonly audience: ChannelAudience;
   /** The Slack user whose answer stands or decided the request, when known. */
@@ -124,8 +125,10 @@ export interface SlackRenderer {
   /**
    * Acknowledges a mention or DM as soon as it arrives, while the message hook
    * is still deciding, and another channel message once `onMessage`
-   * dispatches it. eve's default sets the `Thinking...` status. If the hook
-   * drops the message, eve clears the thread status.
+   * dispatches it. A mention or DM's session starts without waiting for it, so
+   * it has no ordering guarantee relative to the turn's output. eve's default
+   * sets the `Thinking...` status. If the hook drops the message, eve clears
+   * the thread status.
    */
   readonly received?: (
     message: SlackMessage,

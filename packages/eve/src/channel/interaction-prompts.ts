@@ -11,7 +11,6 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import {
   interaction,
   decidingAnswer,
-  promptQueueHead,
   responderOf,
   type Interaction,
 } from "#protocol/session-projection/reader.js";
@@ -67,11 +66,6 @@ export function requestBatchOf(
     if ("callId" in row.subject) result.callId = row.subject.callId;
   }
   return result;
-}
-
-export function firstOpenRequest(view: SessionView): Interaction | undefined {
-  const first = promptQueueHead(view);
-  return first === undefined ? undefined : interaction(view, first.interactionId);
 }
 
 export function requestSettlementOf(

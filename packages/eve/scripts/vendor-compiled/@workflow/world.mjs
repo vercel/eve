@@ -14,7 +14,6 @@ async function discoverDeclarationFiles({ distDir }) {
 export default {
   packageName: "@workflow/world",
   compiledPath: "@workflow/world",
-  chunkGroup: "workflow",
   entries: [
     {
       input: fileURLToPath(new URL("../entries/workflow-world.mjs", import.meta.url)),

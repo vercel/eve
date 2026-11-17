@@ -20,3 +20,4 @@ export type {
   VercelSandboxMountMode,
   VercelSandboxMounts,
 } from "#public/sandbox/vercel-sandbox.js";
+export { VERCEL_EVE_GIT_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";

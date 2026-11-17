@@ -39,7 +39,7 @@ import type {
 import type { ControlDelivery } from "#harness/types.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { Cause, Principal, UserPart } from "#protocol/session-events/envelope.js";
+import type { Cause, Principal, Usage, UserPart } from "#protocol/session-events/envelope.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import {
@@ -174,6 +174,7 @@ export function fail(
     readonly details?: JsonObject;
     readonly message: string;
     readonly terminal?: true;
+    readonly usage?: Usage;
   },
 ): Transition {
   const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
@@ -181,7 +182,9 @@ export function fail(
   const turnId = activeTurnIdOf(view.projection);
   const runId = turnId === undefined ? undefined : openRunOf(view.projection, turnId);
   const events = [
-    ...(runId === undefined ? [] : runSettledFacts({ runId, outcome: "failed", error })),
+    ...(runId === undefined
+      ? []
+      : runSettledFacts({ runId, outcome: "failed", error, usage: failure.usage })),
     ...(failure.terminal === undefined
       ? turnSettled(view.projection, { error, outcome: "failed" })
       : sessionEndedFacts(view.projection, {
@@ -230,7 +233,7 @@ export function discardAttempt(
   input: {
     readonly runId: string;
     readonly ending: "retried" | "steered";
-    readonly usage?: FactOf<"usage.recorded">["data"]["usage"];
+    readonly usage?: Usage;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -251,7 +254,7 @@ export function discardAttempt(
 
 export function suspendStep(
   view: SessionView,
-  step: Pick<SuspendedStep, "event" | "messages" | "tasks">,
+  step: Pick<SuspendedStep, "endsTurn" | "event" | "messages" | "tasks">,
 ): Transition {
   return transition({ events: [], turn: suspend(view.turn, { ...step, requests: [] }) });
 }

@@ -173,7 +173,14 @@ export async function acquireRecoveryLease(
 ): Promise<RecoveryLease | undefined> {
   const leasePath = join(recoveryPath, "lease");
   const leaseJournal: RecoveryLeaseJournal = { pid: process.pid, token };
-  await mkdir(recoveryPath, { recursive: true });
+  try {
+    await mkdir(recoveryPath, { recursive: true });
+  } catch (error) {
+    if (isErrnoCode(error, "ENOENT")) {
+      return undefined;
+    }
+    throw error;
+  }
 
   for (;;) {
     try {

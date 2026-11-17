@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   type ContractRule,
@@ -16,6 +16,7 @@ import {
   chatSdkDriver,
   chatSdkTextDriver,
 } from "#internal/testing/channel-conformance/chat-sdk-driver.js";
+import type { ConformanceHostKind } from "#internal/testing/channel-conformance/hosts.js";
 import { discordDriver } from "#internal/testing/channel-conformance/discord-driver.js";
 import { githubDriver } from "#internal/testing/channel-conformance/github-driver.js";
 import { linearDriver } from "#internal/testing/channel-conformance/linear-driver.js";
@@ -33,7 +34,7 @@ export interface BrokenCell {
   readonly symptom: RegExp;
 }
 
-interface ConformanceChannel {
+export interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   readonly dm?: true;
   readonly broken?: Partial<Record<ContractRuleName, BrokenCell>>;
@@ -336,33 +337,64 @@ function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number
   return broken === undefined ? { kind: "pass" } : { kind: "broken", broken };
 }
 
+function inProcessGap(rule: string): string | undefined {
+  if (rule.includes("run ended"))
+    return "it cancels the session's Workflow run, which an in-process session doesn't have";
+  return undefined;
+}
+
+const WORKFLOW_CHANNEL = "web-chat";
+
+function runsOn(host: ConformanceHostKind, channel: string | undefined, rule: string): boolean {
+  if (host === "in-process") return true;
+  return channel === WORKFLOW_CHANNEL || inProcessGap(rule) !== undefined;
+}
+
+const HOSTS: readonly ConformanceHostKind[] = ["in-process", "workflow"];
+
 export function describeChannelConformance(channel: keyof typeof channelConformance): void {
-  const entries: readonly ConformanceChannel[] = channelConformance[channel];
-  describe.each(entries.map((entry) => ({ entry, name: entry.driver().name })))(
-    "$name channel contract",
-    ({ entry }) => {
-      for (const rule of channelContract) {
-        const cell = cellOf(entry, rule);
-        const { agent } = rule as ContractRule;
-        const run = (options?: { readonly waitTimeoutMs: number }) =>
-          withChannelConversation(entry.driver(), (c) => rule.run(c), { ...agent, ...options });
-        if (cell.kind === "unsupported") {
-          it.skip(`${rule.rule} (not supported: ${cell.reason})`, () => {});
-        } else if (cell.kind === "pass") {
-          it(rule.rule, () => run(), 60_000);
-        } else {
-          it(
-            `${rule.rule} (broken: ${cell.broken.reason})`,
-            () =>
-              expect(run({ waitTimeoutMs: BROKEN_WAIT_TIMEOUT_MS })).rejects.toThrow(
-                cell.broken.symptom,
-              ),
-            60_000,
-          );
-        }
-      }
-    },
+  describeConformance(channelConformance[channel], channel);
+}
+
+export function describeConformance(
+  entries: readonly ConformanceChannel[],
+  channel?: string,
+): void {
+  afterAll(async () => {
+    for (const entry of entries) await entry.driver().dispose?.();
+  });
+  const cases = entries.flatMap((entry) =>
+    HOSTS.map((host) => ({ entry, host, name: entry.driver().name })),
   );
+  describe.each(cases)("$name channel contract ($host)", ({ entry, host }) => {
+    for (const rule of channelContract) {
+      if (!runsOn(host, channel, rule.rule)) continue;
+      const gap = host === "in-process" ? inProcessGap(rule.rule) : undefined;
+      const cell: Cell =
+        gap === undefined ? cellOf(entry, rule) : { kind: "unsupported", reason: gap };
+      const { agent } = rule as ContractRule;
+      const run = (options?: { readonly waitTimeoutMs: number }) =>
+        withChannelConversation(entry.driver(), (c) => rule.run(c), {
+          ...agent,
+          ...options,
+          host,
+        });
+      if (cell.kind === "unsupported") {
+        it.skip(`${rule.rule} (not supported: ${cell.reason})`, () => {});
+      } else if (cell.kind === "pass") {
+        it(rule.rule, () => run(), 60_000);
+      } else {
+        it(
+          `${rule.rule} (broken: ${cell.broken.reason})`,
+          () =>
+            expect(run({ waitTimeoutMs: BROKEN_WAIT_TIMEOUT_MS })).rejects.toThrow(
+              cell.broken.symptom,
+            ),
+          60_000,
+        );
+      }
+    }
+  });
 }
 
 const MATRIX_SYMBOLS = { broken: "❌", pass: "✅", unsupported: "—" } as const;

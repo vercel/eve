@@ -15,6 +15,7 @@ export interface DevelopmentCliOptions {
   host?: string;
   input?: string;
   onboard?: boolean;
+  onboarded?: boolean;
   logs?: LogDisplayMode;
   name?: string;
   port?: number;
@@ -31,3 +32,7 @@ export interface ProductionCliOptions {
   port?: number;
   schedules?: boolean;
 }
+
+export const EVE_INIT_INPUT_ENV = "EVE_INIT_INPUT";
+
+export const EVE_INIT_QUEUED_INPUT_ENV = "EVE_INIT_QUEUED_INPUT";

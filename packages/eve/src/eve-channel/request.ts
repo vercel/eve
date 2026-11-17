@@ -20,10 +20,7 @@ import { isV26Line } from "#protocol/v26-lines.js";
 import { v26LineStream } from "#execution/v26-history.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
-import {
-  isExpiredWorkflowRunError,
-  isMissingWorkflowRunError,
-} from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { isRunExpired, isRunMissing } from "#shared/run-errors.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -359,7 +356,7 @@ export async function createSessionStreamResponse(
         ? internalSession(session).getLineStream({ follow, startIndex: startIndex ?? 0 })
         : undefined;
     early?.catch(() => {});
-    const earlierEve = startedOnEarlierEve(session);
+    const earlierEve = startedOnEarlierEve(session, follow && (startIndex ?? 0) > 0);
     let tailIndex: number | undefined;
     if (includeTailIndex || early === undefined) {
       try {
@@ -402,13 +399,13 @@ export async function createSessionStreamResponse(
   } catch (error) {
     const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;
-    if (isExpiredWorkflowRunError(error)) {
+    if (isRunExpired(error)) {
       return Response.json(
         { code: "session_expired", error: "Session history is no longer available.", ok: false },
         { headers: { "cache-control": "no-store" }, status: 410 },
       );
     }
-    const notFound = isMissingWorkflowRunError(error);
+    const notFound = isRunMissing(error);
     return Response.json(
       { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
       { status: notFound ? 404 : 503 },
@@ -416,14 +413,39 @@ export async function createSessionStreamResponse(
   }
 }
 
-async function startedOnEarlierEve(session: Session): Promise<boolean> {
+const currentSessions = new Set<string>();
+const CURRENT_SESSIONS_LIMIT = 10_000;
+
+export function rememberCurrentSession(sessionId: string): void {
+  if (currentSessions.has(sessionId)) return;
+  if (currentSessions.size >= CURRENT_SESSIONS_LIMIT) {
+    const oldest = currentSessions.values().next();
+    if (oldest.done !== true) currentSessions.delete(oldest.value);
+  }
+  currentSessions.add(sessionId);
+}
+
+async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Promise<boolean> {
+  if (currentSessions.has(session.id)) return false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<unknown> | undefined;
+  let settled = false;
   const first = (async () => {
-    const lines = await internalSession(session).getLineStream({ follow: false, startIndex: 0 });
+    const open = (follow: boolean) =>
+      internalSession(session).getLineStream({ follow, startIndex: 0 });
+    const lines = await (hasFirstLine
+      ? open(true).catch((error: unknown) => {
+          if (settled || isRunMissing(error) || isRunExpired(error)) throw error;
+          return open(false);
+        })
+      : open(false));
     reader = lines.getReader();
+    if (settled) void reader.cancel().catch(() => {});
     const { done, value } = await reader.read();
-    return !done && isV26Line(value);
+    if (done) return false;
+    if (isV26Line(value)) return true;
+    rememberCurrentSession(session.id);
+    return false;
   })();
   const timeout = new Promise<false>((resolve) => {
     timer = setTimeout(() => resolve(false), SESSION_VERSION_CHECK_TIMEOUT_MS);
@@ -433,8 +455,9 @@ async function startedOnEarlierEve(session: Session): Promise<boolean> {
   } catch {
     return false;
   } finally {
+    settled = true;
     clearTimeout(timer);
-    void first.finally(() => reader?.cancel().catch(() => {})).catch(() => {});
+    void reader?.cancel().catch(() => {});
   }
 }
 

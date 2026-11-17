@@ -7,6 +7,7 @@ import {
   followsToolResults,
   type HarnessModelMessage,
   normalizeModelMessages,
+  turnAnchorOf,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { hasUnansweredToolCall } from "#harness/model-call/response.js";
@@ -27,6 +28,7 @@ export interface Prompt {
 
 export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
   const built = await settleHistory(step, turn);
+  step.session = built.session;
   return {
     clientContext: getTurnClientContextState(step.session.state, turn.turnId),
     messages: built.messages,
@@ -36,66 +38,67 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
 async function settleHistory(
   step: Step,
   turn: TurnInput,
-): Promise<{ readonly messages: HarnessModelMessage[]; readonly turn: TurnInput }> {
+): Promise<{
+  readonly messages: HarnessModelMessage[];
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
+}> {
   const repaired = repairToolHistory({
     endsRequest: turn.messages.length === 0,
     messages: step.session.history,
     insertionIndex: turn.storedClientContext?.insertionIndex,
   });
-  step.session = changeHistory(step.session, { repaired: repaired.messages });
-  const messages = [...step.session.history];
+  let session = changeHistory(step.session, { repaired: repaired.messages });
+  const messages = [...session.history];
   if (turn.storedClientContext !== undefined && repaired.insertionIndex !== undefined) {
     const storedClientContext = {
       ...turn.storedClientContext,
       insertionIndex: repaired.insertionIndex,
     };
     turn = { ...turn, storedClientContext };
-    step.session = setTurnClientContextState(step.session, storedClientContext);
+    session = setTurnClientContextState(session, storedClientContext);
   }
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
-      session: step.session,
+      session,
       tools: await stepCatalog(step),
     });
-    step.session = taskContext.session;
+    session = taskContext.session;
     messages.push(
       ...taskContext.messages.map((message) =>
         message.role === "user" ? anchorToTurn(message, turn.turnId) : message,
       ),
     );
   }
-  return { messages, turn };
+  return { messages, session, turn };
 }
 
-export async function commitTurnInput(step: Step, turn: TurnInput): Promise<Prompt> {
-  const settled = await settleHistory(step, turn);
-  const messages = placeTurnInput(step, settled.messages, settled.turn);
-  step.session = changeHistory(step.session, { extend: messages });
+export function commitTurnInput(step: Step, prepared: PreparedPrompt): Prompt {
+  step.session = prepared.session;
+  if (prepared.clientContext !== undefined) {
+    step.session = setTurnClientContextState(step.session, prepared.clientContext);
+  }
+  step.session = changeHistory(step.session, { extend: prepared.messages });
   return {
-    clientContext: getTurnClientContextState(step.session.state, turn.turnId),
+    clientContext: getTurnClientContextState(step.session.state, prepared.turn.turnId),
     messages: [...step.session.history],
   };
 }
 
-export function previewPrompt(step: Step, turn: TurnInput): Prompt {
-  const messages = validateHarnessModelMessages([...step.session.history]);
+export async function previewPrompt(step: Step, turn: TurnInput): Promise<PreparedPrompt> {
+  const settled = await settleHistory(step, turn);
+  const messages = validateHarnessModelMessages(settled.messages);
   return {
-    clientContext: turnClientContext(messages, turn),
-    messages: withTurnInput(messages, turn),
+    ...settled,
+    clientContext: turnClientContext(messages, settled.turn),
+    messages: withTurnInput(messages, settled.turn),
   };
 }
 
-function placeTurnInput(
-  step: Step,
-  messages: readonly HarnessModelMessage[],
-  turn: TurnInput,
-): HarnessModelMessage[] {
-  const clientContext = turnClientContext(messages, turn);
-  if (clientContext !== undefined) {
-    step.session = setTurnClientContextState(step.session, clientContext);
-  }
-  return withTurnInput(messages, turn);
+interface PreparedPrompt extends Prompt {
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
 }
 
 function turnClientContext(
@@ -126,7 +129,10 @@ export function withClientContext(
 ): HarnessModelMessage[] {
   const { clientContext } = prompt;
   if (clientContext === undefined || clientContext.messages.length === 0) return [...messages];
-  const insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  let insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  while (insertionIndex < messages.length && isAnnouncement(messages[insertionIndex]!)) {
+    insertionIndex += 1;
+  }
   return [
     ...messages.slice(0, insertionIndex),
     ...clientContext.messages.map((content) =>
@@ -134,6 +140,14 @@ export function withClientContext(
     ),
     ...messages.slice(insertionIndex),
   ];
+}
+
+function isAnnouncement(message: HarnessModelMessage): boolean {
+  return (
+    message.role === "user" &&
+    (message.kind === "context.state" || message.kind === "context.instruction") &&
+    turnAnchorOf(message) === undefined
+  );
 }
 
 export function projectPrompt(prompt: Prompt): HarnessModelMessage[] {

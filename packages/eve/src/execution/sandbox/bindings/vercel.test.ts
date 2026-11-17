@@ -2,8 +2,12 @@ import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+import {
+  VERCEL_EVE_GIT_SANDBOX_IMAGE,
+  VERCEL_EVE_SANDBOX_IMAGE,
+} from "#execution/sandbox/bindings/eve-image.js";
 import {
   createVercelSandbox as createVercelImplementation,
   type VercelSandboxPreparedArtifact,
@@ -291,6 +295,12 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  const snapshotNotFound = () =>
+    Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
+      json: { error: { code: "snapshot_not_found" } },
+      response: { status: 410 },
+    });
+
   it("creates a session from the prepared snapshot artifact without looking up the template sandbox", async () => {
     const sessionSandbox = createMockSandbox({ name: "session-key" });
     const sandboxModule = {
@@ -319,6 +329,28 @@ describe("createVercelSandbox", () => {
         source: { snapshotId: "prepared-snapshot", type: "snapshot" },
       }),
     );
+    expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("runs no base setup for a prepared snapshot of the eve-git image", async () => {
+    const sessionSandbox = createMockSandbox({ name: "session-key" });
+    const provider = createTestVercelSandbox({
+      createOptions: { image: VERCEL_EVE_GIT_SANDBOX_IMAGE },
+      loadSandboxModule: async () =>
+        ({
+          Sandbox: {
+            create: vi.fn().mockResolvedValue(sessionSandbox),
+            get: vi.fn().mockResolvedValue(null),
+          },
+        }) as never,
+    });
+
+    await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      prepared: { snapshotId: "prepared-snapshot" },
+      sandboxName: "session-key",
+    });
+
     expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
   });
 
@@ -914,11 +946,6 @@ describe("createVercelSandbox", () => {
 
   describe("tool sessions", () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
-    const snapshotNotFound = () =>
-      Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
-        json: { error: { code: "snapshot_not_found" } },
-        response: { status: 410 },
-      });
     const nameTaken = () =>
       Object.assign(new Error("A sandbox with the name already exists"), {
         response: { status: 400 },
@@ -1069,6 +1096,42 @@ describe("createVercelSandbox", () => {
       await expect(open()).rejects.toThrow();
       expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
       expect(gone.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("resuming recorded state", () => {
+    const sandboxName = "eve-sbx-vercel-recorded";
+
+    function resumeFailing(error: Error, sessionId: string) {
+      const stopped = createMockSandbox({ name: sandboxName, status: "stopped" });
+      stopped.runCommand.mockRejectedValue(error);
+      const sandboxModule = { Sandbox: { create: vi.fn(), get: vi.fn(async () => stopped) } };
+      const provider = createTestVercelSandbox({
+        loadSandboxModule: async () => sandboxModule as never,
+      });
+      return provider.openSession({
+        appRoot: "/tmp/test-app-root",
+        existing: { sandboxName, version: 3 },
+        prepared: { snapshotId: "prepared-snapshot" },
+        sandboxName: sessionId,
+      });
+    }
+
+    it("reports a session gone when its sandbox's snapshot expired", async () => {
+      const error = await resumeFailing(snapshotNotFound(), "session_abc").catch((e: unknown) => e);
+      expect(SandboxSessionGoneError.is(error)).toBe(true);
+    });
+
+    it.each([
+      ["a stopped sandbox", 410],
+      ["an internal error", 500],
+    ])("surfaces %s unchanged instead of reporting the session gone", async (_, status) => {
+      const original = Object.assign(new Error("Cannot resume sandbox"), {
+        response: { status },
+      });
+      const error = await resumeFailing(original, "session_abc").catch((e: unknown) => e);
+      expect(error).toBe(original);
+      expect(SandboxSessionGoneError.is(error)).toBe(false);
     });
   });
 

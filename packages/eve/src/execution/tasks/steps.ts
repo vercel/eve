@@ -28,6 +28,7 @@ import { usageSince } from "#shared/token-usage-math.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   PublishedSessionEvents,
+  SessionStepInput,
   SessionStepState,
 } from "#execution/publish-session-events.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
@@ -45,7 +46,7 @@ import { endTask, finishRun, settleTask } from "#harness/session-machine/transit
 import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
 import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
 
 export type TaskRunMessage = Extract<
@@ -82,7 +83,7 @@ export async function applyTaskRunMessage(
   }
   if (cancelled && message.kind === "started") {
     await ignoreGoneTarget(
-      resumeHook(findTask(table, taskId)!.run!.hookToken, {
+      resumeRoutedHook(findTask(table, taskId)!.run!.hookToken, {
         kind: "end",
         reason: TASK_CANCEL_REASON,
       }),
@@ -141,7 +142,7 @@ export async function applyTaskRunMessage(
 }
 
 export async function cancelTasksStep(
-  input: SessionStepState & TaskCancellationInput,
+  input: SessionStepInput & TaskCancellationInput,
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, cancelTasks);
@@ -254,7 +255,7 @@ function taskSettled(
 
 export async function sendTaskRunCommands(commands: TaskRunCommands): Promise<void> {
   for (const command of commands.commands) {
-    await ignoreGoneTarget(resumeHook(commands.run.hookToken, toControlMessage(command)));
+    await ignoreGoneTarget(resumeRoutedHook(commands.run.hookToken, toControlMessage(command)));
   }
 }
 

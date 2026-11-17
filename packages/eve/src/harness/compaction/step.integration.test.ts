@@ -4,13 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import * as compaction from "#harness/compaction/engine.js";
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { createTestKernel } from "#internal/testing/kernel.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessSession, HarnessToolMap, StepFn } from "#harness/types.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
@@ -50,11 +50,11 @@ const summaryStream = (): StreamResult =>
     },
   ]);
 
-const finish = (unified: "stop" | "tool-calls"): StreamPart => ({
+const finish = (unified: "stop" | "tool-calls", inputTokens = 50): StreamPart => ({
   finishReason: { raw: undefined, unified },
   type: "finish",
   usage: {
-    inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 50, total: 50 },
+    inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: inputTokens, total: inputTokens },
     outputTokens: { reasoning: 0, text: 8, total: 8 },
   },
 });
@@ -66,14 +66,14 @@ const answer = (): StreamResult =>
     { id: "reply", type: "text-end" },
     finish("stop"),
   ]);
-const lookup = (preamble: string): StreamResult =>
+const lookup = (preamble: string, inputTokens?: number): StreamResult =>
   streamOf([
     { type: "stream-start", warnings: [] },
     { id: "preamble", type: "text-start" },
     { delta: preamble, id: "preamble", type: "text-delta" },
     { id: "preamble", type: "text-end" },
     { input: "{}", toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" },
-    finish("tool-calls"),
+    finish("tool-calls", inputTokens),
   ]);
 const lookupTool: HarnessToolDefinition = {
   description: "Looks up the sources.",
@@ -81,6 +81,20 @@ const lookupTool: HarnessToolDefinition = {
   inputSchema: jsonSchema({ type: "object" }),
   name: "lookup",
 };
+const policyTool: HarnessToolDefinition = {
+  ...lookupTool,
+  description: "Protected policy. ".repeat(1_200),
+};
+const overThresholdAgent = {
+  model: { contextWindowTokens: 20_000, id: "step-model" },
+  thresholdPercent: 0.25,
+};
+
+async function untilTurnEnds(kernel: StepFn, session: HarnessSession, message: string) {
+  let stepped = await kernel(session, { message });
+  while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+  return stepped;
+}
 
 function userTexts(prompt: Prompt): string[] {
   return prompt.flatMap((message) =>
@@ -93,9 +107,10 @@ function userTexts(prompt: Prompt): string[] {
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
+  measurement: HarnessSession["compaction"] = {},
 ) {
   const session: HarnessSession = {
-    compaction: {},
+    compaction: measurement,
     continuationToken: "http:compaction-session",
     history: [
       { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
@@ -161,63 +176,161 @@ describe("compaction summary call", () => {
     expect(result.next).toBeNull();
   });
 
-  it.each([
-    { error: new CompactionOverLimitError("Still over the limit."), terminal: true },
-    { error: new Error("Summary validation failed."), terminal: false },
-  ])(
-    "keeps summary usage after a late compaction failure ($terminal terminal)",
-    async ({ error, terminal }) => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
-      vi.spyOn(compaction, "compactMessages").mockImplementation(
-        async (_messages, _config, summarize) => {
-          await summarize({
-            messages: [{ role: "user", content: "Summarize Alice's research notes." }],
-            system: "",
-          });
-          throw error;
-        },
-      );
-      const doStream = vi.fn(async () => summaryStream());
-      const events: SessionEvent[] = [];
-      const run = createTestKernel({
-        agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
-        handleEvent: async (publication) => void events.push(...eventsOf(publication)),
-        resolveModel: async () => new MockLanguageModelV3({ doStream }),
-        tools: new Map(),
-      })(
-        {
-          compaction: {},
-          continuationToken: "http:late-compaction-failure",
-          history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
-          sessionId: "late-compaction-failure",
-        },
-        { message: "Please continue." },
-      );
+  it("keeps summary usage after a late compaction failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = new Error("Summary validation failed.");
+    vi.spyOn(compaction, "compactMessages").mockImplementation(
+      async (_messages, _config, summarize) => {
+        await summarize({
+          messages: [{ role: "user", content: "Summarize Alice's research notes." }],
+          system: "",
+        });
+        throw error;
+      },
+    );
+    const doStream = vi.fn(async () => summaryStream());
+    const events: SessionEvent[] = [];
+    const result = await createTestKernel({
+      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: new Map(),
+    })(
+      {
+        compaction: {},
+        continuationToken: "http:late-compaction-failure",
+        history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
+        sessionId: "late-compaction-failure",
+      },
+      { message: "Please continue." },
+    );
 
-      const result = await run;
-      expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
-      if (terminal) {
-        expect(result.next).toEqual({ done: true, output: "" });
-        expect(events.at(-1)).toMatchObject({
-          type: "session.ended",
-          data: { outcome: "failed", error: { code: "COMPACTION_FAILED", message: error.message } },
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+    expect(result.next).toBeNull();
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "failed", error: { code: "MODEL_CALL_FAILED", message: error.message } },
+    });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+    expect(doStream).toHaveBeenCalledOnce();
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { outcome: "failed" } },
+    ]);
+    expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
+      { data: { usage: { inputTokens: 120, outputTokens: 8 } } },
+    ]);
+  });
+
+  it("compacts against the model's window when the agent alone is over the threshold", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const summaries = vi.fn(async () => summaryStream());
+    const turnPrompts: Prompt[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return await summaries();
+        turnPrompts.push(prompt);
+        return turnPrompts.length === 1 ? lookup("Let me check.", 12_000) : answer();
+      },
+    });
+    const events: SessionEvent[] = [];
+    const notes = "Earlier notes. ".repeat(4_000);
+
+    const result = await untilTurnEnds(
+      createTestKernel({
+        agent: overThresholdAgent,
+        handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+        resolveModel: async () => model,
+        tools: new Map([["lookup", policyTool]]),
+      }),
+      {
+        compaction: {},
+        continuationToken: "http:agent-over-threshold",
+        history: [
+          { content: notes, kind: "user", role: "user" },
+          { content: "Noted.", role: "assistant" },
+        ],
+        sessionId: "agent-over-threshold",
+      },
+      "Which sources back the second claim?",
+    );
+
+    expect(summaries).toHaveBeenCalledOnce();
+    expect(turnPrompts).toHaveLength(2);
+    for (const prompt of turnPrompts) {
+      expect(JSON.stringify(prompt)).toContain("Alice asked for the quarterly report.");
+      expect(JSON.stringify(prompt)).not.toContain("Earlier notes. Earlier notes.");
+      expect(prompt).toContainEqual({
+        content: [{ text: "Noted.", type: "text" }],
+        role: "assistant",
+      });
+    }
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { outcome: "completed" } },
+    ]);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
+    });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+    expect(result.next).toBeNull();
+  });
+
+  it("fails only the turn when the provider rejects the request as too long", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const summaries = vi.fn(async () => summaryStream());
+    let turnCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return await summaries();
+        if ((turnCalls += 1) > 1) return answer();
+        throw new APICallError({
+          isRetryable: false,
+          message: "prompt is too long: 21000 tokens > 20000 maximum",
+          requestBodyValues: {},
+          statusCode: 400,
+          url: "https://provider.example/v1/messages",
         });
-      } else {
-        expect(result.next).toBeNull();
-        expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
-          data: { outcome: "failed", error: { code: "MODEL_CALL_FAILED", message: error.message } },
-        });
-        expect(events.some((event) => event.type === "session.ended")).toBe(false);
-      }
-      expect(doStream).toHaveBeenCalledOnce();
-      expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
-        { data: { outcome: "failed" } },
-      ]);
-      expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
-        { data: { usage: { inputTokens: 120, outputTokens: 8 } } },
-      ]);
-    },
-  );
+      },
+    });
+    const events: SessionEvent[] = [];
+    const kernel = createTestKernel({
+      agent: overThresholdAgent,
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", policyTool]]),
+    });
+
+    const rejected = await untilTurnEnds(
+      kernel,
+      {
+        compaction: {},
+        continuationToken: "http:provider-too-long",
+        history: [],
+        sessionId: "provider-too-long",
+      },
+      "Please review Alice's contract.",
+    );
+    const followUp = await untilTurnEnds(kernel, rejected.session, "Please list its parties.");
+
+    expect(summaries).not.toHaveBeenCalled();
+    expect(turnCalls).toBe(2);
+    expect(rejected.next).toBeNull();
+    expect(followUp.next).toBeNull();
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      {
+        data: {
+          outcome: "failed",
+          error: {
+            code: "MODEL_CALL_FAILED",
+            message: "The request exceeds the model's context window.",
+          },
+        },
+      },
+      { data: { outcome: "completed" } },
+    ]);
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+  });
 
   it("fails the turn and keeps the history when the summary call stays rate limited", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
@@ -271,12 +384,13 @@ describe("compaction summary call", () => {
     expect(result.session.history.slice(0, 2)).toEqual(history);
   });
 
-  it("ends before summarizing when protected request context alone exceeds the limit", async () => {
+  it("fails only the turn when protected request context alone exceeds the model's window", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const doStream = vi.fn(async () => summaryStream());
+    const doStream = vi.fn(async () => answer());
     const events: SessionEvent[] = [];
     const result = await createTestKernel({
-      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
+      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 0.5 },
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async () => new MockLanguageModelV3({ doStream }),
       tools: new Map([
@@ -293,25 +407,26 @@ describe("compaction summary call", () => {
     })(
       {
         compaction: {},
-        continuationToken: "http:fixed-part-over-limit",
+        continuationToken: "http:fixed-part-over-window",
         history: [],
-        sessionId: "fixed-part-over-limit",
+        sessionId: "fixed-part-over-window",
       },
       { message: "Please continue." },
     );
 
-    expect(result.next).toEqual({ done: true, output: "" });
     expect(doStream).not.toHaveBeenCalled();
-    expect(events.at(-1)).toMatchObject({
-      type: "session.ended",
+    expect(events.some((event) => event.type.startsWith("context."))).toBe(false);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
       data: {
         outcome: "failed",
         error: {
           code: "COMPACTION_FAILED",
-          message: expect.stringContaining("system prompt, tools, memory and context"),
+          message: expect.stringContaining("~2000-token context window"),
         },
       },
     });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+    expect(result.next).toBeNull();
   });
 
   it("settles a failed manual compaction and its summary run exactly once", async () => {
@@ -368,6 +483,119 @@ describe("compaction summary call", () => {
     });
   });
 
+  it("compacts before switching back when the model's stale measurement undercounts appended JSON", async () => {
+    const history: HarnessModelMessage[] = [
+      { content: "Alice requested a report.", kind: "user", role: "user" },
+      { content: "I will collect the records.", role: "assistant" },
+      { content: "Please include Bob's records.", kind: "user", role: "user" },
+      { content: "I will include them.", role: "assistant" },
+      ...Array.from({ length: 10 }, (_, index): HarnessModelMessage[] => [
+        {
+          content: [
+            { type: "tool-call", toolCallId: `records-${index}`, toolName: "lookup", input: {} },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: `records-${index}`,
+              toolName: "lookup",
+              output: { type: "json", value: { records: '{"id":123,"value":456},'.repeat(1_500) } },
+            },
+          ],
+          role: "tool",
+        },
+      ]).flat(),
+    ];
+    let measurement = compaction.withPromptMeasurement(
+      {},
+      {
+        inputTokens: 10_000,
+        modelId: "model-a",
+        promptMessageCount: 4,
+      },
+    );
+    measurement = compaction.withPromptMeasurement(measurement, {
+      inputTokens: 185_000,
+      modelId: "model-b",
+      promptMessageCount: 24,
+    });
+    expect(estimateTokens(history.slice(4))).toBeGreaterThan(90_000);
+    expect(estimateTokens(history.slice(4))).toBeLessThan(110_000);
+    const events: SessionEvent[] = [];
+    let compactedBeforeCall = false;
+    const turnCalls = vi.fn(async () => {
+      compactedBeforeCall = events.some(
+        (event) => event.type === "context.settled" && event.data.outcome === "completed",
+      );
+      return answer();
+    });
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        return system.includes("CONTEXT CHECKPOINT COMPACTION") ? summaryStream() : turnCalls();
+      },
+    });
+
+    const result = await createTestKernel({
+      agent: { model: { contextWindowTokens: 200_000, id: "model-a" } },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", lookupTool]]),
+    })(
+      {
+        compaction: measurement,
+        continuationToken: "http:stale-model-measurement",
+        history,
+        sessionId: "stale-model-measurement",
+      },
+      { message: "Please summarize Alice and Bob's records." },
+    );
+
+    const change = events.find((event) => event.type === "context.started");
+    expect(change?.data.trigger?.inputTokens).toBeGreaterThanOrEqual(185_000);
+    expect(compactedBeforeCall).toBe(true);
+    expect(turnCalls).toHaveBeenCalledOnce();
+    expect(estimateTokens(result.session.history)).toBeLessThan(estimateTokens(history));
+  });
+
+  it("reserves the selected model's envelope when manually compacting after a model switch", async () => {
+    const summary = "Alice prepared the quarterly report. ".repeat(2_000);
+    const model = new MockLanguageModelV3({
+      doStream: async () =>
+        streamOf([
+          { type: "stream-start", warnings: [] },
+          { id: "summary", type: "text-start" },
+          { delta: summary, id: "summary", type: "text-delta" },
+          { id: "summary", type: "text-end" },
+          finish("stop"),
+        ]),
+    });
+    let measurement = compaction.withPromptMeasurement(
+      {},
+      {
+        inputTokens: 90_040,
+        modelId: "summary-model",
+        promptMessageCount: 3,
+        requestEnvelopeTokens: 90_000,
+      },
+    );
+    measurement = compaction.withPromptMeasurement(measurement, {
+      inputTokens: 41,
+      modelId: "other-model",
+      promptMessageCount: 3,
+      requestEnvelopeTokens: 1,
+    });
+
+    const result = await compactWith(model, undefined, measurement);
+
+    expect(result.session.history[1]).toMatchObject({ role: "assistant" });
+    expect(JSON.stringify(result.session.history)).toContain("Alice prepared");
+    expect(estimateTokens(result.session.history)).toBeLessThanOrEqual(10_000);
+  });
+
   it("retries a transient stream failure like a model step", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -413,81 +641,6 @@ describe("compaction summary call", () => {
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
     expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120 });
   });
-
-  it("starts no summary run when capping tool output is enough", async () => {
-    const model = new MockLanguageModelV3({
-      doStream: async () =>
-        streamOf([
-          { type: "stream-start", warnings: [] },
-          { id: "reply", type: "text-start" },
-          { delta: "Here is the report.", id: "reply", type: "text-delta" },
-          { id: "reply", type: "text-end" },
-          {
-            finishReason: { raw: undefined, unified: "stop" },
-            type: "finish",
-            usage: {
-              inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 10, total: 10 },
-              outputTokens: { reasoning: 0, text: 4, total: 4 },
-            },
-          },
-        ]),
-    });
-    const events: SessionEvent[] = [];
-    const checker = createStreamChecker();
-    const at = "2026-10-21T00:00:00.000Z";
-    const issues: unknown[] = [];
-    let position = 0;
-    const session: HarnessSession = {
-      compaction: {},
-      continuationToken: "http:compaction-capped",
-      history: [
-        { content: "Please search the backlog.", kind: "user", role: "user" },
-        {
-          content: [{ input: {}, toolCallId: "call-0", toolName: "search", type: "tool-call" }],
-          role: "assistant",
-        },
-        {
-          content: [
-            {
-              output: { type: "text", value: "x".repeat(100_000) },
-              toolCallId: "call-0",
-              toolName: "search",
-              type: "tool-result",
-            },
-          ],
-          role: "tool",
-        },
-      ],
-      sessionId: "compaction-capped",
-    };
-    await createTestKernel({
-      agent: { model: { contextWindowTokens: 20_000, id: "turn-model" }, thresholdPercent: 1 },
-      handleEvent: async (publication) => {
-        const facts = eventsOf(publication);
-        events.push(...facts);
-        issues.push(...checker.check({ at, facts }, position++));
-      },
-      resolveModel: async () => model,
-      tools: new Map(),
-    })(session, { message: "Alice asks for the quarterly report." });
-
-    expect(
-      events
-        .filter((event) => event.type.startsWith("context."))
-        .map(({ data, type }) => ({ type, ...data })),
-    ).toMatchObject([
-      { kind: "compaction", type: "context.started" },
-      { kind: "compaction", outcome: "completed", type: "context.settled" },
-    ]);
-    expect(
-      events.filter((event) => event.type === "model.requested").map(({ data }) => data),
-    ).toEqual([expect.not.objectContaining({ changeId: expect.anything() })]);
-    expect(events.filter((event) => event.type === "model.settled")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
-      { data: { owner: { runId: "run_0" } } },
-    ]);
-    expect(issues).toEqual([]);
-  });
 });
 
 describe("announcements after a compaction during a turn", () => {
@@ -530,70 +683,5 @@ describe("announcements after a compaction during a turn", () => {
       [catalog, question],
       ["Summary of our conversation so far:", catalog, question],
     ]);
-  });
-
-  it("doesn't announce the catalog again when capping keeps its message", async () => {
-    const requests: string[][] = [];
-    const model = new MockLanguageModelV3({
-      doStream: async ({ prompt }) => {
-        requests.push(userTexts(prompt));
-        const parts = (requests.length === 1 ? lookup("Let me check.") : answer()).stream;
-        const total = Math.ceil(JSON.stringify(prompt).length / 4);
-        return {
-          stream: parts.pipeThrough(
-            new TransformStream<StreamPart, StreamPart>({
-              transform(part, controller) {
-                controller.enqueue(
-                  part.type === "finish"
-                    ? {
-                        ...part,
-                        usage: {
-                          ...part.usage,
-                          inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: total, total },
-                        },
-                      }
-                    : part,
-                );
-              },
-            }),
-          ),
-        };
-      },
-    });
-    const tools: HarnessToolMap = new Map([
-      ["lookup", { ...lookupTool, execute: async () => "x".repeat(100_000) }],
-      ["refund_invoice", { ...lookupTool, deferred: true, name: "refund_invoice" }],
-    ]);
-    const events: SessionEvent[] = [];
-    const reference = { contextWindowTokens: 200_000, id: "step-model" };
-    const kernel = createTestKernel({
-      agent: { model: reference, thresholdPercent: 1 },
-      handleEvent: foldingHandler(async (event) => void events.push(event)),
-      resolveModel: async () => model,
-      tools,
-    });
-
-    await contextStorage.run(new ContextContainer(), async () => {
-      let session: HarnessSession = {
-        compaction: {},
-        continuationToken: "http:announcement-capping-session",
-        history: [],
-        sessionId: "announcement-capping-session",
-      };
-      for (const message of ["Look up the sources.", "Which sources back the second claim?"]) {
-        let stepped = await kernel(session, { message });
-        while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
-        session = stepped.session;
-        reference.contextWindowTokens = 20_000;
-      }
-    });
-
-    expect(
-      events.filter(({ type }) => type === "context.settled").map(({ data }) => data),
-    ).toMatchObject([{ kind: "compaction", outcome: "completed" }]);
-    expect(requests).toHaveLength(3);
-    const catalogs = (texts: readonly string[]) =>
-      texts.filter((text) => text.includes("eve__search")).length;
-    expect(requests.map(catalogs)).toEqual([1, 1, 1]);
   });
 });

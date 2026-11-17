@@ -324,7 +324,9 @@ TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
       "poll",
       "group",
     ],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/blooio.ts\` and installs the \`eve-channel-blooio\` package:
+    install: `\`eve-channel-blooio@0.3.0\` cannot receive and reply to messages on eve 1.x. It requires an updated package release.
+
+Registry command:
 
 \`\`\`bash
 eve add channel/blooio
@@ -338,7 +340,7 @@ import { blooioChannel } from "eve-channel-blooio";
 export default blooioChannel();
 \`\`\`
 
-Blooio is a native eve channel built on \`defineChannel\` (not a Chat SDK adapter), so eve owns session dispatch, streaming, and human-in-the-loop directly. See the [eve-channel-blooio README](https://github.com/Blooio/eve-channel-blooio#readme) for the full \`BlooioHandle\` surface: reactions, typing indicators, read receipts, polls, groups, capability checks, and history.`,
+Blooio is a native eve channel built on \`defineChannel\`, not a Chat SDK adapter. See the [eve-channel-blooio README](https://github.com/Blooio/eve-channel-blooio#readme) for the full \`BlooioHandle\` surface: reactions, typing indicators, read receipts, polls, groups, capability checks, and history.`,
     configure: `Set \`BLOOIO_API_KEY\` (a \`bl_live_...\` key) and \`BLOOIO_WEBHOOK_SECRET\` (\`whsec_...\`), then point a Blooio webhook at \`/eve/v1/blooio\`:
 
 \`\`\`bash
@@ -429,8 +431,11 @@ npm install eve@latest
 \`\`\`ts
 // agent/channels/eve.ts
 import { eveChannel } from "eve/channels/eve";
+import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
 
-export default eveChannel();
+export default eveChannel({
+  auth: [vercelOidc(), localDev(), placeholderAuth()],
+});
 \`\`\`
 
 Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client. Next.js, Nuxt, Svelte, and TanStack Start each have an integration that mounts those routes on your app's own origin, so there's no CORS to configure and no URL env var to keep in sync:
@@ -442,7 +447,7 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 - **Other Vite apps.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`. See the [Vite guide](/docs/guides/frontend/vite).
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`baseUrl\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
-    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
+    configure: `The eve channel needs no third-party provisioning. Its default auth policy permits local development and verified Vercel OIDC callers, and rejects other production requests. Configure your app's authentication before accepting browser requests in production. Enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -465,7 +470,12 @@ import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
-  adapters: { gchat: createGoogleChatAdapter() },
+  adapters: {
+    gchat: createGoogleChatAdapter({
+      endpointUrl: process.env.GOOGLE_CHAT_ENDPOINT_URL!,
+      botUserId: process.env.GOOGLE_CHAT_BOT_USER_ID!,
+    }),
+  },
   state: createMemoryState(),
   // Hand every message to eve, even mid-reply, so eve can steer the running turn.
   concurrency: "concurrent",
@@ -484,7 +494,7 @@ export default channel;
 \`\`\`
 
 Credentials come from the \`createGoogleChatAdapter\` config or the adapter's environment variables; see the [Google Chat adapter docs](https://chat-sdk.dev/adapters/official/gchat).`,
-    configure: `The adapter mounts its webhook at \`/eve/v1/gchat\`. Point your Google Chat app's HTTP endpoint at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+    configure: `Set \`GOOGLE_CHAT_ENDPOINT_URL\` to the exact deployed \`/eve/v1/gchat\` URL and choose **HTTP endpoint URL** as the Chat app's authentication audience. Set \`GOOGLE_CHAT_BOT_USER_ID\` to the app's canonical \`users/...\` identity. Configure service-account credentials or Application Default Credentials as described in the [Google Chat adapter docs](https://chat-sdk.dev/adapters/official/gchat). The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
   },
   "chat-sdk-whatsapp": {
     logo: "whatsapp",
@@ -660,6 +670,8 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
   // Hand every message to eve, even mid-reply, so eve can steer the running turn.
   concurrency: "concurrent",
+  // Most Zernio platforms cannot edit sent messages.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
@@ -675,7 +687,7 @@ export default channel;
 \`\`\`
 
 See the [Zernio adapter documentation](https://chat-sdk.dev/adapters/vendor-official/zernio) for supported events, capabilities, and credentials.`,
-    configure: `Set \`ZERNIO_API_KEY\` and \`ZERNIO_WEBHOOK_SECRET\`, then point Zernio webhooks at \`/eve/v1/zernio\`. Zernio provides one adapter for Instagram, Facebook, X, Telegram, WhatsApp, Bluesky, and Reddit. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Enable Zernio's inbox addon and connect your social accounts. Set a read-write \`ZERNIO_API_KEY\` and \`ZERNIO_WEBHOOK_SECRET\`, then send \`message.received\` and \`comment.received\` events to \`/eve/v1/zernio\`. Zernio provides one adapter for Instagram, Facebook, X, Telegram, WhatsApp, Bluesky, and Reddit. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-velt": {
     logo: "velt",
@@ -757,7 +769,10 @@ import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: {
-    sendblue: createSendblueAdapter(),
+    sendblue: createSendblueAdapter({
+      allowedServices: ["iMessage", "SMS", "RCS"],
+      webhookSecret: process.env.SENDBLUE_WEBHOOK_SECRET!,
+    }),
   },
   state: createMemoryState(),
   // Hand every message to eve, even mid-reply, so eve can steer the running turn.
@@ -778,7 +793,7 @@ export default channel;
 \`\`\`
 
 See the [Sendblue adapter documentation](https://chat-sdk.dev/adapters/vendor-official/sendblue) for supported events, capabilities, and credentials.`,
-    configure: `Set \`SENDBLUE_API_KEY\`, \`SENDBLUE_API_SECRET\`, and \`SENDBLUE_FROM_NUMBER\`, then point Sendblue webhooks at \`/eve/v1/sendblue\`. The adapter also supports tapbacks, typing indicators, delivery callbacks, and number lookup. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Set \`SENDBLUE_API_KEY\`, \`SENDBLUE_API_SECRET\`, \`SENDBLUE_FROM_NUMBER\`, and \`SENDBLUE_WEBHOOK_SECRET\`. Configure Sendblue to send the matching secret in the \`sb-signing-secret\` header, and point its webhook at \`/eve/v1/sendblue\`. The adapter also supports tapbacks, typing indicators, delivery callbacks, and number lookup. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-novu": {
     logo: "novu",
@@ -868,6 +883,8 @@ export const { bot, channel, send } = chatSdkChannel({
       webhookSecret: process.env.LIVEBLOCKS_WEBHOOK_SECRET!,
       botUserId: "my-agent",
       botUserName: "My Agent",
+      resolveUsers: async ({ userIds }) =>
+        userIds.map((id) => (id === "my-agent" ? { name: "My Agent" } : undefined)),
     }),
   },
   state: createMemoryState(),
@@ -888,7 +905,7 @@ export default channel;
 \`\`\`
 
 See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
-    configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Create a Liveblocks webhook for \`commentCreated\`, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send events to \`/eve/v1/liveblocks\`. Keep \`botUserId\` and \`resolveUsers\` aligned with the bot's identity so the adapter can detect mentions. Replace the example resolver with your app's user lookup when you need names for other users. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   linq: {
     logo: "linq",
@@ -1090,7 +1107,9 @@ See the [AgentPhone adapter documentation](https://chat-sdk.dev/adapters/vendor-
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "lark", "feishu", "bytedance", "cardkit", "messaging"],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/lark.ts\` and installs Chat SDK and its adapter dependencies:
+    install: `eve's Chat SDK bridge does not support Lark's WebSocket transport. This channel cannot receive messages until the bridge supports non-webhook events.
+
+Registry command:
 
 \`\`\`bash
 eve add channel/chat-sdk-lark
@@ -1129,14 +1148,16 @@ export default channel;
 \`\`\`
 
 See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/lark) for all supported events and credentials.`,
-    configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. The adapter uses Lark’s WebSocket long connection rather than an HTTP webhook, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. For an app created on \`open.larksuite.com\`, set \`LARK_DOMAIN=lark\`; the adapter defaults to Feishu. The adapter requires a long-lived Node.js process for its WebSocket connection. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-beeper": {
     logo: "beeper",
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "matrix", "beeper", "encrypted chat", "e2ee", "signal", "instagram"],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/beeper.ts\` and installs Chat SDK and its adapter dependencies:
+    install: `eve's Chat SDK bridge does not support Matrix sync. This channel cannot receive messages until the bridge supports non-webhook events.
+
+Registry command:
 
 \`\`\`bash
 eve add channel/chat-sdk-beeper
@@ -1175,7 +1196,7 @@ export default channel;
 \`\`\`
 
 See the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vendor-official/matrix) for all supported events and credentials.`,
-    configure: `Set the Matrix homeserver, access token, and bot identity environment variables documented by Beeper. This adapter consumes Matrix sync rather than webhooks, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. It requires Node.js 22 or newer and a durable state adapter in production. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Set the Matrix homeserver, access token, and bot identity environment variables documented by Beeper. This adapter consumes Matrix sync rather than webhooks and needs a long-lived process. It requires Node.js 22 or newer and a durable state adapter in production. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-resend": {
     logo: "resend",
@@ -1300,11 +1321,10 @@ The registry also writes \`agent/schedules/gmail-maintenance.ts\`, which calls \
 From your linked Vercel project:
 
 \`\`\`bash
-vercel crons list
-vercel crons run <maintenance-job-path>
+vercel schedules invoke eve.gmail-maintenance
 \`\`\`
 
-Replace \`<maintenance-job-path>\` with the Gmail maintenance route listed by the first command. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
+For an agent added with \`withEve\`, the schedule name includes the agent's name, such as \`eve.support.gmail-maintenance\`. Run \`vercel schedules list\` to find it. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
 
 **Existing labelled mail is not imported on first setup.** The first successful \`watch()\` initializes the cursor at registration time. Send a new message from another account and apply the handoff label after initialization. Later watch renewals preserve the existing cursor. See the [Gmail adapter setup guide](https://chat-sdk.dev/adapters/official/gmail#setup) for Google Cloud, Pub/Sub, OAuth scopes, and watch-renewal requirements.`,
   },
@@ -1323,7 +1343,9 @@ const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
       "media generation",
       "exports",
     ],
-    install: `Install the BlitzReels extension for eve:
+    install: `\`@blitzreels/eve@0.2.1\` does not load on eve 1.x. It requires a rebuilt package release.
+
+Registry command:
 
 \`\`\`bash
 eve add extension/blitzreels
@@ -1410,17 +1432,19 @@ The extension supports creating and inspecting assets, exact-range clips, subtit
       "browser automation",
       "cloud browser",
       "stagehand",
-      "search",
-      "fetch",
+      "playwright",
+      "screenshots",
       "web automation",
     ],
-    install: `Install the Browserbase extension for eve:
+    install: `\`@browserbasehq/eve@0.2.3\` does not load on eve 1.x. It requires a rebuilt package release.
+
+Registry command:
 
 \`\`\`bash
 eve add extension/browserbase
 \`\`\`
 
-The extension requires Node.js 24 or later. A Browserbase API key covers both cloud browser sessions and Stagehand inference through Browserbase Model Gateway, so you do not need a separate model-provider key.`,
+The extension requires Node.js 24 or later. Set \`BROWSERBASE_API_KEY\` for browser sessions and configure any model credentials required by the selected Stagehand model.`,
     quickStart: `Add your Browserbase API key to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1437,8 +1461,8 @@ export default browserbase({
 });
 \`\`\`
 
-The filename supplies the \`browserbase\` namespace. The extension adds \`browserbase__search\`, \`browserbase__fetch\`, and persistent browser tools for creating sessions, navigating, observing, acting, extracting structured data, and running autonomous Stagehand tasks.`,
-    configure: `Use Search → Fetch → browser as an escalation path: search for sources first, fetch straightforward content without starting a session, and create a browser only when a page requires JavaScript or interaction.
+The filename supplies the \`browserbase\` namespace. The extension adds \`browserbase__run\`, \`browserbase__snapshot\`, and \`browserbase__screenshot\`. Use \`run\` for Playwright-shaped JavaScript or snapshot actions, \`snapshot\` for the active page's accessibility tree, and \`screenshot\` for visual inspection.`,
+    configure: `Use the run tool to navigate and interact with pages, then inspect the result with snapshot or screenshot.
 
 You can configure the Stagehand model, session timeout, and proxies:
 
@@ -1453,7 +1477,7 @@ export default browserbase({
 });
 \`\`\`
 
-Browserbase uses keep-alive sessions and eve's durable per-session state to reconnect across workflow steps and function invocations. Call \`browserbase__stop_session\` when the task finishes to release billable browser time. Keep API keys out of prompts, and add approval gates around sensitive or irreversible browser actions. See the [Browserbase extension package](https://www.npmjs.com/package/@browserbasehq/eve) for the complete tool and configuration reference.`,
+Browserbase reuses a browser across calls, including calls from different eve sessions. Do not share it between users who must not access each other's browser data. Browser sessions do not survive process restarts. Call \`await browser.close()\` through \`browserbase__run\` after collecting the final result to release the browser. Keep API keys out of prompts, and add approval gates around sensitive or irreversible browser actions. See the [Browserbase extension package](https://www.npmjs.com/package/@browserbasehq/eve) for the complete tool and configuration reference.`,
   },
   kernel: {
     logo: "kernel",
@@ -1467,14 +1491,16 @@ Browserbase uses keep-alive sessions and eve's durable per-session state to reco
       "managed auth",
       "vercel connect",
     ],
-    install: `Install the Kernel extension for eve:
+    install: `\`@onkernel/eve-extension@0.1.4\` does not load on eve 1.x. It requires a rebuilt package release.
+
+Registry command:
 
 \`\`\`bash
 eve add extension/kernel
 \`\`\`
 
-The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kernel's hosted MCP browser tools and a \`browse\` skill without requiring you to maintain browser tool code.`,
-    quickStart: `Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
+The extension requires Node.js 24 or later. It adds Kernel's hosted MCP browser tools and a \`browse\` skill.`,
+    quickStart: `Vercel Connect setup requires Vercel CLI 58.8.0 or later for \`--connection-method\`. Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
 
 \`\`\`bash
 vercel connect create kernel --name kernel-mcp --connection-method mcp
@@ -1525,13 +1551,15 @@ The default mount can execute JavaScript in the browser VM and reuse authenticat
       "bandit",
       "a/b testing",
     ],
-    install: `Install the Jetty extension for eve:
+    install: `\`@jetty/eve@0.3.1\` does not load on eve 1.x. It requires a rebuilt package release.
+
+Registry command:
 
 \`\`\`bash
 eve add extension/jetty
 \`\`\`
 
-The extension requires Node.js 24 or later and eve 0.25 or later. It can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
+The extension requires Node.js 24 or later. Jetty can record completed turns, grade them, compare experiment arms, and report native \`eve eval\` results.`,
     quickStart: `Add your Jetty credentials and collection to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1614,7 +1642,7 @@ export default githubExtension({
 });
 \`\`\`
 
-The filename supplies the \`github\` namespace, so tools appear as \`github__listPullRequests\`, \`github__createIssue\`, and \`github__addPullRequestComment\`. The preset automatically limits the connector token to the scopes its tools need.`,
+The filename supplies the \`github\` namespace, so tools appear as \`github__listPullRequests\`, \`github__createIssue\`, and \`github__addPullRequestComment\`. The preset automatically limits the connector token to the scopes its tools need. By default, connector-backed tools act as the GitHub App installation, so callers share the App's permissions. Restrict access to the agent accordingly; a preset does not give each caller a separate GitHub identity.`,
     configure: `Choose one or more presets to limit the available tools: \`code-review\`, \`issue-triage\`, \`repo-explorer\`, \`ci-ops\`, or \`maintainer\`. Every write tool requires approval by default, while read tools do not. Use \`requireApproval\` to apply \`always\`, \`once\`, or an input-dependent policy to individual tools:
 
 \`\`\`ts title="agent/extensions/github.ts"
@@ -1644,7 +1672,7 @@ For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`
 eve add extension/nimble
 \`\`\`
 
-The extension requires Node.js 24 or later and a Nimble API key. It adds web search, page extraction, and long-running research tools.`,
+The extension requires Node.js 24 or later, eve 1.x, and a Nimble API key. It adds web search, page extraction, and long-running research tools.`,
     quickStart: `Add your Nimble API key to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1701,14 +1729,19 @@ import { hindsightMemory } from "@vectorize-io/hindsight-eve";
 import { defineMemory } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
 
+const provider = hindsightMemory();
+
 export default defineMemory({
   description: "Long-term memory about the current user.",
-  provider: hindsightMemory(),
+  provider: {
+    ...provider,
+    recall: { "turn.started": provider.recall["turn.started"] },
+  },
   scope: byPrincipal,
 });
 \`\`\`
 
-Before each turn, the provider recalls memories relevant to the user's message. After the turn, it retains the user message and assistant reply. Neither path depends on the model choosing to call a tool. The slot also exposes \`hindsight__reflect\`, so the model can ask long-term memory a question mid-turn.`,
+Set \`provider.recall\` to include only \`turn.started\`, as eve 1.x requires. Before each turn, the provider recalls memories relevant to the user's message. After the turn, it retains the user message and assistant reply. Neither path depends on the model choosing to call a tool. The slot also exposes \`hindsight__reflect\`, so the model can ask long-term memory a question mid-turn.`,
     configure: `Each eve memory scope gets its own Hindsight bank, so \`byPrincipal\` keeps every caller's memory separate. Tune recall in the memory slot when needed:
 
 \`\`\`ts title="agent/memory/hindsight.ts"
@@ -1716,12 +1749,17 @@ import { hindsightMemory } from "@vectorize-io/hindsight-eve";
 import { defineMemory } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
 
+const provider = hindsightMemory({
+  budget: "high",
+  maxTokens: 2048,
+});
+
 export default defineMemory({
   description: "Long-term memory about the current user.",
-  provider: hindsightMemory({
-    budget: "high",
-    maxTokens: 2048,
-  }),
+  provider: {
+    ...provider,
+    recall: { "turn.started": provider.recall["turn.started"] },
+  },
   scope: byPrincipal,
 });
 \`\`\`
@@ -1766,7 +1804,7 @@ export default defineMemory({
 During \`eve dev\`, file memory stays in the local process. On Vercel, the default backend uses the private Blob store provisioned by setup.`,
     configure: `Run \`eve integration setup file-memory\` to repair or re-run provisioning without reinstalling the registry item. Setup uses the first configured function region, preserves an existing eve-owned store if the project region later changes, and never adopts or changes an application store connected with \`BLOB_*\`.
 
-Provisioned bindings use the \`EVE_MEMORY_BLOB_*\` namespace. \`fileMemory()\` prefers \`EVE_MEMORY_BLOB_READ_WRITE_TOKEN\`, then \`EVE_MEMORY_BLOB_STORE_ID\` with Vercel OIDC from the environment or request context. Generic \`BLOB_*\` credentials remain a fallback for manually connected stores. See [File memory](/docs/memory/file) for backend behavior and manual configuration.`,
+Provisioned bindings use the \`EVE_MEMORY_BLOB_*\` namespace. \`fileMemory()\` prefers \`EVE_MEMORY_BLOB_STORE_ID\` with Vercel OIDC from the environment or request context, then \`EVE_MEMORY_BLOB_READ_WRITE_TOKEN\`. Generic \`BLOB_*\` credentials remain a fallback for manually connected stores. See [File memory](/docs/memory/file) for backend behavior and manual configuration.`,
   },
   "upstash-agentkit": {
     logo: "upstash",
@@ -1788,7 +1826,7 @@ Provisioned bindings use the \`EVE_MEMORY_BLOB_*\` namespace. \`fileMemory()\` p
 eve add memory/upstash-agentkit
 \`\`\`
 
-This installs \`@upstash/agentkit-eve\` and \`@upstash/redis\`, then writes a memory slot. The \`@upstash/agentkit-eve/memory\` entry point requires eve 0.45.2 or later.`,
+This installs \`@upstash/agentkit-eve\` and \`@upstash/redis\`, then writes a memory slot. \`@upstash/agentkit-eve@0.19.0\` requires eve 0.87.0 or later and \`@upstash/redis\` 1.38.4 or later.`,
     quickStart: `Add an Upstash Redis database's REST credentials to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1829,7 +1867,7 @@ AgentKit also ships \`@upstash/agentkit-eve-extension\`, an eve extension that a
 eve add memory/arcana
 \`\`\`
 
-This installs \`@kybernesis/arcana\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.49 or later.`,
+This installs \`@kybernesis/arcana@0.8.0\` and writes a memory slot. Requires Node.js 24 or later and eve 1.x.`,
     quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1877,7 +1915,7 @@ An Arcana key is scoped to a workspace. Keep the key in a sensitive environment 
 eve add memory/supermemory
 \`\`\`
 
-This installs \`@supermemory/eve\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.47.3 or later.`,
+This installs \`@supermemory/eve@0.2.0-rc.1\`, a prerelease for eve 1.x, and writes a memory slot. Requires Node.js 24 or later and eve 1.x.`,
     quickStart: `Create a Supermemory API key and add it to the agent's environment:
 
 \`\`\`bash title=".env.local"
@@ -1941,25 +1979,207 @@ import { memantoMemory } from "@moorcheh-ai/memanto/eve";
 import { defineMemory } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
 
+const provider = memantoMemory({
+  apiKey: process.env.MOORCHEH_API_KEY,
+  baseUrl: process.env.MEMANTO_BASE_URL,
+  capture: false,
+});
+
 export default defineMemory({
   description: "Recall and manage durable context for the current user.",
-  provider: memantoMemory({
-    apiKey: process.env.MOORCHEH_API_KEY,
-    baseUrl: process.env.MEMANTO_BASE_URL,
-    capture: false,
-  }),
+  provider: {
+    ...provider,
+    recall: { "turn.started": provider.recall["turn.started"] },
+  },
   scope: byPrincipal,
 });
 \`\`\`
 
-The filename creates the \`memanto\` slot. Before every turn, the provider recalls relevant context. It also gives the model \`memanto__remember\` and \`memanto__recall\` tools for deliberate saves and searches.`,
+The filename creates the \`memanto\` slot. Set \`provider.recall\` to include only \`turn.started\`, as eve 1.x requires. Before every turn, the provider recalls relevant context. It also gives the model \`memanto__remember\` and \`memanto__recall\` tools for deliberate saves and searches.`,
     configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
 
 All eve scopes share one Memanto agent. The provider tags each memory with a digest of eve's opaque scope key and filters recalls by that tag. Its tools are bound to the current scope, so the model cannot read or write another scope's memories.
 
-Automatic capture is unsupported in this reviewed configuration. The published adapter does not make completed-turn capture idempotent across eve operation replays. The registry explicitly sets \`capture: false\`; leave it disabled until the provider supports replay-safe idempotency. The model can still use \`memanto__remember\` for deliberate, scope-bound memory writes. Those are model-invoked writes, not user-approved writes. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
+Keep \`capture: false\`. Automatic capture can store a turn more than once when eve retries it. The model can still use \`memanto__remember\` for deliberate, scope-bound memory writes. These writes do not require user approval. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
 
-The reviewed configuration expects a running Memanto server at \`MEMANTO_BASE_URL\`. If you omit it during \`eve dev\`, the adapter starts a local server with the unpinned default \`memanto\` package through \`uvx\`. That local-server path is outside the reviewed compatibility boundary. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
+Set \`MEMANTO_BASE_URL\` to a Memanto server you run. If you omit it during \`eve dev\`, the adapter starts a local server through \`uvx\` without pinning its version. Use an explicit server URL to control which version runs. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
+  },
+  memco: {
+    logo: "memco",
+    docsHref: "https://docs.memco.ai/integrations/eve/",
+    keywords: [
+      "memory",
+      "shared memory",
+      "team memory",
+      "multi-tenant",
+      "semantic search",
+      "feedback",
+      "memco",
+    ],
+    install: `Give your eve agent shared memory across conversations. Agents can search existing knowledge, save findings, and add evidence or feedback to memories accessible to their memco identity.
+
+Install the memco provider:
+
+\`\`\`bash
+eve add memory/memco
+\`\`\`
+
+This installs the independently maintained \`@memco/eve\` package and writes a memory slot. You need Node.js 24 or later, eve 1.x, and a [memco](https://memco.ai) account. memco hosts the memory service.`,
+    quickStart: `### Shared identity
+
+Use one API token for a personal agent or one trusted team. Every caller shares the token's memco identity and accessible memory. For separate customers, use the multi-tenant setup below.
+
+Create a token in the [memco dashboard](https://spark.memco.ai/) and set it in the server environment, or an uncommitted \`.env.local\` for local development:
+
+\`\`\`bash title=".env.local"
+MEMCO_API_TOKEN=...
+\`\`\`
+
+The command writes this memory slot:
+
+\`\`\`ts title="agent/memory/memco.ts"
+import { memco } from "@memco/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "The team's shared memory: search it before working something out.",
+  provider: memco({ domain: "knowledge" }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+\`byPrincipal\` disables memory for anonymous and runtime callers and enables it in \`eve dev\`. It does not create private memco memory per caller when they share a token.
+
+### Multi-tenant
+
+Use an API client to share knowledge within each customer organization while keeping customers' networks separate. The client needs \`network-management\` and \`user-management\` scopes and the admin grant to act for users. See the [credential guide](https://docs.memco.ai/sdk/embedding-memory/#managing-networks-and-users).
+
+\`\`\`bash title=".env.local"
+MEMCO_CLIENT_ID=...
+MEMCO_CLIENT_SECRET=...
+\`\`\`
+
+Replace the slot with one scoped by \`byTenant\`:
+
+\`\`\`ts title="agent/memory/memco.ts"
+import { byTenant, memco } from "@memco/eve";
+import { defineMemory } from "eve/memory";
+
+export default defineMemory({
+  description: "Your organization's shared memory: search it before working something out.",
+  provider: memco({ domain: "knowledge" }),
+  namespace: "acme-support-agent",
+  scope: byTenant((principal) => {
+    const tenant = principal.attributes.tenantId;
+    return typeof tenant === "string" ? tenant : null;
+  }),
+});
+\`\`\`
+
+The provider provisions a network for each tenant and a separate identity for each user in that tenant. Users share their tenant's knowledge.
+
+Derive \`tenantId\` from verified sign-in, never from a prompt or model input. Tenant IDs must be unique within the app namespace, including across sign-in providers. Use separate sessions for mutually untrusted tenants.
+
+\`byTenant\` disables memory for non-user callers or an unresolved tenant, including eve's local development caller. Test through a channel with authenticated users. Pairing \`byTenant\` with a single API token fails rather than sharing one identity across tenants.
+
+To show readable names in memco, pass \`userName\` to \`memco()\`. Derive it from verified sign-in and consider what personal information the name sends to memco.`,
+    configure: `### How the agent uses memory
+
+\`agent/memory/memco.ts\` creates the \`memco\` slot. The provider supplies a domain briefing and reminders to search before working and save reusable findings. Retrieval happens when the agent calls a memory tool; the provider does not automatically search with each incoming message.
+
+The credential and service determine which tools the agent receives:
+
+| Tool | What it does |
+| --- | --- |
+| \`memco__search\` | Finds existing knowledge |
+| \`memco__get_memory\` | Reads a memory |
+| \`memco__create_memory\` | Saves a finding |
+| \`memco__enrich_memory\` | Adds evidence or missing detail to a memory |
+| \`memco__share_feedback\` | Reports relevance and correctness feedback |
+| \`memco__revert_memory\` | Undoes an eligible recent write by the user |
+
+Add instructions about what the agent should search for and save to \`agent/instructions.md\`.
+
+### Namespaces and deployment
+
+Set a stable, explicit \`namespace\` before launch, unique per app within your memco organization. In multi-tenant mode, the namespace, tenant ID, and domain identify the tenant network. Changing the namespace points tenants at new networks without deleting old ones.
+
+An explicit namespace has no environment suffix. Use a separate memco organization or a distinct namespace for multi-tenant Preview deployments. A namespace does not partition stored memory when callers share one API token; use separate identities to isolate production and previews in token mode.
+
+### Data and permissions
+
+The provider does not capture conversation transcripts. The agent writes findings through memory tools, and their inputs, including search queries, are sent to memco. By default, the model can call these tools without separate user approval. Saved knowledge is accessible to other people and agents in the same network, not private to its originating conversation.
+
+Keep credentials server-side and use one credential set: API client credentials take precedence when both they and a token are set. Treat retrieved content as untrusted data, not instructions, and never save secrets. See [Tell the model how to use memory](/docs/memory#tell-the-model-how-to-use-memory).
+
+See the [provider README](https://github.com/memcoai/eve-memco#readme) for save-and-search verification, options, and service calls. The adapter does not provide exactly-once guarantees for remote operations or immediate key revocation after interrupted turns.`,
+  },
+  "claude-mem": {
+    logo: "claude-mem",
+    docsHref: "https://docs.claude-mem.ai/eve-integration",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "coding agents",
+      "Claude Code",
+      "Codex",
+      "automatic recall",
+      "session context",
+      "cmem.ai",
+      "claude-mem",
+    ],
+    install: `Give your eve agent long-term memory on hosted claude-mem. By default, each eve scope gets its own claude-mem project, and the provider records every completed turn into it. Single-owner agents can opt in to recall the memory you build in Claude Code, Codex, and your other claude-mem clients.
+
+Install the claude-mem provider:
+
+\`\`\`bash
+eve add memory/claude-mem
+\`\`\`
+
+This installs \`claude-mem\` and writes a memory slot. The provider requires Node.js 24 or later, zod 4, and eve 0.84.0 or later.`,
+    quickStart: `Create a key at [cmem.ai/pro/key](https://cmem.ai/pro/key) and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+CLAUDE_MEM_API_KEY=...
+\`\`\`
+
+The registry writes the slot:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+import { claudeMem } from "claude-mem/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY });
+
+export default defineMemory({
+  description: "Recall and save durable context for the current user.",
+  provider: {
+    ...provider,
+    // get_observations fetches by ID across every project the key can see, so it
+    // would let one principal read another's memory through the shared key.
+    async tools(context) {
+      const { get_observations: _unscoped, ...tools } = (await provider.tools?.(context)) ?? {};
+      return tools;
+    },
+  },
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`claude-mem\` slot. Before every turn, the provider adds the newest memory in this scope's project as session context and recalls records from that project that match the user's message. The model also gets \`claude-mem__search\` and \`claude-mem__timeline\` to look further back, and \`claude-mem__remember\` to save a note. The registry omits the provider's \`get_observations\` tool: it fetches observations by ID across every project the key can see, with no project filter, so a caller with another principal's observation ID could read that memory through the shared key. Saving and recording need a Pro key with write access. With a read-only key, pass \`capture: false\` to \`claudeMem(...)\`.`,
+    configure: `By default, each eve scope reads and writes its own claude-mem project, derived from eve's scope key, and recording is on. After each completed turn, the provider sends the prompt, each tool call, and a turn summary to cmem.ai. Each recorded tool call and summary spends the key owner's cmem.ai observer allowance, for every caller the scope admits. To keep recall, search, and \`remember\` without recording, pass \`capture: false\` where the slot creates \`provider\`. Keep the \`tools\` wrapper that omits \`get_observations\`:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY, capture: false });
+\`\`\`
+
+Before a turn is recorded or recalled, the provider removes \`<private>\` regions and redacts secret-shaped text. Notes saved with \`remember\` and model-written \`search\` queries are sent as written. Recorded requests are sent once with no retry, and replays of the same turn are deduplicated.
+
+To recall work from Claude Code, Codex, and your other claude-mem clients, set \`searchAllProjects: true\`. Session context, recall, \`search\`, and \`timeline\` then read every project the key can see. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. A single-owner agent can also keep \`get_observations\` by using \`claudeMem(...)\` directly as the provider; follow the owner-only \`scope\` in the [claude-mem agent template](https://github.com/thedotmack/claude-mem/tree/main/integrations/eve/template). Do not restore it while the scope admits more than one principal. Other options are \`project\` and \`baseUrl\`.
+
+Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source control. See the [claude-mem eve guide](https://docs.claude-mem.ai/eve-integration) for the one-click personal agent template, owner-only scoping, and the full option and tool reference.`,
   },
 };
 
@@ -1986,7 +2206,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
 eve add extension/agent-browser
 \`\`\`
 
-The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox or Docker.`,
+The extension requires Node.js 24 or later, eve 1.x, and a sandbox backend with real process execution, such as Vercel Sandbox or Docker. On first use it installs agent-browser, Chromium, and system libraries inside that sandbox. Installing the libraries requires \`apt\` or \`dnf\` and \`sudo\`.`,
     quickStart: `Mount the extension under \`agent/extensions/\`:
 
 \`\`\`ts title="agent/extensions/browser.ts"
@@ -2023,14 +2243,23 @@ The extension also supports inline screenshots, session naming, proxies, and pro
   link: {
     logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/README.md",
-    keywords: ["stripe", "wallet", "payments", "checkout", "spend requests", "approval"],
+    keywords: [
+      "stripe",
+      "wallet",
+      "payments",
+      "checkout",
+      "spend requests",
+      "approval",
+      "oauth",
+      "financial insights",
+    ],
     install: `Install the Link extension for eve:
 
 \`\`\`bash
 eve add extension/link
 \`\`\`
 
-The extension requires Node.js 24 or later. It uses a configured Link access token; it does not start OAuth or refresh tokens. The token's wallet is shared by every caller who can reach this agent, so mount it only on an appropriately access-controlled agent.`,
+The extension requires Node.js 24 or later and eve 1.0.0 or later. Configure a static Link access token or an application-owned authorization provider. With a static token, every caller uses the same wallet, so restrict access to the agent.`,
     quickStart: `Add a Link access token to the agent's server environment:
 
 \`\`\`bash title=".env.local"
@@ -2047,10 +2276,27 @@ export default link({
 });
 \`\`\`
 
-The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, and purchase reports, plus a wallet skill with the checkout workflow.`,
-    configure: `Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` only creates a draft; it does not authorize a purchase.
+The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, financial insights, and purchase reports. It also includes payment-credential and financial-insights skills. Financial-data tools require the corresponding permissions on the token.`,
+    configure: `### Per-user authorization
 
-Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. The skill tells the agent not to repeat credentials in chat, but applications remain responsible for transcript access and retention. Keep the token out of prompts and source control; a 401 requires the operator to configure a replacement token. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
+For per-user wallets, pass an application-owned authorization provider instead of \`accessToken\`:
+
+\`\`\`ts title="agent/extensions/link.ts"
+import link from "@stripe/link-integrations-eve";
+import { linkAuth } from "../lib/link-auth";
+
+export default link({ auth: linkAuth });
+\`\`\`
+
+Implement \`linkAuth\` with [\`defineInteractiveAuthorization\`](/docs/connections#self-hosted-interactive-oauth). Your application owns Link's OAuth consent, callback routing, state and PKCE validation, token storage, refresh, and revocation. Interactive authorization requires an authenticated user on the agent's inbound channel. Configure exactly one of \`accessToken\` or \`auth\`. See the [Link extension's OAuth guide](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve#interactive-oauth) for the provider contract.
+
+Static-token mode does not start OAuth or refresh tokens. A 401 requires the operator to configure a replacement token.
+
+### Purchase approval and sensitive data
+
+Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` creates a draft for a later \`request_spend_approval\` call; it does not authorize a purchase.
+
+Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. Financial-data and insight results can also contain private information. The skills tell the agent not to repeat credentials and to summarize financial data. Applications remain responsible for transcript access and retention. Keep tokens out of prompts and source control. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
   },
 };
 
@@ -2153,6 +2399,37 @@ WAYDOCK_MCP_KEY=wdmcp_your_key_here
 \`\`\`
 
 The connection sends the key as a bearer token and does not expose it to the model. Waydock enforces the key's scopes on every call. See Waydock's [authentication documentation](https://waydock.ai/docs/authentication) for key scopes and OAuth options.`,
+  },
+  stacktree: {
+    logo: "stacktree",
+    docsHref: "https://stacktr.ee/developers",
+    keywords: ["mcp", "publish", "html", "unlisted link", "hosting"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "STACKTREE_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/stacktree.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/stacktree.ts
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://api.stacktr.ee/mcp",
+  description:
+    "Stacktree: publish HTML pages to unlisted links, update them in place, set optional passcode or email gates, and manage feedback.",
+  approval: always(),
+  headers: () => ({
+    authorization: \`Bearer \${process.env.STACKTREE_API_KEY!}\`,
+  }),
+});
+\`\`\`
+
+eve requires approval for every Stacktree tool call because the server can publish, change access, and delete pages.`,
+    configureNote:
+      "Create an API key in the [Stacktree dashboard](https://app.stacktr.ee/api-keys). eve sends it as an Authorization Bearer token. Pages are unlisted, so anyone with the link can view them. Use Stacktree's optional passcode or email gate when access must be restricted.",
   },
   agentcard: {
     logo: "agentcard",
@@ -2282,6 +2559,8 @@ The allowlist limits the connection to the reviewed Sent tools. eve requires use
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "observability", "traces", "queries"],
     authModes: ["jwtBearer"],
+    configureNote:
+      "Enable Honeycomb Intelligence for your team. EU teams use `https://mcp.eu1.honeycomb.io/mcp`; US teams use `https://mcp.honeycomb.io/mcp`.",
   },
   airtable: {
     logo: "airtable",
@@ -2356,6 +2635,44 @@ Connect owns the OAuth flow, and each end-user authorizes in their own browser b
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "docs", "tables", "pages", "oauth", "connect"],
     authModes: ["user"],
+  },
+  context7: {
+    logo: "context7",
+    docsHref: "https://context7.com/docs/integrations/eve",
+    keywords: [
+      "mcp",
+      "documentation",
+      "library docs",
+      "code examples",
+      "api reference",
+      "coding agent",
+      "Upstash",
+      "api key",
+    ],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "CONTEXT7_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/context7.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/context7.ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const apiKey = process.env.CONTEXT7_API_KEY;
+
+export default defineMcpClientConnection({
+  url: "https://mcp.context7.com/mcp",
+  description: "Context7: up-to-date, version-specific library documentation and code examples.",
+  auth: apiKey ? { getToken: async () => ({ token: apiKey }) } : undefined,
+  tools: { allow: ["resolve-library-id", "query-docs"] },
+});
+\`\`\`
+
+The allowlist limits the connection to Context7's two read-only documentation tools, \`context7__resolve-library-id\` and \`context7__query-docs\`, even if the server adds more tools later. For a named library, the agent resolves its Context7 library ID first, then queries the docs with that ID. A prompt that already includes an ID such as \`/vercel/next.js\` can skip straight to \`query-docs\`.`,
+    configureNote:
+      "Create a free API key in the [Context7 dashboard](https://context7.com/dashboard?tab=settings). eve sends it as an Authorization Bearer token, and Context7 uses it to apply your plan's limits. The connection still works without a key, at Context7's anonymous limits. Vercel Connect is not required.",
   },
   context: {
     logo: "context",
@@ -2704,7 +3021,9 @@ const instrumentationPresentations: Record<string, InstrumentationPresentation> 
 
 \`\`\`bash
 eve add instrumentation/braintrust
-\`\`\``,
+\`\`\`
+
+The integration requires \`braintrust\` 3.44.0 or later.`,
 
     quickStart: `eve installs Braintrust instrumentation:
 
@@ -2745,6 +3064,9 @@ import { PostHogTraceExporter } from "@posthog/ai/otel";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
   spanProcessors: [
     new SimpleSpanProcessor(
       new PostHogTraceExporter({
@@ -2782,6 +3104,9 @@ import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
   traceExporter: new OTLPHttpProtoTraceExporter({
     url: process.env.SENTRY_OTLP_TRACES_ENDPOINT!,
     headers: {
@@ -2790,7 +3115,7 @@ export default otelIntegration({
   }),
 });
 \`\`\``,
-    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
+    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. This integration uses Sentry's OTLP traces endpoint. Span events are dropped during ingestion. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   "datadog-instrumentation": {
     logo: "datadog",
@@ -2809,13 +3134,16 @@ import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
   traceExporter: new OTLPHttpProtoTraceExporter({
     url: process.env.DATADOG_OTLP_TRACES_ENDPOINT!,
     headers: { "dd-api-key": process.env.DD_API_KEY! },
   }),
 });
 \`\`\``,
-    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
+    configure: `Datadog's direct OTLP trace intake is site-specific; use the endpoint for your site in Datadog's OTLP traces intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
     relatedResources: [incidentResponseGuide],
   },
   "honeycomb-instrumentation": {
@@ -2836,6 +3164,9 @@ import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
   traceExporter: new OTLPHttpProtoTraceExporter({
     url: "https://api.honeycomb.io/v1/traces",
     headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
@@ -2862,6 +3193,9 @@ import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
   traceExporter: new OTLPHttpProtoTraceExporter({
     url: "https://otlp.arize.com/v1/traces",
     headers: {
@@ -2891,6 +3225,9 @@ import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
   traceExporter: new OTLPHttpProtoTraceExporter({
     url: "https://api.raindrop.ai/v1/traces",
     headers: {
@@ -2950,6 +3287,9 @@ import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
 import { otelIntegration } from "eve/instrumentation/otel";
 
 export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
   traceExporter: new OTLPHttpProtoTraceExporter({
     url: "http://localhost:4318/v1/traces",
   }),

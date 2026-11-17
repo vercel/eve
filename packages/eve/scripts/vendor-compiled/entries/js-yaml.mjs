@@ -1,1 +1,1 @@
-export { load } from "js-yaml";
+export { CORE_SCHEMA, loadAll, mergeTag } from "js-yaml";

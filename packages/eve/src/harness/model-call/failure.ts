@@ -9,7 +9,7 @@ import { createErrorId, createLogger, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
 import type { StepResult } from "#harness/types.js";
-import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import type { ErrorInfo, Usage } from "#protocol/session-events/envelope.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
@@ -30,7 +30,11 @@ export function modelCallErrorInfo(error: unknown): ErrorInfo {
   return { code: "MODEL_CALL_FAILED", message };
 }
 
-export async function reportModelCallFailure(step: Step, error: unknown): Promise<StepResult> {
+export async function reportModelCallFailure(
+  step: Step,
+  error: unknown,
+  usage?: Usage,
+): Promise<StepResult> {
   step.instrumentation?.recordError(error);
   if (step.emit === undefined) throw error;
   const { sessionId } = step.session;
@@ -49,6 +53,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
         code: "WORKFLOW_STREAM_WRITE_FAILED",
         details: { ...streamWriteDetails, errorId },
         message: toErrorMessage(error),
+        usage,
       }),
     );
     return { next: null, session: step.session };
@@ -92,6 +97,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
       details,
       message,
       ...(terminal && { terminal: true }),
+      usage,
     }),
   );
   if (terminal)
@@ -134,17 +140,11 @@ export async function reportCompactionFailure(
 ): Promise<StepResult> {
   const { sessionId } = step.session;
   log.error(error.message, { sessionId, turnId: step.position().turnId });
-  await step.apply(
-    fail(step.view(), {
-      code: "COMPACTION_FAILED",
-      message: error.message,
-      terminal: true,
-    }),
-  );
+  await step.apply(fail(step.view(), { code: "COMPACTION_FAILED", message: error.message }));
+  step.session = { ...step.session, outputSchema: undefined };
   return {
-    next: step.hasDelegatedCaller
-      ? { done: true, isError: true, output: error.message }
-      : { done: true, output: "" },
+    next: null,
     session: step.session,
+    settledTurn: { isError: true, output: error.message },
   };
 }

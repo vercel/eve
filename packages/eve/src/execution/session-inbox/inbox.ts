@@ -1,16 +1,5 @@
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
-import {
-  SESSION_INBOX_SESSION_ID_METADATA_KEY,
-  sessionInboxHookToken,
-} from "#execution/session-inbox/address.js";
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
-
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
-import {
-  claimHookOwnership,
-  disposeHook,
-  isHookForceClaimedError,
-} from "#execution/hook-ownership.js";
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunMessageBatch,
@@ -49,9 +38,23 @@ export type SessionInboxPayload =
   | WorkflowToolRunMessage
   | AuthorizationCallbackPayload;
 
-interface Source {
+export interface InboxHook extends AsyncIterable<
+  SessionInboxPayload | WorkflowToolRunMessageBatch
+> {
   readonly token: string;
-  readonly hook: Hook<SessionInboxPayload | WorkflowToolRunMessageBatch>;
+}
+
+export interface SessionInboxTransport<Hook extends InboxHook = InboxHook> {
+  open(token: string, options: { readonly force: boolean; readonly claimedAtStart: boolean }): Hook;
+  confirm(hook: Hook): Promise<void>;
+  dispose(hook: Hook): Promise<void>;
+  isTakenOver(error: unknown): boolean;
+  ownerRunId(): string;
+}
+
+interface Source<Hook extends InboxHook> {
+  readonly token: string;
+  readonly hook: Hook;
   registered?: Promise<void>;
   stopping: boolean;
   closed: boolean;
@@ -70,6 +73,7 @@ export interface SessionInboxReader {
   onInterrupt(handler: (payload: SessionInboxPayload) => void): () => void;
   onDelivery(handler: (payload: SessionInboxPayload) => void): () => void;
   restore(payloads: readonly SessionInboxPayload[]): void;
+  ownerRunId(): string;
 }
 
 export interface SessionHookClaimOptions {
@@ -116,8 +120,10 @@ function isDelivery(value: SessionInboxPayload): boolean {
   return value.kind === "send" || value.kind === "deliver";
 }
 
-export function createSessionInbox(sessionId: string): SessionInboxHandle {
-  const sources: Source[] = [];
+export function createSessionInbox<Hook extends InboxHook>(
+  transport: SessionInboxTransport<Hook>,
+): SessionInboxHandle {
+  const sources: Source<Hook>[] = [];
   const queue: SessionInboxPayload[] = [];
   const waiters = new Set<() => void>();
   const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
@@ -132,6 +138,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       }
     | undefined;
   let handoverObservation: SessionHandoverObservation | undefined;
+  const lateParts = new Map<string, Set<number>>();
   const blockedWaiters = new Set<() => void>();
   const arrivalWaiters = new Set<() => void>();
   let takenOver = false;
@@ -170,7 +177,11 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 
   const acceptHandover = (part: SessionHandoverPayload): void => {
     const current = handover;
-    if (current === undefined || part.attemptKey !== current.attemptKey) return;
+    if (current === undefined) {
+      acceptLatePart(part);
+      return;
+    }
+    if (part.attemptKey !== current.attemptKey) return;
     if (part.index < current.nextPart || current.parts.has(part.index)) return;
     current.parts.set(part.index, part);
     const restored: SessionInboxPayload[] = [];
@@ -197,7 +208,22 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     notify();
   };
 
-  const pump = async (source: Source): Promise<void> => {
+  const acceptLatePart = (part: SessionHandoverPayload): void => {
+    const seen = lateParts.get(part.attemptKey);
+    if (seen === undefined) return;
+    if (part.final === true) {
+      lateParts.delete(part.attemptKey);
+      return;
+    }
+    if (seen.has(part.index)) return;
+    seen.add(part.index);
+    queue.push(...part.payloads);
+    observe(deliveryHandlers, part.payloads, isDelivery);
+    observe(interruptHandlers, part.payloads, isInterrupt);
+    notify();
+  };
+
+  const pump = async (source: Source<Hook>): Promise<void> => {
     const iterator = source.hook[Symbol.asyncIterator]();
     try {
       while (!source.stopping) {
@@ -222,7 +248,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       }
     } catch (error) {
       if (source.stopping || source.replaced) return;
-      if (isHookForceClaimedError(error)) {
+      if (transport.isTakenOver(error)) {
         sources.splice(sources.indexOf(source), 1);
         takenOver = true;
       } else {
@@ -237,11 +263,12 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const stop = async (): Promise<void> => {
     const released = sources.splice(0);
     handover = undefined;
+    lateParts.clear();
     takenOver = false;
     stopped = true;
     for (const source of released) source.stopping = true;
     notify();
-    await Promise.all(released.map(({ hook }) => disposeHook(hook)));
+    await Promise.all(released.map(({ hook }) => transport.dispose(hook)));
     queue.splice(0);
     notify();
   };
@@ -256,17 +283,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     if (existing !== undefined && !force) return await existing.registered;
     if (existing === undefined && sources.length >= 256)
       throw new Error("A session may claim at most 256 addresses.");
-    const source: Source = {
+    const source: Source<Hook> = {
       token,
-      hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>(
-        options.claimedAtStart === true
-          ? { token: sessionInboxHookToken(token) }
-          : {
-              token: sessionInboxHookToken(token),
-              metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
-              ...(force && { experimental_force: true }),
-            },
-      ),
+      hook: transport.open(token, { force, claimedAtStart: options.claimedAtStart === true }),
       stopping: false,
       closed: false,
       replaced: false,
@@ -279,7 +298,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     }
     stopped = false;
     try {
-      const confirm = () => claimHookOwnership(source.hook);
+      const confirm = () => transport.confirm(source.hook);
       source.registered = options.confirmAfter?.then(confirm, confirm) ?? confirm();
       await source.registered;
       takenOver = false;
@@ -296,6 +315,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 
   return {
+    ownerRunId: () => transport.ownerRunId(),
     get handoverObservation() {
       return handoverObservation;
     },
@@ -309,7 +329,16 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       while (handover !== undefined) await wait();
     },
     abandonHandover(attemptKey) {
-      if (handover?.attemptKey === attemptKey) openHandover();
+      const current = handover;
+      if (current?.attemptKey !== attemptKey) return;
+      const seen = new Set(Array.from({ length: current.nextPart }, (_, index) => index));
+      const held = [...current.parts.values()].sort((a, b) => a.index - b.index);
+      const restored = held.flatMap((part) => (part.final === true ? [] : part.payloads));
+      for (const part of held) seen.add(part.index);
+      queue.splice(current.index, 0, ...restored);
+      lateParts.set(attemptKey, seen);
+      observe(interruptHandlers, restored, isInterrupt);
+      openHandover();
     },
     whenBlockedOnHandover() {
       return new Promise((resolve) => blockedWaiters.add(resolve));

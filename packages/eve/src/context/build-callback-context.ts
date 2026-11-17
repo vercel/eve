@@ -5,10 +5,12 @@ import { readSessionSchedule } from "#context/session-schedule.js";
 import { loadContext } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 export function buildCallbackContext(): SessionContext {
   const ctx = loadContext();
   const session = ctx.require(SessionKey);
+  const conversation = ctx.get(ConversationContextKey);
 
   return {
     session: {
@@ -19,6 +21,7 @@ export function buildCallbackContext(): SessionContext {
       schedule: readSessionSchedule(ctx),
       predecessor: session.predecessor,
     },
+    ...(conversation !== undefined && { conversation }),
 
     getSandbox: sandboxOf(ctx),
   };

@@ -76,6 +76,8 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
   columns: number;
   rows: number;
   #rawOutput = "";
+  #frames: string[] = [];
+  #synchronizing = false;
   #lines: string[] = [];
   #dimCells: string[] = [];
   #dim = false;
@@ -108,6 +110,7 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     const text = String(chunk);
     this.#rawOutput += text;
     this.#apply(text);
+    this.#recordFrame();
 
     if (typeof encodingOrCallback === "function") {
       encodingOrCallback();
@@ -138,6 +141,16 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
 
   rawOutput() {
     return this.#rawOutput;
+  }
+
+  frames(): readonly string[] {
+    return this.#frames;
+  }
+
+  #recordFrame() {
+    if (this.#synchronizing) return;
+    const frame = this.snapshot();
+    if (this.#frames.at(-1) !== frame) this.#frames.push(frame);
   }
 
   async waitForIdlePrompt(timeoutMs = 1000) {
@@ -238,6 +251,15 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       parameters[0] === undefined || parameters[0] === "" ? fallback : Number(parameters[0]);
 
     if (isPrivate) {
+      if (rawParameters === "?2026" && (command === "h" || command === "l")) {
+        if (command === "l") {
+          this.#synchronizing = false;
+          this.#recordFrame();
+        } else {
+          this.#recordFrame();
+          this.#synchronizing = true;
+        }
+      }
       if (rawParameters === "?1049" && (command === "h" || command === "l")) {
         if (command === "h") {
           this.#mainScreen = {

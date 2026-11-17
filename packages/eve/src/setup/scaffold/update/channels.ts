@@ -247,6 +247,7 @@ async function patchWebPackageJson(
     zod: resolveVersionToken("zodPackageVersion", options.zodPackageVersion),
     ...(authentication === "sign-in-with-vercel"
       ? {
+          "@opentelemetry/api": "1.9.0",
           "better-auth": resolveVersionToken(
             "betterAuthPackageVersion",
             options.betterAuthPackageVersion,

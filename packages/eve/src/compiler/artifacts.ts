@@ -7,6 +7,11 @@ import { normalizeLogicalPath } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  COMPILE_METADATA_KIND,
+  COMPILE_METADATA_VERSION,
+  type CompileMetadata,
+} from "#compiler/artifact-contract.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
   projectDiscoverDiagnostic,
@@ -23,10 +28,6 @@ import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared
 const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
 
 const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
-
-export const COMPILE_METADATA_KIND = "eve-compile-metadata";
-
-export const COMPILE_METADATA_VERSION = 6;
 
 export interface CompilerArtifactPaths {
   appRoot: string;
@@ -46,31 +47,6 @@ interface CompilerDiagnosticsArtifact {
   kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
   summary: DiscoverDiagnosticsSummary;
   version: typeof COMPILER_DIAGNOSTICS_ARTIFACT_VERSION;
-}
-
-interface CompileArtifactDigest {
-  path: string;
-  sha256: string;
-}
-
-export interface CompileMetadata {
-  compile: {
-    manifest: CompileArtifactDigest;
-    moduleMap: CompileArtifactDigest;
-  };
-  discovery: {
-    diagnostics: CompileArtifactDigest;
-    manifest: CompileArtifactDigest;
-    sourceGraphHash: string;
-    summary: DiscoverDiagnosticsSummary;
-  };
-  generator: {
-    name: string;
-    version: string;
-  };
-  kind: typeof COMPILE_METADATA_KIND;
-  status: "failed" | "ready";
-  version: typeof COMPILE_METADATA_VERSION;
 }
 
 export interface CompilerArtifactLocations {

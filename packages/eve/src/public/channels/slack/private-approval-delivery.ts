@@ -1,7 +1,10 @@
 import { createLogger, logError } from "#internal/logging.js";
-import type { SlackHandle } from "#public/channels/slack/api.js";
+import type { SlackHandle, SlackThread } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import type { SlackCardMessage } from "#public/channels/slack/renderers.js";
+import type {
+  SlackCardMessage,
+  SlackInteractionCardParts,
+} from "#public/channels/slack/renderers.js";
 import {
   type RenderedRequestCard,
   sendWithFallback,
@@ -77,6 +80,30 @@ export async function deliverPrivateInteraction(input: {
     );
     throw error;
   }
+}
+
+export async function deliverEphemeralInteraction(input: {
+  readonly card: RenderedRequestCard;
+  readonly channelId: string;
+  readonly reviewer: string;
+  readonly thread: Pick<SlackThread, "postEphemeral">;
+}): Promise<PrivateInteractionDelivery> {
+  const send = async (message: SlackCardMessage) => {
+    const posted = await input.thread.postEphemeral(input.reviewer, {
+      blocks: [...message.blocks],
+      text: message.text,
+    });
+    return { blocks: message.blocks, ts: posted.id };
+  };
+  const { fallback, parts } = input.card;
+  const posted = (await sendWithFallback(send, oneMessage(parts), oneMessage(fallback)))!;
+  return { blocks: posted.blocks, channelId: input.channelId, ts: posted.ts };
+}
+
+function oneMessage({ controls, details }: SlackInteractionCardParts): SlackCardMessage {
+  return details === undefined
+    ? controls
+    : { blocks: [...details.blocks, ...controls.blocks], text: controls.text };
 }
 
 async function resolveMessagePermalink(

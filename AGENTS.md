@@ -22,6 +22,7 @@ docs, prompts, comments, and headings.
 - `apps/fixtures` — shared agent fixtures used by e2e, TUI smoke tests, and local dev
 - `apps/frameworks`, `apps/templates`, `apps/docs` — framework integrations, templates, docs site
 - `docs` — published documentation content
+- `examples` — self-contained example agents built against the workspace `eve`
 - `e2e/` — fixture-owned `eve eval` end-to-end tests
 - `research` — issue-backed implementation plans for proposed changes
 
@@ -33,11 +34,14 @@ commit is missing the trailer, amend it with `git commit --amend -s --no-edit`
 before pushing.
 
 PR descriptions are reviewer-oriented explanations of the problem or decision
-behind the change, the solution, meaningful behavior changes, and validation—not
-file lists or commit logs. Keep the Summary short and lead with that
-justification before implementation details. Link a prior issue or discussion
-when one exists, call out important scope boundaries or preserved behavior, and
-report only checks actually run. Never create an issue solely to accompany a PR.
+behind the change, the solution, and meaningful behavior changes—not file lists
+or commit logs. Keep the Summary short and lead with that justification. Follow
+it with a Changes section: a flat list of the important changes, public API
+first, each with a short reason only when it is not obvious. Link a prior issue
+or discussion when one exists, and call out important scope boundaries or
+preserved behavior. Never include a
+Validation, Test plan, or Checklist section. Never create an issue solely to
+accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
 skill when drafting or updating one.
 
@@ -63,8 +67,9 @@ pnpm docs:check         # docs frontmatter and nav validation
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
 pnpm test:integration   # integration tests (several minutes; leave the full run to CI)
-pnpm test:scenario      # scenario tests (2–5 min; Turbo builds prerequisites)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
+pnpm test:scenario      # scenarios that run eve: eve dev, eve start, real files and shells (Turbo builds prerequisites)
+pnpm test:build         # building and packaging apps with eve: framework, production, and packaging builds (Turbo builds prerequisites)
+pnpm test:public-types  # type checks of the published declarations (Turbo builds prerequisites)
 pnpm test:webchat       # web chat template in headless Chromium (needs playwright-core's chromium-headless-shell)
 pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
@@ -170,12 +175,12 @@ CI.
     while fixing a bug or refactoring; well-named code is the documentation.
     Express an invariant as code that fails when it breaks: a named assert that
     throws with the reason in its message, a type, or a `pnpm guard:invariants`
-    rule. Rules 66 and 67 enforce this with no baseline.
+    rule. Rules 67 and 68 enforce this with no baseline.
 
 11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
     spec, one ordered plugin list, and one route table. Follow the foundation
     invariants in
-    [`research/nitro-3-rc-migration.md`](./research/nitro-3-rc-migration.md#foundation-invariants)
+    [`packages/eve/src/internal/nitro/AGENTS.md`](./packages/eve/src/internal/nitro/AGENTS.md)
     when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
@@ -204,12 +209,33 @@ assertion:
   subprocesses, or real network calls.
 - **Integration** (`src/**/*.integration.test.ts`): multiple modules in memory.
 - **Scenario** (`src/**/*.scenario.test.ts`, `test/scenarios/`): real
-  subprocess, HTTP port, or bundler.
+  subprocess, HTTP port, or bundler. Scenario files run in one of three areas:
+  - running eve (`vitest.scenario.config.ts`): `eve dev` and `eve start`
+    behavior, and small files that need a real filesystem or shell;
+  - building and packaging apps with eve (`vitest.build.config.ts`): the
+    `apps/frameworks` smoke builds (`framework-fixtures`), framework host
+    builds (`framework-builds`), `eve build` and its Nitro and Vercel output
+    (`production-build`), and consumers of the packed tarball and its CLI
+    (`packaging`);
+  - type checks of the published declarations
+    (`vitest.public-types.config.ts`).
+
+  A new scenario file runs eve unless it is listed in
+  `packages/eve/vitest.scenario-shared.ts`; add build and packaging files
+  there.
+
 - **E2E** (`e2e/fixtures/*/evals/`): fixture-owned `eve eval` suites that run
   only in CI. The model suite (`e2e-local`) runs real matrix models against
   the local world; the world suites (`e2e-vercel`, …) run deterministic mock
   models (`EVE_E2E_MODEL=mock`) and exclude `real-model`-tagged evals. See
   [`e2e/README.md`](./e2e/README.md).
+
+Windows CI runs every integration file except those whose first line is
+`// @linux-only: <reason>`. Mark a file only when none of its tests touches
+anything Windows can change: filesystem paths and links, file watching,
+processes and signals, module loading, bundling, the CLI, the dev host, or
+Workflow's local World on disk. Agent and session behavior compiled from
+memory, on either host, is the same on every OS. Unmarked files run on Windows.
 
 **Running a single file or filtered test: always pass the tier config.** Only
 the `vitest.<tier>.config.ts` files alias `#*` imports to `./src`; a bare
@@ -218,7 +244,9 @@ testing stale builds. Use:
 
 ```sh
 pnpm --filter eve exec vitest run --config vitest.unit.config.ts <path-or-pattern>
-# or vitest.integration.config.ts / vitest.scenario.config.ts for those tiers
+# or vitest.integration.config.ts / vitest.scenario.config.ts for those tiers,
+# and vitest.build.config.ts (add --project <name>) / vitest.public-types.config.ts
+# for the scenario files they run
 ```
 
 Add `-t "<name>"` to filter by test name. If you touched anything under

@@ -1,35 +1,3 @@
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
-import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
-import { isObject } from "#shared/guards.js";
-import { encodeLegacyCommand, resolveLegacyInbox } from "./inbox.js";
-
-export async function resumeAuthorizationCallback(
-  token: string,
-  payload: AuthorizationCallbackPayload,
-): Promise<void> {
-  try {
-    await resumeRunnableHook(token, payload);
-    return;
-  } catch (error) {
-    if (!HookNotFoundError.is(error)) throw error;
-  }
-  const target = await resolveLegacyInbox(token);
-  if (target.current)
-    throw new Error(
-      "Authorization was interrupted by the session upgrade. Request authorization again.",
-    );
-  const metadata = await target.hook.metadata;
-  await resumeHook(
-    target.hook.token,
-    encodeLegacyCommand(
-      { kind: "deliver", payloads: payload.payloads },
-      isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
-    ),
-  );
-}
-
 export async function handleExpiredLegacyAuthorization(): Promise<Response> {
   return Response.json(
     {

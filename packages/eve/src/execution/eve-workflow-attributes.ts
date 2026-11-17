@@ -10,6 +10,7 @@ import {
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
   ConversationContextKey,
   normalizeConversationContext,
@@ -61,21 +62,33 @@ export function readChannelKind(serializedContext: Record<string, unknown>): str
 
 export function isWorkflowTraceContentVisible(serializedContext: Record<string, unknown>): boolean {
   const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
-  if (seed !== undefined) {
-    const traceState = resolveForwardedTraceSeed(seed)!;
+  const traceState = seed === undefined ? undefined : resolveForwardedTraceSeed(seed)!;
+  if (traceState !== undefined) {
     if (
       traceState.forwardedTracePolicy !== undefined ||
       readParentSessionId(serializedContext) !== undefined
     ) {
-      const decision = traceState.decision;
-      return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
+      return recordsAllContent(traceState.decision);
     }
   }
   const conversation = normalizeConversationContext(serializedContext[ConversationContextKey.name]);
-  return shouldCaptureInstrumentationContent({
+  const content = {
     audience: conversation?.audience ?? "unknown",
     environment: conversation?.environment ?? "production",
-  });
+  };
+  const visibleByDefault = shouldCaptureInstrumentationContent(content);
+  if (
+    !visibleByDefault ||
+    traceState?.decision === undefined ||
+    !isWorkflowOtelTraceEnabled(serializedContext)
+  ) {
+    return visibleByDefault;
+  }
+  return recordsAllContent(traceState.decision);
+}
+
+function recordsAllContent(decision: InstrumentationDecision | undefined): boolean {
+  return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
 }
 
 function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {

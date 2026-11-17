@@ -11,6 +11,17 @@ const SCENARIO_CACHE_ROOT = join(tmpdir(), "eve-scenario-cache");
 const PREBUILT_EVE_ENTRY = join(EVE_PACKAGE_ROOT, "dist", "src", "index.js");
 
 export default async function packScenarioTarball(): Promise<() => Promise<void>> {
+  const packed = process.env.EVE_SCENARIO_EVE_TARBALL_PATH;
+  if (
+    packed !== undefined &&
+    (await access(packed).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    return async () => {};
+  }
+
   try {
     await access(PREBUILT_EVE_ENTRY);
   } catch {

@@ -68,6 +68,12 @@ describe("eve-discord-agent-template", () => {
     ]);
     for (const [path, content] of generated) {
       let expected = content;
+      if (path === "agent/channels/discord.ts" || path === "daemon/main.ts") {
+        expected = expected.replace(
+          `connectDiscordCredentials(${JSON.stringify(connectorUid)})`,
+          `connectDiscordCredentials(\n    process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)},\n  )`,
+        );
+      }
       if (path === "daemon/package.json") {
         const manifest = JSON.parse(content) as { dependencies: Record<string, string> };
         for (const name of Object.keys(manifest.dependencies)) {
@@ -75,18 +81,10 @@ describe("eve-discord-agent-template", () => {
         }
         expected = `${JSON.stringify(manifest, null, 2)}\n`;
       }
-      if (path === "daemon/main.ts") {
-        expected = expected
-          .replace(
-            'import { runDiscordGatewayRelay } from "eve/experimental/channels/discord/gateway";',
-            'import { experimental_runDiscordGatewayRelay } from "eve/channels/discord/gateway";',
-          )
-          .replace("await runDiscordGatewayRelay(", "await experimental_runDiscordGatewayRelay(");
-      }
       expect(await readTemplateFile(path), path).toBe(expected);
     }
     expect(await readTemplateFile("agent/tools/read_recent_messages.ts")).toContain(
-      `const DISCORD_CONNECTOR = ${JSON.stringify(connectorUid)};`,
+      `process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)};`,
     );
   });
 });

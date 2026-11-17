@@ -15,9 +15,20 @@ import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/mes
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import type { CompactionConfig, CompactionState } from "#harness/types.js";
+import type {
+  CompactionConfig,
+  CompactionStage,
+  CompactionState,
+  PromptMeasurement,
+} from "#harness/types.js";
 
 const KEPT_TAIL_TOKENS = 20_000;
+
+const DEFAULT_ESTIMATE_RATIO = 1.6;
+
+export function estimateRatio(config: CompactionState): number {
+  return config.estimateRatio ?? DEFAULT_ESTIMATE_RATIO;
+}
 
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 
@@ -54,28 +65,92 @@ export function getInputTokenCount(
 }
 
 export function withoutPromptMeasurement(config: CompactionState): CompactionState {
-  const { lastKnownInputTokens: _input, lastKnownPromptMessageCount: _count, ...rest } = config;
+  const {
+    lastKnownInputTokens: _input,
+    lastKnownPromptMessageCount: _count,
+    measurementsByModel: _byModel,
+    ...rest
+  } = config;
   return rest;
 }
 
 export function withPromptMeasurement(
   config: CompactionState,
   measured: {
+    readonly promptMessages?: readonly ModelMessage[];
     readonly inputTokens?: number;
+    readonly modelId: string;
     readonly promptMessageCount?: number;
     readonly requestEnvelopeTokens?: number;
   },
 ): CompactionState {
-  const { requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
-  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return next;
-  return {
-    ...next,
-    lastKnownInputTokens: measured.inputTokens,
-    lastKnownPromptMessageCount: measured.promptMessageCount,
+  const { lastStage, requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
+  const { measurementsByModel } = config;
+  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) {
+    return measurementsByModel === undefined ? next : { ...next, measurementsByModel };
+  }
+  const { inputTokens } = measured;
+  const estimatedTokens =
+    measured.promptMessages === undefined
+      ? undefined
+      : estimateTokens(measured.promptMessages) + (measured.requestEnvelopeTokens ?? 0);
+  const measurement: PromptMeasurement = {
+    inputTokens: measured.inputTokens,
+    promptMessageCount: measured.promptMessageCount,
     ...(measured.requestEnvelopeTokens !== undefined && {
       requestEnvelopeTokens: measured.requestEnvelopeTokens,
     }),
   };
+  return {
+    ...next,
+    ...(lastStage !== undefined && config.lastKnownInputTokens === undefined && { lastStage }),
+    ...(estimatedTokens !== undefined &&
+      estimatedTokens > 0 &&
+      inputTokens > 0 && { estimateRatio: inputTokens / estimatedTokens }),
+    lastKnownInputTokens: measurement.inputTokens,
+    lastKnownPromptMessageCount: measurement.promptMessageCount,
+    ...(measurement.requestEnvelopeTokens !== undefined && {
+      requestEnvelopeTokens: measurement.requestEnvelopeTokens,
+    }),
+    measurementsByModel: { ...measurementsByModel, [measured.modelId]: measurement },
+  };
+}
+
+export function withModelPromptMeasurement(
+  config: CompactionState,
+  modelId: string,
+  prompt?: {
+    readonly messages: readonly ModelMessage[];
+    readonly requestEnvelopeTokens: number;
+  },
+): CompactionState {
+  const own = config.measurementsByModel?.[modelId];
+  if (own === undefined) return config;
+  const { requestEnvelopeTokens: _envelope, ...rest } = config;
+  const selected = {
+    ...rest,
+    lastKnownInputTokens: own.inputTokens,
+    lastKnownPromptMessageCount: own.promptMessageCount,
+    ...(own.requestEnvelopeTokens !== undefined && {
+      requestEnvelopeTokens: own.requestEnvelopeTokens,
+    }),
+  };
+  if (prompt !== undefined) {
+    const ownTokens = getInputTokenCount(
+      prompt.messages,
+      selected,
+      prompt.requestEnvelopeTokens,
+      own.requestEnvelopeTokens,
+    );
+    const latestTokens = getInputTokenCount(
+      prompt.messages,
+      config,
+      prompt.requestEnvelopeTokens,
+      config.requestEnvelopeTokens,
+    );
+    if (latestTokens > ownTokens) return config;
+  }
+  return selected;
 }
 
 export function shouldCompact(
@@ -97,69 +172,75 @@ export type CompactionSummarizer = (prompt: {
   readonly system: string;
 }) => Promise<string>;
 
-interface CompactionHeuristicInput {
-  readonly config: CompactionConfig;
-  readonly older: readonly ModelMessage[];
-  readonly previousCheckpoint: string | undefined;
-  readonly recent: readonly ModelMessage[];
-  readonly replay: ModelMessage | undefined;
-  readonly resume: boolean;
-  readonly tokenEstimateAdjustment: number;
-}
-
-type CompactionHeuristicOutcome =
-  | { readonly messages: ModelMessage[]; readonly type: "within-limit" }
-  | { readonly type: "insufficient" };
-
-type CompactionHeuristic = (input: CompactionHeuristicInput) => CompactionHeuristicOutcome;
-
-const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolResultCapHeuristic];
-
-function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
-  const checkpointHead: ModelMessage[] =
-    input.previousCheckpoint === undefined
-      ? []
-      : [
-          createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
-          { content: input.previousCheckpoint, role: "assistant" },
-        ];
-  const kept = [...checkpointHead, ...capToolResults(input.older), ...input.recent];
-  const capped = input.resume ? resumeAfter(kept, input.replay, input.config.threshold) : kept;
-
-  const evaluation = evaluateThreshold(
-    capped,
-    input.config,
-    "should-compact",
-    input.tokenEstimateAdjustment,
-  );
-  return evaluation.type === "within-limit"
-    ? { messages: capped, type: "within-limit" }
-    : { type: "insufficient" };
-}
-
 function evaluateThreshold(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
-  ruler: "estimate" | "should-compact",
-  tokenEstimateAdjustment = 0,
 ): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
-  const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
-  const estimatedTokens = estimateTokens(messages) + overhead + tokenEstimateAdjustment;
+  const estimatedTokens = estimateTokens(messages);
   return {
     estimatedTokens,
     type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
   };
 }
 
+function startStage(lastStage: CompactionStage | undefined): CompactionStage {
+  if (lastStage === undefined) return "tail";
+  return lastStage === "tail" ? "text-tail" : "summary-only";
+}
+
+interface CompactionHeuristicInput {
+  readonly config: CompactionConfig;
+  readonly conversation: readonly ModelMessage[];
+  readonly forceSummary: boolean;
+  readonly previousCheckpoint: string | undefined;
+  readonly resume: boolean;
+  readonly summarize: CompactionSummarizer;
+}
+
+type CompactionHeuristicOutcome =
+  | {
+      readonly messages: ModelMessage[];
+      readonly stage: CompactionStage;
+      readonly type: "compacted";
+    }
+  | { readonly type: "insufficient" };
+
+type CompactionHeuristic = (input: CompactionHeuristicInput) => Promise<CompactionHeuristicOutcome>;
+
+const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [fixedTailHeuristic];
+
 export async function compactMessages(
   messages: ModelMessage[],
   config: CompactionConfig,
   summarize: CompactionSummarizer,
   forceSummary = false,
-  historyInputTokenCount?: number,
   resume = true,
-): Promise<ModelMessage[]> {
+): Promise<{ readonly messages: ModelMessage[]; readonly stage: CompactionStage }> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  for (const heuristic of COMPACTION_HEURISTICS) {
+    const outcome = await heuristic({
+      config,
+      conversation,
+      forceSummary,
+      previousCheckpoint,
+      resume,
+      summarize,
+    });
+    if (outcome.type === "compacted") {
+      return { messages: outcome.messages, stage: outcome.stage };
+    }
+  }
+  throw overLimitError(config);
+}
+
+async function fixedTailHeuristic({
+  config,
+  conversation,
+  forceSummary,
+  previousCheckpoint,
+  resume,
+  summarize,
+}: CompactionHeuristicInput): Promise<CompactionHeuristicOutcome> {
   const withResumptionGuard: typeof resumeAfter = (kept, replay, threshold) =>
     resume ? resumeAfter(kept, replay, threshold) : kept;
   const budget = keptTailBudget(config);
@@ -181,32 +262,7 @@ export async function compactMessages(
     return { currentIndex: index, fit, keep, replay };
   };
 
-  const first = planTail(conversation);
-  if (!forceSummary && first.fit === undefined) {
-    const { older, recent } = splitMessagesForCompaction(conversation, first.keep);
-    if (older.length === 0 && previousCheckpoint === undefined) {
-      return keepNonToolResultMessages(recent);
-    }
-
-    const tokenEstimateAdjustment = Math.max(
-      0,
-      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
-    );
-    for (const heuristic of COMPACTION_HEURISTICS) {
-      const outcome = heuristic({
-        config,
-        older,
-        previousCheckpoint,
-        recent,
-        replay: first.replay,
-        resume,
-        tokenEstimateAdjustment,
-      });
-      if (outcome.type === "within-limit") {
-        return outcome.messages;
-      }
-    }
-  }
+  const start = startStage(config.lastStage);
 
   const cappedConversation = capToolResults(conversation);
   const summaryPlan = planTail(cappedConversation);
@@ -222,19 +278,17 @@ export async function compactMessages(
       ? floorCut
       : noFiles;
   const floor = withResumptionGuard(checkpointHead(""), floorRequest, Number.POSITIVE_INFINITY);
-  if (evaluateThreshold(floor, config, "estimate").type === "over-limit") {
-    throw new CompactionOverLimitError(
-      `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
-    );
+  if (evaluateThreshold(floor, config).type === "over-limit") {
+    throw overLimitError(config);
   }
 
-  const { older, recent } = splitMessagesForCompaction(cappedConversation, keep);
+  const { recent } = splitMessagesForCompaction(cappedConversation, keep);
 
   const summaryPrompt = createCompactionPrompt({
     messages:
       fit === undefined
-        ? older
-        : older.map((message, index) => (index === currentIndex ? fit.cut : message)),
+        ? cappedConversation
+        : cappedConversation.map((message, index) => (index === currentIndex ? fit.cut : message)),
     previousCheckpoint,
     transcriptBudgetTokens: config.threshold,
   });
@@ -245,30 +299,37 @@ export async function compactMessages(
   });
 
   const fits = (candidate: readonly ModelMessage[]) =>
-    evaluateThreshold(candidate, config, "estimate").type === "within-limit";
+    evaluateThreshold(candidate, config).type === "within-limit";
+  const ratio = estimateRatio(config);
+  const reachesTarget = (candidate: readonly ModelMessage[]) =>
+    Math.ceil(estimateTokens(candidate) * ratio) <= config.target;
 
-  const verbatim = withResumptionGuard(
-    [...checkpointHead(summary), ...recent],
-    replay,
-    config.threshold,
-  );
-  if (fits(verbatim)) {
-    return verbatim;
+  if (start === "tail") {
+    const verbatim = withResumptionGuard(
+      [...checkpointHead(summary), ...recent],
+      replay,
+      config.threshold,
+    );
+    if (reachesTarget(verbatim)) {
+      return { messages: verbatim, stage: "tail", type: "compacted" };
+    }
   }
 
-  const textTail = keepNonToolResultMessages(recent);
-  const stripped = withResumptionGuard(
-    [...checkpointHead(summary), ...textTail],
-    replay,
-    config.threshold,
-  );
-  if (fits(stripped)) {
-    return stripped;
+  if (start !== "summary-only") {
+    const textTail = keepNonToolResultMessages(recent);
+    const stripped = withResumptionGuard(
+      [...checkpointHead(summary), ...textTail],
+      replay,
+      config.threshold,
+    );
+    if (reachesTarget(stripped)) {
+      return { messages: stripped, stage: "text-tail", type: "compacted" };
+    }
   }
 
   const noTail = withResumptionGuard(checkpointHead(summary), replay, config.threshold);
   if (fits(noTail)) {
-    return noTail;
+    return { messages: noTail, stage: "summary-only", type: "compacted" };
   }
 
   const withClippedSummary = (request: ModelMessage | undefined): ModelMessage[] | undefined => {
@@ -300,7 +361,7 @@ export async function compactMessages(
 
   const clipped = withClippedSummary(replay);
   if (clipped !== undefined) {
-    return clipped;
+    return { messages: clipped, stage: "summary-only", type: "compacted" };
   }
 
   const requestBudget =
@@ -310,13 +371,14 @@ export async function compactMessages(
     noFiles === undefined
       ? undefined
       : (fitCurrentMessage(noFiles, requestBudget)?.replay ?? noFiles);
-  const cutRequest = withClippedSummary(request);
-  if (cutRequest === undefined) {
-    throw new CompactionOverLimitError(
-      `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
-    );
-  }
-  return cutRequest;
+  const cutRequest = withClippedSummary(request) ?? withClippedSummary(floorRequest) ?? floor;
+  return { messages: cutRequest, stage: "summary-only", type: "compacted" };
+}
+
+function overLimitError(config: CompactionConfig): CompactionOverLimitError {
+  return new CompactionOverLimitError(
+    `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it. Shorten the instructions, remove tools or trim memory, or raise \`compaction.threshold\`.`,
+  );
 }
 
 const CAPPED_RESULT_ANNOTATION =

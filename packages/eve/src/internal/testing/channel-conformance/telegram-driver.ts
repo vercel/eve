@@ -43,18 +43,16 @@ function messageIdOf(call: PlatformCall): number {
 
 function inlineOptions(call: PlatformCall): RenderedOption[] {
   const messageId = messageIdOf(call);
-  return ((call.body as MessageBody).reply_markup?.inline_keyboard ?? [])
-    .flat()
-    .flatMap((button) =>
-      button.callback_data === undefined
-        ? []
-        : [
-            {
-              handle: { data: button.callback_data, messageId } satisfies PressHandle,
-              label: button.text,
-            },
-          ],
-    );
+  return ((call.body as MessageBody).reply_markup?.inline_keyboard ?? []).flat().flatMap((button) =>
+    button.callback_data === undefined
+      ? []
+      : [
+          {
+            handle: { data: button.callback_data, messageId } satisfies PressHandle,
+            label: button.text,
+          },
+        ],
+  );
 }
 
 export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
@@ -148,6 +146,9 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
+    space: group
+      ? { id: `telegram:${CHAT.id}`, type: "shared" }
+      : { id: `telegram:${CHAT.id}`, type: "direct", visibility: "private" },
     personId: String(PERSON.id),
     capabilities: !group
       ? ["attachments", "buttons", "text-replies"]

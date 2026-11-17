@@ -1,11 +1,10 @@
-import TurndownService from "#compiled/turndown/index.js";
-
 import type {
   TeamsAttachment,
   TeamsChannelAccount,
   TeamsMention,
 } from "#public/channels/teams/api.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
+import { convertHtmlToMarkdown } from "#shared/html-to-markdown.js";
 import { parseJsonObject } from "#shared/json.js";
 
 /**
@@ -85,7 +84,6 @@ const HTML_ENTITY_MAP: Record<string, string> = {
   "&#x27;": "'",
 };
 const HTML_ENTITY_PATTERN = new RegExp(Object.keys(HTML_ENTITY_MAP).join("|"), "gi");
-let turndownService: TurndownService | null = null;
 
 /** Inbound context rendered into the model-visible `<teams_context>` block. */
 export interface TeamsInboundContext {
@@ -292,10 +290,7 @@ function normalizeTeamsText(text: string): string {
   const value = text.trim();
   if (!looksLikeHtml(value)) return decodeHtmlEntities(value);
 
-  return getTurndownService()
-    .turndown(value.replace(/<at>(.*?)<\/at>/gi, "@$1"))
-    .replace(/ {2}\n/g, "\n")
-    .trim();
+  return convertHtmlToMarkdown(value.replace(/<at>(.*?)<\/at>/gi, "@$1"));
 }
 
 function readNestedString(
@@ -319,15 +314,4 @@ function decodeHtmlEntities(value: string): string {
     HTML_ENTITY_PATTERN,
     (match) => HTML_ENTITY_MAP[match.toLowerCase()] ?? match,
   );
-}
-
-function getTurndownService(): TurndownService {
-  turndownService ??= new TurndownService({
-    bulletListMarker: "-",
-    codeBlockStyle: "fenced",
-    emDelimiter: "*",
-    headingStyle: "atx",
-    hr: "---",
-  });
-  return turndownService;
 }

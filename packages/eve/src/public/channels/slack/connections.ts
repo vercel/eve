@@ -53,12 +53,12 @@ export function buildAuthEphemeralBlocks(
   },
 ): unknown[] {
   const origin = hasText(input.requestedInChannelId)
-    ? ` This is for your request in <#${input.requestedInChannelId}>.`
-    : "";
+    ? `This is for your request in <#${input.requestedInChannelId}>.`
+    : undefined;
   const intro =
     input.cancel === undefined
-      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account.${origin}`
-      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel.${origin}`;
+      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account.${origin === undefined ? "" : ` ${origin}`}`
+      : `*Connect ${input.displayName}*${origin === undefined ? "" : `\n${origin}`}`;
   const blocks: unknown[] = [
     {
       type: "section",

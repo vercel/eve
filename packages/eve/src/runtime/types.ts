@@ -68,6 +68,7 @@ export type ResolvedSkillDefinition = Readonly<
 export type ResolvedScheduleDefinition = Readonly<
   SourceRef & {
     readonly cron: string;
+    readonly timezone?: string;
     readonly name: string;
     readonly markdown?: string;
     readonly hasRun: boolean;
@@ -231,6 +232,11 @@ export type ResolvedMemoryDefinition = Readonly<
 export interface ResolvedScheduleCollection extends Readonly<ModuleSourceRef> {
   readonly name: string;
   readonly definition: DynamicSchedulesDefinition<unknown>;
+  readonly namedScope?: {
+    readonly definition: string;
+    readonly name: string;
+    readonly description?: string;
+  };
   readonly offersTools?: true;
 }
 

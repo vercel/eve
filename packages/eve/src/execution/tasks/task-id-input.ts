@@ -58,9 +58,11 @@ export interface ServeCallInput {
   readonly taskId?: string;
 }
 
+const ABSENT_TASK_IDS: ReadonlySet<string> = new Set(["", "undefined", "null"]);
+
 export function splitTaskIdInput(modelInput: JsonObject): ServeCallInput {
   const { [TASK_ID_INPUT]: taskId, ...input } = modelInput;
-  if (typeof taskId !== "string" || taskId === "") return { input };
+  if (typeof taskId !== "string" || ABSENT_TASK_IDS.has(taskId)) return { input };
   return { input, taskId };
 }
 

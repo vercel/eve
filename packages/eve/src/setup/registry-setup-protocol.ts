@@ -34,6 +34,18 @@ export type RegistrySetupOutcome =
   | { kind: "cancelled" }
   | { kind: "failed"; error: RegistrySetupError };
 
+export const REGISTRY_SETUP_SEARCH_QUERY = "\0query\0";
+
+export interface RegistrySetupSearchAction {
+  labelTemplate: string;
+}
+
+export type RegistrySetupSelectOptions =
+  | (Omit<SingleSelectOptions<PrompterValue>, "searchAction"> & {
+      searchAction?: RegistrySetupSearchAction;
+    })
+  | MultiSelectOptions<PrompterValue>;
+
 export type RegistrySetupPrompt =
   | {
       kind: "text" | "password";
@@ -44,7 +56,7 @@ export type RegistrySetupPrompt =
     }
   | {
       kind: "select";
-      options: SingleSelectOptions<PrompterValue> | MultiSelectOptions<PrompterValue>;
+      options: RegistrySetupSelectOptions;
     }
   | {
       kind: "editable-select";

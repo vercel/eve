@@ -14,11 +14,17 @@ export interface SessionTimeoutControl {
   start(): Promise<void>;
 }
 
-export function createSessionTimeoutControl(input: {
+export interface SessionTimeoutInput {
   readonly deadline?: Date;
   readonly sessionId: string;
   readonly timeoutMs: number | false;
-}): SessionTimeoutControl | undefined {
+}
+
+export type SessionTimeouts = (input: SessionTimeoutInput) => SessionTimeoutControl | undefined;
+
+export function createSessionTimeoutControl(
+  input: SessionTimeoutInput,
+): SessionTimeoutControl | undefined {
   const { sessionId, timeoutMs } = input;
   if (timeoutMs === false) return undefined;
   let lastActivityAt =

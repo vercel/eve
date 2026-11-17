@@ -12,7 +12,7 @@ import { isLogLevelEnabled } from "#internal/logging.js";
 
 interface CliLiveRow {
   update(message: string, detail?: string): void;
-  stop(): void;
+  stop(options?: { readonly keepOnScreen?: boolean }): void;
 }
 
 interface CliLiveRowLogger {
@@ -168,11 +168,13 @@ export function startCliLiveRow(
       paint();
       if (pulseTimer === undefined) schedulePulseStep();
     },
-    stop() {
+    stop(stopOptions) {
       if (stopped) return;
       stopped = true;
       if (pulseTimer !== undefined) clearTimeout(pulseTimer);
-      if (live !== undefined && painted) live.clear();
+      if (live === undefined || !painted) return;
+      if (stopOptions?.keepOnScreen === true) live.release();
+      else live.clear();
     },
   };
 }

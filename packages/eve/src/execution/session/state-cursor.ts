@@ -1,7 +1,7 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type {
-  SessionHistoryStepState,
-  SessionStepState,
+  SessionHistoryStepInput,
+  SessionStepInput,
 } from "#execution/publish-session-events.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import {
@@ -48,7 +48,7 @@ export class SessionStateCursor {
   }
 
   async advance<T extends SessionStateTransition>(
-    step: (state: SessionStepState) => Promise<T>,
+    step: (state: SessionStepInput) => Promise<T>,
   ): Promise<T> {
     const { serializedContext, sessionState } = this.values;
     return await this.adopt(
@@ -58,7 +58,7 @@ export class SessionStateCursor {
   }
 
   async advanceWithHistory<T extends SessionStateTransition>(
-    step: (state: SessionHistoryStepState) => Promise<T>,
+    step: (state: SessionHistoryStepInput) => Promise<T>,
   ): Promise<T> {
     return await this.adopt(() => step({ ...this.values, sessionWritable: this.sessionWritable }), {
       withHistory: true,
@@ -66,7 +66,7 @@ export class SessionStateCursor {
   }
 
   async advanceBeside<T extends SessionStateTransition>(
-    step: (state: SessionStepState) => Promise<T>,
+    step: (state: SessionStepInput) => Promise<T>,
     wanted: () => boolean,
   ): Promise<boolean> {
     const base = this.values;

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -11,8 +10,8 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type {
@@ -40,7 +39,7 @@ describe("sign-in signals in tool output", () => {
       try {
         const asked = await stream.nextUntil("first sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [docsCallback(signInId(asked))],
         });
@@ -229,20 +228,18 @@ function userAuth(principalId: string) {
 }
 
 async function startAliceRun(continuationToken: string) {
-  return await startSessionOwner(workflowEntry, [
-    {
-      kind: "initial",
-      ownerDeploymentId: "dpl_inline",
-      input: {
-        message: "Use read_note to read the handoff note, then read_docs to list my documents.",
-      },
-      serializedContext: buildSerializedContext({
-        auth: userAuth("alice"),
-        channelKind: "http",
-        continuationToken,
-      }),
+  return await startTestSession("in-process", {
+    kind: "initial",
+    ownerDeploymentId: "dpl_inline",
+    input: {
+      message: "Use read_note to read the handoff note, then read_docs to list my documents.",
     },
-  ]);
+    serializedContext: buildSerializedContext({
+      auth: userAuth("alice"),
+      channelKind: "http",
+      continuationToken,
+    }),
+  });
 }
 
 function docsCallback(attemptId: string) {

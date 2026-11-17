@@ -16,6 +16,7 @@ type NetworkPolicySandboxSession = SandboxSession & {
 import {
   executeGitHubShell,
   githubShellApproval,
+  isGitHubCommandInputError,
   parseCommand,
   type GitHubAppAuthorizeRequest,
   type GitHubLeaseRule,
@@ -883,19 +884,33 @@ test("a lease breaks a lock whose holder stopped", async () => {
 test("a lease waits on the host and stops when its call is cancelled", async () => {
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
+  const controller = new AbortController();
+  let resolveRetried!: () => void;
+  let rejectRetried!: (reason: unknown) => void;
+  const retried = new Promise<void>((resolve, reject) => {
+    resolveRetried = resolve;
+    rejectRetried = reject;
+  });
+  const watchdog = setTimeout(() => {
+    const error = new Error("Timed out waiting for two busy lease responses");
+    controller.abort(error);
+    rejectRetried(error);
+  }, 10_000);
+  let waiting: Promise<void> | undefined;
   try {
     execFileSync("mkdir", [lockPath]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
     let attempts = 0;
     const sandboxFake: Pick<SandboxSession, "run"> = {
-      run(input) {
-        attempts += 1;
-        return runLockCommand(input.command, lockPath);
+      async run(input) {
+        const result = await runLockCommand(input.command, lockPath);
+        assert.equal(result.exitCode, 75);
+        if (++attempts === 2) resolveRetried();
+        return result;
       },
     };
-    const controller = new AbortController();
     let ran = false;
-    const waiting = withSandboxLeaseLock(
+    waiting = withSandboxLeaseLock(
       sandboxFake as SandboxSession,
       "waiter",
       async () => {
@@ -903,16 +918,95 @@ test("a lease waits on the host and stops when its call is cancelled", async () 
       },
       { signal: controller.signal },
     );
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    assert.ok(attempts > 1);
+    void waiting.catch(rejectRetried);
+    await retried;
+    await new Promise<void>((resolve) => setImmediate(resolve));
     controller.abort(new Error("cancelled"));
     await assert.rejects(waiting, /cancelled/u);
     assert.equal(ran, false);
     assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "holder");
   } finally {
+    clearTimeout(watchdog);
+    controller.abort(new Error("test cleanup"));
+    await waiting?.catch(() => undefined);
     rmSync(lockRoot, { recursive: true, force: true });
   }
 });
+
+test("a stale lock's release that can't take the guard leaves the policy to the next holder", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
+    let cleaned = false;
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
+      cleanup: async () => {
+        cleaned = true;
+      },
+    });
+    assert.equal(cleaned, false);
+    assert.equal(
+      execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }),
+      "lease.lock\nlease.lock.guard\n",
+    );
+    assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "holder");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a fresh lock's release cleans up even when the guard is busy", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    let cleaned = false;
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
+      cleanup: async () => {
+        cleaned = true;
+      },
+    });
+    assert.equal(cleaned, true);
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock.guard\n");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a release breaks a guard a stopped sandbox left behind", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", `${lockPath}.guard`]);
+    let cleanedWhileHeld = "";
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
+      cleanup: async () => {
+        cleanedWhileHeld = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+      },
+    });
+    assert.equal(cleanedWhileHeld, "holder");
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+function heldLockSandbox(lockPath: string): SandboxSession {
+  let calls = 0;
+  const sandbox: Pick<SandboxSession, "run"> = {
+    async run(input: Parameters<SandboxSession["run"]>[0]) {
+      calls += 1;
+      if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
+      return runLockCommand(input.command, lockPath);
+    },
+  };
+  return sandbox as SandboxSession;
+}
 
 async function runLockCommand(
   command: string,
@@ -960,3 +1054,76 @@ function fakeSandbox(
   };
   return sandbox as NetworkPolicySandboxSession;
 }
+
+test("names the refusals the agent can fix by changing its input", async () => {
+  const dependencies = (result = { exitCode: 0, stdout: "", stderr: "" }) => ({
+    sessionId: "session-1",
+    async getConnectToken() {
+      return "token";
+    },
+    async getSandbox() {
+      return fakeSandbox([], result);
+    },
+  });
+  const attributed = {
+    ...CONFIG,
+    attribution: () => ({ name: "octocat", email: "1+octocat@users.noreply.github.com" }),
+  };
+  const refusals: Array<[GitHubShellInput, typeof CONFIG, ReturnType<typeof dependencies>]> = [
+    [{ ...READ, command: "gh pr view 1 | cat" }, CONFIG, dependencies()],
+    [{ ...READ, repository: "not/a/repository" }, CONFIG, dependencies()],
+    [{ ...READ, workingDirectory: "../outside" }, CONFIG, dependencies()],
+    [
+      {
+        ...READ,
+        command: "gh-signed-commit --repo vercel/internal-agents -m fix",
+        workingDirectory: "missing",
+      },
+      CONFIG,
+      {
+        ...dependencies(),
+        async getSandbox() {
+          return fakeSandbox([], ({ command }) =>
+            command.includes("/workspace/missing")
+              ? { exitCode: 1, stdout: "", stderr: "No such file or directory" }
+              : { exitCode: 0, stdout: "/workspace\0", stderr: "" },
+          );
+        },
+      },
+    ],
+    [
+      { ...READ, command: "gh pr create --repo vercel/internal-agents --body-file body.md" },
+      attributed,
+      {
+        ...dependencies(),
+        async getSandbox() {
+          return {
+            ...fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }),
+            readTextFile: async () => null,
+          };
+        },
+      },
+    ],
+  ];
+  for (const [input, config, deps] of refusals) {
+    await assert.rejects(
+      executeGitHubShell(input, config, { ...deps, context: {} as ToolContext }),
+      (error) => isGitHubCommandInputError(error),
+      input.command,
+    );
+  }
+
+  await assert.rejects(
+    executeGitHubShell(READ, CONFIG, {
+      ...dependencies(),
+      async getConnectToken() {
+        return "";
+      },
+    }),
+    (error) => error instanceof Error && !isGitHubCommandInputError(error),
+  );
+  await assert.rejects(
+    executeGitHubShell(READ, undefined, dependencies()),
+    (error) => error instanceof Error && !isGitHubCommandInputError(error),
+  );
+});

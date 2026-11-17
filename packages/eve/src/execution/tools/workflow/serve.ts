@@ -2,7 +2,7 @@ import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
 import { toolStubOutput } from "#tool-stubs/output.js";
 import type { StubScope } from "#tool-stubs/types.js";
 import type { SessionContext } from "#context/session-context.js";
-import { callToolStubStep } from "#execution/tool-stubs/steps.js";
+import { callToolStub, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
 import { createRunUsageTally, type RunUsageTally } from "#execution/agent-sessions/usage.js";
@@ -290,6 +290,7 @@ export function startServeBody(input: WorkflowBodyInput): StartedWorkflowBody {
     get from() {
       return calls.current.from;
     },
+    host: input.host,
     owner: input.owner,
   };
   const agentSessions = createAgentSessions(run, calls.usage);
@@ -316,7 +317,7 @@ async function executeServeBody(
     const output =
       target === undefined
         ? await resolveWorkflowEntryPoint<ServeEntryPoint>(input)(receive, ctx)
-        : await serveStub(target.scope, target.tool, receive, ctx);
+        : await serveStub(input.host.toolStubs, target.scope, target.tool, receive, ctx);
     outcome = { output: toWorkflowOutput(input, output), status: "completed" };
   } catch (error) {
     outcome = toFailedOutcome(error, calls.runSignal);
@@ -364,6 +365,7 @@ function createPendingReceive(): PendingReceive {
 }
 
 async function serveStub(
+  stubs: ToolStubHost | undefined,
   scope: StubScope,
   tool: string,
   receive: WorkflowServeReceive<JsonValue>,
@@ -372,7 +374,7 @@ async function serveStub(
   while (true) {
     const call = await receive();
     if (call.abortSignal.aborted) continue;
-    const result = await callToolStubStep(scope, {
+    const result = await callToolStub(stubs, scope, {
       callId: stubCallId(ctx.session.id, ctx.session.turn.id, call.callId),
       input: call.input,
       tool,

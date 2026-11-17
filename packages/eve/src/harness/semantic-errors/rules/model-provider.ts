@@ -1,6 +1,32 @@
-import { anyOf, codeIs, messageMatches, nameIs, type SemanticErrorRule } from "../rule.js";
+import {
+  allOf,
+  anyOf,
+  codeIs,
+  messageMatches,
+  nameIs,
+  type SemanticErrorRule,
+  statusCodeIs,
+} from "../rule.js";
+
+const isContextOverflowLink = anyOf(
+  codeIs("context_length_exceeded"),
+  allOf(
+    statusCodeIs(400, 413),
+    messageMatches(
+      /prompt is too long|exceed context limit|input is too long|maximum context length|exceeds the context window|input token count.*exceeds the maximum/i,
+    ),
+  ),
+);
 
 export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
+  {
+    id: "model-context-overflow",
+    name: "Model context window exceeded",
+    tags: ["model-provider", "recoverable"],
+    when: isContextOverflowLink,
+    message: "The request exceeds the model's context window.",
+    hint: "Send a shorter message or start a new session. If this repeats, lower `compaction.threshold` in `agent.ts` so compaction runs sooner, or shorten the agent's instructions, tools, or memory.",
+  },
   {
     id: "model-provider-api-key-missing",
     name: "Model provider API key missing",

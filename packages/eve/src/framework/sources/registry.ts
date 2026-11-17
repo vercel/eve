@@ -8,6 +8,7 @@ import {
   type AgentModuleBacking,
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
+import { DEFAULT_TOOL_MODULES, DEFAULT_TOOLS } from "#framework/sources/default-tools.js";
 
 const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v54`;
 
@@ -21,30 +22,7 @@ const localDefaults = defineProgrammaticAgentSource({
       semanticRevision: "eve:default-sandbox:v1",
       loadNamespace: () => import("#framework/sources/modules/sandbox.js"),
     },
-    {
-      logicalPath: "tools/bash.ts",
-      loadNamespace: () => import("#tools/provided/bash.js"),
-    },
-    {
-      logicalPath: "tools/read_file.ts",
-      loadNamespace: () => import("#tools/provided/read-file.js"),
-    },
-    {
-      logicalPath: "tools/write_file.ts",
-      loadNamespace: () => import("#tools/provided/write-file.js"),
-    },
-    {
-      logicalPath: "tools/edit_file.ts",
-      loadNamespace: () => import("#tools/provided/edit-file.js"),
-    },
-    {
-      logicalPath: "tools/web_fetch.ts",
-      loadNamespace: () => import("#tools/provided/web-fetch.js"),
-    },
-    {
-      logicalPath: "tools/web_search.ts",
-      loadNamespace: () => import("#tools/provided/web-search.js"),
-    },
+    ...DEFAULT_TOOLS.map((name) => DEFAULT_TOOL_MODULES[name]),
   ],
 });
 

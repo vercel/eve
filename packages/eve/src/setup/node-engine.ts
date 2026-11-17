@@ -39,10 +39,16 @@ function nextAllowedMajor(requiredRange: string, currentMajor: number): number |
   return nextMajor;
 }
 
+const SCAFFOLD_NODE_MAJOR = 26;
+
 export function pinnedNodeEngineMajor(requiredRange: string): string {
   const normalized = validRange(requiredRange);
   if (normalized === null) {
     throw new Error(`eve declares an invalid Node.js engine range: "${requiredRange}".`);
+  }
+  const preferredRange = `${SCAFFOLD_NODE_MAJOR}.x`;
+  if (isNonEmptySubset(preferredRange, normalized)) {
+    return preferredRange;
   }
   const floor = minVersion(normalized);
   if (floor === null) {

@@ -10,10 +10,7 @@ import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { PreparedCoordinationDispatch } from "#execution/coordination-dispatch-shared.js";
-import {
-  serializeDurableCompiledArtifactsSource,
-  type DurableCompiledArtifactsSource,
-} from "#runtime/durable-compiled-artifacts-source.js";
+import { agentSessionOwner, type AgentSessionOwner } from "#execution/agent-sessions/owner.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
@@ -22,27 +19,24 @@ import {
   type AgentChildTraceDispatch,
 } from "#tracing/eve/agent-invocation-coordinator.js";
 
-export interface AgentSessionContext {
+export type AgentSessionContext = AgentSessionLineage & AgentSessionOwner;
+
+export interface AgentSessionLineage {
   readonly toolStubs?: StubScope;
   readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
-  readonly bundle: AgentSessionBundle;
   readonly capabilities?: SessionCapabilities;
   readonly schedule?: SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   readonly continuationToken?: string;
   readonly conversation?: ConversationContext;
   readonly dynamicSelections: DynamicSubagentSelections;
+  readonly remoteAgents?: readonly string[];
   readonly delegated?: boolean;
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parent: SessionParent;
   readonly traceRoot?: SessionTraceRoot;
   readonly sandbox: AgentSessionSandbox;
   readonly trace: AgentChildTraceDispatch;
-}
-
-export interface AgentSessionBundle {
-  readonly nodeId?: string;
-  readonly source: DurableCompiledArtifactsSource;
 }
 
 export interface AgentSessionSandbox {
@@ -53,7 +47,7 @@ export interface AgentSessionSandbox {
 type CallerDispatch = Pick<
   PreparedCoordinationDispatch<unknown>,
   | "batch"
-  | "bundle"
+  | "owner"
   | "capabilities"
   | "channelMetadata"
   | "dynamicSubagentSelections"
@@ -75,16 +69,14 @@ export function captureAgentSessionContext(
   return {
     agents: caller.workflowAgents,
     toolStubs: caller.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined,
-    bundle: {
-      nodeId: caller.bundle.nodeId,
-      source: serializeDurableCompiledArtifactsSource(caller.bundle.compiledArtifactsSource),
-    },
+    ...agentSessionOwner(caller.owner.reference),
     capabilities: caller.capabilities,
     schedule: readSerializedSessionSchedule(caller.serializedContext),
     channelMetadata: caller.channelMetadata,
     continuationToken: caller.serializedContext[ContinuationTokenKey.name] as string | undefined,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
+    remoteAgents: caller.owner.roster(caller.dynamicSubagentSelections).remoteAgentNames(),
     delegated: hasDelegatedSessionContext(caller.serializedContext),
     localDevRequest: caller.localDevRequest,
     parent: {

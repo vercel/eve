@@ -125,6 +125,7 @@ async function serve(input: {
         workflowsPath,
       },
       workflowWorldPluginPath,
+      timezoneRunner: true,
     },
   );
 
@@ -318,18 +319,19 @@ describe("rendered host routes", () => {
         schedule("daily", "0 0 * * *"),
         schedule("digest", "0 0 * * *"),
         schedule("weekly", "0 0 * * 0"),
+        { ...schedule("pacific", "0 0 * * *"), timezone: "America/Los_Angeles" },
       ],
     });
 
     expect(host.routes.experimental).toEqual({ tasks: true });
     expect(host.routes.scheduledTasks).toEqual({
-      "0 0 * * *": ["daily", "digest"],
-      "0 0 * * 0": "weekly",
+      "0 0 * * *": ["eve.daily", "eve.digest"],
+      "0 0 * * 0": "eve.weekly",
     });
-    const task = (await host.load(host.routes.tasks.daily!.handler)) as {
+    const task = (await host.load(host.routes.tasks["eve.pacific"]!.handler)) as {
       run(event: { name: string }): Promise<unknown>;
     };
-    expect(await task.run({ name: "daily" })).toEqual({ result: "ran daily" });
-    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("daily", artifactsConfig);
+    expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran pacific" });
+    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("pacific", artifactsConfig);
   });
 });

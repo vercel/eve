@@ -18,19 +18,22 @@
   },
   "dependencies": {
     "@comark/react": "0.6.2",
-    "ai": "7.0.137",
-    "eve": "^0.84.0",
+    "ai": "7.0.173",
+    "eve": "^1.0.0",
     "geist": "1.7.2",
-    "next": "16.3.8",
+    "next": "16.4.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "~26.2.0",
+    "@types/node": "26.x",
     "@types/react": "~19.2.15",
     "@types/react-dom": "~19.2.3",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@11.25.0"
+  "engines": {
+    "node": "26.x"
+  },
+  "packageManager": "pnpm@12.21.0"
 }

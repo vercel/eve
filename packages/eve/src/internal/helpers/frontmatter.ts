@@ -1,4 +1,14 @@
-import { load } from "#compiled/js-yaml/index.js";
+import { CORE_SCHEMA, loadAll, mergeTag } from "#compiled/js-yaml/index.js";
+
+const schema = CORE_SCHEMA.withTags(mergeTag);
+
+function loadDocument(source: string): unknown {
+  const documents = loadAll(source, { schema });
+  if (documents.length > 1) {
+    throw new Error("Expected a single YAML document, but found more than one.");
+  }
+  return documents[0] ?? {};
+}
 
 export interface FrontmatterDocument {
   readonly data: unknown;
@@ -27,12 +37,12 @@ export function parseFrontmatter(source: string): FrontmatterDocument | undefine
 
   const yaml = rest.slice(0, closing.index);
   return {
-    data: (yaml.trim() === "" ? undefined : load(yaml)) ?? {},
+    data: loadDocument(yaml),
     content: rest.slice(closing.index + closing[0].length),
   };
 }
 
 export function parseYaml(source: string): unknown {
   const frontmatter = parseFrontmatter(source);
-  return frontmatter === undefined ? (load(source) ?? {}) : frontmatter.data;
+  return frontmatter === undefined ? loadDocument(source) : frontmatter.data;
 }

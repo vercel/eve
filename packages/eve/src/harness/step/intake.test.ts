@@ -20,6 +20,6 @@ describe("settleRuntimeWork", () => {
     expect(publish).toHaveBeenCalledWith([
       { data: { kind: "delegated-late", usage: spent }, type: "usage.recorded" },
     ]);
-    expect(settled).toEqual({ input: { message: "Next?" }, waited: false });
+    expect(settled).toEqual({ endsTurn: false, input: { message: "Next?" }, waited: false });
   });
 });

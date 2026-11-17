@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import type { Locator, Page } from "playwright-core";
+import type { Browser, Locator, Page } from "playwright-core";
 
 import type {
   ClientDriver,
@@ -39,6 +39,54 @@ const COMPOSER_PLACEHOLDER = "Send a message…";
 
 let bundled: Promise<string> | undefined;
 
+interface WebChatTab {
+  readonly host: string;
+  readonly browser: Browser;
+  readonly page: Page;
+  readonly origin: { readonly url: string; close(): Promise<void> };
+  readonly errors: string[];
+}
+
+let shared: Promise<WebChatTab> | undefined;
+
+async function openTab(host: string, assets: string): Promise<WebChatTab> {
+  const origin = await servePage(host, assets);
+  try {
+    const { chromium } = await import("playwright-core");
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    page.setDefaultTimeout(2_000);
+    page.setDefaultNavigationTimeout(30_000);
+    await page.addInitScript(() => {
+      try {
+        sessionStorage.clear();
+        localStorage.clear();
+      } catch {}
+    });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => void errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    return { browser, errors, host, origin, page };
+  } catch (error) {
+    await origin.close();
+    throw error;
+  }
+}
+
+async function closeWebChatBrowser(): Promise<void> {
+  const tab = shared;
+  shared = undefined;
+  const opened = await tab?.catch(() => undefined);
+  if (opened === undefined) return;
+  try {
+    await opened.browser.close();
+  } finally {
+    await opened.origin.close();
+  }
+}
+
 export function webChatDriver(): ClientDriver {
   return {
     name: "web chat",
@@ -46,20 +94,21 @@ export function webChatDriver(): ClientDriver {
     surface: "private",
     async open(host, wait) {
       const assets = await (bundled ??= bundleTemplate());
-      const server = await servePage(host, assets);
-      const { chromium } = await import("playwright-core");
-      const browser = await chromium.launch();
+      const tab = await (shared ??= openTab(host, assets).catch((error: unknown) => {
+        shared = undefined;
+        throw error;
+      }));
+      if (tab.host !== host) {
+        throw new Error(`The web chat tab forwards to ${tab.host}, not to ${host}.`);
+      }
+      const { errors, origin, page } = tab;
       const close = async () => {
-        await browser.close();
-        await server.close();
+        await page.goto("about:blank").catch(async (error: unknown) => {
+          await closeWebChatBrowser();
+          throw error;
+        });
       };
-      const page = await browser.newPage();
-      page.setDefaultTimeout(2_000);
-      const errors: string[] = [];
-      page.on("pageerror", (error) => void errors.push(error.message));
-      page.on("console", (message) => {
-        if (message.type() === "error") errors.push(message.text());
-      });
+      errors.length = 0;
       let seen = "";
       const look = async () => {
         seen = await page
@@ -71,7 +120,8 @@ export function webChatDriver(): ClientDriver {
       const composer = page.getByPlaceholder(COMPOSER_PLACEHOLDER);
 
       try {
-        await page.goto(server.url);
+        await page.context().clearCookies();
+        await page.goto(origin.url);
         await wait(
           "the composer",
           async () => {
@@ -81,7 +131,7 @@ export function webChatDriver(): ClientDriver {
           describe,
         );
       } catch (error) {
-        await close();
+        await closeWebChatBrowser();
         throw error;
       }
 
@@ -140,23 +190,19 @@ export function webChatDriver(): ClientDriver {
         },
         async shown() {
           await look();
-          const shown: ShownText[] = [];
-          for (const message of await page.locator(".is-assistant").all()) {
-            const links: string[] = [];
-            for (const anchor of await message.locator("a[href]").all()) {
-              const href = await anchor.getAttribute("href", { timeout: 100 }).catch(() => null);
-              if (href !== null) links.push(href);
-            }
-            const text = [await message.innerText(), ...links].join("\n");
-            const options = (await readButtons(message.getByRole("button"))) ?? [];
-            shown.push({ onlyPerson: true, options, text });
+          for (let attempt = 1; ; attempt += 1) {
+            const shown = await readShown(page).catch((error: unknown) => {
+              if (attempt >= SHOWN_READ_ATTEMPTS) throw error;
+              return undefined;
+            });
+            if (shown !== undefined) return shown;
           }
-          return shown;
         },
         describe,
         close,
       };
     },
+    dispose: closeWebChatBrowser,
   };
 }
 
@@ -260,7 +306,7 @@ async function bundleTemplate(): Promise<string> {
   await build({
     build: {
       copyPublicDir: false,
-      minify: false,
+      minify: true,
       outDir,
       rollupOptions: {
         input: ENTRY_ID,
@@ -316,7 +362,10 @@ async function servePage(host: string, assets: string) {
     }
     if (request.method === "GET" && /^\/(?:app\.(?:js|css)|assets\/[\w.-]+)$/u.test(url.pathname)) {
       response
-        .writeHead(200, { "content-type": contentType(url.pathname) })
+        .writeHead(200, {
+          "cache-control": "max-age=3600, immutable",
+          "content-type": contentType(url.pathname),
+        })
         .end(await readFile(join(assets, url.pathname)));
       return;
     }
@@ -374,4 +423,21 @@ function contentType(pathname: string): string {
   if (pathname.endsWith(".js")) return "text/javascript";
   if (pathname.endsWith(".css")) return "text/css";
   return "application/octet-stream";
+}
+
+const SHOWN_READ_ATTEMPTS = 5;
+
+async function readShown(page: Page): Promise<ShownText[]> {
+  const shown: ShownText[] = [];
+  for (const message of await page.locator(".is-assistant").all()) {
+    const links: string[] = [];
+    for (const anchor of await message.locator("a[href]").all()) {
+      const href = await anchor.getAttribute("href", { timeout: 100 }).catch(() => null);
+      if (href !== null) links.push(href);
+    }
+    const text = [await message.innerText({ timeout: 500 }), ...links].join("\n");
+    const options = (await readButtons(message.getByRole("button"))) ?? [];
+    shown.push({ onlyPerson: true, options, text });
+  }
+  return shown;
 }

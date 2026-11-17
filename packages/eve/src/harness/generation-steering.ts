@@ -60,6 +60,7 @@ export class GenerationSteering {
     )
       this.effectsStarted = true;
     if (
+      event.type === "call.input" ||
       (event.type === "content.delta" &&
         event.data.kind === "text" &&
         event.data.delta.length > 0) ||

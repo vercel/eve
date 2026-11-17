@@ -43,6 +43,13 @@ export async function agentToolServeWorkflow(
 ): Promise<never> {
   "use workflow";
 
+  return await serveAgentTool(receive, ctx);
+}
+
+export async function serveAgentTool(
+  receive: AgentToolReceive,
+  ctx: WorkflowServeContext<string>,
+): Promise<never> {
   const agent = ctx.agent(ctx.toolName);
   let turn = sendToAgent(agent, await receive());
   let next = receive();

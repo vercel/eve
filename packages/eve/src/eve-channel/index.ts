@@ -70,6 +70,7 @@ import {
   parseSessionControlBody,
   parseSessionMessageBody,
   parseStartIndex,
+  rememberCurrentSession,
   requireSessionId,
 } from "#eve-channel/request.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
@@ -429,6 +430,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           );
         }
 
+        if (operationToken === undefined) rememberCurrentSession(handle.sessionId);
         return Response.json(
           createdSessionBody(handle.sessionId, body, initialDeliveryId ?? handle.deliveryId),
           {

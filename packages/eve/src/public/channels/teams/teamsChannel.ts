@@ -75,6 +75,7 @@ import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { teamsConversationSpace } from "#public/channels/teams/space.js";
 import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 
 const log = createLogger("teams.channel");
@@ -317,6 +318,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       teamId: state.teamId,
     }),
     audience: ({ state }) => teamsAudience(state.conversationType),
+    space: ({ state }) => teamsConversationSpace(state),
 
     context(state, session) {
       return rebuildTeamsContext(state, session, config);

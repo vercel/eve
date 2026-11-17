@@ -11,6 +11,7 @@ import {
 } from "#compiled/@modelcontextprotocol/server/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { readJsonBody } from "#internal/http/json-body.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { withMcpRequestTraceContext } from "#internal/mcp/request-trace-context.js";
 
@@ -134,7 +135,7 @@ export function defineMcpTool<
           if (checked.issues !== undefined) {
             return toolError({
               code: "invalid_input",
-              message: `Invalid arguments for tool ${input.definition.name}: ${checked.issues.map(formatIssue).join(", ")}`,
+              message: formatInputError(input.definition.name, checked.issues),
               retryable: false,
             });
           }
@@ -162,12 +163,37 @@ function advertiseOnly(schema: StandardSchemaWithJSON): StandardSchemaWithJSON {
   };
 }
 
-function formatIssue(issue: StandardSchemaIssue): string {
-  if (issue.path === undefined || issue.path.length === 0) return issue.message;
-  const path = issue.path
-    .map((segment) => String(typeof segment === "object" ? segment.key : segment))
-    .join(".");
-  return `${path}: ${issue.message}`;
+const MAX_VALIDATION_ISSUES = 10;
+const MAX_VALIDATION_MESSAGE_CHARS = 4_096;
+const VALIDATION_TRUNCATED = " ... (validation details truncated)";
+
+function formatInputError(name: string, issues: readonly StandardSchemaIssue[]): string {
+  let message = "Invalid arguments for tool ";
+  const limit = MAX_VALIDATION_MESSAGE_CHARS - VALIDATION_TRUNCATED.length;
+  const append = (part: string): boolean => {
+    const remaining = limit - message.length;
+    message += part.slice(0, remaining);
+    return part.length <= remaining;
+  };
+  if (!append(name) || !append(": ")) return message + VALIDATION_TRUNCATED;
+
+  for (let index = 0; index < Math.min(issues.length, MAX_VALIDATION_ISSUES); index++) {
+    const issue = issues[index]!;
+    if (index > 0 && !append(", ")) return message + VALIDATION_TRUNCATED;
+    if (issue.path !== undefined && issue.path.length > 0) {
+      let first = true;
+      for (const segment of issue.path) {
+        if (!first && !append(".")) return message + VALIDATION_TRUNCATED;
+        first = false;
+        if (!append(String(typeof segment === "object" ? segment.key : segment))) {
+          return message + VALIDATION_TRUNCATED;
+        }
+      }
+      if (!append(": ")) return message + VALIDATION_TRUNCATED;
+    }
+    if (!append(issue.message)) return message + VALIDATION_TRUNCATED;
+  }
+  return issues.length > MAX_VALIDATION_ISSUES ? message + VALIDATION_TRUNCATED : message;
 }
 
 interface McpStreamableHttpServerOptions {
@@ -193,14 +219,15 @@ export function createMcpStreamableHttpServer(
 
     const handler = createMcpHandler(() => createServer(options, tools, auth), {
       legacy: "stateless",
+      maxRequestBodySize: MCP_REQUEST_BODY_MAX_BYTES,
     });
     if (request.method.toUpperCase() !== "POST") return await handler.fetch(request);
 
-    const inspected = await inspectRequestBody(request);
-    if (inspected.tooLarge) return requestBodyTooLargeResponse();
-    if (inspected.invalidJson) return invalidJsonResponse();
+    const inspected = await readJsonBody(request, MCP_REQUEST_BODY_MAX_BYTES);
+    if (inspected.kind === "too-large") return requestBodyTooLargeResponse();
+    if (inspected.kind === "invalid-json") return invalidJsonResponse();
+    if (inspected.kind === "empty") return await handler.fetch(request);
     const parsedBody = inspected.value;
-    if (parsedBody === undefined) return await handler.fetch(request);
 
     const preflightFailure = await preflightModernRequest(request, parsedBody);
     if (preflightFailure !== undefined) return preflightFailure;
@@ -221,47 +248,6 @@ async function preflightModernRequest(
 
   const earlierFailure = await probeEarlierValidationFailure(request, parsedBody);
   return earlierFailure ?? headerMismatchResponse(parsedBody);
-}
-
-async function inspectRequestBody(request: Request): Promise<{
-  readonly invalidJson?: boolean;
-  readonly tooLarge: boolean;
-  readonly value?: unknown;
-}> {
-  const body = request.body;
-  if (body === null) return { tooLarge: false };
-
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MCP_REQUEST_BODY_MAX_BYTES) {
-    await body.cancel().catch(() => {});
-    return { tooLarge: true };
-  }
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      size += chunk.value.byteLength;
-      if (size > MCP_REQUEST_BODY_MAX_BYTES) {
-        await reader.cancel();
-        return { tooLarge: true };
-      }
-      chunks.push(chunk.value);
-    }
-
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return { tooLarge: false, value: JSON.parse(new TextDecoder().decode(bytes)) };
-  } catch {
-    return { invalidJson: true, tooLarge: false };
-  }
 }
 
 function invalidJsonResponse(): Response {
@@ -387,6 +373,7 @@ function createServer(
       CACHE_HINTED_METHODS.map((method) => [method, MCP_LIST_CACHE_HINT]),
     ),
     capabilities,
+    maxToolInputElements: 10_000,
   };
   if (options.instructions !== undefined) serverOptions.instructions = options.instructions;
   const server = new McpServer({ name: options.name, version: options.version }, serverOptions);

@@ -214,7 +214,7 @@ export async function resolveRuntimeModelSelection(input: {
   const selectedModel = selection.model;
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
-    if (promptCache !== undefined) throw gatewayPromptCacheError(id);
+    if (promptCache !== undefined && !isAnthropicGatewayId(id)) throw gatewayPromptCacheError(id);
     const contextWindowTokens =
       selection.modelContextWindowTokens ??
       (
@@ -226,6 +226,7 @@ export async function resolveRuntimeModelSelection(input: {
       reference: {
         id,
         contextWindowTokens,
+        promptCache,
         providerOptions,
         reasoning: selection.reasoning,
       },
@@ -241,7 +242,11 @@ export async function resolveRuntimeModelSelection(input: {
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
   const routesThroughGateway = selectedModel.provider.split(".")[0] === "gateway";
-  if (promptCache !== undefined && routesThroughGateway) {
+  if (
+    promptCache !== undefined &&
+    routesThroughGateway &&
+    !isAnthropicGatewayId(selectedModel.modelId)
+  ) {
     throw gatewayPromptCacheError(formattedId);
   }
   let id = routesThroughGateway ? selectedModel.modelId : formattedId;
@@ -280,9 +285,13 @@ function invalidSelectionError(error: unknown): InvalidRuntimeModelSelectionErro
   );
 }
 
+function isAnthropicGatewayId(modelId: string): boolean {
+  return modelId.split("/")[0] === "anthropic";
+}
+
 function gatewayPromptCacheError(modelId: string): Error {
   return new InvalidRuntimeModelSelectionError(
-    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies only to models eve calls directly; Gateway manages its own prompt caching through providerOptions.gateway.caching.`,
+    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies to Anthropic models and to models eve calls directly; Gateway manages its own prompt caching for other models through providerOptions.gateway.caching.`,
   );
 }
 

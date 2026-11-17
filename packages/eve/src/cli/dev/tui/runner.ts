@@ -50,6 +50,7 @@ import {
 
 import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
+import { coalesceQueuedMessages } from "./message-queue.js";
 import {
   formatPromptCommandHelp,
   parsePromptCommand,
@@ -68,6 +69,7 @@ import {
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import { describeRemoteAuthCompletedMutations } from "./remote-auth-result.js";
 import { prepareRemoteTuiAccess } from "./remote-startup.js";
+import type { StartupOnboardingResult } from "./startup-onboarding.js";
 import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   BOOT_DETECTIONS,
@@ -149,6 +151,7 @@ export type AgentTUIInputQuestion = {
   prompt: string;
   display: "select" | "text";
   options?: ReadonlyArray<AgentTUIInputOption>;
+  initialOptionId?: string;
   allowFreeform?: boolean;
   context?: AgentTUIInputContext;
 };
@@ -233,7 +236,7 @@ export interface PromptCommandHandler {
 }
 
 type TuiStartup = {
-  finish(): { draft: string; queuedPrompt: string | undefined };
+  finish(): { draft: string; queued: readonly string[] };
 };
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
@@ -247,6 +250,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   appRoot?: string;
   initialInput?: string;
   onboard?: boolean;
+  startupOnboarding?: StartupOnboardingResult;
   onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
   onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   promptCommandHandler?: PromptCommandHandler;
@@ -296,6 +300,7 @@ export class EveTUIRunner {
   readonly #startup?: TuiStartup;
   #startupPrompt?: string;
   readonly #onboard: boolean;
+  readonly #startupOnboarding: StartupOnboardingResult | undefined;
   #reportedFirstResponse = false;
   readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
   readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
@@ -355,6 +360,7 @@ export class EveTUIRunner {
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
     if (options.startup !== undefined) this.#startup = options.startup;
     this.#onboard = options.onboard === true;
+    this.#startupOnboarding = options.startupOnboarding;
     this.#onOnboardingStep = options.onOnboardingStep;
     this.#onOnboardingTerminal = options.onOnboardingTerminal;
     if (options.appRoot !== undefined) {
@@ -435,7 +441,7 @@ export class EveTUIRunner {
 
   #finishStartup(): string | undefined {
     const startup = this.#startup?.finish();
-    this.#startupPrompt = startup?.queuedPrompt;
+    this.#startupPrompt = coalesceQueuedMessages(startup?.queued ?? []);
     return startup?.draft ?? this.#initialInput;
   }
 
@@ -532,6 +538,7 @@ export class EveTUIRunner {
       this.#renderer.setStartupPhase?.("connecting");
       startupOutcome = await this.#runInitialAgentOnboarding(title);
     }
+    if (this.#startupOnboarding?.reported === true) await this.#renderSetupIssues(this.#agentInfo);
 
     let initialDraft = this.#finishStartup();
     if (startupOutcome?.cancelled || startupOutcome?.failed) {
@@ -1200,12 +1207,20 @@ export class EveTUIRunner {
   }
 
   async #runInitialAgentOnboarding(title: string): Promise<PromptCommandOutcome | undefined> {
-    this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
-    const outcome = await this.#executeExtensionCommand(
-      { type: "extension", name: "login", argument: "" },
-      title,
-      { trigger: "startup", initialModelStep: "provider" },
-    );
+    let outcome: PromptCommandOutcome | undefined;
+    if (this.#startupOnboarding === undefined) {
+      this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
+      outcome = await this.#executeExtensionCommand(
+        { type: "extension", name: "login", argument: "" },
+        title,
+        { trigger: "startup", initialModelStep: "provider" },
+      );
+    } else if (this.#startupOnboarding.reported === true) {
+      return undefined;
+    } else {
+      const pending = this.#startupOnboarding.outcome;
+      outcome = pending && (await this.#settleCommandOutcome(pending));
+    }
     if (!outcome?.cancelled && outcome?.failed !== true)
       this.#onOnboardingStep?.({ flow: "onboarding", step: "connection_ready" });
     this.#onOnboardingTerminal?.({
@@ -1555,6 +1570,9 @@ function toAgentTUIInputQuestion(
     });
   }
 
+  if (request.request.display === "select" && request.request.initialOptionId !== undefined) {
+    question.initialOptionId = request.request.initialOptionId;
+  }
   if (request.request.allowFreeform !== undefined) {
     question.allowFreeform = request.request.allowFreeform;
   }

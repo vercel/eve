@@ -7,6 +7,7 @@ const runtimeAssetDirs = ["src/cli/commands/agent-prompt"];
 const extensionAssetDirs = [
   "src/extensions/code/extension",
   "src/extensions/git/extension",
+  "src/extensions/custom-skills/extension",
   "src/computer-use/extension",
 ];
 const runtimeAssetFiles = ["src/public/workflow-modules.d.ts"];

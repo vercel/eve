@@ -131,6 +131,12 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: personal ? "teams-dm" : "teams",
+    space: {
+      id: `teams:${TENANT}:${personal ? conversationId : "CHANNEL"}`,
+      type: personal ? "direct" : "shared",
+      ...(personal && { visibility: "private" as const }),
+      workspaceId: `teams:${TENANT}`,
+    },
     personId: PERSON.id,
     capabilities: personal
       ? ["attachments", "buttons", "text-replies"]

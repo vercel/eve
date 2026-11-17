@@ -7,13 +7,14 @@ import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 
 import { defineDynamic } from "#dynamic/definition.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { attachClientContext } from "#internal/client-context.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -200,31 +201,29 @@ describe("reactions", () => {
     const continuationToken = "http:reactions";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "capture:turn", 1);
-        await resumeHook(inbox, { kind: "compact", deliveryId: "compact-second-turn" });
+        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact-second-turn" });
         await until(log, "context:compaction:completed", 1);
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
           payload: { message: "Look up the second thing." },
         });
         await until(log, "capture:turn", 2);
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -340,22 +339,20 @@ describe("reactions", () => {
     const continuationToken = "http:capture-fails";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:completed", 1);
-        await resumeHook(inbox, { kind: "compact", deliveryId: "compact-fails" });
+        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact-fails" });
         await until(log, "context:compaction:failed", 1);
       } finally {
         await run.cancel().catch(() => {});
@@ -433,24 +430,22 @@ describe("reactions", () => {
     const continuationToken = "http:cancel-during-compaction";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:completed", 1);
-        await resumeHook(inbox, { kind: "compact", deliveryId: "compact" });
+        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact" });
         await until(log, "capture:compaction", 1);
-        await resumeHook(inbox, { kind: "cancel", deliveryId: "cancel" });
+        await resumeRoutedHook(inbox, { kind: "cancel", deliveryId: "cancel" });
         await new Promise((resolve) => setTimeout(resolve, 200));
         release();
         await until(log, "settled:cancel:ignored", 1);
@@ -518,23 +513,21 @@ describe("reactions", () => {
     const continuationToken = "http:memory-scope";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:settled", 1);
         thread = "thread-2";
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -596,23 +589,21 @@ describe("reactions", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Alice asks Bob's researcher for a summary." },
-          serializedContext: {
-            ...buildSerializedContext({
-              auth: ALICE,
-              channelKind: "http",
-              continuationToken: "http:overridden",
-            }),
-            "eve.agentSessionRuntimeOverrides": {
-              model: { contextWindowTokens: 200_000, id: "openai/gpt-6.1-sol" },
-            },
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Alice asks Bob's researcher for a summary." },
+        serializedContext: {
+          ...buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken: "http:overridden",
+          }),
+          "eve.agentSessionRuntimeOverrides": {
+            model: { contextWindowTokens: 200_000, id: "openai/gpt-6.1-sol" },
           },
         },
-      ]);
+      });
       try {
         await until(log, "turn:settled", 1);
       } finally {
@@ -665,18 +656,16 @@ describe("reactions", () => {
 
     try {
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            kind: "initial",
-            ownerDeploymentId: "dpl_inline",
-            input: { message: "Alice asks for a short status update." },
-            serializedContext: buildSerializedContext({
-              auth: ALICE,
-              channelKind: "http",
-              continuationToken: "http:build-metadata",
-            }),
-          },
-        ]);
+        const run = await startTestSession("in-process", {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Alice asks for a short status update." },
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken: "http:build-metadata",
+          }),
+        });
         try {
           await until(log, "turn:settled", 1);
         } finally {
@@ -768,21 +757,19 @@ describe("reactions", () => {
     const continuationToken = "http:repo-guidelines";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Check out the repository." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Check out the repository." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       try {
         await until(log, "turn:settled", 1);
-        await resumeHook(sessionInboxHookToken(continuationToken), {
+        await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -799,6 +786,75 @@ describe("reactions", () => {
     expect(JSON.stringify(prompts[1])).toContain("Run pnpm test.");
     expect(JSON.stringify(prompts[2])).toContain("Run pnpm test.");
     expect(log.filter((entry) => entry === "read:AGENTS.md")).toEqual(["read:AGENTS.md"]);
+  }, 60_000);
+
+  it("places a turn's client context after the user-role instruction that turn announces", async () => {
+    const log: string[] = [];
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          prompts.push(prompt);
+          return textStreamResult("Done.");
+        },
+        modelId: "scripted-model",
+        provider: "eve-test",
+      }),
+    );
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "client-context-order",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineInstructions({ content: POLICY, role: "user" }),
+          }),
+          logicalPath: "instructions/policy.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.settled": () => {
+                  log.push("turn:settled");
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/observe.ts",
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: attachClientContext({ message: "Hello." }, ["Client page: /settings"]),
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken: "http:client-context-order",
+        }),
+      });
+      try {
+        await until(log, "turn:settled", 1);
+      } finally {
+        await run.cancel().catch(() => {});
+      }
+    });
+
+    expect(prompts).toHaveLength(1);
+    const users = prompts[0]!.filter((message) => message.role === "user").map(textOf);
+    expect(users.slice(-3)).toEqual([
+      expect.stringContaining(POLICY),
+      expect.stringContaining("Client page: /settings"),
+      "Hello.",
+    ]);
   }, 60_000);
 
   describe("across deployments", () => {
@@ -858,23 +914,21 @@ describe("reactions", () => {
       const continuationToken = "http:deployments";
 
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            kind: "initial",
-            ownerDeploymentId: "dpl_inline",
-            input: { message: "Look up the first thing." },
-            serializedContext: buildSerializedContext({
-              auth: ALICE,
-              channelKind: "http",
-              continuationToken,
-            }),
-          },
-        ]);
+        const run = await startTestSession("in-process", {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Look up the first thing." },
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken,
+          }),
+        });
         const inbox = sessionInboxHookToken(continuationToken);
         try {
           await until(log, "turn:settled", 1);
           vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_second");
-          await resumeHook(inbox, {
+          await resumeRoutedHook(inbox, {
             auth: ALICE,
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             kind: "send",

@@ -12,16 +12,34 @@ import {
 } from "#context/keys.js";
 import type { DefinedDynamicSchedules, ScheduleClient } from "#public/schedules/subscription.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
+import { namedScopeDefinition } from "#runtime/schedules/named-scope.js";
 import {
   createScheduleCollectionClient,
   type ScheduleCollectionClient,
 } from "#runtime/schedules/collection-client.js";
 
-/** Binds a registered subscription to a scope authorized on every operation. */
+/**
+ * Binds a dynamic schedules definition to a client whose scope is authorized on every operation.
+ * A definition with named `scopes` takes the one to act in as `options.scope`.
+ */
 export async function schedules<TPayload, TPrepared = TPayload>(
   collection: DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
+  options: { readonly scope?: string } = {},
 ): Promise<ScheduleClient<TPayload>> {
-  return await bindScheduleCollection(collection);
+  if (collection.scopes === undefined) {
+    if (options.scope !== undefined)
+      throw new Error(
+        `schedules(): this definition declares no "scopes", so it takes no scope "${options.scope}".`,
+      );
+    return await bindScheduleCollection(collection);
+  }
+  if (options.scope === undefined)
+    throw new Error(
+      `schedules(): this definition declares scopes; pass one as { scope }: ${Object.keys(collection.scopes).join(", ")}.`,
+    );
+  return await bindScheduleCollection(
+    namedScopeDefinition(collection, options.scope) as typeof collection,
+  );
 }
 
 export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
@@ -29,10 +47,12 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
 ): Promise<ScheduleCollectionClient<TPayload, TPrepared>> {
   const identity = readScheduleCollectionSource(collection);
   if (identity === undefined)
-    throw new Error("schedules(): subscription must be a stamped agent/schedules module export.");
+    throw new Error(
+      "schedules(): argument must be a defineDynamicSchedules() definition exported from a module in agent/schedules/.",
+    );
   const definition = normalizeScheduleCollectionDefinition(
     collection,
-    `Invalid schedule subscription ${identity.logicalPath}.`,
+    `Invalid dynamic schedules definition ${identity.logicalPath}.`,
   ) as DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>;
   const context = loadContext();
   return createScheduleCollectionClient(definition, {

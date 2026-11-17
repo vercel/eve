@@ -14,6 +14,7 @@ import { dirname, join, relative } from "node:path";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
+import { VERCEL_SCHEDULES_FUNCTION_ROUTE } from "#internal/nitro/host/vercel-build-output-config.js";
 
 const SHARED_SERVER_FUNCTION = "eve/__server";
 
@@ -23,9 +24,12 @@ export async function normalizeVercelServiceOutput(
   outputDir: string,
   routeTable: Pick<HostRouteTable, "routes">,
 ): Promise<void> {
-  const ownFunctions = new Set(
-    routeTable.routes.flatMap((route) => ("vercelFunction" in route ? [route.path.slice(1)] : [])),
-  );
+  const ownFunctions = new Set([
+    ...routeTable.routes.flatMap((route) =>
+      "vercelFunction" in route ? [route.path.slice(1)] : [],
+    ),
+    VERCEL_SCHEDULES_FUNCTION_ROUTE.slice(1),
+  ]);
   const isShared = (functionPath: string) =>
     SERVICE_NAMESPACES.some((namespace) => functionPath.startsWith(namespace));
 

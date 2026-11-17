@@ -2,11 +2,15 @@
 
 import { spawn } from "node:child_process";
 import { access, readdir, realpath, stat } from "node:fs/promises";
-import { createRequire } from "node:module";
+import * as nodeModule from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const require = createRequire(import.meta.url);
+if (nodeModule.enableCompileCache?.() !== undefined) {
+  setTimeout(() => nodeModule.flushCompileCache?.(), 1000).unref();
+}
+
+const require = nodeModule.createRequire(import.meta.url);
 const packageJson = require("../package.json");
 const packageNodeEngine = packageJson.engines?.node;
 const bootstrapPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -302,6 +306,15 @@ export async function runEveCli(argv = process.argv.slice(2), overrides = {}, de
 
   const cliEntrypointPath = await ensureBuiltCli(options, dependencies);
   const importModule = dependencies.importModule ?? ((specifier) => import(specifier));
+  const packageImportsHookPath = resolve(
+    dirname(cliEntrypointPath),
+    "..",
+    "internal",
+    "package-imports-hook.js",
+  );
+  if (await (dependencies.exists ?? fileExists)(packageImportsHookPath)) {
+    await importModule(pathToFileURL(packageImportsHookPath).href);
+  }
   const cliModule = await importModule(pathToFileURL(cliEntrypointPath).href);
 
   if (typeof cliModule.runCli !== "function") {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
-} from "#internal/workflow/development-world-protocol.js";
+} from "#internal/application/dev-transport.js";
 import {
   DEVELOPMENT_MODEL_CREDENTIAL_ROUTE,
   DEVELOPMENT_MODEL_REJECTED_HEADER,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import {
   AuthKey,
@@ -132,8 +133,8 @@ const testAuth: SessionAuthContext = {
   principalType: "user",
 };
 
-function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] {
-  return {
+function createMinimalAgent(): Parameters<typeof buildRunContext>[0]["agent"] {
+  return fromCompiledBundle({
     compiledArtifactsSource: {},
     graph: {
       nodesByNodeId: new Map(),
@@ -146,7 +147,7 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
     subagentRegistry: {},
     toolRegistry: {},
     turnAgent: {},
-  } as never;
+  } as never);
 }
 
 describe("buildRunContext", () => {
@@ -154,7 +155,7 @@ describe("buildRunContext", () => {
     "defers prewarm initiator identity unless explicitly forwarded (%s)",
     (initiatorAuth) => {
       const ctx = buildRunContext({
-        bundle: createMinimalBundle(),
+        agent: createMinimalAgent(),
         run: {
           auth: testAuth,
           initiatorAuth,
@@ -170,7 +171,7 @@ describe("buildRunContext", () => {
 
   it("seeds auth from the run input", () => {
     const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: testAuth,
         adapter: { kind: "http" },
@@ -186,7 +187,7 @@ describe("buildRunContext", () => {
 
   it("seeds null auth when the run input has null auth", () => {
     const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "http" },
@@ -204,7 +205,7 @@ describe("buildRunContext", () => {
 
     const ctx = contextStorage.run(scope, () =>
       buildRunContext({
-        bundle: createMinimalBundle(),
+        agent: createMinimalAgent(),
         run: {
           auth: testAuth,
           adapter: { kind: "channel:slack" },
@@ -222,7 +223,7 @@ describe("buildRunContext", () => {
     scope.set(ScheduleIdKey, "automatic-reports");
     const ctx = contextStorage.run(scope, () =>
       buildRunContext({
-        bundle: createMinimalBundle(),
+        agent: createMinimalAgent(),
         run: {
           auth: testAuth,
           adapter: { kind: "subagent" },
@@ -241,7 +242,7 @@ describe("buildRunContext", () => {
 
   it("stores titles for root and remote-owned sessions, not local children", () => {
     const root = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "http" },
@@ -249,7 +250,7 @@ describe("buildRunContext", () => {
       },
     });
     const child = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "subagent" },
@@ -266,7 +267,7 @@ describe("buildRunContext", () => {
     expect(root.get(SessionTitleKey)).toBe("Investigate the incident");
     expect(child.get(SessionTitleKey)).toBeUndefined();
     const remote = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "eve" },
@@ -285,7 +286,7 @@ describe("buildRunContext", () => {
 
   it("does not invent a continuation for an ID-only run", () => {
     const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "http" },
@@ -300,7 +301,7 @@ describe("buildRunContext", () => {
   it("does not throw when channel has no onContext", () => {
     expect(() =>
       buildRunContext({
-        bundle: createMinimalBundle(),
+        agent: createMinimalAgent(),
         run: {
           auth: null,
           adapter: { kind: "http" },
@@ -313,7 +314,7 @@ describe("buildRunContext", () => {
 
   it("does not seed SessionIdKey", () => {
     const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "http" },
@@ -337,7 +338,7 @@ describe("buildRunContext", () => {
       principalType: "user",
     };
     const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "subagent" },
@@ -363,7 +364,7 @@ describe("buildRunContext", () => {
 
   it("uses the adapter's own projection when channelMetadata is not provided", () => {
     const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "http" },
@@ -384,7 +385,7 @@ describe("buildRunContext", () => {
       originAudience: "private",
     } as const;
     const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
+      agent: createMinimalAgent(),
       run: {
         auth: null,
         adapter: { kind: "eve" },

@@ -22,6 +22,7 @@ import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import { isSlackCodeChannel } from "#public/channels/slack/code-channel.js";
 import { dispatchSignInCancel } from "#public/channels/slack/sign-in-cancel.js";
 import {
+  answerLabelOf,
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlResponse,
@@ -67,6 +68,7 @@ interface ParsedBlockActionsPayload {
   readonly threadTs: string;
   readonly teamId: string | undefined;
   readonly messageBlocks: readonly unknown[];
+  readonly ephemeral: boolean;
 }
 
 export function parseBlockActionsPayload(
@@ -112,14 +114,20 @@ export function parseBlockActionsPayload(
       messageTs: message?.ts,
       triggerId: typeof rawBody.trigger_id === "string" ? rawBody.trigger_id : undefined,
       label: extractActionLabel(a),
+      responseUrl: typeof rawBody.response_url === "string" ? rawBody.response_url : undefined,
       user,
     })),
     channelId: channel,
+    ephemeral: isEphemeralClick(rawBody),
     installationTeamId: readInstallationTeamId(rawBody),
     threadTs,
     teamId,
     messageBlocks,
   };
+}
+
+function isEphemeralClick(raw: Record<string, unknown>): boolean {
+  return isObjectRecord(raw.container) && raw.container.is_ephemeral === true;
 }
 
 function isSharedBlockActionsPayload(
@@ -142,6 +150,7 @@ function parseSharedBlockActionsPayload(
       messageTs: body.messageTs,
       triggerId: body.triggerId,
       label: action.label,
+      responseUrl: body.responseUrl,
       user: {
         id: action.user?.id ?? body.userId,
         username: action.user?.username,
@@ -149,6 +158,7 @@ function parseSharedBlockActionsPayload(
       },
     })),
     channelId: body.channelId,
+    ephemeral: isEphemeralClick(body.raw),
     installationTeamId: readInstallationTeamId(body.raw),
     threadTs: body.threadTs,
     teamId: body.user?.teamId ?? body.teamId,
@@ -518,6 +528,13 @@ async function dispatchBlockAnswers(input: {
     },
     log,
   );
+  if (response.outcome === "delivered" && input.interaction.ephemeral) {
+    const [action] = input.submission.actions;
+    const label = (action && answerLabelOf(action)) ?? "Answered";
+    await settleHitlCard(input.interaction, input.deps, { label, text: label }).catch(
+      (error: unknown) => log.warn("failed to show the answer on an ephemeral card", { error }),
+    );
+  }
   if (response.outcome === "inactive") {
     await Promise.all([
       response.retirement,
@@ -594,8 +611,13 @@ async function openFreeformModal(input: {
     continuationToken: slackSessionToken(target),
     installationTeamId: input.interaction.installationTeamId,
     messageChannelId: input.interaction.channelId,
+    messageThreadTs: input.interaction.threadTs,
     messageTs,
     requestId,
+    ...(input.interaction.ephemeral &&
+      input.freeformAction.responseUrl !== undefined && {
+        responseUrl: input.freeformAction.responseUrl,
+      }),
   };
 
   const promptText = readPromptTextFromBlocks(input.interaction.messageBlocks);
@@ -703,24 +725,31 @@ async function dispatchViewAnswer(input: {
   if (result === null) return;
 
   const cardChannelId = input.metadata.messageChannelId ?? channelId;
+  const settleCard = (label: string) =>
+    settleFreeformCard({
+      card: { label, text: label },
+      channelId: cardChannelId,
+      deps: input.deps,
+      installationTeamId: input.installationTeamId,
+      messageTs: input.metadata.messageTs,
+      responseUrl: input.metadata.responseUrl,
+      threadTs: input.metadata.messageThreadTs,
+    });
   const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx.from(input.metadata.continuationToken).respond(input.submission.answers, {
         auth: result.auth,
         state: withSlackResponder(undefined, input.submission.user.id),
       }),
-    {
-      retirePrompt: (label) =>
-        settleFreeformCard({
-          card: { label, text: label },
-          channelId: cardChannelId,
-          deps: input.deps,
-          installationTeamId: input.installationTeamId,
-          messageTs: input.metadata.messageTs,
-        }),
-    },
+    { retirePrompt: settleCard },
     log,
   );
+  if (response.outcome === "delivered" && input.metadata.responseUrl !== undefined) {
+    const text = input.submission.answers[0]?.text ?? "Answered";
+    await settleCard(text).catch((error: unknown) =>
+      log.warn("failed to show the answer on an ephemeral card", { error }),
+    );
+  }
   if (response.outcome === "inactive") {
     await Promise.all([
       response.retirement,

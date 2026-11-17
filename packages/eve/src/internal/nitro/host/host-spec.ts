@@ -22,6 +22,7 @@ export type HostMode =
       readonly kind: "production";
       readonly preset: "vercel" | undefined;
       readonly publicRoutePrefix?: string;
+      readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
     };
 
@@ -31,8 +32,10 @@ export interface HostDirectories {
 }
 
 export type HostRuntimePlugin =
+  | "connection-drain"
   | "instrumentation"
   | "local-schedules"
+  | "timezone-schedules"
   | "sandbox-shutdown"
   | "skill-files";
 
@@ -86,12 +89,19 @@ export function createHostSpec(
     mode: mode.kind,
     scheduleRegistrations: preparedHost.scheduleRegistrations,
     vercel: preset === "vercel",
+    vercelService: mode.kind === "production" && mode.vercelService === true,
   });
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
     ...(development && usesLocalVercelSchedules(manifest) ? (["local-schedules"] as const) : []),
+    ...(!development &&
+    preset !== "vercel" &&
+    routes.scheduleTasks.some((task) => task.timezone !== undefined)
+      ? (["timezone-schedules"] as const)
+      : []),
     ...(development ? [] : (["sandbox-shutdown"] as const)),
+    ...(!development && preset !== "vercel" ? (["connection-drain"] as const) : []),
   ];
 
   return {

@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { expect } from "vitest";
+
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 
 export interface RunningEveStart {
@@ -57,7 +59,7 @@ export async function startPackagedEveStart(appRoot: string): Promise<RunningEve
     stderr: () => stderr,
     stdout: () => stdout,
     async stop() {
-      await stopChildProcess(child);
+      await stopChildProcess(child, () => stderr);
     },
     url,
   };
@@ -110,21 +112,26 @@ function parseStartUrl(output: string): string | undefined {
   return match?.[1];
 }
 
-async function stopChildProcess(child: ChildProcess): Promise<void> {
+const STOP_TIMEOUT_MS = 10_000;
+
+async function stopChildProcess(child: ChildProcess, readStderr?: () => string): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      process.kill(-child.pid!, "SIGKILL");
-      resolve();
-    }, 10_000);
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  let timer: NodeJS.Timeout | undefined;
+  child.kill("SIGTERM");
+  const stopped = await Promise.race([
+    exited.then(() => true),
+    new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), STOP_TIMEOUT_MS))),
+  ]);
+  clearTimeout(timer);
+  if (stopped) return;
 
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
+  process.kill(-child.pid!, "SIGKILL");
+  await exited;
+  const message = `eve start did not exit within ${STOP_TIMEOUT_MS / 1000}s of SIGTERM.\n\nstderr:\n${readStderr?.() ?? ""}`;
+  if (expect.getState().currentTestName === undefined) throw new Error(message);
+  expect.soft(stopped, message).toBe(true);
 }

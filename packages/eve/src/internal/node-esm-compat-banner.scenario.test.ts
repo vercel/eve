@@ -24,7 +24,7 @@ export const value = [__filename.value, __dirname.value, require.value];`;
             load: () => source,
             renderChunk: () => source,
           },
-          createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+          createNodeEsmCompatBannerPlugin(),
         ],
         output: { format: "esm" },
       });
@@ -49,7 +49,7 @@ export const value = [logs, require(), __filename, __dirname];`;
           load: () => source,
           renderChunk: () => source,
         },
-        createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+        createNodeEsmCompatBannerPlugin(),
       ],
       output: { format: "esm" },
     });

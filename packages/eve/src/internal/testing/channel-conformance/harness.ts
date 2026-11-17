@@ -10,14 +10,13 @@ import { idle } from "#protocol/session-projection/selectors.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createAttachSessionFn, type Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ConversationSpace } from "#shared/conversation-context.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
 import type { ApprovalPrompt, ApprovalResponsePolicy } from "#approval/definition.js";
@@ -29,7 +28,7 @@ import {
   askDayAndTimeWorkflow,
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
-import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { conformanceHost, type ConformanceHost, type ConformanceHostKind } from "./hosts.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationRequiredError,
@@ -105,6 +104,7 @@ export interface ChannelDriver {
   shownMessage?(call: PlatformCall): ShownMessage | undefined;
   shownReply?(body: unknown): ShownMessage | undefined;
   readonly personShownAs?: readonly string[];
+  readonly space?: ConversationSpace;
   nextAddress?(): string | undefined;
 }
 
@@ -146,6 +146,8 @@ export interface ChannelConversation {
   readonly personId: string;
   runsOf(tool: CountedTool): number;
   callersOf(tool: typeof PLAIN_TOOL): readonly (string | null)[];
+  spacesOf(tool: typeof PLAIN_TOOL): readonly (ConversationSpace | null)[];
+  readonly space: ConversationSpace | undefined;
 }
 
 export interface ClientDriver {
@@ -153,6 +155,7 @@ export interface ClientDriver {
   readonly capabilities: readonly ChannelCapability[];
   readonly surface: Surface;
   open(host: string, wait: Wait): Promise<ClientView>;
+  dispose?(): Promise<void>;
 }
 
 export interface ClientView {
@@ -163,6 +166,7 @@ export interface ClientView {
   shownPrompt?(prompt: string): ShownMessage | Promise<ShownMessage>;
   readonly personShownAs?: readonly string[];
   readonly personId?: string;
+  readonly space?: ConversationSpace;
   nextAddress?(): string | undefined;
   shown(): readonly ShownText[] | Promise<readonly ShownText[]>;
   visible?(): readonly ShownText[] | Promise<readonly ShownText[]>;
@@ -234,6 +238,7 @@ const CLIENT_PERSON = {
 
 export interface ConversationOptions {
   readonly limits?: AgentLimitsDefinition;
+  readonly host?: ConformanceHostKind;
   readonly waitTimeoutMs?: number;
 }
 
@@ -378,6 +383,7 @@ function webhookView(
     },
     personShownAs: driver.personShownAs ?? [],
     personId: driver.personId,
+    ...(driver.space !== undefined && { space: driver.space }),
     nextAddress: driver.nextAddress?.bind(driver),
     shown: () => [
       ...calls.flatMap((call) => {
@@ -463,6 +469,7 @@ async function converse(
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
   const callers: (string | null)[] = [];
+  const spaces: (ConversationSpace | null)[] = [];
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [REQUESTER_GATED_TOOL]: 0,
@@ -518,6 +525,7 @@ async function converse(
             execute: async (_input, ctx) => {
               runs[PLAIN_TOOL] += 1;
               callers.push(callerKey(ctx.session.auth.current));
+              spaces.push(ctx.conversation?.space ?? null);
               return { notes: "Bob's review notes" };
             },
             inputSchema: z.object({}),
@@ -598,14 +606,15 @@ async function converse(
     const entry = bundle.graph.root.channels.find((candidate) => candidate.name === channelName);
     if (entry?.adapter === undefined) throw new Error(`Expected the ${channelName} adapter.`);
     const { adapter, turnPolicy } = entry;
-    const workflowRuntime = createWorkflowRuntime({ compiledArtifactsSource });
+    const host = conformanceHost(options.host ?? "workflow", compiledArtifactsSource);
+    const sessionRuntime = host.runtime;
     const operations = createChannelOperations({
       adapter,
       channelName,
-      runtime: workflowRuntime,
+      runtime: sessionRuntime,
       turnPolicy,
     });
-    const attachSession = createAttachSessionFn(workflowRuntime, {
+    const attachSession = createAttachSessionFn(sessionRuntime, {
       channelKind: adapter.kind,
       channelName,
       turnPolicy,
@@ -619,7 +628,8 @@ async function converse(
       return delivery;
     }
 
-    const dispatch: Dispatch = async (request) => {
+    const dispatch: Dispatch = (request) => runtime.run(() => serve(request));
+    const serve: Dispatch = async (request) => {
       const { params, route } = findRoute(channel, request);
       const pending: Promise<unknown>[] = [];
       const args = attachRouteSessionCreator<RouteHandlerArgs>(
@@ -655,7 +665,7 @@ async function converse(
             input.deliveryId === undefined
               ? generated
               : { ...generated, deliveryId: input.deliveryId };
-          const handle = await workflowRuntime.createSession({
+          const handle = await sessionRuntime.createSession({
             ...input,
             delivery,
             adapter,
@@ -675,7 +685,10 @@ async function converse(
       return { response, settled };
     };
 
-    const view = await open(dispatch);
+    const view = await open(dispatch).catch(async (error: unknown) => {
+      await host.dispose().catch(() => {});
+      throw error;
+    });
     const replyWait = <T>(label: string, select: (reply: string) => T | undefined) =>
       wait(
         label,
@@ -696,7 +709,7 @@ async function converse(
 
     const conversation: ChannelConversation = {
       async say(text, person = "alice", files) {
-        await waitForStepsToFinish([...sessions.values()], wait);
+        await waitForStepsToFinish(host, [...sessions.values()], wait);
         const address = view.nextAddress?.();
         if (address !== undefined) await waitForAddress(address);
         await view.say(text, person, files);
@@ -791,10 +804,11 @@ async function converse(
       },
       runsOf: (tool) => runs[tool],
       callersOf: () => callers,
-      waitForRest: () => waitForRest([...sessions.values()], wait),
+      spacesOf: () => spaces,
+      waitForRest: () => waitForRest(host, [...sessions.values()], wait),
       async cancelRunsInWorld() {
-        await waitForStepsToFinish([...sessions.values()], wait);
-        await Promise.all([...sessions.keys()].map((runId) => getRun(runId).cancel()));
+        await waitForStepsToFinish(host, [...sessions.values()], wait);
+        await Promise.all([...sessions.keys()].map((runId) => host.cancelRunOutsideEve(runId)));
         runsCancelledInWorld = true;
         sessions.clear();
       },
@@ -804,18 +818,14 @@ async function converse(
       },
       personShownAs: view.personShownAs ?? [],
       personId: view.personId ?? CLIENT_PERSON.principalId,
+      space: view.space,
     };
 
     async function waitForAddress(address: string): Promise<void> {
-      const world = await getWorld();
-      const token = sessionInboxHookToken(`${channelName}:${address}`);
+      const token = `${channelName}:${address}`;
       await wait(
         `the channel to claim the address "${address}"`,
-        () =>
-          world.hooks.getByToken(token).then(
-            () => true,
-            () => undefined,
-          ),
+        async () => ((await host.addressClaimed(token)) ? true : undefined),
         () => "",
       );
     }
@@ -847,7 +857,7 @@ async function converse(
     }
 
     const settle = async () => {
-      await Promise.all([...sessions.values()].map(cancelUntilResting));
+      await Promise.all([...sessions.values()].map((session) => cancelUntilResting(host, session)));
       await Promise.all(background);
     };
     try {
@@ -855,23 +865,23 @@ async function converse(
     } catch (error) {
       await view.close().catch(() => {});
       await settle().catch(() => {});
+      await host.dispose().catch(() => {});
       throw error;
     }
     await view.close();
     await settle();
+    await host.dispose();
   });
 }
 
-const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "cancelled"]);
-
-async function cancelUntilResting(session: Session): Promise<void> {
+async function cancelUntilResting(host: ConformanceHost, session: Session): Promise<void> {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   let last: string | undefined;
   let running: string[] = [];
   while (Date.now() < deadline) {
     const events = await readThroughTail(session);
     last = events.at(-1)?.type;
-    running = await runningSteps(session);
+    running = await host.runningSteps(session.id);
     if (idle(viewOfEvents(events).view) && running.length === 0) return;
     await session.cancel();
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -905,55 +915,62 @@ async function readThroughTail(session: Session, startIndex = 0): Promise<Sessio
   return events;
 }
 
-async function runningSteps(session: Session): Promise<string[]> {
-  const world = await getWorld();
-  const steps = await world.steps.list({ resolveData: "none", runId: session.id });
-  return steps.data
-    .filter((step) => !TERMINAL_STEP_STATUSES.has(step.status))
-    .map((step) => `${step.stepName} (${step.status})`);
-}
-
-async function waitForStepsToFinish(sessions: readonly Session[], wait: Wait): Promise<void> {
+async function waitForStepsToFinish(
+  host: ConformanceHost,
+  sessions: readonly Session[],
+  wait: Wait,
+): Promise<void> {
   await wait(
     "every session's steps to finish",
     async () => {
-      const running = await Promise.all(sessions.map(runningSteps));
+      const running = await Promise.all(sessions.map((session) => host.runningSteps(session.id)));
       return running.every((steps) => steps.length === 0) ? true : undefined;
     },
     () => "",
   );
 }
 
-const REST_QUIET_MS = 250;
-
-async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<void> {
-  const world = await getWorld();
-  let quietSince: number | undefined;
-  let lastTails = "";
+async function waitForRest(
+  host: ConformanceHost,
+  sessions: readonly Session[],
+  wait: Wait,
+): Promise<void> {
   await wait(
     "every session to rest",
     async () => {
-      const states = await Promise.all(
+      if (!(await settledWithin(host, REST_POLL_MS))) return undefined;
+      const resting = await Promise.all(
         sessions.map(async (session) => {
           const tail = await internalSession(session).getStreamTailIndex();
-          const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
-          const steps = await world.steps.list({ resolveData: "none", runId: session.id });
-          const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
-          return { resting: waiting && idle, tail };
+          const tailEvents = await readThroughTail(session, Math.max(tail, 0));
+          const waiting =
+            tailEvents.some(endsTurn) ||
+            (tailEvents.length > 0 &&
+              tailEvents.every(({ type }) => type.startsWith("delivery.")) &&
+              idle(viewOfEvents(await readThroughTail(session)).view));
+          return waiting && (await host.runningSteps(session.id)).length === 0;
         }),
       );
-      const tails = states.map((state) => state.tail).join(",");
-      const quiet = states.every((state) => state.resting) && tails === lastTails;
-      lastTails = tails;
-      if (!quiet) {
-        quietSince = undefined;
-        return undefined;
-      }
-      quietSince ??= Date.now();
-      return Date.now() - quietSince >= REST_QUIET_MS ? true : undefined;
+      return resting.every(Boolean) ? true : undefined;
     },
     () => "",
   );
+}
+
+const REST_POLL_MS = 1_000;
+
+async function settledWithin(host: ConformanceHost, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      host.settled().then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const asks = (prompt: string) => (event: SessionStreamEvent) =>

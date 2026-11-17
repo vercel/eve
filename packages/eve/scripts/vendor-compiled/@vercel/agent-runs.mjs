@@ -30,7 +30,6 @@ const copyDeclarations = createDeclarationCopier({
 export default {
   packageName: "@vercel/agent-runs",
   compiledPath: "@vercel/agent-runs",
-  chunkGroup: "workflow",
   entries: ["index", "delegation", "otel", "ai-sdk"].map((name) => ({
     entry: `src/${name}.ts`,
     outputPath: name,

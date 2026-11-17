@@ -59,7 +59,6 @@ interface EnsureSandboxAccessInput {
 export interface EnsuredSandboxAccess extends SandboxAccess {
   end(reason: SandboxSessionEndReason): Promise<void>;
   release(): Promise<void>;
-  resumeRecorded(): void;
   settle(): Promise<void>;
 }
 
@@ -109,7 +108,6 @@ export async function ensureSandboxAccess(
       },
       prepare() {},
       async release() {},
-      resumeRecorded() {},
       async settle() {},
       async stop() {},
     };
@@ -236,7 +234,7 @@ export async function ensureSandboxAccess(
     return opened;
   }
 
-  async function resolveOpened(options: { readonly resumeOnly: boolean }): Promise<OpenedSandbox> {
+  async function resolveOpened(): Promise<OpenedSandbox> {
     const definition = activeDefinition();
     const provider = getSandboxEnvironmentRuntime(definition.environment);
     const context = providerContext("sandbox-initialization");
@@ -251,14 +249,11 @@ export async function ensureSandboxAccess(
       });
     }
 
-    if (persisted === null && options.resumeOnly) {
-      throw new Error("This session has not recorded a sandbox to resume.");
-    }
     if (persisted !== null) {
       try {
         return await resumePersisted(context);
       } catch (error) {
-        if (!SandboxSessionGoneError.is(error) || options.resumeOnly) throw error;
+        if (!SandboxSessionGoneError.is(error)) throw error;
         log.warn("session sandbox is gone, starting a fresh one", {
           error,
           providerName: persisted.providerName,
@@ -315,9 +310,9 @@ export async function ensureSandboxAccess(
     return opened;
   }
 
-  function requireOpened(options = { resumeOnly: false }): Promise<OpenedSandbox> {
+  function requireOpened(): Promise<OpenedSandbox> {
     if (requiring !== undefined) return requiring;
-    requiring = resolveOpened(options).catch((error: unknown) => {
+    requiring = resolveOpened().catch((error: unknown) => {
       requiring = undefined;
       throw error;
     });
@@ -325,17 +320,12 @@ export async function ensureSandboxAccess(
   }
 
   async function openSession(): Promise<RuntimeSandboxSession> {
-    try {
-      return (await requireOpened()).sandbox;
-    } catch (error) {
-      if (!SandboxSessionGoneError.is(error)) throw error;
-      return (await requireOpened()).sandbox;
-    }
+    return (await requireOpened()).sandbox;
   }
 
   let preparations: Promise<void> = Promise.resolve();
 
-  function enqueue(job: () => Promise<unknown>, options = { retry: true }): void {
+  function enqueue(job: () => Promise<unknown>): void {
     const report = (error: unknown) => {
       log.warn("background sandbox preparation failed; it runs again when it is needed", {
         error,
@@ -345,9 +335,8 @@ export async function ensureSandboxAccess(
     preparations = preparations.then(async () => {
       try {
         await job();
-      } catch (error) {
-        if (options.retry) await job().catch(report);
-        else report(error);
+      } catch {
+        await job().catch(report);
       }
     });
   }
@@ -427,11 +416,6 @@ export async function ensureSandboxAccess(
     open: openSession,
     prepare(work) {
       enqueue(work === undefined ? requireOpened : () => work(openSession));
-    },
-    resumeRecorded() {
-      if (persisted !== null) {
-        enqueue(() => requireOpened({ resumeOnly: true }), { retry: false });
-      }
     },
     async settle() {
       await preparations;

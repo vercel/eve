@@ -280,6 +280,12 @@ describe("normalizeDevelopmentServerClientUrl", () => {
   });
 });
 
+function stateProbes() {
+  return (mocks.fetch.mock.calls as unknown[][]).filter(
+    ([url]) => !String(url).endsWith("/eve/v1/health"),
+  );
+}
+
 describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -491,6 +497,35 @@ describe("createDevelopmentServer", () => {
     expect(workerOrder ?? Infinity).toBeLessThan(startOrder ?? 0);
 
     await server.close();
+  });
+
+  it("publishes the first generation before the first worker serves requests", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.devServer.swapTo.mockImplementationOnce(async () => {
+      expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledWith({
+        appRoot: "/tmp/eve-test",
+        generation: expect.objectContaining({
+          snapshotRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test",
+        }),
+      });
+    });
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
+    expect(mocks.fetch).toHaveBeenCalledWith(new URL("/eve/v1/health", "http://localhost:2000/"));
+    await server.close();
+  });
+
+  it("keeps the published first generation when the first worker fails readiness", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.devServer.swapTo.mockRejectedValueOnce(new Error("worker failed"));
+
+    await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("worker failed");
+
+    expect(mocks.discardDevelopmentGeneration).not.toHaveBeenCalled();
+    expect(mocks.removeDevelopmentHostWorkspace).not.toHaveBeenCalled();
+    expect(mocks.devServer.close).toHaveBeenCalledOnce();
   });
 
   it("forwards persisted workflow deliveries while the file watcher starts", async () => {
@@ -825,7 +860,7 @@ describe("createDevelopmentServer", () => {
         signal: expect.any(AbortSignal),
       },
     );
-    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(stateProbes()).toHaveLength(1);
     expect(mocks.createHostNitro).toHaveBeenCalledOnce();
     expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
 
@@ -840,7 +875,7 @@ describe("createDevelopmentServer", () => {
       existing: "attach-if-unconfigured",
     });
 
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(stateProbes()).toEqual([]);
     expect(mocks.createHostNitro).toHaveBeenCalledOnce();
 
     await server.close();

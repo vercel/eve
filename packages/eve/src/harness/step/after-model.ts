@@ -14,7 +14,7 @@ import {
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
-import { failTurnForEffect, type Step } from "#harness/step/context.js";
+import { failTurnForEffect, type Step, stepReference } from "#harness/step/context.js";
 import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
@@ -94,7 +94,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   step.session = {
     ...step.session,
     compaction: withPromptMeasurement(step.session.compaction, {
+      promptMessages,
       inputTokens: result.usage?.inputTokens,
+      modelId: stepReference(step).id,
       promptMessageCount: input.durableModelPromptMessageCount,
       requestEnvelopeTokens: input.requestEnvelopeTokens,
     }),
@@ -117,19 +119,21 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
     const { sequence, stepIndex, turnId } = step.position();
     const dispatched = collectWorkflowCalls({
+      clearances: result.policyApprovals ?? {},
       session: step.session,
       toolCalls: workflowToolCalls,
       tools: input.catalog,
       turnId,
     });
     step.session = changeHistory(dispatched.session, { extend: promptMessages });
+    const endsTurn =
+      !normalizedProviderHistory.outcomeEndsResponse &&
+      (await stepEndsTurn(result, responseMessages, input.endsTurnTools));
     const parked = {
+      ...(endsTurn && { endsTurn: true as const }),
       event: { sequence, stepIndex, turnId },
       messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests.map((task) => ({
-        ...task,
-        clearedBy: result.policyApprovals?.[task.callId]?.clearedBy,
-      })),
+      tasks: dispatched.workflowRequests,
     };
     if (approvalRequests.length > 0) {
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
@@ -201,24 +205,43 @@ async function stepEndsTurn(
       if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
     }
   }
-  const succeeded = toolCalls.every((toolCall) => {
-    const output = outputs.get(toolCall.toolCallId);
-    return (
-      endsTurnTools.has(toolCall.toolName) && output !== undefined && !isToolResultError(output)
-    );
-  });
-  if (!succeeded) return false;
   const executeOutputs = new Map(
     (result.toolResults ?? []).map((toolResult) => [toolResult.toolCallId, toolResult.output]),
   );
-  for (const toolCall of toolCalls) {
-    const endsTurn = endsTurnTools.get(toolCall.toolName);
-    if (typeof endsTurn !== "function") continue;
-    if (!(await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))) {
-      return false;
+  return await callsEndTurn(
+    toolCalls.map((toolCall) => {
+      const output = outputs.get(toolCall.toolCallId);
+      return {
+        failed: output === undefined || isToolResultError(output),
+        output: executeOutputs.get(toolCall.toolCallId),
+        toolCallId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+      };
+    }),
+    endsTurnTools,
+  );
+}
+
+export interface EndingCall {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly failed: boolean;
+  readonly output: unknown;
+}
+
+export async function callsEndTurn(
+  calls: readonly EndingCall[],
+  endsTurnTools: EndsTurnTools,
+): Promise<boolean> {
+  let ends = false;
+  for (const call of calls) {
+    const endsTurn = endsTurnTools.get(call.toolName);
+    if (endsTurn === undefined || call.failed) continue;
+    if (typeof endsTurn !== "function" || (await callEndsTurn(endsTurn, call.output, call))) {
+      ends = true;
     }
   }
-  return true;
+  return ends;
 }
 
 async function callEndsTurn(
@@ -265,10 +288,10 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
   )?.input as JsonValue | undefined;
 }
 
-async function settleTurn(
+export async function settleTurn(
   step: Step,
   input: {
-    readonly result: HarnessStepResult;
+    readonly result?: HarnessStepResult;
     readonly stepOutput: string | null;
   },
 ): Promise<StepResult> {
@@ -283,7 +306,7 @@ async function settleTurn(
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
-  const structured = extractFinalOutput(result);
+  const structured = result === undefined ? undefined : extractFinalOutput(result);
   if (structured === undefined) {
     step.session = { ...step.session, outputSchema: undefined };
     await step.apply(fail(step.view(), OUTPUT_SCHEMA_NOT_FULFILLED));

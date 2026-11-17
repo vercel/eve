@@ -3,7 +3,6 @@ import { createDeclarationCopier } from "../_shared.mjs";
 export default {
   packageName: "@vercel/connect",
   compiledPath: "@vercel/connect",
-  bundling: "standalone",
   copyDeclarations: createDeclarationCopier({
     files: ({ distEntries }) =>
       distEntries

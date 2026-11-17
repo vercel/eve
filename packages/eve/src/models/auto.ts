@@ -23,7 +23,7 @@ import type {
   PublicAgentDynamicModelResult,
 } from "#shared/agent-definition.js";
 
-import { decide } from "#ai/decide.js";
+import { decideFor } from "#ai/decide.js";
 import { DEFAULT_DECISION_MODEL } from "#ai/decision-adapter.js";
 
 type AutoModelSelection = ModelOptionSelection;
@@ -49,13 +49,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function turnState(turn: DynamicTurn): TurnState {
-  const input = turnInputText(turn);
-  return { input: input.length > MAX_ROUTING_CHARACTERS ? null : input, turnId: turn.id };
+  return { input: turnInputText(turn), turnId: turn.id };
 }
 
-const MAX_ROUTING_CHARACTERS = 16_000;
-
-type TurnState = { readonly input: string | null; readonly turnId: string };
+type TurnState = { readonly input: string; readonly turnId: string };
 
 function routingState(
   turn: TurnState,
@@ -79,18 +76,11 @@ function routingState(
       break;
     }
   }
-  if (turn.input === null) {
-    throw new Error("The latest message is too long for auto routing.");
-  }
   const messages: { role: string; text: string }[] = turn.input.trim()
     ? [{ role: "user", text: turn.input }]
     : [];
-  let characters = turn.input.length;
   for (let index = end - 1; index >= 0 && messages.length < 8; index--) {
-    const message = texts[index]!;
-    if (message.text.length + characters > MAX_ROUTING_CHARACTERS) break;
-    characters += message.text.length;
-    messages.unshift(message);
+    messages.unshift(texts[index]!);
   }
   return { messages };
 }
@@ -153,7 +143,7 @@ export function auto<const T extends ModelOptions>(
       throw new Error("auto requires user text to select a model.");
     }
     try {
-      const result = await decide({
+      const result = await decideFor("model-selection", {
         model: decisionModel,
         state,
         questions: {

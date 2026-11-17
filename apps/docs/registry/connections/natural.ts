@@ -2,7 +2,7 @@ import { connect } from "@vercel/connect/eve";
 import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.natural.com/mcp",
+  url: "https://mcp.natural.com",
   description:
     "Natural: agentic payments — send and request payments, check balances, and move funds.",
   auth: connect("natural"),

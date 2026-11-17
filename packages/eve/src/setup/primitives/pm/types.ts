@@ -20,6 +20,7 @@ export interface PackageManagerInstallOptions {
   readonly bypassMinimumReleaseAge?: boolean;
   readonly ignoreWorkspace?: boolean;
   readonly progressDetails?: boolean;
+  readonly skipPeerDependencyResolution?: boolean;
 }
 
 export interface PackageManagerStrategy {

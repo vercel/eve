@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -89,6 +89,7 @@ const SAMPLE_ENV: Record<string, string> = {
     type: "service_account",
   }),
   GOOGLE_CHAT_PROJECT_NUMBER: "123456789",
+  LARK_DOMAIN: "lark",
   LIVEBLOCKS_SECRET_KEY: "sk_test_conformance",
   LIVEBLOCKS_WEBHOOK_SECRET: "whsec_Y29uZm9ybWFuY2U=",
   MATRIX_BASE_URL: "https://matrix.example.com",
@@ -149,11 +150,19 @@ afterAll(() => {
 });
 
 function resolveFromDocs(specifier: string): string {
-  const pkg = realpathSync(join(DOCS, "node_modules", specifier));
-  const manifest = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
-  const entry =
-    manifest.exports?.["."]?.import ?? manifest.exports?.["."]?.default ?? manifest.module;
-  return join(pkg, typeof entry === "string" ? entry : entry.default);
+  for (let directory = join(DOCS, "registry", "channels"); ; directory = dirname(directory)) {
+    const pkg = join(directory, "node_modules", specifier);
+    if (existsSync(join(pkg, "package.json"))) {
+      const real = realpathSync(pkg);
+      const manifest = JSON.parse(readFileSync(join(real, "package.json"), "utf8"));
+      const entry =
+        manifest.exports?.["."]?.import ?? manifest.exports?.["."]?.default ?? manifest.module;
+      return join(real, typeof entry === "string" ? entry : entry.default);
+    }
+    if (dirname(directory) === directory) {
+      throw new Error(`${specifier} is not installed above ${DOCS}`);
+    }
+  }
 }
 
 interface LoadedTemplate {

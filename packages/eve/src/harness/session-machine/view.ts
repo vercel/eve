@@ -157,3 +157,41 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
       .map((row) => row.interactionId),
   );
 }
+
+export function endingStepKeys(view: SessionView): ReadonlySet<string> {
+  return new Set(
+    view.turn.suspended.flatMap((parked) =>
+      parked.endsTurn === true ? [stepCoordinatesKey(parked.event)] : [],
+    ),
+  );
+}
+
+export function committedEndingStep(view: SessionView, ending: ReadonlySet<string>): boolean {
+  if (ending.size === 0) return false;
+  const waiting = new Set(view.turn.suspended.map((parked) => stepCoordinatesKey(parked.event)));
+  return [...ending].some((key) => !waiting.has(key));
+}
+
+export function parkedCallsAnswered(
+  suspended: readonly SuspendedStep[],
+  settledIds: ReadonlySet<string>,
+): boolean {
+  return suspended.every((parked) => {
+    const answered = answeredCallIds(parked.messages);
+    return parked.messages.every(
+      ({ content, role }) =>
+        role !== "assistant" ||
+        typeof content === "string" ||
+        content.every(
+          (part) =>
+            part.type !== "tool-call" ||
+            (part.providerExecuted !== true &&
+              (answered.has(part.toolCallId) || settledIds.has(part.toolCallId))),
+        ),
+    );
+  });
+}
+
+function stepCoordinatesKey(event: StepCoordinates): string {
+  return `${event.turnId}:${event.sequence}:${event.stepIndex}`;
+}

@@ -8,7 +8,8 @@ import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbo
 import type { ModelMessage } from "ai";
 import type { Transition } from "#harness/session-machine/commit.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import type { CallsBack } from "./sign-ins.js";
+import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
+import { SIGN_IN_DECLINED, sameRelayedSignIn, type CallsBack } from "./sign-ins.js";
 
 export interface OwnCallbacks {
   readonly origin: string;
@@ -117,4 +118,31 @@ export async function settleSignIns(
       }),
     ),
   );
+}
+
+export interface SignInAnswer {
+  readonly interactionId: string;
+  readonly signIn: SignInChallenge;
+  readonly outcome: "accepted" | "declined";
+}
+
+export function signInsAnswered(
+  tables: SessionView,
+  answer: SignInAnswer,
+  own: OwnCallbacks,
+): readonly AnsweredSignIn[] {
+  const params: AnsweredSignIn["params"] =
+    answer.outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
+  return Object.values(tables.interactions).flatMap((row) => {
+    if (
+      row.interactionId === answer.interactionId ||
+      row.status !== "open" ||
+      "responseId" in row.subject ||
+      row.request.signIn === undefined ||
+      !sameRelayedSignIn(row.request.signIn, answer.signIn)
+    )
+      return [];
+    const callback = localSignInCallback(row, own);
+    return callback === undefined ? [] : [{ callback, params }];
+  });
 }

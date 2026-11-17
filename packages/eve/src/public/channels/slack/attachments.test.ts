@@ -361,9 +361,10 @@ describe("collectInboundFileParts", () => {
         mimeType: "text/csv",
       },
     ]),
+    threadTs: "1.0",
     ts: "9.0",
   };
-  const emptyMention = { attachments: [], ts: "9.0" };
+  const emptyMention = { attachments: [], threadTs: "1.0", ts: "9.0" };
 
   function makeSlackThread(input: {
     refresh: () => Promise<void>;
@@ -421,6 +422,20 @@ describe("collectInboundFileParts", () => {
     expect(parts.map((part) => part.filename)).toEqual(["F2.csv", "F4.csv"]);
   });
 
+  it("doesn't look back from a mention that starts its thread", async () => {
+    const refresh = vi.fn();
+    const thread = makeSlackThread({ refresh, recentMessages: [] });
+
+    const parts = await collect({
+      mention: { attachments: [], threadTs: "9.0", ts: "9.0" },
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    expect(parts).toEqual([]);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("looks back at most 10 messages before the trigger, once per file", async () => {
     const thread = makeSlackThread({
       refresh: vi.fn(),
@@ -436,7 +451,7 @@ describe("collectInboundFileParts", () => {
     });
 
     const parts = await collect({
-      mention: { attachments: [], ts: "20.0" },
+      mention: { attachments: [], threadTs: "1.0", ts: "20.0" },
       thread,
       policy: DEFAULT_UPLOAD_POLICY,
     });
@@ -463,7 +478,7 @@ describe("collectInboundFileParts", () => {
           { isMe: false, raw: {}, text: "<@UBOT> what is this?", ts: "80.0" },
         ] as never,
     );
-    const mention = { attachments: [], ts: "80.0" };
+    const mention = { attachments: [], threadTs: "1.0", ts: "80.0" };
 
     const parts = await collect({
       fetchThreadWindow,

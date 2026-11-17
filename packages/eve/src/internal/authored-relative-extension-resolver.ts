@@ -8,6 +8,7 @@ import {
   isNodeModulesPath,
   isPathImport,
 } from "#internal/authored-package-boundary.js";
+import { type FilterExpression, resolveIdFilter } from "#internal/bundler/filters.js";
 
 const PATH_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 
@@ -15,15 +16,14 @@ export function createAuthoredRelativeExtensionResolverPlugin(input: {
   readonly authoredSourceOnly?: boolean;
   readonly extensions: readonly string[];
   readonly handlesInstalledModule?: (path: string) => boolean;
+  readonly importerFilter?: FilterExpression;
 }): Plugin {
   const isFile = createCachedFileProbe();
 
   return {
     name: "eve-authored-relative-extension-resolver",
     resolveId: {
-      filter: {
-        id: PATH_IMPORT_FILTER,
-      },
+      filter: resolveIdFilter(PATH_IMPORT_FILTER, input.importerFilter),
       handler(source: string, importer: string | undefined) {
         if (
           importer === undefined ||

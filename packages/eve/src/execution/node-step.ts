@@ -33,7 +33,7 @@ import type { KernelConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
-type CreateRuntime = (config: {
+export type CreateRuntime = (config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
 }) => Runtime;
@@ -52,6 +52,7 @@ interface CreateExecutionNodeStepInput {
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly setAttributes?: KernelConfig["setAttributes"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
+  readonly agent: RuntimeAgentIdentity;
   readonly node: ResolvedRuntimeAgentNode;
   readonly sessionUsageLimit?: KernelConfig["sessionUsageLimit"];
 }
@@ -73,7 +74,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     signInCompletions: input.signInCompletions,
     typedAnswers: input.typedAnswers,
     resolveModel,
-    runtimeIdentity: buildRuntimeIdentity(input.node),
+    runtimeIdentity: buildRuntimeIdentity(input.agent),
     sessionUsageLimit: input.sessionUsageLimit,
     tools,
     setAttributes: input.setAttributes,
@@ -88,12 +89,17 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   };
 }
 
-export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
+export interface RuntimeAgentIdentity {
+  readonly id: string;
+  readonly name?: string;
+}
+
+export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdentity {
   const packageInfo = resolveInstalledPackageInfo();
 
   const identity: RuntimeIdentity = {
-    agentId: node.turnAgent.id,
-    agentName: node.agent.config?.name,
+    agentId: agent.id,
+    agentName: agent.name,
     eveVersion: packageInfo.version,
   };
 

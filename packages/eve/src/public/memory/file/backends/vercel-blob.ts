@@ -30,7 +30,7 @@ export function vercelBlob(options: VercelBlobBackendOptions = {}): MemoryDocume
   };
 
   const read = async (input: MemoryDocumentReadInput): Promise<MemoryDocument | null> => {
-    const result = await get(pathname(prefix, input.key), {
+    const result = await get(urlPathname(pathname(prefix, input.key)), {
       ...credentials,
       abortSignal: input.signal,
       access: "private",
@@ -85,4 +85,8 @@ function normalizePrefix(value: string): string {
 
 function pathname(prefix: string, key: string): string {
   return `${prefix}/${encodeURIComponent(key)}/MEMORY.md`;
+}
+
+function urlPathname(pathname: string): string {
+  return pathname.replaceAll("%", "%25");
 }

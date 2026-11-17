@@ -7,9 +7,9 @@ import {
   createParentDevelopmentWorkflowWorld,
   type ParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-server.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
-  DEVELOPMENT_WORKFLOW_SECRET_ENV,
   usesParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-protocol.js";
 

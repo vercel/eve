@@ -16,6 +16,7 @@ import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { TraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
 
@@ -559,8 +560,17 @@ export interface InstrumentationHooks {
   readonly capturesContent: boolean;
   readonly capturesInputs?: boolean;
   readonly capturesOutputs?: boolean;
-  readonly forTrace?: (trace: TraceCaptureContext) => InstrumentationHooks;
+  readonly authoredCapturesInputs?: boolean;
+  readonly authoredCapturesOutputs?: boolean;
+  readonly forTrace?: (
+    trace: TraceCaptureContext,
+    options?: InstrumentationTraceBindingOptions,
+  ) => InstrumentationHooks;
   publish(event: InstrumentationEvent): Promise<void>;
+}
+
+export interface InstrumentationTraceBindingOptions {
+  readonly ceiling?: TraceContentCeiling;
 }
 
 export interface CreateInstrumentationHooksOptions {

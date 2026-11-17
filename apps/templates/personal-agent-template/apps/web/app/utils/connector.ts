@@ -62,6 +62,21 @@ const CONNECTION_ICONS: Record<string, string> = {
   slack: "i-simple-icons-slack",
 };
 
+/** Matches both connection sign-ins and tool-scoped connector sign-ins. */
+export function signInMatchesConnector(
+  signInName: string,
+  connector: { connectionName: string; connectorUid: string },
+) {
+  if (signInName === connector.connectionName) return true;
+  const segment = connector.connectorUid.replace(/[^\w.:-]+/g, "_").replace(/^_+|_+$/g, "");
+  return !!segment && (signInName === segment || signInName.endsWith(`__${segment}`));
+}
+
+export function signInProvider(signInName: string) {
+  const segment = signInName.split("__").at(-1) ?? signInName;
+  return segment.split(/[_/.:]/)[0] || segment;
+}
+
 export function connectionIcon(name: string) {
-  return CONNECTION_ICONS[name.toLowerCase()] ?? "i-lucide-plug";
+  return CONNECTION_ICONS[signInProvider(name).toLowerCase()] ?? "i-lucide-plug";
 }

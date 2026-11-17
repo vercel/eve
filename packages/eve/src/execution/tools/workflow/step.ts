@@ -7,6 +7,8 @@ import {
   findWorkflowToolRunContext,
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
+import { ownerFieldsOf } from "#execution/agent-sessions/owner.js";
+import { signInHookToken } from "#execution/callback-hook-tokens.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import { signInInteractionId, signInRequest } from "#harness/interaction-facts.js";
 import { relayEvent } from "#channel/relay-event.js";
@@ -63,7 +65,7 @@ async function executeAuthorizedStep(
   const pending = new Map<string, IdentifiedAuthorizationChallenge>();
 
   for (;;) {
-    const callback = createHook<unknown>();
+    const callback = createHook<unknown>({ token: signInHookToken(crypto.randomUUID()) });
     try {
       let result: WorkflowStepResult;
       try {
@@ -131,7 +133,7 @@ async function invokeAuthorizedStep(input: {
     delegated: run.agentContext.delegated === true,
     channel: workflowToolChannel(run.agentContext),
     sandbox: {
-      bundle: run.agentContext.bundle,
+      ...ownerFieldsOf(run.agentContext),
       sessionId: run.agentContext.sandbox.sessionId,
       state: run.agentContext.sandbox.state,
     },

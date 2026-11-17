@@ -190,6 +190,10 @@ function chatSdkDriverWith(input: {
   return {
     name: input.name,
     personId: PERSON.userId,
+    space:
+      input.surface === "private"
+        ? { id: threadId, type: "direct", visibility: "private" }
+        : { id: threadId, type: "shared", visibility: "public" },
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";

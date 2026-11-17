@@ -45,8 +45,6 @@ describe("traceChannelRequest span lifetime", () => {
       hooks: createInstrumentationHooks([]),
       otelSettings: {
         functionId: undefined,
-        recordInputs: false,
-        recordOutputs: false,
         traceChannelRequests: true,
       },
       runInContext: (_operation, execute) => execute(),

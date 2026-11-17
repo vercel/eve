@@ -111,6 +111,13 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | a tool sees the person who sent the message as its caller | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | another person's message reaches tools as a different caller, and each person stays the same caller | —<sup>[9](#note-9)</sup> | —<sup>[9](#note-9)</sup> | ✅ |  | —<sup>[9](#note-9)</sup> | ✅ |  | ✅ |  | —<sup>[9](#note-9)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ | —<sup>[9](#note-9)</sup> | ✅ | —<sup>[9](#note-9)</sup> |
 
+## Conversation spaces
+
+| Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `discord-gateway` | `discord-gateway-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `discord-gateway-threads` | `github` | `linear` | `photon` | `slack-code-channel` | `twilio` |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| a tool sees the conversation's space as the platform names it | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| another person in the conversation sees the same space | —<sup>[9](#note-9)</sup> | —<sup>[9](#note-9)</sup> | ✅ |  | —<sup>[9](#note-9)</sup> | ✅ |  | ✅ |  | —<sup>[9](#note-9)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ | —<sup>[9](#note-9)</sup> | ✅ | —<sup>[9](#note-9)</sup> |
+
 ## Attachments
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `discord-gateway` | `discord-gateway-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `discord-gateway-threads` | `github` | `linear` | `photon` | `slack-code-channel` | `twilio` |

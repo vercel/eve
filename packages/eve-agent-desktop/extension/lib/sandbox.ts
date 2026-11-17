@@ -1,7 +1,7 @@
 import { runCommand, type CommandSandbox } from "./process.js";
 
 /** The agent-desktop CLI version this package's tools are written against. */
-export const AGENT_DESKTOP_VERSION = "1.2.0";
+export const AGENT_DESKTOP_VERSION = "1.3.1";
 
 /** npm spec `installAgentDesktop` installs when `installSpec` is not set: the pinned {@link AGENT_DESKTOP_VERSION}. */
 export const DEFAULT_AGENT_DESKTOP_INSTALL_SPEC = `agent-desktop@${AGENT_DESKTOP_VERSION}`;

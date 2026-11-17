@@ -10,6 +10,7 @@ import {
 } from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -39,6 +40,12 @@ type ChannelAddressCreateOptions<TState = undefined> = [TState] extends [undefin
   ? BaseChannelAddressCreateOptions
   : BaseChannelAddressCreateOptions & { readonly state?: Partial<TState> };
 
+export const startsNewAddress: unique symbol = Symbol("eve.channel.startsNewAddress");
+
+export interface StartsNewAddressOption {
+  readonly [startsNewAddress]?: true;
+}
+
 interface BaseChannelAddressDeliveryOptions {
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
@@ -64,8 +71,14 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   create(options: ChannelAddressCreateOptions<TState>): Promise<ChannelCreateResult>;
-  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
-  send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
+  deliver(
+    input: SendPayload,
+    options: ChannelAddressDeliveryOptions<TState> & StartsNewAddressOption,
+  ): Promise<Delivery>;
+  send(
+    message: MessageContent,
+    options: ChannelAddressDeliveryOptions<TState> & StartsNewAddressOption,
+  ): Promise<Delivery>;
   respond(
     answers: SendPayload["answers"],
     options: ChannelAddressDeliveryOptions<TState>,
@@ -140,24 +153,31 @@ export function createChannelAddress<TState = undefined>(input: {
         continuationToken: namespacedToken,
         delivery,
         initiatorAuth: options.initiatorAuth,
-        input: {
-          context: payload.context,
-          history: payload.history,
-          message: serializeFilePartsInMessage(payload.message) ?? "",
-          outputSchema: payload.outputSchema,
-          state: payload.state,
-        },
+        input: attachInputText(
+          {
+            context: payload.context,
+            history: payload.history,
+            message: serializeFilePartsInMessage(payload.message) ?? "",
+            outputSchema: payload.outputSchema,
+            state: payload.state,
+          },
+          readInputText(payload),
+        ),
         requestId: metadata.requestId,
         title: options.title,
       };
-      const result = await input.runtime.dispatchContinuation({
-        command,
-        continuationToken: namespacedToken,
-        successor: runInput,
-      });
-      if (result.status === "accepted")
+      const answering = payload.answers !== undefined && payload.answers.length > 0;
+      const result =
+        options[startsNewAddress] === true && !answering
+          ? undefined
+          : await input.runtime.dispatchContinuation({
+              command,
+              continuationToken: namespacedToken,
+              successor: runInput,
+            });
+      if (result?.status === "accepted")
         return commandDelivery(input.runtime, result, delivery.deliveryId);
-      if (payload.answers && payload.answers.length > 0) {
+      if (answering) {
         throw new SessionNotActiveError();
       }
       const started = await input.runtime.createSession(runInput);

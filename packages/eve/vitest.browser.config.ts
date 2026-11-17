@@ -20,6 +20,11 @@ export default defineConfig({
     environment: "node",
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
     include: ["test/browser/**/*.test.ts"],
+    server: {
+      deps: {
+        external: [/\.workflow-vitest[\\/]/],
+      },
+    },
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
     testTimeout: 60_000,
   },

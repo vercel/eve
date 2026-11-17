@@ -297,6 +297,7 @@ function createResolvedAgentConfig(
         ? {
             id: model.id,
             contextWindowTokens: model.contextWindowTokens,
+            promptCache: model.promptCache,
             providerOptions: model.providerOptions,
           }
         : {

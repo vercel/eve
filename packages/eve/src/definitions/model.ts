@@ -5,7 +5,7 @@ import {
   type LiveDynamicModelSelection,
 } from "#context/keys.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
 import {
   loadDynamicRuntimeModelDefinition,
@@ -25,6 +25,7 @@ import {
   type InternalContext,
   type Kept,
 } from "./definition.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 
 const MODEL_REACTION_ID = "model:agent";
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
@@ -60,7 +61,7 @@ export async function loadModelDefinition(bundle: CompiledBundle): Promise<Defin
     dynamicModel,
     scope: { moduleMap: bundle.moduleMap, nodeId: bundle.nodeId },
   });
-  return modelDefinition(bundle, {
+  return modelDefinition(bundle.modelMetadata, {
     choose: authoredEvaluate(dynamicEvaluate(definition)),
     id: MODEL_REACTION_ID,
     label: `${dynamicModel.logicalPath}#model`,
@@ -68,7 +69,7 @@ export async function loadModelDefinition(bundle: CompiledBundle): Promise<Defin
 }
 
 function modelDefinition(
-  bundle: CompiledBundle,
+  modelMetadata: () => Promise<ModelMetadata>,
   input: {
     readonly id: string;
     readonly label: string;
@@ -82,7 +83,7 @@ function modelDefinition(
           async (evaluation) => {
             const result = await input.choose(evaluation);
             try {
-              return await keptModel(result, bundle);
+              return await keptModel(result, modelMetadata);
             } catch (error) {
               throw new DynamicModelSelectionError(error);
             }
@@ -99,10 +100,13 @@ function modelDefinition(
   };
 }
 
-async function keptModel(result: unknown, bundle: CompiledBundle): Promise<Kept> {
+async function keptModel(
+  result: unknown,
+  modelMetadata: () => Promise<ModelMetadata>,
+): Promise<Kept> {
   const selection = await resolveRuntimeModelSelection({
     durability: "live",
-    modelMetadata: bundle.modelMetadata,
+    modelMetadata,
     selection: result as PublicAgentDynamicModelResult,
   });
   const live =
@@ -131,7 +135,7 @@ export async function chooseModel(
 
 export function currentModel(ctx: Pick<ContextReader, "get">): RuntimeModelReference | undefined {
   return (
-    ctx.get(ChosenModelKey)?.reference ?? givenModel(ctx) ?? ctx.get(BundleKey)?.turnAgent.model
+    ctx.get(ChosenModelKey)?.reference ?? givenModel(ctx) ?? compiledBundleOf(ctx)?.turnAgent.model
   );
 }
 

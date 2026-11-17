@@ -22,16 +22,19 @@ export class MessageQueue {
     return true;
   }
 
-  takePrompt(): string | undefined {
-    if (this.#messages.length === 0) return undefined;
-    const combined = this.#messages.join("\n\n");
+  take(): string[] {
+    const messages = this.#messages;
     this.#messages = [];
-    return combined;
+    return messages;
   }
 
   view(): MessageQueueView {
     return { messages: [...this.#messages], full: this.full };
   }
+}
+
+export function coalesceQueuedMessages(messages: readonly string[]): string | undefined {
+  return messages.length === 0 ? undefined : messages.join("\n\n");
 }
 
 export interface MessageQueuePanelRowsInput {

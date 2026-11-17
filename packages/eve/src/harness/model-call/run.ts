@@ -29,6 +29,7 @@ import {
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
@@ -54,9 +55,10 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
+  const prepared = await previewPrompt(step, input.turn);
+  const failed = await prepareModelCall(step, prepared);
   if (failed !== undefined) return failed;
-  const prompt = await commitTurnInput(step, input.turn);
+  const prompt = commitTurnInput(step, prepared);
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
 
@@ -84,15 +86,15 @@ export async function runModelStep(
   try {
     result = await caller.call();
   } catch (error) {
+    throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
-    return reportModelCallFailure(step, error);
+    return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 
   await recordModelUsage(step, { model: run.model, tools: catalog.advertised.size });
-  caller.clearInterruptedUsage();
 
   let stepResult: StepResult;
   try {
@@ -109,6 +111,7 @@ export async function runModelStep(
       result,
     });
   } catch (error) {
+    throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
     throw error;

@@ -29,7 +29,7 @@ commits need both.
 
 ## Prerequisites
 
-- **Node.js 24+** — see [`.nvmrc`](./.nvmrc) (`nvm use` or `fnm use`)
+- **Node.js 26** — pinned in [`.nvmrc`](./.nvmrc) (`nvm use` or `fnm use`)
 - **pnpm** — the version pinned in [`package.json`](./package.json) (`corepack enable` handles this automatically)
 
 ## Getting started
@@ -65,8 +65,9 @@ This runs the `eve` package build in watch mode alongside the [`apps/fixtures/we
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests
 pnpm test:integration   # integration tests
-pnpm test:scenario      # scenario tests (Turbo builds prerequisites)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
+pnpm test:scenario      # scenarios that run eve: eve dev, eve start, real files and shells (Turbo builds prerequisites)
+pnpm test:build         # building and packaging apps with eve (Turbo builds prerequisites)
+pnpm test:public-types  # type checks of the published declarations (Turbo builds prerequisites)
 pnpm test:e2e           # fixture-owned eve eval suites
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
@@ -256,9 +257,9 @@ add the replacement beside it, mark the old API `@deprecated`, and remove it in
 the next major release.
 
 When `.changeset/pre.json` has `"mode": "pre"`, `main` is in Changesets prerelease mode:
-each release PR publishes the next prerelease, such as `1.0.0-rc.1`, versioned
-with the tag named in that file. Prereleases still publish to npm's `latest`
-dist-tag, so `npm install eve` gets the newest release candidate. Maintainers enter and leave prerelease mode with `pnpm changeset pre enter <tag>`
+each release PR publishes the next prerelease, such as `1.1.0-rc.1`, under the
+npm dist-tag named in that file, and `latest` stays on the last stable release.
+Maintainers enter and leave prerelease mode with `pnpm changeset pre enter <tag>`
 and `pnpm changeset pre exit`. The release after exiting collects every
 prerelease's changesets into the stable version's notes.
 

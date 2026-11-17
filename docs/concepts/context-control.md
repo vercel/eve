@@ -52,13 +52,15 @@ See [Subagents](../subagents) for the distinction between root-agent copies and 
 
 ## Dynamic context with `defineDynamic`
 
-Use `defineDynamic` when instructions, skills, tools, subagents, or the model depend on the caller, tenant, channel, conversation, or feature state. The function reads the recorded session and returns the value or `null`. eve evaluates it before each ordinary model call, and `ctx.memo(key, fn)` keeps JSON observations across evaluations.
+Use `defineDynamic` when instructions, skills, tools, subagents, or the model depend on the caller, tenant, channel, conversation, or feature state. The function reads the recorded session and returns the value or `null`. eve evaluates it before each ordinary model call, not once per turn, so wrap fetches, database queries, and API calls in `ctx.memo(key, fn)`, which keeps their JSON results across evaluations.
 
 See [Dynamic capabilities](../guides/dynamic-capabilities) for the context, memo rules, supported folders, and evaluation timing.
 
 ## Compaction and clear
 
-Before each model call, eve measures the history together with the system instructions and advertised tool schemas against the compaction threshold. The measurement starts from the provider's last reported input usage when one exists.
+Before each model call, eve measures the history together with the system instructions and advertised tool schemas against the compaction threshold. When switching back to a model, eve compares counts based on that model's last reported usage and the latest available measurement. Both counts include estimates for messages added since their measurement and any increase in instructions or tools. eve uses the larger count to avoid delaying compaction when an older measurement underestimates added messages.
+
+A model without a measurement of the current history uses the latest available measurement instead. Its first call can still reveal that compaction is needed before the next step. Rewriting history clears these measurements.
 
 Compaction reserves space for those instructions and tools and reduces only conversation history. It can't shrink the instructions or tool catalog, so keep them within the selected model's context window.
 

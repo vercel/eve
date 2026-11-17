@@ -213,7 +213,7 @@ function attachQuitGuard<T>(prompt: Prompt<T>): QuitGuard {
 }
 
 function toPromptState(state: State): PromptState {
-  return state;
+  return state === "validating" ? "active" : state;
 }
 
 function railForState(state: State): string {

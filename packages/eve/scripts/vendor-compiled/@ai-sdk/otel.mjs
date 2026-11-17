@@ -7,7 +7,6 @@ function isAiImport(source) {
 export default {
   packageName: "@ai-sdk/otel",
   compiledPath: "@ai-sdk/otel",
-  chunkGroup: "workflow",
   external: isAiImport,
   copyDeclarations: createDeclarationCopier({
     rewrites: {

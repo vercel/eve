@@ -1,4 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { theme } from "./theme.ts";
@@ -8,6 +11,9 @@ const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
 const FORCE_KILL_GRACE_MS = 2_000;
 const TERMINATE_GRACE_MS = 5_000;
+const PROC_ROOT = "/proc";
+
+const BUILD_STATE_DIR = process.env.EVE_TUI_BUILD_STATE_DIR;
 
 export type AgentServerMode = "built" | "dev";
 
@@ -38,11 +44,13 @@ export async function startAgentServer(input: {
   const baseUrl = `http://localhost:${port}`;
 
   if (plan.build !== undefined) {
-    console.log(theme.muted(`[tui] building "${input.appName}" before smoke run ...`));
-    await runPnpmCommand({
-      ...plan.build,
-      env: input.startEnv ?? process.env,
-    });
+    if (await builtInThisRun(input.appName)) {
+      console.log(theme.muted(`[tui] reusing the "${input.appName}" build from this run ...`));
+    } else {
+      console.log(theme.muted(`[tui] building "${input.appName}" before smoke run ...`));
+      await runPnpmCommand({ ...plan.build, env: process.env });
+      await recordBuild(input.appName);
+    }
   }
 
   console.log(theme.muted(`[tui] starting "${input.appName}" ${mode} server on ${baseUrl} ...`));
@@ -141,6 +149,24 @@ function spawnServerProcess(input: {
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
+}
+
+async function builtInThisRun(appName: string): Promise<boolean> {
+  if (BUILD_STATE_DIR === undefined) return false;
+
+  try {
+    await access(join(BUILD_STATE_DIR, appName));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function recordBuild(appName: string): Promise<void> {
+  if (BUILD_STATE_DIR === undefined) return;
+
+  await mkdir(BUILD_STATE_DIR, { recursive: true });
+  await writeFile(join(BUILD_STATE_DIR, appName), "");
 }
 
 async function runPnpmCommand(input: {
@@ -273,10 +299,46 @@ function isProcessGroupAlive(child: ChildProcess): boolean {
   if (child.pid === undefined) return false;
   try {
     process.kill(-child.pid, 0);
-    return true;
   } catch {
     return false;
   }
+
+  const live = groupHasLiveMember(child.pid);
+  return live ?? true;
+}
+
+function groupHasLiveMember(pgid: number): boolean | undefined {
+  let entries: string[];
+  try {
+    entries = readdirSync(PROC_ROOT);
+  } catch {
+    return undefined;
+  }
+
+  for (const entry of entries) {
+    if (!/^\d+$/u.test(entry)) continue;
+
+    const stat = readProcStat(entry);
+    if (stat === undefined || stat.pgid !== pgid) continue;
+    if (stat.state !== "Z") return true;
+  }
+  return false;
+}
+
+function readProcStat(pid: string): { state: string; pgid: number } | undefined {
+  let stat: string;
+  try {
+    stat = readFileSync(join(PROC_ROOT, pid, "stat"), "utf8");
+  } catch {
+    return undefined;
+  }
+
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  const state = fields[0];
+  const pgid = Number(fields[2]);
+  if (state === undefined || !Number.isInteger(pgid)) return undefined;
+
+  return { state, pgid };
 }
 
 function hasTerminated(child: ChildProcess): boolean {
@@ -290,7 +352,7 @@ async function waitForTermination(
   graceMs: number,
 ): Promise<void> {
   const deadline = Date.now() + graceMs;
-  await Promise.race([exited, sleep(graceMs)]);
+  await Promise.race([exited, sleep(graceMs, undefined, { ref: false })]);
   while (!hasTerminated(child) && Date.now() < deadline) {
     await sleep(50);
   }

@@ -4,7 +4,7 @@ import { isLoopbackHostname } from "#shared/network-address.js";
 import {
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
-} from "#internal/workflow/development-world-protocol.js";
+} from "#internal/application/dev-transport.js";
 import { authJson } from "./vercel.js";
 import {
   DEVELOPMENT_MODEL_CREDENTIAL_ROUTE,

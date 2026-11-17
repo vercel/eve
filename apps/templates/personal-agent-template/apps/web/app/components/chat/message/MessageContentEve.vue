@@ -2,11 +2,12 @@
 import {
   getToolName,
   isDynamicToolUIPart,
+  isFileUIPart,
   isReasoningUIPart,
   isTextUIPart,
   isToolUIPart,
 } from "ai";
-import type { UIMessage } from "ai";
+import type { FileUIPart, UIMessage } from "ai";
 import type { EveToolUIPart } from "~/composables/chat/providers/eve/adapter";
 import { isPartStreaming, isToolStreaming } from "@nuxt/ui/utils/ai";
 import type { AgentInputResponse } from "~/components/AgentInputRequest.vue";
@@ -31,6 +32,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   inputResponses: [responses: AgentInputResponse[]];
 }>();
+
+/** Inline uploads have no public URL; never load or link non-web schemes. */
+function fileHref(part: FileUIPart): string | undefined {
+  return /^https?:\/\//i.test(part.url) ? part.url : undefined;
+}
 
 const rawParts = computed(() => props.message.parts);
 const displayParts = computed(() =>
@@ -66,7 +72,7 @@ const showThinking = computed(
         :streaming="isPartStreaming(entry.part)"
         chevron="leading"
       >
-        <ChatComark :markdown="entry.part.text" :streaming="isPartStreaming(entry.part)" />
+        <ChatComark :value="entry.part.text" :streaming="isPartStreaming(entry.part)" />
       </UChatReasoning>
 
       <template v-else-if="isToolUIPart(entry.part) || isDynamicToolUIPart(entry.part)">
@@ -79,15 +85,27 @@ const showThinking = computed(
           v-else-if="
             getToolName(entry.part) === 'web_search' || getToolName(entry.part) === 'google_search'
           "
-          :text="isToolStreaming(entry.part) ? 'Searching the web...' : 'Searched the web'"
+          :text="
+            isToolStreaming(entry.part)
+              ? 'Searching the web...'
+              : entry.part.state === 'output-error'
+                ? 'Web search failed'
+                : 'Searched the web'
+          "
           :suffix="getSearchQuery(entry.part)"
           :streaming="isToolStreaming(entry.part)"
           chevron="leading"
         >
-          <ChatToolSources :sources="getSources(entry.part)" />
+          <pre
+            v-if="entry.part.state === 'output-error'"
+            class="overflow-x-auto rounded-md bg-muted p-2 text-xs text-error"
+            >{{ entry.part.errorText }}</pre>
+          <ChatToolSources v-else :sources="getSources(entry.part)" />
         </UChatTool>
         <UChatTool
-          v-else-if="getToolName(entry.part) !== 'ask_question'"
+          v-else-if="
+            getToolName(entry.part) !== 'ask_question' || !(entry.part as EveToolUIPart).interaction
+          "
           :text="
             isDynamicToolUIPart(entry.part)
               ? getToolDisplayName(entry.part as EveToolUIPart)
@@ -128,6 +146,34 @@ const showThinking = computed(
         />
       </template>
 
+      <template v-else-if="isFileUIPart(entry.part)">
+        <a
+          v-if="entry.part.mediaType.startsWith('image/') && fileHref(entry.part)"
+          :href="fileHref(entry.part)"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="my-1 block w-fit"
+        >
+          <img
+            :src="fileHref(entry.part)"
+            :alt="entry.part.filename ?? 'Attached image'"
+            class="max-h-64 max-w-full rounded-lg border border-default object-contain"
+            loading="lazy"
+          />
+        </a>
+        <component
+          :is="fileHref(entry.part) ? 'a' : 'span'"
+          v-else
+          :href="fileHref(entry.part)"
+          :target="fileHref(entry.part) ? '_blank' : undefined"
+          :rel="fileHref(entry.part) ? 'noopener noreferrer' : undefined"
+          class="my-1 inline-flex max-w-full items-center gap-2 rounded-md border border-default px-2.5 py-1.5 text-sm text-muted"
+        >
+          <UIcon name="i-lucide-paperclip" class="size-4 shrink-0" />
+          <span class="truncate">{{ entry.part.filename ?? entry.part.mediaType }}</span>
+        </component>
+      </template>
+
       <template v-else-if="isTextUIPart(entry.part)">
         <div v-if="message.role === 'assistant'" class="relative">
           <ChatComark
@@ -136,7 +182,7 @@ const showThinking = computed(
                 ? `${message.id}-text-${entry.part.text.length}`
                 : `${message.id}-text-${index}`
             "
-            :markdown="entry.part.text"
+            :value="entry.part.text"
             :streaming="isPartStreaming(entry.part)"
           />
           <span

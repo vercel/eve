@@ -185,14 +185,112 @@ describe("defineWorkflowTool", () => {
     ).toThrow("Workflow executors require defineWorkflowTool()");
   });
 
-  it("rejects endsTurn on a workflow tool, which resumes the turn when it finishes", () => {
+  it("accepts endsTurn on execute and rejects it on task and serve", () => {
     const execute = Object.assign(async () => 1, { workflowId: "workflow//test//execute" });
-    const definition = Object.assign(
+    const accepted = Object.assign(
       defineWorkflowTool({ description: "Workflow", inputSchema: {}, execute }),
-      { endsTurn: true },
+      { endsTurn: (output: unknown) => output === 1 },
     );
-    expect(() => normalizeToolDefinition(definition, "Invalid tool.")).toThrow(
-      '"endsTurn" is not supported on defineWorkflowTool()',
-    );
+    expect(() => normalizeToolDefinition(accepted, "Invalid tool.")).not.toThrow();
+
+    for (const entryPoint of ["task", "serve"] as const) {
+      const entry = Object.assign(async () => 1, {
+        workflowId: `workflow//test//${entryPoint}`,
+      });
+      const rejected = Object.assign(
+        defineWorkflowTool({
+          description: "Workflow",
+          inputSchema: {},
+          [entryPoint]: entry,
+        } as never),
+        { endsTurn: true },
+      );
+      expect(() => normalizeToolDefinition(rejected, "Invalid tool.")).toThrow(
+        `"endsTurn" applies only to execute()`,
+      );
+    }
+  });
+
+  it("types an execute tool's endsTurn by the call's output", () => {
+    defineWorkflowTool({
+      description: "React to the message.",
+      inputSchema: z.object({ id: z.string() }),
+      async execute() {
+        return { reacted: true };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ reacted: boolean }>();
+        return output.reacted;
+      },
+    });
+  });
+
+  it("types a generator body's output by its yields and its return value", () => {
+    defineWorkflowTool({
+      description: "Ask for a refund decision.",
+      inputSchema: z.object({ id: z.string() }),
+      async *execute() {
+        yield { phase: "asking" };
+        return { decision: "approved" };
+      },
+      toModelOutput(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string } | { decision: string }>();
+        return { type: "json", value: output };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string } | { decision: string }>();
+        return !("decision" in output);
+      },
+    });
+  });
+
+  it("types a generator body that returns nothing by its yields, which eve uses as the output", () => {
+    defineWorkflowTool({
+      description: "Report progress.",
+      inputSchema: z.object({ id: z.string() }),
+      async *execute() {
+        yield { phase: "done" };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string }>();
+        return true;
+      },
+    });
+  });
+
+  it("types a generator body's output by its outputSchema when it has one", () => {
+    defineWorkflowTool({
+      description: "Ask for a refund decision.",
+      inputSchema: z.object({ id: z.string() }),
+      outputSchema: z.object({ status: z.string(), decision: z.string().optional() }),
+      async *execute() {
+        const proposal = { status: "show_form" };
+        yield proposal;
+        return { ...proposal, decision: "approved" };
+      },
+      toModelOutput(output) {
+        expectTypeOf(output).toEqualTypeOf<{ status: string; decision?: string | undefined }>();
+        return { type: "text", value: output.status };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ status: string; decision?: string | undefined }>();
+        return output.decision === undefined;
+      },
+    });
+  });
+
+  it("types a task generator's output by its yields and its return value", () => {
+    defineWorkflowTool({
+      description: "Deploy",
+      inputSchema: z.object({ service: z.string() }),
+      async *task(input) {
+        yield { phase: "deploying" };
+        return { deployed: input.service };
+      },
+      toModelOutput(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string } | { deployed: string }>();
+        return { type: "json", value: output };
+      },
+    });
   });
 });

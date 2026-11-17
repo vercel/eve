@@ -4,32 +4,28 @@ import {
   restoreSessionStep,
   type PublishedSessionEvents,
   type RestoredSessionStep,
-  type SessionStepState,
+  type SessionStepInput,
 } from "#execution/publish-session-events.js";
 import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
-import { SIGN_IN_DECLINED, sameRelayedSignIn } from "#harness/hitl/sign-ins.js";
 import {
   callsBackFor,
-  localSignInCallback,
   ownCallbacks,
   settleSignIns,
+  signInsAnswered,
   signInsEnded,
-  type AnsweredSignIn,
-  type OwnCallbacks,
+  type SignInAnswer,
   type SignInEnding,
 } from "#harness/hitl/index.js";
-import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 import { relay, relayedMirror } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
+import { sessionSignInCallbacks, signInDelivery } from "#execution/hosts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 export async function runProxySubagentEventStep(
-  input: SessionStepState & {
+  input: SessionStepInput & {
     readonly workflowAsk?: WorkflowAskRoute;
     readonly runId?: string;
     readonly hookPayload: SubagentInteractionHookPayload;
@@ -55,12 +51,13 @@ export async function emitProxiedSubagentEvent(
   },
 ): Promise<PublishedSessionEvents> {
   const { hookPayload, runId, workflowAsk } = input;
-  const baseUrl = await workflowCallbackBaseUrl();
+  const { sessionId } = input.durableSession;
+  const callbacks = sessionSignInCallbacks(sessionId);
   const own =
-    baseUrl === undefined ? undefined : ownCallbacks(input.durableSession.sessionId, baseUrl);
-  if (own !== undefined) {
+    callbacks === undefined ? undefined : ownCallbacks(sessionId, callbacks.callbackBaseUrl);
+  if (callbacks !== undefined && own !== undefined) {
     const tables = storedProjection(input.durableSession.state).view;
-    await settleSignIns(resumeSignInCallback, [
+    await settleSignIns(signInDelivery(callbacks.deliver), [
       ...relayedAnswers(tables, hookPayload).flatMap((answer) =>
         signInsAnswered(tables, answer, own),
       ),
@@ -91,18 +88,6 @@ export async function emitProxiedSubagentEvent(
   );
 }
 
-export interface SignInAnswer {
-  readonly interactionId: string;
-  readonly signIn: SignInChallenge;
-  readonly outcome: "accepted" | "declined";
-}
-
-async function workflowCallbackBaseUrl(): Promise<string | undefined> {
-  const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-  const url = getWorkflowMetadata().url;
-  return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
-}
-
 export function relayedAnswers(
   tables: SessionView,
   payload: SubagentInteractionHookPayload,
@@ -129,26 +114,5 @@ function relayedEndings(
     const ended = relayedMirror(tables, payload, interactionId);
     if (ended?.status !== "open" || ended.request.signIn === undefined) return [];
     return [{ interactionId, reason: event.data.reason ?? outcome }];
-  });
-}
-
-export function signInsAnswered(
-  tables: SessionView,
-  answer: SignInAnswer,
-  own: OwnCallbacks,
-): readonly AnsweredSignIn[] {
-  const params: AnsweredSignIn["params"] =
-    answer.outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
-  return Object.values(tables.interactions).flatMap((row) => {
-    if (
-      row.interactionId === answer.interactionId ||
-      row.status !== "open" ||
-      "responseId" in row.subject ||
-      row.request.signIn === undefined ||
-      !sameRelayedSignIn(row.request.signIn, answer.signIn)
-    )
-      return [];
-    const callback = localSignInCallback(row, own);
-    return callback === undefined ? [] : [{ callback, params }];
   });
 }

@@ -9,6 +9,7 @@ import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-wo
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
+  EVE_HEALTH_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
@@ -408,6 +409,11 @@ async function startNitroDevelopmentServer(
       async () => {
         const payload = await build.buildHost(preparedHost);
         build.close();
+        await activateDevelopmentGeneration({
+          appRoot: preparedHost.appRoot,
+          generation: preparedHost.generation,
+        });
+        initialGenerationPublished = true;
         const workspace = preparedHost.workspace;
         initialWorkspaceTransferred = true;
         await devServer.swapTo({
@@ -415,15 +421,13 @@ async function startNitroDevelopmentServer(
           entry: payload.entry,
           workerData: payload.workerData,
         });
-        await activateDevelopmentGeneration({
-          appRoot: preparedHost.appRoot,
-          generation: preparedHost.generation,
-        });
-        initialGenerationPublished = true;
       },
       options.onBootProgress,
     );
     devServer.prepareSpare();
+    void fetch(new URL(EVE_HEALTH_ROUTE_PATH, serverUrl))
+      .then(async (response) => await response.body?.cancel())
+      .catch(() => undefined);
     await workflowWorld?.start();
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({

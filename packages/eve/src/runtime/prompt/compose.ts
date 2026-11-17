@@ -1,7 +1,9 @@
 import type { ResolvedInstructionsDefinition } from "#runtime/types.js";
 
 export function agentInstructionsOf(
-  instructions: readonly ResolvedInstructionsDefinition[] | undefined,
+  instructions:
+    | readonly Pick<ResolvedInstructionsDefinition, "content" | "name" | "owner" | "role">[]
+    | undefined,
 ): { readonly name: string; readonly content: string } | undefined {
   const systemInstructions = (instructions ?? []).filter(
     (entry) => entry.role === "system" && entry.content.trim().length > 0,

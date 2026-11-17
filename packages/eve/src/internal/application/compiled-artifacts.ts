@@ -54,15 +54,9 @@ export async function writeCompiledArtifactsFiles(input: {
 }): Promise<GeneratedCompiledArtifactsFiles> {
   const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
   const moduleMapPath = join(input.outDir, "compiled-artifacts-module-map.mjs");
-  const dataPath = join(input.outDir, "compiled-artifacts-data.json");
   const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
   const workflowWorldPluginPath = join(input.outDir, "compiled-artifacts-workflow-world.mjs");
-  const sandboxPreparedArtifacts = sandboxPreparedArtifactsManifestSchema.parse(
-    JSON.parse(await readFile(input.compileResult.paths.sandboxPreparedArtifactsPath, "utf8")),
-  );
-  const modelMetadata = modelMetadataSchema.parse(
-    JSON.parse(await readFile(input.compileResult.paths.modelMetadataPath, "utf8")),
-  );
+  const dataPath = await writeCompiledArtifactsData(input);
   const prepared = await prepareAuthoredRuntimeModules({
     appRoot: input.compileResult.project.appRoot,
     manifest: input.compileResult.manifest,
@@ -70,17 +64,7 @@ export async function writeCompiledArtifactsFiles(input: {
     hostBundled: true,
   });
 
-  await mkdir(input.outDir, { recursive: true });
   await writeFile(moduleMapPath, prepared.moduleMapCode);
-  await writeFile(
-    dataPath,
-    JSON.stringify({
-      manifest: compiledAgentManifestSchema.parse(input.compileResult.manifest),
-      metadata: input.compileResult.metadata,
-      modelMetadata,
-      sandboxPreparedArtifacts,
-    } satisfies Omit<BundledCompiledArtifacts, "moduleMap">),
-  );
   await writeFile(
     bootstrapPath,
     createCompiledArtifactsBootstrapSource({
@@ -122,6 +106,31 @@ export async function writeCompiledArtifactsFiles(input: {
     instrumentationSourcePathsOf(instrumentationLayout);
 
   return generatedArtifacts;
+}
+
+export async function writeCompiledArtifactsData(input: {
+  compileResult: CompileAgentResult;
+  outDir: string;
+}): Promise<string> {
+  const dataPath = join(input.outDir, "compiled-artifacts-data.json");
+  const sandboxPreparedArtifacts = sandboxPreparedArtifactsManifestSchema.parse(
+    JSON.parse(await readFile(input.compileResult.paths.sandboxPreparedArtifactsPath, "utf8")),
+  );
+  const modelMetadata = modelMetadataSchema.parse(
+    JSON.parse(await readFile(input.compileResult.paths.modelMetadataPath, "utf8")),
+  );
+
+  await mkdir(input.outDir, { recursive: true });
+  await writeFile(
+    dataPath,
+    JSON.stringify({
+      manifest: compiledAgentManifestSchema.parse(input.compileResult.manifest),
+      metadata: input.compileResult.metadata,
+      modelMetadata,
+      sandboxPreparedArtifacts,
+    } satisfies Omit<BundledCompiledArtifacts, "moduleMap">),
+  );
+  return dataPath;
 }
 
 async function writePreparedInstrumentation(input: {

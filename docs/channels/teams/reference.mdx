@@ -84,7 +84,7 @@ Outbound Connector requests need an HTTPS URL without credentials, a query strin
 
 ## Human-in-the-loop (HITL)
 
-Each approval or question (`interaction.opened`) renders as an Adaptive Card. Approval cards show the tool input in the card and in the fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and free text to `Input.Text`. Submissions don't need a mention, and each one resumes the thread recorded in its card.
+Each approval or question (`interaction.opened`) renders as an Adaptive Card. Approval cards show the tool input in the card and in the fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and free text to `Input.Text`. A select's `initialOptionId` becomes the choice set's starting value, so **Submit** sends that option unless the person changes it. Submissions don't need a mention, and each one resumes the thread recorded in its card.
 
 By default, a submission answers as the Teams user who clicked. If you set `onMessage`, also set `onAnswers` with the same policy. Otherwise eve rejects every card submission. Return `{ auth: defaultTeamsAuth(activity) }` to accept the submitting user.
 

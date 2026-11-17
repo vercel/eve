@@ -1,24 +1,18 @@
 import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
+import type { RunHook } from "#execution/run-host.js";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import {
   forwardAgentSessionRequest,
   type AgentSessionRequest,
 } from "#execution/agent-sessions/requests.js";
-import {
-  cancelAgentSessionTurnStep,
-  endAgentSessionsStep,
-  openAgentSessionStep,
-  sendAgentSessionMessageStep,
-  stopLateAgentSessionStep,
-  type AgentSessionMessage,
-  type AgentSessionReceipt,
-  type OpenedAgentSession,
-} from "#execution/agent-sessions/steps.js";
+import type {
+  AgentSessionMessage,
+  AgentSessionReceipt,
+  OpenedAgentSession,
+} from "#execution/agent-sessions/start.js";
 import type { RunUsageTally } from "#execution/agent-sessions/usage.js";
-import { disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -59,14 +53,14 @@ export function createAgentSessions(
     },
     close: async () => {
       if (sessions.length === 0) return;
-      await endAgentSessionsStep({ sessions });
+      await run.host.agentSessions.end({ sessions });
     },
   };
 }
 
 interface AwaitedReply {
   readonly ended: Promise<AgentTurnEnd>;
-  readonly hook: Hook<AgentTurnReply>;
+  readonly hook: RunHook<AgentTurnReply>;
   readonly settle: (end: AgentTurnEnd) => void;
 }
 
@@ -81,6 +75,8 @@ class RunAgentSession implements AgentSession {
   #opener: WorkflowToolRunContext["from"] | undefined;
   readonly #awaited: AwaitedReply[] = [];
   #delivered: Promise<void> = Promise.resolve();
+  #remote = false;
+  #remoteReplyHooks: Promise<unknown> = Promise.resolve();
 
   constructor(input: {
     readonly key: string;
@@ -106,14 +102,14 @@ class RunAgentSession implements AgentSession {
     const outputSchema = normalizeRequestedOutputSchema(
       serializeOutputSchema(options.outputSchema),
     );
-    const reply = this.#awaitReply(outputSchema !== undefined);
     const sender: AgentSessionSender = { context: this.#run.agentContext, from: this.#run.from };
-    const sending: AgentSessionMessage = {
-      auth: this.#run.auth,
-      message,
-      outputSchema,
-      replyTo: reply.hook.token,
-    };
+    const auth = this.#run.auth;
+    this.#remote ||= sender.context.remoteAgents?.includes(this.#name) ?? true;
+    const hook = this.#remote
+      ? await this.#openRemoteReplyHook()
+      : this.#run.host.createHook<AgentTurnReply>();
+    const reply = this.#awaitReply(hook, outputSchema !== undefined);
+    const sending: AgentSessionMessage = { auth, message, outputSchema, replyTo: hook.token };
     const delivery = this.#delivered.then(() => this.#deliver(sending, sender));
     this.#delivered = delivery.catch(() => undefined);
     try {
@@ -128,8 +124,15 @@ class RunAgentSession implements AgentSession {
     return response as AgentResponse<TOutput>;
   }
 
-  #awaitReply(expectsData: boolean): AwaitedReply {
-    const hook = createHook<AgentTurnReply>();
+  #openRemoteReplyHook(): Promise<RunHook<AgentTurnReply>> {
+    const opening = this.#remoteReplyHooks.then(() =>
+      this.#run.host.createRemoteReplyHook<AgentTurnReply>(),
+    );
+    this.#remoteReplyHooks = opening.catch(() => undefined);
+    return opening;
+  }
+
+  #awaitReply(hook: RunHook<AgentTurnReply>, expectsData: boolean): AwaitedReply {
     let settle: (end: AgentTurnEnd) => void = () => {};
     const ended = new Promise<AgentTurnEnd>((resolve) => {
       settle = resolve;
@@ -140,7 +143,7 @@ class RunAgentSession implements AgentSession {
     return reply;
   }
 
-  async #readTurn(hook: Hook<AgentTurnReply>, expectsData: boolean): Promise<AgentTurnEnd> {
+  async #readTurn(hook: RunHook<AgentTurnReply>, expectsData: boolean): Promise<AgentTurnEnd> {
     try {
       for await (const reply of hook) {
         if (reply.kind !== "runtime-action-result") {
@@ -211,7 +214,7 @@ class RunAgentSession implements AgentSession {
       ({ receipt } = await opening);
     } else {
       const opened = await this.#opened;
-      receipt = await sendAgentSessionMessageStep({ ...message, ...opened });
+      receipt = await this.#run.host.agentSessions.send({ ...message, ...opened });
       if (receipt.sessionId !== opened.address.sessionId) {
         const redirected = {
           ...opened,
@@ -243,7 +246,7 @@ class RunAgentSession implements AgentSession {
     this.#opener = from;
     let opened: OpenedAgentSession | undefined;
     try {
-      const { address, deliveryId } = await openAgentSessionStep({
+      const { address, deliveryId } = await this.#run.host.agentSessions.open({
         ...message,
         context,
         key: this.#key,
@@ -258,7 +261,8 @@ class RunAgentSession implements AgentSession {
     } catch (error) {
       this.#opened = undefined;
       this.#opener = undefined;
-      if (opened !== undefined) await stopLateAgentSessionStep(opened).catch(() => undefined);
+      if (opened !== undefined)
+        await this.#run.host.agentSessions.stopLate(opened).catch(() => undefined);
       throw error;
     }
   }
@@ -266,7 +270,9 @@ class RunAgentSession implements AgentSession {
   #cancelTurnOnAbort(reply: AwaitedReply, signal: AbortSignal): void {
     const cancel = (): void => {
       if (!this.#awaited.includes(reply) || this.#opened === undefined) return;
-      void this.#opened.then((opened) => cancelAgentSessionTurnStep(opened)).catch(() => {});
+      void this.#opened
+        .then((opened) => this.#run.host.agentSessions.cancelTurn(opened))
+        .catch(() => {});
     };
     if (signal.aborted) {
       cancel();
@@ -281,9 +287,9 @@ interface AgentSessionSender {
   readonly from: WorkflowToolRunContext["from"];
 }
 
-async function releaseHook(hook: Hook<AgentTurnReply>): Promise<void> {
+async function releaseHook(hook: RunHook<AgentTurnReply>): Promise<void> {
   try {
-    await disposeHook(hook);
+    await hook.dispose();
   } catch {}
 }
 

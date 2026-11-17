@@ -220,8 +220,13 @@ describe("public sandbox types", () => {
     void colliding;
   });
 
-  it("keeps SandboxSession assignable to the AI SDK sandbox session", () => {
-    expectTypeOf<SandboxSession>().toExtend<Omit<Experimental_SandboxSession, "description">>();
+  it("keeps SandboxSession compatible with the AI SDK sandbox members it implements", () => {
+    expectTypeOf<SandboxSession>().toExtend<
+      Omit<
+        Experimental_SandboxSession,
+        "description" | "stat" | "listDirectory" | "deleteFile" | "spawn"
+      >
+    >();
   });
 
   it("keeps SandboxNetworkPolicy within the Vercel Sandbox network policy shape", () => {

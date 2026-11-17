@@ -4,7 +4,9 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import { strictestApproval } from "#approval/agent.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
+import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 import type {
   AgentLimitsDefinition,
   AgentReasoningDefinition,
@@ -28,20 +30,20 @@ export function agentSettings(step: {
       thresholdPercent: config.compaction?.thresholdPercent,
     };
   }
-  const bundle = step.ctx.require(BundleKey);
+  const { settings } = sessionAgent(step.ctx);
   return {
-    compactionModel: bundle.turnAgent.compactionModel,
-    reasoning: bundle.turnAgent.reasoning,
-    thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
+    compactionModel: settings.compaction?.model,
+    reasoning: settings.reasoning,
+    thresholdPercent: settings.compaction?.thresholdPercent,
   };
 }
 
 export function agentLimits(
-  bundle: Pick<CompiledBundle, "resolvedAgent">,
+  agent: Pick<SessionAgent, "settings">,
   ctx: Pick<ContextReader, "get">,
 ): Pick<AgentLimitsDefinition, "sessionTimeoutMs"> | undefined {
   const config = ctx.get(DynamicSubagentAgentConfigKey);
-  return config === undefined ? bundle.resolvedAgent.config?.limits : config.limits;
+  return config === undefined ? agent.settings.limits : config.limits;
 }
 
 export function resolveSessionUsageLimit(

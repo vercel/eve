@@ -99,8 +99,6 @@ beforeEach(() => {
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,
-      recordInputs: false,
-      recordOutputs: false,
       traceChannelRequests: false,
       tracePolicy: undefined,
     },

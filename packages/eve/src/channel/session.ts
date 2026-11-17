@@ -240,8 +240,23 @@ export function createSession(
       const result = await runtime.dispatchSession({ command, sessionId: id });
       return commandDelivery(runtime, result, command.deliveryId, { follow: false });
     },
-    async *stream(options?: SessionStreamOptions) {
-      yield* await runtime.getEventStream(id, options);
+    stream(options?: SessionStreamOptions) {
+      return {
+        [Symbol.asyncIterator]() {
+          let reader: Promise<ReadableStreamDefaultReader<SessionStreamEvent>> | undefined;
+          return {
+            async next() {
+              reader ??= runtime.getEventStream(id, options).then((stream) => stream.getReader());
+              const result = await (await reader).read();
+              return result.done ? { done: true, value: undefined } : result;
+            },
+            async return() {
+              await (await reader?.catch(() => undefined))?.cancel();
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      };
     },
     async getLineStream(options?: SessionStreamOptions) {
       return runtime.getLineStream(id, options);

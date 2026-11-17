@@ -1,4 +1,4 @@
-import { getStepMetadata } from "#compiled/@workflow/core/index.js";
+import { isRetriedStep } from "#execution/hosts.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -63,21 +63,35 @@ import { initialSessionProjection, type SessionProjection } from "#protocol/sess
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { endSession } from "#harness/session-machine/deliveries.js";
+import { SessionStreamWriteError } from "#harness/session-stream-write-error.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 
 const log = createLogger("execution.publish-session-events");
 
 export type SessionEventOrigin = "own" | "relayed";
 
-export interface SessionStepState {
+export interface SessionStepInput {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
-export interface SessionHistoryStepState extends SessionStepState {
+export interface SessionHistoryStepInput extends SessionStepInput {
   readonly history: HarnessModelMessage[];
+}
+
+export type Entered<I extends object> = Omit<I, "rerun"> & {
+  readonly rerun: boolean;
+};
+
+export type SessionStepState = Entered<SessionStepInput>;
+
+export type SessionHistoryStepState = Entered<SessionHistoryStepInput>;
+
+export function enterSessionStep<I extends object>(input: I): Entered<I> {
+  return { ...input, rerun: isRetriedStep() };
 }
 
 export interface PublishedSessionEvents {
@@ -130,6 +144,7 @@ export interface RestoredSessionStep {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly rerun: boolean;
 }
 
 export interface RestoredSessionHistoryStep extends RestoredSessionStep {
@@ -141,6 +156,7 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
     ctx: await deserializeContext(step.serializedContext),
     durableSession: readDurableSession(step.sessionState),
     sessionWritable: step.sessionWritable,
+    rerun: step.rerun,
   };
 }
 
@@ -202,6 +218,7 @@ async function publishInSessionScope<T>(
   const { ctx } = step;
   enterSessionProjection(ctx, step.durableSession.state);
   const orphaned = await readOrphanedLines({
+    rerun: step.rerun,
     sessionId: step.durableSession.sessionId,
     position: nextLinePosition(ctx),
     sessionWritable: step.sessionWritable,
@@ -212,7 +229,7 @@ async function publishInSessionScope<T>(
       ? hydrated
       : { ...hydrated, history: validateHarnessModelMessages(step.history) };
   const instrumentation = bindSessionInstrumentation({
-    agentName: ctx.require(BundleKey).turnAgent.id,
+    agentName: sessionAgent(ctx).id,
     ctx,
     rootSessionId: session.rootSessionId ?? session.sessionId,
     sessionId: session.sessionId,
@@ -290,9 +307,9 @@ export async function readOrphanedLines(input: {
   readonly sessionId: string;
   readonly position: number;
   readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly always?: boolean;
+  readonly rerun: boolean;
 }): Promise<readonly OrphanedLine[]> {
-  if (input.always !== true && !isRetriedStep()) return [];
+  if (!input.rerun) return [];
   const { sessionId, sessionWritable, position: first } = input;
   let lines = interruptedAttempts.get(sessionWritable);
   if (lines === undefined) {
@@ -329,15 +346,6 @@ export function followInterruptedAttempt(
     },
     state,
   });
-}
-
-function isRetriedStep(): boolean {
-  try {
-    return getStepMetadata().attempt > 1;
-  } catch (error) {
-    if (error instanceof Error && error.name === "NotInStepContextError") return false;
-    throw error;
-  }
 }
 
 async function readLinesFrom(sessionId: string, first: number): Promise<OrphanedLine[]> {
@@ -535,7 +543,9 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
   };
   return {
     async write(bytes) {
-      await streamWriter.write(bytes);
+      await streamWriter.write(bytes).catch((error: unknown) => {
+        throw new SessionStreamWriteError(error);
+      });
     },
     close: async () => {
       try {
@@ -637,7 +647,7 @@ export async function publishTerminalSessionEvent(input: {
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {
     instrumentation = bindSessionInstrumentation({
-      agentName: ctx.require(BundleKey).turnAgent.id,
+      agentName: sessionAgent(ctx).id,
       ctx,
       rootSessionId: ctx.get(ParentSessionKey)?.rootSessionId ?? sessionId,
       sessionId,

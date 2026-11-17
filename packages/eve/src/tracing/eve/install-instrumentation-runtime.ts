@@ -59,8 +59,8 @@ export function installInstrumentationRuntime(input: {
         mapping: eveOutputMapping(),
       }),
       idGenerator,
-      recordInputs: input.collected.settings.recordInputs,
-      recordOutputs: input.collected.settings.recordOutputs,
+      recordInputs: true,
+      recordOutputs: true,
       stateStore: new ContextAgentTraceStateStore(),
       tracePolicy: input.collected.settings.tracePolicy,
     });

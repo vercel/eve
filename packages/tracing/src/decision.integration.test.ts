@@ -92,6 +92,40 @@ describe("decision tracing", () => {
     );
   });
 
+  const results = [
+    { question_index: 0, question_name: "team", type: "choice", value: "billing" },
+    { question_index: 1, question_name: "urgent", type: "refusal" },
+  ];
+
+  it.each([false, true])(
+    "names the turn and purpose, and records results only as output content (outputs: %s)",
+    async (recordOutputs) => {
+      const turn = await tracing.turn({ agentName: "support", identity, sequence: 0, capture });
+      await tracing.decision(
+        {
+          modelId: "jev",
+          identity,
+          purpose: "model-selection",
+          parent: turn.reference,
+          capture: { emit: true, recordInputs: false, recordOutputs },
+        },
+        async (operation) => {
+          await operation.complete({ output: results });
+        },
+      );
+      await turn.complete();
+
+      const decision = span("decision jev");
+      expect(decision.attributes).toMatchObject({
+        "agent.turn.id": "turn-1",
+        "agent.decision.purpose": "model-selection",
+      });
+      expect(decision.attributes["gen_ai.decision.results"]).toBe(
+        recordOutputs ? JSON.stringify(results) : undefined,
+      );
+    },
+  );
+
   it("records nothing beneath an unsampled parent", async () => {
     let inner: boolean | undefined;
     await tracing.decision(

@@ -141,6 +141,7 @@ export function buildAgentInfoResponse(
     schedules: manifest.schedules.map((schedule) => ({
       ...toOwnedSource(manifest, schedule),
       cron: schedule.cron,
+      ...(schedule.timezone !== undefined && { timezone: schedule.timezone }),
       hasRun: schedule.hasRun,
       markdown: schedule.markdown,
       name: schedule.name,

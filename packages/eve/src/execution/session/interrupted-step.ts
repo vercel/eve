@@ -35,7 +35,6 @@ import type {
   StepResult,
 } from "#harness/types.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
-import { summarizeFailure } from "#execution/failure-summary.js";
 import { eventsOfLine } from "#protocol/session-lines.js";
 import type { SessionOutcome } from "#protocol/session-events/families/session.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -124,7 +123,7 @@ export async function recoverInterruptedStep(input: {
     readonly kind: "clear" | "compact";
     readonly delivery?: ControlDelivery;
   };
-  readonly failed?: { readonly error: unknown };
+  readonly failed?: { readonly error: { readonly name?: string }; readonly stopped?: true };
 }): Promise<
   | { readonly result: DurableStepResult }
   | { readonly session: HarnessSession; readonly stepInput: HarnessStepInput | undefined }
@@ -234,7 +233,8 @@ export async function recoverInterruptedStep(input: {
   session = saveTransition(session, stop);
   const note = interruptedAttemptNote(attempt.calls);
   if (note !== undefined) session = changeHistory(session, { append: [note] });
-  if (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS) {
+  const stopped = input.failed?.stopped === true;
+  if (stopped || (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS)) {
     const { settledInteractions } = attempt;
     const answers = input.stepInput?.answers?.filter(
       (answer) => !settledInteractions.has(answer.interactionId),
@@ -261,9 +261,14 @@ export async function recoverInterruptedStep(input: {
           details: { errorId: createErrorId() },
           message: "This turn was interrupted too many times to continue.",
         }
-      : summarizeFailure(input.failed.error, "STEP_FAILED");
+      : {
+          code: "TURN_FAILED",
+          details: { errorId: createErrorId() },
+          message: "This turn failed before it finished. Send another message to continue.",
+        };
   log.error("turn failed", {
     code: failure.code,
+    errorName: input.failed?.error.name,
     errorId: failure.details.errorId,
     sessionId: session.sessionId,
     turnId: failing,

@@ -1,5 +1,7 @@
 import { internalSession, type Session } from "#channel/session.js";
-import type { ChildOpened } from "#protocol/session-events/families/child.js";
+import { v26ChildStarted } from "#execution/v26-history.js";
+import { isStoredLine } from "#protocol/session-events/envelope.js";
+import { eventsOfLine } from "#protocol/session-lines.js";
 import {
   createEveDescendantStreamRoutePath,
   createEveSessionStreamRoutePath,
@@ -15,7 +17,7 @@ import { findRemoteAgentBinding, type RemoteAgentBinding } from "#eve-channel/su
 import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 import { isObject } from "#shared/guards.js";
-import { isExpiredWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { isRunExpired } from "#shared/run-errors.js";
 
 export async function descendantStreamResponse(input: {
   readonly request: Request;
@@ -48,7 +50,7 @@ export async function descendantStreamResponse(input: {
       const opened = await recordedChild(parent, hop, signal);
       if (opened === undefined) return unavailable();
       const remaining = children.slice(index + 1);
-      if (opened.data.stream === createEveSessionStreamRoutePath(childId)) {
+      if (opened.stream === createEveSessionStreamRoutePath(childId)) {
         if (ancestry.has(childId)) return unavailable("cycle", 422);
         ancestry.add(childId);
         parent = input.attachSession(childId);
@@ -63,9 +65,9 @@ export async function descendantStreamResponse(input: {
       const binding = await waitWithSignal(
         findRemoteAgentBinding({
           parent: internalSession(parent),
-          callId: "callId" in opened.data.owner ? opened.data.owner.callId : "",
+          callId: opened.callId ?? "",
           childSessionId: childId,
-          childStreamPath: opened.data.stream,
+          childStreamPath: opened.stream,
         }),
         signal,
       );
@@ -118,7 +120,7 @@ export async function descendantStreamResponse(input: {
       return response;
     }
   } catch (error) {
-    if (isExpiredWorkflowRunError(error)) return unavailable("session_expired", 410);
+    if (isRunExpired(error)) return unavailable("session_expired", 410);
     return unavailable();
   } finally {
     clearTimeout(timeout);
@@ -171,30 +173,31 @@ async function recordedChild(
   parent: Session,
   hop: DescendantHop,
   signal: AbortSignal,
-): Promise<ChildOpened | undefined> {
+): Promise<{ readonly callId?: string; readonly stream: string } | undefined> {
   signal.throwIfAborted();
-  const cancellation = new AbortController();
-  const events = parent
-    .stream({
-      follow: false,
-      startIndex: hop.position,
-      signal: AbortSignal.any([signal, cancellation.signal]),
-    })
-    [Symbol.asyncIterator]();
+  const lines = (
+    await waitWithSignal(
+      internalSession(parent).getLineStream({ follow: false, startIndex: hop.position }),
+      signal,
+    )
+  ).getReader();
   try {
-    while (true) {
-      const next = await waitWithSignal(events.next(), signal);
-      if (next.done || next.value.meta.position.line > hop.position) return undefined;
-      const event = next.value;
-      if (
-        event.meta.position.line === hop.position &&
-        event.type === "child.opened" &&
-        event.data.sessionId === hop.sessionId
-      )
-        return event;
+    const next = await waitWithSignal(lines.read(), signal);
+    if (next.done) return undefined;
+    const record: unknown = next.value;
+    if (!isStoredLine(record)) {
+      const started = v26ChildStarted(record);
+      return started?.sessionId === hop.sessionId ? started : undefined;
     }
+    for (const event of eventsOfLine(record, hop.position, "")) {
+      if (event.type === "child.opened" && event.data.sessionId === hop.sessionId)
+        return {
+          ...("callId" in event.data.owner && { callId: event.data.owner.callId }),
+          stream: event.data.stream,
+        };
+    }
+    return undefined;
   } finally {
-    cancellation.abort();
-    void events.return?.().catch(() => {});
+    void lines.cancel().catch(() => {});
   }
 }

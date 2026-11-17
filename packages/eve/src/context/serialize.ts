@@ -3,7 +3,7 @@ import { resolveKey } from "#context/key.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { mountedStateKeyName } from "#public/definitions/state.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { type CompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("context.serialize");
 const STATE_LAYOUT_KEY = "eve.stateLayout";
@@ -20,7 +20,7 @@ export function serializeContext(ctx: AlsContext): Record<string, unknown> {
     }
   }
   if (
-    data[BundleKey.name] !== undefined ||
+    data[SessionAgentKey.name] !== undefined ||
     Object.keys(data).some((name) => name.startsWith("eve:mount."))
   ) {
     data[STATE_LAYOUT_KEY] = STATE_LAYOUT_VERSION;
@@ -34,7 +34,7 @@ export async function deserializeContext(
   let data = serialized;
   const ctx = new ContextContainer();
 
-  const serializedBundle = data[BundleKey.name];
+  const serializedAgent = data[SessionAgentKey.name];
   if (data[STATE_LAYOUT_KEY] !== undefined && data[STATE_LAYOUT_KEY] !== STATE_LAYOUT_VERSION) {
     throw new IncompatibleStateLayoutError();
   }
@@ -44,19 +44,21 @@ export async function deserializeContext(
   ) {
     throw new IncompatibleStateLayoutError();
   }
-  if (serializedBundle !== undefined) {
-    const codec = BundleKey.codec;
+  if (serializedAgent !== undefined) {
+    const codec = SessionAgentKey.codec;
     if (codec === undefined) {
-      throw new Error('Context key "eve.bundle" is missing a codec.');
+      throw new Error(`Context key "${SessionAgentKey.name}" is missing a codec.`);
     }
-    const bundle = await codec.deserialize(serializedBundle, ctx);
-    if (data[STATE_LAYOUT_KEY] === undefined) data = await adoptLegacyStateLayout(data, bundle);
-    ctx.set(BundleKey, bundle);
+    const agent = await codec.deserialize(serializedAgent, ctx);
+    if (agent.compiled !== undefined && data[STATE_LAYOUT_KEY] === undefined) {
+      data = await adoptLegacyStateLayout(data, agent.compiled);
+    }
+    ctx.set(SessionAgentKey, agent);
   }
 
   for (const [name, raw] of Object.entries(data)) {
     if (raw === undefined) continue;
-    if (name === BundleKey.name || name === STATE_LAYOUT_KEY) continue;
+    if (name === SessionAgentKey.name || name === STATE_LAYOUT_KEY) continue;
     const key = resolveKey(name);
     if (key === undefined) {
       log.warn("dropping unknown context key during deserialization", { key: name });
@@ -85,7 +87,7 @@ async function adoptLegacyStateLayout(
   const adopted: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(data)) {
     if (value === undefined) continue;
-    if (name === BundleKey.name || resolveKey(name) !== undefined) {
+    if (name === SessionAgentKey.name || resolveKey(name) !== undefined) {
       adopted[name] = value;
       continue;
     }

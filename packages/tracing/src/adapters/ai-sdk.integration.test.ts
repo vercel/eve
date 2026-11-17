@@ -100,6 +100,15 @@ const sandbox: SandboxSession = {
   async writeFile() {},
   async writeBinaryFile() {},
   async writeTextFile() {},
+  async stat() {
+    return null;
+  },
+  async listDirectory() {
+    return null;
+  },
+  async deleteFile() {
+    return false;
+  },
   async spawn() {
     throw new Error("The scripted harness does not spawn processes");
   },

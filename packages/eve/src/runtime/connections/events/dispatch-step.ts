@@ -1,7 +1,7 @@
 import { deserializeContext } from "#context/serialize.js";
 import { AuthKey } from "#context/keys.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { EventBinding } from "#runtime/connections/events/state.js";
@@ -14,11 +14,9 @@ import {
 import type { AlsContext } from "#context/container.js";
 
 export function resolveBinding(ctx: AlsContext, binding: EventBinding) {
-  const connection = ctx
-    .require(BundleKey)
-    .resolvedAgent.connections.find(
-      (connection) => connection.connectionName === binding.connectionName,
-    );
+  const connection = requireCompiledBundle(ctx).resolvedAgent.connections.find(
+    (connection) => connection.connectionName === binding.connectionName,
+  );
   const events = connection?.experimental_events;
   if (
     connection === undefined ||
@@ -57,7 +55,7 @@ export async function dispatchConnectionEventStep(input: {
     : undefined;
   if (resolved === undefined) return;
   const { binding, connection } = resolved;
-  const bundle = ctx.require(BundleKey);
+  const bundle = requireCompiledBundle(ctx);
   const { callbacks } = resolved.events;
   ctx.setVirtualContext(AuthKey, binding.auth);
   const operation =

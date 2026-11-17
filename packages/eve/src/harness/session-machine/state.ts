@@ -41,6 +41,7 @@ export interface SuspendedStep {
   readonly requests: readonly ApprovalAsk[];
   readonly approved?: readonly ApprovedCall[];
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+  readonly endsTurn?: true;
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly requester?: SessionAuthContext | null;
 }

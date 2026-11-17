@@ -134,9 +134,8 @@ describe("dispatchSignInCancel", () => {
     await clickCancel(runtime);
 
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
-    expect(logger.warn).toHaveBeenCalledWith(
-      "Slack refused to remove the cancelled sign-in prompt",
-      { body: "expired_url", status: 404 },
-    );
+    expect(logger.warn).toHaveBeenCalledWith("failed to remove the cancelled sign-in prompt", {
+      error: expect.objectContaining({ status: 404 }),
+    });
   });
 });
