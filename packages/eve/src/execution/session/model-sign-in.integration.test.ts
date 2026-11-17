@@ -188,6 +188,32 @@ describe("a model sign-in that ends without a credential", () => {
     );
   });
 
+  it("steers when a message arrives while the sign-in starts", async () => {
+    const billing = billingProvider({ refresh: "stale-token", token: "stale-token" });
+    await withAgent(
+      "model-sign-in-steered-start",
+      defineAgent({
+        model: defineDynamic((ctx: DynamicModelContext) => ({
+          model: refusedIn(ctx) ? plainModel() : billing.model,
+          modelContextWindowTokens: 200_000,
+        })),
+      }),
+      async (session) => {
+        billing.onStart = async () => {
+          billing.onStart = undefined;
+          await session.send("Only the open ones.");
+        };
+        const settled = await session.stream.nextUntil("steered answer", isTurnSettled);
+        expect(
+          filterEventsByType(settled, "interaction.settled").map((e) => e.data.outcome),
+        ).toEqual(["withdrawn"]);
+        expect(turnSettled(settled)).toMatchObject({ outcome: "completed" });
+        expect(billing.starts()).toBe(1);
+        expect(billing.tokensSeen).toEqual(["stale-token", "stale-token"]);
+      },
+    );
+  });
+
   it("shows the provider's own failure message", async () => {
     const billing = billingProvider({ failCompletion: "Save your API key first." });
     await withSession(billing, async (session) => {
@@ -364,6 +390,7 @@ async function withSession(
 interface BillingProvider {
   evictions: number;
   readonly model: ModelDefinition;
+  onStart?: () => Promise<void>;
   options: SessionOptions;
   readonly prompts: unknown[];
   starts(): number;
@@ -395,6 +422,7 @@ function billingProvider(
     },
     async startAuthorization({ callbackUrl }) {
       starts += 1;
+      await billing.onStart?.();
       return {
         challenge: {
           displayName: "Billing",

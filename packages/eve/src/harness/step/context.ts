@@ -200,7 +200,7 @@ function providerName(
   const cards = Object.values(view.projection.view.interactions).flatMap(
     (row) => row.request.signIn ?? [],
   );
-  const card = cards.findLast((asked) => asked.name === signIn.scope) ?? cards.at(-1);
+  const card = cards.findLast((asked) => asked.name === signIn.scope);
   return signIn.authorization?.displayName ?? card?.displayName ?? displayProperName(signIn.scope);
 }
 

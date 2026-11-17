@@ -198,6 +198,7 @@ export class ModelCaller {
   }
 
   async abandonForSignIn(): Promise<readonly ModelMessage[]> {
+    this.input.generation.end();
     return await this.discard("retried");
   }
 

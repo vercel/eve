@@ -104,6 +104,7 @@ export async function runModelStep(
     throwIfTurnAborted(step.config.abortSignal);
     const signInError = signInErrorIn(error);
     if (signInError !== undefined) {
+      if (generation.interrupted) return caller.steered();
       const messages = await caller.abandonForSignIn();
       step.session = changeHistory(step.session, { extend: messages });
       return await pauseForSignIn(step, signInError);
@@ -171,6 +172,7 @@ async function resolveCredentialedModel(step: Step): Promise<ResolvedModel> {
     return { model: await credentialedModel(resolved.model, resolved.choice.reference) };
   } catch (error) {
     if (isTurnCancellation(error)) throw error;
+    if (!isSignInError(error)) return { failed: await reportModelCallFailure(step, error) };
     return {
       credential: isModelDefinition(resolved.model) ? modelSignInName(resolved.model) : undefined,
       signIn: error,
