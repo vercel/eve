@@ -43,7 +43,8 @@ import { defineDynamic, defineModel } from "eve/models";
 const ownGateway = defineModel({
   id: "anthropic/claude-sonnet-5",
   auth: connect("vercel/myagent"), // your connector for Sign in with Vercel
-  create: ({ token }) => createGateway({ apiKey: token })("anthropic/claude-sonnet-5"),
+  create: ({ token }) =>
+    createGateway({ apiKey: token, teamIdOrSlug: "acme" })("anthropic/claude-sonnet-5"),
 });
 
 export default defineAgent({
@@ -57,12 +58,15 @@ Both branches name the same model. A signed-in person's calls reach AI Gateway w
 Vercel access token, and every other session uses the project's credential, as a string ID does
 today.
 
-The example assumes a Vercel Connect connector the author creates for Sign in with Vercel, with
-an app that asks for the AI Gateway `Use` permission. `vercel/myagent` stands for that connector's
-UID. Vercel lists the permission as private beta. `createGateway` takes a Vercel access token as
-its `apiKey`, and takes `teamIdOrSlug` for a token that can reach several teams. `create` receives
-only the credential, so a definition that needs a per-person value like that is built inside the
-dynamic function, where `create` can close over it.
+`vercel/myagent` stands for the UID of a Vercel Connect connector the author creates for a Vercel
+app that asks only for the AI Gateway `Use` permission. Vercel lists that permission as private
+beta. `createGateway` takes a Vercel access token as its `apiKey`, and `teamIdOrSlug` scopes the
+call to the team that pays for it. The person grants the app access to that team when they sign
+in.
+
+The example bills one team for everyone. `create` receives only the credential, so to bill each
+person's own team, build the definition inside the dynamic function, where `create` can close over
+a value read from `ctx`.
 
 `defineModel` takes and returns a `ModelDefinition`, also exported from `eve/models`. `id`, `auth`,
 and `create` are always required:
@@ -326,7 +330,7 @@ The closest alternative gives the dynamic `model` function the method that tools
 ```ts
 const model = defineDynamic(async (ctx) => {
   const { token } = await ctx.getToken(connect("vercel/myagent"));
-  return createGateway({ apiKey: token })("anthropic/claude-sonnet-5");
+  return createGateway({ apiKey: token, teamIdOrSlug: "acme" })("anthropic/claude-sonnet-5");
 });
 ```
 
