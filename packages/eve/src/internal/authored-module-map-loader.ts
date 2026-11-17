@@ -124,6 +124,7 @@ async function hydrateCompiledModuleMapFromManifest(
       ),
     };
   }
+  graph?.warnIfBundledPerModule();
   return { nodes };
 }
 

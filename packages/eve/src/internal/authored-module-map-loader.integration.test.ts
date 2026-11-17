@@ -99,6 +99,21 @@ describe("loadCompiledModuleMapFromAuthoredSource", () => {
     ).toBeLessThanOrEqual(1);
   });
 
+  it("reports a module that doesn't parse without a graph warning", async () => {
+    const app = await createAppRoot("eve-shared-module-graph-", {
+      files: {
+        ...sharedModuleAppFiles("__eveBrokenModuleEvaluations"),
+        "agent/tools/broken.mjs": "export default {",
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow("tools/broken.mjs");
+
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("could not bundle");
+    warn.mockRestore();
+  });
+
   it("evaluates a shared module once per tool without a graph", async () => {
     const app = await createAppRoot("eve-shared-module-graph-", {
       files: sharedModuleAppFiles("__evePerModuleEvaluations"),

@@ -23,6 +23,7 @@ export interface AuthoredModuleGraph {
     modulePath: string,
     externalDependencies: readonly string[],
   ): Promise<string | undefined>;
+  warnIfBundledPerModule(): void;
 }
 
 export function createAuthoredModuleGraph(
@@ -33,25 +34,38 @@ export function createAuthoredModuleGraph(
     (modulePath) => AUTHORED_BUNDLED_MODULE_EXTENSION.test(modulePath),
   );
   const builds = new Map<string, Promise<ReadonlyMap<string, string> | undefined>>();
+  const failures = new Map<string, unknown>();
+  let reportedFailure = false;
   return {
     async entryPath(modulePath, externalDependencies) {
-      const externals = normalizeExternalDependencies(externalDependencies);
-      const key = externals.join("\0");
+      const key = externalDependenciesKey(externalDependencies);
       let build = builds.get(key);
       if (build === undefined) {
-        build = writeAuthoredModuleGraph(entries, externals, options.appRoot).catch(
-          (error: unknown) => {
-            console.warn(
-              `eve: could not bundle ${entries.length} authored modules as one graph, so each module is bundled and evaluated on its own. Build memory then grows with the number of modules. Cause: ${toErrorMessage(error)}`,
-            );
-            return undefined;
-          },
-        );
+        build = writeAuthoredModuleGraph(
+          entries,
+          normalizeExternalDependencies(externalDependencies),
+          options.appRoot,
+        ).catch((error: unknown) => {
+          failures.set(key, error);
+          return undefined;
+        });
         builds.set(key, build);
       }
       return (await build)?.get(resolve(modulePath));
     },
+    warnIfBundledPerModule() {
+      if (reportedFailure || failures.size === 0) return;
+      reportedFailure = true;
+      const [failure] = failures.values();
+      console.warn(
+        `eve: could not bundle ${entries.length} authored modules as one graph, so each module was bundled and evaluated on its own. Build memory then grows with the number of modules. Cause: ${toErrorMessage(failure)}`,
+      );
+    },
   };
+}
+
+function externalDependenciesKey(externalDependencies: readonly string[]): string {
+  return normalizeExternalDependencies(externalDependencies).join("\0");
 }
 
 async function writeAuthoredModuleGraph(

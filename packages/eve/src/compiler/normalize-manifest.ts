@@ -169,6 +169,7 @@ export async function compileAgentManifestWithModuleGraph(
     subagents,
   });
   void pruneAuthoredModuleCache();
+  moduleGraph.warnIfBundledPerModule();
   return { manifest: compiled, moduleGraph };
 }
 
