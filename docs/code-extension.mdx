@@ -146,7 +146,8 @@ flag and other `gh api` calls get no trailer.
 
 Set `commentFooter` on the returned co-author, such as `"<sub>Sent using V</sub>"`, to end every
 comment, review, and review reply with that line. eve adds it to `gh pr comment`, `gh issue comment`,
-and `gh pr review` bodies, and to the `body` and `comments[][body]` fields of `gh api` calls to the
+`gh discussion comment`, and `gh pr review` bodies, to the `-c/--comment` of `gh pr` and `gh issue`
+`close` and `reopen`, and to the `body` and `comments[][body]` fields of `gh api` calls to the
 REST comment, review, and reply endpoints, whether passed inline, as `@file`, or in `--input` JSON.
 Body files get a footered copy, so the agent's own file is unchanged. A body that already ends with
 the footer is left alone. With a footer set, eve refuses a command that would post a comment it

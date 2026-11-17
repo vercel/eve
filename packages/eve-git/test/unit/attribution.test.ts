@@ -253,6 +253,59 @@ test("adds the footer to pr and issue comments and reviews", async () => {
   assert.equal(sandbox.store.get("/workspace/repo/c.md"), "Fixed.\n");
 });
 
+test("adds the footer to discussion comments and closing or reopening comments", async () => {
+  assert.deepEqual(await attribute(["gh", "discussion", "comment", "5", "--body", "hi"]), [
+    "gh",
+    "discussion",
+    "comment",
+    "5",
+    "--body",
+    `hi\n\n${FOOTER}`,
+  ]);
+  const sandbox = files({ "/workspace/repo/reply.md": "Thanks." });
+  assert.deepEqual(
+    await attribute(["gh", "discussion", "comment", "DC_1", "-F", "reply.md"], sandbox),
+    ["gh", "discussion", "comment", "DC_1", "-F", "/tmp/body-1.md"],
+  );
+  assert.equal(sandbox.store.get("/tmp/body-1.md"), `Thanks.\n\n${FOOTER}`);
+  assert.match(
+    await refusal(["gh", "discussion", "comment", "5", "--body-file", "-"]),
+    /--body-file <path>/u,
+  );
+  for (const [argv, expected] of [
+    [
+      ["gh", "issue", "close", "5", "--comment", "done"],
+      ["gh", "issue", "close", "5", "--comment", `done\n\n${FOOTER}`],
+    ],
+    [
+      ["gh", "pr", "close", "5", "-d", "-c", "-superseded"],
+      ["gh", "pr", "close", "5", "-d", "-c", `-superseded\n\n${FOOTER}`],
+    ],
+    [
+      ["gh", "-R", "o/r", "issue", "close", "5", "-r", "not planned", "--comment=dup"],
+      ["gh", "-R", "o/r", "issue", "close", "5", "-r", "not planned", `--comment=dup\n\n${FOOTER}`],
+    ],
+    [
+      ["gh", "issue", "reopen", "5", "-c", "back"],
+      ["gh", "issue", "reopen", "5", "-c", `back\n\n${FOOTER}`],
+    ],
+    [
+      ["gh", "pr", "reopen", "5", "--comment", "again"],
+      ["gh", "pr", "reopen", "5", "--comment", `again\n\n${FOOTER}`],
+    ],
+    [
+      ["gh", "pr", "close", "5"],
+      ["gh", "pr", "close", "5"],
+    ],
+    [
+      ["gh", "discussion", "comment", "DC_1", "--delete", "--yes"],
+      ["gh", "discussion", "comment", "DC_1", "--delete", "--yes"],
+    ],
+  ] as const) {
+    assert.deepEqual(await attribute([...argv]), expected, argv.join(" "));
+  }
+});
+
 test("adds the footer to REST comment, review, and reply bodies", async () => {
   for (const endpoint of [
     "repos/o/r/issues/12/comments",
@@ -479,6 +532,9 @@ test("resolves attribution only for commands that can publish", () => {
     ["gh", "pr", "comment", "1"],
     ["gh", "-R", "o/r", "issue", "comment", "1"],
     ["gh", "pr", "review", "1"],
+    ["gh", "discussion", "comment", "1"],
+    ["gh", "issue", "close", "1"],
+    ["gh", "pr", "reopen", "1"],
     ["gh", "api", "-X", "POST", "repos/o/r/issues/1/comments"],
     ["gh", "api", "repos/o/r/pulls/1/reviews/9/events"],
     ["gh", "api", "graphql"],

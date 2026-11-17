@@ -5,10 +5,11 @@ export interface GitHubCoAuthor {
   readonly email: string;
   readonly name: string;
   /**
-   * One Markdown line that ends every comment, review, and review reply the
-   * turn posts, such as `<sub>Sent using V</sub>`. When it is set, a command
-   * that would post a comment the footer cannot be added to is refused. Omit
-   * it to post comments unchanged.
+   * One Markdown line that ends every comment, review, review reply, and
+   * closing or reopening comment the turn posts, such as
+   * `<sub>Sent using V</sub>`. When it is set, a command that would post a
+   * comment the footer cannot be added to is refused. Omit it to post comments
+   * unchanged.
    */
   readonly commentFooter?: string;
 }
@@ -39,6 +40,7 @@ type CommandKind =
   | "signed-commit"
   | "pr-create"
   | "comment"
+  | "state-comment"
   | "api-comment"
   | "api-review-events"
   | "graphql";
@@ -52,6 +54,14 @@ const REPO_FLAGS = ["-R", "--repo"];
 const GLOBAL_VALUE_FLAGS = new Set([...REPO_FLAGS, "--hostname"]);
 const SIGNED_COMMIT_VALUE_FLAGS = new Set(["--repo", "--branch", "--base", "-m", "-b"]);
 const COMMENT_VALUE_FLAGS = new Set([...BODY_FLAGS, ...BODY_FILE_FLAGS, ...REPO_FLAGS]);
+const STATE_COMMENT_FLAGS = new Set(["-c", "--comment"]);
+const STATE_VALUE_FLAGS = new Set([
+  ...STATE_COMMENT_FLAGS,
+  ...REPO_FLAGS,
+  "-r",
+  "--reason",
+  "--duplicate-of",
+]);
 const PR_CREATE_VALUE_FLAGS = new Set([
   ...COMMENT_VALUE_FLAGS,
   "-a",
@@ -209,6 +219,13 @@ export async function attributeCommand(
     replace(body, await files.write(withFooter(content, footer)));
     return result;
   }
+  if (kind === "state-comment") {
+    const comment = parseArgs(argv, 1, STATE_VALUE_FLAGS).flags.findLast((flag) =>
+      STATE_COMMENT_FLAGS.has(flag.name),
+    );
+    if (comment?.value.trim()) replace(comment, withFooter(comment.value, footer));
+    return result;
+  }
   const { flags } = parseArgs(argv, 1, API_VALUE_FLAGS);
   if (kind === "graphql") {
     const refused = await refuseGraphqlComment(flags, files, resolve);
@@ -258,7 +275,12 @@ function commandKind(argv: readonly string[]): CommandKind | null {
   if (argv[0] !== "gh") return null;
   const [group, action] = parseArgs(argv, 1, GLOBAL_VALUE_FLAGS).positionals;
   if (group === "pr" && action === "create") return "pr-create";
-  if ((group === "pr" || group === "issue") && action === "comment") return "comment";
+  if ((group === "pr" || group === "issue" || group === "discussion") && action === "comment") {
+    return "comment";
+  }
+  if ((group === "pr" || group === "issue") && (action === "close" || action === "reopen")) {
+    return "state-comment";
+  }
   if (group === "pr" && action === "review") return "comment";
   if (group !== "api") return null;
   const endpoint = apiPath(parseArgs(argv, 1, API_VALUE_FLAGS).positionals[1] ?? "");
