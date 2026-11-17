@@ -1,3 +1,4 @@
+/*! Question and answer shapes adapted from AI SDK 7.0.137 (Apache-2.0). */
 import type { HistoryMessage } from "#shared/history-message.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 

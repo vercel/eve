@@ -5,6 +5,11 @@ import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 import { frameworkTool } from "./framework-tool.js";
 import { refreshReadFileStamp } from "./write-file.js";
 
+/*!
+ * Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
+ * edit-diff.ts in badlogic/pi-mono v1.5.0) under the MIT License.
+ */
+
 /**
  * One targeted replacement in an `edit_file` call: exact text in the original file and its
  * replacement.

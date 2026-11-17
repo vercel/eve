@@ -215,7 +215,8 @@
  *             declarations users can see: what a published package entry
  *             exports, plus the types those declarations refer to. Tool
  *             directives (`@ts-expect-error`, `oxlint-disable`,
- *             `/// <reference>`, `@__PURE__`) are allowed anywhere. Anything
+ *             `/// <reference>`, `@__PURE__`) and license notices (`/*!`,
+ *             `@license`, `SPDX-License-Identifier`) are allowed anywhere. Anything
  *             else drifts from the code it describes; an invariant belongs in
  *             code that throws when it breaks (a named assert, a type, or a
  *             guard rule). See `scripts/comment-policy.mjs`.

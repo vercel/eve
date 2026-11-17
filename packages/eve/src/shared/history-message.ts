@@ -1,3 +1,5 @@
+/*! Shapes adapted from @ai-sdk/provider-utils 5.0.58 (Apache-2.0). */
+
 type JSONValue =
   | null
   | boolean

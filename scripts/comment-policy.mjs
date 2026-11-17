@@ -15,7 +15,7 @@ const packagesDir = join(root, "packages");
 const SOURCE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
 const COMMENT_MESSAGE =
-  "Comment outside the public API. Comments may only be JSDoc on declarations a published package entry exports, or tool directives (@ts-expect-error, oxlint-disable, /// <reference>, @__PURE__). Delete it. If it states an invariant, enforce it in code instead: a named assert that throws, a type, or a guard rule.";
+  "Comment outside the public API. Comments may only be JSDoc on declarations a published package entry exports, tool directives (@ts-expect-error, oxlint-disable, /// <reference>, @__PURE__), or license notices (/*! ... */, @license, SPDX-License-Identifier). Delete it. If it states an invariant, enforce it in code instead: a named assert that throws, a type, or a guard rule.";
 
 const DIRECTIVE_RES = [
   /^@ts-(?:expect-error|ignore|nocheck|check)\b/,
@@ -26,6 +26,8 @@ const DIRECTIVE_RES = [
   /^@(?:vitest-environment|jsxImportSource|jsx)\b/,
   /^(?:v8|c8|istanbul) ignore\b/,
   /^@internal$/,
+  /^@(?:license|preserve)\b/,
+  /^\s*SPDX-License-Identifier:/m,
 ];
 
 const STRING_LIKE_KINDS = new Set([
@@ -61,6 +63,33 @@ function sourceFiles() {
     .sort();
 }
 
+const CODE_RE = /\.(?:[cm]?js|jsx|tsx?)$/;
+
+/**
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+function exportTargets(value) {
+  if (typeof value === "string") return [value];
+  if (typeof value !== "object" || value === null) return [];
+  return Object.values(value).flatMap(exportTargets);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function declarationTarget(value) {
+  if (typeof value === "string") return value.endsWith(".d.ts") ? value : undefined;
+  if (typeof value !== "object" || value === null) return undefined;
+  if (typeof value.types === "string" && value.types.endsWith(".d.ts")) return value.types;
+  for (const nested of Object.values(value)) {
+    const found = declarationTarget(nested);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 /**
  * @param {string} packageDir
  * @param {string} key
@@ -71,8 +100,9 @@ function entrySources(packageDir, key, value) {
   const source = typeof value === "object" && value !== null ? value["eve-source"] : undefined;
   if (typeof source === "string" && /\.tsx?$/.test(source) && !source.startsWith("./dist/"))
     return [join(packageDir, source)];
-  const types = typeof value === "object" && value !== null ? value.types : value;
-  if (typeof types !== "string" || !types.endsWith(".d.ts")) return [];
+  const types = declarationTarget(value);
+  if (types === undefined)
+    return exportTargets(value).some((target) => CODE_RE.test(target)) ? undefined : [];
   const rest = types.replace(/^\.\/dist\//, "").replace(/\.d\.ts$/, "");
   for (const candidate of [`${rest}.ts`, `${rest}.tsx`, `${rest}/index.ts`, `${rest}.d.ts`]) {
     if (existsSync(join(packageDir, candidate))) return [join(packageDir, candidate)];
@@ -130,7 +160,7 @@ function commentBody(text) {
 
 /** @param {string} text */
 export function isDirective(text) {
-  if (text.startsWith("/// <")) return true;
+  if (text.startsWith("/// <") || text.startsWith("/*!")) return true;
   const body = commentBody(text);
   return DIRECTIVE_RES.some((re) => re.test(body));
 }
