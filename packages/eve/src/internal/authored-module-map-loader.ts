@@ -21,6 +21,10 @@ import {
   bundleAuthoredModuleMapForGeneration,
   loadAuthoredModuleNamespace,
 } from "#internal/authored-module-loader.js";
+import {
+  createAuthoredModuleGraph,
+  type AuthoredModuleGraph,
+} from "#internal/authored-module-graph.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
@@ -30,6 +34,7 @@ import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 export async function loadCompiledModuleMapFromAuthoredSource(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
   readonly authoredAppRoot?: string;
+  readonly moduleGraph?: AuthoredModuleGraph | "shared";
 }): Promise<CompiledModuleMap> {
   const manifest = await loadCompiledManifest({
     compiledArtifactsSource: input.compiledArtifactsSource,
@@ -38,6 +43,7 @@ export async function loadCompiledModuleMapFromAuthoredSource(input: {
     manifest,
     input.compiledArtifactsSource.appRoot,
     input.authoredAppRoot,
+    input.moduleGraph,
   );
 }
 
@@ -45,6 +51,7 @@ async function hydrateCompiledModuleMapFromManifest(
   manifest: CompiledAgentManifest,
   runtimeAppRoot: string,
   authoredAppRoot: string = manifest.appRoot,
+  moduleGraph?: AuthoredModuleGraph | "shared",
 ): Promise<CompiledModuleMap> {
   const materializedIndex = await readMaterializedAuthoredModuleIndex(runtimeAppRoot);
   if (materializedIndex !== undefined) {
@@ -96,20 +103,45 @@ async function hydrateCompiledModuleMapFromManifest(
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
       .map((subagent) => ({ manifest: subagent.agent, nodeId: subagent.nodeId })),
   ];
+  const resolveSourcePath = (sourcePath: string) =>
+    resolve(authoredAppRoot, relative(manifest.appRoot, sourcePath));
+  const graph =
+    moduleGraph === "shared"
+      ? createAuthoredModuleGraph(
+          nodeManifests.flatMap((node) =>
+            listApplicationModuleSourcePaths(node.manifest).map(resolveSourcePath),
+          ),
+          { appRoot: authoredAppRoot },
+        )
+      : moduleGraph;
   for (const node of nodeManifests) {
     nodes[node.nodeId] = {
-      modules: await hydrateCompiledNodeScope(node.manifest, authoredAppRoot, (sourcePath) =>
-        resolve(authoredAppRoot, relative(manifest.appRoot, sourcePath)),
+      modules: await hydrateCompiledNodeScope(
+        node.manifest,
+        authoredAppRoot,
+        resolveSourcePath,
+        graph,
       ),
     };
   }
   return { nodes };
 }
 
+function listApplicationModuleSourcePaths(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+): string[] {
+  return collectRuntimeModuleBindingsForManifest(manifest).flatMap(({ binding }) =>
+    binding.backing.kind !== "programmatic" && binding.owner.kind === "application"
+      ? [binding.backing.sourcePath]
+      : [],
+  );
+}
+
 async function hydrateCompiledNodeScope(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
   appRoot: string,
   resolveSourcePath: (sourcePath: string) => string,
+  graph: AuthoredModuleGraph | undefined,
 ): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
   for (const { binding, sourceId } of collectRuntimeModuleBindingsForManifest(manifest)) {
@@ -120,6 +152,7 @@ async function hydrateCompiledNodeScope(
             await loadAuthoredModuleNamespace(resolveSourcePath(binding.backing.sourcePath), {
               appRoot: binding.owner.kind === "application" ? appRoot : undefined,
               externalDependencies: binding.backing.externalDependencies,
+              graph: binding.owner.kind === "application" ? graph : undefined,
               extension: (() => {
                 const mountId = resolveExtensionBindingMountId(binding);
                 return mountId === undefined ? undefined : { mountId };

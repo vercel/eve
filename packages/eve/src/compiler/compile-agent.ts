@@ -15,6 +15,7 @@ import { type CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 
 interface CompileAgentInput {
   developmentExtensions?: DevelopmentExtensionSelection;
@@ -26,6 +27,7 @@ export interface CompileAgentResult {
   diagnostics: CompilerDiagnostic[];
   manifest: CompiledAgentManifest;
   metadata: CompileMetadata;
+  moduleGraph?: AuthoredModuleGraph;
   paths: CompilerArtifactPaths;
   project: ResolvedDiscoveryProject;
 }
@@ -118,6 +120,7 @@ async function writeAgentCompilation(
     diagnostics: writtenArtifacts.diagnosticsArtifact.diagnostics,
     manifest: writtenArtifacts.compiledManifest,
     metadata: writtenArtifacts.metadata,
+    moduleGraph: writtenArtifacts.moduleGraph,
     paths: writtenArtifacts.paths,
     project: discovered.project,
   };

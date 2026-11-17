@@ -6,6 +6,7 @@ import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type {
@@ -153,9 +154,11 @@ export async function prewarmAppSandboxes(input: {
   readonly loadAgentGraph?: (
     input: Readonly<{
       compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
+      moduleGraph?: AuthoredModuleGraph;
     }>,
   ) => Promise<ResolvedAgentGraphBundle>;
   readonly log?: (message: string) => void;
+  readonly moduleGraph?: AuthoredModuleGraph;
   readonly dispatch?: SandboxProviderPrepareDispatch;
   readonly preparedArtifactStore?: SandboxPreparedArtifactStore;
 }): Promise<void> {
@@ -167,6 +170,7 @@ export async function prewarmAppSandboxes(input: {
   }
   const graph = await (input.loadAgentGraph ?? loadGraphFromArtifacts)({
     compiledArtifactsSource,
+    moduleGraph: input.moduleGraph,
   });
 
   await prewarmSandboxes({
@@ -359,6 +363,7 @@ function describeIdentityValue(value: unknown): string {
 
 async function loadGraphFromArtifacts(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
+  readonly moduleGraph?: AuthoredModuleGraph;
 }): Promise<ResolvedAgentGraphBundle> {
   const [manifest, moduleMap] = await Promise.all([
     loadCompiledManifest({
@@ -366,6 +371,7 @@ async function loadGraphFromArtifacts(input: {
     }),
     loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: input.compiledArtifactsSource,
+      moduleGraph: input.moduleGraph ?? "shared",
     }),
   ]);
 

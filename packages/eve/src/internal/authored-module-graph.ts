@@ -16,6 +16,7 @@ import {
   resolveAuthoredPackageRoot,
 } from "#internal/authored-package-boundary.js";
 import { buildWithRolldown } from "#internal/bundler/rolldown.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 export interface AuthoredModuleGraph {
   entryPath(
@@ -39,7 +40,12 @@ export function createAuthoredModuleGraph(
       let build = builds.get(key);
       if (build === undefined) {
         build = writeAuthoredModuleGraph(entries, externals, options.appRoot).catch(
-          () => undefined,
+          (error: unknown) => {
+            console.warn(
+              `eve: could not bundle ${entries.length} authored modules as one graph, so each module is bundled and evaluated on its own. Build memory then grows with the number of modules. Cause: ${toErrorMessage(error)}`,
+            );
+            return undefined;
+          },
         );
         builds.set(key, build);
       }
