@@ -16,32 +16,61 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { collectComments } from "./comment-policy.mjs";
+
 const root = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const DOCS_RE = /^docs\/.*\.mdx?$/;
 const CHANGESET_RE = /^\.changeset\/(?!README\.md$)[^/]+\.md$/;
-const JSDOC_LINE_RE = /^\s*(?:\/\*\*(?!\/)|\*(?!\/)|\*\/)/;
 
 const require = createRequire(import.meta.url);
 const ts = createRequire(require.resolve("@microsoft/api-extractor/package.json"))("typescript");
-const printer = ts.createPrinter({ removeComments: true });
+
+/** @param {string} path */
+function scriptKind(path) {
+  if (path.endsWith(".tsx")) return ts.ScriptKind.TSX;
+  if (path.endsWith(".jsx")) return ts.ScriptKind.JSX;
+  if (/\.[cm]?js$/.test(path)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
+}
 
 /**
- * @param {string} path
- * @param {string} text
+ * The file's tokens with their exact text. Comments and whitespace are trivia,
+ * not tokens, so two versions that differ only in comments have equal tokens,
+ * while any change inside a string or template literal changes a token.
+ *
+ * @param {import("typescript").SourceFile} file
  */
-function printWithoutComments(path, text) {
-  const kind = path.endsWith(".tsx")
-    ? ts.ScriptKind.TSX
-    : path.endsWith(".jsx")
-      ? ts.ScriptKind.JSX
-      : /\.[cm]?js$/.test(path)
-        ? ts.ScriptKind.JS
-        : ts.ScriptKind.TS;
-  return printer
-    .printFile(ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, kind))
-    .replace(/\/\*![\s\S]*?\*\//g, "")
-    .replace(/\s+/g, "");
+function codeTokens(file) {
+  const tokens = [];
+  const visit = (node) => {
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode)
+      return;
+    const children = node.getChildren(file);
+    if (children.length > 0) {
+      for (const child of children) visit(child);
+    } else if (
+      node.kind !== ts.SyntaxKind.SyntaxList &&
+      node.kind !== ts.SyntaxKind.EndOfFileToken
+    ) {
+      tokens.push(`${node.kind}:${node.getText(file)}`);
+    }
+  };
+  visit(file);
+  return tokens.join("\0");
+}
+
+/** @param {import("typescript").SourceFile} file */
+function jsDocLines(file) {
+  return collectComments(file)
+    .filter((comment) => comment.text.startsWith("/**") && !comment.text.startsWith("/**/"))
+    .reduce((total, comment) => total + comment.text.split("\n").length, 0);
+}
+
+/** @param {string} text */
+function countLines(text) {
+  if (text === "") return 0;
+  return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
 /** @param {string[]} args */
@@ -124,38 +153,11 @@ export function measureDocsGrowth(range) {
     docs.files.set(item.path, item.added - item.deleted);
   }
 
-  const jsdoc = { added: 0, deleted: 0, files: new Map() };
-  let file = "";
-  for (const line of git(["diff", "-U0", "--no-renames", ...args, "--", "packages"]).split("\n")) {
-    if (line.startsWith("--- ")) {
-      if (line.startsWith("--- a/")) file = line.slice(6);
-      continue;
-    }
-    if (line.startsWith("+++ ")) {
-      if (line.startsWith("+++ b/")) file = line.slice(6);
-      continue;
-    }
-    if (!SOURCE_RE.test(file)) continue;
-    const sign = line[0];
-    if ((sign !== "+" && sign !== "-") || !JSDOC_LINE_RE.test(line.slice(1))) continue;
-    const delta = sign === "+" ? 1 : -1;
-    if (delta > 0) jsdoc.added++;
-    else jsdoc.deleted++;
-    jsdoc.files.set(file, (jsdoc.files.get(file) ?? 0) + delta);
-  }
-
   for (const path of untracked) {
-    if (!existsSync(join(root, path))) continue;
-    if (DOCS_RE.test(path)) {
-      const lines = readFileSync(join(root, path), "utf8").split("\n").length;
+    if (DOCS_RE.test(path) && existsSync(join(root, path))) {
+      const lines = countLines(readFileSync(join(root, path), "utf8"));
       docs.added += lines;
       docs.files.set(path, lines);
-    } else if (path.startsWith("packages/") && SOURCE_RE.test(path)) {
-      const lines = readFileSync(join(root, path), "utf8")
-        .split("\n")
-        .filter((line) => JSDOC_LINE_RE.test(line)).length;
-      jsdoc.added += lines;
-      if (lines > 0) jsdoc.files.set(path, lines);
     }
   }
 
@@ -181,18 +183,40 @@ export function measureDocsGrowth(range) {
       return undefined;
     }
   };
-  const changesCode = (path) => {
-    if (!path.startsWith("packages/")) return false;
-    if (/(^|\/)(README|CHANGELOG)\.md$/.test(path)) return false;
-    if (!SOURCE_RE.test(path)) return true;
+
+  const jsdoc = { added: 0, deleted: 0, files: new Map() };
+  let changesCode = false;
+  for (const path of new Set(paths)) {
+    if (!path.startsWith("packages/") || /(^|\/)(README|CHANGELOG)\.md$/.test(path)) continue;
+    if (!SOURCE_RE.test(path)) {
+      changesCode = true;
+      continue;
+    }
     const before = readBase(path);
     const after = readTarget(path);
-    if (before === undefined || after === undefined) return true;
-    return printWithoutComments(path, before) !== printWithoutComments(path, after);
-  };
+    const beforeFile =
+      before === undefined
+        ? undefined
+        : ts.createSourceFile(path, before, ts.ScriptTarget.Latest, false, scriptKind(path));
+    const afterFile =
+      after === undefined
+        ? undefined
+        : ts.createSourceFile(path, after, ts.ScriptTarget.Latest, false, scriptKind(path));
+    if (
+      beforeFile === undefined ||
+      afterFile === undefined ||
+      codeTokens(beforeFile) !== codeTokens(afterFile)
+    )
+      changesCode = true;
+    const delta =
+      (afterFile ? jsDocLines(afterFile) : 0) - (beforeFile ? jsDocLines(beforeFile) : 0);
+    if (delta > 0) jsdoc.added += delta;
+    if (delta < 0) jsdoc.deleted -= delta;
+    if (delta !== 0) jsdoc.files.set(path, delta);
+  }
 
   return {
-    changesCode: [...new Set(paths)].some(changesCode),
+    changesCode,
     feature: bumps.includes("minor") || bumps.includes("major"),
     docs,
     jsdoc,
