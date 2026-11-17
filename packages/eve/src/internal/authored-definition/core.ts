@@ -24,7 +24,7 @@ import {
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
-  type PublicAgentModelHandle,
+  type PublicAgentStaticModelDefinition,
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
@@ -338,7 +338,7 @@ function normalizeAgentCompactionDefinition(
         `${message} "compaction.model" takes a model ID or a model instance. A defineModel value needs a credential, and the summary call can't hold the turn for a sign-in.`,
       );
     }
-    normalizedDefinition.model = record.model as PublicAgentModelHandle;
+    normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
   }
 
   if (record.modelContextWindowTokens !== undefined) {

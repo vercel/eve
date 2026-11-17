@@ -18,7 +18,7 @@ import {
   type AgentPromptCacheDefinition,
   type AgentToolExposure,
   type ModelRouting,
-  type PublicAgentStaticModelDefinition,
+  type PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import {
@@ -75,7 +75,7 @@ export async function compileAgentConfig(
           providerOptions: definition.modelOptions?.providerOptions,
           source: configModule,
           sourcePath: configModulePath,
-          value: definition.model as PublicAgentStaticModelDefinition,
+          value: definition.model as PublicAgentTurnModelDefinition,
         })
       : undefined;
   const compaction: {
@@ -215,7 +215,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly source?: ModuleSourceRef;
   readonly sourceField?: CompiledRuntimeModelReference["sourceField"];
   readonly sourcePath?: string;
-  readonly value: PublicAgentStaticModelDefinition;
+  readonly value: PublicAgentTurnModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
     const routing = classifyModelRouting(input.value, input.providerOptions);
@@ -329,7 +329,7 @@ function rejectGatewayPromptCache(
   input: {
     readonly promptCache?: AgentPromptCacheDefinition;
     readonly sourcePath?: string;
-    readonly value: PublicAgentStaticModelDefinition;
+    readonly value: PublicAgentTurnModelDefinition;
   },
   routing: ModelRouting,
 ): void {

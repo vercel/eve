@@ -3,7 +3,7 @@ import { isModelDefinition } from "#models/definition.js";
 import type {
   PublicAgentDynamicModelResult,
   PublicAgentModelSelectionDefinition,
-  PublicAgentStaticModelDefinition,
+  PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 
 /** A model ID or instance, or a selection with model-specific settings. */
@@ -16,7 +16,9 @@ export type ModelOptionSelection = PublicAgentDynamicModelResult;
  */
 export type ModelOption =
   | string
-  | (PublicAgentModelSelectionDefinition & { readonly description: string });
+  | (PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> & {
+      readonly description: string;
+    });
 
 /** Model options by key. */
 export type ModelOptions = Readonly<Record<string, ModelOption>>;
@@ -31,7 +33,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStaticModel(value: unknown): value is PublicAgentStaticModelDefinition {
+function isStaticModel(value: unknown): value is PublicAgentTurnModelDefinition {
   return typeof value === "string"
     ? value.trim().length > 0
     : isRuntimeLanguageModel(value) || isModelDefinition(value);
@@ -79,13 +81,13 @@ export function normalizeModelOptions(options: ModelOptions): NormalizedModelOpt
   });
 }
 
-export function selectionModel(selection: ModelOptionSelection): PublicAgentStaticModelDefinition {
+export function selectionModel(selection: ModelOptionSelection): PublicAgentTurnModelDefinition {
   return isSelectionObject(selection) ? selection.model : selection;
 }
 
 function isSelectionObject(
   selection: ModelOptionSelection,
-): selection is PublicAgentModelSelectionDefinition {
+): selection is PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> {
   return (
     typeof selection !== "string" &&
     !isRuntimeLanguageModel(selection) &&

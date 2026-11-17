@@ -1,11 +1,11 @@
 import { isModelDefinition } from "#models/definition.js";
-import type { ModelRouting, PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
+import type { ModelRouting, PublicAgentTurnModelDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 const GATEWAY_PROVIDER = "gateway";
 
 export function classifyModelRouting(
-  model: PublicAgentStaticModelDefinition,
+  model: PublicAgentTurnModelDefinition,
   providerOptions?: Record<string, JsonObject>,
 ): ModelRouting {
   if (isModelDefinition(model)) {

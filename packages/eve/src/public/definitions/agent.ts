@@ -1,6 +1,5 @@
 import type {
   PublicAgentDefinition,
-  PublicAgentModelHandle,
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
@@ -50,13 +49,11 @@ export type DefinedAgent<TAgent extends AgentDefinition = AgentDefinition> = TAg
 
 /**
  * Agent configuration returned by a dynamic subagent resolver: `defineAgent({ description, model })`.
- * The description tells the parent agent when to delegate. The model is a model ID or instance:
- * the session saves the selection, so it takes no `defineModel` value.
+ * The description tells the parent agent when to delegate.
  */
 export type DynamicLocalSubagentDefinition = DefinedAgent<
   Extract<AgentDefinition, { readonly model: PublicAgentStaticModelDefinition }> & {
     readonly description: string;
-    readonly model: PublicAgentModelHandle;
   }
 >;
 

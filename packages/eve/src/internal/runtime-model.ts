@@ -3,10 +3,10 @@ import { isModelDefinition } from "#models/definition.js";
 import type {
   AgentReasoningDefinition,
   EveLanguageModel,
-  PublicAgentStaticModelDefinition,
+  PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 
-export function formatLanguageModelGatewayId(model: PublicAgentStaticModelDefinition): string {
+export function formatLanguageModelGatewayId(model: PublicAgentTurnModelDefinition): string {
   if (typeof model === "string") {
     return model;
   }

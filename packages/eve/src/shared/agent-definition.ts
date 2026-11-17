@@ -86,21 +86,23 @@ export interface EveLanguageModel {
   doStream(options: never): PromiseLike<unknown>;
 }
 
-/** A model eve calls as it is: an AI Gateway model id string or an {@link EveLanguageModel}. */
-export type PublicAgentModelHandle = string | EveLanguageModel;
+/** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
+export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
 /**
- * A concrete model: an AI Gateway model id string, an {@link EveLanguageModel}, or a
- * {@link ModelDefinition} that runs on the caller's own credential.
+ * A model for a session's turns: a static model, or a {@link ModelDefinition} that runs on the
+ * caller's own credential.
  */
-export type PublicAgentStaticModelDefinition = PublicAgentModelHandle | ModelDefinition;
+export type PublicAgentTurnModelDefinition = PublicAgentStaticModelDefinition | ModelDefinition;
 
 /**
  * A model together with settings that apply only when it is selected, such as reasoning effort
  * and provider options.
  */
-export interface PublicAgentModelSelectionDefinition {
-  readonly model: PublicAgentStaticModelDefinition;
+export interface PublicAgentModelSelectionDefinition<
+  TModel extends PublicAgentTurnModelDefinition = PublicAgentStaticModelDefinition,
+> {
+  readonly model: TModel;
   /** Override the agent reasoning effort for this selection; omitted values inherit it. */
   readonly reasoning?: AgentReasoningDefinition;
   /** Context window of the selected model, in tokens. */
@@ -110,12 +112,12 @@ export interface PublicAgentModelSelectionDefinition {
 }
 
 /**
- * What a dynamic model function returns: a model ID or instance, or a
- * {@link PublicAgentModelSelectionDefinition}.
+ * What a dynamic model function returns: a model ID, instance, or {@link ModelDefinition}, or a
+ * {@link PublicAgentModelSelectionDefinition} holding one.
  */
 export type PublicAgentDynamicModelResult =
-  | PublicAgentStaticModelDefinition
-  | PublicAgentModelSelectionDefinition;
+  | PublicAgentTurnModelDefinition
+  | PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition>;
 
 /**
  * A `model` chosen per model call: `defineDynamic()` from `eve` or `eve/models`, or `auto()`. Its
@@ -166,7 +168,7 @@ export interface PublicAgentCompactionDefinition {
    * When omitted, eve uses the active turn model for the summary call. A summary call can't hold
    * the turn for a sign-in, so it takes no `defineModel` value.
    */
-  readonly model?: PublicAgentModelHandle;
+  readonly model?: PublicAgentStaticModelDefinition;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *
@@ -427,6 +429,13 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
         /** Language model used for agent turns. */
         readonly model: PublicAgentStaticModelDefinition;
         /** Optional context-window override for the static model. */
+        readonly modelContextWindowTokens?: number;
+        readonly modelOptions?: AgentModelOptionsDefinition;
+      }
+    | {
+        /** A model that runs on the caller's own credential; see `defineModel` in `eve/models`. */
+        readonly model: ModelDefinition;
+        /** Optional context-window override for a model `id` outside the AI Gateway catalog. */
         readonly modelContextWindowTokens?: number;
         readonly modelOptions?: AgentModelOptionsDefinition;
       }

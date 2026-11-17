@@ -30,7 +30,7 @@ import {
   type PublicAgentDynamicModelDefinition,
   type PublicAgentDynamicModelResult,
   type PublicAgentModelSelectionDefinition,
-  type PublicAgentStaticModelDefinition,
+  type PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import {
@@ -191,7 +191,7 @@ export async function resolveRuntimeModelSelection(input: {
     );
   }
 
-  let selection: PublicAgentModelSelectionDefinition;
+  let selection: PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition>;
   let providerOptions: Record<string, JsonObject> | undefined;
   let promptCache: ReturnType<typeof normalizeAgentPromptCache> | undefined;
   try {
@@ -338,7 +338,9 @@ const DYNAMIC_MODEL_SELECTION_KEYS = new Set([
   "reasoning",
 ]);
 
-function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefinition): void {
+function validateDynamicModelSelection(
+  selection: PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition>,
+): void {
   const unknownKeys = Object.keys(selection).filter(
     (key) => !DYNAMIC_MODEL_SELECTION_KEYS.has(key),
   );
@@ -371,15 +373,17 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
 
 function normalizeDynamicModelSelection(
   result: NonNullable<PublicAgentDynamicModelResult>,
-): PublicAgentModelSelectionDefinition {
+): PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> {
   if (isModelSelectionDefinition(result)) {
     return result;
   }
 
-  return { model: result as PublicAgentStaticModelDefinition };
+  return { model: result as PublicAgentTurnModelDefinition };
 }
 
-function isModelSelectionDefinition(value: unknown): value is PublicAgentModelSelectionDefinition {
+function isModelSelectionDefinition(
+  value: unknown,
+): value is PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> {
   return (
     typeof value === "object" &&
     value !== null &&
