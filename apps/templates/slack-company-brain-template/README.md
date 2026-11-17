@@ -75,6 +75,10 @@ evals/                           # checks for answer length, citations, and thre
 
 ## Get started
 
+The easiest way to start is the **Deploy with Vercel** button above. It creates
+the Vercel project, the Slack connector, and the memory Blob store for you. To
+set it up by hand instead:
+
 ```bash
 pnpm install
 vercel link                       # link a Vercel project
