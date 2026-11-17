@@ -35,12 +35,19 @@ export default defineDynamicSchedules({
   async run({ payload, occurrence, to }) {
     await to(slack, { channelId: payload.channelId }).send(prompt(payload, occurrence));
   },
-  async turnFailed({ error, payload, occurrence, auth, schedule }) {
-    if (error.code !== "BUDGET_SPENT") return;
+  async turnFailed({ error, payload, auth, schedule }) {
+    if (!error.semanticId || !REPEATS_EVERY_RUN.has(error.semanticId)) return;
     await schedule.disable();
-    await notifyRunner(auth, payload, "Your budget is used up, so I paused this task.");
+    await notifyRunner(auth, payload, `I paused this task: ${error.message}`);
   },
 });
+
+// Failures that repeat on the next occurrence.
+const REPEATS_EVERY_RUN = new Set([
+  "gateway-budget-exhausted",
+  "model-provider-api-key-missing",
+  "model-not-found",
+]);
 ```
 
 `turnFailed` receives `ScheduleTurnFailedArgs`, exported from `eve/experimental/schedules`:
@@ -55,6 +62,12 @@ export default defineDynamicSchedules({
 | `sessionId`  | `string`                     | The session of the failed turn.                                                   |
 
 A named scope can replace `turnFailed`, as it replaces `run`.
+
+`ErrorInfo` gains an optional `semanticId`: the id of the eve semantic error rule that matched the
+failure, such as `gateway-budget-exhausted` or `model-provider-api-key-missing`
+([rules][rules]). Every failed model call has the code `MODEL_CALL_FAILED`
+([`failure.ts`][model-failed]), so without the id a handler can tell causes apart only by their
+message. The field is additive, so it changes no existing event.
 
 ## Behavior
 
@@ -121,6 +134,10 @@ eve has most of the pieces already:
 4. **The payload.** eve reads the stored schedule through the provider and passes its prepared
    payload. Session context doesn't carry the payload, and it can be up to 64 KB.
 
+5. **The cause.** eve's semantic classifier already stores the matched rule's id in the failure's
+   `details.semanticErrorId` ([`gateway.ts`][budget-rule]), and `errorInfoOf` drops it
+   ([`facts.ts`][error-info]). `errorInfoOf` copies it to `semanticId`.
+
 The handler has no `scope` check, for the reason the handle on `run` has none: an occurrence acts
 for the schedule, not for a caller ([`ScheduleHandle`][handle]).
 
@@ -138,6 +155,13 @@ what happens, eve decides when, and the handle stays with the definition.
 covers the occurrence and the other the turn it starts. `events` handlers only report, and none of
 them receives a handle, so a new event would either break that pattern or leave the author with no
 way to pause.
+
+### The rule id on `ErrorInfo`
+
+The handler needs to know which failures repeat. eve already classifies failures with one rule set
+across gateways, providers, and the runtime, so its rule id is the general answer. A
+gateway-specific code would serve one provider, and passing the raw `details` would tie authors to
+an internal shape.
 
 ### `currentSchedule()`
 
@@ -167,6 +191,7 @@ import cycle. Lazy imports break the cycle and add a second path to the same han
 - A replayed step doesn't call `turnFailed` again.
 - A thrown `turnFailed` logs and leaves the next occurrence unaffected.
 - A named scope's `turnFailed` replaces the definition's.
+- `ErrorInfo.semanticId` carries the matched rule's id, and stays unset when no rule matched.
 
 [handle]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/public/schedules/subscription.ts#L275-L284
 [auth]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/public/schedules/subscription.ts#L403-L416
@@ -178,6 +203,10 @@ import cycle. Lazy imports break the cycle and add a second path to the same han
 [dispatch-handle]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/runtime/schedules/dispatch-occurrence.ts#L51-L58
 [namespace]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/runtime/schedules/dispatch-occurrence.ts#L74-L90
 [hooks]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/docs/guides/hooks.md#what-happens-when-a-hook-throws
+[rules]: https://github.com/vercel/eve/tree/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/semantic-errors/rules
+[model-failed]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/model-call/failure.ts#L93-L101
+[budget-rule]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/semantic-errors/rules/gateway.ts#L48-L54
+[error-info]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/facts.ts#L29-L41
 [terminal]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/model-call/errors.ts#L222-L228
 [ended]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/harness/facts.ts#L43-L65
 [occurrence-identity]: https://github.com/vercel/eve/blob/8f522a3728c8de2c6c8ce5056288d19730314fc5/packages/eve/src/public/schedules/subscription.ts#L75-L91
