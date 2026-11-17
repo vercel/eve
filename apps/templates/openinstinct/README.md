@@ -337,7 +337,7 @@ format; re-run it after the upgrade.
 
 Local development requires:
 
-- Node.js 24 and pnpm 11.24.0
+- Node.js 24 and pnpm 12.21.0
 - Docker Desktop or another running Docker Compose installation
 - Kernel credentials from a [Kernel API key](https://kernel.sh) or a linked
   Vercel Marketplace resource
