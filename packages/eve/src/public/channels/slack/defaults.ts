@@ -285,17 +285,17 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   // the shared thread.
   const { instructions } = event;
   if (recipientUserId && (challengeUrl || instructions)) {
-    // The turn's own sign-in holds it, so the prompt can cancel that turn.
     const target = slackSessionTargetOf(channel.slack);
+    const addressable = Boolean(target.channelId && (target.codeChannel || target.threadTs));
+    // The turn's own sign-in holds it, so the prompt can cancel that turn.
     const cancel =
-      event.responseId === undefined &&
-      target.channelId &&
-      (target.codeChannel || target.threadTs) &&
-      event.turnId
+      event.responseId === undefined && addressable && event.turnId
         ? { ...target, turnId: event.turnId }
         : undefined;
+    const connect = addressable ? { ...target, interactionId: event.interactionId } : undefined;
     const prompt = {
       cancel,
+      connect,
       displayName,
       instructions,
       url: challengeUrl,
