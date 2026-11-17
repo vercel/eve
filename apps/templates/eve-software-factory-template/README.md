@@ -57,7 +57,7 @@ Each transfer has a 120-second sandbox lifetime and a 64 MiB bundle limit. Trans
 
 Root and repository stations start with egress restricted to GitHub and public package registries. Add exact hostnames with `FACTORY_SANDBOX_ALLOWED_DOMAINS`; use `FACTORY_SANDBOX_EGRESS=open` only when unrestricted access is necessary. Allowed hosts can still receive repository data, so this is destination restriction, not a confidentiality guarantee. These options never widen the credentialed transfer sandbox's GitHub-only policy. Restart existing sessions to apply a changed policy.
 
-Tooling preparation checks Git and installs pnpm 11.25.0 if pnpm is absent, before repository data enters the snapshot. Session setup disables automatic npm, pnpm, and Yarn install scripts before running `FACTORY_SETUP_COMMAND`. Explicit commands such as `pnpm run generate` still run. Prefer naming a required generation step explicitly; `FACTORY_ALLOW_INSTALL_SCRIPTS=1` opts into automatic scripts for new sessions. Package-manager settings are defaults, not a security boundary against repository code with a shell.
+Tooling preparation checks Git and installs pnpm 12.21.0 if pnpm is absent, before repository data enters the snapshot. Session setup disables automatic npm, pnpm, and Yarn install scripts before running `FACTORY_SETUP_COMMAND`. Explicit commands such as `pnpm run generate` still run. Prefer naming a required generation step explicitly; `FACTORY_ALLOW_INSTALL_SCRIPTS=1` opts into automatic scripts for new sessions. Package-manager settings are defaults, not a security boundary against repository code with a shell.
 
 Configuration (see `.env.example`):
 
