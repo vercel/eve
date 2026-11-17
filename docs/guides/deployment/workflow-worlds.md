@@ -7,11 +7,11 @@ A Workflow world is the backend that stores eve sessions so they survive restart
 
 ## Compare worlds
 
-| World                               | Storage                           | Processes              | After an eve version upgrade                                                                       |
-| ----------------------------------- | --------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------- |
-| [Local](#use-the-local-world)       | Files under `.eve/.workflow-data` | One                    | Existing sessions cannot resume                                                                    |
-| [Postgres](#use-the-postgres-world) | A PostgreSQL database             | Any number of replicas | Existing sessions cannot resume                                                                    |
-| [Vercel Workflow](./vercel)         | Managed by Vercel                 | Managed by Vercel      | Runs continue on their original deployments; eligible idle sessions can move to the new deployment |
+| World                               | Storage                            | Processes              | After an eve version upgrade                                                                       |
+| ----------------------------------- | ---------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------- |
+| [Local](#use-the-local-world)       | SQLite under `.eve/.workflow-data` | One                    | Existing sessions cannot resume                                                                    |
+| [Postgres](#use-the-postgres-world) | A PostgreSQL database              | Any number of replicas | Existing sessions cannot resume                                                                    |
+| [Vercel Workflow](./vercel)         | Managed by Vercel                  | Managed by Vercel      | Runs continue on their original deployments; eligible idle sessions can move to the new deployment |
 
 On the local and Postgres worlds, a new build on the same eve version resumes existing sessions. See [Upgrade a self-hosted agent](./self-hosted-operations#upgrade-a-self-hosted-agent) for what happens when the eve version changes.
 

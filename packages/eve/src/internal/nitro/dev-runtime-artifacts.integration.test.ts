@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { createWorld } from "#compiled/@workflow/world-local/index.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -211,7 +212,7 @@ describe("development runtime artifact snapshots", () => {
     await mkdir(join(appRoot, "node_modules", "heavy-package"), { recursive: true });
     await mkdir(join(appRoot, ".next", "cache"), { recursive: true });
     await mkdir(join(appRoot, ".generated", "compiled"), { recursive: true });
-    await mkdir(join(appRoot, ".workflow-data", "streams"), { recursive: true });
+    await mkdir(join(appRoot, ".workflow-data"), { recursive: true });
     await mkdir(join(appRoot, ".workflow-vitest"), { recursive: true });
     await mkdir(join(appRoot, "build"), { recursive: true });
     await mkdir(join(appRoot, "dist"), { recursive: true });
@@ -225,7 +226,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(join(appRoot, "node_modules", "heavy-package", "index.js"), "export {}\n");
     await writeFile(join(appRoot, ".next", "cache", "webpack.bin"), "cache\n");
     await writeFile(join(appRoot, ".generated", "compiled", "bundle.js"), "generated\n");
-    await writeFile(join(appRoot, ".workflow-data", "streams", "events.bin"), "events\n");
+    await writeFile(join(appRoot, ".workflow-data", "world.db"), "");
     await writeFile(join(appRoot, ".workflow-vitest", "steps.mjs"), "export {}\n");
     await writeFile(join(appRoot, "build", "server.js"), "build\n");
     await writeFile(join(appRoot, "dist", "index.js"), "dist\n");
@@ -581,12 +582,12 @@ describe("development runtime artifact snapshots", () => {
         sourceRoot: appRoot,
       }),
     });
-    const runsDirectory = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "default", "runs");
-    await mkdir(runsDirectory, { recursive: true });
-    await writeFile(
-      join(runsDirectory, "active-turn.json"),
-      `${JSON.stringify({ snapshotRoot: retiredSnapshotRoot, status: "running" })}\n`,
-    );
+    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(appRoot) });
+    await world.events.create(null, {
+      eventType: "run_created",
+      eventData: { deploymentId: "retired", input: [], workflowName: "turn" },
+    });
+    await world.close?.();
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,

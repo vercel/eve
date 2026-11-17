@@ -1,10 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { createWorld } from "@workflow/world-local";
 
+import {
+  readLocalWorldWaits,
+  rewriteLocalWorldRunAttributes,
+  type StoredWait,
+} from "#internal/testing/local-world-database.js";
 import { workflowDriverCodePath } from "#internal/workflow-bundle/builder-support.js";
 import { setWorld, workflowEntrypoint } from "#internal/workflow/runtime.js";
 
@@ -28,15 +32,6 @@ export interface TestWorld {
   storedWaits(): Promise<StoredWait[]>;
   rewriteRunAttributes(runId: string, patch: Record<string, string | undefined>): Promise<void>;
   close(): Promise<void>;
-}
-
-export interface StoredWait {
-  readonly waitId: string;
-  readonly runId: string;
-  readonly status: string;
-  readonly createdAt: string;
-  readonly resumeAt?: string;
-  readonly completedAt?: string;
 }
 
 const CURRENT = Symbol.for("eve.testing.workflow-test-world");
@@ -73,30 +68,9 @@ export async function openTestWorld(options: TestWorldOptions): Promise<TestWorl
       return recovering;
     },
     activeRunIds: () => activeRunIds(world),
-    async storedWaits() {
-      return withWorldDatabase(options.dataDir, (db) =>
-        db
-          .prepare("SELECT waits.doc FROM waits JOIN runs USING (run_id) WHERE runs.tag = ?")
-          .all(options.tag)
-          .map(({ doc }) => JSON.parse(String(doc), decodeStoredDate) as StoredWait),
-      );
-    },
-    async rewriteRunAttributes(runId, patch) {
-      withWorldDatabase(options.dataDir, (db) => {
-        const row = db.prepare("SELECT doc FROM runs WHERE run_id = ?").get(runId);
-        if (row === undefined) throw new Error(`The World stored no run "${runId}".`);
-        const run = JSON.parse(String(row.doc)) as { attributes?: Record<string, string> };
-        const attributes = { ...run.attributes };
-        for (const [key, value] of Object.entries(patch)) {
-          if (value === undefined) delete attributes[key];
-          else attributes[key] = value;
-        }
-        db.prepare("UPDATE runs SET doc = ? WHERE run_id = ?").run(
-          JSON.stringify({ ...run, attributes }),
-          runId,
-        );
-      });
-    },
+    storedWaits: async () => readLocalWorldWaits(options.dataDir, options.tag),
+    rewriteRunAttributes: async (runId, patch) =>
+      rewriteLocalWorldRunAttributes(options.dataDir, runId, patch),
     async close() {
       await deliveries.close();
       await world.close?.();
@@ -107,21 +81,6 @@ export async function openTestWorld(options: TestWorldOptions): Promise<TestWorl
   };
   (globalThis as { [CURRENT]?: TestWorld })[CURRENT] = testWorld;
   return testWorld;
-}
-
-function withWorldDatabase<T>(dataDir: string, use: (db: DatabaseSync) => T): T {
-  const db = new DatabaseSync(join(dataDir, "world.db"));
-  try {
-    db.exec("PRAGMA busy_timeout = 5000");
-    return use(db);
-  } finally {
-    db.close();
-  }
-}
-
-function decodeStoredDate(_key: string, value: unknown): unknown {
-  const tagged = value as { __type?: unknown; value?: unknown } | null;
-  return tagged?.__type === "Date" ? tagged.value : value;
 }
 
 async function startWorld(

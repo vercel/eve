@@ -225,7 +225,7 @@ describe("summarizeKnownError (catalog table)", () => {
     },
     {
       title: "workflow store version mismatch",
-      error: named("DataDirVersionError", "data dir was created by a newer version"),
+      error: named("NewerSchemaError", "database was written by a newer version"),
       id: "workflow-store-version-mismatch",
     },
     {
@@ -358,8 +358,8 @@ describe("summarizeKnownError (catalog table)", () => {
 
   it("matches plain-object throwables that crossed a workflow step boundary", () => {
     const summary = summarizeKnownError({
-      name: "DataDirVersionError",
-      message: "created by a newer version",
+      name: "NewerSchemaError",
+      message: "written by a newer version",
     });
     expect(summary?.id).toBe("workflow-store-version-mismatch");
   });

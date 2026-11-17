@@ -1,5 +1,3 @@
-import { access } from "node:fs/promises";
-
 import { createLogger } from "#internal/logging.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import { isStoredLine } from "#protocol/session-events/envelope.js";
@@ -26,16 +24,12 @@ export async function readDevSessionEvents(
   appRoot: string,
   window: DevSessionEventWindow,
 ): Promise<DevSessionEventLine[]> {
-  const dataDir = resolveLocalWorkflowWorldDataDirectory(appRoot);
-  try {
-    await access(dataDir);
-  } catch {
-    return [];
-  }
-
   const { createWorld } = await import("#compiled/@workflow/world-local/index.js");
   const runtime = await import("#internal/workflow/runtime.js");
-  const world = createWorld({ dataDir });
+  const world = createWorld({
+    dataDir: resolveLocalWorkflowWorldDataDirectory(appRoot),
+    queueAuthKey: "read",
+  });
   runtime.setWorld(world);
 
   const lines: DevSessionEventLine[] = [];

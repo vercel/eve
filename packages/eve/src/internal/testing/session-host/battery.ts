@@ -25,7 +25,7 @@ import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { defineMemory } from "#public/memory/index.js";
 import { isHookNotFound } from "#shared/run-errors.js";
 
-import type { StoredWait } from "#internal/testing/workflow-test-world.js";
+import type { StoredWait } from "#internal/testing/local-world-database.js";
 
 import type {
   CompletingStep,

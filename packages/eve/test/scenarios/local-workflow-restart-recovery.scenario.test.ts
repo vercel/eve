@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -6,6 +6,10 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 
 import { Client } from "../../src/client/client.js";
 import { buildApplication } from "../../src/internal/nitro/host.js";
+import {
+  countLocalWorldActiveSteps,
+  readLocalWorldWaits,
+} from "../../src/internal/testing/local-world-database.js";
 import { materializeScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import { startPackagedEveStart } from "./eve-start-harness.js";
@@ -68,71 +72,10 @@ afterAll(async () => {
 
 afterEach(() => vi.unstubAllEnvs());
 
-function readStoredWaits(appRoot: string): { readonly status: string; readonly waitId: string }[] {
-  const waits = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "waits");
-  if (!existsSync(waits)) return [];
-  return readdirSync(waits)
-    .filter((file) => file.endsWith(".json"))
-    .map(
-      (file) =>
-        JSON.parse(readFileSync(join(waits, file), "utf8")) as { status: string; waitId: string },
-    );
-}
-
-function countJournaledWaits(appRoot: string): number {
-  const events = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "events");
-  if (!existsSync(events)) return 0;
-  const journaled = new Set<string>();
-  for (const runId of readdirSync(events)) {
-    for (const file of readdirSync(join(events, runId))) {
-      if (!file.endsWith(".json")) continue;
-      const event = JSON.parse(readFileSync(join(events, runId, file), "utf8")) as {
-        correlationId?: string;
-        eventType?: string;
-      };
-      if (event.eventType === "wait_created") journaled.add(`${runId}-${event.correlationId}`);
-    }
-  }
-  return readStoredWaits(appRoot).filter((wait) => journaled.has(wait.waitId)).length;
-}
-
-function countUnsettledSteps(appRoot: string): number {
-  const dataDir = resolveLocalWorkflowWorldDataDirectory(appRoot);
-  const steps = join(dataDir, "steps");
-  if (!existsSync(steps)) return 0;
-  let unsettled = 0;
-  for (const runId of readdirSync(steps)) {
-    const events = join(dataDir, "events", runId);
-    const settled = new Set<string>();
-    for (const file of existsSync(events) ? readdirSync(events) : []) {
-      if (!file.endsWith(".json")) continue;
-      const event = JSON.parse(readFileSync(join(events, file), "utf8")) as {
-        correlationId?: string;
-        eventType?: string;
-      };
-      if (event.eventType === "step_completed" || event.eventType === "step_failed") {
-        settled.add(`${runId}-${event.correlationId}`);
-      }
-    }
-    for (const file of readdirSync(join(steps, runId))) {
-      if (!file.endsWith(".json")) continue;
-      const step = JSON.parse(readFileSync(join(steps, runId, file), "utf8")) as {
-        status: string;
-        stepId: string;
-      };
-      const key = `${runId}-${step.stepId}`;
-      if (step.status === "running" || step.status === "pending" || !settled.has(key)) {
-        unsettled += 1;
-      }
-    }
-  }
-  return unsettled;
-}
-
 async function postDelivery(url: string, proof?: string): Promise<Response> {
   return await fetch(new URL("/.well-known/workflow/v1/flow", url), {
     body: "{}",
-    headers: proof === undefined ? {} : { "x-eve-workflow-delivery": proof },
+    headers: proof === undefined ? {} : { "x-workflow-auth": proof },
     method: "POST",
     signal: AbortSignal.timeout(10_000),
   });
@@ -141,7 +84,8 @@ async function postDelivery(url: string, proof?: string): Promise<Response> {
 it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async () => {
   stubProductionEnv();
   const { appRoot } = app;
-  await rm(resolveLocalWorkflowWorldDataDirectory(appRoot), { force: true, recursive: true });
+  const dataDir = resolveLocalWorkflowWorldDataDirectory(appRoot);
+  await rm(dataDir, { force: true, recursive: true });
   await rm(join(appRoot, ".sleep-requested"), { force: true });
 
   let server = await startPackagedEveStart(appRoot);
@@ -154,13 +98,13 @@ it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async
       .poll(() => existsSync(join(appRoot, ".sleep-requested")), { timeout: 30_000 })
       .toBe(true);
     await expect
-      .poll(() => countJournaledWaits(appRoot), { timeout: 30_000 })
+      .poll(() => readLocalWorldWaits(dataDir).length, { timeout: 30_000 })
       .toBeGreaterThanOrEqual(2);
-    await expect.poll(() => countUnsettledSteps(appRoot), { timeout: 30_000 }).toBe(0);
+    await expect.poll(() => countLocalWorldActiveSteps(dataDir), { timeout: 30_000 }).toBe(0);
   } finally {
     await server.crash();
   }
-  expect(readStoredWaits(appRoot).map((wait) => wait.status)).not.toContain("completed");
+  expect(readLocalWorldWaits(dataDir).map((wait) => wait.status)).not.toContain("completed");
 
   server = await startPackagedEveStart(appRoot);
   try {

@@ -1,29 +1,66 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const [fixtureDirectory, outputDirectory] = process.argv.slice(2);
 if (!fixtureDirectory || !outputDirectory) {
   throw new Error("Usage: capture-workflow-events.mjs <fixture-directory> <output-directory>");
 }
 
-const directory = join(fixtureDirectory, ".eve", ".workflow-data", "events");
-const files = await readdir(directory).catch((error) => {
-  if (error.code === "ENOENT") return [];
-  throw error;
-});
+const PAGE_LIMIT = 1000;
+
+const eveDirectory = join(fixtureDirectory, ".eve");
+const evalServers = join(eveDirectory, "eval-servers");
+const dataDirectories = [
+  join(eveDirectory, ".workflow-data"),
+  ...(existsSync(evalServers)
+    ? readdirSync(evalServers).map((name) => join(evalServers, name, ".workflow-data"))
+    : []),
+].filter((dataDir) => existsSync(join(dataDir, "world.db")));
+
+const require = createRequire(join(resolve(fixtureDirectory), "package.json"));
+const eveRoot = dirname(require.resolve("eve/package.json"));
+const { createWorld } = await import(
+  pathToFileURL(join(eveRoot, "dist", "src", "compiled", "@workflow", "world-local", "index.js"))
+    .href
+);
+
+async function* listAll(listPage) {
+  let cursor;
+  do {
+    const page = await listPage({ limit: PAGE_LIMIT, ...(cursor === undefined ? {} : { cursor }) });
+    yield* page.data;
+    cursor = page.hasMore && page.cursor ? page.cursor : undefined;
+  } while (cursor !== undefined);
+}
+
 const events = [];
-for (const file of files.filter((file) => file.endsWith(".json"))) {
-  const event = JSON.parse(await readFile(join(directory, file), "utf8"));
-  // Never retain serialized inputs, hook payloads, credentials, or model content.
-  events.push({
-    runId: event.runId,
-    eventId: event.eventId,
-    eventType: event.eventType,
-    correlationId: event.correlationId,
-    createdAt: event.createdAt,
-    stepName: event.eventData?.stepName,
-    ownerMessageId: event.eventData?.ownerMessageId,
-  });
+for (const dataDir of dataDirectories) {
+  const world = createWorld({ dataDir, queueAuthKey: "read" });
+  try {
+    for await (const run of listAll((pagination) =>
+      world.runs.list({ resolveData: "none", pagination }),
+    )) {
+      for await (const event of listAll((pagination) =>
+        world.events.list({ runId: run.runId, resolveData: "all", pagination }),
+      )) {
+        // Never retain serialized inputs, hook payloads, credentials, or model content.
+        events.push({
+          runId: event.runId,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          correlationId: event.correlationId,
+          createdAt: event.createdAt,
+          stepName: event.eventData?.stepName,
+          ownerMessageId: event.eventData?.ownerMessageId,
+        });
+      }
+    }
+  } finally {
+    await world.close();
+  }
 }
 events.sort((a, b) => String(a.eventId).localeCompare(String(b.eventId)));
 await mkdir(outputDirectory, { recursive: true });
