@@ -42,12 +42,10 @@ const SESSION_SEND_RETRY_MAX_DELAY_MS = 2_000;
 const SESSION_SEND_READY_TIMEOUT_MS = 20_000;
 const followSession = Symbol("followClientSession");
 const sendFollowed = Symbol("sendFollowedClientSession");
-/** How long a sent delivery keeps the stream connection its send opened for its first read. */
 const SEND_STREAM_HOLD_MS = 10_000;
 
 interface FollowSessionOptions extends SessionStreamOptions {
   readonly headers?: Readonly<Record<string, string>>;
-  /** A following connection at the start index that's already opening. */
   readonly opened?: Promise<OpenedStream | undefined>;
   readonly onCaughtUp?: () => void;
   readonly resolveReconnectPolicy?: () => SessionStreamOptions["reconnect"];
@@ -158,7 +156,6 @@ export class ClientSession {
     return await this.#send({ ...options, answers }, false, true);
   }
 
-  /** A send or answer whose caller already follows this session's stream. */
   async [sendFollowed]<TOutput = unknown>(
     input: SendTurnPayload<TOutput>,
   ): Promise<Delivery<TOutput>> {
@@ -175,8 +172,6 @@ export class ClientSession {
   ): Promise<Delivery<TOutput>> {
     const initialStreamIndex = this.#state.streamIndex;
     const path = createEveSessionRoutePath(this.#state.sessionId);
-    // The delivery's stream opens as the send goes out, so its first read doesn't wait a round
-    // trip after the send is accepted.
     let early: EarlyStream = NO_EARLY_STREAM;
     let response: Response;
     let timing: Omit<ClientSendReceipt, "deliveryId">;
@@ -190,7 +185,6 @@ export class ClientSession {
         this.#state.inbox,
         opensStream
           ? () => {
-              // A retried send reopens it; the attempt before's connection closes unread.
               early.release();
               early = this.#openEarlyStream(initialStreamIndex, input);
             }
@@ -222,7 +216,6 @@ export class ClientSession {
     );
   }
 
-  /** One following connection at `startIndex`, for the first read of the delivery a send makes. */
   #openEarlyStream(startIndex: number, input: SendTurnOptions): EarlyStream {
     return earlyStream(() =>
       openStreamBody({
@@ -230,7 +223,6 @@ export class ClientSession {
         path: createEveSessionStreamRoutePath(this.#state.sessionId),
         redirect: this.#context.redirect,
         resolveHeaders: () => this.#context.resolveHeaders(input.headers),
-        // One attempt: a read that finds it unopened opens its own, with its own retries.
         retryPolicy: { ...DEFAULT_STREAM_RECONNECT_POLICY, maxAttempts: 1 },
         startIndex,
       }),
@@ -416,7 +408,6 @@ export class ClientSession {
   }
 }
 
-/** @internal */
 export function sendFollowedClientSession<TOutput = unknown>(
   session: ClientSession,
   input: SendTurnPayload<TOutput>,
@@ -573,17 +564,12 @@ function createMessageBody(
   return body;
 }
 
-/** A stream connection a send opened early, which the delivery's first read takes. */
 interface EarlyStream {
-  /** The connection, once; later reads open their own. */
   take(): Promise<OpenedStream | undefined> | undefined;
-  /** Closes the connection if no read has taken it. */
   release(): void;
-  /** Closes the connection after `ms` if no read has taken it by then. */
   releaseAfter(ms: number): void;
 }
 
-/** No early connection: the session's ID arrives with the send's answer. */
 const NO_EARLY_STREAM: EarlyStream = { take: () => undefined, release() {}, releaseAfter() {} };
 
 function earlyStream(open: () => Promise<OpenedStream>): EarlyStream {

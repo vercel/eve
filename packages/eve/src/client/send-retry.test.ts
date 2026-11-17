@@ -20,7 +20,6 @@ function accepted() {
   return Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 });
 }
 
-/** The send's POST attempts; a send also opens its delivery's stream with a GET beside them. */
 function posts(fetchMock: { mock: { calls: readonly (readonly unknown[])[] } }) {
   return fetchMock.mock.calls.filter(
     ([, init]) => (init as RequestInit | undefined)?.method === "POST",
@@ -78,9 +77,7 @@ describe("session send readiness retries", () => {
       acceptedAt: startedAt + 3_750,
     });
     expect(new Set(observedHeaders).size).toBe(5);
-    expect(observedHeaders.map(Number)).toEqual(
-      observedHeaders.map(Number).sort((a, b) => a - b),
-    );
+    expect(observedHeaders.map(Number)).toEqual(observedHeaders.map(Number).sort((a, b) => a - b));
     expect(new Set(observedPaths)).toEqual(new Set(["/eve/v1/session/session_1"]));
   });
 

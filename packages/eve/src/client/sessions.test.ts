@@ -227,7 +227,6 @@ describe("Client.sessions", () => {
 
     expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
       "/eve/v1/session/wrun_A",
-      // The send opens its delivery's stream as it goes out.
       "/eve/v1/session/wrun_A/stream",
       "/eve/v1/session/wrun_A/cancel",
       "/eve/v1/session/wrun_A/compact",

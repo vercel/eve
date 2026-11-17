@@ -270,7 +270,6 @@ export class EvalSessionDriver implements EveEvalSession {
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
     const payload = attachSignal(input, this.#signal);
     const startIndex = this.#session.state.streamIndex;
-    // The eval follows the session from its own cursor below, so the send opens no stream.
     const response = await sendFollowedClientSession(this.#session, payload);
     this.recordSend(
       payload.answers === undefined ? "message" : "respond",

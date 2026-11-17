@@ -17,7 +17,6 @@ function session() {
   );
 }
 
-/** A stream response that records when its body is cancelled. */
 function stream(events: readonly SessionEvent[], onCancel = () => {}) {
   const body = events.map(encodeTestLine).join("");
   return new Response(
