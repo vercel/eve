@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { compileAgent } from "#compiler/compile-agent.js";
+import { join } from "node:path";
+
+import { compileAgent, compileAgentInWorkspace } from "#compiler/compile-agent.js";
 import { EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION } from "#compiler/extension-compatibility.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
@@ -56,15 +58,22 @@ describe("loadCompiledModuleMapFromAuthoredSource", () => {
     const app = await createAppRoot("eve-shared-module-graph-", {
       files: sharedModuleAppFiles("__eveCompileGraphEvaluations"),
     });
-    const compiled = await compileAgent({ startPath: app.appRoot });
+    const { compileResult, moduleGraph } = await compileAgentInWorkspace({
+      artifactLocations: {
+        publishedRoot: join(app.appRoot, ".eve"),
+        writeRoot: join(app.appRoot, ".eve"),
+      },
+      startPath: app.appRoot,
+    });
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
     const evaluationsAfterCompile = sharedModuleEvaluations("__eveCompileGraphEvaluations");
 
     const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource,
-      moduleGraph: compiled.moduleGraph,
+      moduleGraph,
     });
 
+    expect(() => structuredClone(compileResult)).not.toThrow();
     expect(evaluationsAfterCompile).toBe(1);
     expect(sharedModuleEvaluations("__eveCompileGraphEvaluations")).toBe(1);
     expect(Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules)).toEqual(

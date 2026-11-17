@@ -1,5 +1,6 @@
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
@@ -55,7 +56,7 @@ export async function prepareDevelopmentApplicationHost(
   let generation: Awaited<ReturnType<typeof stageDevelopmentGeneration>> | undefined;
 
   try {
-    const compileResult = await compileAgentInWorkspace({
+    const { compileResult } = await compileAgentInWorkspace({
       artifactLocations: {
         publishedRoot: join(appRoot, ".eve"),
         writeRoot: workspace.compilerArtifactsDir,
@@ -104,9 +105,9 @@ export async function prepareDevelopmentApplicationHost(
 
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
-): Promise<PreparedApplicationHost> {
+): Promise<PreparedApplicationHost & { readonly moduleGraph: AuthoredModuleGraph }> {
   await buildWorkspaceExtensions(workspace.appRoot);
-  const compileResult = await compileAgentInWorkspace({
+  const { compileResult, moduleGraph } = await compileAgentInWorkspace({
     artifactLocations: {
       publishedRoot: join(workspace.publication.output.finalDir, ".eve"),
       writeRoot: workspace.compiler.artifactsDir,
@@ -121,12 +122,15 @@ export async function prepareProductionApplicationHost(
     outDir: workspace.host.artifactsDir,
   });
 
-  return createPreparedApplicationHost({
-    compileResult,
-    compiledArtifacts,
-    schedules,
-    workflowBuildDir: workspace.workflow.buildDir,
-  });
+  return {
+    ...createPreparedApplicationHost({
+      compileResult,
+      compiledArtifacts,
+      schedules,
+      workflowBuildDir: workspace.workflow.buildDir,
+    }),
+    moduleGraph,
+  };
 }
 
 export async function refreshProductionCompiledArtifacts(
