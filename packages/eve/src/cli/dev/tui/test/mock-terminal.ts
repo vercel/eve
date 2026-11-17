@@ -77,6 +77,8 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
   columns: number;
   rows: number;
   #rawOutput = "";
+  #frames: string[] = [];
+  #synchronizing = false;
   #lines: string[] = [];
   /** Parallel to `#lines`: `d` marks a cell drawn dim (SGR 2), a space any other cell. */
   #dimCells: string[] = [];
@@ -110,6 +112,7 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     const text = String(chunk);
     this.#rawOutput += text;
     this.#apply(text);
+    this.#recordFrame();
 
     if (typeof encodingOrCallback === "function") {
       encodingOrCallback();
@@ -145,6 +148,21 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
 
   rawOutput() {
     return this.#rawOutput;
+  }
+
+  /**
+   * Every distinct screen a terminal could have shown, oldest first: one per
+   * write, except that a synchronized update (`?2026h` … `?2026l`) shows only
+   * its final state. Flash tests assert on these instead of the end state.
+   */
+  frames(): readonly string[] {
+    return this.#frames;
+  }
+
+  #recordFrame() {
+    if (this.#synchronizing) return;
+    const frame = this.snapshot();
+    if (this.#frames.at(-1) !== frame) this.#frames.push(frame);
   }
 
   /**
@@ -264,6 +282,15 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       parameters[0] === undefined || parameters[0] === "" ? fallback : Number(parameters[0]);
 
     if (isPrivate) {
+      if (rawParameters === "?2026" && (command === "h" || command === "l")) {
+        if (command === "l") {
+          this.#synchronizing = false;
+          this.#recordFrame();
+        } else {
+          this.#recordFrame();
+          this.#synchronizing = true;
+        }
+      }
       // The alternate screen swaps the grid: entering starts the modal view
       // from a blank screen, leaving restores the transcript snapshot.
       if (rawParameters === "?1049" && (command === "h" || command === "l")) {

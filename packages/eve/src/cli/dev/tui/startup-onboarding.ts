@@ -29,10 +29,12 @@ export async function runStartupOnboarding(input: {
   readonly onOnboardingStep?: ((input: EveCliSetupStepEvent) => void) | undefined;
   /** Stops the open setup flow when `eve dev` stops or its server fails to start or exits. */
   readonly signal: AbortSignal;
+  /** The status shown until the setup flow opens; `eve init` keeps showing its install. */
+  readonly phase?: "connecting" | "installing";
 }): Promise<StartupOnboardingResult> {
   if (input.signal.aborted) return { outcome: { cancelled: true } };
   const { renderer } = input.startup;
-  renderer.setStartupPhase("connecting");
+  renderer.setStartupPhase(input.phase ?? "connecting");
   input.onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
   const onStop = () => renderer.requestInterrupt();
   input.signal.addEventListener("abort", onStop, { once: true });

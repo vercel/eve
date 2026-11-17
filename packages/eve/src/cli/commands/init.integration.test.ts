@@ -145,6 +145,13 @@ function fakeOnboarding(
   };
 }
 
+/** What init printed above its onboarding screen when it handed the terminal to eve dev. */
+async function handedOffRows(deps: ReturnType<typeof dependencies>): Promise<string[]> {
+  const onboarding = await deps.startInitOnboarding.mock.results[0]?.value;
+  const close = onboarding?.close as ReturnType<typeof fakeOnboarding>["close"] | undefined;
+  return (close?.mock.calls[0]?.[0]?.rows ?? []).map(stripAnsi);
+}
+
 /** A host project the dir-mode tests target: package.json plus a pnpm lockfile. */
 async function createHostProject(
   parentDirectory: string,
@@ -571,10 +578,10 @@ describe("runInitCommand", () => {
       "--onboarded",
     ]);
     const messages = output.messages.map(stripAnsi);
-    // The onboarding screen shows the install and Git phases instead of init's progress row.
-    expect(messages).toEqual([
-      "",
-      "Creating agent...",
+    // The onboarding screen shows the install and Git phases instead of init's progress row, and
+    // the summary lands above it as it hands the terminal to eve dev.
+    expect(messages).toEqual(["", "Creating agent..."]);
+    await expect(handedOffRows(deps)).resolves.toEqual([
       `✓ Created an eve agent in ${projectPath} in 13.8s`,
       "",
     ]);
@@ -748,7 +755,7 @@ describe("runInitCommand", () => {
         "dev",
         "--onboarded",
       ]);
-      expect(output.messages.map(stripAnsi).join("\n")).toContain(
+      expect((await handedOffRows(deps)).join("\n")).toContain(
         `Created an eve agent in ${projectPath}`,
       );
     },
@@ -920,10 +927,11 @@ describe("runInitCommand", () => {
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
       engines: { node: "26.x" },
     });
-    expect(output.messages.join("\n")).toContain(
+    const summary = (await handedOffRows(deps)).join("\n");
+    expect(summary).toContain(
       `⚠ Updated workspace root configuration at ${join(workspaceRoot, "pnpm-workspace.yaml")}`,
     );
-    expect(output.messages.join("\n")).toContain(
+    expect(summary).toContain(
       `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "26.x"`,
     );
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
@@ -1118,7 +1126,7 @@ describe("runInitCommand", () => {
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
     const projectPath = join(parentDirectory, "my-agent");
-    expect(stripAnsi(output.errors.join("\n"))).toContain(
+    expect((await handedOffRows(deps)).join("\n")).toContain(
       `Git initialization failed during commit: commit refused\nThe eve agent was created successfully. Git repository metadata and staged files were preserved at "${projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
@@ -1733,9 +1741,7 @@ describe("runInitCommand", () => {
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
-    expect(output.messages.map(stripAnsi)).toContain(
-      "Connect a model with /login when you’re ready.",
-    );
+    expect(await handedOffRows(deps)).toContain("Connect a model with /login when you’re ready.");
     expect(deps.spawnPackageManager.mock.calls[0]?.[2]).toContain("--onboarded");
   });
 

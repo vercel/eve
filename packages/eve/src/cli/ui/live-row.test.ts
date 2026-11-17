@@ -249,4 +249,25 @@ describe("startCliLiveRow", () => {
       }
     }
   });
+
+  it("leaves a kept row for the next painter to draw over in place", () => {
+    vi.useFakeTimers();
+    const screen = makeScreen();
+    const progress = startCliLiveRow(
+      { log: vi.fn() },
+      { output: screen, elapsed: true, pulseSequence: "11111111" },
+    );
+    progress.update("Creating agent");
+    progress.stop({ keepOnScreen: true });
+    expect(screen.snapshot()).toBe("▪ Creating agent 0s");
+    expect(vi.getTimerCount()).toBe(0);
+
+    const next = startCliLiveRow(
+      { log: vi.fn() },
+      { output: screen, elapsed: true, pulseSequence: "11111111" },
+    );
+    next.update("Installing dependencies");
+    expect(screen.snapshot()).toBe("▪ Installing dependencies 0s");
+    next.stop();
+  });
 });

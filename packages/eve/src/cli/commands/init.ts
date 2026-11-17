@@ -107,6 +107,7 @@ const defaultDependencies: InitCommandDependencies = {
 };
 
 const CURRENT_DIRECTORY_PROJECT_NAME = ".";
+const SHOW_CURSOR = "\x1b[?25h";
 export const EVE_INIT_PACKAGE_SPEC_ENV = "EVE_INIT_PACKAGE_SPEC";
 
 const initLog = createLogger("init");
@@ -412,7 +413,8 @@ async function runInitSteps(input: {
       git = dependencies.startGitInitialization(project.projectPath);
     }
     if (project.kind === "created" && startOnboarding !== undefined) {
-      progress.stop();
+      // The terminal UI paints over the row, so the screen never goes blank while it loads.
+      progress.stop({ keepOnScreen: true });
       onboarding = await startOnboarding(project.projectPath);
       // The terminal UI owns the screen and shows the install on its status line.
       progress =
@@ -637,36 +639,59 @@ export async function runInitCommand(
   trackStep?.("handoff");
   let onboardingCancelled = false;
   let carriedInput: InitCarriedInput = {};
-  if (onboarding !== undefined) {
-    onboardingCancelled = (await onboarding.finished).cancelled;
-    carriedInput = await onboarding.close();
-  }
-  const interrupted = onboarding?.interrupted.aborted === true;
+  const summary: { readonly text: string; readonly error?: true }[] = [];
   if (result.kind === "created") {
-    logger.log(
-      `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
-    );
+    summary.push({
+      text: `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
+    });
     for (const mutation of result.workspaceRootMutations) {
-      logger.log(pc.yellow(`⚠ ${formatWorkspaceRootMutationWarning(mutation)}`));
+      summary.push({ text: pc.yellow(`⚠ ${formatWorkspaceRootMutationWarning(mutation)}`) });
     }
   } else {
-    logger.log(
-      `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
-    );
+    summary.push({
+      text: `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
+    });
   }
 
   if (result.kind === "created" && result.gitResult.kind === "failed") {
-    logger.error(
-      pc.yellow(
+    summary.push({
+      error: true,
+      text: pc.yellow(
         `Git initialization failed during ${result.gitResult.stage}: ${result.gitResult.reason}`,
       ),
-    );
+    });
     if (result.gitResult.stage === "commit") {
-      logger.error(
-        pc.yellow(
+      summary.push({
+        error: true,
+        text: pc.yellow(
           `The eve agent was created successfully. Git repository metadata and staged files were preserved at "${result.projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(result.projectPath)} commit -m "Initial commit from eve"`,
         ),
-      );
+      });
+    }
+  }
+
+  let handedOff = false;
+  if (onboarding !== undefined) {
+    onboardingCancelled = (await onboarding.finished).cancelled;
+    if (onboarding.interrupted.aborted) {
+      carriedInput = await onboarding.close();
+    } else {
+      // eve dev starts next and paints over the onboarding screen, which stays up meanwhile
+      // so the terminal never goes blank between the two. The summary lands above it.
+      if (onboardingCancelled) {
+        summary.push({ text: pc.dim("Connect a model with /login when you’re ready.") });
+      }
+      summary.push({ text: "" });
+      const rows = summary.flatMap(({ text }) => text.split("\n"));
+      carriedInput = await onboarding.close({ rows });
+      handedOff = true;
+    }
+  }
+  const interrupted = onboarding?.interrupted.aborted === true;
+  if (!handedOff) {
+    for (const { text, error } of summary) {
+      if (error) logger.error(text);
+      else logger.log(text);
     }
   }
 
@@ -713,17 +738,20 @@ export async function runInitCommand(
   if (carriedInput.queued !== undefined) {
     process.env[EVE_INIT_QUEUED_INPUT_ENV] = JSON.stringify(carriedInput.queued);
   }
-  if (onboardingCancelled) logger.log(pc.dim("Connect a model with /login when you’re ready."));
-  logger.log("");
-  if (
-    !resultSucceeded(
-      await dependencies.spawnPackageManager(
-        result.packageManager,
-        result.projectPath,
-        devArguments,
-      ),
-    )
-  ) {
+  if (!handedOff) logger.log("");
+  let devResult: Awaited<ReturnType<typeof dependencies.spawnPackageManager>>;
+  try {
+    devResult = await dependencies.spawnPackageManager(
+      result.packageManager,
+      result.projectPath,
+      devArguments,
+    );
+  } finally {
+    // The handed-off screen left the cursor hidden for eve dev, which restores it when it exits;
+    // this covers an eve dev that never got that far.
+    if (handedOff) process.stdout.write(SHOW_CURSOR);
+  }
+  if (!resultSucceeded(devResult)) {
     throw new Error(`Development server exited unsuccessfully in "${result.projectPath}".`);
   }
 }

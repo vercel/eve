@@ -38,4 +38,14 @@ describe("LiveRegion", () => {
     live.clear();
     expect(screen.snapshot()).toBe("");
   });
+
+  it("leaves a released region for the next painter to draw over in place", () => {
+    const { screen, live } = setup();
+    live.flush(["committed line"], ["a", "b", "c"]);
+    live.release();
+    expect(screen.snapshot()).toBe("committed line\na\nb\nc");
+
+    new LiveRegion({ write: (chunk) => screen.write(chunk) }).update(["next"]);
+    expect(screen.snapshot()).toBe("committed line\nnext");
+  });
 });

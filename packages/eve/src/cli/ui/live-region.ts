@@ -101,6 +101,16 @@ export class LiveRegion {
     this.#liveRowCount = 0;
   }
 
+  /**
+   * Gives up the live region but leaves it on screen, with the cursor at its
+   * first row, so the next painter (another live region, or another process)
+   * draws over it in place instead of the screen going blank in between.
+   */
+  release(): void {
+    this.#write(this.#moveToTop());
+    this.#liveRowCount = 0;
+  }
+
   /** Clears the visible transcript and, where supported, terminal scrollback. */
   clearAll(): void {
     this.#write(`${CLEAR_SCROLLBACK}${CLEAR_SCREEN}${CURSOR_HOME}`);
