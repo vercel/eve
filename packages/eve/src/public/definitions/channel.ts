@@ -179,8 +179,9 @@ export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends 
    * session is over, so nothing is saved after it.
    *
    * - A rejection is logged, not thrown.
-   * - eve stops waiting after 30 seconds and logs a warning. Changes the task makes after that
-   *   aren't saved.
+   * - eve stops waiting after 30 seconds and logs a warning, and the step goes on without the
+   *   task. Don't count on changes it makes after that: a later save in the same step may keep
+   *   them, or they may be lost.
    * - Later handlers, hooks, and the model don't wait for the task, so work that must happen in
    *   order with them belongs in the handler itself.
    * - Call it while the handler runs. A call after the step ended is logged, and eve doesn't wait

@@ -62,7 +62,9 @@ gain members in a minor release, so this ships as `minor`; a test fixture that b
   never fails the turn, matching how a throwing handler is already treated.
 - **Bounded wait.** Each drain waits at most 30 seconds. Work still running then is logged with
   its event types and left behind, so a promise that never settles can't hold the step until the
-  host times it out. Changes it makes afterwards aren't saved.
+  host times it out. Its later writes to channel state aren't isolated: they share the state
+  object the step's other handlers use, so a later save in the same step may keep them, and
+  they're lost once the step ends.
 - **Closed after release.** Once the step releases the stream, a `waitUntil` call (from a
   handler that kept `ctx`) is logged and not waited for, rather than queued where nothing would
   drain it.

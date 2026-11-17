@@ -138,7 +138,7 @@ events: {
 
 - eve waits for the promise before the step that ran the handler ends, or, inside a model call, before that call ends, including when the turn is cancelled. The work never outlives the sandbox or session it uses, and changes it makes to `ctx.channel.state` are saved with the step. `session.ended` is the exception: the session is over, so nothing is saved after it.
 - If the promise rejects, eve logs the error and the turn continues.
-- eve stops waiting after 30 seconds and logs a warning naming the event. Changes the promise makes after that aren't saved.
+- eve stops waiting after 30 seconds and logs a warning naming the event, and the step goes on without the promise. Don't count on changes it makes after that: a later save in the same step may keep them, or they may be lost.
 - Later handlers, hooks, and the model don't wait for the promise. Work that must happen in order with later events, such as posting a reply after the typing indicator, belongs in the handler itself, or the handler for the later event must wait for it.
 - Call `ctx.waitUntil()` while the handler runs. A call after the step ended logs a warning, and eve doesn't wait for that promise.
 
