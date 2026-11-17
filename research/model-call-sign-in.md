@@ -1,16 +1,15 @@
 ---
 issue: https://github.com/vercel/eve/issues/6408
 status: in-progress
-last_updated: "2026-11-16"
+last_updated: "2026-11-17"
 ---
 
 # Sign in before a model call
 
 Some agents need the caller's own credential for the model call itself, such as each person's own
 provider API key. eve starts a sign-in only when a tool asks for a token, and the model call runs
-before any tool. This proposal gives the agent's dynamic `model` the `ctx.getToken` and
-`ctx.requireAuth` methods of tools, so it can require a sign-in. Among dynamic values, only the
-`model` field has them.
+before any tool. This proposal gives every dynamic value the `ctx.getToken` and `ctx.requireAuth`
+methods of tools, so the agent's dynamic `model` can require a sign-in.
 
 ## Authoring API
 
@@ -29,8 +28,8 @@ export default defineAgent({
 | `ctx.requireAuth(provider, options?)` | Drops the cached token and starts a sign-in. Never returns. |
 
 Both accept the same providers and options as their tool counterparts. eve doesn't read provider
-errors: the app calls `ctx.requireAuth` when its provider rejects a token. The model's function
-calls `ctx.getToken` before it builds the model, outside `ctx.memo`.
+errors: the app calls `ctx.requireAuth` when its provider rejects a token. A value calls
+`ctx.getToken` outside `ctx.memo`, and the model's function before it builds the model.
 
 ## Semantics
 
@@ -51,7 +50,10 @@ calls `ctx.getToken` before it builds the model, outside `ctx.memo`.
 - A responder's sign-in settles on its callback. The model call's sign-in settles when the turn
   goes ahead with the model call, accepted, or when the sign-in fails, declined or failed with the
   reason. The dynamic model's `getToken` just returns the token after the callback.
-- Without an `authKey`, eve keys the model's sign-in under `eve:model`. An `authKey` replaces that
-  key, so every tool, connection and the `model` field with the same `authKey` share one token.
+- Without an `authKey`, eve keys a dynamic value's sign-in under `eve:dynamic`, and a provider
+  without Connect metadata under its dynamic value too, so two values never share its token. An
+  `authKey` replaces that key, so every tool, connection and dynamic value with the same `authKey`
+  shares one token.
 - A step's restore reads tokens but never completes or opens a sign-in, so the guard against a
   rejected fresh token holds in a fresh process.
+- Rebuilding a remote agent's credentials runs no sign-in, so `getToken` throws there.

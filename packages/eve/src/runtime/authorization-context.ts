@@ -10,6 +10,8 @@ import {
 /** Shared getToken/requireAuth capability, independent of the executing tool or workflow. */
 export function createAuthorizationContext(input: {
   readonly scope: string;
+  /** Keys a provider without Connect metadata apart from other owners' providers in `scope`. */
+  readonly owner?: string;
   readonly boundResponder?: SessionAuthContext;
   readonly completeAuthorization?: (scoped: ScopedAuthorization) => Promise<boolean>;
 }) {
@@ -47,6 +49,7 @@ export function createAuthorizationContext(input: {
 function buildInlineScopedAuthorization(input: {
   readonly boundResponder?: SessionAuthContext;
   readonly scope: string;
+  readonly owner?: string;
   readonly provider: ToolAuthProvider;
   readonly options?: ToolAuthOptions;
   readonly inlineAuthState: InlineAuthState;
@@ -61,6 +64,7 @@ function buildInlineScopedAuthorization(input: {
         ? deriveInlineScope({
             authorization,
             inlineAuthState: input.inlineAuthState,
+            owner: input.owner,
             provider: input.provider,
             scope: input.scope,
           })
@@ -84,6 +88,7 @@ function normalizeInlineProvider(
 
 function deriveInlineScope(input: {
   readonly scope: string;
+  readonly owner?: string;
   readonly authorization: AuthorizationDefinition;
   readonly provider: ToolAuthProvider;
   readonly inlineAuthState: InlineAuthState;
@@ -103,7 +108,9 @@ function deriveInlineScope(input: {
     );
   }
 
-  return `${input.scope}__inline_auth`;
+  return input.owner === undefined
+    ? `${input.scope}__inline_auth`
+    : `${input.scope}__${encodeScopeOwner(input.owner)}__inline_auth`;
 }
 
 function validateInlineAuthKey(authKey: string): string {
@@ -113,6 +120,14 @@ function validateInlineAuthKey(authKey: string): string {
     );
   }
   return authKey;
+}
+
+/**
+ * Encodes a definition id into the allowed scope characters, one id to one segment: every
+ * character outside `[A-Za-z0-9:-]` becomes `.<hex>.`, so `foo/bar` and `foo_bar` stay apart.
+ */
+function encodeScopeOwner(owner: string): string {
+  return owner.replace(/[^A-Za-z0-9:-]/gu, (char) => `.${char.codePointAt(0)!.toString(16)}.`);
 }
 
 function sanitizeScopeSegment(value: string): string {

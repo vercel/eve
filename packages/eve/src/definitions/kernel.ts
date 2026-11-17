@@ -447,20 +447,22 @@ async function withMemos<T>(
 }
 
 /**
- * The dynamic model signs in under this scope: `connect("x/y")` keys as `eve:model__x_y`, and a
- * provider without Connect metadata as `eve:model__inline_auth`. A tool name can't contain `:`.
- * An `authKey` replaces the scope, so every tool and connection with the same key shares the token.
+ * Dynamic values sign in under this scope: `connect("x/y")` keys as `eve:dynamic__x_y`, and a
+ * provider without Connect metadata keys under its definition too, so two values never share its
+ * token. A tool name can't contain `:`. An `authKey` replaces the scope, so every tool and
+ * connection with the same key shares the token.
  */
-const MODEL_AUTH_SCOPE = "eve:model";
+const DYNAMIC_AUTH_SCOPE = "eve:dynamic";
 
 /**
- * The dynamic model's sign-in methods. A restore reads the latest evaluation's results and
+ * A dynamic value's sign-in methods. A restore reads the latest evaluation's results and
  * completes no sign-in: the evaluation completes a pending one, so when the provider rejects the
  * fresh token, the turn fails.
  */
-function modelSignIn(mode: Run["mode"]): SignInMethods {
+function dynamicSignIn(definition: Definition, mode: Run["mode"]): SignInMethods {
   const { getToken, requireAuth } = createAuthorizationContext({
-    scope: MODEL_AUTH_SCOPE,
+    owner: definition.id,
+    scope: DYNAMIC_AUTH_SCOPE,
     ...(mode === "restore" && { completeAuthorization: async () => false }),
   });
   return { getToken, requireAuth };
@@ -478,7 +480,7 @@ function internalContext(
       ...frame,
       abortSignal: run.signal,
       ctx,
-      ...(run.choosesModel && modelSignIn(run.mode)),
+      ...dynamicSignIn(definition, run.mode),
       getSandbox: run.choosesModel
         ? () => {
             throw new Error(

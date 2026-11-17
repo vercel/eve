@@ -41,10 +41,9 @@ export interface ToolAuthOptions {
 }
 
 /**
- * The caller's sign-in, in a tool and in the agent's dynamic `model`. Both methods take the same
- * providers as a connection's `auth` field, including `connect("...")` from `@vercel/connect/eve`,
- * and one call can use several providers. Each context says how its work continues after the
- * sign-in.
+ * The caller's sign-in, in a tool and in a dynamic value. Both methods take the same providers as
+ * a connection's `auth` field, including `connect("...")` from `@vercel/connect/eve`, and one call
+ * can use several providers. Each context says how its work continues after the sign-in.
  */
 export interface SignInMethods {
   /**

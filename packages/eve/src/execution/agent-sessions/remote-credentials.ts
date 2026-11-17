@@ -63,6 +63,12 @@ export async function remoteAgentCredentials(input: {
       );
     },
     model: { id: binding.model ?? "" },
+    getToken: () => {
+      throw unavailableAuth(label, "getToken");
+    },
+    requireAuth: () => {
+      throw unavailableAuth(label, "requireAuth");
+    },
   };
   let value: unknown;
   try {
@@ -83,6 +89,12 @@ export async function remoteAgentCredentials(input: {
 function destinationChanged(name: string): Error {
   return new Error(
     `Remote agent "${name}" now resolves to another destination than the one its child was opened at, so eve doesn't send its credentials. Open a new child.`,
+  );
+}
+
+function unavailableAuth(label: string, method: "getToken" | "requireAuth"): Error {
+  return new Error(
+    `"${label}" called ctx.${method}() while eve rebuilt credentials for a remote agent. No sign-in can run there, so read the remote agent's credentials from the session or the environment.`,
   );
 }
 

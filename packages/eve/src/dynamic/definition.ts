@@ -92,24 +92,18 @@ export interface SessionFrame {
   readonly now: Date;
 }
 
-/** What every dynamic value reads: the session as of its latest commit, and its memos. */
-export interface DynamicValueContext extends SessionFrame {
-  readonly memo: Memo;
-  /** The conversation history as of the latest commit, assembled when something reads it. */
-  messages(): Promise<readonly ModelMessage[]>;
-}
-
 /**
  * What a dynamic agent `model` reads. The model isn't chosen yet, so there's no `ctx.model`.
  *
- * Its {@link SignInMethods} let the model call run on the caller's own credential. When the
- * caller hasn't signed in, `getToken` opens the sign-in and pauses the turn before the model
- * call; eve evaluates the model again after sign-in. `requireAuth` works during the model call
- * too: eve ends that call and runs it again after sign-in. When eve can't finish the sign-in, as
- * in a turn from a schedule, the turn fails with `SIGN_IN_FAILED`.
+ * Its {@link SignInMethods} let the turn run on the caller's own credential. Every dynamic value
+ * has them; the agent's `model` is the main use, so the model call runs on the caller's own key.
+ * When the caller hasn't signed in, `getToken` opens the sign-in and pauses the turn before the
+ * model call; eve evaluates the value again after sign-in. `requireAuth` works during the model
+ * call too: eve ends that call and runs it again after sign-in. When eve can't finish the
+ * sign-in, as in a turn from a schedule, the turn fails with `SIGN_IN_FAILED`.
  *
- * Call `getToken` before you build the model, outside `ctx.memo`: a memo keeps its result in the
- * session, and eve already reuses the token within a step.
+ * Call `getToken` outside `ctx.memo`, and in the `model` field before you build the model: a memo
+ * keeps its result in the session, and eve already reuses the token within a step.
  *
  * ```ts
  * // `anthropicKey` is an interactive definition for each person's Anthropic API key.
@@ -121,10 +115,14 @@ export interface DynamicValueContext extends SessionFrame {
  * });
  * ```
  */
-export interface DynamicModelContext extends DynamicValueContext, SignInMethods {}
+export interface DynamicModelContext extends SessionFrame, SignInMethods {
+  readonly memo: Memo;
+  /** The conversation history as of the latest commit, assembled when something reads it. */
+  messages(): Promise<readonly ModelMessage[]>;
+}
 
 /** What a dynamic value reads: the session as of its latest commit, and the model chosen for it. */
-export interface DynamicContext extends DynamicValueContext {
+export interface DynamicContext extends DynamicModelContext {
   /** The model chosen for the session. */
   readonly model: { readonly id: string };
   /**
@@ -187,7 +185,7 @@ export type DefineDynamic<TResult, TContext = DynamicContext> = (
  * });
  * ```
  */
-export function defineDynamic<TResult, TContext extends DynamicValueContext = DynamicContext>(
+export function defineDynamic<TResult, TContext extends DynamicModelContext = DynamicContext>(
   fn: (ctx: TContext) => TResult | Promise<TResult>,
 ): DynamicSentinel<TResult, TContext> {
   assertDynamicFunction(fn, "defineDynamic()");
@@ -206,8 +204,7 @@ function assertDynamicFunction(value: unknown, subject: string): void {
   throw new Error(`${subject} takes a function: defineDynamic(async (ctx) => value).`);
 }
 
-/** Whether `value` is a `defineDynamic()` value, for any context. */
-export function isDynamicSentinel(value: unknown): value is DynamicSentinel<unknown, never> {
+export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
   return typeof value === "object" && value !== null && DYNAMIC_SENTINEL in value;
 }
 
@@ -222,10 +219,7 @@ export function dynamicEvaluate<TResult, TContext>(
  * Throws unless `sentinel` is a `defineDynamic(fn)` value: the function and nothing beside it.
  * The compiler and the runtime loader both use it, so every source agrees.
  */
-export function assertDynamicSentinelKeys(
-  sentinel: DynamicSentinel<unknown, never>,
-  message: string,
-): void {
+export function assertDynamicSentinelKeys(sentinel: DynamicSentinel, message: string): void {
   assertDynamicFunction(dynamicEvaluate(sentinel), `${message} defineDynamic()`);
   const unknownKeys = Object.keys(sentinel);
   if (unknownKeys.length > 0) {
