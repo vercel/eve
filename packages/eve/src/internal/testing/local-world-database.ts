@@ -43,6 +43,9 @@ export function rewriteLocalWorldRunAttributes(
   runId: string,
   patch: Record<string, string | undefined>,
 ): void {
+  if (!existsSync(join(dataDir, "world.db"))) {
+    throw new Error(`The World stored no run "${runId}".`);
+  }
   const db = openDatabase(dataDir, false);
   try {
     const row = db.prepare("SELECT doc FROM runs WHERE run_id = ?").get(runId);

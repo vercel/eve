@@ -20,6 +20,13 @@ const dataDirectories = [
     : []),
 ].filter((dataDir) => existsSync(join(dataDir, "world.db")));
 
+await mkdir(outputDirectory, { recursive: true });
+const outputPath = join(outputDirectory, "workflow-events.json");
+if (dataDirectories.length === 0) {
+  await writeFile(outputPath, "[]");
+  process.exit(0);
+}
+
 const require = createRequire(join(resolve(fixtureDirectory), "package.json"));
 const eveRoot = dirname(require.resolve("eve/package.json"));
 const { createWorld } = await import(
@@ -63,5 +70,4 @@ for (const dataDir of dataDirectories) {
   }
 }
 events.sort((a, b) => String(a.eventId).localeCompare(String(b.eventId)));
-await mkdir(outputDirectory, { recursive: true });
-await writeFile(join(outputDirectory, "workflow-events.json"), JSON.stringify(events, null, 2));
+await writeFile(outputPath, JSON.stringify(events, null, 2));
