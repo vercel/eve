@@ -62,6 +62,7 @@ pnpm typecheck          # TypeScript across the workspace
 pnpm lint               # oxlint (auto-fixes)
 pnpm fmt                # oxfmt
 pnpm guard:invariants   # mechanical code-invariant checks (runs in CI)
+pnpm guard:docs-budget  # fixes and internal changes don't grow docs (pre-commit and CI)
 pnpm docs:check         # docs frontmatter and nav validation
 
 pnpm test               # unit + integration
@@ -289,6 +290,13 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 - `docs/**` is the published documentation. If your change alters
   public behavior, update the relevant doc in the same PR and run
   `pnpm docs:check`.
+- A bug fix or internal change may rewrite docs but not grow them. When a
+  branch changes code in `packages/` without a `minor` or `major` changeset,
+  the lines it adds to `docs/` Markdown and to JSDoc may not exceed the lines
+  it deletes. Do not document a fix; its changeset records it. A feature takes
+  a `minor` changeset, and a docs correction that needs more words goes in its
+  own docs-only PR. `pnpm guard:docs-budget` checks this, as do the pre-commit
+  hook and CI.
 - When moving a published route, update authored links to the new URL and add a
   permanent redirect from every old HTML and supported Markdown URL.
 - Sidebar order lives in `docs/meta.json`.

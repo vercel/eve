@@ -22,12 +22,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # No step here reads git history: the only git call is the
-      # `git check-attr` in scripts/sync-template-files.mjs, which reads
-      # .gitattributes from the checkout.
+      # Depth 2 holds a pull request's merge commit and both parents, which the
+      # docs budget check compares. No other step reads git history.
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Setup pnpm
@@ -73,6 +73,10 @@ jobs:
 
       - name: Guard mechanical code invariants
         run: pnpm guard:invariants
+
+      - name: Check that fixes and internal changes don't grow docs
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-docs-budget.mjs --base "$(git rev-parse HEAD^1)" --head HEAD
 
       - name: Check templates match their copied source files
         run: pnpm check:template-files

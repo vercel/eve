@@ -93,8 +93,10 @@ if (fmt.status !== 0) {
 
 // Re-stage. Paths with no on-disk change are a no-op for `git add`; paths
 // `oxfmt` rewrote pick up the new content. Partially-staged files were
-// already excluded above, so this cannot pull in unstaged edits.
-const add = run("git", ["add", "--", ...safe], {
+// already excluded above, so this cannot pull in unstaged edits. `-u` limits
+// it to index entries, so a tracked file under an ignored path (such as
+// `.githooks/`) re-stages without `git add` refusing the ignored path.
+const add = run("git", ["add", "-u", "--", ...safe], {
   stdio: ["ignore", "inherit", "inherit"],
 });
 if (add.status !== 0) {
