@@ -478,6 +478,34 @@ describe("SessionStore acceptance and observation", () => {
     expect(server.reads).toHaveLength(1);
   });
 
+  it("publishes a live stream's catch-up once instead of once per historical line", async () => {
+    // A notification per replayed line forces one React commit per line inside a single task,
+    // which trips React's nested update limit past ~50 lines, as in #3862 for resume.
+    const server = agent();
+    for (let index = 0; index < 8; index += 1)
+      server.append(testTurnFacts(index, `Earlier ${index}.`, [`earlier_${index}`]));
+    const backlog = server.log.length;
+    const current = store({ initialSession });
+    const onEvent = vi.fn();
+    const onSessionChange = vi.fn();
+    current.setCallbacks({ onEvent, onSessionChange });
+    const published: number[] = [];
+    current.subscribe(() => published.push(current.snapshot.events.length));
+
+    await current.send({ message: "later." });
+    await vi.waitFor(() => expect(current.snapshot.events).toHaveLength(backlog));
+
+    expect(onEvent).toHaveBeenCalledTimes(backlog);
+    expect(onSessionChange.mock.calls.length).toBeGreaterThanOrEqual(backlog);
+    expect(published.filter((count) => count > 0 && count < backlog)).toEqual([]);
+
+    const live = testTurnFacts(8, "Later.", ["d_0"]);
+    for (const event of live) server.append([event]);
+    await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+    expect(published).toContain(backlog + 1);
+    expect(current.snapshot.events).toHaveLength(backlog + live.length);
+  });
+
   it.each([2, 4])(
     "resumes a saved prefix of %i facts using line positions, not event counts",
     async (savedFacts) => {
@@ -1272,7 +1300,7 @@ describe("SessionStore with a follow predicate", () => {
       true,
     );
     await receipt.result();
-    expect(texts(current)).toContain("assistant: Arrived while closed.");
+    await vi.waitFor(() => expect(texts(current)).toContain("assistant: Arrived while closed."));
   });
 
   it("keeps a paused turn's stream attached through unrelated delivery settlements", async () => {

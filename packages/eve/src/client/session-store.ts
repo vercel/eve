@@ -499,7 +499,8 @@ export class SessionStore {
       throw new Error("A session is required before opening its stream.");
     this.#followAgents();
     const lifetime = this.#controller;
-    return this.#conversationClient.stream(this.#session, {
+    const opening = !this.#conversationClient.streaming;
+    const stream = this.#conversationClient.stream(this.#session, {
       startIndex: this.#conversationClient.view.position,
       ...options,
       onEvent: (event, historical) => {
@@ -511,6 +512,13 @@ export class SessionStore {
         this.#fail(error);
       },
     });
+    if (opening) {
+      const publishCaughtUp = () => {
+        if (lifetime === this.#controller) this.#publish();
+      };
+      void stream.caughtUp.then(publishCaughtUp, publishCaughtUp);
+    }
+    return stream;
   }
 
   #followAgents(): void {
@@ -554,7 +562,9 @@ export class SessionStore {
     for (const check of this.#turnWaiters) check();
     this.#callbacks.onSessionChange?.(this.#sessionState);
     if (lifetime !== this.#controller) return;
-    this.#publish();
+    // Catch-up publishes once when its stream reaches the tail or stops; a notification per historical line
+    // would force one React commit per line within a single task and trip React's nested update limit.
+    if (!historical) this.#publish();
     if (lifetime !== this.#controller) return;
     this.#conversationClient.reconcileFollowing();
     if (lifetime !== this.#controller) return;
