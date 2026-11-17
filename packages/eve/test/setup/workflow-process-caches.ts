@@ -26,16 +26,12 @@ const WARNED_ONCE = [
 ] as const;
 
 export function resetWorkflowProcessCaches(): void {
-  const fs = singleton("@workflow/world-local//fs", 1);
-  clearCollections(fs?.createdFilesCache);
-  clearCollections(fs?.createdDirectoriesCache);
-  clearCollections(singleton("@workflow/world-local//hookIndexEnsureCache", 1)?.ensuredBasedirs);
   const port = singleton("@workflow/core//devServerPort", 1);
   if (port !== undefined) {
     port.cachedPort = undefined;
     port.inFlight = undefined;
   }
-  clearCollections(singleton("@workflow/core//stepSingleFlight", 1));
+  clearCollections(singleton("@workflow/core//stepSingleFlight", 2));
   for (const name of WARNED_ONCE) {
     const warned = singleton(name, 1);
     if (warned === undefined) continue;

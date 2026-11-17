@@ -20,7 +20,6 @@ export const workflowSdkNotice = {
 
 const LOAD_DEPENDENT_NOTICES = [
   "[workflow-sdk] Step execution already in flight in this process",
-  "[world-local] restored missing run_created for ",
 ] as const;
 
 export function captureConsoleOutput(): {

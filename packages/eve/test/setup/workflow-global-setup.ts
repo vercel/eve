@@ -1,8 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { initDataDir } from "@workflow/world-local";
-
 import {
   resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
@@ -18,7 +16,6 @@ import {
 } from "#internal/workflow-bundle/builder-support.js";
 import { findWorkflowPatterns } from "#internal/workflow-bundle/workflow-builders.js";
 import { installEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
-import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 
 export const WORKFLOW_TEST_AGENT_NAME = "eve-test";
 
@@ -48,7 +45,6 @@ export default async function setupWorkflowTests(): Promise<void> {
     tsconfigPath: join(packageRoot, "tsconfig.json"),
     workingDir: packageRoot,
   });
-  await initDataDir(resolveLocalWorkflowWorldDataDirectory(packageRoot));
 }
 
 async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntries> {

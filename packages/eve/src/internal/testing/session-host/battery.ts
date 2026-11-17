@@ -25,7 +25,7 @@ import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { defineMemory } from "#public/memory/index.js";
 import { isHookNotFound } from "#shared/run-errors.js";
 
-import type { StoredWait } from "#internal/testing/workflow-test-world.js";
+import type { StoredWait } from "#internal/testing/local-world-database.js";
 
 import type {
   CompletingStep,
@@ -71,13 +71,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
 
   const needs = (capability: keyof HostCapabilities, title: string, test: () => Promise<void>) =>
     it.skipIf(!kind.capabilities[capability])(`${title} [${capability}]`, test);
-  const brokenOn = (
-    capability: keyof HostCapabilities,
-    title: string,
-    symptom: string,
-    test: () => Promise<void>,
-  ) =>
-    it.skipIf(!kind.capabilities[capability])(`${title} [${capability}; broken: ${symptom}]`, test);
 
   describe(`session host: ${name}`, () => {
     describe("ports", () => {
@@ -475,39 +468,6 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           expect(Date.now()).toBeGreaterThanOrEqual(resumeAt);
         });
       });
-
-      brokenOn(
-        "durable",
-        "finishes a turn whose process died between storing a wait and journaling it",
-        "its replay's wait_created conflicts with the stored wait and is dropped, so nothing wakes the run",
-        async () => {
-          await withHost(
-            napper(200),
-            async ({
-              crashBeforeNextWaitEvent,
-              restart,
-              runStatus,
-              runtime,
-              settled,
-              storedWaits,
-            }) => {
-              const crashed = crashBeforeNextWaitEvent!(60_000, 10_000);
-              const sent = await alice(runtime, `${name}:crash`).send("Alice asks you to nap.", {
-                auth: null,
-              });
-              const crash = await crashed;
-              const due = Date.now() + 500;
-              await restart!();
-              await new Promise((resolve) => setTimeout(resolve, due - Date.now()));
-              await settled();
-              const waits = await storedWaits!();
-              expect(waits.find((wait) => wait.waitId === crash.waitId)?.status).toBe("waiting");
-              expect(await runStatus!(crash.runId)).toBe("running");
-              expect(ofType(await recorded(runtime, sent.sessionId), "turn.settled")).toEqual([]);
-            },
-          );
-        },
-      );
 
       needs(
         "stamps",

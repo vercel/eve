@@ -19,7 +19,6 @@ export interface DevEnvironmentInfo {
   readonly vercelCliPath?: string;
   readonly sessionsDirectory?: {
     readonly path: string;
-    readonly files: number;
     readonly bytes: number;
   };
 }
@@ -174,14 +173,12 @@ export async function measureSessionsDirectory(
     return undefined;
   }
 
-  let files = 0;
   let bytes = 0;
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    files += 1;
     try {
       bytes += (await stat(join(entry.parentPath, entry.name))).size;
     } catch {}
   }
-  return { path: displayLocalWorkflowWorldDataDirectory(appRoot), files, bytes };
+  return { path: displayLocalWorkflowWorldDataDirectory(appRoot), bytes };
 }

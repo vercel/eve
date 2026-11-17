@@ -67,7 +67,10 @@ async function openWorld(fixtureDir) {
   const eveDir = dirname(require.resolve("eve/package.json"));
   const entry = join(eveDir, "dist", "src", "compiled", "@workflow", "world-local", "index.js");
   const { createWorld } = await import(pathToFileURL(entry).href);
-  return { name: "local", world: createWorld({ dataDir: localDataDir(fixtureDir) }) };
+  return {
+    name: "local",
+    world: createWorld({ dataDir: localDataDir(fixtureDir), queueAuthKey: "read" }),
+  };
 }
 
 async function listRunEvents(world, runId) {

@@ -34,25 +34,8 @@ function linuxOnlyIntegrationTests(): string[] {
 const linuxOnlyTests = linuxOnlyIntegrationTests();
 
 function isolatedIntegrationTests(): string[] {
-  const files = integrationTestFiles();
-
-  const alwaysIsolated = new Set([
-    "src/internal/workflow/local-world-stream-reads.integration.test.ts",
-  ]);
-
-  for (const file of alwaysIsolated) {
-    if (!files.includes(file)) {
-      throw new Error(
-        `vitest.integration.config.ts lists ${file} as isolated, but no such integration test exists.`,
-      );
-    }
-  }
-
-  return files
-    .filter(
-      (file) =>
-        alwaysIsolated.has(file) || SHARED_STATE_USE.test(readFileSync(ROOT + file, "utf8")),
-    )
+  return integrationTestFiles()
+    .filter((file) => SHARED_STATE_USE.test(readFileSync(ROOT + file, "utf8")))
     .sort();
 }
 

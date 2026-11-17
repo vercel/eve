@@ -282,24 +282,23 @@ function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
     const deliveryTimeoutsImportSpecifier = stringifyEsmImportSpecifier(
       resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-timeouts.ts"),
     );
-    const deliveryAuthImportSpecifier = stringifyEsmImportSpecifier(
-      resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-auth.ts"),
+    const queueAuthImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/local-world-queue-auth.ts"),
     );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const importLines = `
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from ${deliveryTimeoutsImportSpecifier};
-import { authenticateLocalWorkflowDeliveries } from ${deliveryAuthImportSpecifier};
+import { assertLocalWorkflowQueueAuthEnforced } from ${queueAuthImportSpecifier};
 import { resolveLocalWorkflowWorldDataDirectory } from ${dataDirectoryImportSpecifier};`.trimStart();
     const createWorldSource = `
+assertLocalWorkflowQueueAuthEnforced();
 applyLocalWorkflowWorldDeliveryTimeoutDefaults();
-const workflowWorld = authenticateLocalWorkflowDeliveries(
-  await workflowWorldModule.createWorld({
-    dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
-    recoverActiveRuns: false,
-  }),
-);`.trimStart();
+const workflowWorld = await workflowWorldModule.createWorld({
+  dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
+  recoverActiveRuns: true,
+});`.trimStart();
     return {
       moduleImportSpecifier,
       extraImportLines: importLines.split("\n"),
