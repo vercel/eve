@@ -88,15 +88,19 @@ export function createSandboxEnvironmentHarness<
     async idleSession(input: {
       readonly appRoot: string;
       readonly sandboxName: string;
+      readonly signal?: AbortSignal;
       readonly state: State | null;
     }): Promise<void> {
       const context = sessionContext(input.appRoot, input.sandboxName);
       const lifecycle = getSessionArtifactLifecycle(implementation);
       if (lifecycle === undefined) {
-        await implementation.onSessionIdle?.(context, input.state);
+        await implementation.onSessionIdle?.(context, input.state, { signal: input.signal });
         return;
       }
-      await lifecycle.onSessionIdle(context, input.state, { artifact: preparedArtifact });
+      await lifecycle.onSessionIdle(context, input.state, {
+        artifact: preparedArtifact,
+        signal: input.signal,
+      });
     },
     async prepare(input: {
       readonly appRoot: string;

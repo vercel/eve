@@ -148,7 +148,7 @@ eve calls the provider's methods at these points:
 | `sandbox.stop()`                                                 | `connection.stop()`, then `connection.close()`                                                                                                               |
 | `sandbox.delete()`                                               | `connection.close()`, then `onSessionEnd(ctx, state, { reason: "deleted" })`                                                                                 |
 | The eve server shuts down                                        | `connection.stop()`, then `connection.close()`, on every connection eve still holds                                                                          |
-| The session that owns the sandbox stays idle for `idleTimeoutMs` | `onSessionIdle(ctx, state)`, when the provider implements it                                                                                                 |
+| The session that owns the sandbox stays idle for `idleTimeoutMs` | `onSessionIdle(ctx, state, { signal })`, when the provider implements it                                                                                     |
 | The session that owns the sandbox ends                           | `connection.close()` on a connection the ending step still holds, then `onSessionEnd(ctx, state, { reason })` with `"completed"`, `"expired"`, or `"failed"` |
 
 - A prewarmed session calls `start()` before its first message, and its first turn can call it again at the same time.
@@ -198,15 +198,16 @@ eve retries cleanup, so `onSessionEnd()` must be safe to repeat and must succeed
 `onSessionIdle()`, optional, stops compute for `ctx.session.id` if it is running, and keeps its files. eve calls it once the owning session has been idle for the environment's `idleTimeoutMs`. Without it, eve never stops the sandbox, and the backend's own limits apply.
 
 ```ts
-async onSessionIdle(ctx, state) {
+async onSessionIdle(ctx, state, { signal }) {
   // looks the machine up without waking it, and suspends it only if it is running
-  await acme.machines.suspendIfRunning(state?.name ?? nameFor(ctx.session.id));
+  await acme.machines.suspendIfRunning(state?.name ?? nameFor(ctx.session.id), { signal });
 },
 ```
 
 - Never start or resume the sandbox. Succeed when it is already stopped or doesn't exist.
 - `state` is `null` when the session never saved it, so find the sandbox from the session id, as in `onSessionEnd()`.
 - eve calls it once per idle period and doesn't retry it. eve logs a failure, and the backend's own limits still apply.
+- eve waits up to 120 seconds for the call, then aborts `signal` and moves on. Pass `signal` to the requests and commands that stop compute, so an abandoned call doesn't keep running.
 - eve never calls it for a keyed `invokeTool` sandbox, or from a subagent that shares its parent's sandbox.
 - With it, `idleTimeoutMs` must be a non-negative number or `false`, and any other value throws from `environment()`.
 

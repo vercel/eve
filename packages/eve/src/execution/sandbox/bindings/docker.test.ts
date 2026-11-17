@@ -152,7 +152,9 @@ describe("Docker sandbox idle stop", () => {
     const { state } = await provider.start(session);
 
     vi.mocked(run).mockClear();
-    await provider.idleSession({ ...session, state });
+    const { signal } = new AbortController();
+    await provider.idleSession({ ...session, signal, state });
+    expect(vi.mocked(run).mock.calls[0]?.[1]).toEqual(expect.objectContaining({ signal }));
     await provider.idleSession({ ...session, state: null });
     await provider.endSession({ ...session, state });
     await expect(provider.idleSession({ ...session, state: null })).resolves.toBeUndefined();

@@ -61,7 +61,7 @@ export interface EnsuredSandboxAccess extends SandboxAccess {
   end(reason: SandboxSessionEndReason): Promise<void>;
   release(): Promise<void>;
   settle(): Promise<void>;
-  stopIdle(): Promise<void>;
+  stopIdle(options: { readonly signal: AbortSignal }): Promise<void>;
 }
 
 interface OpenedSandbox {
@@ -514,7 +514,7 @@ export async function ensureSandboxAccess(
         sessionId: input.sessionId,
       });
     },
-    async stopIdle() {
+    async stopIdle({ signal }) {
       if (idle === undefined) return;
       runningGeneration = undefined;
       const { provider } = idle;
@@ -522,10 +522,10 @@ export async function ensureSandboxAccess(
       const context = providerContext("sandbox-idle");
       const lifecycle = getSessionArtifactLifecycle(provider.implementation);
       if (lifecycle === undefined) {
-        await provider.implementation.onSessionIdle?.(context, state);
+        await provider.implementation.onSessionIdle?.(context, state, { signal });
       } else {
         const artifact = await loadRecordedArtifact(provider);
-        await lifecycle.onSessionIdle(context, state, { artifact });
+        await lifecycle.onSessionIdle(context, state, { artifact, signal });
       }
       untrackActiveSandboxConnection({
         providerName: provider.providerName,

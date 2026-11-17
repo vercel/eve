@@ -20,7 +20,11 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import { defineSandboxProvider, type SandboxSessionContext } from "#sandbox/provider.js";
+import {
+  defineSandboxProvider,
+  type SandboxSessionContext,
+  type SandboxSessionIdleOptions,
+} from "#sandbox/provider.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -40,7 +44,7 @@ interface TestAppDescriptor {
   readonly beforeSandboxStart?: (sessionId: string) => Promise<void>;
   readonly sandboxIdle?: {
     readonly idleTimeoutMs?: number | false;
-    readonly onSessionIdle?: (sessionId: string) => Promise<void>;
+    readonly onSessionIdle?: (sessionId: string, signal: AbortSignal | undefined) => Promise<void>;
   };
 }
 
@@ -116,9 +120,13 @@ function createTestSandboxProvider(
         return connect(context.session.id);
       },
       ...(idle !== undefined && {
-        async onSessionIdle(context: SandboxSessionContext) {
+        async onSessionIdle(
+          context: SandboxSessionContext,
+          _state: unknown,
+          options: SandboxSessionIdleOptions,
+        ) {
           events.push(`idle:${context.session.id}`);
-          await idle.onSessionIdle?.(context.session.id);
+          await idle.onSessionIdle?.(context.session.id, options.signal);
         },
       }),
     }),

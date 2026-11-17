@@ -14,6 +14,7 @@
   "SandboxSessionContext",
   "SandboxSessionEndOptions",
   "SandboxSessionGoneError",
+  "SandboxSessionIdleOptions",
   "SandboxTemplateNotProvisionedError",
   "WithPrepareOption",
   "defineSandboxProvider"

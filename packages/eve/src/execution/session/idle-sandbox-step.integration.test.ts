@@ -12,13 +12,13 @@ afterEach(() => {
 });
 
 describe("idle sandbox stop step", () => {
-  it("returns and clears the marker when the provider never finishes stopping", async () => {
-    const called = Promise.withResolvers<void>();
+  it("aborts the provider call, returns, and clears the marker when the provider never finishes stopping", async () => {
+    const called = Promise.withResolvers<AbortSignal | undefined>();
     const runtime = await createTestRuntime({
       sandboxIdle: {
         idleTimeoutMs: 0,
-        onSessionIdle: async () => {
-          called.resolve();
+        onSessionIdle: async (_sessionId, signal) => {
+          called.resolve(signal);
           await new Promise<never>(() => {});
         },
       },
@@ -39,10 +39,12 @@ describe("idle sandbox stop step", () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
       const step = stopIdleSessionSandboxStep({ serializedContext, sessionState });
-      await called.promise;
+      const signal = await called.promise;
+      expect(signal?.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(120_000);
       const { stateDelta } = await step;
 
+      expect(signal?.aborted).toBe(true);
       const next = applyValueDelta(sessionState, stateDelta.sessionState);
       expect(readDurableSession(next).sandboxState).not.toHaveProperty("running");
       expect(runtime.sandboxEvents).toEqual([`idle:${checkpoint.sessionId}`]);

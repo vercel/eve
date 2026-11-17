@@ -104,28 +104,38 @@ Where the option goes:
 
 ```ts
 // eve/sandbox/provider
+interface SandboxSessionIdleOptions {
+  /** Aborted when eve abandons the call. */
+  readonly signal?: AbortSignal;
+}
+
 interface SandboxProviderImplementation {
   /**
    * Stops compute for `ctx.session.id` if it is running, and keeps its files. Never starts or
    * resumes it. `state` is `null` when the session never recorded it. Must succeed when the
    * sandbox is already stopped or doesn't exist.
    */
-  onSessionIdle?(ctx: SandboxSessionContext, state: Readonly<State> | null): Promise<void>;
+  onSessionIdle?(
+    ctx: SandboxSessionContext,
+    state: Readonly<State> | null,
+    options: SandboxSessionIdleOptions,
+  ): Promise<void>;
 }
 ```
 
 - The contract needs a new method because the only stop today is `connection.stop()`, and a
   connection comes from `start()` or `resume()`, which start or resume the sandbox.
-- It has the shape of `onSessionEnd()`: no connection, and it finds the sandbox from the session id
-  when `state` is `null`, as when only a subagent opened a shared sandbox.
+- It has the shape of `onSessionEnd()`: no connection, it finds the sandbox from the session id
+  when `state` is `null`, as when only a subagent opened a shared sandbox, and its third argument
+  carries a `signal`. An implementation can leave that argument out.
 - It is optional. eve doesn't stop a provider without it, so a custom provider behaves as it does
   today until it adds the method.
 - eve never calls it for a keyed `invokeTool` sandbox, where `ctx.kind` is `"tool-session"`.
 
 | Provider         | `onSessionIdle()`                                                                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Vercel           | Looks the sandbox up by name without resuming it, and stops it if it is running.                                                                       |
-| Docker           | Runs `docker stop` on the session's container.                                                                                                         |
+| Vercel           | Looks the sandbox up by name without resuming it, and stops it if it is running. Both requests take the signal.                                        |
+| Docker           | Runs `docker stop -t 0` on the session's container, and passes the signal to the command.                                                              |
 | just-bash        | Not implemented. It has no compute to stop.                                                                                                            |
 | `DefaultSandbox` | Delegates to the provider it selected. When `state` is `null` it finds that provider from the prepared artifact, through the channel session end uses. |
 
@@ -163,8 +173,10 @@ interface SandboxProviderImplementation {
   step, `stopIdleSessionSandboxStep`, calls `onSessionIdle()` and clears the marker, whether or not
   the call succeeds. The call is bounded at 120 seconds: a Vercel stop returns once its snapshot is
   written, and 120 seconds matches the ceiling eve already uses for `bash`, which keeps a hosted
-  step inside Vercel's 300-second Hobby function limit. A call that hasn't finished by then is
-  abandoned and logged, so a hung provider can't hold the session's messages. Once the provider call
+  step inside Vercel's 300-second Hobby function limit. When a call hasn't finished by then, eve
+  aborts the `signal` it passed to `onSessionIdle()`, logs the failure, and moves on, so a hung
+  provider can't hold the session's messages and a provider that honors the signal cancels its
+  request or command. Once the provider call
   succeeds, the step also stops tracking the sandbox for server shutdown, as session end does; after
   a failed or abandoned call, server shutdown still stops it. eve doesn't retry: a failure is logged
   and the provider's own timeout remains the backstop. If the step itself rejects, the session
@@ -174,10 +186,15 @@ interface SandboxProviderImplementation {
 - **Cost.** One sleep and one step per idle period, and no extra workflow run. A sleep that loses
   the race to a message still wakes the run once when it elapses.
 - **Deployment handoff.** A window isn't carried to the session's next run. That run starts a new
-  window from the recorded marker.
+  window from the recorded marker. The prewarm marker the loop holds in memory isn't recorded, so
+  it is lost when the first message both beats the prewarm and moves the session to another
+  deployment. This limit is accepted: the provider's own timeout bounds that case.
 - **Late use.** A step still winding down after its task was cancelled can use the sandbox after
   the stop and restart it. eve doesn't stop a sandbox restarted that late, as at session end, and
-  the provider's own timeout bounds it.
+  the provider's own timeout bounds it. This limit is also accepted: a child that shares the
+  sandbox reports its turn as finished before its own loop takes a `ctx.continue()` continuation,
+  so the parent can go idle and stop the shared sandbox during that continued turn. The child's
+  next use resumes it.
 - The harness doesn't change.
 
 ## Rollout

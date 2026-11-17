@@ -863,10 +863,13 @@ describe("createVercelSandbox", () => {
       const { state } = await provider.start({ appRoot, sandboxName: "session_golden" });
       const [sandbox] = fake.sandboxes.values();
 
-      await provider.idleSession({ appRoot, sandboxName: "session_golden", state });
-      await provider.idleSession({ appRoot, sandboxName: "session_golden", state: null });
+      const { signal } = new AbortController();
+      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state });
+      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state: null });
 
       expect(sandbox?.stop).toHaveBeenCalledTimes(2);
+      expect(sandbox?.stop).toHaveBeenNthCalledWith(1, { signal });
+      expect(sandbox?.stop).toHaveBeenNthCalledWith(2, { signal });
       expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledOnce();
     });
 
@@ -965,8 +968,16 @@ describe("createVercelSandbox", () => {
         });
       const end = (state: { readonly sandboxName: string; readonly version: 3 } | null) =>
         provider.endSession({ appRoot: "/tmp/test-app-root", sandboxName: "session-key", state });
-      const idle = (state: { readonly sandboxName: string; readonly version: 3 } | null) =>
-        provider.idleSession({ appRoot: "/tmp/test-app-root", sandboxName: "session-key", state });
+      const idle = (
+        state: { readonly sandboxName: string; readonly version: 3 } | null,
+        signal?: AbortSignal,
+      ) =>
+        provider.idleSession({
+          appRoot: "/tmp/test-app-root",
+          sandboxName: "session-key",
+          signal,
+          state,
+        });
       return { end, fake, idle, start };
     }
 
@@ -986,10 +997,11 @@ describe("createVercelSandbox", () => {
       const { state } = await start();
       const sandbox = fake.sandboxes.get(state.sandboxName)!;
 
-      await idle(state);
-      expect(sandbox.stop).toHaveBeenCalledOnce();
+      const { signal } = new AbortController();
+      await idle(state, signal);
+      expect(sandbox.stop).toHaveBeenCalledExactlyOnceWith({ signal });
       expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
-        expect.objectContaining({ name: state.sandboxName, resume: false }),
+        expect.objectContaining({ name: state.sandboxName, resume: false, signal }),
       );
 
       sandbox.status = "stopped";

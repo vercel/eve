@@ -17,21 +17,20 @@ const log = createLogger("execution.session.idle-sandbox");
 
 const IDLE_STOP_TIMEOUT_MS = 120_000;
 
-async function withinIdleStopTimeout(stop: Promise<void>): Promise<void> {
+async function withinIdleStopTimeout(stop: (signal: AbortSignal) => Promise<void>): Promise<void> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `The sandbox provider did not stop the idle sandbox within ${IDLE_STOP_TIMEOUT_MS / 1000} seconds.`,
-          ),
-        ),
-      IDLE_STOP_TIMEOUT_MS,
-    );
+    timer = setTimeout(() => {
+      const error = new Error(
+        `The sandbox provider did not stop the idle sandbox within ${IDLE_STOP_TIMEOUT_MS / 1000} seconds.`,
+      );
+      controller.abort(error);
+      reject(error);
+    }, IDLE_STOP_TIMEOUT_MS);
   });
   try {
-    await Promise.race([stop, timedOut]);
+    await Promise.race([stop(controller.signal), timedOut]);
   } finally {
     clearTimeout(timer);
   }
@@ -63,7 +62,8 @@ async function stopIdleSessionSandbox(
     const ctx = await deserializeContext(input.serializedContext);
     const scoped = await withContextScope(ctx, hydrateDurableSession(durable), async (session) => {
       const access = ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined;
-      if (access !== undefined) await withinIdleStopTimeout(access.stopIdle()).catch(report);
+      if (access !== undefined)
+        await withinIdleStopTimeout((signal) => access.stopIdle({ signal })).catch(report);
       return { result: undefined, session };
     });
     return {

@@ -448,6 +448,48 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
     },
   );
 
+  it("stops a sandbox that only a child sharing it opened, once the parent goes idle", async () => {
+    await withSession(
+      host,
+      {
+        agent: scriptedAgent((prompt, firstUser) => {
+          if (firstUser.includes("CHILD:")) return textStreamResult("The report is exported.");
+          if (!prompt.includes('"toolName":"agent"'))
+            return toolCallsStreamResult([
+              {
+                input: JSON.stringify({ message: "CHILD: export the report" }),
+                toolCallId: "call_agent",
+                toolName: "agent",
+              },
+            ]);
+          return textStreamResult("The report is ready.");
+        }),
+        input: { message: "Alice asks for the report export." },
+        modules: [
+          hookModule(
+            "child-sandbox",
+            defineHook({
+              events: {
+                async "turn.started"(_event, ctx) {
+                  if (ctx.session.parent !== undefined) await ctx.getSandbox();
+                },
+              },
+            }),
+          ),
+        ],
+        name: `idle-shared-child-${host}`,
+        sandboxIdle: { idleTimeoutMs: 0 },
+      },
+      async (session) => {
+        await session.nextTurn();
+
+        await vi.waitFor(() => expect(session.events()).toEqual(["definition", "start", "idle"]), {
+          timeout: 10_000,
+        });
+      },
+    );
+  });
+
   it("starts the idle window again after a turn that arrives inside it", async () => {
     const windowMs = 2_000;
     await withSession(

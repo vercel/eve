@@ -132,6 +132,12 @@ export interface SandboxSessionEndOptions {
   readonly reason: "completed" | "expired" | "failed" | "deleted";
 }
 
+/** What eve passes to `onSessionIdle()`: a signal eve aborts when it stops waiting for the call. */
+export interface SandboxSessionIdleOptions {
+  /** Aborted when eve abandons the call. Pass it to the requests and commands that stop compute. */
+  readonly signal?: AbortSignal;
+}
+
 /** The lifecycle one sandbox environment implements. */
 export interface SandboxProviderImplementation<
   OpenOptions extends object | undefined,
@@ -181,10 +187,15 @@ export interface SandboxProviderImplementation<
    * Never starts or resumes it. `state` is `null` when the session never
    * recorded it. Must succeed when the sandbox is already stopped or doesn't
    * exist. eve calls it once the session has been idle for the environment's
-   * `idleTimeoutMs`, and never for a keyed `invokeTool` sandbox. Without it,
+   * `idleTimeoutMs`, and never for a keyed `invokeTool` sandbox. eve waits up
+   * to 120 seconds, then aborts `options.signal` and moves on. Without it,
    * eve never stops the sandbox and the provider's own timeout applies.
    */
-  onSessionIdle?(ctx: SandboxSessionContext, state: Readonly<State> | null): Promise<void>;
+  onSessionIdle?(
+    ctx: SandboxSessionContext,
+    state: Readonly<State> | null,
+    options: SandboxSessionIdleOptions,
+  ): Promise<void>;
   /**
    * Lets a keyed `invokeTool` call keep its sandbox between calls. eve never
    * ends a keyed sandbox, so the provider must bound its retention.

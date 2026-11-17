@@ -53,7 +53,7 @@ cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 
-The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
+The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. A running command doesn't keep the session busy, so eve [stops the sandbox](../sandbox#stop-an-idle-sandbox) once the session has been idle for the environment's `idleTimeoutMs`, 5 minutes by default. The command ends with the sandbox and never writes its `exit` file, so a later check finds none. For commands that outlast the window, set a longer `idleTimeoutMs`, or `false` to turn the stop off. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 

@@ -760,7 +760,8 @@ describe("idle stop marker", () => {
     value.start.mockClear();
 
     const idle = await unopened(value.registry, recorded);
-    await idle.stopIdle();
+    const { signal } = new AbortController();
+    await idle.stopIdle({ signal });
 
     expect(value.onSessionIdle).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
@@ -768,6 +769,7 @@ describe("idle stop marker", () => {
         session: expect.objectContaining({ id: "session-1" }),
       }),
       { key: "session-1" },
+      { signal },
     );
     expect(value.start).not.toHaveBeenCalled();
     expect(value.resume).not.toHaveBeenCalled();
@@ -783,7 +785,8 @@ describe("idle stop marker", () => {
     await access.release();
     value.onSessionIdle.mockRejectedValueOnce(new Error("docker stop failed"));
 
-    await expect((await unopened(value.registry, recorded)).stopIdle()).rejects.toThrow(
+    const { signal } = new AbortController();
+    await expect((await unopened(value.registry, recorded)).stopIdle({ signal })).rejects.toThrow(
       "docker stop failed",
     );
     await shutdownActiveSandboxConnections();
@@ -795,7 +798,9 @@ describe("idle stop marker", () => {
     const value = fixture({ idleTimeoutMs: false, stopsIdle: true });
     const recorded = { running: { generation: "generation-1", idleTimeoutMs: 0 }, session: null };
 
-    await (await unopened(value.registry, recorded)).stopIdle();
+    await (
+      await unopened(value.registry, recorded)
+    ).stopIdle({ signal: new AbortController().signal });
 
     expect(value.onSessionIdle).not.toHaveBeenCalled();
   });

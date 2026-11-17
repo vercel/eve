@@ -90,7 +90,10 @@ interface SandboxSessionArtifactLifecycle {
   onSessionIdle(
     context: SandboxSessionContext,
     state: SandboxPreparedArtifact | null,
-    options: { readonly artifact: SandboxPreparedArtifact | undefined },
+    options: {
+      readonly artifact: SandboxPreparedArtifact | undefined;
+      readonly signal?: AbortSignal;
+    },
   ): Promise<void>;
   stopsIdle(state: SandboxPreparedArtifact): boolean;
 }

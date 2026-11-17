@@ -11,6 +11,7 @@ import {
   type SandboxProvider,
   type SandboxProviderImplementation,
   type SandboxSessionContext,
+  type SandboxSessionIdleOptions,
   type SandboxSessionEndOptions,
 } from "#public/sandbox/provider.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
@@ -97,7 +98,7 @@ export const DefaultSandbox: SandboxProvider<
       justBash: options.justBash,
       vercel: options.vercel,
     })) {
-      if (nested !== undefined && "idleTimeoutMs" in nested) {
+      if (nested !== undefined && Reflect.get(nested, "idleTimeoutMs") !== undefined) {
         throw new Error(
           `DefaultSandbox takes idleTimeoutMs at the top level, not in its ${key} options. Use DefaultSandbox.environment({ idleTimeoutMs }).`,
         );
@@ -155,9 +156,10 @@ export const DefaultSandbox: SandboxProvider<
       context: SandboxSessionContext,
       state: DefaultSandboxSessionState | null,
       artifact: DefaultSandboxPreparedArtifact | undefined,
+      idleOptions: SandboxSessionIdleOptions,
     ) {
       const inner = recordedProvider(state, artifact);
-      await inner?.implementation.onSessionIdle?.(context, inner.state);
+      await inner?.implementation.onSessionIdle?.(context, inner.state, idleOptions);
     }
 
     const implementation: SandboxProviderImplementation<
@@ -168,7 +170,8 @@ export const DefaultSandbox: SandboxProvider<
     > = {
       onSessionEnd: (context, state, endOptions) =>
         endSession(context, state, undefined, endOptions),
-      onSessionIdle: (context, state) => idleSession(context, state, undefined),
+      onSessionIdle: (context, state, idleOptions) =>
+        idleSession(context, state, undefined, idleOptions),
       async prepare(context) {
         const name = selectProvider();
         if (name === null) {
@@ -222,11 +225,12 @@ export const DefaultSandbox: SandboxProvider<
           { reason },
         );
       },
-      onSessionIdle: async (context, state, { artifact }) => {
+      onSessionIdle: async (context, state, { artifact, signal }) => {
         await idleSession(
           context,
           isDefaultSandboxSessionState(state) ? state : null,
           isDefaultSandboxPreparedArtifact(artifact) ? artifact : undefined,
+          { signal },
         );
       },
       stopsIdle: (state) =>

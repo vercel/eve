@@ -154,6 +154,11 @@ describe("defineSandboxProvider", () => {
         `DefaultSandbox takes idleTimeoutMs at the top level, not in its ${nested} options.`,
       );
     }
+    for (const nested of ["docker", "vercel"] as const) {
+      expect(() =>
+        DefaultSandbox.environment({ [nested]: { idleTimeoutMs: undefined } } as never),
+      ).not.toThrow();
+    }
   });
 
   it("hashes template identities with the workspace, skills, and source revision", async () => {
