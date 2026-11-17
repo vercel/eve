@@ -21,17 +21,26 @@ import {
   readOwnedInvocationRun,
 } from "#internal/invocation/owned-run.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import {
+  emptyPreviews,
+  emptySessionView,
+  foldReceivedEvent,
+} from "#protocol/session-projection/fold.js";
 import { openRequests, openSignIns, interaction } from "#protocol/session-projection/reader.js";
 import {
-  type Activity,
   activity,
   failure,
   interactionBatches,
   reply,
   replyText,
 } from "#protocol/session-projection/selectors.js";
-import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type {
+  InteractionRow,
+  SessionPreviews,
+  SessionView,
+} from "#protocol/session-projection/tables.js";
+import { reasoningStatus } from "#channel/reasoning-status.js";
+import { truncate } from "#public/channels/text.js";
 import { type Answer, parseAnswers } from "#shared/input.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { JsonValue } from "#shared/json.js";
@@ -178,6 +187,7 @@ interface InvocationFailure {
 
 interface InvocationStream {
   readonly view: SessionView;
+  readonly previews: SessionPreviews;
   readonly batches: readonly InputBatch[];
   readonly pending: InputBatch | undefined;
   readonly signIns: readonly InteractionRow[];
@@ -187,6 +197,7 @@ interface InvocationStream {
 
 async function readInvocationStream(invocationId: string): Promise<InvocationStream> {
   const view = emptySessionView();
+  const previews = emptyPreviews();
   const reader = createEventReader();
   for await (const { line, position, record } of streamSessionLines(invocationId, {
     follow: false,
@@ -195,7 +206,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
       if (position === 0 && isV26Line(record)) return startedOnEarlierEve(view);
       continue;
     }
-    for (const event of reader.read(line, position)) foldReceivedEvent(view, event);
+    for (const event of reader.read(line, position)) foldReceivedEvent(view, event, previews);
   }
   const batches = interactionBatches(view).map(
     (batch): InputBatch =>
@@ -213,6 +224,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
   return {
     batches,
     pending,
+    previews,
     result: latestResult(view),
     settled: howItSettled(view),
     signIns: openSignIns(view),
@@ -230,6 +242,7 @@ function startedOnEarlierEve(view: SessionView): InvocationStream {
   return {
     batches: [],
     pending: undefined,
+    previews: emptyPreviews(),
     result: undefined,
     settled: { error, terminal: true },
     signIns: [],
@@ -325,20 +338,50 @@ function projectInvocation(
     pollAfterMs: 1_000,
     result,
     status: "working",
-    statusMessage: statusMessage(activity(stream.view)),
+    statusMessage: statusMessage(stream.view, stream.previews),
   };
 }
 
-function statusMessage(current: Activity): string | undefined {
-  const names =
-    current.kind === "calling"
-      ? current.names
-      : current.kind === "waiting-on-tasks"
-        ? current.tasks.map((task) => task.name)
-        : [];
+const WRITING_REPLY_MIN_CHARS = 280;
+const STATUS_MESSAGE_MAX_LENGTH = 200;
+
+function statusMessage(view: SessionView, previews: SessionPreviews): string | undefined {
+  const current = activity(view);
+  if (current.kind === "calling") return latestOf(current.names);
+  if (current.kind === "waiting-on-tasks") return latestOf(current.tasks.map((task) => task.name));
+  if (current.kind !== "thinking") return undefined;
+  const turnId = view.session.latestTurnId;
+  const streaming = Object.values(previews.parts).filter((part) => partTurn(view, part) === turnId);
+  const replyChars = streaming
+    .filter((part) => part.kind === "text")
+    .reduce((total, part) => total + part.text.length, 0);
+  if (replyChars >= WRITING_REPLY_MIN_CHARS) return "Writing a reply...";
+  const live = streaming.findLast((part) => part.kind === "reasoning");
+  const done = Object.values(view.parts).findLast(
+    (part) =>
+      part.kind === "reasoning" &&
+      typeof part.value === "string" &&
+      partTurn(view, part) === turnId,
+  );
+  const reasoning =
+    (live === undefined ? undefined : reasoningStatus(live.text)) ??
+    (typeof done?.value === "string" ? reasoningStatus(done.value, { complete: true }) : undefined);
+  return reasoning === undefined ? "Thinking..." : truncate(reasoning, STATUS_MESSAGE_MAX_LENGTH);
+}
+
+function latestOf(names: readonly string[]): string | undefined {
   const latest = names.at(-1);
   if (latest === undefined) return undefined;
   return names.length === 1 ? latest : `${latest} (+${String(names.length - 1)} more)`;
+}
+
+function partTurn(
+  view: SessionView,
+  part: { readonly runId?: string; readonly turnId?: string },
+): string | undefined {
+  if (part.turnId !== undefined) return part.turnId;
+  const owner = part.runId === undefined ? undefined : view.runs[part.runId]?.owner;
+  return owner !== undefined && "turnId" in owner ? owner.turnId : undefined;
 }
 
 function workingInvocation(

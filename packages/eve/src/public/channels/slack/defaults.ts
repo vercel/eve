@@ -44,12 +44,8 @@ import type {
   SlackInboundMessageContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
-import {
-  clearStatus,
-  hideStatus,
-  reasoningStatus,
-  showStatus,
-} from "#public/channels/slack/thread-status.js";
+import { clearStatus, hideStatus, showStatus } from "#public/channels/slack/thread-status.js";
+import { reasoningStatus } from "#channel/reasoning-status.js";
 
 const log = createLogger("slack.defaults");
 const STATUS_HOLD_MS = 3_000;
