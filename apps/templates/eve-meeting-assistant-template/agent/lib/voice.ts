@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   callRecallApi,
+  RecallApiError,
   recallBotConfig,
   resolveRecallWebhookUrl,
   type RecallChannelState,
@@ -81,7 +82,16 @@ async function streamSpeech(
   const query = new URL(request.url).searchParams;
   const key = query.get("key") ?? "";
   if (!/^[0-9a-f-]{36}$/u.test(key)) return new Response("not found", { status: 404 });
-  const bot = await botForKey(key);
+  let bot: { id: string; ended: boolean } | undefined;
+  try {
+    bot = await botForKey(key);
+  } catch (error) {
+    // The lookup's path and the error built from it carry the page key, which
+    // reads the meeting's replies, so log only the status, never the error.
+    const status = error instanceof RecallApiError ? ` with HTTP ${error.status}` : "";
+    console.error(`voice: Recall bot lookup failed${status}`);
+    return new Response("lookup unavailable", { status: 503 });
+  }
   if (bot === undefined) return new Response("not found", { status: 404 });
   if (bot.ended) return new Response("meeting ended", { status: 410 });
   // The session starts with the bot's first meeting event; the page retries until then.
