@@ -139,13 +139,7 @@ eve info [--json]
 
 Run `eve info` first when something behaves unexpectedly. It shows which files eve found and what the agent includes, and lists every compile error and warning with its source without starting the dev server. Static instructions appear in source order with their `system` or `user` role; dynamic instructions are runtime-only and don't appear.
 
-`eve info` loads every authored module and exits with code 1 when the agent fails to compile, so a CI step or a coding agent can run it as a check before `eve build`. Besides discovery problems, it reports:
-
-- tool `inputSchema` values that model providers reject, such as a root that isn't `type: "object"` or a field with an unknown JSON Schema type
-- missing default exports and definitions that don't match their file's kind
-- a workflow tool that calls `ctx.agent("name")` for an agent it can't reach, or calls `ctx.getSandbox()`, `ctx.getToken()`, `ctx.requireAuth()`, or `ctx.to()` in its `"use workflow"` body
-- a model id missing from the AI Gateway catalog
-- likely misspelled directories and files, such as `tool/` or `agents.ts`, and `.tsx` or `.jsx` tool and hook files, which eve ignores (warnings)
+`eve info` loads every authored module and exits with code 1 when the agent fails to compile, so a CI step or a coding agent can run it as a check before `eve build`. The same compile runs in `eve build` and `eve dev`, so anything `eve info` reports as an error stops them too.
 
 ### JSON output
 

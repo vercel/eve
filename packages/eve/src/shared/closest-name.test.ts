@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { closestName, didYouMean } from "#shared/closest-name.js";
+import { closestName } from "#shared/closest-name.js";
 
 describe("closestName", () => {
   it.each([
@@ -16,10 +16,5 @@ describe("closestName", () => {
   it("returns undefined when nothing is close", () => {
     expect(closestName("docs", ["tools", "skills"])).toBeUndefined();
     expect(closestName("lib", ["lib"])).toBeUndefined();
-  });
-
-  it("formats a suggestion suffix", () => {
-    expect(didYouMean("tool", ["tools"])).toBe(' Did you mean "tools"?');
-    expect(didYouMean("docs", ["tools"])).toBe("");
   });
 });

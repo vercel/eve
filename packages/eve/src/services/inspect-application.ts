@@ -56,6 +56,16 @@ async function loadCompiledApplicationState(appRoot: string): Promise<{
       return { compiledState: null };
     }
 
-    return { compileError: toErrorMessage(error), compiledState: null };
+    return { compileError: formatErrorWithCauses(error), compiledState: null };
   }
+}
+
+function formatErrorWithCauses(error: unknown): string {
+  const lines = [toErrorMessage(error)];
+  let cause = error instanceof Error ? error.cause : undefined;
+  for (let depth = 0; cause !== undefined && depth < 5; depth += 1) {
+    lines.push(`Caused by: ${toErrorMessage(cause)}`);
+    cause = cause instanceof Error ? cause.cause : undefined;
+  }
+  return lines.join("\n");
 }

@@ -2,6 +2,6 @@
 "eve": minor
 ---
 
-`eve info` now catches common agent mistakes before runtime, lists each diagnostic with its source, and exits with code 1 when the agent fails to compile.
+`eve info` now lists each compile diagnostic with its source and exits with code 1 when the agent fails to compile, so it works as a check before `eve build`.
 
-New checks reject tool input schemas that model providers would refuse, `ctx.agent("name")` calls to agents a workflow tool can't reach, and step-only context calls such as `ctx.getSandbox()` inside a `"use workflow"` body. Discovery now suggests the intended name for misspelled directories and files such as `tool/` or `agents.ts`, and warns about ignored `.tsx` and `.jsx` tool and hook files. Errors for missing default exports, missing tool descriptions, misnamed subagent config files, and unlisted model ids now say what to fix. `eve info --json` always prints JSON and adds `diagnostics.items`.
+`eve info --json` always prints JSON and adds `diagnostics.items` with each diagnostic's severity, code, message, and source; a definition that throws reports one `compile/failed` item with its causes instead of crashing the command. Errors for missing default exports, missing tool descriptions, misnamed subagent config files, unlisted model ids, and disabled tool slots that disable nothing now say what to fix. New projects' `AGENTS.md` points coding agents at `eve info` as the first verification step.

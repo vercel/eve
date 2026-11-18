@@ -12,11 +12,6 @@ export function closestName(name: string, candidates: Iterable<string>): string 
   return best?.candidate;
 }
 
-export function didYouMean(name: string, candidates: Iterable<string>): string {
-  const match = closestName(name, candidates);
-  return match === undefined ? "" : ` Did you mean "${match}"?`;
-}
-
 function editDistance(left: string, right: string): number {
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let i = 1; i <= left.length; i += 1) {
