@@ -119,10 +119,12 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
     id: "tool inputSchema uses an unknown JSON Schema type",
     files: {
       "agent/tools/get_weather.ts": tool(
-        `  description: "Get the weather.",\n  inputSchema: { type: "object", properties: { city: { type: "text" } } },`,
+        `  description: "Get the weather.",\n  inputSchema: { type: "object", properties: { city: { type: "string", enum: ["Paris", "Tokyo"] }, note: { type: "text" } }, required: ["city"] },`,
       ),
     },
-    caughtAt: "first turn",
+    caughtAt: "eve info",
+    code: "compile/tool-input-schema-invalid",
+    message: 'unsupported type "text", so eve can\'t validate',
   },
   {
     id: "tool inputSchema cannot be represented as JSON Schema",
@@ -270,6 +272,17 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
     caughtAt: "eve info",
     code: "compile/workflow-agent-target-unknown",
     message: 'Did you mean "researcher"?',
+  },
+  {
+    id: "subagent workflow tool calls an agent it cannot reach",
+    files: {
+      "agent/subagents/researcher/tools/ask_back.ts": researchBrief(
+        '    const response = await ctx.agent("agent").send(topic);\n    return { brief: await response.result() };',
+      ),
+    },
+    caughtAt: "eve info",
+    code: "compile/workflow-agent-target-unknown",
+    message: "This agent has no subagents or remote agents to call.",
   },
   {
     id: "subagent re-exports a tool path that does not exist",

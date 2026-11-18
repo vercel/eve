@@ -15,6 +15,7 @@ describe("findModelInputSchemaProblem", () => {
     [{ type: "string" }, 'its root has type "string"'],
     [{ type: ["string", "number"] }, 'its root has type ["string","number"]'],
     [{ city: "string" }, "its root has no type"],
+    [{ properties: { city: { type: "string" } } }, 'Add type: "object"'],
     [{ anyOf: [{ type: "object" }, { type: "object" }] }, 'its root is "anyOf"'],
   ])("reports %j", (schema, expected) => {
     expect(findModelInputSchemaProblem(schema)).toContain(expected);

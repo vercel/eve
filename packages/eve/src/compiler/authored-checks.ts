@@ -22,6 +22,7 @@ import {
 import { closestName } from "#shared/closest-name.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { findModelInputSchemaProblem } from "#tools/model-input-schema-problem.js";
+import { findJsonSchemaValidatorProblem } from "#tools/schema.js";
 
 export const COMPILE_APPROVAL_TOOL_NAME_UNKNOWN = "compile/approval-tool-name-unknown";
 
@@ -42,18 +43,28 @@ interface ConnectionApprovalScan {
   readonly operations?: { readonly list: "allow" | "block"; readonly names: readonly string[] };
 }
 
+function findToolInputSchemaProblem(
+  tool: CompiledToolDefinition,
+  binding: CompiledModuleBinding | undefined,
+): string | undefined {
+  if (tool.modelInputSchema === undefined) return undefined;
+  const modelProblem = findModelInputSchemaProblem(tool.modelInputSchema);
+  if (modelProblem !== undefined || binding?.owner.kind !== "application") return modelProblem;
+  const validatorProblem = findJsonSchemaValidatorProblem(tool.modelInputSchema);
+  return validatorProblem === undefined
+    ? undefined
+    : `${validatorProblem}, so eve can't validate the tool's input.`;
+}
+
 export async function diagnoseAuthoredSources(
   manifest: CompiledAgentManifest,
 ): Promise<CompilerDiagnostic[]> {
   const diagnostics: CompilerDiagnostic[] = [];
   for (const scope of agentNodeScopes(manifest)) {
     for (const tool of scope.tools) {
-      const schemaProblem =
-        tool.modelInputSchema === undefined
-          ? undefined
-          : findModelInputSchemaProblem(tool.modelInputSchema);
+      const binding = scope.bindings[tool.sourceId];
+      const schemaProblem = findToolInputSchemaProblem(tool, binding);
       if (schemaProblem !== undefined) {
-        const binding = scope.bindings[tool.sourceId];
         diagnostics.push({
           code: COMPILE_TOOL_INPUT_SCHEMA_INVALID,
           message: `Tool "${tool.logicalPath}" has an invalid inputSchema: ${schemaProblem}`,
@@ -70,7 +81,6 @@ export async function diagnoseAuthoredSources(
         });
       }
       if (tool.behavior?.handling?.kind !== "workflow-tool") continue;
-      const binding = scope.bindings[tool.sourceId];
       if (binding?.owner.kind !== "application" || binding.backing.kind !== "filesystem") continue;
       const sourcePath = binding.backing.sourcePath;
       const sources = [{ logicalPath: tool.logicalPath, nodeId: scope.nodeId, sourcePath }];
@@ -82,7 +92,9 @@ export async function diagnoseAuthoredSources(
           message:
             `Tool "${tool.logicalPath}" calls ctx.agent(${JSON.stringify(target)}), but no agent by that name is available to it.` +
             (match === undefined ? "" : ` Did you mean ${JSON.stringify(match)}?`) +
-            ` Available: ${scope.agentNames.map((name) => JSON.stringify(name)).join(", ")}.`,
+            (scope.agentNames.length === 0
+              ? " This agent has no subagents or remote agents to call."
+              : ` Available: ${scope.agentNames.map((name) => JSON.stringify(name)).join(", ")}.`),
           severity: "error",
           sources,
         });
