@@ -43,7 +43,7 @@ The mount name prefixes everything. Mounted as `skills`, the agent gets:
 | `skills__read`     | Reads one version, with a list of every version. Deferred.                                         |
 | `skills__set_mode` | Changes how the live version applies. Deferred.                                                    |
 | `skills__remove`   | Deletes skills with every version. Asks for approval. Deferred.                                    |
-| `skills__manage`   | A skill with the lifecycle rules, which the model loads before changing skills.                    |
+| `skills__manage`   | A skill with the lifecycle rules, which the model loads before changing skills. Needs a scope.     |
 
 Deferred tools stay out of the tool list until the model finds them with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill), so the extension adds three tools to every request.
 
