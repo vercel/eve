@@ -1,15 +1,13 @@
-import {
-  CompileAgentError,
-  type CompileAgentResult,
-  compileAgent,
-} from "#compiler/compile-agent.js";
-import { DiscoveryProjectResolutionError } from "#discover/project.js";
+import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import { reportDiscoverWarnings } from "#compiler/report-warnings.js";
 import { type ApplicationInfo, getApplicationInfo } from "#internal/application/paths.js";
+import { recordBundledModules } from "#internal/bundler/bundled-module-recorder.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
+import { readCachedCompile, writeCachedCompile } from "#services/inspect-cache.js";
 
 export interface ApplicationInspectionMessaging {
   readonly createSessionRoutePath: string;
@@ -23,8 +21,13 @@ export interface ApplicationInspection {
   readonly messaging: ApplicationInspectionMessaging;
 }
 
-export async function inspectApplication(appRoot: string): Promise<ApplicationInspection> {
-  const compiledState = await loadCompiledApplicationState(appRoot);
+export type ApplicationInspectionCache = "off" | "read" | "refresh";
+
+export async function inspectApplication(
+  appRoot: string,
+  options: { readonly cache?: ApplicationInspectionCache } = {},
+): Promise<ApplicationInspection> {
+  const compiledState = await loadCompiledApplicationState(appRoot, options.cache ?? "off");
   const application = getApplicationInfo(compiledState?.project.appRoot ?? appRoot);
 
   return {
@@ -38,11 +41,30 @@ export async function inspectApplication(appRoot: string): Promise<ApplicationIn
   };
 }
 
-async function loadCompiledApplicationState(appRoot: string): Promise<CompileAgentResult | null> {
+async function loadCompiledApplicationState(
+  appRoot: string,
+  cache: ApplicationInspectionCache,
+): Promise<CompileAgentResult | null> {
+  if (cache === "read") {
+    const cached = await readCachedCompile(appRoot);
+    if (cached !== null) {
+      reportDiscoverWarnings(cached.diagnostics);
+      return cached;
+    }
+  }
+
+  const [{ CompileAgentError, compileAgent }, { DiscoveryProjectResolutionError }] =
+    await Promise.all([import("#compiler/compile-agent.js"), import("#discover/project.js")]);
+  const moduleIds = new Set<string>();
+  const startedAtMs = Date.now();
   try {
-    return await compileAgent({
-      startPath: appRoot,
-    });
+    const result = await recordBundledModules(moduleIds, () =>
+      compileAgent({ startPath: appRoot }),
+    );
+    if (cache !== "off") {
+      await writeCachedCompile({ moduleIds, result, startPath: appRoot, startedAtMs });
+    }
+    return result;
   } catch (error) {
     if (error instanceof CompileAgentError) {
       return error.result;

@@ -12,6 +12,7 @@ interface CliInfoLogger {
 }
 
 export interface PrintApplicationInfoOptions {
+  fresh?: boolean;
   json?: boolean;
 }
 
@@ -142,7 +143,9 @@ export async function printApplicationInfo(
   appRoot: string,
   options: PrintApplicationInfoOptions = {},
 ): Promise<void> {
-  const inspection = await inspectApplication(appRoot);
+  const inspection = await inspectApplication(appRoot, {
+    cache: options.fresh === true ? "refresh" : "read",
+  });
 
   if (options.json) {
     logger.log(JSON.stringify(buildApplicationInfoJson(inspection), null, 2));
