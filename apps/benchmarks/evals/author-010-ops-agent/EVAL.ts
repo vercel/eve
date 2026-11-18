@@ -111,11 +111,13 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
         })),
       ...runs
         .filter((run) => run.probe.operation === operation && sendsProbeRequest(run))
-        // Grade each tool on the first input form it accepts and on any other form that
-        // places the requested order, so every way it can place that order is covered.
+        // Grade every input form that places the requested order. A tool with no such form
+        // is graded on the first form it accepts, so a malformed order fails only exposure.
         .filter(
           (run, index, sent) =>
-            sent.findIndex(({ file }) => file === run.file) === index || implementsProbe(run),
+            sendsExpectedRequest(run) ||
+            (sent.findIndex(({ file }) => file === run.file) === index &&
+              !sent.some((other) => other.file === run.file && sendsExpectedRequest(other))),
         )
         .map(({ name, tool, nested }) => ({
           name,
@@ -276,8 +278,12 @@ function sendsProbeRequest({ probe, requests }: NorthstarToolRun): boolean {
   return requests.some(({ method, url }) => method === probe.method && url.pathname === probe.path);
 }
 
-function implementsProbe({ error, probe, requests }: NorthstarToolRun): boolean {
-  if (error !== undefined) return false;
+function implementsProbe(run: NorthstarToolRun): boolean {
+  return run.error === undefined && sendsExpectedRequest(run);
+}
+
+/** Whether the run sent the probe's request as the contract describes, even if it then threw. */
+function sendsExpectedRequest({ probe, requests }: NorthstarToolRun): boolean {
   return requests.some(({ method, url, body }) => {
     if (method !== probe.method || url.pathname !== probe.path) return false;
     // `warehouse` is optional, so a tool may leave it out, but it must not change it.
