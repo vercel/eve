@@ -372,6 +372,7 @@ export class ModelCaller {
         ],
       ),
       onLanguageModelCallEnd: (event: LanguageModelCallEndEvent) => {
+        attempt?.onLanguageModelCallEnd(event);
         if (generation.interrupted) return;
         this.unkeptUsage = runUsageOf({
           costUsd: extractGatewayCostUsd(event.providerMetadata),
