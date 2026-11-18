@@ -222,6 +222,28 @@ describe("a model that needs the caller's credential", () => {
     });
   });
 
+  it("replaces a token a manual compaction's summary rejects, and compacts", async () => {
+    const billing = billingProvider({ refresh: "fresh-token", token: "stale-token" });
+    await withSession(
+      billing,
+      async (session) => {
+        await session.stream.nextUntil("first turn", isTurnSettled);
+        await session.compact();
+        const compacted = await session.stream.nextUntil(
+          "compaction",
+          (event) =>
+            event.type === "delivery.settled" && event.data.deliveryId === "control_compact",
+        );
+        expect(filterEventsByType(compacted, "delivery.settled").at(-1)?.data).toMatchObject({
+          outcome: "applied",
+        });
+        expect(billing.evictions).toBe(1);
+        expect(billing.summaryTokens).toEqual(["stale-token", "fresh-token"]);
+      },
+      { rejectStaleOnlyInSummary: true },
+    );
+  });
+
   it.each(["has no credential", "fails to build"] as const)(
     "compacts with compaction.model when the turn model %s",
     async (breakage) => {
