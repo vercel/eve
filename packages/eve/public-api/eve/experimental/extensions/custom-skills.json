@@ -4,5 +4,11 @@
   "SkillScope",
   "SkillScopeResolver",
   "SkillValidator",
-  "default"
+  "create",
+  "default",
+  "list",
+  "publish",
+  "read",
+  "remove",
+  "set_mode"
 ]

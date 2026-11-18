@@ -92,6 +92,7 @@ const { approval, execute } = skillChange<z.infer<typeof inputSchema>, SavePlan,
   },
 });
 
+/** Saves a new version of a custom skill. */
 export default defineTool({
   label: {
     start: ({ name }) => `Saving skill ${name}`,

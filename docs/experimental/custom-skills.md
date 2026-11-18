@@ -82,6 +82,35 @@ export default customSkills({
 
 A scope's `key` says where its skills are stored and must be unique per owner. `label` is how the model and approval cards name who the skills are for. `shared` marks a scope many people use, which the default approval rule treats more carefully. `readOnly` lists and loads skills but refuses changes, and `loadPrefix` keeps the scope's load names apart from other scopes'.
 
+## Turn it on per session
+
+To offer custom skills only to some people, such as behind a feature flag, use the [directory form](/docs/extensions#override-a-contribution) of the mount. Return no scopes for everyone else, which hides their saved skills and the `manage` skill:
+
+```ts title="agent/extensions/skills/extension.ts"
+import customSkills from "eve/experimental/extensions/custom-skills";
+import { defaultScopes } from "eve/experimental/extensions/custom-skills/policies";
+import { customSkillsEnabled } from "../../flags.js";
+
+export default customSkills({
+  scopes: async (ctx) =>
+    (await customSkillsEnabled(ctx.session.auth.current)) ? defaultScopes(ctx) : [],
+});
+```
+
+Then hide the tools: import each one from `eve/experimental/extensions/custom-skills`, the entry that carries this mount's configuration, and return it from [`defineDynamic`](/docs/guides/dynamic-capabilities#dynamic-tools) in a same-named file. Repeat for `list`, `publish`, `read`, `remove`, and `set_mode`:
+
+```ts title="agent/extensions/skills/tools/create.ts"
+import { create } from "eve/experimental/extensions/custom-skills";
+import { defineDynamic } from "eve/tools";
+import { customSkillsEnabled } from "../../../flags.js";
+
+export default defineDynamic(async (ctx) =>
+  (await customSkillsEnabled(ctx.session.auth.current)) ? create : null,
+);
+```
+
+Each tool keeps its approval rules. The same exports let you wrap a tool another way, such as with stricter [approval](#approval).
+
 ## Approval
 
 `approval.request` decides, for each change, whether it runs, asks a person, or is refused. It receives the action, the scope, the caller, whether the change alters what applies, and the content and live state of each skill it affects:

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { skillScopes } from "../lib/runtime.ts";
 import { loadName, scopeField, withSkillScope } from "../lib/tool-support.ts";
 
+/** Lists a scope's custom skills. */
 export default defineTool({
   label: {
     start: () => "Listing skills",

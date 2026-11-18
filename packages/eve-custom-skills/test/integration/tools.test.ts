@@ -9,6 +9,7 @@ import { documentRepository } from "../../extension/lib/document-repository.ts";
 import { loadTurnSkills } from "../../extension/lib/runtime.ts";
 import { spaceScope } from "../../extension/lib/scopes.ts";
 import type { SkillApprovalRule, SkillChangeEvent } from "../../extension/lib/types.ts";
+import manage from "../../extension/skills/manage.ts";
 import create from "../../extension/tools/create.ts";
 import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
@@ -393,4 +394,16 @@ test("a requester can't approve their own shared change, even when it reaches th
   const notOwner = await run(create, { ...deploy }, context({ approvedBy: bob }));
   assert.equal(notOwner.success, false);
   assert.match(String(notOwner.error), /Only the person who asked/);
+});
+
+test("the manage skill is offered only when the session has a skill scope", async () => {
+  const resolve = Object.getOwnPropertySymbols(manage)
+    .map((key): unknown => Reflect.get(manage, key))
+    .find((value) => typeof value === "function") as (
+    ctx: unknown,
+  ) => Promise<{ readonly description: string } | null>;
+  mount();
+  assert.match(String((await resolve(context()))?.description), /^Lifecycle rules/);
+  extension({ storage: inMemory(), scopes: () => [] });
+  assert.equal(await resolve(context()), null);
 });
