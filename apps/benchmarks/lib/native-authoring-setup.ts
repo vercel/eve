@@ -45,23 +45,25 @@ export const OPENCODE_GLOBAL_CONFIG = `${JSON.stringify({
   permission: { external_directory: "allow", read: "allow", doom_loop: "allow" },
 })}\n`;
 
+/** The selected canary, installed once before the model starts. */
+export const EVE_CANARY_PREFIX = "/usr/local/lib/eve-benchmark";
+
 /**
  * The `eve` on PATH. Inside a project it runs that project's installed binary, the way a
- * user's `eve` resolves; npx re-resolves the remote tarball on every call, which made direct
- * calls several seconds slower than `npm run` (7.8 s vs 0.6 s for `--help` at p50) and charged
- * that overhead to the model. Only `eve init`, before any project exists, still needs npx.
+ * user's `eve` resolves; anywhere else, such as `eve init` in an empty workspace, it runs the
+ * canary installed during setup. Running `npx --package=<tarball>` here instead re-resolved the
+ * remote tarball on every call and charged several seconds to the model each time (7.8 s vs
+ * 0.6 s for `--help` at p50).
  */
-export function eveWrapper(packageSpec: string): string {
-  return `#!/bin/sh
+export const EVE_WRAPPER = `#!/bin/sh
 dir=$PWD
 while :; do
   if [ -x "$dir/node_modules/.bin/eve" ]; then exec "$dir/node_modules/.bin/eve" "$@"; fi
   [ "$dir" = / ] && break
   dir=$(dirname "$dir")
 done
-exec npx --yes --allow-remote=all --package=${shellQuote(packageSpec)} eve "$@"
+exec ${EVE_CANARY_PREFIX}/node_modules/.bin/eve "$@"
 `;
-}
 
 export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
@@ -81,7 +83,12 @@ export function createNativeAuthoringSetup(options: {
       "rm -f .eve-authoring-bootstrap.json CASE.ts package.json package-lock.json PROMPT.md",
       "fixture cleanup",
     );
-    await sandbox.writeFiles({ "/usr/local/bin/eve": eveWrapper(options.packageSpec) });
+    await run(
+      sandbox,
+      `mkdir -p ${EVE_CANARY_PREFIX} && npm install --prefix ${EVE_CANARY_PREFIX} --no-save --no-package-lock --no-audit --no-fund --allow-remote=all ${shellQuote(options.packageSpec)}`,
+      "eve canary install",
+    );
+    await sandbox.writeFiles({ "/usr/local/bin/eve": EVE_WRAPPER });
     await run(sandbox, "chmod +x /usr/local/bin/eve", "eve wrapper");
 
     if (bootstrap.startingPoint === "scaffolded") {
