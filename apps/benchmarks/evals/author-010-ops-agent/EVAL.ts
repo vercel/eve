@@ -110,9 +110,9 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
           toolInput: input,
         })),
       ...runs
+        // Every input form the schema accepts that sends the request is graded, even one the
+        // tool mishandles, because one probe can't show which values it would send correctly.
         .filter((run) => run.probe.operation === operation && sendsProbeRequest(run))
-        // A tool whose schema takes both input forms is graded on the first one it accepts.
-        .filter((run, index, sent) => sent.findIndex(({ file }) => file === run.file) === index)
         .map(({ name, tool, nested }) => ({
           name,
           approval: tool.approval,
