@@ -153,6 +153,7 @@ export function iMessageTapbackText(tapback: IMessageTapback): string {
 export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapter>>(
   bridge: ChatSdkChannelBridge<TAdapters>,
   onTapback: TapbackHook,
+  eventId: (raw: unknown) => string | undefined,
 ): void {
   bridge.bot.onReaction(async (event: ReactionEvent) => {
     if (event.user.isMe) return;
@@ -168,6 +169,7 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
     await bridge.send(result.message ?? iMessageTapbackText(tapback), {
       auth: result.auth,
       context: [...(result.context ?? [])],
+      idempotencyKey: eventId(event.raw),
       inputAnswer:
         result.answer === undefined
           ? undefined
