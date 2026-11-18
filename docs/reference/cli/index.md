@@ -288,6 +288,27 @@ Bundled development extensions mount without adding files to your project; pass 
 
 A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`; chat needs no Vercel project, channels, or integrations. Use `/model` to change models and settings, and `/add` to install an addition. `--input` text stays editable in the prompt. See [Terminal UI](/docs/guides/dev-tui) for credential precedence and login options.
 
+### Run without the UI
+
+With `--no-ui`, or when the terminal isn't a TTY, `eve dev` prints one line after it compiles the agent, builds the dev bundle, and starts accepting requests:
+
+```text
+[DEV] ready at http://127.0.0.1:2000
+```
+
+It is the last startup line. Wait for it instead of sleeping for a fixed time. If startup fails, `eve dev` exits with a non-zero code without printing it. Stop the server by sending `SIGINT` or `SIGTERM` to its process ID:
+
+```bash
+eve dev --no-ui > eve-dev.log 2>&1 &
+pid=$!
+until grep -q "ready at" eve-dev.log; do
+  kill -0 "$pid" 2>/dev/null || { cat eve-dev.log; exit 1; }
+  sleep 0.5
+done
+# send requests to the URL on the ready line
+kill "$pid"
+```
+
 ### Local development lifecycle
 
 A second interactive `eve dev` for the same app root reconnects to the running server when it is on loopback and healthy. Each terminal UI gets a fresh client session on the shared server. Passing `--host`, `--port`, or a `PORT` value skips reconnection and reports the running server instead.

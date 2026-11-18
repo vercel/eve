@@ -101,9 +101,7 @@ describe("resolveEveDestinationPrefix", () => {
     expect(stdoutWrites).toContain(
       '[eve:dev:support] dependency metadata: "homepage": "https://rolldown.rs/"\n',
     );
-    expect(stderrWrites).toContain(
-      "[eve:dev:support] server listening at http://127.0.0.1:33449\n",
-    );
+    expect(stderrWrites).toContain("[eve:dev:support] ready at http://127.0.0.1:33449\n");
   });
 
   it("selects a workspace agent when starting its dev server", async () => {
@@ -126,7 +124,7 @@ describe("resolveEveDestinationPrefix", () => {
       expect.arrayContaining(["dev", "--no-ui", "--port", "0", "--agent", "support"]),
       expect.objectContaining({ cwd: appRoot }),
     );
-    child.stdout.emit("data", Buffer.from("[dev] server listening at http://127.0.0.1:33451\n"));
+    child.stdout.emit("data", Buffer.from("[DEV] ready at http://127.0.0.1:33451\n"));
     await expect(destination).resolves.toBe("http://127.0.0.1:33451");
   });
 
@@ -153,14 +151,12 @@ describe("resolveEveDestinationPrefix", () => {
     child.stdout.emit(
       "data",
       Buffer.from(
-        "☰eve  v0.0.0\nCONFIGURATION_FIELD_CONFLICT\n\u001b[33m[CONFIGURATION_FIELD_CONFLICT] \u001b[0mnoisy\n[dev] server listening at http://127.0.0.1:33450\n",
+        "☰eve  v0.0.0\nCONFIGURATION_FIELD_CONFLICT\n\u001b[33m[CONFIGURATION_FIELD_CONFLICT] \u001b[0mnoisy\n[DEV] ready at http://127.0.0.1:33450\n",
       ),
     );
 
     await expect(destination).resolves.toBe("http://127.0.0.1:33450");
-    expect(stdoutWrites).toEqual([
-      "[eve:dev:billing] server listening at http://127.0.0.1:33450\n",
-    ]);
+    expect(stdoutWrites).toEqual(["[eve:dev:billing] ready at http://127.0.0.1:33450\n"]);
   });
 });
 
