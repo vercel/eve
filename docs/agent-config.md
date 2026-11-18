@@ -215,6 +215,8 @@ When the caller has no credential, eve opens the same sign-in as a connection, w
 
 In a turn, compaction's summary call reuses the turn's model and credential. Compaction between turns resolves the credential itself and never opens a sign-in; without one, the compaction fails. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
 
+eve calls `auth.getToken` before each model call. `connect(...)` serves the token from Vercel Connect's in-process cache, so a warm process makes no network request; a custom `getToken` should cache its token the same way.
+
 ## Reasoning effort
 
 `reasoning` sets the model's reasoning effort through AI SDK's provider-agnostic
