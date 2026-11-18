@@ -8,7 +8,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { generateText, isStepCount, tool } from "ai";
+import { generateText, isStepCount, registerTelemetry, tool } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
@@ -115,7 +115,7 @@ const sandbox: SandboxSession = {
 };
 
 describe("AI SDK HarnessAgent consumer", () => {
-  it.each(["generate", "stream"] as const)(
+  it.each(["generate", "stream", "global"] as const)(
     "records a real HarnessAgent %s lifecycle using only the package root",
     async (method) => {
       vi.stubEnv("VERCEL_ENV", "preview");
@@ -125,25 +125,23 @@ describe("AI SDK HarnessAgent consumer", () => {
       });
       context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
       const tracing = createAgentRun({ telemetry: otelTelemetry({ provider }) });
+      const integration = aiSdkTelemetry(tracing, {
+        turn: {
+          agentName: "support",
+          identity: { conversationId: "conversation", runId: method, turnId: "turn" },
+          sequence: 0,
+          framework: { name: "ai-sdk-harness", version: "1" },
+        },
+      });
+      if (method === "global") registerTelemetry(integration);
       const agent = new HarnessAgent({
         harness: scriptedHarness(method === "stream"),
-        telemetry: {
-          integrations: [
-            aiSdkTelemetry(tracing, {
-              turn: {
-                agentName: "support",
-                identity: { conversationId: "conversation", runId: method, turnId: "turn" },
-                sequence: 0,
-                framework: { name: "ai-sdk-harness", version: "1" },
-              },
-            }),
-          ],
-        },
+        ...(method === "global" ? {} : { telemetry: { integrations: [integration] } }),
       });
       const session = await agent.createSession({ sandboxSession: sandbox });
       try {
         let text = "";
-        if (method === "generate")
+        if (method !== "stream")
           text = (await agent.generate({ session, prompt: "Help Alice inspect her project." }))
             .text;
         else {
@@ -190,6 +188,7 @@ describe("AI SDK HarnessAgent consumer", () => {
         ).toBe(true);
         expect(spans.every((span) => span.attributes["vercel.session_id"] === method)).toBe(true);
       } finally {
+        globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = undefined;
         await session.destroy();
         await tracing.shutdown();
         context.disable();

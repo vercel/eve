@@ -2262,6 +2262,13 @@ importers:
         version: 5.1.0(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/tracing:
+    dependencies:
+      '@ai-sdk/otel':
+        specifier: 'catalog:'
+        version: 1.0.172(zod@4.6.7)
+      '@vercel/otel':
+        specifier: 'catalog:'
+        version: 2.3.0(@opentelemetry/api-logs@0.223.1)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.12.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.223.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.12.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.12.1(@opentelemetry/api@1.9.1))
     devDependencies:
       '@ai-sdk/harness':
         specifier: 1.0.183

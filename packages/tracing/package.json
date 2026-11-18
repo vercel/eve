@@ -55,6 +55,10 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "@ai-sdk/otel": "catalog:",
+    "@vercel/otel": "catalog:"
+  },
   "devDependencies": {
     "@ai-sdk/harness": "1.0.183",
     "@ai-sdk/provider-utils": "catalog:",
