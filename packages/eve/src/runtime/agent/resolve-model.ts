@@ -56,15 +56,6 @@ export interface RuntimeModelResolutionScope {
 
 export type RuntimeModel = LanguageModel | DefinedModel;
 
-class CredentialedModelUnavailableError extends Error {
-  constructor(modelId: string) {
-    super(
-      `The dynamic model function failed, and the "${modelId}" model needs it to run on the caller's credential.`,
-    );
-    this.name = "CredentialedModelUnavailableError";
-  }
-}
-
 export interface ResolvedRuntimeModelSelection {
   readonly model?: RuntimeModel;
   readonly reference: RuntimeModelReference;
@@ -90,7 +81,11 @@ export async function resolveRuntimeModelReference(
     return await loadSourceBackedRuntimeModelReference(reference, scope);
   }
 
-  if (reference.credentialed === true) throw new CredentialedModelUnavailableError(reference.id);
+  if (reference.credentialed === true) {
+    throw new Error(
+      `The dynamic model function failed, and the "${reference.id}" model needs it to run on the caller's credential.`,
+    );
+  }
 
   return localGatewayModel(reference.id) ?? reference.id;
 }
