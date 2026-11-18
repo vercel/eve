@@ -40,9 +40,6 @@ describe("framework-tanstack build", () => {
   it("emits the eve service and route into the Vercel Build Output", async () => {
     const app = await scenarioApp(TANSTACK_EVE_SERVICE_DESCRIPTOR);
 
-    // `VERCEL` triggers the eve plugin's service generation. `NITRO_PRESET`
-    // pins Nitro's Vercel preset so the assertion does not depend on provider
-    // detection, which prefers the CI provider over `VERCEL`.
     await runPnpmCommand({
       args: ["exec", "vite", "build"],
       cwd: app.appRoot,
@@ -98,8 +95,6 @@ describe("framework-tanstack build", () => {
   it("builds the eve app from the TanStack Start project root", async () => {
     const app = await scenarioApp(TANSTACK_EVE_SERVICE_DESCRIPTOR);
 
-    // The generated Vercel service runs `eve build` in the host root. Nitro
-    // must not mistake that root for a Vite app because of its vite.config.
     await runPnpmCommand({
       args: ["exec", "eve", "build", "--skip-sandbox-prewarm"],
       cwd: app.appRoot,
@@ -110,8 +105,6 @@ describe("framework-tanstack build", () => {
       expect.any(String),
     );
 
-    // Building through the host's Vite config would bundle TanStack Start's
-    // SSR output into eve's server.
     const serverEntries = await readdir(serverRoot);
     expect(serverEntries).not.toContain("_ssr");
     expect(serverEntries.filter((entry) => entry.startsWith("_tanstack-start-manifest"))).toEqual(

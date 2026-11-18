@@ -3,13 +3,11 @@ import { boundedTraceError } from "./serialization.js";
 import { truncateTelemetryText } from "./serialization.js";
 import { contentAttribute, textContentAttribute } from "./serialization.js";
 
-/** Call with policy-projected errors; undefined retains failure status without content. */
 export function recordAgentSpanError(span: Span, error: unknown, errorType?: string): void {
   span.setAttribute(
     "error.type",
     truncateTelemetryText(errorType ?? (error instanceof Error ? error.name : "_OTHER"), 128),
   );
-  // A thrown Error keeps its own name; a wrapped value takes the error type.
   const wrapped = error !== undefined && !(error instanceof Error);
   if (wrapped) {
     const serialized = contentAttribute(error);

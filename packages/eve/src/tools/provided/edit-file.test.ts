@@ -61,7 +61,6 @@ function createSandbox(
 }
 
 describe("edit_file", () => {
-  // Claude rejects a whole request when any advertised tool has a root union, and every agent gets edit_file.
   it("advertises an object-root input schema", () => {
     const schema = (editFile.inputSchema as ToolSchema)["~standard"].jsonSchema.input({
       target: "draft-07",
@@ -255,7 +254,6 @@ describe("edit_file", () => {
 
     const write = contextStorage.run(new ContextContainer(), async () => {
       await executeReadFileOnSandbox(sandbox.session, { filePath: "notes.md" });
-      // A formatter rewrites the file after the read.
       await sandbox.session.writeTextFile({ path, content: "draft\nformatted\n" });
       await editFile.execute(
         { path: "notes.md", edits: [{ oldText: "draft", newText: "plan" }] },

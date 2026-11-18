@@ -3,18 +3,26 @@ import {
   decideWithMetadata,
   resolveDecisionModel,
 } from "#ai/decision-adapter.js";
+import type { DecisionPurpose } from "#ai/decide.js";
 import type { DecisionOptions, DecisionQuestion } from "#ai/decision-types.js";
+import { decisionResults } from "#instrumentation/decision-results.js";
 import { Experimental_DecisionRefusalError as DecisionRefusalError } from "#compiled/@ai-sdk/provider/index.js";
 import { context } from "#compiled/@opentelemetry/api/index.js";
 import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey, SessionKey } from "#context/keys.js";
-import { getRegisteredTelemetryIntegrations } from "#instrumentation/ai-sdk-telemetry.js";
+import {
+  aiSdkCapture,
+  getRegisteredTelemetryIntegrations,
+} from "#instrumentation/ai-sdk-telemetry.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  defaultContentCapture,
+} from "#shared/forwarded-trace-policy.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
@@ -22,23 +30,30 @@ import { gatewayCostAttributes, readGatewayCostData } from "#tracing/eve/gateway
 import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 
-/** Decision calls can run before a model attempt or outside an eve session. */
 export async function decideWithTracing<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
->(options: DecisionOptions<Questions>) {
+>(options: DecisionOptions<Questions>, purpose: DecisionPurpose) {
   const runtime = getInstrumentationRuntime();
-  const settings = runtime?.otelSettings;
-  const traceDecision = runtime?.decision;
-  if (settings === undefined || traceDecision === undefined) return decideWithMetadata(options);
+  if (runtime === undefined) return decideWithMetadata(options);
   const ctx = contextStorage.getStore() ?? new ContextContainer();
   const session = readInstrumentationSessionContext(ctx);
+  const agentName = ctx.get(SessionAgentKey)?.name ?? "eve";
+  const ceiling = session.forwardedTracePolicy?.ceiling;
+  const hooks =
+    runtime.hooks.forTrace?.({ agentName, ...session.conversation }, { ceiling }) ?? runtime.hooks;
+  const settings = runtime.otelSettings;
+  const traceDecision = runtime.decision;
+  if (settings === undefined || traceDecision === undefined) {
+    return decideWithMetadata(options, {
+      telemetry: aiSdkCapture(defaultContentCapture(session.conversation, ceiling), hooks),
+    });
+  }
   const sessionId = ctx.get(SessionIdKey);
   const turnId = ctx.get(SessionKey)?.turn.id;
   const turnContext =
     sessionId === undefined || turnId === undefined
       ? undefined
-      : await runtime?.readTurnTraceContext?.(sessionId, turnId);
-  const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
+      : await runtime.readTurnTraceContext?.(sessionId, turnId);
   const decision = resolveInstrumentationTraceDecision(
     settings,
     agentName,
@@ -59,16 +74,8 @@ export async function decideWithTracing<
   const record = effective?.action === "record";
   const capture = {
     emit: record && inherited?.emit !== false,
-    recordInputs:
-      settings.recordInputs &&
-      record &&
-      effective.recordInputs &&
-      inherited?.recordInputs !== false,
-    recordOutputs:
-      settings.recordOutputs &&
-      record &&
-      effective.recordOutputs &&
-      inherited?.recordOutputs !== false,
+    recordInputs: record && effective.recordInputs && inherited?.recordInputs !== false,
+    recordOutputs: record && effective.recordOutputs && inherited?.recordOutputs !== false,
   };
   let host = withChannelAudience(context.active(), session.audience);
   if (sessionId !== undefined)
@@ -81,6 +88,7 @@ export async function decideWithTracing<
   const operation = await traceDecision({
     modelId: typeof model === "string" ? model : model.modelId,
     provider: typeof model === "string" ? undefined : model.provider,
+    purpose,
     identity:
       sessionId === undefined || turnId === undefined
         ? undefined
@@ -90,11 +98,9 @@ export async function decideWithTracing<
     parent: turnContext ?? session.traceSeed,
     context: host,
   });
-  // eve owns this operation; the SDK integration would emit a second pair of spans.
   const telemetry = {
     integrations: [...getRegisteredTelemetryIntegrations({ excludeEveOtelIntegration: true })],
-    recordInputs: operation.capture.recordInputs,
-    recordOutputs: operation.capture.recordOutputs,
+    ...aiSdkCapture(operation.capture, hooks),
   };
   try {
     const result = await operation.run(() =>
@@ -106,15 +112,14 @@ export async function decideWithTracing<
       ...gatewayCostAttributes(readGatewayCostData(result.providerMetadata) ?? {}),
     });
     await operation.complete({
+      output: decisionResults(options.questions, { answers: result.answers }),
       usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
     });
     return result;
   } catch (error) {
-    // A refusal is an answer, not a failed request. SDK errors can retain inputs and outputs on
-    // enumerable properties, so a failure records only its type.
     await operation.complete(
       DecisionRefusalError.isInstance(error)
-        ? { outcome: "refused" }
+        ? { output: decisionResults(options.questions, { refused: error.questionIds }) }
         : { failed: true, errorCode: "decision_error" },
     );
     throw error;

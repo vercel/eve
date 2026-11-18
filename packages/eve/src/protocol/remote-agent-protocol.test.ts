@@ -19,7 +19,6 @@ describe("the callback URL a parent gives a remote child", () => {
   it("names this protocol too, so every callback says what was agreed", () => {
     const marked = callbackUrlForProtocol(base, REMOTE_AGENT_PROTOCOL_VERSION);
     expect(readCallbackProtocol(marked)).toBe(REMOTE_AGENT_PROTOCOL_VERSION);
-    // A URL a parent run from before v27 minted names none.
     expect(readCallbackProtocol(base)).toBeUndefined();
   });
 

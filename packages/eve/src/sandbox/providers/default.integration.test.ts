@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
-import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { ensureSandboxAccess, sandboxIdleTimeoutMs } from "#execution/sandbox/ensure.js";
 import { createSandboxPrepareContext } from "#execution/sandbox/prewarm.js";
 import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
 import { TOOL_SESSION_ID_PREFIX } from "#execution/tool-session/id.js";
@@ -33,7 +33,6 @@ afterEach(async () => {
   vi.mocked(isLinuxDockerDaemonAvailableSync).mockClear();
 });
 
-/** Prepares the environment the way the build does and records the artifact. */
 async function build(environment: ReturnType<typeof DefaultSandbox.environment>, dev: boolean) {
   const appRoot = await createScratchDirectory("eve-default-sandbox-");
   const log = vi.fn();
@@ -61,6 +60,26 @@ async function build(environment: ReturnType<typeof DefaultSandbox.environment>,
   return { appRoot, artifact, log };
 }
 
+function registryOf(
+  environment: ReturnType<typeof DefaultSandbox.environment>,
+  selector: SandboxSelector,
+): RuntimeSandboxRegistry {
+  return {
+    sandbox: {
+      definition: {
+        environment,
+        kind: "independent",
+        logicalPath: "sandbox.ts",
+        revisionHash: "revision",
+        selector,
+        sourceId: "sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+}
+
 async function access(input: {
   readonly appRoot: string;
   readonly environment: ReturnType<typeof DefaultSandbox.environment>;
@@ -68,24 +87,10 @@ async function access(input: {
   readonly sessionId?: string;
   readonly state?: SandboxState;
 }) {
-  const registry: RuntimeSandboxRegistry = {
-    sandbox: {
-      definition: {
-        environment: input.environment,
-        kind: "independent",
-        logicalPath: "sandbox.ts",
-        revisionHash: "revision",
-        selector: input.selector,
-        sourceId: "sandbox",
-        sourceKind: "module",
-      },
-      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
-    },
-  };
   return await ensureSandboxAccess({
     compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(input.appRoot),
     nodeId: "__root__",
-    registry,
+    registry: registryOf(input.environment, input.selector),
     sessionId: input.sessionId ?? "session-1",
     state: input.state ?? null,
   });
@@ -98,7 +103,6 @@ describe("DefaultSandbox", () => {
     expect(artifact).toMatchObject({ provider: "just-bash" });
     vi.mocked(isLinuxDockerDaemonAvailableSync).mockClear();
 
-    // A runtime that probed the host would now select Vercel Sandbox.
     vi.stubEnv("VERCEL", "1");
     const sandbox = await access({
       appRoot,
@@ -153,8 +157,6 @@ describe("DefaultSandbox", () => {
     await expect(opened?.setNetworkPolicy("deny-all")).rejects.toThrow(/just-bash/);
   });
 
-  // Recorded from DefaultSandbox before it moved to the public provider API.
-  // Deployed builds and running sessions depend on them, so they must never change.
   it("records the same artifact and session state as earlier releases", async () => {
     const environment = DefaultSandbox.environment();
     const { appRoot, artifact } = await build(environment, true);
@@ -186,6 +188,21 @@ describe("DefaultSandbox", () => {
         stateProtocolVersion: 1,
       },
     });
+  });
+
+  it("records nothing to stop when it selected just-bash, which has no compute to stop", async () => {
+    const environment = DefaultSandbox.environment({ idleTimeoutMs: 0 });
+    const { appRoot } = await build(environment, true);
+    const selector = defineSandbox(() => environment.open());
+    const sandbox = await access({ appRoot, environment, selector });
+    await sandbox.get();
+    const recorded = await sandbox.captureState();
+
+    expect(recorded).not.toHaveProperty("running");
+    expect(
+      sandboxIdleTimeoutMs(registryOf(environment, selector), "session-1", recorded.session),
+    ).toBe(undefined);
+    expect(sandboxIdleTimeoutMs(registryOf(environment, selector), "session-1", null)).toBe(0);
   });
 
   it("keeps a keyed tool call's sandbox when the selected provider can", async () => {

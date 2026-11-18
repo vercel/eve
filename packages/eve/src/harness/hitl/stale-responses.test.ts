@@ -8,7 +8,6 @@ import {
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/hitl/stale-responses.js";
 
-/** The tables of a session that asked to approve a call, which closed. */
 const knownApproval = tablesOf([
   { data: {}, type: "session.started" },
   {
@@ -48,7 +47,6 @@ const knownApproval = tablesOf([
   },
 ] as SessionEvent[]);
 
-/** An answer as the session received it, from one delivery. */
 function submitted(interactionId: string, optionId: string) {
   return {
     deliveryId: "delivery-1",
@@ -58,7 +56,6 @@ function submitted(interactionId: string, optionId: string) {
   };
 }
 
-/** The session no longer knows the request a response answers. */
 const unknown = tablesOf([]);
 
 it("converts a stale approval into a non-authorizing user message", () => {
@@ -179,8 +176,6 @@ it("drops a stale session-limit continuation answer and keeps the rest of the in
     },
   });
 
-  // Nothing model-visible: a stale "Stop" must not read as prose, and a
-  // stale grant must not extend any budget.
   expect(stepInput?.answers).toBeUndefined();
   expect(stepInput?.message).toBe("also do this");
 });
@@ -197,8 +192,6 @@ it("keeps pending and non-continuation responses while dropping stale continuati
     },
   });
 
-  // The stale grant is dropped; the pending question answer and the answer
-  // to the currently pending continuation prompt pass through.
   expect(stepInput?.answers).toEqual([
     submitted("question-1", "candidate"),
     submitted("sess-1:0:limit:input:20", "deny"),

@@ -93,7 +93,6 @@ describe("eve logs", () => {
     const mru = collectingLogger();
     await runLogsShowCommand(mru.logger, root);
     expect(mru.out).toEqual(["newer content"]);
-    // Output carries records only: nothing on stderr, so `2>&1 | jq` parses.
     expect(mru.err).toEqual([]);
 
     const named = collectingLogger();
@@ -146,7 +145,6 @@ describe("eve logs", () => {
       now: () => new Date("2026-07-15T13:00:00.000Z"),
     });
 
-    // Window: this log's encoded start through `now` (it is the newest log).
     expect(readEvents).toHaveBeenCalledWith(root, {
       from: new Date("2026-07-15T12:00:00.000Z"),
       to: new Date("2026-07-15T13:00:00.000Z"),
@@ -159,7 +157,6 @@ describe("eve logs", () => {
     ]);
     expect(withEvents.err).toEqual([]);
 
-    // Older log: window ends at the next log's start; zero events stay silent.
     const older = collectingLogger();
     const readNone = vi.fn().mockResolvedValue([]);
     await runLogsShowCommand(older.logger, root, "2026-07-14", {

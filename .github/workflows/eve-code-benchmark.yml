@@ -36,12 +36,8 @@ on:
         options: [all, anthropic, openai]
         default: all
 
-# OIDC alternative: add `id-token: write` here and omit `vercel-token` below
-# after configuring a matching Vercel team OIDC policy.
 permissions:
   contents: read
-  actions: read
-  pull-requests: write
 
 jobs:
   request:
@@ -105,6 +101,15 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.request.outputs.models) }}
     runs-on: ubuntu-latest
+    environment:
+      name: eve-bench
+      deployment: false
+    # OIDC alternative: add `id-token: write` here and omit `vercel-token` below
+    # after configuring a matching Vercel team OIDC policy.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
     # Trials run in waves of up to 16 sandboxes; each trial can take up to its
     # dataset's agent timeout (20 minutes on deepswe-lean) plus preparation and
     # verification.
@@ -183,7 +188,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
       # The branch restarts from the newest main on every refresh, so the PR
       # holds one commit and never conflicts. createCommitOnBranch commits are
       # signed by GitHub, which satisfies the signed-commit rule without a bot

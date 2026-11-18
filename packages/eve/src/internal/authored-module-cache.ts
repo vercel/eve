@@ -5,16 +5,8 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
-// Cache file names derive from bundle output, so no process imports a file another process
-// wrote: each one bundles, writes or touches the file, then imports it, possibly lazily much
-// later. A file is therefore in use only while a process that touched it is still running.
-// Each process registers a lease before its first touch, so every file it uses is newer than
-// its lease, and a file older than every live lease cannot be in use.
 const LEASE_DIRECTORY_NAME = ".leases";
-// Some file systems store mtimes at 1–2 s precision, which can round a touch below its lease.
 const MTIME_PRECISION_MARGIN_MS = 60_000;
-// Live processes refresh their leases, so a lease nobody refreshed belongs to a process that
-// is gone, even when its pid was reused or it ran on another host or in another container.
 const LEASE_HEARTBEAT_MS = 60_000;
 const LEASE_EXPIRY_MS = 10 * 60_000;
 
@@ -28,10 +20,6 @@ const leases = new Map<string, { readonly path: string; readonly lease: CacheLea
 let heartbeat: NodeJS.Timeout | undefined;
 let pruning: Promise<void> | undefined;
 
-/**
- * Writes a content-addressed bundle into the authored-module cache, or marks an
- * existing one as used by this process so {@link pruneAuthoredModuleCache} keeps it.
- */
 export function writeAuthoredModuleCacheFile(
   directoryPath: string,
   fileName: string,
@@ -39,14 +27,11 @@ export function writeAuthoredModuleCacheFile(
 ): string {
   registerLease(directoryPath);
   const filePath = join(directoryPath, fileName);
-  // Touch first and write only when missing, so a file this process reuses is never older
-  // than its lease, even if another process removes it in between.
   try {
     const now = new Date();
     utimesSync(filePath, now, now);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      // Not ours to touch: replace it with a fresh copy so it stays protected.
       replaceFile(filePath, code);
       return filePath;
     }
@@ -54,7 +39,6 @@ export function writeAuthoredModuleCacheFile(
       writeFileSync(filePath, code);
     } catch (writeError) {
       if ((writeError as NodeJS.ErrnoException).code !== "ENOENT") throw writeError;
-      // The cache directory was removed while this process ran.
       leases.delete(directoryPath);
       registerLease(directoryPath);
       writeFileSync(filePath, code);
@@ -63,10 +47,6 @@ export function writeAuthoredModuleCacheFile(
   return filePath;
 }
 
-/**
- * Removes cached bundles that no running process can still import. Runs in the
- * background: callers should not await it, and it never rejects.
- */
 export function pruneAuthoredModuleCache(): Promise<void> {
   pruning ??= pruneLeasedDirectories().finally(() => {
     pruning = undefined;
@@ -81,9 +61,7 @@ function registerLease(directoryPath: string): void {
   leases.set(directoryPath, { path, lease });
   try {
     writeLease(path, lease);
-  } catch {
-    // An unwritable cache still serves existing bundles, and nobody can prune it either.
-  }
+  } catch {}
   if (heartbeat === undefined) {
     heartbeat = setInterval(refreshLeases, LEASE_HEARTBEAT_MS).unref();
     process.once("exit", releaseLeases);
@@ -150,8 +128,6 @@ async function pruneDirectory(
   for (const fileName of await readdir(directoryPath)) {
     if (!fileName.endsWith(".mjs") && !fileName.endsWith(".tmp")) continue;
     const filePath = join(directoryPath, fileName);
-    // Checked and removed back to back, so a concurrent touch by another process has only
-    // microseconds to land in between.
     try {
       if (statSync(filePath).mtimeMs < cutoff) unlinkSync(filePath);
     } catch {}
@@ -178,12 +154,10 @@ async function findOldestLiveLease(
   return oldest;
 }
 
-/** The lease's start time while its process may still run, or `undefined` once it is gone. */
 async function readLiveLeaseSince(leasePath: string): Promise<number | undefined> {
   const refreshedAt = (await stat(leasePath).catch(() => undefined))?.mtimeMs;
   if (refreshedAt === undefined || Date.now() - refreshedAt > LEASE_EXPIRY_MS) return undefined;
   const lease = parseLease(await readFile(leasePath, "utf8").catch(() => undefined));
-  // Still being written: its process registered just now.
   if (lease === undefined) return refreshedAt;
   if (lease.host === hostname() && !isRunning(lease.pid)) return undefined;
   return Math.min(lease.since, refreshedAt);

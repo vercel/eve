@@ -6,31 +6,19 @@ import type { Prompter } from "../prompter.js";
 import { withSpinner } from "../with-spinner.js";
 
 export type LoginFlowResult =
-  /** A `vercel whoami` already succeeds; nothing to do. */
   | { kind: "already" }
-  /** `vercel login` ran and the directory is now authenticated. */
   | { kind: "logged-in" }
-  /** `vercel login` exited without leaving an authenticated session. */
   | { kind: "failed" }
-  /** The Vercel CLI is not installed, so login cannot start. */
   | { kind: "cli-missing" }
-  /** Vercel could not be reached, so login state could not be determined. */
   | { kind: "unavailable" }
-  /** The user stopped waiting (Cancel / Esc) before login completed. */
   | { kind: "cancelled" };
 
-/**
- * Deadline for the `vercel login` browser OAuth. Generous because a human is in
- * the loop, but bounded so an abandoned hand-off cannot stall the TUI forever.
- * Mirrors the Slack Connect create wait.
- */
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
 function vercelLoginUrl(text: string): string | undefined {
   return text.match(/https:\/\/vercel\.com\/oauth\/device\?[^\s]+/u)?.[0];
 }
 
-/** Injected for tests; defaults to the real auth probe and `vercel login`. */
 export interface LoginFlowDeps {
   getVercelAuthStatus: typeof getVercelAuthStatus;
   runVercelLogin: (input: {
@@ -42,10 +30,6 @@ export interface LoginFlowDeps {
 
 const defaultDeps: LoginFlowDeps = {
   getVercelAuthStatus,
-  // `--non-interactive` (stdin ignored) makes `vercel login` run the OAuth/SSO
-  // web flow with no terminal method menu: it prints the URL (streamed to the
-  // rail via onOutput) and polls the browser. That is what lets the TUI stay
-  // live and wait, exactly like `vercel connect create`.
   runVercelLogin: ({ cwd, onOutput, signal }) =>
     runVercel(["login"], {
       cwd,
@@ -56,14 +40,6 @@ const defaultDeps: LoginFlowDeps = {
     }),
 };
 
-/**
- * Runs `vercel login` while the dev TUI stays live, mirroring the Slack Connect
- * browser wait: an interactive prompter races the login subprocess against a
- * "Cancel" action (the browser OAuth runs without the terminal, so the panel
- * keeps painting and the user can bail); a plain/headless prompter just runs it
- * behind an ephemeral spinner. Returns the CLI's success, or `"cancelled"` when
- * the user stops waiting first.
- */
 async function runVercelLoginWithControls(
   deps: LoginFlowDeps,
   appRoot: string,
@@ -77,8 +53,6 @@ async function runVercelLoginWithControls(
     );
   }
 
-  // A private controller linked to the outer signal, so a Cancel aborts only
-  // this subprocess while an outer interrupt still propagates.
   const controller = new AbortController();
   const linked = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const prompt = prompter.awaitChoice({
@@ -93,7 +67,6 @@ async function runVercelLoginWithControls(
       prompt.choice.then(() => ({ via: "choice" as const })),
     ]);
     if (winner.via === "work") return winner.ok;
-    // Cancel (or Esc): abort the login subprocess and settle it before leaving.
     controller.abort();
     await work.catch(() => {});
     return "cancelled";
@@ -102,18 +75,10 @@ async function runVercelLoginWithControls(
   }
 }
 
-/**
- * THE LOGIN FLOW for the dev TUI's `/deploy`. Short-circuits when already
- * authenticated; otherwise runs `vercel login` as a browser flow the TUI waits
- * on (see {@link runVercelLoginWithControls}) and re-probes after, so a
- * half-finished or abandoned login reports `failed`, never a false success.
- */
 export async function runLoginFlow(input: {
   appRoot: string;
   prompter: Prompter;
-  /** Run the browser login even when the account-level Vercel session is valid. */
   force?: boolean;
-  /** False for remote access: reuse the existing session without opening a browser. */
   allowLogin?: boolean;
   signal?: AbortSignal;
   deps?: Partial<LoginFlowDeps>;

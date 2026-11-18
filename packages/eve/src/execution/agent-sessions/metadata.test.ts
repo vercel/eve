@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { ParentSessionKey } from "#context/keys.js";
 import { DefinitionsStateKey } from "#definitions/state.js";
-import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
-describe("resolveWorkflowAgentMetadata", () => {
+describe("a compiled agent's delegates", () => {
   it("includes root self-delegation and hidden static subagents", () => {
     const ctx = context({
       description: "Coordinate specialist work.",
@@ -25,7 +25,7 @@ describe("resolveWorkflowAgentMetadata", () => {
       ]),
     });
 
-    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
+    expect(delegatesOf(ctx)).toEqual({
       agent: { description: "Coordinate specialist work." },
       researcher: { description: "Investigate difficult questions." },
     });
@@ -34,7 +34,7 @@ describe("resolveWorkflowAgentMetadata", () => {
   it("includes root self-delegation with an empty description when the root has none", () => {
     const ctx = context({ nodeId: undefined, subagentsByName: new Map() });
 
-    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
+    expect(delegatesOf(ctx)).toEqual({
       agent: { description: "" },
     });
   });
@@ -47,7 +47,7 @@ describe("resolveWorkflowAgentMetadata", () => {
       subagentsByName: new Map(),
     });
 
-    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({});
+    expect(delegatesOf(ctx)).toEqual({});
   });
 
   it("uses the descriptions dynamic subagent slots hold without adding self-delegation", () => {
@@ -67,7 +67,7 @@ describe("resolveWorkflowAgentMetadata", () => {
       },
     } as never);
 
-    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
+    expect(delegatesOf(ctx)).toEqual({
       reviewer: { description: "Review this tenant." },
     });
   });
@@ -80,11 +80,18 @@ function context(input: {
   readonly subagentsByName: ReadonlyMap<string, unknown>;
 }): ContextContainer {
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, {
-    nodeId: input.nodeId,
-    resolvedAgent: { config: { description: input.description } },
-    subagentRegistry: { subagentsByName: input.subagentsByName },
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      nodeId: input.nodeId,
+      resolvedAgent: { config: { description: input.description } },
+      subagentRegistry: { subagentsByName: input.subagentsByName },
+    } as never),
+  );
   if (input.parentSession !== undefined) ctx.set(ParentSessionKey, input.parentSession as never);
   return ctx;
+}
+
+function delegatesOf(ctx: ContextContainer) {
+  return ctx.require(SessionAgentKey).delegates(ctx);
 }

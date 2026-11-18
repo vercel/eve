@@ -11,15 +11,12 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { evaluateValues } from "#definitions/step.js";
 import { installDefinitions, restoreDefinitions } from "./kernel.js";
 import { forgetSessionLive } from "#definitions/state.js";
 
-/**
- * A sandbox that records the paths written to it, under its own identity. Queued work runs in
- * order, and `get()` and `settle()` wait for it, as the runtime's access does.
- */
 function sandbox(id: string) {
   const written: string[] = [];
   const removed: string[] = [];
@@ -62,7 +59,6 @@ function sandbox(id: string) {
     failNextWrite() {
       failingWrites += 1;
     },
-    /** Holds every open until the returned function is called. */
     hold() {
       let release!: () => void;
       gate = new Promise((resolve) => {
@@ -79,7 +75,6 @@ function sandbox(id: string) {
   };
 }
 
-/** Runs a step's work, then waits for the sandbox work it queued, as a step's commit does. */
 async function step(
   ctx: ContextContainer,
   box: ReturnType<typeof sandbox>,
@@ -91,7 +86,6 @@ async function step(
 
 const policySkill = (slug: string, reference: string) => ({
   logicalPath: `skills/${slug}.ts`,
-  // Each returns a skill named "policy", as a map of skills does.
   evaluate: () => ({
     policy: defineSkill({
       description: `The ${slug} policy.`,
@@ -103,7 +97,6 @@ const policySkill = (slug: string, reference: string) => ({
   sourceId: `skills/${slug}.ts`,
 });
 
-/** A session whose one dynamic skill builds a supporting file, which its slot doesn't hold. */
 function session(skills?: readonly object[]) {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, `session-${Math.random()}`);
@@ -111,29 +104,32 @@ function session(skills?: readonly object[]) {
     auth: { current: null, initiator: null },
     sessionId: ctx.get(SessionIdKey),
   } as never);
-  ctx.set(BundleKey, {
-    graph: { nodesByNodeId: new Map() },
-    resolvedAgent: {
-      definitions: (
-        skills ?? [
-          {
-            logicalPath: "skills/policy.ts",
-            evaluate: () =>
-              defineSkill({
-                description: "The tenant policy.",
-                files: { "references/policy.md": "Policy reference.\n" },
-                content: "# Policy",
-              }),
-            slug: "policy",
-            sourceId: "skills/policy.ts",
-          },
-        ]
-      ).map((skill) => ({ ...skill, kind: "skill" })),
-    },
-    subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
-    toolRegistry: { toolsByName: new Map() },
-    turnAgent: {},
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      graph: { nodesByNodeId: new Map() },
+      resolvedAgent: {
+        definitions: (
+          skills ?? [
+            {
+              logicalPath: "skills/policy.ts",
+              evaluate: () =>
+                defineSkill({
+                  description: "The tenant policy.",
+                  files: { "references/policy.md": "Policy reference.\n" },
+                  content: "# Policy",
+                }),
+              slug: "policy",
+              sourceId: "skills/policy.ts",
+            },
+          ]
+        ).map((skill) => ({ ...skill, kind: "skill" })),
+      },
+      subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
+      toolRegistry: { toolsByName: new Map() },
+      turnAgent: {},
+    } as never),
+  );
   enterSessionProjection(ctx, undefined);
   return ctx;
 }
@@ -183,11 +179,9 @@ describe("dynamic skill files", () => {
     await step(ctx, first, () => evaluateValues(ctx, { conversation: [] }));
     expect(first.written).toEqual(PACKAGE);
 
-    // The same sandbox already has the package: the next step writes nothing.
     await step(ctx, first, () => installDefinitions(ctx));
     expect(first.written).toEqual(PACKAGE);
 
-    // A fresh process with a new sandbox renders the skill again from its record to write it.
     forgetSessionLive(ctx.get(SessionIdKey)!);
     const next = sandbox("next");
     ctx.set(SandboxKey, next.access as never);
@@ -218,7 +212,6 @@ describe("dynamic skill files", () => {
     await step(ctx, box, () => evaluateValues(ctx, { conversation: [] }));
     expect(box.written).toEqual(PACKAGE);
 
-    // `start()` stamps a new generation; the provider names the sandbox as before.
     box.state.generation = "recreated";
     await step(ctx, box, () => installDefinitions(ctx));
     expect(box.written).toEqual([...PACKAGE, ...PACKAGE]);
@@ -359,7 +352,6 @@ describe("dynamic skill files after a change", () => {
     ctx.set(SandboxKey, box.access as never);
     await step(ctx, box, () => evaluateValues(ctx, { conversation: [] }));
 
-    // The sandbox may already provide the files, for example from its snapshot.
     const before = box.removed.length;
     files = false;
     await step(ctx, box, () => evaluateValues(ctx, { conversation: [] }));

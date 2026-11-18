@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
   activateDevelopmentGeneration,
   createDevelopmentGenerationPruner,
 } from "#internal/nitro/development-generation.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import { getDevelopmentWorkflowGeneration } from "#runtime/development-generation.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   decodeDevelopmentWorldValue,
@@ -25,12 +25,16 @@ import {
 } from "#internal/workflow/development-world-server.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
+  DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
+  DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
+} from "#protocol/routes.js";
+import {
+  DEVELOPMENT_WORKFLOW_SECRET_ENV,
+  DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
+} from "#internal/application/dev-transport.js";
+import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
-  DEVELOPMENT_WORKFLOW_SECRET_ENV,
-  DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
-  DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
-  DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#internal/workflow/development-world-protocol.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -329,7 +333,6 @@ describe("parent development Workflow World", () => {
       await expect
         .poll(() => [...deliveries].sort())
         .toEqual([runIds[0], runIds[2], runIds[3], runIds[4]].sort());
-      // The restart lost the runs' queued step messages and wait timers.
       for (const message of messages) {
         expect(message).toMatchObject({ recovery: true, runSpecVersion: 6 });
       }
@@ -414,8 +417,6 @@ describe("parent development Workflow World", () => {
       await second.start();
       expect(startupFetch).not.toHaveBeenCalled();
       startupFetch.mockRestore();
-      // Ingress reports the session stranded from this error, so its identity
-      // must survive the worker boundary.
       const refusal = await createDevelopmentWorkflowWorld()
         .hooks.getByToken(token)
         .catch((error: unknown) => error);
@@ -449,7 +450,6 @@ describe("parent development Workflow World", () => {
       await second.close();
     }
     const resumed = createWorld({ activeGenerationId: () => "reloaded", appRoot, resume: true });
-    // Capture startup recovery without opening a port.
     const deliveries: string[] = [];
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
       deliveries.push(JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)).runId);
@@ -644,9 +644,6 @@ describe("parent development Workflow World", () => {
         }),
       );
 
-      // A missing generation never heals on retry: the delivery is
-      // acknowledged so the queue stops redelivering, and the handler
-      // never runs.
       expect(response.status).toBe(200);
       expect(handled).not.toHaveBeenCalled();
       expect(errorSpy).not.toHaveBeenCalled();
@@ -818,11 +815,6 @@ describe("parent development Workflow World", () => {
   });
 });
 
-/**
- * Wires the worker-side world client to the parent world in memory: the
- * client's fetches route straight into `world.handleRequest`, standing in for
- * the parent listener without binding a port.
- */
 function connectWorkerToWorld(world: ParentDevelopmentWorkflowWorld, appRoot: string): void {
   process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = SECRET;
   process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
@@ -843,10 +835,6 @@ function createWorkerQueueHandler(): (request: Request) => Promise<Response> {
   return handler;
 }
 
-/**
- * Runs one queue delivery through the worker-side handler and reports the
- * generation the handler executed under.
- */
 async function deliverToWorker(payload: unknown): Promise<string | undefined> {
   const worker = createDevelopmentWorkflowWorld();
   let observedGenerationId: string | undefined;

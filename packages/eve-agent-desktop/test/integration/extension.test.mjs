@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-// The eve runtime sets this ambient scope while it loads an extension's modules so
-// `defineExtension` can bind config; emulate it before importing the built dist.
 globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-desktop.test";
 
 const { default: extension } = await import("@eve/agent-desktop");
@@ -22,7 +20,6 @@ function streamOf(text) {
   });
 }
 
-/** A sandbox process that has already produced `result` and exits immediately. */
 function fakeProcess({ stdout = "", stderr = "", exitCode = 0 } = {}) {
   return {
     stdout: streamOf(stdout),
@@ -34,11 +31,6 @@ function fakeProcess({ stdout = "", stderr = "", exitCode = 0 } = {}) {
   };
 }
 
-/**
- * A sandbox where agent-desktop is installed, the desktop is up, and every
- * command succeeds. `respond` may override the result of a command;
- * `intercept` may replace the process for one, which the abort tests use.
- */
 function fakeSandbox({
   respond,
   version = AGENT_DESKTOP_VERSION,
@@ -71,7 +63,6 @@ const ctx = (sandbox) => ({
 });
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** The argv after the binary in the last agent-desktop command. */
 function lastArgv(sandbox) {
   const command = sandbox.commands.at(-1);
   const invocation = command.slice(command.lastIndexOf("; ") + 2);
@@ -124,7 +115,6 @@ test("instructions name only tools the extension ships", () => {
         "skeleton",
         "return",
         "mouse_",
-        // agent-desktop error kinds (`error.details.kind`), not tools.
         "identity_not_unique",
         "saved_ref_ambiguous",
       ].includes(name) ||
@@ -426,7 +416,6 @@ test("screenshot readback shares the call signal and its cleanup is inside the d
   sandbox.readFile = async ({ signal }) => {
     readSignal = signal;
     reading.resolve();
-    // A stream that never produces data and ignores cancellation.
     return new ReadableStream({
       pull: () => new Promise(() => {}),
       cancel: () => new Promise(() => {}),
@@ -468,7 +457,6 @@ test("manageDesktop false keeps the image's own session environment", async () =
   resetConfig();
 });
 
-/** A sandbox whose version probe answers from `versions` in order (undefined: missing). */
 function versionSandbox(versions, options) {
   const sandbox = fakeSandbox(options);
   const spawn = sandbox.spawn;
@@ -609,7 +597,7 @@ test("an endless capture stops reading at the inline limit and is cancelled", as
         },
         cancel() {
           state.cancelled++;
-          return new Promise(() => {}); // a sandbox that never acknowledges the cancel
+          return new Promise(() => {});
         },
       },
       { highWaterMark: 0 },

@@ -7,26 +7,16 @@ import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json
 export interface SubagentParentContext {
   readonly conversationId?: string;
   readonly lineage: SessionParent;
-  /** The caller's trace root, which a local child inherits. */
   readonly traceRoot?: SessionTraceRoot;
   readonly continuationToken?: string;
   readonly traceContext?: SessionTraceSeed;
   readonly originAudience?: ChannelAudience;
 }
 
-/**
- * Delegated input keeps file parts beside the synthesized child instructions.
- */
 interface FormattedSubagentInvocation extends StepInput {
   readonly message: MessageContent<string | URL>;
 }
 
-/**
- * Reads the `outputSchema` a `ctx.agent()` call requested. An empty `{}`
- * constrains nothing, but honoring it would flip the child into
- * structured-output mode and discard its text reply, so only a non-empty
- * object counts as a requested schema.
- */
 export function normalizeRequestedOutputSchema(
   outputSchema: JsonValue | undefined,
 ): JsonObject | undefined {
@@ -90,9 +80,6 @@ const formatSubagentInputByType = {
   },
 } satisfies SubagentInputFormatters;
 
-/**
- * Formats the stable delegated input handed to one child agent invocation.
- */
 export function formatSubagentInput(
   input: SubagentInputFormatRequest,
 ): FormattedSubagentInvocation {

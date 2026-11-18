@@ -2,17 +2,17 @@ import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
-import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
-import { setEveAttributes } from "#runtime/attributes/emit.js";
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { sessionProvider } from "#context/providers/session.js";
 import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
-import { sandboxProvider } from "#context/providers/sandbox.js";
+import { sandboxProvider, sessionSandboxIdleTimeoutMs } from "#context/providers/sandbox.js";
+import { markSandboxRunning } from "#sandbox/state.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -29,16 +29,22 @@ import {
   ChannelInstrumentationKey,
   HandleEventKey,
   ToolChannelKey,
+  ToolStubsKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { readPendingHistory, withoutPendingHistory } from "#execution/session/pending-history.js";
 import * as agentTraceState from "#tracing/eve/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
-import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import {
+  isTurnCancellation,
+  throwIfTurnAborted,
+  TurnCancelledError,
+} from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { isBetweenTurns, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import {
@@ -72,6 +78,7 @@ import {
   foldOrphanedLines,
   openSessionEventPublisher,
   readOrphanedLines,
+  type Entered,
 } from "#execution/publish-session-events.js";
 import {
   readInterruptedAttempt,
@@ -87,25 +94,40 @@ import { createTurnEventHandler } from "#execution/session/turn-event-handler.js
 import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
 import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { readHitlState } from "#harness/hitl/index.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import {
+  ownCallbacks,
+  readHitlState,
+  ResumeSignInKey,
+  settleSignIns,
+  signInsAnswered,
+  signInsEnded,
+  type SignInAnswer,
+} from "#harness/hitl/index.js";
 import {
   createDurableSessionValues,
   readDurableSession,
 } from "#execution/durable-session-store.js";
-import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import {
+  buildRuntimeIdentity,
+  createExecutionNodeStep,
+  type CreateRuntime,
+} from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
-import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { toolStubPlayback, type ToolStubHost } from "#execution/tool-stub-host.js";
+import { ToolStubPlaybackKey } from "#context/providers/tool-stubs-key.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
   createCancelledModelCallBatchResult,
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { signInInteractionId } from "#harness/interaction-facts.js";
+import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
+import { signInDelivery, type DurableHost } from "#execution/hosts.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export type { TurnStepInput };
 
@@ -113,45 +135,50 @@ const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
+  usage?: Promise<void>;
 }
 
-/** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
-export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
-  "use step";
-  if (input.handover !== undefined) {
-    traceSessionHandover(
-      "inbox_unblocked",
-      input.sessionState.sessionId,
-      input.handover.attemptKey,
-      {
-        "eve.handoff.buffered_payload_count": input.handover.payloadCount,
-        "eve.handoff.applied_at_ms": input.handover.appliedAtMs,
-        "eve.handoff.applied_at_clock": "workflow",
-      },
+export interface SessionStepHost {
+  readonly callbackBaseUrl?: string;
+  setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
+  readonly createRuntime: CreateRuntime;
+  readonly toolStubs?: ToolStubHost;
+  readonly deliver?: DurableHost["deliver"];
+}
+
+export function turnStepOn(
+  host: SessionStepHost,
+): (input: TurnStepInput) => Promise<TurnStepResult> {
+  return async (input) =>
+    await withSessionStateDelta(input, (state) =>
+      runSessionStep(
+        {
+          ...state,
+          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+        },
+        host,
+      ),
     );
-  }
-  return await withSessionStateDelta(input, (state) =>
-    runSessionStep({
-      ...state,
-      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-    }),
-  );
 }
 
-async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+async function runSessionStep(
+  input: Entered<TurnStepInput>,
+  host: SessionStepHost,
+): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
   try {
-    return await runSessionStepBody(input, pendingAttributes);
+    return await runSessionStepBody(input, pendingAttributes, host);
   } finally {
     await pendingAttributes.title;
+    await pendingAttributes.usage;
   }
 }
 
 async function runSessionStepBody(
-  input: TurnStepInput,
+  input: Entered<TurnStepInput>,
   pendingAttributes: PendingStepAttributes,
+  host: SessionStepHost,
 ): Promise<DurableStepResult> {
-  // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
   let delivery = rawDelivery;
   const runtimeResults = input.input?.runtimeResults;
@@ -159,13 +186,11 @@ async function runSessionStepBody(
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   enterSessionProjection(ctx, durableSession.state);
-  // An earlier attempt may have published past the checkpoint. The step recovers from what it
-  // wrote instead of running the model and tools again, so every position and id follows it.
   const orphaned = await readOrphanedLines({
     sessionId: durableSession.sessionId,
     position: nextLinePosition(ctx),
     sessionWritable: input.sessionWritable,
-    always: input.recover !== undefined,
+    rerun: input.recover !== undefined || input.rerun,
   });
   const interrupted =
     orphaned.length > 0 || input.recover !== undefined
@@ -175,19 +200,10 @@ async function runSessionStepBody(
     enterSessionProjectionAt(ctx, foldOrphanedLines(currentProjection(ctx), orphaned));
   }
   const adapter = ctx.require(ChannelKey);
-  const bundle = ctx.require(BundleKey);
+  const agent = sessionAgent(ctx);
+  const bundle = requireCompiledBundle(ctx);
 
-  // Populate the callback base URL so getHookUrl() works during tool
-  // execution, preferring eve's active local origin over metadata fallback.
-  try {
-    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-    const metadata = getWorkflowMetadata();
-    if (typeof metadata.url === "string") {
-      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
-    }
-  } catch {
-    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
-  }
+  if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
 
   const { signIns } = readHitlState(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
@@ -197,8 +213,27 @@ async function runSessionStepBody(
     if (matches.length > 0) {
       const matchedAttemptIds = matches.map((match) => match.result.attemptId);
       const authResults = matches.map((match) => match.result);
+      const baseUrl = ctx.get(CallbackBaseUrlKey);
+      if (baseUrl !== undefined && host.deliver !== undefined) {
+        const own = ownCallbacks(durableSession.sessionId, baseUrl);
+        const tables = storedProjection(durableSession.state).view;
+        await settleSignIns(
+          signInDelivery(host.deliver),
+          matches.flatMap(({ challenge, result }) => {
+            const answer = ownSignInAnswer(tables, challenge, result.callback);
+            if (answer !== undefined) return signInsAnswered(tables, answer, own);
+            const error = result.callback.params["error"];
+            return error === undefined
+              ? []
+              : signInsEnded(
+                  tables,
+                  { interactionId: signInInteractionId(challenge), reason: error },
+                  own,
+                );
+          }),
+        );
+      }
       ctx.set(PendingAuthorizationResultKey, authResults);
-      // The session stops waiting on them; the turn they resume reports their completion.
       const view = sessionView(storedProjection(durableSession.state), durableSession.state);
       const transition = matchSignIns(view, { attemptIds: matchedAttemptIds });
       if (transition.events.length !== 0) throw new Error("matchSignIns must not emit events.");
@@ -208,8 +243,6 @@ async function runSessionStepBody(
     }
   }
 
-  // A new inbound message is a new caller action, not a scheduled occurrence.
-  // Approval/input responses alone keep the parked turn's provenance.
   if (delivery?.payloads.some((payload) => payload.message !== undefined)) {
     ctx.delete(ScheduleIdKey);
     ctx.delete(ScheduleInstanceKey);
@@ -225,15 +258,10 @@ async function runSessionStepBody(
   const previousAuth = ctx.get(AuthKey);
   const hadInitiator = ctx.has(InitiatorAuthKey);
 
-  // Apply deliver-time auth ferried via `resumeHook` (initial-turn
-  // input has no auth; it was seeded by buildRunContext).
   if (delivery?.auth !== undefined) {
     ctx.set(AuthKey, delivery.auth ?? null);
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
-  // A sign-in callback carries no identity. Resume as the user who started the
-  // sign-in, not whoever spoke in the session while it was pending. Approval
-  // sign-ins (`candidateId`) bind their responder separately.
   const requester =
     delivery === undefined
       ? completedAuths?.find(({ challenge }) => challenge.candidateId === undefined)?.challenge
@@ -244,8 +272,15 @@ async function runSessionStepBody(
     ...hydrateDurableSession(durableSession),
     history: validateHarnessModelMessages(input.history),
   };
+  const sandboxIdleTimeoutMs = (session: HarnessSession) =>
+    sessionSandboxIdleTimeoutMs({
+      agent,
+      channelState: ctx.get(ChannelKey)?.state,
+      sandboxState: session.sandboxState,
+      sessionId: durableSession.sessionId,
+    });
   const instrumentation = bindSessionInstrumentation({
-    agentName: bundle.turnAgent.id,
+    agentName: agent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
@@ -262,14 +297,11 @@ async function runSessionStepBody(
     const title = deriveSessionTitle(rawDelivery?.title ?? message);
     if (title !== undefined) {
       ctx.set(SessionTitleKey, title);
-      pendingAttributes.title = setEveAttributes({ "$eve.title": title });
+      pendingAttributes.title = host.setAttributes({ "$eve.title": title });
     }
   }
 
   if (rawDelivery !== undefined) {
-    // Prepare only the session boundary here. Turn trace state is owned by the
-    // tool loop: preparing it this early would persist stale principals and a
-    // stale start time for deliveries that never start a turn (the park path).
     await contextStorage.run(ctx, () =>
       instrumentation?.preparePreamble({
         sequence: initialEmissionState.sequence,
@@ -285,8 +317,6 @@ async function runSessionStepBody(
     sessionWritable: input.sessionWritable,
   });
   const { adapterCtx } = publisher.dispatcher;
-  // A hook's `ctx.cancel()` aborts the same signal the harness already honors
-  // for `session.cancel()`, so both settle through one cancellation path.
   const hookCancellation = new AbortController();
   const abortSignal =
     input.abortSignal === undefined
@@ -294,7 +324,7 @@ async function runSessionStepBody(
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
     const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
-    const sessionUsageLimit = resolveSessionUsageLimit(bundle);
+    const sessionUsageLimit = agent.settings.limits?.sessionUsage;
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
@@ -317,14 +347,10 @@ async function runSessionStepBody(
       delivery !== undefined && !startedBetweenTurns
         ? structuredClone(adapterCtx.state)
         : undefined;
-    // Run the adapter's deliver hook for each queued payload and coalesce
-    // the resulting HarnessStepInput values; runtime results ride the same input.
     let resolved: HarnessStepInput | undefined;
     let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
       const delivered: { payload: DeliverPayload; input: StepInput | undefined }[] = [];
-      // History left by `create()` joins the first message's turn. It leaves state only once a
-      // deliver result carries it, so a dropped first message does not lose it.
       const pendingHistory = delivery.payloads.some((payload) => payload.message !== undefined)
         ? readPendingHistory(durableSession.state)
         : [];
@@ -338,7 +364,6 @@ async function runSessionStepBody(
             delivered.push({ input: undefined, payload });
             continue;
           }
-          // `history` is framework-owned, so a channel's deliver hook cannot drop or rewrite it.
           const history = [...(accepted === 0 ? pendingHistory : []), ...(payload.history ?? [])];
           accepted += 1;
           delivered.push({
@@ -362,8 +387,6 @@ async function runSessionStepBody(
       resolved =
         admission.inputs.length === 0 ? undefined : admission.inputs.reduce(coalesceTurnInputs);
     }
-    // A delivery without auth acts as the session's current identity, so
-    // only a delivery that names its sender can be answered by someone else.
     const answers =
       delivery?.auth === undefined
         ? undefined
@@ -374,17 +397,11 @@ async function runSessionStepBody(
             stepInput: resolved,
           });
     if (answers !== undefined) {
-      // The responder settles the request; the turn keeps its caller and
-      // initiator. Adapter state from the answer stays: channels record the
-      // responder and their prompt cards there, not the reply destination.
       resolved = answers;
       if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !startedBetweenTurns;
-    // The adapter saw the incoming caller. A responder's answers, an ignored
-    // correction and other input without a message keep a running turn's
-    // identity; a message joining it may update only its principal's claims.
     let turnAuth = ctx.get(AuthKey);
     if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
     else if (delivery !== undefined && !startedBetweenTurns) {
@@ -394,7 +411,6 @@ async function runSessionStepBody(
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
     if (ignoredActiveDelivery) {
-      // An ignored correction must not change the reply destination either.
       adapterCtx.state = previousAdapterState!;
     } else {
       if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {
@@ -428,9 +444,7 @@ async function runSessionStepBody(
       setChannelContext(ctx, updatedAdapter);
     }
 
-    /** Whether the admission changed the session: its history or its sandbox. */
     let admissionChangedSession = false;
-    /** The admission's commit: the session's start if it hasn't, then each delivery admitted. */
     const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): Commit => {
       if (admission === undefined || admitDeliveries(admission.deliveries).length === 0)
         return admitDeliveries([]);
@@ -448,28 +462,20 @@ async function runSessionStepBody(
             },
       });
     };
-    /** The admission commit, with the session's providers its hooks read. */
     const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
       const facts = admissionFacts(runtime);
       if (facts.length === 0) return;
-      // The admission commits before the step's framework context exists, and its hooks read
-      // the session (`ctx.session`) like every other commit's. The session's start resolves
-      // its dynamic connections into a registry, which the step's own scope rebuilds and
-      // rehydrates, and its dynamic skills write their files to the sandbox, whose state the
-      // step's scope resumes.
       const created = sessionProvider.create(ctx, initialSession);
       ctx.setVirtualContext(SessionKey, created.value);
       const registry = await connectionProvider.create(ctx, initialSession);
       if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
       const sandbox = await sandboxProvider.create(ctx, initialSession);
       if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.value);
-      // A user-role instruction the session's start resolves stays in its slot until the step
-      // builds the conversation, which takes it ahead of the turn's input.
-      // Instrumentation hears the admission like any commit, so providers see the session start.
       const publish = instrumentation?.createHandleEvent({ handleEvent }) ?? handleEvent;
       try {
         await contextStorage.run(ctx, () => publish(facts));
       } finally {
+        await publisher.drain();
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
           if (
@@ -482,11 +488,6 @@ async function runSessionStepBody(
       }
     };
 
-    /**
-     * A cancel stops the turn its input was selected for. Input it hadn't consumed yet joins that
-     * turn first, opening it if need be, so the cancel settles each delivery with the turn and the
-     * history that keeps the message agrees with the stream.
-     */
     const consumeCancelledInput = async (): Promise<void> => {
       const projection = currentProjection(ctx);
       const waiting = (resolved?.deliveries ?? []).filter(
@@ -496,7 +497,6 @@ async function runSessionStepBody(
       const received = commitTransitions([
         receive(sessionView(projection, initialSession.state), { deliveries: waiting }),
       ]);
-      // The turn is already stopping, so this commit's hooks have nothing left to cancel.
       const emit = createTurnEventHandler({
         abortSignal,
         canCancelTurn: false,
@@ -509,8 +509,7 @@ async function runSessionStepBody(
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
-      // Nothing here starts a turn, so a cancel has nothing to stop.
-      await publishAdmission(buildRuntimeIdentity(effectiveNode)).catch(ignoreTurnCancellation);
+      await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -528,17 +527,12 @@ async function runSessionStepBody(
       });
     }
 
-    const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
+    const runtimeIdentity = buildRuntimeIdentity(agent);
     let restoration: Promise<void> | undefined;
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
-          const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-          const revision = deploymentId
-            ? `deployment:${deploymentId}`
-            : await resolveRuntimeCompiledArtifactsVersionedCacheKey(
-                bundle.compiledArtifactsSource,
-              );
+          const revision = await agent.revision();
           await contextStorage.run(ctx, () =>
             restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
@@ -549,6 +543,10 @@ async function runSessionStepBody(
       })());
     };
     if (interrupted !== undefined) {
+      initialSession = markSandboxRunning(
+        initialSession,
+        await sandboxIdleTimeoutMs(initialSession),
+      );
       const recovered = await recoverInterruptedStep({
         admission: admissionFacts(runtimeIdentity),
         attempt: interrupted,
@@ -559,19 +557,24 @@ async function runSessionStepBody(
         ctx,
         failed: input.recover,
         publish: async (events, session) => {
-          const scoped = await withContextScope(ctx, session, async (current) => {
-            await prepareDefinitions(current);
-            const emit = createTurnEventHandler({
-              abortSignal,
-              canCancelTurn: false,
-              conversation: current.history,
-              hookCancellation: new AbortController(),
-              publisher,
-            });
-            const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
-            await publish(events);
-            return { result: undefined, session: current };
-          });
+          const scoped = await withContextScope(
+            ctx,
+            session,
+            async (current) => {
+              await prepareDefinitions(current);
+              const emit = createTurnEventHandler({
+                abortSignal,
+                canCancelTurn: false,
+                conversation: current.history,
+                hookCancellation: new AbortController(),
+                publisher,
+              });
+              const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
+              await publish(events);
+              return { result: undefined, session: current };
+            },
+            { drain: publisher.drain },
+          );
           return scoped.session;
         },
         session: initialSession,
@@ -582,7 +585,6 @@ async function runSessionStepBody(
       });
       if ("result" in recovered) {
         await instrumentation?.flush();
-        // The attempt that ended the session may have closed its stream already.
         if (recovered.result.action === "done") await publisher.writer.close().catch(() => {});
         return recovered.result;
       }
@@ -594,15 +596,13 @@ async function runSessionStepBody(
     try {
       await publishAdmission(runtimeIdentity);
     } catch (error) {
-      // A hook's cancel on the admission stops the turn below, like a cancel that arrives now.
       if (!isTurnCancellation(error)) {
         await instrumentation?.flush();
         throw error;
       }
     }
 
-    const modelCallsPerStep =
-      bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
+    const modelCallsPerStep = agent.settings.modelCallsPerStep ?? 1;
     const capabilities = ctx.get(CapabilitiesKey);
 
     const runHarnessStep = async (
@@ -617,7 +617,7 @@ async function runSessionStepBody(
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
         controlDelivery: input.input?.controlDelivery,
-        createRuntime: createWorkflowRuntime,
+        createRuntime: host.createRuntime,
         handleEvent,
         signInCompletions,
         typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
@@ -626,12 +626,15 @@ async function runSessionStepBody(
           moduleMap: bundle.moduleMap,
           nodeId: bundle.nodeId,
         },
+        agent,
         node: effectiveNode,
         sessionUsageLimit,
-        // The title's write finishes first.
         setAttributes: async (attributes) => {
-          await pendingAttributes.title;
-          await setEveAttributes(attributes);
+          const previous = pendingAttributes.usage ?? pendingAttributes.title;
+          pendingAttributes.usage = (async () => {
+            await previous?.catch(() => {});
+            await host.setAttributes(attributes);
+          })().catch(() => {});
         },
       });
       return step(lifecycleSession, stepInput);
@@ -640,9 +643,7 @@ async function runSessionStepBody(
     let completedModelCall: CompletedModelCallCheckpoint | undefined;
     let stepResult: StepResult;
     try {
-      // A signal already aborted at entry (cancellation during an in-line
-      // runtime-action wait) must settle before the park-resume stages run,
-      // or the pending batch would re-park and later re-dispatch.
+      if (input.recover?.stopped === true) throw new TurnCancelledError();
       throwIfTurnAborted(abortSignal);
       stepResult = await runModelCallBatch({
         steeringSignal: input.steeringSignal,
@@ -650,41 +651,44 @@ async function runSessionStepBody(
         initialSession,
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
-          const result = await runStep(ctx, session, async (enrichedSession) => {
-            // Races session resources against the model call; their users wait for what remains.
-            if (firstCall && input.input?.control === undefined) {
-              startSessionPrewarmers(ctx, "turn");
-            }
-            ctx.setVirtualContext(HandleEventKey, handleEvent);
-            ctx.setVirtualContext(ToolChannelKey, {
-              channel: channelOf(ctx),
-              to: createToolChannelTo({
-                delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadBundle: () => ctx.require(BundleKey),
-              }),
-            });
-            const schemaSession =
-              firstCall && resolved?.outputSchema !== undefined
-                ? { ...enrichedSession, outputSchema: resolved.outputSchema }
-                : enrichedSession;
-            // The scope's providers start empty; the slots fill what they own.
-            await installDefinitions(ctx);
-            // A sign-in completes before the turn it resumes, in the first call only.
-            const completions =
-              firstCall && completedAuths !== undefined
-                ? completedAuths.map(({ challenge }) => challenge)
-                : undefined;
-            const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
-            // Only the step knows whether it stopped for an interaction; the tables say which.
-            await publisher.finish({ announce: stoppedForPerson(harnessResult) });
-            return harnessResult;
-          });
-          // The waiting boundary may reach the client before this step returns.
-          // Its settled result wins over a cancellation of that completed turn.
+          const result = await runStep(
+            ctx,
+            session,
+            async (enrichedSession) => {
+              if (firstCall && input.input?.control === undefined) {
+                startSessionPrewarmers(ctx, "turn");
+              }
+              ctx.setVirtualContext(HandleEventKey, handleEvent);
+              if (host.deliver !== undefined)
+                ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
+              const stubs = ctx.get(ToolStubsKey);
+              if (stubs !== undefined)
+                ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(host.toolStubs, stubs));
+              ctx.setVirtualContext(ToolChannelKey, {
+                channel: channelOf(ctx),
+                to: createToolChannelTo({
+                  createRuntime: host.createRuntime,
+                  delegated: hasDelegatedSessionContext(input.serializedContext),
+                  loadAgent: () => agent,
+                }),
+              });
+              const schemaSession =
+                firstCall && resolved?.outputSchema !== undefined
+                  ? { ...enrichedSession, outputSchema: resolved.outputSchema }
+                  : enrichedSession;
+              await installDefinitions(ctx);
+              const completions =
+                firstCall && completedAuths !== undefined
+                  ? completedAuths.map(({ challenge }) => challenge)
+                  : undefined;
+              const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
+              await publisher.finish({ announce: stoppedForPerson(harnessResult) });
+              return harnessResult;
+            },
+            { drain: publisher.drain },
+          );
           if (result.settledTurn === undefined) throwIfTurnAborted(abortSignal);
-          // The call's result carries the lifecycle it published, which batching reads.
           const saved = { ...result, session: saveSessionProjection(result.session, ctx) };
-          // A cut continuation starts from this completed call's private state.
           recordAppliedSession(ctx, saved.session);
           completedModelCall = { result: saved, serializedContext: serializeContext(ctx) };
           return saved;
@@ -696,16 +700,20 @@ async function runSessionStepBody(
         throw error;
       }
       if (completedModelCall === undefined) await consumeCancelledInput();
+      await publisher.drain();
       return createCancelledModelCallBatchResult({
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
         ctx,
         initialSession,
+        sandboxIdleTimeoutMs: await sandboxIdleTimeoutMs(
+          completedModelCall?.result.session ?? initialSession,
+        ),
         stepInput: resolved,
       });
     }
 
-    // Re-stamp the current address after handlers add a continuation alias.
+    await publisher.drain();
     const aliased = saveSessionProjection(
       dropClosedRecords(
         reconcileSessionContinuationToken(ctx, stepResult.session),
@@ -726,20 +734,27 @@ async function runSessionStepBody(
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
-    publisher.writer.release();
+    await publisher.release();
   }
 }
 
-/**
- * The step stopped for an interaction: it says so, or it stopped with nothing of its own to wait on,
- * and the tables say whether that's an interaction (`announceWaiting`).
- */
 function stoppedForPerson(result: StepResult): boolean {
   if (result.held !== undefined) return result.held.kind === "request";
   return result.next === null && result.settledTurn === undefined;
 }
 
-/** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */
 function ignoreTurnCancellation(error: unknown): void {
   if (!isTurnCancellation(error)) throw error;
+}
+
+function ownSignInAnswer(
+  tables: SessionView,
+  challenge: AuthorizationChallenge,
+  callback: AuthorizationCallback,
+): SignInAnswer | undefined {
+  const interactionId = signInInteractionId(challenge);
+  const signIn = tables.interactions[interactionId]?.request.signIn;
+  const error = callback.params["error"];
+  if (signIn === undefined || (error !== undefined && error !== SIGN_IN_DECLINED)) return undefined;
+  return { interactionId, outcome: error === undefined ? "accepted" : "declined", signIn };
 }

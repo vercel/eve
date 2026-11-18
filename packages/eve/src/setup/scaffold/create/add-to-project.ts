@@ -26,10 +26,6 @@ export interface AddAgentToProjectOptions {
   projectRoot: string;
   model: string;
   reasoning?: AgentReasoningDefinition;
-  /**
-   * The host project's package manager, which owns any manager-specific
-   * generated project configuration. Defaults to pnpm.
-   */
   packageManager?: PackageManagerKind;
   evePackage?: EvePackageContract;
   aiPackageVersion?: string;
@@ -40,9 +36,7 @@ export interface AddAgentToProjectOptions {
 interface AddAgentToProjectResult {
   filesWritten: string[];
   configurationFilesChanged: string[];
-  /** Dependencies added to package.json; ones the project already declares anywhere are left untouched. */
   dependenciesAdded: string[];
-  /** Present when an incompatible package.json engines.node value was replaced. */
   nodeEngineOverride?: NodeEngineOverride;
 }
 
@@ -68,14 +62,6 @@ function hasDeclaredDependency(packageJson: unknown, dependencyName: string): bo
   return false;
 }
 
-/**
- * Adds an eve agent to an existing package: writes the `agent/` files, adds
- * missing runtime dependencies, reconciles `engines.node` with eve's
- * requirement, and applies the selected package manager's project
- * configuration. Other host configuration (tsconfig, scripts, ignore files)
- * remains untouched. All conflicts are gathered and reported before anything
- * is written.
- */
 export async function addAgentToProject(
   options: AddAgentToProjectOptions,
 ): Promise<AddAgentToProjectResult> {
@@ -120,9 +106,6 @@ export async function addAgentToProject(
     "aiPackageVersion",
     options.aiPackageVersion ?? DEFAULT_AI_PACKAGE_VERSION,
   );
-  // Channels and connections scaffolded later (`eve add channel/slack`,
-  // possibly while `eve dev` is running) import `@vercel/connect`; shipping
-  // it from init means adding them never introduces a missing dependency.
   const connectVersion = resolveVersionToken(
     "connectPackageVersion",
     options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,

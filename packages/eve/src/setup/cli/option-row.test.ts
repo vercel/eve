@@ -120,7 +120,6 @@ describe("renderOptionRow", () => {
   });
 
   test("hovering a checked row keeps its check inside the highlight", () => {
-    // The highlight says "active", not "press to activate": the check stays.
     expect(
       row({
         label: "Web Chat",

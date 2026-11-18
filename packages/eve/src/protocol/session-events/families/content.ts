@@ -18,6 +18,7 @@ export interface ContentDeltaData {
   readonly delta: string;
 }
 
+/** The payload of `content.completed`: a content part's whole value, such as reply text, reasoning, a result, or a file. */
 export interface ContentCompletedData {
   readonly partId: string;
   /** The model run that wrote the part. Absent when its turn wrote it, which `scope.turnId` names. */
@@ -34,9 +35,13 @@ export interface ContentCompletedData {
   readonly fallbackText?: string;
 }
 
+/** A progress record previewing part of a content part's value as it streams. */
 export type ContentDelta = Envelope<"content.delta", ContentDeltaData>;
+/** The fact recording a finished content part. */
 export type ContentCompleted = Envelope<"content.completed", ContentCompletedData>;
+/** Any fact in the `content` family. */
 export type ContentFact = ContentCompleted;
+/** Any progress record in the `content` family. */
 export type ContentProgress = ContentDelta;
 
 export const contentSchemas = {

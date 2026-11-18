@@ -39,12 +39,6 @@ async function hasApiKeyInFile(filePath: string, key: string): Promise<boolean> 
   return false;
 }
 
-/**
- * Returns the first env file (`.env.local`, then `.env`) defining a non-empty
- * value for `key`, or `undefined` when neither does. Exported for flows that
- * verify credentials landed after a `vercel env pull` (the `eve link` flow
- * checks both `VERCEL_OIDC_TOKEN` and `AI_GATEWAY_API_KEY`).
- */
 export async function findEnvFileWithKey(
   projectRoot: string,
   key: string,
@@ -67,12 +61,6 @@ export async function detectAiGatewayResolution(
   return { kind: "unresolved" };
 }
 
-/**
- * THE AI GATEWAY DETECTION BOX: reads the scaffolded project's `.env.local` and
- * `.env` for an existing `AI_GATEWAY_API_KEY` so the credential step can skip
- * work already done. Pure detection: it prompts for nothing, so the single
- * gather produces an empty input in every mode.
- */
 export function detectAiGateway(): SetupBox<SetupState, null, ResolvedAiGatewayCredentials> {
   return {
     id: "detect-ai-gateway",

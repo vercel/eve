@@ -1,4 +1,3 @@
-/** Internal signal used to stop an eval after a recorded required assertion fails. */
 export class EvalRequirementFailed extends Error {
   constructor() {
     super("A required eval assertion failed.");
@@ -6,7 +5,6 @@ export class EvalRequirementFailed extends Error {
   }
 }
 
-/** Internal signal used by `t.skip()` to produce a skipped verdict. */
 export class EvalSkipped extends Error {
   readonly reason: string;
 

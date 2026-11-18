@@ -6,7 +6,6 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** The session with `usage` as what its view records it spent, as model usage. */
 export function withSessionUsage<T extends { readonly state?: SessionStateMap }>(
   session: T,
   usage: Partial<TokenUsage>,
@@ -24,7 +23,6 @@ export function withSessionUsage<T extends { readonly state?: SessionStateMap }>
   };
 }
 
-/** Renew through the recorded acceptance, not a private window setter. */
 export function acceptSessionBudget<T extends { readonly state?: SessionStateMap }>(session: T): T {
   const projection = storedProjection(session.state);
   const interactionId = `budget_${projection.view.position}`;

@@ -55,7 +55,6 @@ export class EvalSessionManager {
     return driver;
   }
 
-  /** A recorded stub failure always fails the eval, even if the agent recovers. */
   async verifyStubs(): Promise<void> {
     for (const session of this.#stubbedSessions) {
       const response = await this.#client.fetch(createEveSessionStubsRoutePath(session.sessionId), {
@@ -143,7 +142,6 @@ export class EvalSessionManager {
     options?: { readonly startIndex?: number },
   ): EvalSessionDriver {
     const startIndex = options?.startIndex ?? 0;
-    // What this eval already read of the session names the calls a later read settles.
     const history = this.#sessions
       .filter((driver) => driver.id === sessionId)
       .flatMap((driver) => driver.events)

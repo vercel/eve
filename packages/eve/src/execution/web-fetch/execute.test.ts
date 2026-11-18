@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { MAX_OUTPUT_BYTES, MAX_OUTPUT_LINES } from "#execution/sandbox/truncate-output.js";
-import { convertHtmlToMarkdown, extractTextFromHtml } from "#execution/web-fetch/html.js";
+import { extractTextFromHtml } from "#execution/web-fetch/html.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { executeWebFetchTool } from "#execution/web-fetch/execute.js";
 
@@ -10,59 +10,6 @@ vi.mock("#execution/web-fetch/request.js", () => ({
 }));
 
 const requestPublicUrlMock = vi.mocked(requestPublicUrl);
-
-describe("convertHtmlToMarkdown", () => {
-  it("converts headings to ATX-style markdown", () => {
-    const html = "<h1>Title</h1><h2>Subtitle</h2><p>Body text.</p>";
-    const markdown = convertHtmlToMarkdown(html);
-
-    expect(markdown).toContain("# Title");
-    expect(markdown).toContain("## Subtitle");
-    expect(markdown).toContain("Body text.");
-  });
-
-  it("converts links to markdown syntax", () => {
-    const html = '<a href="https://example.com">Example</a>';
-    const markdown = convertHtmlToMarkdown(html);
-
-    expect(markdown).toContain("[Example](https://example.com)");
-  });
-
-  it("removes script, style, meta, and link elements", () => {
-    const html = [
-      "<html><head>",
-      '<meta charset="utf-8">',
-      '<link rel="stylesheet" href="style.css">',
-      "<style>body { color: red; }</style>",
-      "</head><body>",
-      "<script>alert('xss')</script>",
-      "<p>Visible content.</p>",
-      "</body></html>",
-    ].join("");
-    const markdown = convertHtmlToMarkdown(html);
-
-    expect(markdown).toContain("Visible content.");
-    expect(markdown).not.toContain("alert");
-    expect(markdown).not.toContain("color: red");
-    expect(markdown).not.toContain("stylesheet");
-  });
-
-  it("converts unordered lists with dash markers", () => {
-    const html = "<ul><li>One</li><li>Two</li></ul>";
-    const markdown = convertHtmlToMarkdown(html);
-
-    expect(markdown).toMatch(/-\s+One/);
-    expect(markdown).toMatch(/-\s+Two/);
-  });
-
-  it("converts fenced code blocks", () => {
-    const html = "<pre><code>const x = 1;</code></pre>";
-    const markdown = convertHtmlToMarkdown(html);
-
-    expect(markdown).toContain("```");
-    expect(markdown).toContain("const x = 1;");
-  });
-});
 
 describe("extractTextFromHtml", () => {
   it("strips all HTML tags and returns plain text", () => {
@@ -117,8 +64,6 @@ describe("extractTextFromHtml", () => {
   });
 
   const KIB_256 = 256 * 1024;
-  // Most of these took seconds before the linear scan (quadratic regex
-  // backtracking). The 1 s bound is deliberately loose to avoid CI flake.
   it.each([
     ["<script x", "<script x".repeat(KIB_256 / 9)],
     ["<", "<".repeat(KIB_256)],
@@ -205,7 +150,6 @@ describe("executeWebFetchTool", () => {
   it("converts HTML served without a Content-Type", async () => {
     const script = "const ignored = 1;\n".repeat(MAX_OUTPUT_LINES + 500);
     const html = `\n<!DOCTYPE html><html><head><script>${script}</script></head><body><h1>Visible title</h1></body></html>`;
-    // Bytes, because a string body would get an implicit text/plain header.
     requestPublicUrlMock.mockResolvedValueOnce(new Response(new TextEncoder().encode(html)));
 
     const result = await executeWebFetchTool({ url: "https://example.com" });

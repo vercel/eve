@@ -281,7 +281,7 @@ Each agent chooses its own mount name and configuration. For example, `shared.ts
 
 #### Develop from source
 
-`eve dev` builds mounted workspace extensions from source before it compiles the agent. It watches each extension's source, `package.json`, and TypeScript configuration, and rebuilds only the extension you changed. If an edit fails to build, the last successful build keeps running.
+`eve dev` builds mounted workspace extensions from source before it compiles the agent, along with any workspace extensions those extensions depend on. It watches each extension's source, `package.json`, and TypeScript configuration, and rebuilds only the extension you changed. If an edit fails to build, the last successful build keeps running.
 
 `eve build`, and `withEve` during `next build`, also build these extensions from source first, and skip an extension that is already up to date. Production builds don't need the package's `prepare` script, which package managers skip for no-op installs and with `--ignore-scripts`.
 

@@ -33,7 +33,6 @@ const THREAD_ID = "test:C01:1700000000.000001";
 const CHANNEL_ID = "test:C01";
 const PRESS = { actionId: "eve_input:request-1:approve", kind: "action", value: "approve" };
 
-/** Posts a press to the bridge's webhook and drains every task it hands to `waitUntil`. */
 async function firePress(channel: unknown, sendError?: Error): Promise<Response> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
   const post = channel.routes.find(
@@ -343,7 +342,6 @@ class NotImplementedError extends Error {
   }
 }
 
-/** An adapter whose webhook turns a `{ kind: "action" }` body into a press on `message-1`. */
 class TestAdapter {
   readonly name = "test";
   readonly userName = "bot";

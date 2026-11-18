@@ -4,7 +4,6 @@ import { resumeWebhook } from "#internal/workflow/runtime.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { walkCauseChain } from "#shared/errors.js";
 
-/** The path `createWebhook()` mints, so external systems call back without knowing eve. */
 export const WORKFLOW_WEBHOOK_ROUTE_PATTERN = "/.well-known/workflow/v1/webhook/:token";
 
 export async function handleWorkflowWebhookRequest(
@@ -17,7 +16,6 @@ export async function handleWorkflowWebhookRequest(
   }
 
   try {
-    // Nitro can supply lazy Headers objects that Workflow's native serializer cannot read.
     const callback = new Request(request.url, {
       method: request.method,
       headers: new Headers(request.headers),

@@ -103,6 +103,9 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 | `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token         |
 | `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
 | `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
+| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`  |
+
+With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
 
 Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
 
@@ -158,7 +161,7 @@ export default git({
 });
 ```
 
-For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected.
+For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected. When the command's own input is refused before it runs, such as shell syntax, a `workingDirectory` outside the workspace, a `gh-signed-commit` directory that is not a repository root, or a missing `--body-file`, `executeGitHubShell` throws `GitHubCommandInputError`; detect it with `isGitHubCommandInputError(error)` to tell the agent's mistakes apart from configuration, Connect, and sandbox failures.
 
 ## Prepare the sandbox
 

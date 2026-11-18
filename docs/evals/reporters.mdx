@@ -101,7 +101,7 @@ Metric names come from assertion names:
 
 For example, `succeeded` becomes `gate_succeeded` and `calledTool(get_stock_quote)` becomes `gate_calledTool_get_stock_quote`. Use `.label("stable name")` to choose a stable metric name. Assertion names can contain authored expectations, so review them before exporting sensitive evals. Row metadata keeps each assertion's name and score under `eveAssertionScores`; pass `recordAssertionDetails: false` to omit them and failed assertion messages.
 
-Install `dd-trace` (tested against `dd-trace@6.13.0`: `npm install dd-trace@6.13.0`). Set `DD_API_KEY`, `DD_APP_KEY`, and `DD_SITE` as appropriate. Without credentials, reporting is skipped.
+Install `dd-trace` (tested against `dd-trace@6.20.1`: `npm install dd-trace@6.20.1`). Set `DD_API_KEY`, `DD_APP_KEY`, and `DD_SITE` as appropriate. Without credentials, reporting is skipped.
 
 Like the Braintrust reporter, it records eval prompts, outputs, authored expectations, and execution error messages by default. Pass `recordInputs: false`, `recordOutputs: false`, `recordExpectedOutputs: false`, or `recordErrors: false` if your destination isn't approved for that content.
 

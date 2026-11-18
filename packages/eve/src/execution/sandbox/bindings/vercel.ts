@@ -21,7 +21,10 @@ import type {
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
-import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+import {
+  VERCEL_EVE_GIT_SANDBOX_IMAGE,
+  VERCEL_EVE_SANDBOX_IMAGE,
+} from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
   createVercelNetworkPolicySetter,
@@ -78,7 +81,6 @@ export type VercelSandboxSessionState = {
   readonly version: 3;
 };
 
-/** Capabilities a Vercel connection adds to the session. */
 export type VercelSandboxExtensions = Pick<VercelSandboxSession, "name" | "setNetworkPolicy">;
 
 interface CreateVercelSandboxInput {
@@ -103,9 +105,10 @@ export function createVercelSandbox(
     timeout: input.createOptions?.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS,
   };
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
+  const image = createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE;
   const usesEveBase =
     createOptions.source === undefined &&
-    (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE) === VERCEL_EVE_SANDBOX_IMAGE;
+    (image === VERCEL_EVE_SANDBOX_IMAGE || image === VERCEL_EVE_GIT_SANDBOX_IMAGE);
 
   return {
     async onSessionEnd(context, state, { signal }) {
@@ -116,18 +119,26 @@ export function createVercelSandbox(
         signal,
       });
     },
+    async onSessionIdle(context, state, { signal }) {
+      const sandbox = await getNamedVercelSandbox({
+        createOptions: signal === undefined ? createOptions : { ...createOptions, signal },
+        sandboxModule: await loadSandboxModule(),
+        sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
+      });
+      if (sandbox === null) return;
+      try {
+        await stopVercelSandbox(sandbox, signal);
+      } catch (error) {
+        if (!isVercelSandboxMissingError(error)) throw error;
+      }
+    },
     async prepare(context) {
-      // Without build-time inputs, sessions can initialize directly from the image.
-      // An authored `source` keeps a snapshot instead of being fetched again per session.
       if (context.isEmpty && createOptions.source === undefined) return {};
       try {
         const templateKey = `eve-sbx-tpl-vercel-${context
           .templateKey({
             createOptions: vercelIdentityOptions(createOptions),
-            resolvedImage:
-              createOptions.source === undefined
-                ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
-                : undefined,
+            resolvedImage: createOptions.source === undefined ? image : undefined,
             version: 4,
           })
           .slice(0, 32)}`;
@@ -159,7 +170,16 @@ export function createVercelSandbox(
           `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
         );
       }
-      await ensureVercelSandboxBaseRuntime(sandbox);
+      try {
+        await ensureVercelSandboxBaseRuntime(sandbox);
+      } catch (error) {
+        if (isVercelSnapshotNotFoundError(error)) {
+          throw new SandboxSessionGoneError(
+            `Vercel sandbox session "${state.sandboxName}" can no longer resume: its snapshot expired or was deleted.`,
+          );
+        }
+        throw error;
+      }
       return createVercelConnection(sandbox);
     },
     async start(context, options, artifact) {
@@ -167,7 +187,6 @@ export function createVercelSandbox(
       const sandbox = await openSession(context, options, artifact, sandboxName);
       return { connection: createVercelConnection(sandbox), state: { sandboxName, version: 3 } };
     },
-    // Saved filesystems expire, so a keyed tool session's sandbox is bounded.
     toolSessions: true,
   };
 
@@ -206,36 +225,12 @@ export function createVercelSandbox(
     };
     try {
       const session = await ensureUsableSession({
-        // Only an expired snapshot gives a tool session a fresh sandbox.
         expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
         inheritsBaseRuntime:
           artifact.snapshotId !== undefined && mounts === undefined && usesEveBase,
         input: ensureSessionInput,
         session: await ensureSession(ensureSessionInput),
       });
-      // Template-less sessions run base setup with open egress, so the policy
-      // from open() or else the environment applies only once it finishes.
-      const networkPolicy = sessionCreateOptions.networkPolicy;
-      if (session.created && artifact.snapshotId === undefined && networkPolicy !== undefined) {
-        try {
-          await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
-        } catch (error) {
-          try {
-            await deleteNamedVercelSandbox({
-              createOptions: sessionCreateOptions,
-              sandboxModule,
-              sandboxName: session.sandbox.name,
-            });
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              `Failed to apply network policy and discard Vercel sandbox session "${context.session.id}".`,
-              { cause: error },
-            );
-          }
-          throw error;
-        }
-      }
       return session.sandbox;
     } catch (error) {
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
@@ -253,11 +248,6 @@ export function createVercelSandbox(
   }
 }
 
-/**
- * The session's sandbox name. Sandbox names are unique within a Vercel
- * project, so the session id alone keeps it stable across deployments and
- * open options; those apply only when the sandbox is created.
- */
 function vercelSessionName(sessionId: string): string {
   return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;
 }
@@ -285,11 +275,6 @@ function requirePreparedVercelTemplate(artifact: SandboxJson): VercelSandboxPrep
   return artifact.snapshotId === undefined ? {} : { snapshotId: artifact.snapshotId };
 }
 
-/**
- * eve's mounts in the SDK's `{ drive, mode }` form. A `Drive` mounts
- * read-write by name, as the SDK does, so a `Drive` from the app's own
- * `@vercel/sandbox` install works too.
- */
 function toVercelMounts(
   mounts: VercelSandboxMounts,
 ): Record<string, { readonly drive: string; readonly mode: VercelSandboxMountMode }> {
@@ -303,7 +288,6 @@ function toVercelMounts(
   );
 }
 
-/** Create options with the default sandbox timeout applied once. */
 type ResolvedVercelCreateOptions = VercelCreateOptions & { readonly timeout: number };
 
 interface EnsureTemplateInput {
@@ -314,14 +298,6 @@ interface EnsureTemplateInput {
   readonly templateKey: string;
 }
 
-/**
- * Returns the prepared snapshot for one template key. Builds of the same
- * revision share it through a pointer: a stopped sandbox named by the key,
- * created from a snapshot that finished preparing. Preparation itself runs
- * in a private sandbox no other build can see, so nothing under the shared
- * name ever holds unfinished work, and deleting a stale pointer can never
- * remove another build's preparation.
- */
 async function ensureTemplate(input: EnsureTemplateInput): Promise<string> {
   const sandboxModule = await input.loadSandboxModule();
   const pointer = await getNamedVercelSandbox({
@@ -343,11 +319,6 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<string> {
   }
 
   const snapshotId = await prepareTemplateSnapshot(input, sandboxModule);
-  /*
-   * The pointer only saves later builds a preparation; this build's snapshot
-   * is already valid. So publishing never fails the build, including when a
-   * build replacing the same stale pointer deletes this one mid-publish.
-   */
   await publishTemplatePointer(input, sandboxModule, pointer, snapshotId).catch(
     (error: unknown) => {
       input.context.log(`could not publish sandbox template: ${errorMessage(error)}`);
@@ -356,16 +327,10 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<string> {
   return snapshotId;
 }
 
-/** Prepares the template in a sandbox only this build knows, and returns its snapshot. */
 async function prepareTemplateSnapshot(
   input: EnsureTemplateInput,
   sandboxModule: VercelModule,
 ): Promise<string> {
-  /*
-   * Not persistent: a sandbox this build abandons (killed, timed out) is
-   * discarded without an automatic snapshot, and its name is unique, so no
-   * other build ever finds it.
-   */
   const sandbox = await input.createSandbox({
     sandboxModule,
     createOptions: withBaseSetupNetworkPolicy({
@@ -379,27 +344,15 @@ async function prepareTemplateSnapshot(
     await ensureVercelSandboxBaseRuntime(sandbox);
     await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
     await input.context.populate(createVercelConnection(sandbox));
-    // Authored preparation can change the base paths inherited by every new session.
     await ensureVercelSandboxBaseRuntime(sandbox);
-    // The returned snapshot, not the handle's cached `currentSnapshotId`, which the SDK may not refresh.
     return (await sandbox.snapshot()).snapshotId;
   } finally {
-    /*
-     * A snapshot outlives its source sandbox, so the private sandbox is never
-     * needed again. Failing to delete it doesn't change this build's result:
-     * it's not persistent, and no other build looks it up.
-     */
     await sandbox.delete().catch((error: unknown) => {
       input.context.log(`could not delete sandbox ${sandbox.name}: ${errorMessage(error)}`);
     });
   }
 }
 
-/**
- * Records a finished snapshot under the template key, replacing a stale
- * pointer. When another build published first, its snapshot is as valid as
- * this one, and this build keeps its own: there is nothing to read back.
- */
 async function publishTemplatePointer(
   input: EnsureTemplateInput,
   sandboxModule: VercelModule,
@@ -410,11 +363,9 @@ async function publishTemplatePointer(
     try {
       await stalePointer.delete();
     } catch (error) {
-      // Another build that saw the same stale pointer deleted it first.
       if (!isVercelSandboxMissingError(error)) throw error;
     }
   }
-  // A snapshot source excludes `image`, `runtime`, and any authored source.
   const {
     image: _image,
     runtime: _runtime,
@@ -461,7 +412,6 @@ async function ensureUsableSession(input: {
   readonly session: VercelSandboxSessionCreateResult;
 }): Promise<VercelSandboxSessionCreateResult> {
   const ensureBaseRuntime = async (session: VercelSandboxSessionCreateResult) => {
-    // A fresh restore inherits the base runtime checked before the snapshot was captured.
     if (session.created && input.inheritsBaseRuntime) return;
     await ensureVercelSandboxBaseRuntime(session.sandbox);
   };
@@ -481,7 +431,6 @@ async function ensureUsableSession(input: {
       sandboxName: input.session.sandbox.name,
     });
   } catch (error) {
-    // Another instance that saw the same expiry deleted it first.
     if (!isVercelSandboxMissingError(error)) throw error;
   }
   const replacement = await ensureSession(input.input);
@@ -516,7 +465,6 @@ async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSe
       }),
     };
   } catch (error) {
-    // Lookup-then-create is not atomic: another instance created the name first.
     if (!isVercelSandboxNameConflictError(error)) throw error;
     const winner = await getNamedVercelSandbox({ ...input, sandboxName });
     if (winner === null) throw error;
@@ -531,19 +479,13 @@ function createSessionCreateParams(
   const createOptions: VercelCreateOptions = { ...input.createOptions };
   if (input.mounts !== undefined) createOptions.mounts = input.mounts;
   if (input.snapshotId === undefined) {
-    return withBaseSetupNetworkPolicy({
+    return {
       ...createOptions,
       name: sandboxName,
       persistent: true,
-    });
+    };
   }
 
-  /*
-   * Strip `source`, `runtime`, and `image` from author-supplied create options
-   * for the template-backed session path. The framework owns the source there,
-   * and a snapshot source is mutually exclusive with both `runtime` and `image`
-   * (the template snapshot already has the eve image baked in).
-   */
   const {
     image: _image,
     runtime: _runtime,
@@ -609,14 +551,8 @@ function createVercelConnection(
   };
 }
 
-/** Keeps each `realpath` argument list far below the kernel's argument size limit. */
 const REALPATH_ARGUMENT_BYTES = 64 * 1024;
 
-/**
- * The SDK writes by unpacking a tar archive, which replaces a symlinked
- * destination instead of writing through it. Resolve every path first, with
- * as few `realpath` calls as the argument size limit allows.
- */
 async function resolveVercelWriteFiles(
   sandbox: VercelSandbox,
   files: SandboxWriteFilesOptions["files"],
@@ -645,7 +581,6 @@ async function resolveVercelWriteFiles(
   });
 }
 
-/** `-z` ends each path with NUL, so names with whitespace or newlines come back intact. */
 async function resolveVercelPaths(
   sandbox: VercelSandbox,
   paths: readonly string[],
@@ -669,8 +604,4 @@ async function resolveVercelPaths(
   return resolved;
 }
 
-/**
- * 30 minutes. The `@vercel/sandbox` SDK defaults to 5 minutes which is
- * too short for multi-step workflows — the VM expires between steps.
- */
 const DEFAULT_SANDBOX_TIMEOUT_MS = 30 * 60 * 1_000;

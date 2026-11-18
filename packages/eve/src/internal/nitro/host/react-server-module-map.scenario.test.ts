@@ -11,10 +11,6 @@ const execFileAsync = promisify(execFile);
 describe("react-server module maps", () => {
   const scenarioApp = useScenarioApp();
 
-  // `@acme/db` declares `server-only` itself, so the app cannot resolve it
-  // under pnpm's strict layout. NODE_OPTIONS conditions resolve through the
-  // same `authoredModuleConditions` call; its unit test owns reading them from
-  // the environment.
   it.each([
     { conditions: [], expected: "server-only-ready:default" },
     { conditions: ["--conditions=react-server"], expected: "server-only-ready:react-server" },
@@ -48,7 +44,6 @@ describe("react-server module maps", () => {
           "agent/agent.ts":
             'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/instructions.md": "Reply concisely.",
-          // Step modules reach the Nitro bundle directly instead of through the module map.
           "agent/tools/lookup.ts": [
             'import "server-only";',
             'import { defineWorkflowTool } from "eve/tools";',

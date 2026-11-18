@@ -15,9 +15,7 @@ const API_KEY = "linq-conformance-api-key";
 const SIGNING_KEY = Buffer.from("linq-conformance-signing-key");
 const SIGNING_SECRET = `whsec_${SIGNING_KEY.toString("base64")}`;
 const BASE_URL = "https://linq-conformance.invalid/api/partner";
-// Stands in for cdn.linqapp.com; `.invalid` never resolves, so nothing that bypasses the fake reaches the network.
 const CDN_HOST = "cdn.linq-conformance.invalid";
-// As on Linq, a handle's `id` is opaque; only `handle`, a phone number or email, can be messaged.
 const PERSON = { handle: "+15550100", id: "handle-alice" };
 let nextChat = 0;
 
@@ -28,11 +26,9 @@ interface LinqPart {
 
 interface LinqMessageBody {
   readonly message?: { readonly parts?: readonly LinqPart[] };
-  /** An edit's replacement text. */
   readonly text?: string;
 }
 
-/** Drives the real Linq adapter through signed webhooks, in a group chat by default or 1:1. */
 export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
   const group = surface === "shared";
   nextChat += 1;
@@ -40,12 +36,10 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
   let messageId = 0;
   let outbound = 0;
   let restoreFetch: (() => void) | undefined;
-  /** Files a person sent, by the permanent CDN URL Linq lists each under. */
   const uploads = new Map<string, SentFile>();
 
   function signedMessage(text: string, files: readonly SentFile[] = []): Request {
     messageId += 1;
-    // Linq sends each file as a `media` part beside the text.
     const media = files.map((file, index) => {
       const url = `https://${CDN_HOST}/${chatId}/${messageId}-${index}/${file.name}`;
       uploads.set(url, file);
@@ -60,7 +54,6 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
     });
     const body = JSON.stringify({
       data: {
-        // Linq's bridge hears every group message; a mention would route past its handler.
         chat: { id: chatId, is_group: group },
         direction: "inbound",
         id: `linq-inbound-${messageId}`,
@@ -88,6 +81,9 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
 
   return {
     name: group ? "linq" : "linq-dm",
+    space: group
+      ? { id: `linq:${chatId}`, type: "shared" }
+      : { id: `linq:${chatId}`, type: "direct", visibility: "private" },
     personId: PERSON.id,
     capabilities: ["attachments", "text-replies"],
     surface,
@@ -104,11 +100,9 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
         }
         const bodyText = await request.text();
         const body = bodyText === "" ? {} : (JSON.parse(bodyText) as { readonly to?: unknown });
-        // Starting a chat (`messages.create`) needs a handle Linq can reach.
         if (Array.isArray(body.to) && body.to.some((to) => to !== PERSON.handle)) {
           return {
             body,
-            // Never delivered, so no reader takes it for a sent message.
             method: `${request.method} ${url.pathname} (rejected)`,
             response: Response.json({ error: "invalid recipient" }, { status: 400 }),
           };
@@ -118,11 +112,9 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
         return {
           body,
           method: `${request.method} ${url.pathname}`,
-          // The adapter reads the sent or edited message's id back to edit it later.
           response: { chat_id: chatId, id, message: { id } },
         };
       });
-      // The adapter accepts no fetch option, so route only its test host globally and preserve other fetches.
       globalThis.fetch = async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input.toString());
         if (url.hostname === new URL(BASE_URL).hostname || url.hostname === CDN_HOST) {
@@ -146,7 +138,6 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
     findOptions(call, prompt) {
       if (!call.method.endsWith("/messages") || !postedText(call)?.includes(prompt))
         return undefined;
-      // The Chat SDK bridge's fallback text replaces Linq's own `Options:` card flattening.
       return numberedOptions(postedText(call)!);
     },
     press() {
@@ -156,7 +147,6 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
     shownMessage(call) {
       const text = postedText(call);
       if (text === undefined) return undefined;
-      // A send's id comes back from Linq; an edit names the message it rewrites in its path.
       const id = call.method.startsWith("PATCH ")
         ? call.method.split("/").at(-1)!
         : (call.response as { readonly id: string }).id;
@@ -165,7 +155,6 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
   };
 }
 
-/** Text the bot sent (`POST …/messages`) or edited a message to (`PATCH /messages/:id`). */
 function postedText(call: PlatformCall): string | undefined {
   const body = call.body as LinqMessageBody;
   if (call.method.startsWith("PATCH ") && call.method.includes("/messages/")) return body.text;

@@ -10,6 +10,7 @@ import {
   applyAttributes,
 } from "./span-kinds.js";
 import { mcpLifecycle, type McpLifecycle } from "./mcp.js";
+import { memoryToolLifecycle, type MemoryToolLifecycle } from "./memory.js";
 import { intersectCapture } from "./activation.js";
 import { snapshotRecord, traceSnapshot, validSnapshot, boundedSerializer } from "./snapshot.js";
 import { withAgentHandoff } from "./delegation.js";
@@ -39,7 +40,6 @@ interface Construction extends Partial<ScopeRecord> {
   readonly key: string;
   readonly deferred?: boolean;
   readonly executionContext?: ExecutionContext;
-  /** Applies sampling to a host-supplied root reference. */
   readonly sample?: boolean;
 }
 export interface ChildOptions {
@@ -48,43 +48,33 @@ export interface ChildOptions {
 }
 export interface LiveOperation extends Operation {
   child(data: ScopeData, key?: string, options?: ChildOptions): Promise<LiveOperation>;
-  /** Returns an unsettled child with this identity, without starting one. */
   find(data: ScopeData): LiveOperation | undefined;
-  /** Unsettled children, in start order. */
   readonly children: readonly LiveOperation[];
   usage(usage: Usage, key?: string): Promise<void>;
-  /** Carries a model call's messages up to its turn: the first input and the latest output. */
   turnContent(content: { readonly input?: string; readonly output?: string }): void;
   error(error?: unknown, type?: string): void;
-  /** Replaces the host context for this operation and its descendants. */
   useContext(context: ExecutionContext): void;
-  /** Fills in a deferred operation's details from a later call with the same identity. */
   refine(data: ScopeData, startTimeMs?: number): void;
-  /** Lowers capture for this operation and its children, and drops retained content it no longer allows. */
   narrow(capture: CaptureDecision): void;
-  /** Completes this operation, or closes the open descendants of a finished one. */
   release(result: ScopeTerminal): Promise<void>;
-  /** Finished, with no unfinished descendants. */
   readonly settled: boolean;
   readonly callId?: string;
   readonly mcp: McpLifecycle;
+  readonly memory?: MemoryToolLifecycle;
   record(): ScopeRecord;
 }
 
-/** Durable trees reserve stable IDs and defer spans whose lifetime can cross processes. */
 const DEFERRED_WHEN_DURABLE: ReadonlySet<ScopeData["type"]> = new Set([
   "activation",
   "tool",
   "approval",
 ]);
-/** Durable work a successful attempt or turn leaves open, such as a tool awaiting approval. */
 const OUTLIVES_ATTEMPT: ReadonlySet<ScopeData["type"]> = new Set(["tool", "approval"]);
 
 function segment(value: string | number): string {
   return encodeURIComponent(String(value));
 }
 
-/** Children with a stable identity hydrate on re-entry; the rest are numbered. */
 function semanticKey(data: ScopeData): string | undefined {
   switch (data.type) {
     case "step":
@@ -141,7 +131,6 @@ export function createScopes(input: {
   ): TraceReference | undefined {
     const ids = telemetry.ids;
     if (!input.durable || ids === undefined) return undefined;
-    // Re-executed model calls, decisions, and memory reads are new work and get new IDs.
     if (data.type === "model" || data.type === "decision" || data.type === "memory")
       return undefined;
     if (data.type === "activation" && parent !== undefined)
@@ -222,7 +211,6 @@ export function createScopes(input: {
     }
     const key = binding.key;
     let startTimeMs = binding.startTimeMs ?? Date.now();
-    // A restored record keeps its saved parent; a nested activation names its own.
     const parentReference = binding.parent ?? parent?.reference;
     if (capture.emit) capture = intersectCapture(capture, telemetry.active()?.capture);
     let actualCapture = capture;
@@ -261,7 +249,6 @@ export function createScopes(input: {
     let host = binding.executionContext;
     let reference =
       binding.reference ?? reserve(data, key, parentReference, prepared, actualCapture);
-    // A nested turn joins its parent's sampling decision; a root turn asks the sampler.
     if (binding.sample === true && reference !== undefined)
       reference = {
         ...reference,
@@ -286,6 +273,7 @@ export function createScopes(input: {
       recordOutputs: actualCapture.emit && sampled && actualCapture.recordOutputs,
     };
     actualData = capturedData(actualData, actualCapture);
+    const turnContentParent = parent?.type === "step" ? parent : undefined;
     let finished = binding.finished ?? false;
     let terminalResult = binding.terminal;
     const children = new Map<string, LiveOperation>();
@@ -300,9 +288,14 @@ export function createScopes(input: {
       void onChange();
     }
 
-    /** Content arriving now is held to any narrower run ceiling in force. */
     function current(): CaptureDecision {
       return intersectCapture(actualCapture, telemetry.active()?.capture);
+    }
+
+    function enrich(attributes: Attributes): void {
+      const permitted = (withoutDeclinedContent(attributes, current()) ?? attributes) as Attributes;
+      Object.assign(enrichment, permitted);
+      if (operation !== undefined) applyAttributes(operation, permitted);
     }
 
     async function child(
@@ -362,7 +355,6 @@ export function createScopes(input: {
       if (finished) return;
       const capture = current();
       if (!capture.recordOutputs) result = { ...result, error: undefined };
-      // A call whose work already failed cannot finish as completed.
       if (terminalResult?.failed)
         result = {
           ...result,
@@ -401,7 +393,7 @@ export function createScopes(input: {
         const content = result.model.content;
         if (capture.recordOutputs && actualCapture.recordOutputs && content !== undefined) {
           const output = serializer.outputMessages(content, result.model.finishReason);
-          if (output !== undefined) parent?.turnContent({ output });
+          if (output !== undefined) turnContentParent?.turnContent({ output });
         }
       }
       operation.end(result.endTimeMs);
@@ -451,7 +443,6 @@ export function createScopes(input: {
               options: {
                 ...known,
                 kind: known.kind ?? next.options.kind,
-                // Earlier arguments were recorded with consent; new ones need it now.
                 arguments:
                   known.arguments ??
                   (current().recordInputs ? snapshotContent(next.options.arguments) : undefined),
@@ -572,16 +563,12 @@ export function createScopes(input: {
       mcp: mcpLifecycle({
         serializer,
         ...actualCapture,
-        write(attributes) {
-          const permitted = (withoutDeclinedContent(attributes, current()) ??
-            attributes) as Attributes;
-          Object.assign(enrichment, permitted);
-          if (operation !== undefined) applyAttributes(operation, permitted);
-        },
+        write: enrich,
         error(error, type) {
           runtime.error(error, type);
         },
       }),
+      memory: actualData.type === "tool" ? memoryToolLifecycle(enrich) : undefined,
       get finished() {
         return finished;
       },
@@ -590,7 +577,6 @@ export function createScopes(input: {
       },
       run(execute, ceiling) {
         if (finished) throw new Error("The trace scope has already finished.");
-        // The ceiling governs work inside this run, not what the operation already recorded.
         const scoped = intersectCapture(
           intersectCapture(actualCapture, ceiling),
           telemetry.active()?.capture,
@@ -618,7 +604,13 @@ export function createScopes(input: {
                 );
         return runTraceContext(
           telemetry,
-          { type: runtime.type, reference: retainedReference, capture: scoped, mcp: runtime.mcp },
+          {
+            type: runtime.type,
+            reference: retainedReference,
+            capture: scoped,
+            mcp: runtime.mcp,
+            memory: runtime.memory,
+          },
           callback,
           host,
         );
@@ -691,12 +683,11 @@ export function createScopes(input: {
       operation.addEvent("step.started", undefined, startTimeMs);
     const inputMessages = prepared.attributes["gen_ai.input.messages"];
     if (!finished && actualData.type === "model" && typeof inputMessages === "string")
-      parent?.turnContent({ input: inputMessages });
+      turnContentParent?.turnContent({ input: inputMessages });
     return runtime;
   }
 
   return {
-    /** Starts a turn tree. Durable turns reserve their IDs from `key`. */
     start(facts: {
       identity: ScopeIdentity;
       key: string;
@@ -727,7 +718,6 @@ export function createScopes(input: {
         facts.onChange ?? (() => Promise.resolve()),
       );
     },
-    /** Rebuilds a tree from a checkpoint, or returns `undefined` for an unusable one. */
     async restore(
       snapshot: unknown,
       options: {

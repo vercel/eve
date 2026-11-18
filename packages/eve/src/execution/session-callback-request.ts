@@ -1,4 +1,4 @@
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import {
   assertPublicHostname,
   createPublicDispatcher,
@@ -13,7 +13,6 @@ import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.session-callback");
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
-/** Callback replies are small JSON acknowledgements. */
 const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1024;
 const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
 const VERCEL_CALLBACK_HOST_ENVS = [
@@ -23,16 +22,8 @@ const VERCEL_CALLBACK_HOST_ENVS = [
 ] as const;
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 
-/**
- * Posts one framework callback payload with the shared callback transport policy.
- *
- * Callback URLs are caller-supplied, so delivery only connects to public
- * addresses (loopback is also allowed on local development servers), checked
- * against every resolved address at connect time.
- */
 export async function postSessionCallbackRequest(input: {
   readonly body: unknown;
-  /** Set false when the caller owns failure logging, such as best-effort activity. */
   readonly logFailures?: boolean;
   readonly timeoutMs?: number;
   readonly url: string;
@@ -50,8 +41,6 @@ export async function postSessionCallbackRequest(input: {
   } catch (error) {
     const blocked = findUnsafeDestinationError(error);
     if (blocked !== undefined) {
-      // The policy decides the same way on every attempt, so do not retry.
-      // The policy message carries no part of the URL.
       if (input.logFailures !== false) {
         log.error("callback delivery failed", {
           ...callbackLogFields(input),
@@ -59,10 +48,8 @@ export async function postSessionCallbackRequest(input: {
           error: new Error(blocked.message),
         });
       }
-      throw new FatalError(`Callback delivery refused: ${blocked.message}`);
+      throw new NonRetryableError(`Callback delivery refused: ${blocked.message}`);
     }
-    // Fetch errors can contain the capability URL or credentials in their
-    // cause chain. Log a safe summary, but preserve the original rejection.
     if (input.logFailures !== false) {
       log.error("callback delivery failed", {
         ...callbackLogFields(input),
@@ -104,9 +91,6 @@ async function requestCallback(
       ...init,
       dispatcher,
       method: "POST",
-      // Do not follow redirects: a validated callback host could otherwise
-      // 3xx-bounce the framework to an internal/metadata address after the
-      // path/token check has already passed.
       redirect: "error",
     });
     return await readBoundedResponse(response, MAX_CALLBACK_RESPONSE_BYTES);
@@ -178,11 +162,6 @@ function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
     }
     if (!url.hostname.includes("*")) return (target) => target.origin === url.origin;
 
-    // `*.example.com` matches exactly one label so a subdomain owner several
-    // levels down cannot claim the trust. A trailing dot would let
-    // `*.vercel.app.` slip past the denylist and match fully qualified hosts.
-    // `vercel.app` is shared by every Vercel customer, so a wildcard over it
-    // would trust all deployments; other shared domains are not detected.
     const suffix = url.hostname.slice(2);
     if (
       !url.hostname.startsWith("*.") ||
@@ -205,8 +184,8 @@ function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
   });
 }
 
-function invalidCallbackOriginsError(): FatalError {
-  return new FatalError(
+function invalidCallbackOriginsError(): NonRetryableError {
+  return new NonRetryableError(
     "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments. A leading `*.` label (e.g. `https://*.preview.example.com`) matches exactly one subdomain label and needs at least two labels after it; `*.vercel.app` and trailing dots are not allowed.",
   );
 }

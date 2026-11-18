@@ -2,11 +2,16 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createChannelOperations,
+  type ChannelReceiveContext,
+} from "#channel/channel-operations.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { Card, CardText } from "#public/channels/slack/cards.js";
 import type { SlackPostInput } from "#public/channels/slack/api.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import type { Runtime } from "#channel/types.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,
@@ -112,12 +117,24 @@ function approvalPress(): Request {
   );
 }
 
-/** Posts `request` to the channel's webhook and drains every task it hands to `waitUntil`. */
 async function firePost(
   channel: unknown,
   request: Request,
   send: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ id: "s1" }),
   resolveSession: () => Promise<unknown> = () => Promise.resolve({ id: "s1" }),
+): Promise<void> {
+  await postWith(channel, request, {
+    from: mockChannelContext<SlackChannelState>(
+      send as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
+    ).from,
+    resolveSession: resolveSession as never,
+  });
+}
+
+async function postWith(
+  channel: unknown,
+  request: Request,
+  operations: ChannelReceiveContext<SlackChannelState>,
 ): Promise<void> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
   const post = channel.routes.find((route) => route.method === "POST");
@@ -125,10 +142,7 @@ async function firePost(
   const waitUntil = vi.fn();
   await post.handler(request, {
     ...mockAgentRouteArgs(),
-    from: mockChannelContext<SlackChannelState>(
-      send as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
-    ).from,
-    resolveSession: resolveSession as never,
+    ...operations,
     waitUntil,
     attachSession: vi.fn() as never,
     to: vi.fn() as never,
@@ -164,7 +178,6 @@ describe("slackChannel ephemeral threading", () => {
       },
     });
 
-  // #5012: Slack only shows a threaded ephemeral once the thread has a reply.
   it("omits thread_ts from postEphemeral for a top-level mention", async () => {
     await firePost(postEphemeralOnMention(), mention({ ts: "1700000000.000001" }));
 
@@ -197,7 +210,6 @@ describe("slackChannel inactive prompt press", () => {
 
     const [update] = slackCalls("chat.update");
     expect(update).toMatchObject({ text: "No longer active", ts: "1700000000.000010" });
-    // Nobody's answer was taken, so the retired card credits nobody.
     const shown = JSON.stringify(update?.blocks);
     expect(shown).toContain("No longer active");
     expect(shown).not.toContain("U_APPROVER");
@@ -208,6 +220,196 @@ describe("slackChannel inactive prompt press", () => {
         user: "U_APPROVER",
       }),
     ]);
+  });
+});
+
+describe("slackChannel ephemeral request press", () => {
+  const RESPONSE_URL = "https://hooks.slack.com/actions/T01/1/abc";
+  const route = "route:C01:1700000000.000001:";
+
+  function ephemeralPress(action: Record<string, unknown>, { inThread = true } = {}): Request {
+    const payload = {
+      actions: [action],
+      channel: { id: "C01" },
+      container: {
+        channel_id: "C01",
+        is_ephemeral: true,
+        message_ts: "1700000000.000020",
+        ...(inThread && { thread_ts: "1700000000.000001" }),
+        type: "message",
+      },
+      response_url: RESPONSE_URL,
+      team: { id: "T01" },
+      trigger_id: "trigger-1",
+      type: "block_actions",
+      user: { id: "U01", name: "alice", team_id: "T01", username: "alice" },
+    };
+    return signed(
+      new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),
+      "application/x-www-form-urlencoded",
+    );
+  }
+
+  function responseUrlPosts(): Record<string, unknown>[] {
+    return fetchMock.mock.calls
+      .filter(([url]) => String(url) === RESPONSE_URL)
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+  }
+
+  it.each([
+    {
+      action: {
+        action_id: `${ANSWER_ACTION_PREFIX}${route}q_team`,
+        selected_option: { text: { text: "Acme", type: "plain_text" }, value: "team_acme" },
+        type: "radio_buttons",
+      },
+      name: "a picked option",
+    },
+    {
+      action: {
+        action_id: `${ANSWER_ACTION_PREFIX}${route}q_team:button:0`,
+        block_id: "eve_use:q_team",
+        text: { text: "Use Acme", type: "plain_text" },
+        type: "button",
+        value: "team_acme",
+      },
+      name: "the kept preselected option",
+    },
+  ])("replaces the card with $name through its response URL once delivered", async ({ action }) => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    const press = ephemeralPress(action);
+
+    await firePost(slackChannel({ credentials: { botToken: "xoxb-test" } }), press, send);
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(slackCalls("chat.update")).toEqual([]);
+    const [replaced, ...more] = responseUrlPosts();
+    expect(more).toEqual([]);
+    expect(replaced).toMatchObject({
+      replace_original: true,
+      text: "Acme",
+      thread_ts: "1700000000.000001",
+    });
+    expect(JSON.stringify(replaced?.blocks)).toContain("Acme");
+  });
+
+  async function answerInModal(
+    channel: unknown,
+    send: ReturnType<typeof vi.fn>,
+    { inThread = true } = {},
+  ): Promise<void> {
+    await firePost(
+      channel,
+      ephemeralPress(
+        { action_id: `eve_input_freeform:${route}q_scope`, type: "button", value: "q_scope" },
+        { inThread },
+      ),
+      send,
+    );
+    const [opened] = slackCalls("views.open");
+    const view = opened?.view as { private_metadata: string };
+
+    const submission = {
+      type: "view_submission",
+      user: { id: "U01", name: "alice", team_id: "T01", username: "alice" },
+      view: {
+        callback_id: "eve_input_freeform_submit",
+        private_metadata: view.private_metadata,
+        state: {
+          values: {
+            eve_freeform_block: {
+              eve_freeform_text: { type: "plain_text_input", value: "The billing migration" },
+            },
+          },
+        },
+        team_id: "T01",
+      },
+    };
+    await firePost(
+      channel,
+      signed(
+        new URLSearchParams({ payload: JSON.stringify(submission) }).toString(),
+        "application/x-www-form-urlencoded",
+      ),
+      send,
+    );
+  }
+
+  it.each([
+    {
+      answer: (channel: unknown, send: ReturnType<typeof vi.fn>) =>
+        firePost(
+          channel,
+          ephemeralPress(
+            {
+              action_id: `${ANSWER_ACTION_PREFIX}${route}q_team`,
+              selected_option: { text: { text: "Acme", type: "plain_text" }, value: "team_acme" },
+              type: "radio_buttons",
+            },
+            { inThread: false },
+          ),
+          send,
+        ),
+      name: "a picked option",
+      text: "Acme",
+    },
+    {
+      answer: (channel: unknown, send: ReturnType<typeof vi.fn>) =>
+        answerInModal(channel, send, { inThread: false }),
+      name: "a typed answer",
+      text: "The billing migration",
+    },
+  ])(
+    "keeps a top-level card's replacement with $name out of a thread",
+    async ({ answer, text }) => {
+      const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+      await answer(slackChannel({ credentials: { botToken: "xoxb-test" } }), send);
+
+      const [replaced] = responseUrlPosts();
+      expect(replaced).toMatchObject({ replace_original: true, text });
+      expect(replaced?.thread_ts).toBeUndefined();
+    },
+  );
+
+  it("replaces the card with a typed answer from its modal", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await answerInModal(slackChannel({ credentials: { botToken: "xoxb-test" } }), send);
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(slackCalls("chat.update")).toEqual([]);
+    const [replaced] = responseUrlPosts();
+    expect(replaced).toMatchObject({
+      replace_original: true,
+      text: "The billing migration",
+      thread_ts: "1700000000.000001",
+    });
+  });
+});
+
+describe("slackChannel action token", () => {
+  it("adds Slack's action token to the default auth without a hook", async () => {
+    fetchMock.mockImplementation(async () => Response.json({ ok: true, ts: "1700000001.000001" }));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    const event = {
+      assistant_thread: { action_token: "action-token" },
+      channel: "C01",
+      text: "hello",
+      ts: "1700000000.000001",
+      type: "app_mention",
+      user: "U01",
+    };
+
+    await firePost(
+      channel,
+      signed(JSON.stringify({ event, event_id: "Ev1", team_id: "T01", type: "event_callback" })),
+      send,
+    );
+
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(input.auth?.attributes).toMatchObject({ action_token: "action-token" });
   });
 });
 
@@ -248,6 +450,65 @@ describe("slackChannel messageContext.users", () => {
     expect(turn).toContain("id: U01\\ndisplay_name: alice\\nreal_name: Alice Doe\\n</sender>");
     expect(turn).not.toContain("alice@example.com");
     expect(input.auth?.attributes).toMatchObject({ full_name: "Alice Doe" });
+  });
+
+  it("starts the session of a mention that starts its thread without looking for one", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const runtime: Runtime = {
+      createSession: vi.fn().mockResolvedValue({ events: new ReadableStream(), sessionId: "s1" }),
+      dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" }),
+      dispatchSession: vi.fn(),
+      getEventStream: vi.fn(),
+      getLineStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
+      resolveContinuation: vi.fn(),
+    };
+    const operations = createChannelOperations<SlackChannelState>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+    const thread = { continuationToken: "slack:C01:1700000000.000001" };
+
+    await postWith(channel, mention({ ts: "1700000000.000001" }), operations);
+    expect(runtime.createSession).toHaveBeenCalledWith(expect.objectContaining(thread));
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+
+    await postWith(
+      channel,
+      mention({ ts: "1700000000.000002", threadTs: "1700000000.000001" }),
+      operations,
+    );
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(expect.objectContaining(thread));
+    expect(runtime.createSession).toHaveBeenCalledOnce();
+  });
+
+  it("sends a mention to its session while Slack is still confirming the acknowledgement", async () => {
+    const acknowledged = Promise.withResolvers<Response>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) =>
+      String(request).endsWith("assistant.threads.setStatus")
+        ? await acknowledged.promise
+        : await answer(request, init),
+    );
+    let statusPending = false;
+    const send = vi.fn(async () => {
+      statusPending = slackCalls("assistant.threads.setStatus").length === 1;
+      acknowledged.resolve(Response.json({ ok: true }));
+      return { sessionId: "s1" };
+    });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      mention({ ts: "1700000000.000001" }),
+      send,
+    );
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(statusPending).toBe(true);
   });
 
   it("uses an authored resolve instead of the built-in users.info cache", async () => {
@@ -562,7 +823,6 @@ describe("slackChannel message status and guidance", () => {
       send,
       noSession,
     );
-    // An unmentioned edit to the root of the thread the agent serves.
     const root = {
       text: "Who can take the rollback?",
       thread_ts: rootTs,
@@ -606,9 +866,6 @@ describe("slackChannel message status and guidance", () => {
     expect(slackCalls("assistant.threads.setStatus")).toEqual([]);
   });
 
-  // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
-  // hook runs, so `deferred` can only keep the rest of the turn quiet. A `hidden` tool sets
-  // `label: false`: it shows no status and doesn't end a deferred turn's quiet.
   it.each<{
     name: string;
     request: () => Request;
@@ -626,8 +883,7 @@ describe("slackChannel message status and guidance", () => {
       name: "immediate reply",
       request: threadReply,
       status: "immediate",
-      trace:
-        "post:Thinking... turn:Thinking... model:Thinking... tool:Get weather model:Get weather",
+      trace: "post:Thinking... turn:Thinking... model tool:Get weather model:Get weather",
     },
     {
       name: "deferred mention",
@@ -654,7 +910,7 @@ describe("slackChannel message status and guidance", () => {
       request: threadReply,
       status: "immediate",
       steps: ["turn", "model", "hidden", "model"],
-      trace: "post:Thinking... turn:Thinking... model:Thinking... hidden model:Thinking...",
+      trace: "post:Thinking... turn:Thinking... model hidden model:Thinking...",
     },
   ])("$name", async ({ request, status, steps = ["turn", "model", "tool", "model"], trace }) => {
     const edits: unknown[] = [];
@@ -689,6 +945,44 @@ describe("slackChannel message status and guidance", () => {
     expect("message" in input && input.message).toEqual(
       expect.stringContaining(`<guidance>\n${guidance}\n</guidance>`),
     );
+  });
+
+  it("writes a turn's status without holding the turn, and posts the reply after it", async () => {
+    const slack = Promise.withResolvers<void>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
+      if (String(request).endsWith("assistant.threads.setStatus")) await slack.promise;
+      return answer(request, init);
+    });
+    const background: Promise<unknown>[] = [];
+    const harness = slackRenderingHarness(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      { channelId: "C01", teamId: "T01", threadTs: "1700000000.000001" },
+      { waitUntil: (promise) => void background.push(promise) },
+    );
+    const operations = () =>
+      fetchMock.mock.calls
+        .map(([request]) => String(request).replace("https://slack.com/api/", ""))
+        .filter((operation) => operation !== "chat.getPermalink");
+
+    await harness.step("turn");
+    await harness.step("model");
+    expect(background).toHaveLength(2);
+    const replied = harness.event({
+      type: "content.completed",
+      data: { kind: "text", phase: "reply", value: "Sunny.", runId: "r1", partId: "p1" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(operations()).toEqual(["assistant.threads.setStatus"]);
+    slack.resolve();
+    await replied;
+    await Promise.all(background);
+
+    expect(operations()).toEqual(["assistant.threads.setStatus", "chat.postMessage"]);
   });
 });
 
@@ -739,7 +1033,6 @@ describe("slackChannel message edits", () => {
     ];
     expect(address).toBe(`C01:${rootTs}`);
     expect(input).toMatchObject({ state: { quiet: true } });
-    // The channel's `turnPolicy` applies, so a queued edit can't overtake the message it edits.
     expect(input).not.toHaveProperty("turnPolicy");
     expect(input).not.toHaveProperty("title");
     expect("message" in input && input.message).toEqual(
@@ -809,7 +1102,6 @@ describe("slackChannel message edits", () => {
   const dmEdit = { channelType: "im", previousText: "hi", text: "hello" } as const;
   const otherEdit = { previousText: "Lunch?", text: "Lunch at noon?" };
 
-  // Each row authors a hook the edit must skip, so the default can't just be "no hooks".
   it.each<{
     name: string;
     edit: Parameters<typeof edited>[0];
@@ -868,7 +1160,6 @@ describe("slackChannel message edits", () => {
     },
   ])("$name", async ({ edit, hooks, reached }) => {
     const calls: string[] = [];
-    // Records the text each hook decided and the edit `ctx.edit` showed it.
     const hook = (name: MessageHook) =>
       name === "onMessageEdited"
         ? (ctx: SlackInboundMessageContext, decided: SlackMessageEdit) => {

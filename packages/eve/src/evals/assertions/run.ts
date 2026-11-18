@@ -17,7 +17,6 @@ import {
 import type { EveEvalEventMatch } from "#evals/match.js";
 import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector.js";
 
-/** Minimal captured scope consumed by deterministic eval assertions. */
 export interface EveEvalAssertionSubject {
   readonly derived: import("#evals/types.js").EveEvalDerivedFacts;
   readonly events: readonly SessionStreamEvent[];
@@ -32,10 +31,6 @@ const fail = (message: string, metadata?: Readonly<Record<string, unknown>>): As
   metadata,
 });
 
-/**
- * Asserts the run finished successfully: it did not fail and did not park on an
- * unanswered HITL input request.
- */
 export function succeeded(): RunAssertion {
   return {
     name: "succeeded",
@@ -50,9 +45,6 @@ export function succeeded(): RunAssertion {
   };
 }
 
-/**
- * Asserts the run ended cleanly parked on HITL input.
- */
 export function awaitingInput(): RunAssertion {
   return {
     name: "awaitingInput",
@@ -67,10 +59,6 @@ export function awaitingInput(): RunAssertion {
   };
 }
 
-/**
- * Asserts the joined assistant message text contains `token` (substring for
- * strings, `test` for RegExps).
- */
 export function messageIncludes(token: string | RegExp): RunAssertion {
   return {
     name: `messageIncludes(${String(token)})`,
@@ -83,12 +71,6 @@ export function messageIncludes(token: string | RegExp): RunAssertion {
   };
 }
 
-/**
- * Asserts a completed tool call with `name` happened. Options constrain the
- * call further: `input` partial-deep-matches, `output` matches the result,
- * `status` overrides the lifecycle state, and `count` constrains the number of
- * matches with either an exact number or a predicate.
- */
 export function calledTool(name: string, options: EveEvalToolCallMatchOptions = {}): RunAssertion {
   validateCount(options.count);
   return {
@@ -116,10 +98,6 @@ export function calledTool(name: string, options: EveEvalToolCallMatchOptions = 
   };
 }
 
-/**
- * Asserts the skill `skill` was loaded. `output`/`status`/`count` constrain
- * the matching load exactly as for `calledTool`.
- */
 export function calledSkill(
   skill: string,
   options: EveEvalSkillLoadMatchOptions = {},
@@ -141,9 +119,6 @@ export function calledSkill(
   };
 }
 
-/**
- * Asserts no tool call with `name` happened.
- */
 export function notCalledTool(name: string): RunAssertion {
   return {
     name: `notCalledTool(${name})`,
@@ -155,10 +130,6 @@ export function notCalledTool(name: string): RunAssertion {
   };
 }
 
-/**
- * Asserts the named tools were requested in the given order (subsequence match:
- * other calls may interleave).
- */
 export function toolOrder(names: readonly string[]): RunAssertion {
   return {
     name: `toolOrder(${names.join(" → ")})`,
@@ -176,9 +147,6 @@ export function toolOrder(names: readonly string[]): RunAssertion {
   };
 }
 
-/**
- * Asserts the run made no tool calls at all.
- */
 export function usedNoTools(): RunAssertion {
   return {
     name: "usedNoTools",
@@ -190,9 +158,6 @@ export function usedNoTools(): RunAssertion {
   };
 }
 
-/**
- * Asserts the run made at most `max` tool calls.
- */
 export function maxToolCalls(max: number): RunAssertion {
   validateCount(max);
   return {
@@ -208,9 +173,6 @@ export function maxToolCalls(max: number): RunAssertion {
   };
 }
 
-/**
- * Asserts no call reported a failure.
- */
 export function noFailedCalls(): RunAssertion {
   return {
     name: "noFailedCalls",
@@ -233,12 +195,6 @@ export function noFailedCalls(): RunAssertion {
   };
 }
 
-/**
- * Asserts a call to the agent tool `name` occurred. Each call to an agent
- * task counts once: its status and `output` come from `call.settled`, and the
- * session and remote metadata from the task's `child.opened` once its
- * session opened.
- */
 export function calledAgent(
   name: string,
   options: EveEvalSubagentCallMatchOptions = {},
@@ -268,10 +224,6 @@ export function calledAgent(
   };
 }
 
-/**
- * Escape hatch: asserts an arbitrary predicate over the full typed event
- * stream. `label` names the assertion in reports.
- */
 export function eventsSatisfy(
   label: string,
   predicate: (events: readonly SessionStreamEvent[]) => boolean,
@@ -285,7 +237,6 @@ export function eventsSatisfy(
   };
 }
 
-/** Asserts a typed stream event exists, optionally constraining its count. */
 export function typedEvent(matcher: EveEvalEventMatch): RunAssertion {
   validateCount(matcher.count);
   return {
@@ -302,7 +253,6 @@ export function typedEvent(matcher: EveEvalEventMatch): RunAssertion {
   };
 }
 
-/** Asserts no typed stream event matches. */
 export function notEvent(matcher: EveEvalEventMatch): RunAssertion {
   return {
     name: `notEvent(${matcher.type})`,
@@ -315,7 +265,6 @@ export function notEvent(matcher: EveEvalEventMatch): RunAssertion {
   };
 }
 
-/** Asserts typed event groups occur in order, ignoring unrelated events. */
 export function eventOrder(matchers: readonly EveEvalEventMatch[]): RunAssertion {
   for (const matcher of matchers) validateCount(matcher.count);
   return {
@@ -344,9 +293,6 @@ export function eventOrder(matchers: readonly EveEvalEventMatch[]): RunAssertion
   };
 }
 
-/**
- * Asserts `result.output` (the final assistant message) deep-equals `value`.
- */
 export function outputEquals(value: unknown): RunAssertion {
   return {
     name: "outputEquals",
@@ -359,10 +305,6 @@ export function outputEquals(value: unknown): RunAssertion {
   };
 }
 
-/**
- * Asserts `result.output` validates against a Standard Schema (e.g. a Zod
- * schema).
- */
 export function outputMatches(schema: StandardSchemaV1): RunAssertion {
   return {
     name: "outputMatches",

@@ -1,12 +1,5 @@
 import type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
 export type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
-/**
- * Minimal Microsoft Teams Bot Framework Connector REST wrapper.
- *
- * The native Teams channel talks directly to the Bot Framework Activity
- * protocol instead of exposing BotBuilder or Teams SDK objects through
- * eve public APIs.
- */
 
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
@@ -113,7 +106,6 @@ export interface TeamsOutboundActivity extends TeamsMessageBody {
   readonly type: "message" | "typing";
 }
 
-/** Maximum character length for a single outbound Teams activity before `splitTeamsMessageText` chunks it (80 KiB). */
 export const TEAMS_MESSAGE_TEXT_MAX_LENGTH = 80 * 1024;
 
 const DEFAULT_LOGIN_BASE_URL = "https://login.microsoftonline.com";
@@ -137,7 +129,6 @@ export function teamsContinuationToken(input: {
     .join(":");
 }
 
-/** Normalizes the thread suffix that Teams inconsistently includes in channel conversation ids. */
 export function normalizeTeamsContinuationAddress(input: {
   readonly conversationId: string;
   readonly replyToActivityId?: string | null;
@@ -159,14 +150,12 @@ export function normalizeTeamsContinuationAddress(input: {
   };
 }
 
-/** Resolves a Teams app id, falling back to `MICROSOFT_APP_ID` then `TEAMS_APP_ID`. */
 export async function resolveTeamsAppId(appId?: TeamsAppId): Promise<string> {
   const source = appId ?? process.env.MICROSOFT_APP_ID ?? process.env.TEAMS_APP_ID;
   if (!source) throw new Error("MICROSOFT_APP_ID or TEAMS_APP_ID is required.");
   return typeof source === "function" ? await source() : source;
 }
 
-/** Resolves a Teams app password, falling back to `MICROSOFT_APP_PASSWORD` then `TEAMS_APP_PASSWORD`. */
 export async function resolveTeamsAppPassword(appPassword?: TeamsAppPassword): Promise<string> {
   const source =
     appPassword ?? process.env.MICROSOFT_APP_PASSWORD ?? process.env.TEAMS_APP_PASSWORD;
@@ -174,14 +163,12 @@ export async function resolveTeamsAppPassword(appPassword?: TeamsAppPassword): P
   return typeof source === "function" ? await source() : source;
 }
 
-/** Resolves a Teams tenant id, falling back to `MICROSOFT_TENANT_ID` then `TEAMS_TENANT_ID`. */
 export async function resolveTeamsTenantId(tenantId?: TeamsTenantId): Promise<string | undefined> {
   const source = tenantId ?? process.env.MICROSOFT_TENANT_ID ?? process.env.TEAMS_TENANT_ID;
   if (!source) return undefined;
   return typeof source === "function" ? await source() : source;
 }
 
-/** Resolves a Bot Connector access token, using a custom provider or client credentials. */
 export async function resolveTeamsAccessToken(options: TeamsApiOptions = {}): Promise<string> {
   const credentials = options.credentials;
   if (credentials?.tokenProvider !== undefined) {
@@ -231,7 +218,6 @@ export async function resolveTeamsAccessToken(options: TeamsApiOptions = {}): Pr
   return accessToken;
 }
 
-/** Low-level Bot Framework Connector API call. */
 export async function callTeamsConnectorApi(
   input: TeamsApiOptions & {
     readonly body?: TeamsOutboundActivity | JsonObject;
@@ -275,7 +261,6 @@ export async function callTeamsConnectorApi(
   };
 }
 
-/** Sends a non-reply activity to one Teams conversation. */
 export async function sendTeamsActivity(
   input: TeamsApiOptions & {
     readonly body: TeamsOutboundActivity;
@@ -294,7 +279,6 @@ export async function sendTeamsActivity(
   return toPostedActivity(response.body);
 }
 
-/** Sends a reply activity to one Teams conversation activity. */
 export async function replyToTeamsActivity(
   input: TeamsApiOptions & {
     readonly activityId: string;
@@ -316,7 +300,6 @@ export async function replyToTeamsActivity(
   return toPostedActivity(response.body);
 }
 
-/** Updates an existing Teams bot activity. */
 export async function updateTeamsActivity(
   input: TeamsApiOptions & {
     readonly activityId: string;
@@ -341,7 +324,6 @@ export async function updateTeamsActivity(
   return toPostedActivity(response.body);
 }
 
-/** Triggers Teams' typing indicator for one conversation. */
 export async function triggerTeamsTypingIndicator(
   input: TeamsApiOptions & {
     readonly conversationId: string;
@@ -358,11 +340,6 @@ export async function triggerTeamsTypingIndicator(
   }
 }
 
-/**
- * Splits `content` into chunks no longer than `TEAMS_MESSAGE_TEXT_MAX_LENGTH`,
- * breaking on paragraph, then line, then word boundaries before a hard cut.
- * Returns a single-element array when `content` already fits.
- */
 export function splitTeamsMessageText(content: string): readonly string[] {
   if (content.length <= TEAMS_MESSAGE_TEXT_MAX_LENGTH) return [content];
 
@@ -380,7 +357,6 @@ export function splitTeamsMessageText(content: string): readonly string[] {
   return chunks;
 }
 
-/** Normalizes a string or message body into a Teams message activity body. */
 export function normalizeTeamsPostInput(message: string | TeamsMessageBody): TeamsMessageBody {
   if (typeof message === "string") {
     return { text: message, textFormat: "markdown" };

@@ -6,6 +6,7 @@ import type { Envelope, ErrorInfo } from "../envelope.js";
 /** What a model run belongs to: a turn, or a context change's summary. */
 export type ModelOwner = { readonly turnId: string } | { readonly changeId: string };
 
+/** The payload of `model.requested`: a model run is introduced for its owner. */
 export interface ModelRequestedData {
   readonly runId: string;
   readonly owner: ModelOwner;
@@ -33,8 +34,10 @@ export interface ModelRetriedData {
   readonly error: ErrorInfo;
 }
 
+/** How a model run ended, as recorded on `model.settled`. */
 export type ModelOutcome = "completed" | "failed" | "interrupted" | "abandoned";
 
+/** The payload of `model.settled`: a model run ends, with its outcome and the provider's finish reason. */
 export interface ModelSettledData {
   readonly runId: string;
   readonly outcome: ModelOutcome;
@@ -44,10 +47,15 @@ export interface ModelSettledData {
   readonly error?: ErrorInfo;
 }
 
+/** The fact that introduces a model run. */
 export type ModelRequested = Envelope<"model.requested", ModelRequestedData>;
+/** The fact recording that an attempt at a model run's provider call began. */
 export type ModelStarted = Envelope<"model.started", ModelStartedData>;
+/** The fact recording that a model run's attempt failed and the run tries again. */
 export type ModelRetried = Envelope<"model.retried", ModelRetriedData>;
+/** The terminal fact of a model run. */
 export type ModelSettled = Envelope<"model.settled", ModelSettledData>;
+/** Any fact in the `model` family. */
 export type ModelFact = ModelRequested | ModelStarted | ModelRetried | ModelSettled;
 
 const attempt = z.number().int().nonnegative();

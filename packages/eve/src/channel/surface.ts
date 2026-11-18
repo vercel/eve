@@ -1,8 +1,3 @@
-// How built-in channels show a session. Its events mean the same on every platform: the agent
-// works, replies, asks people, signs them in, and fails. A channel says how its platform shows
-// each, as a `ChannelSurface`, and `surfaceEvents` makes its event handlers from that; a channel
-// adds or replaces handlers for what only its platform does.
-
 import {
   requestBatchOf,
   requestSettlementOf,
@@ -21,29 +16,20 @@ import type {
 } from "#public/definitions/channel.js";
 import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 
-/** What a channel can do in its conversation, in its platform's terms. */
 export interface ChannelSurface<TChannel> {
-  /** Shows the agent working. */
   typing?(channel: TChannel): Promise<void>;
-  /** Posts text in the conversation: a reply, or a failure notice. */
   post(channel: TChannel, text: string): Promise<unknown>;
-  /** What a person starts after the session fails: "message", "comment". */
   readonly restart: string;
-  /** How the platform asks people. */
   readonly requests: ButtonRequests<TChannel> | TextRequests<TChannel>;
   signIns(channel: TChannel): SignInSurface;
 }
 
-/** A platform with buttons: it shows a commit's requests at once, and marks each as it settles. */
 export interface ButtonRequests<TChannel> {
   show(channel: TChannel, request: Interaction, batch: RequestBatch): Promise<void>;
-  /** Called for every request that settles; one the channel didn't show it ignores. */
   settle(channel: TChannel, settlement: RequestSettlement): Promise<void>;
 }
 
-/** A platform with text alone: a reply answers the request it sees, so it sees one at a time. */
 export interface TextRequests<TChannel> {
-  /** Shows the request a typed reply answers now; `false` when it couldn't, to try again. */
   showOne(channel: TChannel, request: Interaction): Promise<boolean | void>;
 }
 
@@ -53,7 +39,6 @@ type Handler<T extends SessionEvent["type"], TChannel> = (
 ) => Promise<void>;
 
 export interface SurfaceEvents<TChannel> {
-  /** A text channel's: shows the request a typed reply answers now, as it changes. */
   readonly committed?: (line: CommittedLine, ctx: ChannelEventContext<TChannel>) => Promise<void>;
   readonly "turn.started"?: Handler<"turn.started", TChannel>;
   readonly "call.requested"?: Handler<"call.requested", TChannel>;
@@ -64,12 +49,10 @@ export interface SurfaceEvents<TChannel> {
   readonly "session.ended": Handler<"session.ended", TChannel>;
 }
 
-/** The event handlers that show a session on `surface`. */
 export function surfaceEvents<TChannel extends { readonly state: object }>(
   surface: ChannelSurface<TChannel>,
 ): SurfaceEvents<TChannel> {
   const { requests } = surface;
-  // A text channel's state keeps which request it showed.
   const queue =
     "showOne" in requests
       ? (promptQueue<TChannel & { state: PromptQueueState }>(requests.showOne) as (
@@ -97,7 +80,6 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
       }
       await showSignIn(view, event.data.interactionId, surface.signIns(channel));
     },
-    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "interaction.settled"(event, ctx) {
       const { channel } = ctx;
       const view = sessionTables(ctx.view);

@@ -10,11 +10,9 @@ async function discoverDeclarationFiles({ distDir }) {
     .map((file) => ({ source: file, output: file }));
 }
 
-/** Vendored server-side Vercel Blob slice used by the file-memory backend. */
 export default {
   packageName: "@vercel/blob",
   compiledPath: "@vercel/blob",
-  bundling: "standalone",
   copyDeclarations: createDeclarationCopier({
     files: discoverDeclarationFiles,
     rewrites: {

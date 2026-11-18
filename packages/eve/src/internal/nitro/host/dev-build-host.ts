@@ -1,5 +1,3 @@
-// Type-only imports keep this module cheap: the dev server forks its first build
-// process before it loads the compiler, Nitro, or its own server modules.
 import { type ChildProcess, fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -19,11 +17,9 @@ export interface DevelopmentPrepareInput {
   readonly changedPaths?: readonly string[];
   readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly previousExtensions?: readonly WorkspaceExtension[];
-  /** Created by the dev server, so it can remove the workspace if the build process dies. */
   readonly workspace?: DevelopmentHostWorkspace;
 }
 
-/** Worker entry and data for a built Nitro host. */
 export interface DevelopmentHostBuild {
   readonly entry: string;
   readonly workerData: Readonly<Record<string, unknown>>;
@@ -42,11 +38,9 @@ interface DevelopmentBuildOperations {
 
 export type DevelopmentBuildOperation = keyof DevelopmentBuildOperations;
 
-// Authored code also runs in the build process and may send its own IPC messages.
 export const DEVELOPMENT_BUILD_MESSAGE_KIND = "eve:development-build";
 
 export interface DevelopmentBuildRequest {
-  /** The dev server's environment, including `.env` changes staged for this rebuild. */
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly id: number;
   readonly input: unknown;
@@ -59,7 +53,6 @@ export type DevelopmentBuildOutcome =
   | { readonly ok: false; readonly error: SerializedError };
 
 export type DevelopmentBuildResponse = {
-  /** The build's Docker probe result, if it probed. */
   readonly dockerAvailability: boolean | undefined;
   readonly id: number;
   readonly kind: typeof DEVELOPMENT_BUILD_MESSAGE_KIND;
@@ -68,21 +61,11 @@ export type DevelopmentBuildResponse = {
 export interface DevelopmentBuildSession {
   prepare(input: DevelopmentPrepareInput): Promise<PreparedDevelopmentApplicationHost>;
   buildHost(host: PreparedDevelopmentApplicationHost): Promise<DevelopmentHostBuild>;
-  /** Ends the session. Its build process exits, releasing everything it loaded. */
   close(): void;
 }
 
-/** The build processes owned by one dev server. */
 export interface DevelopmentBuilds {
-  /**
-   * Starts a build session for one rebuild. Every step that evaluates
-   * authored code or runs Rolldown happens in the session's child process,
-   * which exits when the session closes. Node never unloads an imported
-   * module and Rolldown's native memory belongs to the whole process, so
-   * exiting is the only way to release both.
-   */
   begin(): DevelopmentBuildSession;
-  /** Stops every build process, including the spare. Later sessions fail. */
   close(): void;
 }
 
@@ -98,10 +81,6 @@ const MAX_SERIALIZED_CAUSE_DEPTH = 8;
 let prewarmedProcess: DevelopmentBuildProcess | undefined;
 let nextRequestId = 0;
 
-/**
- * Forks a build process before the dev server loads its own modules, so the
- * two startups overlap. The first {@link createDevelopmentBuilds} adopts it.
- */
 export function prewarmDevelopmentBuildProcess(): void {
   if (!isSourceCheckout()) {
     prewarmedProcess ??= new DevelopmentBuildProcess();
@@ -145,7 +124,6 @@ export function createDevelopmentBuilds(): DevelopmentBuilds {
           ended = true;
           active.delete(buildProcess);
           buildProcess.close();
-          // The next rebuild should not wait for a process to start and load the compiler.
           if (!closed) spare ??= new DevelopmentBuildProcess();
         },
       };
@@ -160,8 +138,6 @@ export function createDevelopmentBuilds(): DevelopmentBuilds {
   };
 }
 
-// Running from TypeScript source (eve's own tests, or a source checkout): a
-// child process cannot import the source without the caller's transform.
 function isSourceCheckout(): boolean {
   return import.meta.url.endsWith(".ts");
 }
@@ -244,7 +220,6 @@ class DevelopmentBuildProcess {
     this.#pending.clear();
   }
 
-  // An idle build process must not keep the dev server alive. Bun's channel has no ref/unref.
   #idleWhenSettled(): void {
     if (this.#pending.size > 0) return;
     this.#child.unref();
@@ -252,8 +227,6 @@ class DevelopmentBuildProcess {
   }
 }
 
-// Later build processes receive it with their environment, and runtime workers
-// copy it when they start, so neither probes Docker again.
 function publishDockerAvailability(available: boolean | undefined): void {
   if (available !== undefined && process.env[LINUX_DOCKER_AVAILABILITY_ENV] === undefined) {
     process.env[LINUX_DOCKER_AVAILABILITY_ENV] = available ? "1" : "0";

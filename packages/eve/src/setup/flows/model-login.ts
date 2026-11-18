@@ -53,8 +53,6 @@ async function readLoginModel(agentRoot: string): Promise<LoginModel> {
   const selection = await readAuthoredModelSelection(agentRoot);
   if (selection !== undefined)
     return { selection, external: parseModelHelper(selection) !== undefined };
-  // Dynamic models still need routing inspection, but ordinary source literals
-  // and eve helpers do not need to compile the agent just to sign in.
   const inspection = await inspectApplication(agentRoot);
   const model = inspection.compiledState?.manifest.config.model;
   return {
@@ -83,12 +81,9 @@ type LoginInput = {
   agentRoot?: string;
   prompter: Prompter;
   automatic?: boolean;
-  /** Connection selected by the TUI's `/login <connection>` completion. */
   selected?: ModelConnectionSelection;
-  /** TUI callers can omit the redundant picker heading beneath `/login`. */
   connectionMessage?: string;
   signal?: AbortSignal;
-  /** Applies writes under one watcher lease and waits for runtime activation. */
   withConnectionUpdate?(task: () => Promise<void>): Promise<void>;
 };
 
@@ -213,8 +208,6 @@ export async function runModelLogin(input: LoginInput): Promise<ModelLoginResult
   ): Promise<ModelLoginResult | undefined> => {
     const controller = new AbortController();
     const attemptSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-    // Public catalog work can overlap browser sign-in. Capture its failure so
-    // it cannot abandon an active prompt or become an unhandled rejection.
     const preparation = getModel()
       .then(async (model) => {
         const selection = modelSelection(selected, model);

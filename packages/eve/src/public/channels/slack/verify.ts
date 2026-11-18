@@ -5,14 +5,12 @@ import {
 
 export type { SlackWebhookVerifier };
 
-/** Verification inputs for Eve's Slack webhook route. */
 interface SlackVerifyOptions {
   readonly signingSecret: string | undefined;
   readonly webhookVerifier: SlackWebhookVerifier | undefined;
   readonly maxSkewSeconds?: number;
 }
 
-/** Verifies a Slack request with the Chat SDK webhook primitive. */
 export async function verifySlackRequest(
   request: Request,
   options: SlackVerifyOptions,

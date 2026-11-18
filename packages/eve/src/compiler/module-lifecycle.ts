@@ -9,7 +9,6 @@ import {
   type CompiledBindingNamespaceLoader,
 } from "#compiler/load-binding-namespace.js";
 
-/** Owns namespace loading and lifecycle decisions for one node compilation. */
 export class NodeModuleEvaluationContext {
   #bindings: Readonly<Record<string, AgentModuleBinding>> = {};
   readonly #lifecycle = new NodeModuleLifecycle();
@@ -48,7 +47,6 @@ export class NodeModuleEvaluationContext {
   }
 }
 
-/** Marks authored config namespaces whose values must be resolved by the runtime. */
 export function markConfigRuntimeEntries(
   config: CompiledAgentDefinition,
   evaluation: NodeModuleEvaluationContext,
@@ -57,9 +55,7 @@ export function markConfigRuntimeEntries(
     config.dynamicModel,
     config.model?.source,
     config.compaction?.model?.source,
-    // The runtime loads `limits.sessionUsage` from the agent config module.
     config.limits?.sessionUsage === true ? config.source : undefined,
-    // And `approval`.
     config.approval === true ? config.source : undefined,
   ];
   for (const source of sources) {
@@ -67,7 +63,6 @@ export function markConfigRuntimeEntries(
   }
 }
 
-/** Tracks one selected node's module namespace usage across compilation and runtime linking. */
 class NodeModuleLifecycle {
   readonly #compileLoads = new Set<string>();
   readonly #runtimeRoots = new Set<string>();

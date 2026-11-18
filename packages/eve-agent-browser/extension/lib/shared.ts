@@ -4,8 +4,11 @@ export { AGENT_BROWSER_SANDBOX_VERSION };
 
 export type AgentBrowserArgs = readonly string[];
 
+/** Options that choose what gets installed when agent-browser is set up in a sandbox. */
 export interface AgentBrowserInstallOptions {
+  /** Download the browser with `agent-browser install`. Defaults to true. */
   readonly installBrowser?: boolean;
+  /** npm spec to install, such as a tarball or mirror. Defaults to {@link DEFAULT_AGENT_BROWSER_INSTALL_SPEC}. */
   readonly installSpec?: string;
   /** Install Chromium system libraries before installing agent-browser. Defaults to true. */
   readonly installSystemDependencies?: boolean;
@@ -17,9 +20,12 @@ export interface AgentBrowserRunOptions {
   readonly session?: string;
 }
 
+/** Result of one agent-browser CLI command run in a sandbox. */
 export interface AgentBrowserCommandResult<TJson = unknown> {
+  /** The shell command that ran. */
   readonly command: string;
   readonly exitCode: number;
+  /** stdout parsed as JSON, or `null` when it is not valid JSON. */
   readonly json: TJson | null;
   readonly stderr: string;
   readonly stdout: string;
@@ -35,12 +41,14 @@ export interface BuildShellCommandOptions extends BuildAgentBrowserArgvOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
+/** npm spec installed by default: the agent-browser version this package is built against. */
 export const DEFAULT_AGENT_BROWSER_INSTALL_SPEC = `agent-browser@${AGENT_BROWSER_SANDBOX_VERSION}`;
 
 const SAFE_SHELL_ARG = /^[A-Za-z0-9_/:=.,@%+-]+$/;
 const SAFE_ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MAX_DEFAULT_SESSION_NAME_LENGTH = 48;
 
+/** Thrown when an agent-browser command exits non-zero. Carries the command, exit code, and captured output. */
 export class AgentBrowserCommandError extends Error {
   readonly command: string;
   readonly exitCode: number;
@@ -60,11 +68,13 @@ export class AgentBrowserCommandError extends Error {
   }
 }
 
+/** Returns the npm spec to install: the trimmed `installSpec` option, or {@link DEFAULT_AGENT_BROWSER_INSTALL_SPEC} when it is unset or blank. */
 export function resolveAgentBrowserInstallSpec(options: AgentBrowserInstallOptions = {}): string {
   const spec = options.installSpec?.trim();
   return spec && spec.length > 0 ? spec : DEFAULT_AGENT_BROWSER_INSTALL_SPEC;
 }
 
+/** Quotes a value for safe use as one POSIX shell argument, leaving values made only of safe characters unquoted. */
 export function quoteShellArg(value: string): string {
   if (value.length > 0 && SAFE_SHELL_ARG.test(value)) {
     return value;
@@ -72,6 +82,7 @@ export function quoteShellArg(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+/** Builds the agent-browser CLI argument list, prepending `--session` when a session is given and appending `--json` unless `json` is `false`. */
 export function buildAgentBrowserArgv(
   args: AgentBrowserArgs,
   options: BuildAgentBrowserArgvOptions = {},

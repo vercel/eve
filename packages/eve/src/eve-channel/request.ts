@@ -20,10 +20,7 @@ import { isV26Line } from "#protocol/v26-lines.js";
 import { v26LineStream } from "#execution/v26-history.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
-import {
-  isExpiredWorkflowRunError,
-  isMissingWorkflowRunError,
-} from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { isRunExpired, isRunMissing } from "#shared/run-errors.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -64,7 +61,6 @@ function rejectUnknownFields(
   fields: readonly string[],
 ): Response | undefined {
   const unknown: string[] = [];
-  // One extra name reports omissions without walking the rest of the object.
   for (const key in payload) {
     if (!Object.hasOwn(payload, key) || fields.includes(key)) continue;
     unknown.push(key.length > 128 ? `${key.slice(0, 128)}…` : key);
@@ -85,7 +81,6 @@ function rejectUnknownFields(
   );
 }
 
-/** Replay-stable identity for one authenticated create operation. */
 export async function deriveOperationContinuationToken(input: {
   readonly auth: SessionAuthContext;
   readonly operationId: string;
@@ -106,7 +101,6 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
-  // A newer protocol may introduce fields; preserve upgrade guidance before checking this one's envelope.
   const protocolVersion =
     input.callback === undefined ? undefined : parseProtocolVersionField(input.protocolVersion);
   if (protocolVersion instanceof Response) return protocolVersion;
@@ -121,7 +115,6 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     "stubs",
     "forwardedPrincipal",
   ];
-  // Supported callers can still send this retired advisory field when delegating.
   if (input.callback !== undefined) fields.push("activityObserver");
   const rejection = rejectUnknownFields(input, fields);
   if (rejection !== undefined) return rejection;
@@ -182,7 +175,6 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 interface ParsedSessionMessageBody {
   inbox?: string;
   callback?: SessionCallback;
-  /** Names the delivery: a repeat with the same key is the same delivery, with the same receipt. */
   idempotencyKey?: string;
   message?: MessageContent;
   answers?: readonly ValidatedAnswer[];
@@ -359,18 +351,12 @@ export async function createSessionStreamResponse(
   const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // An unknown or unreachable session would otherwise answer 200 and then fail mid-body, so it
-    // must fail before any bytes are committed. A following read checks the session as it opens
-    // and a historical read always reports the tail, so only a response that reports the tail, or
-    // a tail-relative cursor that needs it to become a position, pays for the lookup. A position
-    // cursor opens the stream alongside it to save a round trip.
     const early =
       startIndex === undefined || startIndex >= 0
         ? internalSession(session).getLineStream({ follow, startIndex: startIndex ?? 0 })
         : undefined;
-    // Handled below; this keeps an early rejection from being reported as unhandled.
     early?.catch(() => {});
-    const earlierEve = startedOnEarlierEve(session);
+    const earlierEve = startedOnEarlierEve(session, follow && (startIndex ?? 0) > 0);
     let tailIndex: number | undefined;
     if (includeTailIndex || early === undefined) {
       try {
@@ -388,10 +374,7 @@ export async function createSessionStreamResponse(
     let lineLimit =
       includeTailIndex && tailIndex !== undefined ? Math.max(0, tailIndex - from + 1) : undefined;
     if (await earlierEve) {
-      // An eve before v27 recorded it: read every v26 line, each in light of those before it.
       void early?.then((opened) => opened.cancel()).catch(() => {});
-      // With no owner left to write to it, following would only reconnect each lease to read the
-      // whole history again: end at the tail with `stream.ended`, so readers stop.
       const live = follow && (await internalSession(session).hasRunnableOwner());
       if (follow && !live) lineLimit = undefined;
       lines = v26LineStream(
@@ -416,13 +399,13 @@ export async function createSessionStreamResponse(
   } catch (error) {
     const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;
-    if (isExpiredWorkflowRunError(error)) {
+    if (isRunExpired(error)) {
       return Response.json(
         { code: "session_expired", error: "Session history is no longer available.", ok: false },
         { headers: { "cache-control": "no-store" }, status: 410 },
       );
     }
-    const notFound = isMissingWorkflowRunError(error);
+    const notFound = isRunMissing(error);
     return Response.json(
       { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
       { status: notFound ? 404 : 503 },
@@ -430,19 +413,39 @@ export async function createSessionStreamResponse(
   }
 }
 
-/**
- * True when the session's first stored line is a v26 event. v27 readers can't read such a
- * stream, so serving it as version 27 would leave a client waiting on facts that never come.
- * Reads at most one line; an empty, unreadable, or slow stream reads as current.
- */
-async function startedOnEarlierEve(session: Session): Promise<boolean> {
+const currentSessions = new Set<string>();
+const CURRENT_SESSIONS_LIMIT = 10_000;
+
+export function rememberCurrentSession(sessionId: string): void {
+  if (currentSessions.has(sessionId)) return;
+  if (currentSessions.size >= CURRENT_SESSIONS_LIMIT) {
+    const oldest = currentSessions.values().next();
+    if (oldest.done !== true) currentSessions.delete(oldest.value);
+  }
+  currentSessions.add(sessionId);
+}
+
+async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Promise<boolean> {
+  if (currentSessions.has(session.id)) return false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<unknown> | undefined;
+  let settled = false;
   const first = (async () => {
-    const lines = await internalSession(session).getLineStream({ follow: false, startIndex: 0 });
+    const open = (follow: boolean) =>
+      internalSession(session).getLineStream({ follow, startIndex: 0 });
+    const lines = await (hasFirstLine
+      ? open(true).catch((error: unknown) => {
+          if (settled || isRunMissing(error) || isRunExpired(error)) throw error;
+          return open(false);
+        })
+      : open(false));
     reader = lines.getReader();
+    if (settled) void reader.cancel().catch(() => {});
     const { done, value } = await reader.read();
-    return !done && isV26Line(value);
+    if (done) return false;
+    if (isV26Line(value)) return true;
+    rememberCurrentSession(session.id);
+    return false;
   })();
   const timeout = new Promise<false>((resolve) => {
     timer = setTimeout(() => resolve(false), SESSION_VERSION_CHECK_TIMEOUT_MS);
@@ -452,8 +455,9 @@ async function startedOnEarlierEve(session: Session): Promise<boolean> {
   } catch {
     return false;
   } finally {
+    settled = true;
     clearTimeout(timer);
-    void first.finally(() => reader?.cancel().catch(() => {})).catch(() => {});
+    void reader?.cancel().catch(() => {});
   }
 }
 
@@ -478,9 +482,7 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
 }
 
-/** Delegating callers must speak a remote agent protocol this deployment serves. */
 function parseProtocolVersionField(value: unknown): number | Response {
-  // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
   if (value !== undefined && typeof value !== "number") {
     return Response.json(
       { error: "Expected 'protocolVersion' to be a number.", ok: false },
@@ -586,7 +588,6 @@ function parseMessagePart(raw: unknown): MessageTextPart | MessageFilePart | Res
         { status: 400 },
       );
     }
-    // Only the framework can mint refs that invoke sandbox or adapter capabilities.
     if (hasInternalRefScheme(part.data)) {
       return Response.json(
         { error: "File part 'data' must not use a framework-internal ref scheme.", ok: false },
@@ -712,7 +713,6 @@ export function parseIncludeTailIndex(request: Request): boolean {
   return raw === "1" || raw === "true";
 }
 
-/** `follow=false` (or `0`) bounds the read at the durable tail; following is the default. */
 function parseFollow(request: Request): boolean {
   const raw = new URL(request.url).searchParams.get("follow");
   return raw !== "0" && raw !== "false";
@@ -731,12 +731,6 @@ export function parseStartIndex(request: Request): number | undefined | Response
   return parsed;
 }
 
-/**
- * Serializes stored lines as NDJSON, with the transport records every v27 reader understands: a
- * heartbeat every 10 seconds of silence (and one first, so the response commits at once), a
- * lease end after 60 seconds, and `stream.ended` when the durable stream is done. A bounded read
- * ends after `lineLimit` lines, without `stream.ended`: the stream itself goes on.
- */
 function serializeLines(
   lines: ReadableStream<unknown>,
   signal: AbortSignal,
@@ -779,9 +773,7 @@ function serializeLines(
         try {
           controller.enqueue(record(LEASE_ENDED_RECORD));
           controller.terminate();
-        } catch {
-          // The response was cancelled while the lease callback was already queued.
-        }
+        } catch {}
       }, SESSION_STREAM_LEASE_MS);
     },
     transform(line, controller) {

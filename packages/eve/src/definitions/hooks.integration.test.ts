@@ -3,19 +3,16 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookContext, type HookDefinition } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
-
-// A hook's ctx.continue() from a settled turn, read from what the model receives and what the
-// session admits.
 
 const ALICE = {
   attributes: {},
@@ -44,11 +41,9 @@ async function until(log: readonly string[], entry: string, count: number): Prom
   }
 }
 
-/** Runs a session whose model replies "Done." to every turn, with the given hooks. */
 async function runSession(input: {
   readonly name: string;
   readonly hooks: Readonly<Record<string, HookDefinition>>;
-  /** Holds the first model call until it resolves. */
   readonly firstCall?: Promise<void>;
   readonly drive: (session: { readonly inbox: string; readonly log: string[] }) => Promise<void>;
 }): Promise<{ readonly log: string[]; readonly inputs: string[]; readonly prompts: string[] }> {
@@ -92,18 +87,16 @@ async function runSession(input: {
   });
   const continuationToken = `http:${input.name}`;
   await runtime.run(async () => {
-    const run = await start(workflowEntry, [
-      {
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        input: { message: "Alice asks for the report." },
-        serializedContext: buildSerializedContext({
-          auth: ALICE,
-          channelKind: "http",
-          continuationToken,
-        }),
-      },
-    ]);
+    const run = await startTestSession("in-process", {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      input: { message: "Alice asks for the report." },
+      serializedContext: buildSerializedContext({
+        auth: ALICE,
+        channelKind: "http",
+        continuationToken,
+      }),
+    });
     try {
       await input.drive({ inbox: sessionInboxHookToken(continuationToken), log });
     } finally {
@@ -131,10 +124,8 @@ describe("hook ctx.continue()", () => {
               results.push(
                 ctx.continue(`Keep going (${settled}).`, {
                   context: ["The report needs a summary."],
-                  // The second continuation acts for Bob; the first names no sender.
                   ...(settled === 2 && { auth: BOB }),
                 }),
-                // A second continuation of the same turn adds nothing, and says so.
                 ctx.continue("Ignored."),
               );
             },
@@ -151,7 +142,6 @@ describe("hook ctx.continue()", () => {
       { queued: true },
       { queued: false, reason: "already-queued" },
     ]);
-    // The source keeps the channel; a continuation names no sender unless it passes `auth`.
     expect(log.filter((entry) => /^(admitted|principal):/u.test(entry))).toEqual([
       'admitted:{"channel":"http"}',
       "principal:alice",
@@ -160,7 +150,6 @@ describe("hook ctx.continue()", () => {
       'admitted:{"channel":"http","hook":"until-done"}',
       "principal:bob",
     ]);
-    // History notes ahead of each continuation that no person wrote it, so every later call reads it.
     const note = "sent automatically after the last turn, not by a person";
     expect(prompts[1]).toContain(note);
     expect(prompts[1]).toContain("The report needs a summary.");
@@ -204,8 +193,7 @@ describe("hook ctx.continue()", () => {
     const { inputs } = await runSession({
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
-        // Bob asks while the first turn still runs; his message waits behind it.
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -243,8 +231,7 @@ describe("hook ctx.continue()", () => {
     const { inputs, log } = await runSession({
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
-        // Alice clears the conversation while the first turn still runs; the clear cancels it.
-        await resumeHook(inbox, { deliveryId: "clear-1", kind: "clear" });
+        await resumeRoutedHook(inbox, { deliveryId: "clear-1", kind: "clear" });
         await until(log, "turn:cancelled", 1);
         release();
         await until(log, 'admitted:{"control":"clear"}', 1);
@@ -294,7 +281,6 @@ describe("hook ctx.continue()", () => {
             },
           },
         }),
-        // Naming Alice, the session's identity, acts for the same principal as naming no one.
         review: defineHook({
           events: {
             "turn.settled": (_event, ctx) => {
@@ -304,7 +290,6 @@ describe("hook ctx.continue()", () => {
             },
           },
         }),
-        // A continuation for Bob can't share a turn that acts for Alice.
         "zz-audit": defineHook({
           events: {
             "turn.settled": (_event, ctx) => {

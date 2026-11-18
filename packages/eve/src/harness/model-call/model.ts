@@ -7,10 +7,6 @@ import type { Step } from "#harness/step/context.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
 
-/**
- * Builds AI Gateway app attribution headers, including eve's User-Agent product token, for a
- * Gateway-routed model. Direct-provider models receive no Gateway-specific headers.
- */
 export function buildGatewayAttributionHeaders(
   profile: ModelProfile,
   runtimeIdentity: KernelConfig["runtimeIdentity"],
@@ -27,7 +23,6 @@ export function buildGatewayAttributionHeaders(
   return headers;
 }
 
-/** Injects the active model-call context when a Gateway request reaches the provider boundary. */
 export function withGatewayTraceContext(
   model: LanguageModel,
   profile: ModelProfile,
@@ -49,7 +44,6 @@ export function withGatewayTraceContext(
   return wrapLanguageModel({ model: gatewayModel, middleware });
 }
 
-/** The model the step's call runs, as its definitions chose it, and its provider. */
 export async function resolveEffectiveRuntimeModel(step: Step): Promise<{
   readonly choice: ModelChoice;
   readonly model: LanguageModel;

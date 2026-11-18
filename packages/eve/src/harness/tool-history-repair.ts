@@ -4,17 +4,14 @@ import { extractToolResultCallIds } from "#harness/model-call/response.js";
 import { awaitedProviderToolCallIds } from "#harness/provider-tool-history.js";
 import { withResult } from "#harness/session-machine/suspended-steps.js";
 
-/** Answer orphaned historical calls without executing them. */
 export function repairToolHistory(input: {
   readonly messages: readonly ModelMessage[];
   readonly insertionIndex?: number;
-  /** Nothing follows `messages` in the request, so a provider result they await can still come. */
   readonly endsRequest?: boolean;
 }): { messages: ModelMessage[]; insertionIndex: number | undefined } {
   const closed = closeProviderCalls(input.messages, input.endsRequest === true);
   let messages = [...closed];
   let insertionIndex = input.insertionIndex;
-  // Any recorded result, even misplaced or inline, belongs to its original history.
   const protectedIds = new Set(extractToolResultCallIds(messages));
   const seen = new Set<string>();
   for (const message of messages) {
@@ -54,13 +51,6 @@ export function repairToolHistory(input: {
   return { messages, insertionIndex };
 }
 
-/**
- * A provider tool called beside local tools can defer its result to the next response, which
- * must directly follow the local results. Once anything else follows them, such as a cancelled
- * turn's message, a retry note, or a new turn's input, that result can no longer come and the
- * provider rejects the dangling call. It becomes an ordinary call, answered like any orphan, as
- * `normalizeProviderToolHistory` rewrites a provider call that shares a message with local calls.
- */
 function closeProviderCalls(messages: readonly ModelMessage[], endsRequest: boolean) {
   const answered = extractToolResultCallIds(messages);
   const awaited = endsRequest ? awaitedProviderToolCallIds(messages) : new Set<string>();
@@ -94,10 +84,6 @@ function closeProviderCalls(messages: readonly ModelMessage[], endsRequest: bool
   });
 }
 
-/**
- * The `code_execution` run an Anthropic programmatic call ran inside. Once that run has its
- * result, the call belongs to it, whether or not the call has a result of its own.
- */
 function anthropicCaller(options: ToolCallPart["providerOptions"]): string | undefined {
   const caller = (options?.anthropic as { caller?: { toolId?: unknown } } | undefined)?.caller;
   return typeof caller?.toolId === "string" ? caller.toolId : undefined;

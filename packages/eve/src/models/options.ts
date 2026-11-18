@@ -20,7 +20,6 @@ export type ModelOption =
 /** Model options by key. */
 export type ModelOptions = Readonly<Record<string, ModelOption>>;
 
-/** One option after validation: its key, its description, and the model it selects. */
 export interface NormalizedModelOption {
   readonly description: string;
   readonly key: string;
@@ -35,7 +34,6 @@ function isStaticModel(value: unknown): value is PublicAgentStaticModelDefinitio
   return typeof value === "string" ? value.trim().length > 0 : isRuntimeLanguageModel(value);
 }
 
-/** Whether the value is a model ID or instance, or a valid model selection. */
 export function isModelSelection(value: unknown): value is ModelOptionSelection {
   return (
     isStaticModel(value) ||
@@ -49,7 +47,6 @@ export function isModelSelection(value: unknown): value is ModelOptionSelection 
   );
 }
 
-/** Whether the value is a valid {@link ModelOption}. */
 export function isModelOption(option: unknown): option is ModelOption {
   return typeof option === "string"
     ? option.trim().length > 0
@@ -59,12 +56,10 @@ export function isModelOption(option: unknown): option is ModelOption {
         isModelSelection({ ...option, description: undefined });
 }
 
-/** Whether the value is a record of valid {@link ModelOption}s. */
 export function isModelOptions(value: unknown): value is ModelOptions {
   return isRecord(value) && Object.values(value).every(isModelOption);
 }
 
-/** A selection with only a model is the model itself. */
 export function normalizeModelSelection(
   selection: ModelOptionSelection,
 ): PublicAgentDynamicModelResult {
@@ -73,7 +68,6 @@ export function normalizeModelSelection(
   return Object.values(settings).every((value) => value === undefined) ? model : selection;
 }
 
-/** Each option's key, description, and selection, in authored order. Validate options first. */
 export function normalizeModelOptions(options: ModelOptions): NormalizedModelOption[] {
   return Object.entries(options).map(([key, option]) => {
     if (typeof option === "string") return { description: option, key, selection: key };
@@ -82,14 +76,12 @@ export function normalizeModelOptions(options: ModelOptions): NormalizedModelOpt
   });
 }
 
-/** The model of a selection: an AI Gateway model ID or a live model. */
 export function selectionModel(selection: ModelOptionSelection): PublicAgentStaticModelDefinition {
   return typeof selection === "string" || isRuntimeLanguageModel(selection)
     ? selection
     : selection.model;
 }
 
-/** A selection's model, as a log label. */
 export function selectionLogIdentity(selection: ModelOptionSelection): string {
   const model = selectionModel(selection);
   return typeof model === "string" ? model : `${model.provider}/${model.modelId}`;

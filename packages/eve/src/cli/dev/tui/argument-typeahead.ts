@@ -8,16 +8,13 @@ export interface PromptArgumentSuggestion {
   readonly value: string;
   readonly label: string;
   readonly hint?: string;
-  /** Follow-up values available after selecting this exact value. */
   readonly next?: readonly PromptArgumentSuggestion[];
 }
 
 interface ArgumentTypeaheadQuery {
   readonly command: ArgumentTypeaheadCommand;
   readonly argument: string;
-  /** Complete arguments before the one currently being typed. */
   readonly completed: readonly string[];
-  /** Offset of the current argument in the composer draft. */
   readonly argumentStart: number;
 }
 
@@ -42,10 +39,6 @@ export function argumentTypeaheadLoadingLabel(command: ArgumentTypeaheadCommand)
   return typeaheadCommand(command)?.loadingLabel ?? "suggestions";
 }
 
-/**
- * Parses the active token in an inline command drawer. The command grammar
- * deliberately uses literal spaces, matching slash-command dispatch.
- */
 export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | undefined {
   if (!text.startsWith("/")) return undefined;
   const commandEnd = text.indexOf(" ");
@@ -92,7 +85,6 @@ function sanitizeSuggestion(suggestion: PromptArgumentSuggestion): PromptArgumen
   return sanitized;
 }
 
-/** Filters catalog entries case-insensitively across their visible labels and ids. */
 export function argumentTypeaheadFor(
   query: ArgumentTypeaheadQuery,
   catalog: readonly PromptArgumentSuggestion[],
@@ -134,7 +126,6 @@ export function selectedArgumentSuggestion(
   return state.suggestions[state.selectedIndex];
 }
 
-/** Replaces only the active argument, retaining selected preceding model tokens. */
 export function argumentTypeaheadCompletion(
   state: ArgumentTypeaheadState,
   suggestion: PromptArgumentSuggestion,
@@ -142,7 +133,6 @@ export function argumentTypeaheadCompletion(
   return `/${state.command} ${[...state.completed, suggestion.value].join(" ")}`;
 }
 
-/** Paints canonical catalog values under the command's active argument column. */
 export function renderArgumentSuggestions(
   state: ArgumentTypeaheadState,
   theme: Theme,

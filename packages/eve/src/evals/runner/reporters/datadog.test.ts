@@ -64,7 +64,6 @@ function makeResult(id: string): EveEvalResult {
   };
 }
 
-/** A pulled dataset that already holds Alice's record from an earlier run. */
 function memoryDataset(existing: DatadogDatasetRecord[]) {
   const records = [...existing];
   const added: unknown[] = [];

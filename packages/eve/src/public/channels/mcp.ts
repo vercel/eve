@@ -33,7 +33,12 @@ import {
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
-import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
+import {
+  clientUrl,
+  type PlainHttpPolicy,
+  validateHttpEndpointRequest,
+  validateHttpMetadataRequest,
+} from "#internal/http/request-guards.js";
 import {
   createMcpStreamableHttpServer,
   defineMcpTool,
@@ -54,6 +59,10 @@ import {
   readRouteSessionCreator,
   readSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
+/**
+ * Options for {@link mcpChannel}: the required route auth, the route path, and which of the agent's
+ * `agent_*` tools, tools, and skills to publish.
+ */
 export interface McpChannelConfig {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
@@ -91,6 +100,16 @@ export interface McpChannelConfig {
    * @default false
    */
   readonly skills?: boolean;
+  /**
+   * When a request that reached eve over plain HTTP is accepted. `"loopback"` accepts it only
+   * from a loopback host, such as a local `eve dev`. `"forwarded-https"` also accepts it when
+   * `X-Forwarded-Proto` says the client used HTTPS, for a proxy that terminates TLS and sets
+   * the header itself; any client can send the header, so use it only when every request passes
+   * through such a proxy. `"allow"` accepts it from any host, for a network kept private some
+   * other way. The Host and Origin checks apply either way.
+   * @default "loopback"
+   */
+  readonly plainHttp?: "loopback" | "forwarded-https" | "allow";
 }
 
 /** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its tools and skills. */
@@ -127,21 +146,27 @@ export function mcpChannel(input: McpChannelConfig): McpChannel {
     await authenticateMcpRequest(request, args, input, oauth, publish);
   const routes = [GET(path, handle), POST(path, handle), DELETE(path, handle)];
   if (oauth !== undefined) {
-    routes.unshift(...protectedResourceMetadataRoutes(oauth, path));
+    routes.unshift(...protectedResourceMetadataRoutes(oauth, path, input.plainHttp));
   }
   return defineChannel({ routes });
 }
 
-function protectedResourceMetadataRoutes(options: OAuthResourceOptions, resourcePath: string) {
+function protectedResourceMetadataRoutes(
+  options: OAuthResourceOptions,
+  resourcePath: string,
+  plainHttp: PlainHttpPolicy | undefined,
+) {
   const metadataPath = protectedResourceMetadataPath(options, resourcePath);
   return [
     GET(metadataPath, async (request) =>
-      protectedResourceMetadataResponse(request, options, resourcePath, false),
+      protectedResourceMetadataResponse(request, options, resourcePath, false, plainHttp),
     ),
     HEAD(metadataPath, async (request) =>
-      protectedResourceMetadataResponse(request, options, resourcePath, true),
+      protectedResourceMetadataResponse(request, options, resourcePath, true, plainHttp),
     ),
-    OPTIONS(metadataPath, async (request) => protectedResourceMetadataOptionsResponse(request)),
+    OPTIONS(metadataPath, async (request) =>
+      protectedResourceMetadataOptionsResponse(request, plainHttp),
+    ),
   ] as const;
 }
 
@@ -161,11 +186,12 @@ function protectedResourceMetadataResponse(
   options: OAuthResourceOptions,
   resourcePath: string,
   head: boolean,
+  plainHttp: PlainHttpPolicy | undefined,
 ): Response {
-  const securityFailure = validateMcpMetadataRequest(request);
+  const securityFailure = validateHttpMetadataRequest(request, "MCP", plainHttp);
   if (securityFailure !== undefined) return securityFailure;
   const resource =
-    options.resource ?? new URL(resourcePath, new URL(request.url).origin).toString();
+    options.resource ?? new URL(resourcePath, clientUrl(request, plainHttp).origin).toString();
   const authorizationServers =
     options.issuer !== undefined ? [options.issuer] : options.authorizationServers;
   const response = Response.json(
@@ -186,8 +212,11 @@ function protectedResourceMetadataResponse(
     : response;
 }
 
-function protectedResourceMetadataOptionsResponse(request: Request): Response {
-  const securityFailure = validateMcpMetadataRequest(request);
+function protectedResourceMetadataOptionsResponse(
+  request: Request,
+  plainHttp: PlainHttpPolicy | undefined,
+): Response {
+  const securityFailure = validateHttpMetadataRequest(request, "MCP", plainHttp);
   if (securityFailure !== undefined) return securityFailure;
   const headers = new Headers({
     "access-control-allow-methods": "GET, HEAD, OPTIONS",
@@ -206,10 +235,11 @@ function addResourceChallenge(
   response: Response,
   request: Request,
   options: OAuthResourceOptions,
+  plainHttp: PlainHttpPolicy | undefined,
 ): Response {
   if (response.status !== 401 && response.status !== 403) return response;
   const metadataPath = protectedResourceMetadataPath(options, new URL(request.url).pathname);
-  const publicBase = options.resource ?? new URL(request.url).origin;
+  const publicBase = options.resource ?? clientUrl(request, plainHttp).origin;
   const metadataUrl = new URL(metadataPath, publicBase).toString();
   const headers = new Headers(response.headers);
   const existing = headers.get("www-authenticate");
@@ -375,11 +405,11 @@ async function authenticateMcpRequest(
   oauth: OAuthResourceOptions | undefined,
   publish: McpPublishOptions,
 ): Promise<Response> {
-  const securityFailure = validateMcpHttpRequest(request);
+  const securityFailure = validateHttpEndpointRequest(request, "MCP", input.plainHttp);
   if (securityFailure !== undefined) return securityFailure;
   const auth = await routeAuth(request, input.auth);
   if (auth instanceof Response) {
-    return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth);
+    return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth, input.plainHttp);
   }
   const sessionAuth = sessionAuthFromResult(auth);
   const principals = await resolveMcpRequestPrincipals(
@@ -435,7 +465,6 @@ async function handleMcpRequest(
         auth.authenticator === "none" && auth.principalType === "anonymous",
       )
     : [];
-  // One `describe()` serves both the published tools and the skill catalog.
   const described = publish.tools || publish.skills ? await args.describe() : undefined;
   const publishedTools =
     publish.tools && described !== undefined
@@ -448,7 +477,6 @@ async function handleMcpRequest(
       : [];
   const features: McpServerFeature[] = [];
   if (publish.tools) {
-    // Advertised only; published tools read the key from each call's `_meta`.
     features.push({
       capabilities: { extensions: { [MCP_TOOL_SESSIONS_EXTENSION]: {} } },
       register() {},
@@ -471,11 +499,6 @@ async function handleMcpRequest(
   })(request);
 }
 
-/**
- * Hosted MCP clients receive this once per connection (legacy `initialize`)
- * or per discovery (`server/discover`). Keep it short: clients truncate or
- * drop long instructions, and the details live in each tool description.
- */
 const MCP_SERVER_INSTRUCTIONS = [
   "Each invocation is one durable agent task.",
   "Call agent_start once per task and keep the returned invocationId.",
@@ -617,8 +640,6 @@ function createInvocationTools(
   return tools;
 }
 
-// Unknown, expired, and foreign-principal invocations all read as not found
-// so the response never confirms that another caller's invocation exists.
 const INVOCATION_NOT_FOUND =
   "Invocation not found. It may have expired or belong to another caller.";
 
@@ -654,10 +675,6 @@ function invocationResult(invocation: AgentInvocation): McpCallToolResult {
   };
 }
 
-// Bounds on caller-supplied text. The transport already caps the whole body
-// at MCP_REQUEST_BODY_MAX_BYTES; these keep individual durable fields sane.
-// Text bounds are UTF-8 bytes, matching the transport cap and the docs;
-// string.length undercounts multibyte input by up to 3x.
 const MAX_MESSAGE_BYTES = 64 * 1_024;
 const MAX_RESPONSE_TEXT_BYTES = 16 * 1_024;
 const MAX_ID_CHARS = 256;

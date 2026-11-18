@@ -1,9 +1,24 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { createContext, runInContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
+import { useScenarioApp } from "#internal/testing/scenario-app.js";
 import { FatalError, RetryableError } from "#compiled/@workflow/errors/index.js";
 import { dehydrateStepError, hydrateStepError } from "#compiled/@workflow/core/serialization.js";
 import {
@@ -16,6 +31,29 @@ import {
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { bundleFinalWorkflowOutput } from "#internal/workflow-bundle/builder-support.js";
 import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builders.js";
+
+const runFile = promisify(execFile);
+const scenarioApp = useScenarioApp();
+
+const INSTALLED_BUILD_SCRIPT = `
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+const [eveRoot, appRoot, outDir, inlineSourcemap] = process.argv.slice(1);
+const builderPath = join(eveRoot, "dist", "src", "internal", "workflow-bundle", "builder.js");
+const { WorkflowBundleBuilder } = await import(pathToFileURL(builderPath).href);
+const compiledArtifactsBootstrapPath = join(outDir, "bootstrap.mjs");
+await mkdir(outDir, { recursive: true });
+await writeFile(compiledArtifactsBootstrapPath, "export {};\\n");
+await new WorkflowBundleBuilder({
+  agentName: "installed",
+  appRoot,
+  compiledArtifactsBootstrapPath,
+  inlineSourcemap: inlineSourcemap === "true",
+  outDir,
+  rootDir: eveRoot,
+}).build();
+`;
 
 const REQUIRE_EXPORT_MARKER = "eve-workflow-conditional-require-export";
 const IMPORT_EXPORT_MARKER = "eve-workflow-conditional-import-export";
@@ -403,9 +441,6 @@ describe("WorkflowBundleBuilder", () => {
             "",
           ].join("\n"),
         ),
-        // A plain (non-`"use step"`) helper that pulls in a node builtin —
-        // the same shape as the runtime-actions -> logging -> node:util
-        // regression that previously failed at workflow run time.
         writeFile(
           helperFilePath,
           [
@@ -701,8 +736,6 @@ describe("WorkflowBundleBuilder", () => {
             "",
           ].join("\n"),
         ),
-        // node:crypto is used only inside a `"use step"` function, which the
-        // transform stubs out of the driver chunk — the guard must not fire.
         writeFile(
           flowFilePath,
           [
@@ -765,7 +798,6 @@ describe("WorkflowBundleBuilder", () => {
           join(appRoot, "package.json"),
           `${JSON.stringify({ dependencies: { eve: "*" }, name: "authored-app", version: "0.0.0" })}\n`,
         ),
-        // Dependency trees are never authored modules, even with directives.
         writeFile(
           join(appRoot, "node_modules", "vendored", "index.js"),
           'export async function vendored() {\n  "use step";\n}\n',
@@ -846,13 +878,86 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowCode).toContain("deploy ${service}");
       expect(workflowCode).not.toContain("defineWorkflowTool");
       expect(workflowCode).not.toContain("node:crypto");
+      expect(existsSync(join(appRoot, "node_modules", ".cache", "eve", "workflow-driver"))).toBe(
+        false,
+      );
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
   });
+
+  it("reuses an installed eve's framework driver per app until its code or options change", async () => {
+    const app = await scenarioApp({
+      files: {},
+      installDependencies: true,
+      name: "installed-driver",
+    });
+    const eveRoot = await realpath(join(app.appRoot, "node_modules", "eve"));
+    const cacheDirectory = join(app.appRoot, "node_modules", ".cache", "eve", "workflow-driver");
+    const outDir = join(app.appRoot, "workflow-build");
+    const build = async (inlineSourcemap: boolean, appRoot = app.appRoot) => {
+      await runFile(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          INSTALLED_BUILD_SCRIPT,
+          eveRoot,
+          appRoot,
+          outDir,
+          String(inlineSourcemap),
+        ],
+        { cwd: app.appRoot },
+      );
+      return {
+        code: await readFile(join(outDir, "workflows.code.txt"), "utf8"),
+        manifest: JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8")),
+      };
+    };
+    const editInstalledEve = async (distPath: string, appended: string) => {
+      const path = join(eveRoot, "dist", "src", distPath);
+      await writeFile(`${path}.edit`, `${await readFile(path, "utf8")}\n${appended}\n`);
+      await rename(`${path}.edit`, path);
+    };
+
+    const cold = await build(true);
+    expect(cold.code).toContain("sourceMappingURL=data:");
+    const [mappedEntry] = await readdir(cacheDirectory);
+    const mappedEntryPath = join(cacheDirectory, mappedEntry!);
+    const { mtimeMs } = await stat(mappedEntryPath);
+    await expect(build(true)).resolves.toEqual(cold);
+    expect((await stat(mappedEntryPath)).mtimeMs).toBe(mtimeMs);
+
+    await editInstalledEve(
+      "internal/workflow-bundle/workflow-transformer.js",
+      "// edited in place",
+    );
+    await build(true);
+    expect((await stat(mappedEntryPath)).mtimeMs).not.toBe(mtimeMs);
+
+    await editInstalledEve(
+      "tools/provided/sleep-workflow.js",
+      `globalThis.eveDriverProbe = "patched in place";`,
+    );
+    const patched = await build(true);
+    expect(patched.code).toContain("patched in place");
+
+    const unmapped = await build(false);
+    expect(unmapped.code).toContain("patched in place");
+    expect(unmapped.code).not.toContain("sourceMappingURL");
+    expect(await readdir(cacheDirectory)).toHaveLength(2);
+
+    const secondAppRoot = join(app.appRoot, "agents", "second");
+    await mkdir(secondAppRoot, { recursive: true });
+    await build(true, secondAppRoot);
+    expect(await readdir(cacheDirectory)).toHaveLength(3);
+
+    await truncate(mappedEntryPath, Math.floor((await stat(mappedEntryPath)).size / 2));
+    await expect(build(true)).resolves.toEqual(patched);
+  }, 240_000);
+
   it.each([
     { importer: "workflow code", specifier: "missing-workflow-package" },
-    // Dependency warnings are otherwise filtered as non-actionable.
     { importer: "a dependency", specifier: "dep" },
   ])(
     "rejects unresolved imports from $importer before emitting a VM bundle",

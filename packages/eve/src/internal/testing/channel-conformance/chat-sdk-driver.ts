@@ -30,7 +30,6 @@ const PEOPLE = {
   bob: { fullName: "Bob", isBot: false, isMe: false, userId: "bob", userName: "bob" },
 } as const;
 
-/** The auth an app derives from a Chat SDK user, as the docs' `resolveInputAuth` example does. */
 function userAuth(userId: string): SessionAuthContext {
   return { attributes: {}, authenticator: ADAPTER, principalId: userId, principalType: "user" };
 }
@@ -54,13 +53,11 @@ type Inbound =
       readonly kind: "message";
       readonly person: Person;
       readonly text: string;
-      /** Files on the message, as the platform lists them: a URL to each, not its bytes. */
       readonly files?: readonly InboundFile[];
     }
   | {
       readonly kind: "action";
       readonly actionId: string;
-      /** The posted message holding the pressed button. */
       readonly messageId: string;
       readonly person: Person;
       readonly value?: string;
@@ -75,7 +72,6 @@ function messageIdOf(call: PlatformCall): string {
   return (call.response as { readonly id: string }).id;
 }
 
-/** A card's buttons, or only those under `prompt` when the card holds several requests. */
 function buttonsOf(call: PlatformCall, prompt?: string): { handle: PressHandle; label: string }[] {
   const card = cardOf(call.body as AdapterPostableMessage);
   if (card === undefined) return [];
@@ -85,12 +81,6 @@ function buttonsOf(call: PlatformCall, prompt?: string): { handle: PressHandle; 
     .map((button) => ({ handle: { button, messageId }, label: button.label ?? "" }));
 }
 
-/**
- * Drives `chatSdkChannel` with a card-capable adapter: one thread, in a
- * workspace channel by default or a direct message, no streaming, and every
- * message handed to eve with an empty `context`. The fake adapter is the
- * platform: it reads inbound JSON and records every post and edit.
- */
 export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
   const driver = chatSdkDriverWith({
     name: surface === "private" ? "chat-sdk-dm" : "chat-sdk",
@@ -135,11 +125,6 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
   };
 }
 
-/**
- * The same bridge behind a text-only adapter: every post reaches the person as
- * the `chat` package's default plain-text rendering, so a card shows only its
- * fallback text and has nothing to press.
- */
 export function chatSdkTextDriver(): ChannelDriver {
   const converter = new PlainTextConverter();
   const driver = chatSdkDriverWith({
@@ -160,7 +145,6 @@ export function chatSdkTextDriver(): ChannelDriver {
     press() {
       throw new Error("A text-only Chat SDK adapter has nothing to press.");
     },
-    // The plain-text rendering has nothing to press, but an edit still rewrites the message it names.
     shownMessage(call) {
       if (!isPost(call)) return undefined;
       return {
@@ -193,7 +177,6 @@ function chatSdkDriverWith(input: {
   nextThread += 1;
   const threadId = `${ADAPTER}:D${nextThread}`;
   let sequence = 0;
-  /** Files a person sent, by the URL the platform lists each under. */
   const uploads = new Map<string, SentFile>();
 
   function inbound(body: Inbound): Request {
@@ -207,6 +190,10 @@ function chatSdkDriverWith(input: {
   return {
     name: input.name,
     personId: PERSON.userId,
+    space:
+      input.surface === "private"
+        ? { id: threadId, type: "direct", visibility: "private" }
+        : { id: threadId, type: "shared", visibility: "public" },
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";
@@ -236,8 +223,6 @@ function chatSdkDriverWith(input: {
           });
         });
       } else {
-        // The wiring docs/channels/chat-sdk/index.mdx shows: a mention starts the session, and
-        // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();
           await bridge.send(messageContentOf(message), {
@@ -282,7 +267,6 @@ function isPost(call: PlatformCall): boolean {
   return call.method === "postMessage" || call.method === "editMessage";
 }
 
-/** The DM thread the bot opens with the person, beside the conversation's own thread. */
 const PERSON_DM_THREAD = `${ADAPTER}:direct-message:${PERSON.userId}`;
 
 function isPersonDirectMessage(call: PlatformCall): boolean {
@@ -305,7 +289,6 @@ function fakeAdapter({
   readonly threadId: string;
   readonly uploads: ReadonlyMap<string, SentFile>;
 }): Adapter {
-  /** Downloads a file as an adapter's `fetchData` does: with its own auth, failing on a refusal. */
   async function fetchData(url: string): Promise<Buffer> {
     const file = uploads.get(url);
     record({ body: {}, method: `GET ${url}`, response: {} });
@@ -320,7 +303,6 @@ function fakeAdapter({
   const self = {
     name: ADAPTER,
     userName: "eve",
-    // As Slack's adapter does, so the channel can rebuild a download after the queue.
     rehydrateAttachment(attachment: Attachment): Attachment {
       const { url } = attachment;
       return url === undefined ? attachment : { ...attachment, fetchData: () => fetchData(url) };
@@ -348,7 +330,6 @@ function fakeAdapter({
         await chat?.processMessage(
           adapter,
           threadId,
-          // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
           inboundMessage(threadId, id, body.text, !dm, PEOPLE[body.person], body.files, fetchData),
           options,
         );
@@ -370,8 +351,6 @@ function fakeAdapter({
       isDM: dm,
       metadata: {},
     }),
-    // No native ephemerals, as on Discord or Linq: `postEphemeral` falls back to a DM.
-    // Only the person signing in can be reached, so a sign-in sent to anyone else fails its cells.
     async openDM(userId: string) {
       if (userId !== PERSON.userId) throw new Error(`no direct message with ${userId}`);
       return PERSON_DM_THREAD;
@@ -398,7 +377,6 @@ function fakeAdapter({
     async removeReaction() {},
     async startTyping() {},
   };
-  // Chat SDK adapters have many optional members; the fake implements the ones eve calls.
   const adapter: Adapter = self as typeof self & Adapter;
   return adapter;
 }
@@ -418,7 +396,6 @@ function inboundMessage(
       mimeType: file.mediaType,
       name: file.name,
       type: file.mediaType.startsWith("image/") ? ("image" as const) : ("file" as const),
-      // Private to the platform, as Slack's or Teams' are: only `fetchData` can download it.
       url: file.url,
     })),
     author,
@@ -438,10 +415,6 @@ function cardOf(posted: AdapterPostableMessage): CardNode | undefined {
   return (posted as CardNode).type === "card" ? (posted as CardNode) : undefined;
 }
 
-/**
- * A card batching several requests lists each one's prompt text, then its
- * actions. Returns the part of `card` that belongs to `prompt`.
- */
 function requestSection(card: CardNode, prompt: string): CardNode {
   const children = card.children ?? [];
   const start = children.findIndex(

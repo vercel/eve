@@ -7,14 +7,6 @@ import {
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import type { AnchoredEntry, CallRecord } from "./definition.js";
 
-// Placing what definitions add to a call's messages.
-
-/**
- * Announcements join the record ahead of the turn's input, or at its end on a step that continues
- * from tool results, in the order the definitions made them: only a changed value adds a message,
- * so the prompt before it stays cached. A provider tool's pending result must open the next
- * response, so then nothing joins; the next request carries them.
- */
 export function announce(
   draft: CallRecord,
   currentInput: ReadonlySet<HarnessModelMessage>,
@@ -49,12 +41,6 @@ export function announce(
   };
 }
 
-/**
- * Each entry just ahead of the first message its turn anchors. Every later call finds a turn's
- * input where it was, so context ahead of it keeps the prompt before it cached. Context whose
- * turn's input compaction summarized, or a turn that brought none, sits after the compaction's
- * checkpoint instead.
- */
 export function placeAnchored(
   messages: readonly HarnessModelMessage[],
   entries: readonly AnchoredEntry[],
@@ -77,7 +63,6 @@ export function placeAnchored(
   return placed;
 }
 
-/** How many messages a compacted history opens with: its checkpoint and the summary. */
 function checkpointLength(messages: readonly HarnessModelMessage[]): number {
   const [marker, summary] = messages;
   return marker?.role === "user" &&

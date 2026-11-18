@@ -2,10 +2,6 @@ import { isObject } from "#shared/guards.js";
 import { createStubValidator } from "#tool-stubs/schema.js";
 import type { StubCall, StubResult, ToolStub } from "#tool-stubs/types.js";
 
-/**
- * Selects stub outcomes and advances their sequences.
- * The surrounding workflow orders calls and restores progress on replay.
- */
 export class StubPlayback {
   private readonly rules;
   private readonly results = new Map<string, StubResult>();

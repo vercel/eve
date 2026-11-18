@@ -351,7 +351,7 @@ eve link
 eve deploy
 ```
 
-The app and each agent deploy together as one Vercel project. See [Deploy to Vercel](../deployment/vercel) for credentials and sandboxes.
+The app and each agent deploy together as one Vercel project. With Next.js hosting and an `agents/` workspace, `next build` also writes `.eve/agent-summary.json` in the `eveRoot` directory, which Vercel uses to show each agent's tools, schedules, and connections on the project overview. See [Deploy to Vercel](../deployment/vercel) for credentials and sandboxes.
 
 <Callout type="warning" title="Next.js hosting from apps/web">
   When the installer puts a Next.js-hosted app in `apps/web/`, Vercel doesn't build it by default.

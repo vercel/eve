@@ -183,13 +183,10 @@ describe("transactional authored rebuild coordinator", () => {
       PostCommitDevelopmentRebuildError,
     );
 
-    // The live worker's workspace survives; only the unactivated generation
-    // snapshot is discarded, and the staged environment stays committed.
     expect(mocks.removeDevelopmentHostWorkspace).not.toHaveBeenCalled();
     expect(mocks.discardDevelopmentGeneration).toHaveBeenCalledWith(structuralHost.generation);
     expect(mocks.environmentCommit).toHaveBeenCalledOnce();
     expect(mocks.environmentRollback).not.toHaveBeenCalled();
-    // Only the coordinator's initial request: a failed activation prunes nothing.
     expect(mocks.requestPrune).toHaveBeenCalledOnce();
 
     const retryHost = createHost("retry", "run-2");
@@ -220,7 +217,6 @@ describe("transactional authored rebuild coordinator", () => {
 
     expect(devServer.swapTo).not.toHaveBeenCalled();
     expect(devServer.recycle).toHaveBeenCalledTimes(2);
-    // Activation precedes each recycle, so the retired worker never loads the new generation.
     expect(mocks.activateDevelopmentGeneration.mock.invocationCallOrder[0]).toBeLessThan(
       devServer.recycle.mock.invocationCallOrder[0]!,
     );

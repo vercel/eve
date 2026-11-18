@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { app, desktopTool, flag, windowId } from "../lib/tool";
 
+/** Lets the agent resize an app window in pixels. */
 export default desktopTool({
   description: "Resize an app window in pixels.",
   inputSchema: z.object({

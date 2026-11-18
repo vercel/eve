@@ -15,7 +15,6 @@ export interface TraceOperation extends SpanWriter {
   readonly capture: CaptureDecision;
   readonly finished: boolean;
   run<T>(execute: () => T): T;
-  /** Lowers what the span accepts from now on. */
   narrow(capture: CaptureDecision): void;
 }
 export function createSpanWriter(input: {

@@ -41,7 +41,6 @@ import {
 
 export { shouldMockAuthoredRuntimeModels };
 
-/** A deterministic authoring or selection error that retrying cannot repair. */
 export class InvalidRuntimeModelSelectionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -49,21 +48,16 @@ export class InvalidRuntimeModelSelectionError extends Error {
   }
 }
 
-/** Loaded compiled-module scope used to resolve source-backed runtime models. */
 export interface RuntimeModelResolutionScope {
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string | undefined;
 }
 
 export interface ResolvedRuntimeModelSelection {
-  /** Live provider instance; absent for string selections, which resolve through the reference so mock/bootstrap adapters keep precedence. */
   readonly model?: LanguageModel;
   readonly reference: RuntimeModelReference;
 }
 
-/**
- * Resolves one runtime model reference into the active language model.
- */
 export async function resolveRuntimeModelReference(
   reference: RuntimeModelReference,
   scope?: RuntimeModelResolutionScope,
@@ -132,7 +126,6 @@ async function loadSourceBackedRuntimeModelReference(
   return toAiSdkLanguageModel(model);
 }
 
-/** The live model of one `agent({ models })` option, which the child's step reads from the tool. */
 function agentToolOptionModel(
   definition: unknown,
   key: string,
@@ -188,7 +181,6 @@ export async function loadDynamicRuntimeModelDefinition(input: {
 
 export async function resolveRuntimeModelSelection(input: {
   readonly durability: "durable" | "live";
-  /** The build's model metadata snapshot, read only when the selection omits its context window. */
   readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly selection: PublicAgentDynamicModelResult;
 }): Promise<ResolvedRuntimeModelSelection> {
@@ -222,7 +214,7 @@ export async function resolveRuntimeModelSelection(input: {
   const selectedModel = selection.model;
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
-    if (promptCache !== undefined) throw gatewayPromptCacheError(id);
+    if (promptCache !== undefined && !isAnthropicGatewayId(id)) throw gatewayPromptCacheError(id);
     const contextWindowTokens =
       selection.modelContextWindowTokens ??
       (
@@ -234,6 +226,7 @@ export async function resolveRuntimeModelSelection(input: {
       reference: {
         id,
         contextWindowTokens,
+        promptCache,
         providerOptions,
         reasoning: selection.reasoning,
       },
@@ -249,10 +242,13 @@ export async function resolveRuntimeModelSelection(input: {
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
   const routesThroughGateway = selectedModel.provider.split(".")[0] === "gateway";
-  if (promptCache !== undefined && routesThroughGateway) {
+  if (
+    promptCache !== undefined &&
+    routesThroughGateway &&
+    !isAnthropicGatewayId(selectedModel.modelId)
+  ) {
     throw gatewayPromptCacheError(formattedId);
   }
-  // A Gateway instance carries its Gateway model id, as a string selection does.
   let id = routesThroughGateway ? selectedModel.modelId : formattedId;
   let contextWindowTokens = selection.modelContextWindowTokens;
   if (contextWindowTokens === undefined) {
@@ -265,7 +261,6 @@ export async function resolveRuntimeModelSelection(input: {
             selectedModel.modelId,
           ),
     );
-    // A direct provider model takes its Gateway slug, as the compiler names a static one.
     if (!routesThroughGateway) id = entry.slug;
     contextWindowTokens = entry.contextWindowTokens;
   }
@@ -290,9 +285,13 @@ function invalidSelectionError(error: unknown): InvalidRuntimeModelSelectionErro
   );
 }
 
+function isAnthropicGatewayId(modelId: string): boolean {
+  return modelId.split("/")[0] === "anthropic";
+}
+
 function gatewayPromptCacheError(modelId: string): Error {
   return new InvalidRuntimeModelSelectionError(
-    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies only to models eve calls directly; Gateway manages its own prompt caching through providerOptions.gateway.caching.`,
+    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies to Anthropic models and to models eve calls directly; Gateway manages its own prompt caching for other models through providerOptions.gateway.caching.`,
   );
 }
 

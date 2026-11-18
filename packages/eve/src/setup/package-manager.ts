@@ -5,7 +5,6 @@ import { pathExists } from "./path-exists.js";
 
 export type PackageManagerKind = "bun" | "npm" | "pnpm" | "yarn";
 
-/** How a project's package manager was identified, most authoritative first. */
 export type PackageManagerSource = "package-manager-field" | "lockfile" | "default";
 
 export interface DetectedPackageManager {
@@ -13,7 +12,6 @@ export interface DetectedPackageManager {
   source: PackageManagerSource;
 }
 
-/** Package-manager marker files in detection precedence order. */
 const LOCKFILE_MANAGERS: ReadonlyArray<readonly [string, PackageManagerKind]> = [
   ["pnpm-lock.yaml", "pnpm"],
   ["pnpm-workspace.yaml", "pnpm"],
@@ -27,11 +25,6 @@ function isPackageManagerKind(value: string): value is PackageManagerKind {
   return value === "bun" || value === "npm" || value === "pnpm" || value === "yarn";
 }
 
-/**
- * Resolves a project's package manager from gathered facts: an explicit
- * `packageManager` field wins, then the first known package-manager marker,
- * then pnpm.
- */
 export function resolvePackageManager(input: {
   packageManagerField?: string;
   lockfiles: readonly string[];
@@ -50,13 +43,6 @@ export function resolvePackageManager(input: {
   return { kind: "pnpm", source: "default" };
 }
 
-/**
- * Identifies the package manager that launched the current process from an
- * npm user-agent string. Every manager advertises itself there when running
- * a binary (`npx`, `pnpm dlx`, `yarn dlx`, `bunx`, run-scripts), e.g.
- * `"pnpm/10.4.0 npm/? node/v24.0.0 darwin arm64"` → pnpm. A binary executed
- * directly carries no user agent and yields undefined.
- */
 export function packageManagerFromUserAgent(
   userAgent: string | undefined,
 ): PackageManagerKind | undefined {
@@ -64,7 +50,6 @@ export function packageManagerFromUserAgent(
   return kind !== undefined && isPackageManagerKind(kind) ? kind : undefined;
 }
 
-/** Reads {@link packageManagerFromUserAgent} from the process environment. */
 export function detectInvokingPackageManager(): PackageManagerKind | undefined {
   return packageManagerFromUserAgent(process.env.npm_config_user_agent);
 }
@@ -83,9 +68,7 @@ async function detectPackageManagerInDirectory(
     ) {
       packageManagerField = parsed.packageManager;
     }
-  } catch {
-    // Missing or unparsable package.json: the lockfiles decide.
-  }
+  } catch {}
 
   const lockfiles: string[] = [];
   for (const [lockfile] of LOCKFILE_MANAGERS) {
@@ -112,7 +95,6 @@ async function detectAncestorPackageManager(
   }
 }
 
-/** Reads package-manager facts from `projectRoot`, then walks ancestors. */
 export async function detectPackageManager(projectRoot: string): Promise<DetectedPackageManager> {
   return (
     (await detectPackageManagerInDirectory(resolve(projectRoot))) ??

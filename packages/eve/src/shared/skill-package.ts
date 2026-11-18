@@ -26,7 +26,6 @@ export function stripSkillFrontmatter(content: string): string {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
-/** Content hash over every package file, including `SKILL.md`. */
 export function skillPackageRevision(skill: MaterializableSkillPackage): string {
   const hash = createHash("sha256");
   for (const file of skill.files) {
@@ -35,10 +34,6 @@ export function skillPackageRevision(skill: MaterializableSkillPackage): string 
   return hash.digest("hex");
 }
 
-/**
- * Normalizes one named skill package into the concrete files eve writes to
- * workspace resources or the live sandbox.
- */
 export function normalizeSkillPackage(input: NamedSkillDefinition): MaterializableSkillPackage {
   assertSafeSkillPackageName(input.name);
 
@@ -70,12 +65,6 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
   };
 }
 
-/**
- * Writes a normalized package under a compiled workspace resource node root.
- *
- * For a `rootPath` of `.eve/compile/workspace-resources/__root__` and a skill
- * named `research`, files land under `skills/research/`.
- */
 export async function writeSkillPackageDirectory(input: {
   readonly rootPath: string;
   readonly skill: MaterializableSkillPackage;
@@ -87,10 +76,6 @@ export async function writeSkillPackageDirectory(input: {
   }
 }
 
-/**
- * Writes a normalized package into the live sandbox under
- * the sandbox skill root.
- */
 export async function writeSkillPackageToSandbox(input: {
   readonly sandbox: SandboxSession;
   readonly skill: MaterializableSkillPackage;
@@ -108,9 +93,6 @@ export async function writeSkillPackageToSandbox(input: {
   await input.sandbox.writeFiles({ files });
 }
 
-/**
- * Removes a skill package from the live sandbox.
- */
 export async function removeSkillPackageFromSandbox(input: {
   readonly sandbox: SandboxSession;
   readonly name: string;
@@ -125,10 +107,6 @@ export async function removeSkillPackageFromSandbox(input: {
   });
 }
 
-/**
- * Validates a runtime-contributed skill name before it becomes one path
- * segment under the sandbox skill root.
- */
 function assertSafeSkillPackageName(name: string): void {
   if (
     name.length === 0 ||

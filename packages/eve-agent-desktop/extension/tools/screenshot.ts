@@ -19,6 +19,7 @@ const inputSchema = z.object({
     .describe("Display index from list_displays; omit app and windowId to capture it."),
 });
 
+/** Lets the agent take a PNG screenshot of one app window or of the whole screen. */
 export default desktopTool<typeof inputSchema, ScreenshotOutput>({
   description:
     "Take a PNG screenshot of one app window (app or windowId) or of the whole screen. A covered window fails with reason covered: focus it first.",

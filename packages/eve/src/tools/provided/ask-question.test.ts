@@ -5,10 +5,7 @@ import {
   ASK_QUESTION_TOOL_DESCRIPTION,
   askQuestion,
 } from "#tools/provided/ask-question.js";
-import {
-  toAskQuestionOutput,
-  toAskQuestionRequest,
-} from "#tools/provided/ask-question-workflow.js";
+import { toAskQuestionOutput, toAskQuestionRequest } from "#tools/provided/ask-question-body.js";
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
 function accepts(value: unknown): boolean {

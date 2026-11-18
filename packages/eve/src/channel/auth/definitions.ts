@@ -1,10 +1,3 @@
-/**
- * Route-level HTTP authentication primitives.
- *
- * Strategy helpers return an {@link AuthFn} for route factories. Verifier
- * helpers are lower-level pure functions for custom `fetch` handlers.
- */
-
 import { decodeJwt } from "#compiled/jose/index.js";
 
 import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
@@ -40,10 +33,6 @@ import {
 } from "#channel/ip-allow-list.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
-// ---------------------------------------------------------------------------
-// Result types
-// ---------------------------------------------------------------------------
-
 /**
  * Result returned by the verifier helpers below. On success, `sessionAuth`
  * is a fully-constructed {@link SessionAuthContext}; on failure no detail is
@@ -52,10 +41,6 @@ import { isLoopbackHostname } from "#shared/network-address.js";
 export type VerifyResult =
   | { readonly ok: true; readonly sessionAuth: SessionAuthContext }
   | { readonly ok: false };
-
-// ---------------------------------------------------------------------------
-// HTTP Basic
-// ---------------------------------------------------------------------------
 
 /**
  * Credentials accepted by {@link verifyHttpBasic}.
@@ -99,10 +84,6 @@ export function verifyHttpBasic(
     sessionAuth: createRuntimeSessionAuthContext(result.principal),
   };
 }
-
-// ---------------------------------------------------------------------------
-// JWT HMAC
-// ---------------------------------------------------------------------------
 
 /**
  * Configuration for {@link verifyJwtHmac}. Optional fields have defaults so
@@ -165,10 +146,6 @@ export async function verifyJwtHmac(
     sessionAuth: createRuntimeSessionAuthContext(result.principal),
   };
 }
-
-// ---------------------------------------------------------------------------
-// JWT ECDSA
-// ---------------------------------------------------------------------------
 
 /**
  * Configuration for {@link verifyJwtEcdsa}.
@@ -234,10 +211,6 @@ export async function verifyJwtEcdsa(
   };
 }
 
-// ---------------------------------------------------------------------------
-// OIDC
-// ---------------------------------------------------------------------------
-
 /**
  * Configuration for {@link verifyOidc}.
  */
@@ -288,14 +261,6 @@ export async function verifyOidc(
     : { ok: false };
 }
 
-/**
- * Runs OIDC token verification against a resolved strategy and returns
- * the strategy authenticator's tagged result. Internal helper shared
- * between {@link verifyOidc} (public, never grants the Vercel
- * current-project upgrade) and {@link verifyVercelOidc} (always opts
- * into it). Returning the raw outcome rather than a boolean lets call
- * sites log a structured rejection reason.
- */
 async function runOidcVerification(
   token: string | null,
   config: VerifyOidcConfig & {
@@ -326,10 +291,6 @@ async function runOidcVerification(
   return await authenticateOidcStrategy({ strategy, token });
 }
 
-// ---------------------------------------------------------------------------
-// Bearer token extraction
-// ---------------------------------------------------------------------------
-
 /**
  * Extracts the bearer token from an `Authorization: Bearer <token>` header.
  * Returns `null` if the header is missing, the scheme isn't `Bearer`, or the
@@ -343,10 +304,6 @@ export function extractBearerToken(authorizationHeader: string | null): string |
   const value = match?.[1]?.trim();
   return value === undefined || value.length === 0 ? null : value;
 }
-
-// ---------------------------------------------------------------------------
-// IP allowlist
-// ---------------------------------------------------------------------------
 
 /**
  * Parsed IP allowlist for repeated checks. Construct once at module load,
@@ -373,10 +330,6 @@ export function isIpAllowed(ip: string | null, allowList: IpAllowList): boolean 
   }
   return isRuntimeIpAllowed(ip, allowList);
 }
-
-// ---------------------------------------------------------------------------
-// Unauthorized response builder
-// ---------------------------------------------------------------------------
 
 /**
  * One challenge entry attached to the `www-authenticate` header on a failure
@@ -453,7 +406,7 @@ function formatChallenge(challenge: UnauthorizedChallenge): string {
   return `${challenge.scheme} ${renderedParameters}`;
 }
 
-/** @internal Escapes a value for an HTTP auth challenge quoted string. */
+/** @internal */
 export function escapeAuthChallengeParameter(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
@@ -617,7 +570,7 @@ export function oauthResource(
   return wrapped;
 }
 
-/** @internal Reads OAuth resource metadata without widening `AuthFn`. */
+/** @internal */
 export function readOAuthResourceOptions(
   auth: AuthFn<Request> | readonly AuthFn<Request>[],
 ): OAuthResourceOptions | undefined {
@@ -625,13 +578,6 @@ export function readOAuthResourceOptions(
   return (auth as Partial<OAuthResourceAuth>)[OAUTH_RESOURCE_SYMBOL];
 }
 
-/**
- * Symbol-keyed property carrying the `www-authenticate` challenges an
- * {@link AuthFn} would satisfy, attached via {@link withAuthChallenges}.
- * Reading it back off the function (rather than widening `AuthFn`'s call
- * signature) lets {@link routeAuth} discover the right challenge scheme(s)
- * for a 401 without every strategy needing to change shape.
- */
 const AUTH_CHALLENGES_SYMBOL = Symbol.for("eve.channels.auth.challenges");
 
 /**
@@ -663,11 +609,6 @@ export function withAuthChallenges<TEvent, TResult extends AuthResult = AuthResu
   return wrapped;
 }
 
-/**
- * Reads the challenges {@link withAuthChallenges} attached to `fn`, or
- * `undefined` when `fn` declared none (e.g. {@link none}, {@link localDev},
- * {@link placeholderAuth}, or a custom `AuthFn` that never opted in).
- */
 function getDeclaredChallenges<TEvent>(
   fn: AuthFn<TEvent>,
 ): readonly UnauthorizedChallenge[] | undefined {
@@ -676,11 +617,6 @@ function getDeclaredChallenges<TEvent>(
   ];
 }
 
-/**
- * Collects the deduped, ordered set of challenges declared across `list` via
- * {@link withAuthChallenges}. Dedupes by the rendered `www-authenticate`
- * string so e.g. two `jwtHmac()` entries only contribute one `Bearer`.
- */
 function collectDeclaredChallenges(
   list: readonly AuthFn<Request>[],
 ): readonly UnauthorizedChallenge[] {
@@ -745,12 +681,6 @@ export async function routeAuth<TResult extends AuthResult = AuthResult>(
   });
 }
 
-/**
- * A supplied Bearer credential that every declared Bearer strategy declined
- * is invalid, rather than absent. Add the RFC 6750 error only after the whole
- * auth walk has exhausted so another Bearer strategy or a fallback such as
- * localDev() still has a chance to accept the request.
- */
 function addInvalidBearerTokenError(
   request: Request,
   challenges: readonly UnauthorizedChallenge[],
@@ -820,7 +750,15 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
   return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
 }
 
-/** Marks functions {@link localDev} returns so channels can tell the author configured it. */
+/** @internal */
+export function declaredAuthChallenges(
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+): readonly UnauthorizedChallenge[] {
+  return collectDeclaredChallenges(
+    Array.isArray(auth) ? (auth as readonly AuthFn<Request>[]) : [auth as AuthFn<Request>],
+  );
+}
+
 const LOCAL_DEV_AUTH_SYMBOL = Symbol.for("eve.channels.auth.localDev");
 
 /**
@@ -860,7 +798,7 @@ export function localDev(): AuthFn<Request> {
   return authenticate;
 }
 
-/** @internal Whether `fn` is a function {@link localDev} returned. */
+/** @internal */
 export function isLocalDevAuth(fn: AuthFn<never>): boolean {
   return (
     (fn as Partial<Record<typeof LOCAL_DEV_AUTH_SYMBOL, true>>)[LOCAL_DEV_AUTH_SYMBOL] === true
@@ -868,7 +806,6 @@ export function isLocalDevAuth(fn: AuthFn<never>): boolean {
 }
 
 function isCrossSiteBrowserRequest(request: Request): boolean {
-  // Under DNS rebinding the browser addresses the attacker's own host name.
   if (!isLocalMachineAddress(new URL(request.url).hostname)) return true;
   const origin = request.headers.get("origin");
   if (origin === null) return false;
@@ -876,11 +813,6 @@ function isCrossSiteBrowserRequest(request: Request): boolean {
   return hostname === undefined || !isLocalMachineAddress(hostname);
 }
 
-/**
- * `eve dev --host` can listen beyond loopback. Its listener signs each
- * caller's socket address onto the request, so a caller on another machine is
- * refused however it sets the request's headers.
- */
 function isFromRemotePeer(request: Request): boolean {
   return readTrustedDevelopmentPeer(request.headers) === "remote";
 }
@@ -892,16 +824,6 @@ const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {
   principalType: "local-dev",
 };
 
-/**
- * Expected prefix for the `aud` claim of a Vercel-minted OIDC token
- * (`https://vercel.com/<owner-slug>`). Requiring it gives a real audience
- * binding: `verifyVercelOidc` otherwise verifies the token only against its
- * own `aud` (a tautology), so a token the project minted for a foreign
- * federation audience (e.g. AWS STS) — same `project_id`, different `aud` —
- * could be replayed against the agent. Foreign audiences lack this prefix and
- * are rejected; every owner's Vercel audience carries it, so the cross-project
- * `subjects` path is unaffected.
- */
 const VERCEL_OIDC_AUDIENCE_PREFIX = "https://vercel.com/";
 
 /**
@@ -978,10 +900,6 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  // Bind the audience: the token must carry a Vercel audience. The verifier
-  // below otherwise checks the token's `aud` against itself (a tautology), so
-  // without this a token minted for a foreign federation audience would still
-  // authenticate on a matching `project_id`.
   if (!claims.audiences.some((audience) => audience.startsWith(VERCEL_OIDC_AUDIENCE_PREFIX))) {
     vercelOidcLog.debug("Rejected token whose audience is not a Vercel audience.", {
       audiences: claims.audiences,
@@ -990,11 +908,6 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  // `acceptCurrentVercelProject: true` activates the same-project bypass
-  // inside the OIDC verifier so any token minted for the configured project
-  // is accepted regardless of `subjects`. The supplied `subjects`
-  // matcher (defaulting to an empty list that matches nothing)
-  // determines which **other** callers are allowed in.
   const currentVercelProject = resolveCurrentVercelProject(opts);
   const result = await runOidcVerification(token, {
     acceptCurrentVercelProject: true,
@@ -1138,7 +1051,6 @@ export type VercelOidcOptions = VerifyVercelOidcOptions;
  * `Bearer` {@link withAuthChallenges} challenge for {@link routeAuth}'s 401.
  */
 export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
-  // JavaScript callers can pass eveVercelOidc's object entries, which would otherwise never match.
   if (opts.subjects?.some((entry: unknown) => typeof entry !== "string")) {
     throw new TypeError(
       'vercelOidc: every subjects entry must be a string. For entries such as { subject, allowToolStubs: true }, use eveVercelOidc from "eve/channels/eve".',
@@ -1262,19 +1174,6 @@ export function oidc(config: VerifyOidcConfig): AuthFn<Request> {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
-
-/**
- * Decodes a bearer JWT into its issuer and audience(s) without verifying
- * the signature. Returns `null` for malformed tokens or tokens missing
- * the `iss` claim.
- *
- * Used by {@link verifyVercelOidc} to discover the team-scoped issuer and
- * audience baked into Vercel-issued tokens before running full
- * verification.
- */
 function decodeUnverifiedJwtClaims(
   token: string,
 ): { readonly issuer: string; readonly audiences: readonly string[] } | null {

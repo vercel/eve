@@ -8,12 +8,10 @@ const at = "2026-10-09T00:00:00.000Z";
 const turn = { turnId: "turn_0" };
 const run = { runId: "run_0", turnId: "turn_0" };
 
-/** One line per argument: a commit of its facts. */
 function commits(...lines: readonly unknown[][]): StoredLine[] {
   return lines.map((facts) => ({ at, facts }));
 }
 
-/** A turn that answers a message with one reply part. */
 function repliedTurn(): StoredLine[] {
   return commits(
     [
@@ -406,7 +404,6 @@ describe("createStreamChecker", () => {
   it("checks on from a checkpoint's view, knowing what it holds open", () => {
     const lines = repliedTurn();
     expect(rulesOf(lines.slice(3), lines.slice(0, 3))).toEqual([]);
-    // The checkpoint knows the run, so introducing it again is refused.
     const again = commits([
       { data: { owner: turn, runId: "run_0" }, scope: run, type: "model.requested" },
     ]);

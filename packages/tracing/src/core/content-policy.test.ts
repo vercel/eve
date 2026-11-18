@@ -73,9 +73,6 @@ describe("withoutDeclinedContent", () => {
     ).toEqual({});
   });
 
-  // The prefixes are shared: `ai.response.finish_reason` and `gen_ai.tool.name`
-  // say what happened rather than what was said, so declining content cannot
-  // cost a destination the ability to read its own traces.
   it("keeps metadata that shares a prefix with content", () => {
     expect(
       withoutDeclinedContent(ATTRIBUTES, { recordInputs: false, recordOutputs: false }),

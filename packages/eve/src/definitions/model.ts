@@ -5,7 +5,7 @@ import {
   type LiveDynamicModelSelection,
 } from "#context/keys.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
 import {
   loadDynamicRuntimeModelDefinition,
@@ -25,11 +25,11 @@ import {
   type InternalContext,
   type Kept,
 } from "./definition.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 
 const MODEL_REACTION_ID = "model:agent";
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
 
-/** A dynamic `model` failed to choose a model: the model call that needs it fails. */
 export class DynamicModelSelectionError extends Error {
   readonly code = DYNAMIC_MODEL_SELECTION_ERROR_CODE;
   override readonly name = "DynamicModelSelectionError";
@@ -48,20 +48,12 @@ export function isDynamicModelSelectionError(error: unknown): error is DynamicMo
   );
 }
 
-/** The model a call runs: its reference, and the provider the process holds for it, if any. */
 export type ModelChoice = LiveDynamicModelSelection;
 
-/** What the model slot records: the model chosen. */
 interface ModelSlotValue {
   readonly reference: LiveDynamicModelSelection["reference"];
 }
 
-/**
- * An agent's dynamic `model` field: its function returns the model, as a gateway ID, a provider
- * object, or `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`. It's chosen before
- * every other value evaluates, so each can read `ctx.model`. A model call needs a model, so `null`
- * fails it.
- */
 export async function loadModelDefinition(bundle: CompiledBundle): Promise<Definition | undefined> {
   const dynamicModel = bundle.turnAgent.dynamicModel;
   if (dynamicModel === undefined) return undefined;
@@ -69,16 +61,15 @@ export async function loadModelDefinition(bundle: CompiledBundle): Promise<Defin
     dynamicModel,
     scope: { moduleMap: bundle.moduleMap, nodeId: bundle.nodeId },
   });
-  return modelDefinition(bundle, {
+  return modelDefinition(bundle.modelMetadata, {
     choose: authoredEvaluate(dynamicEvaluate(definition)),
     id: MODEL_REACTION_ID,
     label: `${dynamicModel.logicalPath}#model`,
   });
 }
 
-/** A definition that chooses the model. */
 function modelDefinition(
-  bundle: CompiledBundle,
+  modelMetadata: () => Promise<ModelMetadata>,
   input: {
     readonly id: string;
     readonly label: string;
@@ -92,7 +83,7 @@ function modelDefinition(
           async (evaluation) => {
             const result = await input.choose(evaluation);
             try {
-              return await keptModel(result, bundle);
+              return await keptModel(result, modelMetadata);
             } catch (error) {
               throw new DynamicModelSelectionError(error);
             }
@@ -109,14 +100,15 @@ function modelDefinition(
   };
 }
 
-/** Resolves a model result to what the slot records, and the provider the process holds. */
-async function keptModel(result: unknown, bundle: CompiledBundle): Promise<Kept> {
+async function keptModel(
+  result: unknown,
+  modelMetadata: () => Promise<ModelMetadata>,
+): Promise<Kept> {
   const selection = await resolveRuntimeModelSelection({
     durability: "live",
-    modelMetadata: bundle.modelMetadata,
+    modelMetadata,
     selection: result as PublicAgentDynamicModelResult,
   });
-  // Mock runs replace real providers, but keep explicitly scripted responders.
   const live =
     selection.model === undefined ||
     (!isMockModel(selection.model) && shouldMockAuthoredRuntimeModels())
@@ -126,15 +118,10 @@ async function keptModel(result: unknown, bundle: CompiledBundle): Promise<Kept>
   return { live, value: parseJsonValue(value) };
 }
 
-/**
- * The model the session chose last, as its definitions decided before a model call. Readers
- * outside the call, such as `ctx.model`, read it.
- */
 export const ChosenModelKey = new ContextKey<{ readonly reference: RuntimeModelReference }>(
   "eve.model",
 );
 
-/** What the session's definitions decide the model call runs, and records it as the session's choice. */
 export async function chooseModel(
   contributions: readonly Contribution[],
   ctx: ContextAccessor,
@@ -146,10 +133,9 @@ export async function chooseModel(
   return choice;
 }
 
-/** The session's model outside a model call: the one it chose last, else the one it was given. */
 export function currentModel(ctx: Pick<ContextReader, "get">): RuntimeModelReference | undefined {
   return (
-    ctx.get(ChosenModelKey)?.reference ?? givenModel(ctx) ?? ctx.get(BundleKey)?.turnAgent.model
+    ctx.get(ChosenModelKey)?.reference ?? givenModel(ctx) ?? compiledBundleOf(ctx)?.turnAgent.model
   );
 }
 
@@ -157,14 +143,12 @@ export function effectiveModelId(ctx: Pick<ContextReader, "get">): string | unde
   return currentModel(ctx)?.id;
 }
 
-/** The model a session's parent gave it: a `ctx.agent` model, or a dynamic subagent's config's. */
 function givenModel(ctx: Pick<ContextReader, "get">): RuntimeModelReference | undefined {
   return (
     ctx.get(AgentSessionRuntimeOverridesKey)?.model ?? ctx.get(DynamicSubagentAgentConfigKey)?.model
   );
 }
 
-/** `agent.ts`'s model, which every dynamic choice after it may replace. */
 export function agentModel(bundle: CompiledBundle): Definition | undefined {
   const reference = bundle.turnAgent.model;
   if (reference === undefined) return undefined;
@@ -175,7 +159,6 @@ export function agentModel(bundle: CompiledBundle): Definition | undefined {
   };
 }
 
-/** The model a session's parent gave it, which no definition of the session's own replaces. */
 export const parentModel: Definition = {
   contribute: ({ container }) => ({
     model: () => {

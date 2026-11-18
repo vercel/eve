@@ -215,20 +215,12 @@ describe("resolveConnectionPrincipal", () => {
   it("accepts an explicit ctx argument and bypasses AsyncLocalStorage", () => {
     const ctx = ctxWithAuth(userAuth({ issuer: "idp", principalId: "u1" }));
 
-    // No contextStorage.run wrapper — the resolver reads the ctx arg
-    // directly so callers inside a durable step can pass the
-    // deserialized context without re-entering ALS.
     const principal = resolveConnectionPrincipal("linear", userAuthDef, ctx);
 
     expect(principal).toMatchObject({ id: "u1", issuer: "idp", type: "user" });
   });
 
   it("resolves from a durable-step-style ctx with AuthKey but no derived SessionKey", () => {
-    // Inside a `"use step"` boundary the workflow deserializes only
-    // seed keys (AuthKey among them); derived keys like SessionKey are
-    // reconstructed by sessionProvider, which only runs inside runStep.
-    // This test guards against regressing on that path: the resolver
-    // must not depend on SessionKey being populated.
     const ctx = new ContextContainer();
     ctx.set(AuthKey, userAuth({ issuer: "idp", principalId: "durable-user" }));
 
@@ -242,9 +234,6 @@ describe("resolveConnectionPrincipal", () => {
   });
 
   it("returns an app principal for app-typed connections even when no context is active", () => {
-    // Mirrors ad-hoc CLI / unit-test use: no contextStorage.run,
-    // no ctx argument. App-scoped connections must still resolve
-    // because they do not depend on session identity.
     const principal = resolveConnectionPrincipal("linear", appAuth);
 
     expect(principal).toEqual({ type: "app" });

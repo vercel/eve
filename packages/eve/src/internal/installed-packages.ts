@@ -2,13 +2,13 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
-/** A package found on disk, or a declared dependency that isn't installed (empty `root`). */
+const NODE_MODULES_SEGMENT = "/node_modules/";
+
 export interface InstalledPackage {
   readonly name: string | undefined;
   readonly root: string;
 }
 
-/** The packages at `packageRoots` and every package they can load, as installed on disk. */
 export function installedDependencyClosure(
   packageRoots: readonly string[],
 ): readonly InstalledPackage[] {
@@ -32,34 +32,52 @@ export function installedDependencyClosure(
   return closure;
 }
 
-/**
- * Whether a module path sits inside one of `packageRoots` or a package they can load. Builds the
- * closure once, on the first call, and caches each directory's answer.
- */
+export interface InstalledPackageScope {
+  readonly includes: (modulePath: string) => boolean;
+  readonly nodeModulesDirectories: () => readonly string[];
+  readonly rootsOutsideNodeModules: () => readonly string[];
+}
+
 export function createInstalledPackageScope(
   packageRoots: readonly string[],
-): (modulePath: string) => boolean {
+): InstalledPackageScope {
   let scopeRoots: ReadonlySet<string> | undefined;
-  const byDirectory = new Map<string, boolean>();
-  return (modulePath) => {
-    if (packageRoots.length === 0) return false;
-    scopeRoots ??= new Set(
+  const roots = (): ReadonlySet<string> =>
+    (scopeRoots ??= new Set(
       installedDependencyClosure(packageRoots)
         .map((installed) => installed.root)
         .filter((root) => root !== ""),
-    );
-    const directory = dirname(toCanonicalPath(modulePath));
-    let inScope = byDirectory.get(directory);
-    if (inScope === undefined) {
-      const packageRoot = installedPackageRoot(modulePath);
-      inScope = packageRoot !== undefined && scopeRoots.has(packageRoot);
-      byDirectory.set(directory, inScope);
-    }
-    return inScope;
+    ));
+  const byDirectory = new Map<string, boolean>();
+  return {
+    includes(modulePath) {
+      if (packageRoots.length === 0) return false;
+      const directory = dirname(toCanonicalPath(modulePath));
+      let inScope = byDirectory.get(directory);
+      if (inScope === undefined) {
+        const packageRoot = installedPackageRoot(modulePath);
+        inScope = packageRoot !== undefined && roots().has(packageRoot);
+        byDirectory.set(directory, inScope);
+      }
+      return inScope;
+    },
+    nodeModulesDirectories() {
+      const directories = new Set<string>();
+      for (const root of roots()) {
+        const path = root.replaceAll("\\", "/");
+        const index = path.lastIndexOf(NODE_MODULES_SEGMENT);
+        if (index !== -1) directories.add(path.slice(index + NODE_MODULES_SEGMENT.length));
+      }
+      return [...directories];
+    },
+    rootsOutsideNodeModules() {
+      return [...roots()].filter(
+        (root) => !root.replaceAll("\\", "/").includes(NODE_MODULES_SEGMENT),
+      );
+    },
   };
 }
 
-/** The nearest enclosing directory whose package.json names a package, skipping nested stubs. */
 export function installedPackageRoot(filePath: string): string | undefined {
   let directory = dirname(toCanonicalPath(filePath));
   while (true) {
@@ -102,8 +120,6 @@ function findInstalledDependencyRoot(dependency: string, fromRoot: string): stri
   return packageJsonPath === undefined ? undefined : toCanonicalPath(dirname(packageJsonPath));
 }
 
-// The native realpath also expands Windows 8.3 names, such as a temp directory's `RUNNER~1`, so
-// package roots recorded here match the long-form module ids bundlers hand to plugins.
 function toCanonicalPath(path: string): string {
   try {
     return realpathSync.native(path);

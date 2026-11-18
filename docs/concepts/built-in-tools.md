@@ -43,7 +43,7 @@ export { default } from "eve/tools/bash";
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
 
-The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A longer stream starts with a note, which names a file in the sandbox holding the full output when the sandbox runs `bash` with its job files (`just-bash` does not). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A line longer than 2,000 characters keeps its start and ends with `[truncated]`. A stream with lines left out starts with a note, which names a file in the sandbox holding the full output when the sandbox runs `bash` with its job files (`just-bash` does not). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
 
 The command writes to `stdout` and `stderr` files in `outputDirectory`, and its exit code to an `exit` file when it finishes. The model checks on or stops it with shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
@@ -53,7 +53,7 @@ cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 
-The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
+The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. A running command doesn't keep the session busy, so it ends when eve [stops the idle sandbox](../sandbox#stop-an-idle-sandbox), and a later check finds no `exit` file. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 
@@ -242,7 +242,7 @@ export default disableTool();
 
 ### `web_search`
 
-`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Exa unless you set `provider`; direct provider models use their native search.
+`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Parallel unless you set `provider`; direct provider models use their native search.
 
 ```sh
 eve add tool/web_search
@@ -251,7 +251,7 @@ eve add tool/web_search
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "exa" });
+export default webSearch({ provider: "parallel" });
 ```
 
 Choose another AI Gateway search provider:
@@ -259,7 +259,7 @@ Choose another AI Gateway search provider:
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "parallel" });
+export default webSearch({ provider: "exa" });
 ```
 
 Select Browserbase Search in the same slot:
@@ -554,7 +554,7 @@ import { noReply } from "eve/tools/no_reply";
 export default noReply;
 ```
 
-`no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes.
+`no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends once it succeeds, after any other tool calls in the same step settle. Only root sessions receive it. Slack clears the thread status when the turn completes.
 
 Without `no_reply`, a root session also accepts an empty model reply with `finishReason: "stop"` and completes the turn without a final message. Use `no_reply` to record an explicit choice to stay quiet, with a reason. Delegated sessions retry an empty reply once and report a failure if it stays empty, so the caller can act on it.
 

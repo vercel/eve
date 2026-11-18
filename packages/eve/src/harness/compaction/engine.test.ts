@@ -2,15 +2,24 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
-import { compactMessages, getInputTokenCount, shouldCompact } from "#harness/compaction/engine.js";
+import {
+  compactMessages,
+  type CompactionSummarizer,
+  estimateRatio,
+  getInputTokenCount,
+  shouldCompact,
+  withoutPromptMeasurement,
+  withPromptMeasurement,
+} from "#harness/compaction/engine.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import type { CompactionConfig } from "#harness/types.js";
+import type { CompactionConfig, CompactionStage } from "#harness/types.js";
 import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
 
 const config: CompactionConfig = {
   recentWindowSize: 2,
+  target: 100,
   threshold: 100,
 };
 
@@ -34,9 +43,6 @@ function toolFileMessage(data: unknown, mediaType = "image/png"): ModelMessage {
 describe("estimateTokens", () => {
   it("estimates based on serialized character length", () => {
     const messages: ModelMessage[] = [{ content: "a".repeat(400), role: "user" }];
-    // JSON.stringify wraps the payload with struct chars; the estimate is
-    // serialized-length / 4. The exact value matters less than the rough
-    // relationship to raw content length.
     expect(estimateTokens(messages)).toBeGreaterThanOrEqual(100);
     expect(estimateTokens(messages)).toBeLessThan(120);
   });
@@ -93,11 +99,6 @@ describe("estimateTokens", () => {
   });
 
   it("counts all content parts including reasoning", () => {
-    // The simplified estimator uses JSON.stringify(messages).length / 4 with
-    // no type-specific skipping. Reasoning contributes to the estimate like
-    // any other payload — this is intentional: the true token count comes
-    // back from the model each step via `lastKnownInputTokens`, so the
-    // heuristic only needs to roughly track size.
     const base: ModelMessage[] = [
       {
         content: [
@@ -171,8 +172,6 @@ describe("estimateTokens", () => {
 });
 
 describe("getInputTokenCount", () => {
-  // #3799: two page scans returned by a vision tool counted as ~160k tokens
-  // of base64 text and forced compaction against a 43,895-token prompt.
   it("does not count tool-result image bytes as text before provider usage arrives", () => {
     const page = pngBytes(1000, 1000, 240_000).toString("base64");
     const prompt: ModelMessage[] = [{ content: "Read both scanned pages.", role: "user" }];
@@ -199,7 +198,6 @@ describe("getInputTokenCount", () => {
       lastKnownInputTokens: 42,
       lastKnownPromptMessageCount: 1,
     });
-    // No appended messages: the exact prior count is the whole count.
     expect(result).toBe(42);
   });
 
@@ -214,8 +212,6 @@ describe("getInputTokenCount", () => {
       lastKnownInputTokens: 42,
       lastKnownPromptMessageCount: 1,
     });
-    // prior (42) + rough estimate of the one appended assistant message.
-    // The assistant message is ~80 content chars plus JSON struct overhead.
     expect(result).toBeGreaterThan(42 + 20);
     expect(result).toBeLessThan(42 + 40);
   });
@@ -266,6 +262,7 @@ describe("shouldCompact", () => {
       lastKnownInputTokens: 200,
       lastKnownPromptMessageCount: messages.length,
       recentWindowSize: 2,
+      target: 1_000,
       threshold: 1_000,
     };
     const activeInputTokens = getInputTokenCount(messages, compaction);
@@ -292,9 +289,6 @@ describe("shouldCompact", () => {
     expect(shouldCompact([], { ...config, threshold: 0 })).toBe(false);
   });
 
-  // #4292: a 40,000-character Chinese tool result costs about 30k o200k and
-  // 40k cl100k tokens, but serialized length / 4 counted it as about 10k, so a
-  // measured 165k prompt reached the 200k window without compacting.
   it("compacts when a large CJK tool result pushes a measured prompt over the threshold", () => {
     const prompt: ModelMessage[] = [
       { content: "Summarize the attached Chinese report.", role: "user" },
@@ -319,34 +313,18 @@ describe("shouldCompact", () => {
         lastKnownInputTokens: 165_000,
         lastKnownPromptMessageCount: prompt.length,
         recentWindowSize: 4,
+        target: 180_000,
         threshold: 180_000,
       }),
     ).toBe(true);
   });
 });
 
-// --- compactMessages ---------------------------------------------------
-//
-// compactMessages escalates through heuristics before summarizing, and which
-// strategy a test hits is pure threshold arithmetic:
-//
-// - The tool-result cap heuristic is accepted only when the capped history
-//   PLUS the fixed compaction prompt envelope fits the threshold.
-//   `HEURISTICS_FORBIDDEN` leaves only a little room above the envelope, and
-//   `compact` prepends `OLD_BULK` to a history at that threshold, so no
-//   heuristic can be accepted and the summarization fallback always runs.
-// - `ROOMY` accepts capping whenever the history's bulk is tool output.
-//
-// Every result is checked against `expectWellFormedCompaction`: no orphaned
-// tool_result, never trailing on an assistant message, and — unless the
-// window was exhausted — within the threshold on shouldCompact's own ruler,
-// so the result cannot immediately re-trigger compaction.
-
 const ENVELOPE_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
-const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS) + 200;
+const TIGHT_THRESHOLD = Math.floor(ENVELOPE_TOKENS) + 200;
 const OLD_BULK: ModelMessage[] = [
   { content: "background ".repeat(150), role: "user" },
   { content: "noted", role: "assistant" },
@@ -367,7 +345,6 @@ function assistant(text: string): ModelMessage {
   return { content: text, role: "assistant" };
 }
 
-/** An assistant tool-call message and its paired tool-result message. */
 function toolExchange(input: {
   readonly callId: string;
   readonly payloadChars: number;
@@ -423,6 +400,11 @@ function toolResultValue(message: ModelMessage | undefined): string {
   return output?.type === "text" || output?.type === "error-text" ? output.value : "";
 }
 
+function toolResultOutput(message: ModelMessage | undefined) {
+  const part = Array.isArray(message?.content) ? message.content[0] : undefined;
+  return part?.type === "tool-result" ? part.output : undefined;
+}
+
 function isCheckpointHead(messages: readonly ModelMessage[]): boolean {
   return messages[0]?.content === CHECKPOINT_MARKER;
 }
@@ -450,26 +432,57 @@ function expectWellFormedCompaction(result: ModelMessage[], threshold: number): 
   }
 }
 
+type TestCompactionConfig = Omit<CompactionConfig, "target"> & { readonly target?: number };
+
+async function compactHistory(
+  messages: ModelMessage[],
+  testConfig: TestCompactionConfig,
+  summarize: CompactionSummarizer,
+  forceSummary?: boolean,
+  resume?: boolean,
+): Promise<ModelMessage[]> {
+  const { messages: result } = await compactMessages(
+    messages,
+    {
+      ...testConfig,
+      estimateRatio: testConfig.estimateRatio ?? 1,
+      target: testConfig.target ?? testConfig.threshold,
+    },
+    summarize,
+    forceSummary,
+    resume,
+  );
+  return result;
+}
+
 async function compact(
   messages: ModelMessage[],
   overrides: Partial<CompactionConfig> & { readonly summary?: string } = {},
-): Promise<{ result: ModelMessage[]; summarizer: ReturnType<typeof summarizeWith> }> {
+): Promise<{
+  result: ModelMessage[];
+  stage: CompactionStage;
+  summarizer: ReturnType<typeof summarizeWith>;
+}> {
   const summarizer = summarizeWith(overrides.summary ?? "checkpoint text");
 
+  const threshold = overrides.threshold ?? ROOMY;
   const compactionConfig: CompactionConfig = {
+    estimateRatio: overrides.estimateRatio ?? 1,
     lastKnownInputTokens: overrides.lastKnownInputTokens,
     lastKnownPromptMessageCount: overrides.lastKnownPromptMessageCount,
+    lastStage: overrides.lastStage,
     recentWindowSize: overrides.recentWindowSize ?? 4,
-    threshold: overrides.threshold ?? ROOMY,
+    target: overrides.target ?? threshold,
+    threshold,
   };
   const history =
-    compactionConfig.threshold === HEURISTICS_FORBIDDEN && !isCheckpointHead(messages)
+    threshold === TIGHT_THRESHOLD && !isCheckpointHead(messages)
       ? [...OLD_BULK, ...messages]
       : messages;
-  const result = await compactMessages(history, compactionConfig, summarizer);
+  const { messages: result, stage } = await compactMessages(history, compactionConfig, summarizer);
 
-  expectWellFormedCompaction(result, compactionConfig.threshold);
-  return { result, summarizer };
+  expectWellFormedCompaction(result, threshold);
+  return { result, stage, summarizer };
 }
 
 function summarizeWith(summary: string) {
@@ -478,180 +491,284 @@ function summarizeWith(summary: string) {
   );
 }
 
-describe("compactMessages: tool-result cap heuristic", () => {
-  it.each([false, true])(
-    "summarizes provider-measured pressure when capping is insufficient (tool output: %s)",
-    async (withToolOutput) => {
-      const messages = [
-        ...checkpointHead("Previous investigation checkpoint."),
-        user("Dense multilingual context ".repeat(30)),
-        ...(withToolOutput
-          ? toolExchange({ callId: "call-0", payloadChars: 4_000 })
-          : [assistant("Evidence recorded.")]),
-        user("Continue the investigation."),
-      ];
-      const measuredConfig = {
-        lastKnownInputTokens: 60_000,
-        lastKnownPromptMessageCount: messages.length - 1,
-        recentWindowSize: 1,
-        threshold: 20_000,
-      };
-      expect(shouldCompact(messages, measuredConfig)).toBe(true);
-      expect(estimateTokens(messages) + ENVELOPE_TOKENS).toBeLessThan(measuredConfig.threshold);
+function summarizerTranscript(summarizer: ReturnType<typeof summarizeWith>): string {
+  return String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+}
 
-      const { result, summarizer } = await compact(messages, measuredConfig);
-
-      expect(summarizer).toHaveBeenCalledOnce();
-      expect(result[1]).toEqual(assistant("checkpoint text"));
-      expect(result.at(-1)).toEqual(messages.at(-1));
-      expect(result).toHaveLength(3);
-      expect(shouldCompact(result, { recentWindowSize: 1, threshold: 20_000 })).toBe(false);
-    },
+async function compactWithToolInTail(exchange: readonly ModelMessage[]) {
+  const { result, summarizer } = await compact(
+    [
+      user("earlier context"),
+      assistant("noted"),
+      user("investigate"),
+      ...exchange,
+      user("what did you find?"),
+    ],
+    { recentWindowSize: 4 },
   );
+  expect(summarizer).toHaveBeenCalledOnce();
+  return { result, tool: result.find((message) => message.role === "tool") };
+}
 
-  it("accepts capping that frees enough space against the measured input count", async () => {
+describe("compactMessages: summarizing a history over the trigger", () => {
+  it("summarizes the older region, large tool results included, in one call", async () => {
     const messages = [
-      user("Investigate."),
-      ...toolExchange({ callId: "large", payloadChars: 100_000 }),
-      user("Continue."),
+      user("investigate the bug"),
+      ...toolExchange({ callId: "call-0", payloadChars: 4_000 }),
+      assistant("found it"),
+      user("fix it"),
+      assistant("fixed"),
+      user("what now?"),
     ];
-    const measuredConfig = {
-      lastKnownInputTokens: 30_000,
-      lastKnownPromptMessageCount: messages.length,
-      recentWindowSize: 1,
-      threshold: 20_000,
-    };
-    expect(shouldCompact(messages, measuredConfig)).toBe(true);
-    const { result, summarizer } = await compact(messages, measuredConfig);
-    expect(summarizer).not.toHaveBeenCalled();
-    expect(result).toHaveLength(messages.length);
-    expect(JSON.stringify(result)).toContain("Truncated by eve");
-  });
+    const threshold = Math.floor(estimateTokens(messages));
+    expect(shouldCompact(messages, { recentWindowSize: 2, target: threshold, threshold })).toBe(
+      true,
+    );
 
-  it.each([undefined, -1, 100])(
-    "ignores unusable prompt counts (%s) when evaluating capping",
-    async (lastKnownPromptMessageCount) => {
-      const messages = [
-        user("Investigate."),
-        ...toolExchange({ callId: "large", payloadChars: 4_000 }),
-        user("Continue."),
-      ];
-      const { summarizer } = await compact(messages, {
-        lastKnownInputTokens: 30_000,
-        lastKnownPromptMessageCount,
-        recentWindowSize: 1,
-        threshold: 20_000,
+    const { result, stage, summarizer } = await compact(messages, {
+      recentWindowSize: 2,
+      threshold,
+    });
+
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(stage).toBe("tail");
+    expect(result).toEqual([
+      ...checkpointHead("checkpoint text"),
+      assistant("fixed"),
+      user("what now?"),
+    ]);
+    expect(result.some((message) => message.role === "tool")).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("x".repeat(2_001));
+    const transcript = summarizerTranscript(summarizer);
+    expect(transcript).toContain("Truncated by eve");
+    expect(transcript).not.toContain("x".repeat(2_001));
+  });
+});
+
+describe("compactMessages: target and estimate ratio", () => {
+  const summary = "checkpoint text";
+  const tail = [
+    user("question"),
+    ...toolExchange({ callId: "call-1", payloadChars: 400 }),
+    user("go on"),
+  ];
+  const history = [user("old notes ".repeat(500)), assistant("ok"), ...tail];
+  const verbatim = [...checkpointHead(summary), ...tail];
+  const textTail = [...checkpointHead(summary), user("question"), user("go on")];
+
+  it.each([
+    ["1.3", 1.3, 1.3],
+    ["unset, which uses 1.6", undefined, 1.6],
+  ])(
+    "judges the tail against the target at the estimate times the ratio (%s)",
+    async (_name, ratio, factor) => {
+      const atTarget = Math.ceil(estimateTokens(verbatim) * factor);
+      const run = (target: number) =>
+        compactMessages(
+          history,
+          { estimateRatio: ratio, recentWindowSize: 4, target, threshold: ROOMY },
+          summarizeWith(summary),
+        );
+
+      await expect(run(atTarget)).resolves.toEqual({ messages: verbatim, stage: "tail" });
+      await expect(run(atTarget - 1)).resolves.toEqual({
+        messages: textTail,
+        stage: "text-tail",
       });
-      expect(summarizer).not.toHaveBeenCalled();
     },
   );
-  it("credits removed history against the provider count of the measured messages", async () => {
-    const summarize = summarizeWith("summary");
-    const [call, resultMsg] = toolExchange({ callId: "large", payloadChars: 40_000 });
-    const messages = [user("investigate"), call, resultMsg, user("continue")];
-    const result = await compactMessages(
-      messages,
-      {
-        lastKnownInputTokens: 15_000,
-        lastKnownPromptMessageCount: messages.length,
-        recentWindowSize: 1,
-        threshold: 10_000,
-      },
-      summarize,
-    );
-    expect(summarize).not.toHaveBeenCalled();
-    expect(estimateTokens(result)).toBeLessThan(2_000);
-    expect(result.map((entry) => entry.role)).toEqual(messages.map((entry) => entry.role));
+
+  it("starts at the text-only tail after a compaction that ended at the verbatim tail", async () => {
+    const { result, stage } = await compact(history, { lastStage: "tail", recentWindowSize: 4 });
+
+    expect(stage).toBe("text-tail");
+    expect(result).toEqual(textTail);
+    expect(result.some((message) => message.role === "tool")).toBe(false);
   });
 
-  it("summarizes when a no-op cannot satisfy the provider count of the measured messages", async () => {
-    const summarize = summarizeWith("summary");
-    const messages = [user("earlier ".repeat(1_500)), assistant("reply"), user("continue")];
-    const history = estimateTokens(messages);
-    await compactMessages(
-      messages,
+  it.each(["text-tail", "summary-only"] as const)(
+    "starts at the summary alone after a compaction that ended at %s",
+    async (lastStage) => {
+      const { result, stage } = await compact(history, { lastStage, recentWindowSize: 4 });
+
+      expect(stage).toBe("summary-only");
+      expect(result).toEqual([...checkpointHead(summary), user("go on")]);
+    },
+  );
+
+  describe("keeps what the tail drops in the summary", () => {
+    const marker = "UNIQUE_LATEST_TEST_FAILURE";
+    const failing: ModelMessage[] = [
+      user("run the tests"),
       {
-        lastKnownInputTokens: history * 2,
-        lastKnownPromptMessageCount: messages.length,
-        recentWindowSize: 0,
-        threshold: Math.floor(history * 1.5),
+        content: [
+          {
+            input: { command: "pnpm test" },
+            toolCallId: "call-t",
+            toolName: "bash",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
       },
-      summarize,
+      {
+        content: [
+          {
+            output: { type: "text", value: `${marker} ${"x".repeat(1_600)}` },
+            toolCallId: "call-t",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      user("what failed?"),
+    ];
+    const longHistory = [user("old notes ".repeat(40_000)), assistant("ok"), ...failing];
+
+    it("when the target drops the tail's tool results", async () => {
+      const { result, stage, summarizer } = await compact(longHistory, {
+        recentWindowSize: 4,
+        summary: "s".repeat(600),
+        target: 500,
+        threshold: 80_500,
+      });
+
+      expect(stage).toBe("text-tail");
+      expect(JSON.stringify(result)).not.toContain(marker);
+      expect(summarizer).toHaveBeenCalledTimes(1);
+      expect(summarizerTranscript(summarizer)).toContain(marker);
+    });
+
+    it("when a skipped stage drops the tail", async () => {
+      const { result, stage, summarizer } = await compact(longHistory, {
+        lastStage: "text-tail",
+        recentWindowSize: 4,
+        threshold: 80_500,
+      });
+
+      expect(stage).toBe("summary-only");
+      expect(JSON.stringify(result)).not.toContain(marker);
+      expect(summarizer).toHaveBeenCalledTimes(1);
+      expect(summarizerTranscript(summarizer)).toContain(marker);
+      expect(summarizerTranscript(summarizer)).toContain("run the tests");
+    });
+  });
+});
+
+describe("compaction state: prompt measurement", () => {
+  it("sets the estimate ratio from the provider's count over the estimate", () => {
+    const promptMessages = [{ role: "user" as const, content: "x".repeat(4_000) }];
+    const envelope = 100_000;
+    const next = withPromptMeasurement(
+      {},
+      {
+        inputTokens: 186_000,
+        modelId: "model-a",
+        promptMessageCount: 10,
+        promptMessages,
+        requestEnvelopeTokens: envelope,
+      },
     );
-    expect(summarize).toHaveBeenCalledOnce();
+
+    expect(next.estimateRatio).toBeCloseTo(
+      186_000 / (estimateTokens(promptMessages) + envelope),
+      6,
+    );
+    expect(next.requestEnvelopeTokens).toBe(envelope);
+    expect(next.lastKnownInputTokens).toBe(186_000);
+    expect(next.lastKnownPromptMessageCount).toBe(10);
   });
 
-  it("caps oversized older tool results in place without calling the summarizer", async () => {
+  it("keeps the previous ratio when the measurement has no estimate", () => {
+    const next = withPromptMeasurement(
+      { estimateRatio: 1.2 },
+      { inputTokens: 186_000, modelId: "model-a", promptMessageCount: 10 },
+    );
+
+    expect(next.estimateRatio).toBe(1.2);
+  });
+
+  it("uses 1.6 until a call is measured", () => {
+    expect(estimateRatio({})).toBe(1.6);
+    expect(estimateRatio({ estimateRatio: 1.3 })).toBe(1.3);
+  });
+
+  it("keeps the ratio and the last stage when the measurement is dropped", () => {
+    const next = withoutPromptMeasurement({
+      estimateRatio: 1.3,
+      lastKnownInputTokens: 186_000,
+      lastKnownPromptMessageCount: 10,
+      lastStage: "tail",
+    });
+
+    expect(next).toEqual({ estimateRatio: 1.3, lastStage: "tail" });
+  });
+
+  it("keeps the last stage through the first measurement after a rewrite and drops it on the next", () => {
+    const rewritten = withoutPromptMeasurement({
+      estimateRatio: 1.3,
+      lastKnownInputTokens: 186_000,
+      lastKnownPromptMessageCount: 40,
+      lastStage: "tail",
+    });
+    const measurement = {
+      inputTokens: 130_000,
+      modelId: "model-a",
+      promptMessageCount: 6,
+      promptMessages: [],
+      requestEnvelopeTokens: 100_000,
+    };
+
+    const first = withPromptMeasurement(rewritten, measurement);
+    expect(first.lastStage).toBe("tail");
+
+    const second = withPromptMeasurement(first, { ...measurement, promptMessageCount: 8 });
+    expect(second.lastStage).toBeUndefined();
+    expect(second.estimateRatio).toBeCloseTo(1.3, 3);
+  });
+
+  it("drops the last stage when the first call after a rewrite reports no input tokens", () => {
+    let state = withoutPromptMeasurement({ estimateRatio: 1.3, lastStage: "tail" });
+    for (let call = 0; call < 6; call += 1) {
+      state = withPromptMeasurement(state, { modelId: "model-a" });
+    }
+
+    expect(state.lastStage).toBeUndefined();
+    expect(state.estimateRatio).toBe(1.3);
+  });
+});
+
+describe("compactMessages: capped tool results", () => {
+  it("caps an oversized tool result in the kept tail in place", async () => {
     const [call, resultMsg] = toolExchange({
       callId: "call-0",
       payloadChars: 4_000,
       prose: "Searching first.",
     });
-    const messages = [user("investigate the bug"), call, resultMsg, user("what did you find?")];
 
-    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+    const { result, tool } = await compactWithToolInTail([call, resultMsg]);
 
-    expect(summarizer).not.toHaveBeenCalled();
-    // Structure survives untouched: the assistant message keeps its prose and
-    // its tool-call part, and the result stays a tool message.
-    expect(result[0]).toEqual(user("investigate the bug"));
-    expect(result[1]).toBe(call);
-    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
-    expect(cappedPart?.type).toBe("tool-result");
-    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    expect(result).toContain(call);
+    expect(result.indexOf(call) + 1).toBe(result.indexOf(tool!));
+    const output = toolResultOutput(tool);
     const value =
       typeof output === "object" && output !== null && "value" in output
         ? String(output.value)
         : "";
-    // Annotation leads; a real content prefix follows; the 4k bulk is gone.
     expect(value).toContain("Truncated by eve");
     expect(value).toContain("xxx");
     expect(value.length).toBeLessThan(2_400);
     expect(result.at(-1)).toEqual(user("what did you find?"));
-    // The capped result cannot immediately re-trigger compaction.
-    expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
-  });
-
-  it("leaves an already-capped tool result unchanged on a later compaction", async () => {
-    const annotations = (message: ModelMessage | undefined) =>
-      JSON.stringify(message).split("Truncated by eve").length - 1;
-    const messages = [
-      user("investigate the bug"),
-      ...toolExchange({ callId: "call-0", payloadChars: 4_000 }),
-      user("keep going"),
-    ];
-    const { result: first } = await compact(messages, { recentWindowSize: 1 });
-    const capped = first[2];
-    expect(annotations(capped)).toBe(1);
-
-    const { result: second, summarizer } = await compact(
-      [
-        ...first,
-        ...toolExchange({ callId: "call-1", payloadChars: 4_000 }),
-        user("what did you find?"),
-      ],
-      { recentWindowSize: 1 },
-    );
-
-    expect(summarizer).not.toHaveBeenCalled();
-    expect(annotations(second[2])).toBe(1);
-    expect(second[2]).toEqual(capped);
   });
 
   it("does not split a UTF-16 surrogate pair at either cut when capping tool results", async () => {
-    // Astral characters across the whole cut window: both the head and the
-    // tail cut fall inside surrogate pairs at one of the two offsets.
     for (const offset of [0, 1]) {
       const content = `${"x".repeat(offset)}${"📥".repeat(2_000)}`;
-      const { result } = await compact(
-        [
-          user("investigate"),
-          ...toolResultExchange({ type: "json", value: { content } }),
-          user("next"),
-        ],
-        { recentWindowSize: 1 },
+      const { tool } = await compactWithToolInTail(
+        toolResultExchange({ type: "json", value: { content } }),
       );
-      const value = toolResultValue(result[2]);
+      const value = toolResultValue(tool);
       expect(value.startsWith("[Truncated by eve")).toBe(true);
       expect(value.length).toBeLessThanOrEqual(2_000);
       expect(value).toBe(value.toWellFormed());
@@ -680,17 +797,10 @@ describe("compactMessages: tool-result cap heuristic", () => {
       ],
       role: "tool",
     };
-    const messages = [user("run the tests"), call, resultMsg, user("what failed?")];
 
-    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+    const { tool } = await compactWithToolInTail([call, resultMsg]);
 
-    expect(summarizer).not.toHaveBeenCalled();
-    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
-    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
-    const value =
-      typeof output === "object" && output !== null && "value" in output
-        ? String(output.value)
-        : "";
+    const value = toolResultValue(tool);
     expect(value.startsWith("[Truncated by eve")).toBe(true);
     expect(value).toContain("✓ passing test");
     expect(value).toContain("chars omitted");
@@ -700,18 +810,11 @@ describe("compactMessages: tool-result cap heuristic", () => {
 
   it("keeps a large failed bash result a plain-text failure when capping", async () => {
     const value = `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts\n\n[exit code: 1]`;
-    const messages = [
-      user("run the tests"),
-      ...toolResultExchange({ type: "error-text", value }),
-      user("what failed?"),
-    ];
 
-    const { result } = await compact(messages, { recentWindowSize: 1 });
+    const { tool } = await compactWithToolInTail(toolResultExchange({ type: "error-text", value }));
 
-    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
-    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
-    expect(output?.type).toBe("error-text");
-    const capped = toolResultValue(result[2]);
+    expect(toolResultOutput(tool)?.type).toBe("error-text");
+    const capped = toolResultValue(tool);
     expect(capped.startsWith("[Truncated by eve")).toBe(true);
     expect(capped.endsWith("FAIL src/auth.test.ts\n\n[exit code: 1]")).toBe(true);
   });
@@ -722,22 +825,19 @@ describe("compactMessages: tool-result cap heuristic", () => {
     ["astral characters", { type: "json" as const, value: { content: "📥".repeat(2_000) } }],
     ["text", { type: "text" as const, value: `line "one"\n${"y".repeat(4_000)}` }],
   ])("returns a capped %s result unchanged on every later compaction", async (_name, output) => {
-    let history: ModelMessage[] = [
-      user("investigate"),
-      ...toolResultExchange(output),
-      user("next"),
-    ];
-    const { result: first } = await compact(history, { recentWindowSize: 1 });
-    const capped = first[2];
+    const { result: first, tool: capped } = await compactWithToolInTail(toolResultExchange(output));
     const cappedValue = toolResultValue(capped);
     expect(cappedValue.startsWith("[Truncated by eve")).toBe(true);
     expect(cappedValue.length).toBeLessThanOrEqual(2_000);
 
-    history = first;
+    let history = first;
     for (let round = 0; round < 3; round += 1) {
-      const { result, summarizer } = await compact(history, { recentWindowSize: 1 });
-      expect(summarizer).not.toHaveBeenCalled();
-      expect(result[2]).toBe(capped);
+      const { result, summarizer } = await compact(
+        [...history.slice(0, 2), user(`round ${round}`), ...history.slice(2)],
+        { recentWindowSize: 10 },
+      );
+      expect(summarizer).toHaveBeenCalledOnce();
+      expect(result.find((message) => message.role === "tool")).toBe(capped);
       history = result;
     }
   });
@@ -751,21 +851,18 @@ describe("compactMessages: tool-result cap heuristic", () => {
   ])(
     "keeps the whole capped %s content when a later compaction summarizes",
     async (_name, value) => {
-      const history: ModelMessage[] = [
-        user("investigate"),
-        ...toolResultExchange({ type: "json", value }),
-        user("next"),
-      ];
-      const { result: first } = await compact(history, { recentWindowSize: 1 });
-      const cappedValue = toolResultValue(first[2]);
+      const { result: first, tool } = await compactWithToolInTail(
+        toolResultExchange({ type: "json", value }),
+      );
+      const cappedValue = toolResultValue(tool);
       expect(cappedValue).toContain("KEPT-HEAD-7781");
       expect(cappedValue.split("chars omitted").length - 1).toBe(1);
       expect(cappedValue.endsWith('KEPT-TAIL-7781"}}')).toBe(true);
 
       const summarize = summarizeWith("forced checkpoint");
-      await compactMessages(first, { recentWindowSize: 1, threshold: ROOMY }, summarize, true);
+      await compactHistory(first, { recentWindowSize: 1, threshold: ROOMY }, summarize, true);
 
-      const transcript = String(summarize.mock.calls[0]?.[0]?.messages?.[0]?.content);
+      const transcript = summarizerTranscript(summarize);
       expect(transcript).toContain(cappedValue.replace(/\s+/g, " ").trim());
       expect(transcript.split("Truncated by eve").length - 1).toBe(1);
     },
@@ -773,8 +870,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
 
   it("stubs content-output file parts instead of truncating into their payloads", async () => {
     const base64 = "iVBORw0KGgo".repeat(500);
-    const messages: ModelMessage[] = [
-      user("render the chart"),
+    const exchange: ModelMessage[] = [
       {
         content: [{ input: {}, toolCallId: "call-0", toolName: "render_chart", type: "tool-call" }],
         role: "assistant",
@@ -801,19 +897,11 @@ describe("compactMessages: tool-result cap heuristic", () => {
         ],
         role: "tool",
       },
-      user("what does it show?"),
     ];
 
-    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+    const { tool } = await compactWithToolInTail(exchange);
 
-    expect(summarizer).not.toHaveBeenCalled();
-    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
-    expect(cappedPart?.type).toBe("tool-result");
-    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
-    // Stubbing the file part is enough to fit: the output stays a structured
-    // content output, the sibling text survives whole, and no payload bytes
-    // (or truncation annotation) remain.
-    expect(output).toEqual({
+    expect(toolResultOutput(tool)).toEqual({
       type: "content",
       value: [
         { text: "Chart summary: revenue up.", type: "text" },
@@ -824,8 +912,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
 
   it("stubs a staged tool file with its sandbox path so the agent can reopen it", async () => {
     const path = "/workspace/.eve/attachments/0123456789abcdef/chart.png";
-    const messages: ModelMessage[] = [
-      user("render the chart"),
+    const exchange: ModelMessage[] = [
       {
         content: [{ input: {}, toolCallId: "call-0", toolName: "render_chart", type: "tool-call" }],
         role: "assistant",
@@ -855,14 +942,11 @@ describe("compactMessages: tool-result cap heuristic", () => {
         ],
         role: "tool",
       },
-      user("what does it show?"),
     ];
 
-    const { result } = await compact(messages, { recentWindowSize: 1 });
+    const { tool } = await compactWithToolInTail(exchange);
 
-    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
-    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
-    expect(output).toMatchObject({
+    expect(toolResultOutput(tool)).toMatchObject({
       type: "content",
       value: [{ text: `Attached file ${path} (image/png)`, type: "text" }, { type: "text" }],
     });
@@ -870,8 +954,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
 
   it("falls back to the annotated text cap when a content output is oversized after stubbing", async () => {
     const longText = "finding line ".repeat(500);
-    const messages: ModelMessage[] = [
-      user("inspect everything"),
+    const exchange: ModelMessage[] = [
       {
         content: [{ input: {}, toolCallId: "call-0", toolName: "render_chart", type: "tool-call" }],
         role: "assistant",
@@ -897,20 +980,11 @@ describe("compactMessages: tool-result cap heuristic", () => {
         ],
         role: "tool",
       },
-      user("what did you find?"),
     ];
 
-    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+    const { tool } = await compactWithToolInTail(exchange);
 
-    expect(summarizer).not.toHaveBeenCalled();
-    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
-    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
-    const value =
-      typeof output === "object" && output !== null && "value" in output
-        ? String(output.value)
-        : "";
-    // The prefix cap now truncates stubbed content — readable text — never
-    // raw payload bytes.
+    const value = toolResultValue(tool);
     expect(value).toContain("Truncated by eve");
     expect(value).toContain("finding line");
     expect(value).not.toContain("iVBORw0KGgo");
@@ -928,42 +1002,34 @@ describe("compactMessages: tool-result cap heuristic", () => {
       recentResult,
     ];
 
-    const { result, summarizer } = await compact(messages, { recentWindowSize: 3 });
+    const { result, stage, summarizer } = await compact(messages, { recentWindowSize: 3 });
 
-    expect(summarizer).not.toHaveBeenCalled();
-    // A tool-ending tail gets no "Continue." guard, so the exchange is last.
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(stage).toBe("tail");
     expect(result.slice(-2)).toEqual([recentCall, recentResult]);
   });
 
-  it("retains the prior checkpoint pair so chaining survives cap-only cycles", async () => {
-    const [call, resultMsg] = toolExchange({ callId: "call-0", payloadChars: 4_000 });
-    const messages = [
-      ...checkpointHead("Previous checkpoint"),
-      user("new evidence"),
-      call,
-      resultMsg,
-      user("recent question"),
-    ];
-
-    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
-
-    expect(summarizer).not.toHaveBeenCalled();
-    expect(result[0]).toEqual(compactionMarker(CHECKPOINT_MARKER));
-    expect(result[1]).toEqual(assistant("Previous checkpoint"));
-  });
-
-  it("keeps a tool result paired with its call when the window would split them", async () => {
+  it("summarizes a tool result with its call when the window would split them", async () => {
     const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 40 });
-    // recentWindowSize 2 splits between call and result; the snap pulls the
-    // result into the older region, and capping leaves both untouched.
     const messages = [user("old context"), call, resultMsg, user("next question")];
 
     const { result, summarizer } = await compact(messages, { recentWindowSize: 2 });
 
-    expect(summarizer).not.toHaveBeenCalled();
-    expect(result).toContainEqual(call);
-    expect(result).toContainEqual(resultMsg);
-    expect(result.indexOf(call)).toBeLessThan(result.indexOf(resultMsg));
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(result).not.toContainEqual(call);
+    expect(result).not.toContainEqual(resultMsg);
+  });
+
+  it("summarizes even when capping the older tool results alone would fit", async () => {
+    const [olderCall, olderResult] = toolExchange({ callId: "call-0", payloadChars: 200_000 });
+    const messages = [user("read the log"), olderCall, olderResult, user("now fix it")];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(result[0]).toEqual(compactionMarker(CHECKPOINT_MARKER));
+    expect(result[1]).toEqual(assistant("checkpoint text"));
+    expect(result).not.toContainEqual(olderCall);
   });
 });
 
@@ -972,7 +1038,7 @@ describe("compactMessages: forced summary", () => {
     const summarize = summarizeWith("forced checkpoint");
     const messages = [user("old message"), assistant("old reply")];
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       messages,
       { recentWindowSize: 10, threshold: ROOMY },
       summarize,
@@ -991,15 +1057,14 @@ describe("compactMessages: forced summary", () => {
       assistant("QA passed."),
     ];
 
-    const between = await compactMessages(
+    const between = await compactHistory(
       messages,
       { recentWindowSize: 1, threshold: ROOMY },
       summarizeWith("checkpoint"),
       true,
-      undefined,
       false,
     );
-    const during = await compactMessages(
+    const during = await compactHistory(
       messages,
       { recentWindowSize: 1, threshold: ROOMY },
       summarizeWith("checkpoint"),
@@ -1012,8 +1077,6 @@ describe("compactMessages: forced summary", () => {
 });
 
 describe("compactMessages: deferred provider tool results", () => {
-  // Anthropic defers a web search called beside a local tool: the search runs once the local
-  // result is in, and its result opens the next response.
   const searchRun: ModelMessage[] = [
     user("Run date and search for the Node LTS."),
     {
@@ -1049,13 +1112,12 @@ describe("compactMessages: deferred provider tool results", () => {
         toolName: "web_search",
         type: "tool-result",
       },
-      { text: "Node 24 is LTS.", type: "text" },
+      { text: "Node 26 is LTS.", type: "text" },
     ],
     role: "assistant",
   };
 
   it("keeps the deferred result with its call", async () => {
-    // `compact` fails on any kept result whose call was summarized away.
     await compact(
       [
         ...searchRun,
@@ -1065,14 +1127,14 @@ describe("compactMessages: deferred provider tool results", () => {
         user("Thanks."),
         assistant("Anytime."),
       ],
-      { recentWindowSize: 5, threshold: HEURISTICS_FORBIDDEN },
+      { recentWindowSize: 5, threshold: TIGHT_THRESHOLD },
     );
   });
 
   it("ends on the local result while the search waits", async () => {
     const { result } = await compact(searchRun, {
       recentWindowSize: 2,
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: TIGHT_THRESHOLD,
     });
 
     expect(result.at(-1)).toEqual(searchRun.at(-1));
@@ -1081,15 +1143,12 @@ describe("compactMessages: deferred provider tool results", () => {
 
 describe("compactMessages: summarization fallback", () => {
   it("summarizes when capping cannot free enough space", async () => {
-    // All bulk is conversational prose — capping removes nothing — and the
-    // threshold sits below the prompt envelope, so no heuristic can be
-    // accepted regardless.
     const messages = [user("old context to fold away"), assistant("old reply"), user("continue")];
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 1,
       summary: "Distilled story",
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: TIGHT_THRESHOLD,
     });
 
     expect(summarizer).toHaveBeenCalledTimes(1);
@@ -1112,7 +1171,7 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result, summarizer } = await compact(messages, {
       summary: "Updated checkpoint",
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: TIGHT_THRESHOLD,
     });
 
     expect(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain(previousCheckpoint);
@@ -1122,7 +1181,6 @@ describe("compactMessages: summarization fallback", () => {
   });
 
   it("keeps the recent window verbatim after summarizing when it fits", async () => {
-    // Prose bulk forces summarization; the threshold has room for the tail.
     const oldProse = user("investigation notes ".repeat(2_000));
     const [recentCall, recentResult] = toolExchange({ callId: "call-1", payloadChars: 100 });
     const messages = [oldProse, assistant("done reading"), recentCall, recentResult];
@@ -1179,9 +1237,6 @@ describe("compactMessages: summarization fallback", () => {
     const tail = [user("do the thing"), recentCall, recentResult];
     const messages = [oldProse, ...tail];
 
-    // The threshold sits between the stripped and verbatim sizes, and half of
-    // it still holds the whole tail, so the window keeps it and only the
-    // summary head pushes the verbatim candidate over.
     const summary = "s".repeat(2_400);
     const summaryHead = [compactionMarker(CHECKPOINT_MARKER), assistant(summary)];
     const verbatimSize = estimateTokens([...summaryHead, ...tail]);
@@ -1214,11 +1269,9 @@ describe("compactMessages: summarization fallback", () => {
     const { result } = await compact(messages, {
       recentWindowSize: 10,
       summary: "Summary of the large SQL result",
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: TIGHT_THRESHOLD,
     });
 
-    // The folded-away user prompt is replayed as the live turn, so the model
-    // resumes against its actual instruction rather than a bare "Continue.".
     expect(result).toEqual([
       compactionMarker(CHECKPOINT_MARKER),
       assistant("Summary of the large SQL result"),
@@ -1235,7 +1288,7 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result } = await compact(messages, {
       recentWindowSize: 1,
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: TIGHT_THRESHOLD,
     });
 
     expect(result.at(-1)).toEqual(user("please fix the flaky test"));
@@ -1246,11 +1299,9 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result } = await compact(messages, {
       recentWindowSize: 2,
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: TIGHT_THRESHOLD,
     });
 
-    // "latest question" is already in the kept tail — replaying it would ask
-    // the model to answer again instead of continuing.
     expect(result.at(-1)).toEqual(
       createFrameworkUserMessage("execution.continuation", "Continue."),
     );
@@ -1262,7 +1313,7 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result } = await compact(messages, {
       recentWindowSize: 1,
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: TIGHT_THRESHOLD,
     });
 
     expect(result.at(-1)).toEqual(user("latest question"));
@@ -1283,6 +1334,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       lastKnownInputTokens: Math.round(estimateTokens(history)),
       lastKnownPromptMessageCount: history.length,
       recentWindowSize: 4,
+      target: threshold,
       threshold,
     };
   }
@@ -1294,7 +1346,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       ...toolExchange({ callId: "call-0", payloadChars: 50 }),
     ];
 
-    const result = await compactMessages(history, config(history), summarizer);
+    const result = await compactHistory(history, config(history), summarizer);
 
     const kept = result.filter((message) => message.role === "user" && !isCheckpoint(message));
     expect(kept).toHaveLength(1);
@@ -1315,7 +1367,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       ...toolExchange({ callId: "call-0", payloadChars: 50 }),
     ];
 
-    const result = await compactMessages(history, config(history), summarizeWith("s"));
+    const result = await compactHistory(history, config(history), summarizeWith("s"));
 
     expect(result).toContainEqual(task);
   });
@@ -1327,7 +1379,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     );
     const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
 
-    const result = await compactMessages(history, config(history), summarizer);
+    const result = await compactHistory(history, config(history), summarizer);
 
     const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
     expect(prompt).toContain("MIDDLE MARKER");
@@ -1343,7 +1395,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     const task = user(`${"a ".repeat(5_000)}EARLY MARKER ${"b ".repeat(40_000)}END SENTINEL`);
     const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
 
-    await compactMessages(history, config(history), summarizer);
+    await compactHistory(history, config(history), summarizer);
 
     const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
     expect(prompt).toContain("EARLY MARKER");
@@ -1352,8 +1404,6 @@ describe("compactMessages: fixed kept-tail budget", () => {
 
   it("never splits a surrogate pair at either edge of the cut", async () => {
     const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-    // Padding shifts the pairs against the cut, so across the combinations the
-    // start and the end each land mid-pair at least once.
     for (const before of ["", "a", "ab"]) {
       for (const after of ["", "a", "ab"]) {
         const summarizer = summarizeWith("checkpoint text");
@@ -1362,7 +1412,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
           ...toolExchange({ callId: "call-0", payloadChars: 50 }),
         ];
 
-        const result = await compactMessages(history, config(history), summarizer);
+        const result = await compactHistory(history, config(history), summarizer);
 
         const replayed = result.flatMap((message) =>
           typeof message.content === "string"
@@ -1389,11 +1439,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     };
     const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
 
-    const result = await compactMessages(
-      history,
-      config(history),
-      summarizeWith("checkpoint text"),
-    );
+    const result = await compactHistory(history, config(history), summarizeWith("checkpoint text"));
 
     const kept = result.find(
       (message) => message.role === "user" && Array.isArray(message.content),
@@ -1415,11 +1461,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     };
     const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
 
-    const result = await compactMessages(
-      history,
-      config(history),
-      summarizeWith("checkpoint text"),
-    );
+    const result = await compactHistory(history, config(history), summarizeWith("checkpoint text"));
 
     const kept = result.find(
       (message) => message.role === "user" && Array.isArray(message.content),
@@ -1449,7 +1491,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     };
     const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
 
-    const result = await compactMessages(history, config(history), summarizer);
+    const result = await compactHistory(history, config(history), summarizer);
 
     const kept = result.find(
       (message) => message.role === "user" && Array.isArray(message.content),
@@ -1478,7 +1520,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     };
     const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
 
-    const result = await compactMessages(history, config(history), summarizer);
+    const result = await compactHistory(history, config(history), summarizer);
 
     const kept = result.find(
       (message) => message.role === "user" && Array.isArray(message.content),
@@ -1502,14 +1544,14 @@ describe("compactMessages: fixed kept-tail budget", () => {
     ];
     const summarizer = summarizeWith("s".repeat(400_000));
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
-      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN },
+      { recentWindowSize: 1, threshold: TIGHT_THRESHOLD },
       summarizer,
     );
 
     expect(summarizer).toHaveBeenCalledTimes(1);
-    expect(estimateTokens(result)).toBeLessThanOrEqual(HEURISTICS_FORBIDDEN);
+    expect(estimateTokens(result)).toBeLessThanOrEqual(TIGHT_THRESHOLD);
     expect(JSON.stringify(result)).toContain("chars omitted");
     expect(result.at(-1)).toEqual(user("still there?"));
   });
@@ -1518,7 +1560,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     const history = [user("notes ".repeat(9_000)), assistant("ok"), user("go on")];
 
     const summarizer = summarizeWith("s".repeat(45_000));
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
       { recentWindowSize: 1, threshold: THRESHOLD },
       summarizer,
@@ -1539,13 +1581,13 @@ describe("compactMessages: fixed kept-tail budget", () => {
     };
     const summarizer = summarizeWith("checkpoint text");
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       [...OLD_BULK, assistant("ok"), request],
-      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN + 600 },
+      { recentWindowSize: 1, threshold: TIGHT_THRESHOLD + 600 },
       summarizer,
     );
 
-    expect(estimateTokens(result)).toBeLessThanOrEqual(HEURISTICS_FORBIDDEN + 600);
+    expect(estimateTokens(result)).toBeLessThanOrEqual(TIGHT_THRESHOLD + 600);
     const last = JSON.stringify(result.at(-1));
     expect(last).toContain("Summarize this scan.");
     expect(last).toContain("file in this message was omitted");
@@ -1558,20 +1600,20 @@ describe("compactMessages: fixed kept-tail budget", () => {
       role: "user",
     };
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       [...OLD_BULK, assistant("ok"), request],
-      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN + 600 },
+      { recentWindowSize: 1, threshold: TIGHT_THRESHOLD + 600 },
       summarizeWith("checkpoint text"),
     );
 
-    expect(estimateTokens(result)).toBeLessThanOrEqual(HEURISTICS_FORBIDDEN + 600);
+    expect(estimateTokens(result)).toBeLessThanOrEqual(TIGHT_THRESHOLD + 600);
     expect(result.at(-1)?.role).toBe("user");
     expect(JSON.stringify(result.at(-1))).toContain("file in this message was omitted");
   });
 
   it("fills the room it has with the clipped summary", async () => {
     const threshold = 10_000;
-    const result = await compactMessages(
+    const result = await compactHistory(
       [user("old notes ".repeat(5_000)), assistant("ok"), user("go on")],
       { recentWindowSize: 1, threshold },
       summarizeWith("s".repeat(200_000)),
@@ -1589,7 +1631,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       user("go on"),
     ];
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
       { recentWindowSize: 2, threshold: 900 },
       summarizeWith(summary),
@@ -1601,7 +1643,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
   });
 
   it("compacts when the request is shorter than its cut note", async () => {
-    const result = await compactMessages(
+    const result = await compactHistory(
       [...OLD_BULK, assistant("ok"), user("hi")],
       { recentWindowSize: 1, threshold: 60 },
       summarizeWith("x"),
@@ -1621,7 +1663,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     const threshold = 60_000;
     expect(estimateTokens([request])).toBeLessThan(threshold / 2);
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       [user("old notes ".repeat(30_000)), assistant("ok"), request, assistant("Reading it.")],
       { recentWindowSize: 1, threshold },
       summarizeWith("checkpoint text"),
@@ -1634,7 +1676,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     const summarizer = summarizeWith("checkpoint text");
 
     await expect(
-      compactMessages(
+      compactHistory(
         [...OLD_BULK, assistant("ok"), user("Review this contract. ".repeat(200))],
         { recentWindowSize: 1, threshold: 60 },
         summarizer,
@@ -1647,7 +1689,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     const summarizer = summarizeWith("checkpoint text");
 
     await expect(
-      compactMessages([...OLD_BULK, user("hi")], { recentWindowSize: 1, threshold: 1 }, summarizer),
+      compactHistory([...OLD_BULK, user("hi")], { recentWindowSize: 1, threshold: 1 }, summarizer),
     ).rejects.toThrow(/leave only ~1 tokens/);
     expect(summarizer).not.toHaveBeenCalled();
   });
@@ -1661,7 +1703,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       ...toolExchange({ callId: "call-0", payloadChars: 100_000 }),
     ];
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
       { recentWindowSize: 4, threshold: 30_000 },
       summarizeWith("checkpoint text"),
@@ -1673,25 +1715,6 @@ describe("compactMessages: fixed kept-tail budget", () => {
     expect(estimateTokens(result)).toBeLessThan(30_000);
   });
 
-  it("keeps the newest tool result whole when no summary is needed", async () => {
-    const history: ModelMessage[] = [
-      user("go"),
-      ...toolExchange({ callId: "call-0", payloadChars: 45_000 }),
-      ...toolExchange({ callId: "call-1", payloadChars: 45_000 }),
-      ...toolExchange({ callId: "call-2", payloadChars: 30_000 }),
-    ];
-    const summarizer = summarizeWith("unused");
-
-    const result = await compactMessages(
-      history,
-      { recentWindowSize: 2, threshold: 30_000 },
-      summarizer,
-    );
-
-    expect(summarizer).not.toHaveBeenCalled();
-    expect(JSON.stringify(result.at(-1))).not.toContain("Truncated by eve");
-  });
-
   it("never keeps more than the budget word for word", async () => {
     const history: ModelMessage[] = [
       user("start"),
@@ -1700,7 +1723,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       ).flat(),
     ];
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
       { recentWindowSize: 40, threshold: 10_000 },
       summarizeWith("checkpoint text"),
@@ -1728,7 +1751,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       assistant("Working"),
     ];
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
       { recentWindowSize: 1, threshold: 10_000 },
       summarizeWith("checkpoint text"),
@@ -1758,7 +1781,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
         const stepConfig = config(history, threshold);
         if (shouldCompact(history, stepConfig)) {
           compactions += 1;
-          history = await compactMessages(history, stepConfig, summarizer);
+          history = await compactHistory(history, stepConfig, summarizer);
         }
       }
 
@@ -1772,7 +1795,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
       user("r".repeat(34_000)),
     ];
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
       { recentWindowSize: 1, threshold: 10_000 },
       summarizeWith("z".repeat(8_000)),
@@ -1788,7 +1811,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
     };
     const history: ModelMessage[] = [request, assistant("Working on it.")];
 
-    const result = await compactMessages(
+    const result = await compactHistory(
       history,
       { recentWindowSize: 1, threshold: 10_000 },
       summarizeWith("checkpoint text"),

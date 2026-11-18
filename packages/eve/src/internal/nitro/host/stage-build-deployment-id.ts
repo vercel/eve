@@ -11,7 +11,6 @@ import {
 } from "#internal/nitro/host/build-deployment-id.js";
 
 async function optionalPeerIdentity(outputDirectory: string): Promise<string> {
-  // otel-registration probes this peer with createRequire at runtime, outside Nitro tracing.
   const require = createRequire(join(outputDirectory, "server", "index.mjs"));
   let entryPath: string;
   try {
@@ -46,7 +45,6 @@ async function optionalPeerIdentity(outputDirectory: string): Promise<string> {
   }
 }
 
-/** The World plugin is always bundled into an eve server chunk, never a traced dependency. */
 function mayContainPlaceholder(relativePath: string): boolean {
   return (
     relativePath.startsWith("server/") &&
@@ -55,7 +53,6 @@ function mayContainPlaceholder(relativePath: string): boolean {
   );
 }
 
-/** Hashes the staged output, installs the id in the World plugin, and returns the id. */
 export async function stageBuildDeploymentId(outputDirectory: string): Promise<string> {
   const relativePaths: string[] = [];
   async function walk(relativeDirectory: string, ancestors: ReadonlySet<string>): Promise<void> {

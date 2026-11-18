@@ -29,7 +29,7 @@ import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
@@ -100,8 +100,6 @@ function registerChannelRequestTracing(enabled: boolean): void {
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,
-      recordInputs: false,
-      recordOutputs: false,
       traceChannelRequests: enabled,
     },
     runInContext: (_operation, execute) => execute(),
@@ -407,7 +405,6 @@ describe("dispatchChannelRequest", () => {
     );
   });
 
-  // https://github.com/vercel/eve/issues/5408
   it("tags ctx.to() sends with the Vercel deployment that accepted them", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const runtimeForTest = createRuntime({
@@ -553,7 +550,6 @@ describe("dispatchChannelRequest", () => {
       deliveryId: expect.any(String),
     });
     expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
-      // A control is a delivery with its own id.
       command: { deliveryId: expect.any(String), kind: "reset", reason: "User requested /new" },
       continuationToken: "imessage:direct:+15551234567:+15557654321",
     });
@@ -804,7 +800,6 @@ describe("dispatchChannelRequest", () => {
       channels: [
         {
           fetch: async (_req, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
-            // Untyped authored code can pass any value.
             ctx.waitUntil("not a promise" as never);
             return new Response("ok");
           },
@@ -839,7 +834,6 @@ describe("dispatchChannelRequest", () => {
         slackChannel(
           async (_request, ctx: { waitUntil: (t: Promise<unknown>) => void }) =>
             new Response(
-              // No eager pull: the body starts only once the response is read.
               new ReadableStream(
                 {
                   pull(controller) {
@@ -924,19 +918,6 @@ describe("dispatchChannelRequest", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Inbound HTTP tracing
-//
-// The vendored `#compiled/@opentelemetry/api` and the real `@opentelemetry/api`
-// share one process-global registry (same major version), so a provider, the
-// official `AsyncLocalStorageContextManager`, and a propagator registered
-// through the real package are what the production code's vendored calls
-// observe. That lets these unit tests assert real recording spans,
-// active-context inheritance across awaits, and W3C extraction without a live
-// exporter.
-// ---------------------------------------------------------------------------
-
-/** Minimal W3C `traceparent` extractor — enough to model an inbound trace context. */
 const w3cPropagator = {
   fields: () => ["traceparent"],
   inject: () => {},
@@ -1009,7 +990,6 @@ describe("dispatchChannelRequest tracing", () => {
     apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
     apiPropagation.setGlobalPropagator(w3cPropagator as never);
     apiTrace.setGlobalTracerProvider(provider);
-    // Request spans are opt-in; enable them for this suite.
     registerChannelRequestTracing(true);
   });
 
@@ -1025,7 +1005,6 @@ describe("dispatchChannelRequest tracing", () => {
     return exporter.getFinishedSpans();
   }
 
-  // The request span ends with the response body, so read it before inspecting spans.
   async function dispatchAndConsume(
     ...args: Parameters<typeof dispatchChannelRequest>
   ): Promise<Response> {
@@ -1076,14 +1055,13 @@ describe("dispatchChannelRequest tracing", () => {
 
     expect(response.status).toBe(200);
     expect(agentContextDuringHandler).toBe(true);
-    // The span had not ended while the handler was still running.
     expect(spansDuringHandler).toBe(0);
 
     const spans = await finishedSpans();
     expect(spans).toHaveLength(1);
     const [span] = spans;
     expect(span!.name).toBe("agent.channel.request");
-    expect(span!.kind).toBe(1 /* SpanKind.SERVER */);
+    expect(span!.kind).toBe(1);
     expect(span!.attributes).toMatchObject({
       "eve.channel.kind": "channel:slack",
       "eve.channel.name": "slack",
@@ -1093,12 +1071,10 @@ describe("dispatchChannelRequest tracing", () => {
       "server.address": "eve.test",
       "url.scheme": "https",
     });
-    expect(span!.status.code).toBe(0 /* SpanStatusCode.UNSET */);
+    expect(span!.status.code).toBe(0);
   });
 
   it("stamps the instrumentation kind for a behaviorless authored channel, not the http adapter kind", async () => {
-    // Behaviorless authored channels keep adapter kind "http"; the stamped
-    // instrumentation kind carries the real channel:<name>.
     const definition: CompiledChannel = {
       __kind: CHANNEL_SENTINEL,
       routes: [],
@@ -1123,7 +1099,6 @@ describe("dispatchChannelRequest tracing", () => {
     expect(span!.attributes["eve.channel.kind"]).toBe("channel:support");
   });
 
-  // https://github.com/vercel/eve/issues/4256
   it("keeps the request span open until a streamed response body is consumed", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
@@ -1185,7 +1160,6 @@ describe("dispatchChannelRequest tracing", () => {
       agentName: "test-agent",
       channels: [
         slackChannel(async () => {
-          // Model hook.resume: a nested span opened under the active context.
           await Promise.resolve();
           vendoredTrace.getTracer("test.nested").startSpan("hook.resume").end();
           return new Response("ok");
@@ -1278,7 +1252,6 @@ describe("dispatchChannelRequest tracing", () => {
       {} as never,
     );
 
-    // The existing JSON 500 conversion is unchanged.
     expect(response.status).toBe(500);
     const body = (await response.json()) as { errorId: string; ok: boolean };
     expect(body.ok).toBe(false);
@@ -1286,7 +1259,7 @@ describe("dispatchChannelRequest tracing", () => {
 
     const [span] = await finishedSpans();
     expect(span!.attributes["http.response.status_code"]).toBe(500);
-    expect(span!.status.code).toBe(2 /* SpanStatusCode.ERROR */);
+    expect(span!.status.code).toBe(2);
     const exceptions = span!.events.filter((event) => event.name === "exception");
     expect(exceptions).toHaveLength(0);
     expect(span!.status.message).toBeUndefined();
@@ -1302,10 +1275,9 @@ describe("dispatchChannelRequest tracing", () => {
 
     const [span] = await finishedSpans();
     expect(span!.name).toBe("agent.channel.request");
-    expect(span!.status.code).toBe(2 /* SpanStatusCode.ERROR */);
+    expect(span!.status.code).toBe(2);
     expect(span!.events.filter((event) => event.name === "exception")).toHaveLength(0);
     expect(span!.status.message).toBeUndefined();
-    // No channel was resolved, so no channel identity is attached.
     expect(span!.attributes["eve.channel.name"]).toBeUndefined();
   });
 
@@ -1329,7 +1301,7 @@ describe("dispatchChannelRequest tracing", () => {
     expect(span!.attributes["http.response.status_code"]).toBe(404);
     expect(span!.attributes["http.route"]).toBe("/missing");
     expect(span!.attributes["eve.channel.name"]).toBeUndefined();
-    expect(span!.status.code).toBe(0 /* SpanStatusCode.UNSET */);
+    expect(span!.status.code).toBe(0);
   });
 
   it("keeps session ids, tokens, auth headers, bodies, and query strings off the span", async () => {
@@ -1382,9 +1354,6 @@ describe("dispatchChannelRequest without an OTel provider", () => {
   let provider: BasicTracerProvider;
 
   beforeEach(() => {
-    // Register an exporter to prove nothing reaches it, but leave the global
-    // tracer provider as the no-op default. Enable the opt-in flag so this
-    // exercises the no-provider path rather than the disabled-flag bypass.
     exporter = new InMemorySpanExporter();
     provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
     apiTrace.disable();
@@ -1424,8 +1393,6 @@ describe("dispatchChannelRequest with request tracing not enabled", () => {
   let provider: BasicTracerProvider;
 
   beforeEach(() => {
-    // A live provider proves the opt-in flag — not a missing provider — is what
-    // gates the span.
     exporter = new InMemorySpanExporter();
     provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
     apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());

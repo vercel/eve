@@ -5,72 +5,51 @@ import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/m
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 
-/** One model call's messages: what the step commits, and what the model reads. */
 export interface RequestMessages {
   readonly history: readonly HarnessModelMessage[];
   readonly historyState: HistoryState;
   readonly nonSystemMessages: readonly HarnessModelMessage[];
 }
 
-/**
- * The call's system prompt: a retry's note, then exactly the instructions. A string alone is sent
- * as it is; parts join into one system message, empty ones skipped, with the cache breakpoint at
- * its end.
- */
 export function modelInstructions(input: {
   readonly instructions: string | readonly string[];
-  readonly anthropicCache: ModelProfile["anthropicCache"];
+  readonly profile: Pick<ModelProfile, "anthropicCache" | "gateway" | "provider">;
   readonly extraSystemNote?: string;
-}): SystemModelMessage | string | undefined {
-  const note = input.extraSystemNote ? [input.extraSystemNote] : [];
-  if (typeof input.instructions === "string" && note.length === 0) return input.instructions;
-  const parts = [
-    ...note,
-    ...(typeof input.instructions === "string" ? [input.instructions] : input.instructions),
-  ].filter((part) => part !== "");
-  const instructions = parts.map((content): SystemModelMessage => ({ content, role: "system" }));
-  return mergeSystemInstructions(
-    input.anthropicCache
-      ? applySystemCacheBreakpoint(instructions, input.anthropicCache)
-      : instructions,
-  );
+}): SystemModelMessage | SystemModelMessage[] | string | undefined {
+  const { anthropicCache, gateway, provider } = input.profile;
+  const [base = "", ...own] =
+    typeof input.instructions === "string" ? [input.instructions] : input.instructions;
+  const note = input.extraSystemNote ?? "";
+
+  const gatewayAnchorsFirstMessage = gateway && provider === "anthropic";
+  if (anthropicCache === undefined && typeof input.instructions === "string" && note === "") {
+    return input.instructions;
+  }
+  if (anthropicCache === undefined && !gatewayAnchorsFirstMessage) {
+    return systemMessage([note, base, ...own]);
+  }
+
+  const baseMessage = systemMessage([base]);
+  const ownMessage = systemMessage([note, ...own]);
+  const messages = [
+    ...(baseMessage === undefined
+      ? []
+      : anthropicCache
+        ? applySystemCacheBreakpoint([baseMessage], anthropicCache)
+        : [baseMessage]),
+    ...(ownMessage === undefined ? [] : [ownMessage]),
+  ];
+  return messages.length > 1 ? messages : messages[0];
 }
 
-/** A retry's note, trailing the call's messages. */
+function systemMessage(parts: readonly string[]): SystemModelMessage | undefined {
+  const content = parts.filter((part) => part !== "").join("\n\n");
+  return content === "" ? undefined : { role: "system", content };
+}
+
 export function withTrailingUserNote(
   messages: readonly ModelMessage[],
   note?: string,
 ): ModelMessage[] {
   return note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
-}
-
-export function mergeSystemInstructions(
-  instructions: readonly SystemModelMessage[],
-): SystemModelMessage | undefined {
-  if (instructions.length === 0) {
-    return undefined;
-  }
-
-  if (instructions.length === 1) {
-    return { ...instructions[0]! };
-  }
-
-  let providerOptions: SystemModelMessage["providerOptions"] | undefined;
-  for (const instruction of instructions) {
-    if (instruction.providerOptions !== undefined) {
-      providerOptions = {
-        ...providerOptions,
-        ...instruction.providerOptions,
-      };
-    }
-  }
-
-  const merged: SystemModelMessage = {
-    role: "system",
-    content: instructions.map((instruction) => instruction.content).join("\n\n"),
-  };
-  if (providerOptions !== undefined) {
-    merged.providerOptions = providerOptions;
-  }
-  return merged;
 }

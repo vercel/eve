@@ -9,16 +9,6 @@ import {
 
 import { theme } from "./lib/theme.ts";
 
-/**
- * End-to-end proof of the buffered `/loglevel` command. Logs are captured
- * regardless of the display mode, so switching modes applies retroactively:
- *
- *   - `/loglevel none` hides log lines already in the transcript
- *   - lines captured while hidden stay buffered, invisible
- *   - `/loglevel all` restores every buffered log line
- *
- * Needs no agent server and no model credentials.
- */
 const UNREACHABLE_HOST = "http://127.0.0.1:49217";
 const VISIBLE_STDOUT_MARK = "LOGLEVEL_STDOUT_MARK_4f2";
 const VISIBLE_STDERR_MARK = "LOGLEVEL_STDERR_MARK_8d5";
@@ -48,8 +38,6 @@ void (async () => {
   try {
     await screen.waitForIdlePrompt(5_000);
 
-    // Foreign writes are captured synchronously, so snapshots reflect them
-    // immediately.
     process.stdout.write(`${VISIBLE_STDOUT_MARK}\n`);
     process.stderr.write(`${VISIBLE_STDERR_MARK}\n`);
     const visible = screen.snapshot();
@@ -66,7 +54,6 @@ void (async () => {
       throw new Error(`/loglevel none should retroactively hide past logs:\n${hidden}`);
     }
 
-    // Captured while hidden: buffered, never rendered.
     process.stdout.write(`${HIDDEN_STDOUT_MARK}\n`);
     if (screen.snapshot().includes(HIDDEN_STDOUT_MARK)) {
       throw new Error(`logs captured while hidden should not render:\n${screen.snapshot()}`);

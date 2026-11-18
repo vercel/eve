@@ -12,13 +12,6 @@ import { areSchedulesDisabled, EVE_SCHEDULES_DISABLED_ENV } from "#internal/sche
 const log = createLogger("schedule.dispatch");
 let loggedSchedulesDisabled = false;
 
-/**
- * Dispatches one eve authored schedule via the execution engine.
- *
- * Fire-and-forget: the workflow runtime owns terminal completion and
- * its own failure observability. The task return value reports which
- * session ids the handler started so Nitro / dev tools can correlate.
- */
 export async function dispatchScheduleTask(
   taskName: string,
   config: NitroArtifactsConfig,
@@ -42,10 +35,6 @@ export async function dispatchScheduleTask(
   );
 }
 
-/**
- * Variant of {@link dispatchScheduleTask} for callers that already resolved
- * an artifact source and need the dispatch to stay on that generation.
- */
 export async function dispatchScheduleTaskFromArtifacts(
   taskName: string,
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,

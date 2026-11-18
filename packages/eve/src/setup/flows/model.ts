@@ -9,11 +9,6 @@ interface CurrentAgentModel {
   readonly routing: ModelRouting | null;
 }
 
-/**
- * Reads the model the runtime is currently serving. That's the compiled
- * `config.model.id`, the same field `eve info` reports. Returns null when the
- * app hasn't compiled yet.
- */
 async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel> {
   try {
     const { compiledState } = await inspectApplication(appRoot);
@@ -34,12 +29,6 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
   }
 }
 
-/**
- * Refusal message when `/model` can't rewrite the model — it is a source-backed
- * SDK model call (`gateway(...)`, `anthropic(...)`), not a string literal — or
- * null when the model is an editable string. Editability is independent of
- * routing: a `gateway(...)` call is gateway-routed yet still uneditable here.
- */
 export async function modelChangeRefusalForUneditableModel(
   appRoot: string,
 ): Promise<string | null> {

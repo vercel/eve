@@ -19,7 +19,6 @@ function isFlushPayload(value: unknown): value is FlushPayload {
   return typeof payload.sessionId === "string" && Array.isArray(payload.events);
 }
 
-/** Sends a telemetry batch from the telemetry-disabled child CLI process. */
 export async function flushEveCliTelemetry(payloadJson: string): Promise<void> {
   let payload: FlushPayload;
   try {
@@ -42,7 +41,5 @@ export async function flushEveCliTelemetry(payloadJson: string): Promise<void> {
       body: JSON.stringify(payload.events),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-  } catch {
-    // Telemetry must never affect command output or exit status.
-  }
+  } catch {}
 }

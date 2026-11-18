@@ -7,13 +7,11 @@ import { z } from "#compiled/zod/index.js";
 const LINEAR_TRIGGER_PATH = "/eve/v1/linear";
 const LINEAR_AGENT_SESSION_TRIGGER_EVENT = "AgentSessionEvent";
 
-/** Identity of the Linear connector provisioned for an agent channel. */
 export interface LinearConnectorRef {
   id: string;
   uid: string;
 }
 
-/** Effects used to provision a Linear Connect connector. */
 interface ProvisionLinearConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
@@ -25,7 +23,6 @@ const LinearConnectorRefSchema = z.object({
   supportedSubjectTypes: z.array(z.string()).refine((types) => types.includes("app")),
 });
 
-/** Parses `vercel connect create -F json` output for an app-scoped Linear connector. */
 export function parseCreatedLinearConnector(stdout: string): LinearConnectorRef | undefined {
   try {
     const parsed = LinearConnectorRefSchema.safeParse(JSON.parse(stdout));
@@ -35,7 +32,6 @@ export function parseCreatedLinearConnector(stdout: string): LinearConnectorRef 
   }
 }
 
-/** Finds the canonical Linear connector if it already exists in this Vercel team. */
 export async function findLinearConnector(input: {
   project: VercelProjectReference;
   projectRoot: string;
@@ -75,7 +71,6 @@ export async function findLinearConnector(input: {
   }
 }
 
-/** Attaches a Linear connector's verified events to this agent's production route. */
 export async function attachLinearConnector(input: {
   connector: LinearConnectorRef;
   log: ChannelSetupLog;
@@ -107,7 +102,6 @@ export async function attachLinearConnector(input: {
   }
 }
 
-/** Creates a Linear connector and routes its verified Agent Session events to eve. */
 export async function provisionLinearConnector(input: {
   log: ChannelSetupLog;
   project: VercelProjectReference;

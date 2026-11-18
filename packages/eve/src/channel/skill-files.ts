@@ -7,16 +7,10 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 
-/** Largest skill file `readSkill` returns. */
 export const MAX_SKILL_FILE_BYTES = 512 * 1024;
 
-/** Canonical file name of a skill package's entry markdown. */
 export const SKILL_ENTRY_FILE_NAME = "SKILL.md";
 
-/**
- * Whether a file name is a skill's entry markdown. Discovery accepts any case
- * variant, such as `skill.md`, and materialization keeps the authored name.
- */
 export function isSkillEntryFileName(name: string): boolean {
   return name.toLowerCase() === "skill.md";
 }
@@ -28,7 +22,6 @@ export type SkillReadErrorCode =
   | "unknown-file"
   | "unknown-skill";
 
-/** Thrown by `readSkill`. `code` lets a channel map the failure onto its own protocol. */
 export class SkillReadError extends Error {
   readonly code: SkillReadErrorCode;
 
@@ -39,40 +32,20 @@ export class SkillReadError extends Error {
   }
 }
 
-/** One regular file of a skill: its `/`-separated path under the skill root and its size. */
 export interface SkillFileEntry {
   readonly path: string;
   readonly size: number;
 }
 
-/**
- * Lookup into the compiled skill files of one agent. Paths are `/`-separated
- * and relative to the skill root, e.g. `SKILL.md` or `references/api.md`.
- */
 export interface SkillFileSource {
-  /** Regular files of one skill, sorted by path. Empty when the skill has no materialized files. */
   listFiles(skill: string): Promise<readonly SkillFileEntry[]>;
-  /**
-   * Every directory of one skill below its root, sorted by path, including
-   * empty ones that no listed file implies.
-   */
   listDirectories(skill: string): Promise<readonly string[]>;
   readFile(skill: string, path: string): Promise<Uint8Array>;
 }
 
-/**
- * One indexed file: `[path, size, sha256]`. `sha256` is `null` for files over
- * {@link MAX_SKILL_FILE_BYTES}, which are listed but not shipped.
- */
 export type SkillFilesIndexEntry = readonly [path: string, size: number, sha256: string | null];
 
-/**
- * Index of the skill files a production build ships, written by `eve build`.
- * Entries are arrays, not object keys, so names such as `__proto__` stay
- * plain data.
- */
 export interface SkillFilesIndex {
-  /** `[skill, files, directories]`, sorted by skill then path. */
   readonly skills: readonly (readonly [
     skill: string,
     files: readonly SkillFilesIndexEntry[],
@@ -80,15 +53,11 @@ export interface SkillFilesIndex {
   ])[];
 }
 
-/** The skill files a production build embeds, as its generated Nitro plugin installs them. */
 export interface BundledSkillFiles {
-  /** The JSON text of a {@link SkillFilesIndex}. */
   readonly index: string;
-  /** Loads the shipped bytes with this SHA-256. Every file with that digest shares the array. */
   readonly read: (sha256: string) => Promise<Uint8Array>;
 }
 
-/** The parsed form of {@link BundledSkillFiles} a runtime session holds. */
 export interface InstalledSkillFiles {
   readonly read: (sha256: string) => Promise<Uint8Array>;
   readonly skills: ReadonlyMap<string, IndexedSkill>;
@@ -99,7 +68,6 @@ interface IndexedSkill {
   readonly directories: readonly string[];
 }
 
-/** Installs a production build's embedded skill files on the active runtime session. */
 export function installBundledSkillFiles(input: BundledSkillFiles): void {
   const index = JSON.parse(input.index) as SkillFilesIndex;
   getActiveRuntimeSession().skillFiles = {
@@ -110,14 +78,6 @@ export function installBundledSkillFiles(input: BundledSkillFiles): void {
   };
 }
 
-/**
- * Selects the skill file source for the active compiled artifacts.
- *
- * Skill files are materialized under the node's workspace resource root by
- * `compiler/workspace-resources.ts`. Disk artifacts (dev) read that tree with
- * {@link createDiskSkillFileSource}; bundled artifacts (production builds)
- * read the files `eve build` embedded for the root agent.
- */
 export function createCompiledSkillFileSource(input: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
@@ -133,11 +93,6 @@ export function createCompiledSkillFileSource(input: {
   );
 }
 
-/**
- * Reads the skill files embedded in a production build. Listing and sizes
- * come from the build index, so an over-limit file is rejected without
- * loading it. Each read returns its own copy of the embedded bytes.
- */
 const bundledSkillFileSource: SkillFileSource = {
   async listFiles(skill) {
     return (installedSkillFiles().skills.get(skill)?.files ?? []).map(([path, size]) => ({
@@ -169,17 +124,6 @@ function installedSkillFiles(): InstalledSkillFiles {
   return installed;
 }
 
-/**
- * Reads skill files from a materialized `skills/<name>/` tree.
- *
- * Only regular files reached through real directories are served: a
- * symlinked skill root lists nothing, listing skips symlinks, every path
- * component is checked with `lstat` before opening, the leaf is opened with
- * `O_NOFOLLOW` where the platform defines it, and the `realpath` of the
- * target must stay under the `realpath` of the skill root. These checks are
- * not atomic; the tree is the app's own compile output, so a writer that
- * could race them can already change what is served.
- */
 export function createDiskSkillFileSource(skillsRoot: string): SkillFileSource {
   return {
     async listFiles(skill) {
@@ -248,7 +192,6 @@ async function isRealDirectory(path: string): Promise<boolean> {
   return (await lstatOrUndefined(path))?.isDirectory() === true;
 }
 
-/** The regular files and real directories below a skill root, unsorted. */
 async function walkSkill(
   skillRoot: string,
 ): Promise<{ files: SkillFileEntry[]; directories: string[] }> {
@@ -257,7 +200,6 @@ async function walkSkill(
   const walk = async (directory: string, prefix: string) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      // Dirent reports symlinks as neither files nor directories, so they are skipped.
       if (entry.isDirectory()) {
         directories.push(path);
         await walk(`${directory}/${entry.name}`, path);
@@ -282,14 +224,6 @@ function tooLarge(skill: string, path: string, size: number): SkillReadError {
   );
 }
 
-/**
- * Reads one file of one skill, byte for byte, given any caller-supplied path.
- *
- * With no `path`, reads the skill's entry markdown under whatever case variant
- * of `SKILL.md` it was authored with. An explicit top-level `SKILL.md` matches
- * the entry file case-insensitively too; every other path must match a listed
- * file exactly. Files over {@link MAX_SKILL_FILE_BYTES} are `too-large`.
- */
 export async function readSkillFile(input: {
   readonly path?: string;
   readonly skill: string;
@@ -306,7 +240,6 @@ export async function readSkillFile(input: {
   if (file === undefined) throw unknownFile(input.skill, requested);
   if (file.size > MAX_SKILL_FILE_BYTES) throw tooLarge(input.skill, file.path, file.size);
   const bytes = await input.source.readFile(input.skill, file.path);
-  // The file can change between the listing and the read.
   if (bytes.byteLength > MAX_SKILL_FILE_BYTES) {
     throw tooLarge(input.skill, file.path, bytes.byteLength);
   }

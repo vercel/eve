@@ -40,7 +40,6 @@ function span(
   };
 }
 
-/** A turn with a user message, an assistant reply, and a tool call. */
 function conversationSpans(): LocalTraceSpan[] {
   const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, { "agent.turn.id": "turn_0" });
   const delivery = span("0".repeat(16), "agent.channel.delivery", 0, 0, undefined, {
@@ -115,7 +114,6 @@ describe("renderTraceViewer", () => {
     expect(body).toContain("assistant");
     expect(body).toContain("reply");
     expect(body).toContain("get_weather");
-    // First card (system) is selected: white half-block bar on its rows.
     const selectedRows = frame.rows.filter((row) => row.includes("\x1b[97m▌"));
     expect(selectedRows.length).toBeGreaterThan(0);
   });
@@ -128,7 +126,6 @@ describe("renderTraceViewer", () => {
       theme: THEME,
       toast: "Copied to clipboard",
     });
-    // Message row with the left bar, padding rows above and below.
     expect(stripAnsi(frame.rows[3]!)).toContain("▌  Copied to clipboard");
     expect(stripAnsi(frame.rows[2]!)).toMatch(/▌ +$/u);
     expect(stripAnsi(frame.rows[4]!)).toMatch(/▌ +$/u);
@@ -151,7 +148,6 @@ describe("renderTraceViewer", () => {
 
   it("extracts the dragged text from the rendered conversation", () => {
     const state = viewerState(conversationSpans());
-    // The system card's title row is line 1 (" │  system" once rendered).
     const selection = {
       anchor: { line: 1, column: 0 },
       head: { line: 1, column: 40 },
@@ -161,7 +157,6 @@ describe("renderTraceViewer", () => {
     const text = conversationSelectionText(state, 100, THEME, selection);
     expect(text).toContain("system");
     expect(text).not.toContain("\x1b");
-    // A multi-line drag keeps line structure.
     const multi = conversationSelectionText(state, 100, THEME, {
       anchor: { line: 1, column: 0 },
       head: { line: 5, column: 99 },
@@ -184,7 +179,6 @@ describe("renderTraceViewer", () => {
     const frame = render(state);
     const highlighted = frame.rows.filter((row) => row.includes("\x1b[7m"));
     expect(highlighted.length).toBe(3);
-    // The highlight sits in the drawer area (right of the conversation).
     for (const row of highlighted) {
       const before = row.slice(0, row.indexOf("\x1b[7m"));
       expect(visibleLength(before)).toBeGreaterThanOrEqual(frame.contentWidth);
@@ -193,7 +187,6 @@ describe("renderTraceViewer", () => {
 
   it("extracts the dragged text from the details drawer", () => {
     const state = viewerState(conversationSpans(), { panelOpen: true });
-    // Detail line 1 is the selected span's name (line 0 is top padding).
     const text = panelSelectionText(state, 100, THEME, {
       anchor: { line: 1, column: 0 },
       head: { line: 2, column: 40 },
@@ -237,7 +230,6 @@ describe("renderTraceViewer", () => {
     );
     const body = frame.rows.map(stripAnsi).join("\n");
     expect(body).toContain("explode");
-    // The failed card carries a red error mark beside its title.
     expect(frame.rows.some((row) => row.includes("\x1b[31m⨯"))).toBe(true);
   });
 
@@ -247,7 +239,6 @@ describe("renderTraceViewer", () => {
     expect(body).toContain("gen_ai.request.model gpt-5");
     expect(body).toContain("agent.usage.input_tokens 1234");
     expect(frame.panelTotalRows).toBeGreaterThan(3);
-    // No rule divider between cards and drawer — padded space only.
     expect(frame.rows.some((row) => row.includes("│ gen_ai"))).toBe(false);
   });
 
@@ -308,8 +299,6 @@ describe("renderTraceViewer", () => {
   });
 
   it("never emits a raw newline inside a frame row, even from \n-laden payloads", () => {
-    // A tool result ending in a real newline used to split its composed row
-    // and inject a phantom blank line into the frame.
     const turn = span("a".repeat(16), "agent.turn", 0, 0);
     const selected = span("f".repeat(16), "agent.action", 100, 200, turn.spanId, {
       "agent.action.name": "lookup",
@@ -325,8 +314,6 @@ describe("renderTraceViewer", () => {
   });
 
   it("reports viewport metrics for key handling", () => {
-    // 30 rows minus three header rows (padding, title, padding) and the three-row
-    // footer (padding + hints + status).
     const frame = render(viewerState(conversationSpans()), 100, 30);
     expect(frame.timelineViewportRows).toBe(24);
     expect(frame.panelViewportRows).toBe(24);
@@ -358,12 +345,9 @@ describe("renderTraceViewer", () => {
     });
     expect(frame.rows.some((row) => row.includes("\x1b[48;2;22;22;22m"))).toBe(true);
     expect(frame.rows.some((row) => row.includes("\x1b[48;2;36;36;36m"))).toBe(true);
-    // The toast sits on the body band, message row between its padding rows.
     expect(frame.rows[3]).toContain("\x1b[48;2;36;36;36m");
     expect(stripAnsi(frame.rows[3]!)).toContain("▌  Copied to clipboard");
-    // Rows never exceed the terminal width even with the bands painted.
     for (const row of frame.rows) expect(visibleLength(row)).toBeLessThanOrEqual(100);
-    // On a light background the toast's primary text inverts to black.
     const lightFrame = renderTraceViewer(viewerState(conversationSpans()), {
       width: 100,
       height: 30,
@@ -381,19 +365,15 @@ describe("renderTraceViewer", () => {
       viewerState(conversationSpans(), { panelOpen: true, selectedRow: 2 }),
       { width: 100, height: 30, theme: THEME, surfaces: light },
     );
-    // Header: primary title, muted metadata segments.
     expect(frame.rows[1]).toContain("\x1b[1m\x1b[38;2;0;0;0m▲ traces\x1b[39m\x1b[22m");
     expect(frame.rows[1]).toContain("\x1b[38;2;115;115;115m");
-    // Footer control hints render as black-anchored muted text.
     const footer = frame.rows[frame.rows.length - 2]!;
     expect(footer).toContain("\x1b[38;2;115;115;115m");
     expect(footer).toContain("q close");
-    // Drawer: primary span name and muted fact labels.
     expect(
       frame.rows.some((row) => row.includes("\x1b[38;2;0;0;0mai.streamText.doStream\x1b[39m")),
     ).toBe(true);
     expect(frame.rows.some((row) => row.includes("\x1b[38;2;115;115;115mstatus"))).toBe(true);
-    // Without surfaces the chrome keeps the theme's plain emphasis.
     const plain = render(viewerState(conversationSpans(), { panelOpen: true, selectedRow: 2 }));
     expect(plain.rows[1]).toContain("\x1b[1m▲ traces\x1b[22m");
     expect(plain.rows.join("\n")).not.toContain("\x1b[38;2;");

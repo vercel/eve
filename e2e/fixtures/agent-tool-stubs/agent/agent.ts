@@ -13,6 +13,11 @@ export default defineAgent({
         if (result?.name === "complete_task") {
           return { toolCalls: [{ name: "list_tasks", input: {} }] };
         }
+        const lookups = request.toolResults.filter((entry) => entry.name === "lookup_record");
+        // A failed lookup is retried once with the same input, as the errors eval asks.
+        if (result?.name === "lookup_record" && result.isError && lookups.length === 1) {
+          return { toolCalls: [{ name: "lookup_record", input: lookupInput() }] };
+        }
         if (
           result?.name === "lookup_record" &&
           JSON.stringify(result.output) === '{"marker":"pending"}'

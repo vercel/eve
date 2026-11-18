@@ -20,8 +20,6 @@ const manifest = JSON.parse(await readFile(join(root, "packages/eve/package.json
   exports: Record<string, string | { types?: string }>;
 };
 
-// Framework and adapter entries typecheck with their documented integration
-// peers. The remaining entries must compile without those optional packages.
 const integrations: Record<string, readonly string[]> = {
   "eve/react": ["react", "@types/react"],
   "eve/vue": ["vue"],
@@ -165,9 +163,7 @@ function version(name: string): string {
         return (
           JSON.parse(readFileSync(join(path, name, "package.json"), "utf8")) as { version: string }
         ).version;
-      } catch {
-        /* Try the owning workspace package. */
-      }
+      } catch {}
     }
   }
   throw new Error(
@@ -217,6 +213,7 @@ describe("packed public declarations", () => {
           compilerOptions: {
             strict: true,
             skipLibCheck: false,
+            skipDefaultLibCheck: true,
             noEmit: true,
             types: group.name === "core" ? ["node", "eve/workflow-modules"] : ["node"],
             target: "ES2024",

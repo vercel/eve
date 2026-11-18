@@ -2,6 +2,7 @@ export {
   defineSandboxProvider,
   type SandboxConnection,
   type SandboxIdentity,
+  type SandboxIdleTimeoutOption,
   type SandboxJson,
   type SandboxPrepareContext,
   type SandboxPrepareOption,
@@ -10,6 +11,7 @@ export {
   type SandboxProviderImplementation,
   type SandboxSessionContext,
   type SandboxSessionEndOptions,
+  type SandboxSessionIdleOptions,
   type WithPrepareOption,
 } from "#sandbox/provider.js";
 export type { SandboxDeleteOptions, SandboxProviderFiles } from "#shared/sandbox-provider.js";

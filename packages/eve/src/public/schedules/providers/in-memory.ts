@@ -11,6 +11,9 @@ import type {
 } from "#public/schedules/subscription.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
+/**
+ * Options for {@link inMemoryScheduleProvider}. `now` replaces the clock, for deterministic tests.
+ */
 export interface InMemoryScheduleProviderOptions {
   readonly now?: () => Date;
 }
@@ -20,6 +23,10 @@ interface StoredSchedule extends ScheduleRecord {
   readonly target: ScheduleProviderContext["target"];
 }
 
+/**
+ * A process-local schedule provider for code-driven tests. It has no background clock, so
+ * occurrences run only when `invoke` is called, and schedules are lost when the process exits.
+ */
 export function inMemoryScheduleProvider(
   options: InMemoryScheduleProviderOptions = {},
 ): ScheduleProvider {

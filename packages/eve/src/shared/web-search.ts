@@ -7,8 +7,13 @@ export const WEB_SEARCH_FALLBACK_PROVIDERS = ["exa", "parallel", "browserbase", 
  */
 export const WEB_SEARCH_PROVIDERS = [...WEB_SEARCH_FALLBACK_PROVIDERS, "native"] as const;
 
+/** A web search provider an agent can select, one of {@link WEB_SEARCH_PROVIDERS}. */
 export type WebSearchProvider = (typeof WEB_SEARCH_PROVIDERS)[number];
 
+/**
+ * A web search provider AI Gateway runs for any model, usable as a fallback; one of
+ * {@link WEB_SEARCH_FALLBACK_PROVIDERS}.
+ */
 export type WebSearchFallbackProvider = (typeof WEB_SEARCH_FALLBACK_PROVIDERS)[number];
 
 /** The Gateway search an agent selected, and what a model the provider can't serve uses instead. */

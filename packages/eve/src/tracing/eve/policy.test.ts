@@ -44,7 +44,6 @@ function policyFor(
   });
 }
 
-// #4850: a turn's activation names no audience; its content markers follow the session's.
 describe("createEveCapturePolicy forOperation", () => {
   it.each([
     ["public", true],

@@ -11,13 +11,8 @@ import { firstSentence } from "#shared/presentation-text.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { isToolSchema, type ToolSchema, withOptionalStringProperty } from "#tools/schema.js";
 
-// A `serve` tool's model input is the tool's own input plus an optional
-// `taskId`, which sends the call to the running task it names.
-
-/** The model input property eve adds to every `serve` tool. */
 export const TASK_ID_INPUT = "taskId";
 
-/** A `serve` tool's input schema as the model sees it, with the optional `taskId`. */
 export function withTaskIdSchema(schema: ToolSchema): ToolSchema {
   return withOptionalStringProperty(schema, {
     description: TASK_ID_INPUT_DESCRIPTION,
@@ -25,11 +20,6 @@ export function withTaskIdSchema(schema: ToolSchema): ToolSchema {
   });
 }
 
-/**
- * The tool as the model sees it: its input gains `taskId`, and its description
- * explains it. An agent tool also gets its activity label, the agent and the
- * first sentence of its message: `Researcher: Find the March incidents`.
- */
 export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolDefinition {
   const schema = definition.inputSchema;
   if (!isToolSchema(schema)) {
@@ -44,7 +34,6 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
     ),
     inputSchema: withTaskIdSchema(schema),
   };
-  // `label: false` keeps the call out of activity, so it gets no label either.
   if (!agent || definition.label === false || definition.label?.start !== undefined) {
     return described;
   }
@@ -54,11 +43,6 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
   };
 }
 
-/**
- * `Researcher: Find the March incidents`, from the first sentence of the
- * message. A call to the agent's own copy shows the brief alone, since its
- * name, `agent`, says nothing. The agent's name when the message is empty.
- */
 function agentCallLabel(name: string, input: unknown): string {
   const message =
     typeof input === "object" && input !== null
@@ -69,16 +53,16 @@ function agentCallLabel(name: string, input: unknown): string {
   return name === AGENT_TOOL_NAME ? brief : `${displayTitle(name)}: ${brief}`;
 }
 
-/** A `serve` tool call's model input, split into the task it names and the tool's own input. */
 export interface ServeCallInput {
   readonly input: JsonObject;
   readonly taskId?: string;
 }
 
+const ABSENT_TASK_IDS: ReadonlySet<string> = new Set(["", "undefined", "null"]);
+
 export function splitTaskIdInput(modelInput: JsonObject): ServeCallInput {
   const { [TASK_ID_INPUT]: taskId, ...input } = modelInput;
-  // Some models fill an optional string with "" instead of omitting it.
-  if (typeof taskId !== "string" || taskId === "") return { input };
+  if (typeof taskId !== "string" || ABSENT_TASK_IDS.has(taskId)) return { input };
   return { input, taskId };
 }
 

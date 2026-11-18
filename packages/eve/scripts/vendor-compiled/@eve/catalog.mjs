@@ -10,7 +10,6 @@ const require = createRequire(import.meta.url);
 const tscPath = join(dirname(require.resolve("typescript/package.json")), "bin", "tsc");
 const copyDeclarations = createDeclarationCopier({ declarationRoot: "dist/src" });
 
-/** Bundle the private workspace catalog so the published eve package stays self-contained. */
 export default {
   packageName: "@eve/catalog",
   compiledPath: "@eve/catalog",

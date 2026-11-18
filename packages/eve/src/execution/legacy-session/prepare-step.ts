@@ -6,11 +6,6 @@ import { readLegacySnapshot, importConversation } from "./snapshot.js";
 import { SESSION_INBOX_CONTEXT_KEY } from "#execution/session-inbox/address.js";
 import { isObject } from "#shared/guards.js";
 
-/**
- * Context that pre-cutover drivers (eve 0.45 to 0.56) saved and the current
- * build no longer defines. Loading it would refuse the import as an unknown
- * framework key.
- */
 const RETIRED_CONTEXT_KEYS = [
   "eve.activityObserver",
   "eve.activityPendingBlockers",
@@ -27,7 +22,6 @@ const RETIRED_CONTEXT_KEYS = [
   "eve.turnTaskState",
 ];
 
-/** Persist the import before publishing its current-generation inbox. */
 export async function prepareLegacySessionStep(rawInput: unknown) {
   "use step";
   const input = readLegacyTurnInput(rawInput);

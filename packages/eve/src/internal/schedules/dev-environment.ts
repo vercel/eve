@@ -1,4 +1,3 @@
-/** Matches the Schedules SDK's CLI-hosted local environment selection. */
 export function isVercelSchedulesDevEnvironment(): boolean {
   return (
     process.env.NODE_ENV === "development" &&

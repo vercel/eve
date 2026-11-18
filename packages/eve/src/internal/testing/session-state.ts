@@ -4,10 +4,6 @@ import {
 } from "#execution/durable-session-store.js";
 import { positionState } from "#internal/testing/session-machine.js";
 
-/**
- * Complete session checkpoint for tests that exercise workflow coordination. `position` seeds the
- * projection: inside an open turn, or between turns when `turnId` is empty.
- */
 export function createTestSessionState(
   overrides: Partial<DurableSessionState> = {},
   position?: { readonly sequence: number; readonly stepIndex?: number; readonly turnId: string },

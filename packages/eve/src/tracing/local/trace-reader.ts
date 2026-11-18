@@ -1,13 +1,3 @@
-/**
- * Reads the local trace spool written by {@link LocalTraceSpanProcessor}.
- *
- * The spool is the contract between the dev-time writer and every viewer
- * (`eve traces`, the TUI trace viewer): one directory per trace under
- * `.eve/traces/v1/<traceId>/segments/`, one immutable OTLP/JSON file per
- * span. Parsing is defensive end to end — malformed or oversized segments
- * are skipped so a partial write never breaks a view.
- */
-
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -32,7 +22,6 @@ export interface LocalTraceSpan {
   readonly attributes: Readonly<Record<string, unknown>>;
   readonly endTimeNs: bigint;
   readonly events: readonly LocalTraceSpanEvent[];
-  /** OTLP span kind (1 internal … 5 consumer); undefined when absent. */
   readonly kind?: number;
   readonly name: string;
   readonly parentSpanId?: string;
@@ -40,7 +29,6 @@ export interface LocalTraceSpan {
   readonly spanId: string;
   readonly startTimeNs: bigint;
   readonly statusCode: number;
-  /** Message carried by an ERROR status, when the span recorded one. */
   readonly statusMessage?: string;
   readonly traceId: string;
 }
@@ -48,24 +36,13 @@ export interface LocalTraceSpan {
 export interface LocalTrace {
   readonly agentName?: string;
   readonly endTimeNs: bigint;
-  /** Conversation that owns the trace, which is the one the list shows. */
   readonly conversationId?: string;
-  /**
-   * Every conversation identifier recorded in the trace.
-   *
-   * A logical conversation can contain separate root traces for the parent
-   * and child activations. Any matching conversation ID resolves to them.
-   */
   readonly conversationIds: readonly string[];
   readonly spans: readonly LocalTraceSpan[];
   readonly startTimeNs: bigint;
   readonly traceId: string;
 }
 
-/**
- * Trace ids held by the spool, unordered. Empty when nothing has been written
- * yet; any other read fault propagates.
- */
 export async function listLocalTraceIds(appRoot: string): Promise<string[]> {
   let entries;
   try {
@@ -79,11 +56,6 @@ export async function listLocalTraceIds(appRoot: string): Promise<string[]> {
     .map((entry) => entry.name);
 }
 
-/**
- * Instant one trace last received a span, or `undefined` once retention has
- * pruned it. Reads the segments directory's mtime, so it stays cheap enough to
- * poll a large spool without parsing any span.
- */
 export async function readLocalTraceActivityMs(
   appRoot: string,
   traceId: string,
@@ -96,11 +68,6 @@ export async function readLocalTraceActivityMs(
   }
 }
 
-/**
- * Segment file names of one trace in read order, or `undefined` when the trace
- * is gone. Segments are immutable and named for their span, so the order is
- * stable across reads and a caller can treat names it has seen as parsed.
- */
 export async function listLocalTraceSegments(
   appRoot: string,
   traceId: string,
@@ -120,10 +87,6 @@ export async function listLocalTraceSegments(
     .sort((left, right) => left.localeCompare(right));
 }
 
-/**
- * Spans held by one segment file. An oversized, unreadable, or malformed
- * segment yields none, so a partial write never breaks a view.
- */
 export async function readLocalTraceSegment(
   appRoot: string,
   traceId: string,
@@ -140,7 +103,6 @@ export async function readLocalTraceSegment(
   return parseLocalTraceSegment(content, traceId);
 }
 
-/** Reads valid local traces, newest first, while ignoring malformed segments. */
 export async function listLocalTraces(appRoot: string): Promise<LocalTrace[]> {
   const traces: LocalTrace[] = [];
   for (const traceId of await listLocalTraceIds(appRoot)) {
@@ -156,10 +118,6 @@ export async function listLocalTraces(appRoot: string): Promise<LocalTrace[]> {
   );
 }
 
-/**
- * Reads one whole trace, or `undefined` when it holds no valid spans. Spans
- * come back ordered by start time.
- */
 async function readLocalTrace(appRoot: string, traceId: string): Promise<LocalTrace | undefined> {
   const fileNames = await listLocalTraceSegments(appRoot, traceId);
   if (fileNames === undefined) return undefined;
@@ -173,14 +131,12 @@ async function readLocalTrace(appRoot: string, traceId: string): Promise<LocalTr
   return assembleLocalTrace(traceId, [...spans.values()]);
 }
 
-/** Sorts spans into timeline order: start, then end, then a stable tiebreak. */
 export function compareLocalTraceSpans(left: LocalTraceSpan, right: LocalTraceSpan): number {
   if (left.startTimeNs !== right.startTimeNs) return left.startTimeNs < right.startTimeNs ? -1 : 1;
   if (left.endTimeNs !== right.endTimeNs) return left.endTimeNs < right.endTimeNs ? -1 : 1;
   return left.name.localeCompare(right.name) || left.spanId.localeCompare(right.spanId);
 }
 
-/** Builds a trace from already-parsed spans, deriving summary fields. */
 export function assembleLocalTrace(traceId: string, spans: readonly LocalTraceSpan[]): LocalTrace {
   const ordered = [...spans].sort(compareLocalTraceSpans);
   const attributes = ordered.map((span) => span.attributes);
@@ -202,11 +158,6 @@ export function assembleLocalTrace(traceId: string, spans: readonly LocalTraceSp
   };
 }
 
-/**
- * Extracts short human-facing details from a span's structural attributes
- * (turn id, step index/attempt, action kind/name, model id) for one-line
- * span labels. Raw values — callers sanitize for their output surface.
- */
 export function describeLocalTraceSpan(span: LocalTraceSpan): string[] {
   const details: string[] = [];
   const turnId = stringSpanAttribute(span, "agent.turn.id");
@@ -238,7 +189,6 @@ export function isAgentTurnSpan(span: LocalTraceSpan): boolean {
   return isAgentActivationSpan(span);
 }
 
-/** Parses one OTLP/JSON segment file into spans belonging to `expectedTraceId`. */
 export function parseLocalTraceSegment(content: string, expectedTraceId: string): LocalTraceSpan[] {
   try {
     const request = JSON.parse(content) as unknown;

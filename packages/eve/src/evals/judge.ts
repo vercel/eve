@@ -1,4 +1,5 @@
 import { decideWithMetadata } from "#ai/decision-adapter.js";
+import type { DecisionQuestion } from "#ai/decision-types.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { AssertionCollector } from "#evals/assertions/collector.js";
 import { formatDiagnosticValue, toDiagnosticMetadataValue } from "#evals/diagnostics.js";
@@ -22,7 +23,6 @@ interface JudgeDeps {
   readonly signal: AbortSignal;
 }
 
-/** Bind decision-backed judgments to the existing assertion lifecycle. */
 export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
   function judge(criteria: string, opts?: JudgeOpts): AssertionHandle;
   function judge<const Q extends JudgeQuestion>(
@@ -59,8 +59,13 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
       (async () => {
         const capturedState = structuredClone(state);
         const capturedQuestions = structuredClone(questions);
-        const decisionQuestions = Object.fromEntries(
+        const decisionQuestions: Record<string, DecisionQuestion> = Object.fromEntries(
           Object.entries(capturedQuestions).map(([id, question]) => {
+            if (question.type === "score" && question.criteria.length < 2) {
+              throw new Error(
+                `Judge question "${id}" score criteria must contain at least two ordered levels.`,
+              );
+            }
             if (question.type !== "choice") return [id, question];
             const { expected, ...decisionQuestion } = question;
             if (typeof expected !== "string" || !Object.hasOwn(question.criteria, expected)) {
@@ -71,7 +76,6 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
         );
         const result = await decideWithMetadata({
           model,
-          // The AI SDK reads a bare array as state parts, so JSON arrays travel as one JSON part.
           state: isJsonArray(capturedState)
             ? [{ type: "json", value: capturedState }]
             : capturedState,

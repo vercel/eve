@@ -7,18 +7,11 @@ const INSTRUMENTATION_EXTENSIONS = [".ts", ".mts", ".js", ".mjs"] as const;
 
 const INSTRUMENTATION_DIRECTORY = "instrumentation";
 
-/** Instrumentation providers keyed by their path-derived slot name. */
 export interface InstrumentationLayout {
   readonly kind: "directory";
   readonly modulePathsBySlot: Readonly<Record<string, string>>;
 }
 
-/**
- * Resolves the instrumentation layout for one agent root.
- *
- * An empty directory layout still installs eve's built-in destinations.
- * The removed single-file layout is rejected with a migration-oriented error.
- */
 export function resolveInstrumentationLayout(input: {
   readonly agentRoot: string;
 }): InstrumentationLayout {
@@ -42,12 +35,6 @@ export function resolveInstrumentationLayout(input: {
   };
 }
 
-/**
- * Maps each `instrumentation/<slot>.<ext>` file to its absolute path.
- *
- * Slots are sorted so the registration order a provider sees does not depend on
- * how the filesystem happens to enumerate the directory.
- */
 function collectInstrumentationProviderModules(
   directoryPath: string,
 ): Readonly<Record<string, string>> {
@@ -79,7 +66,6 @@ function collectInstrumentationProviderModules(
   );
 }
 
-/** Finds the removed single-file layout only so the build can reject it. */
 function findRemovedInstrumentationFile(agentRoot: string): string | undefined {
   for (const extension of INSTRUMENTATION_EXTENSIONS) {
     const candidate = join(agentRoot, `${INSTRUMENTATION_DIRECTORY}${extension}`);

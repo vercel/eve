@@ -34,7 +34,6 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
-// Content a tool sees or produces. It reaches a span only when content capture is on.
 const SENTINEL = "sentinel-7f3a-content";
 const CLIENT_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const CLIENT_SPAN_ID = "00f067aa0ba902b7";
@@ -69,14 +68,12 @@ const tools = [
   tool(
     "lookup",
     async ({ text }) =>
-      // A span the tool opens nests under the tool span.
       await apiTrace.getTracer("test.tool").startActiveSpan("nested lookup", async (span) => {
         span.end();
         return { echoed: text, status: "ok" };
       }),
   ),
   tool("explode", async ({ text }) => {
-    // Logged failures record on the active span; their text must not be captured.
     logError(log, "the tool failed", new Error(`logged ${text}`));
     throw new Error(`thrown ${text}`);
   }),
@@ -108,14 +105,12 @@ const descriptions: AgentToolDescription[] = tools.map(({ name }) => ({
 let exporter: InMemorySpanExporter;
 let provider: BasicTracerProvider;
 
-function useTracing(tracePolicy?: TraceCapturePolicy, capturesContent = false): void {
+function useTracing(tracePolicy?: TraceCapturePolicy): void {
   registerInstrumentationRuntime({
     forceFlush: async () => undefined,
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,
-      recordInputs: capturesContent,
-      recordOutputs: capturesContent,
       traceChannelRequests: false,
       tracePolicy,
     },
@@ -125,7 +120,6 @@ function useTracing(tracePolicy?: TraceCapturePolicy, capturesContent = false): 
 }
 
 beforeEach(() => {
-  // Content is captured for a private audience only in development.
   vi.stubEnv("EVE_DEV", "1");
   exporter = new InMemorySpanExporter();
   provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
@@ -230,7 +224,6 @@ function parentSpanId(span: ReadableSpan): string | undefined {
   return span.parentSpanContext?.spanId;
 }
 
-/** Everything an exporter would ship for a span, events and status included. */
 function exported(span: ReadableSpan): string {
   return JSON.stringify({
     attributes: span.attributes,
@@ -269,7 +262,6 @@ describe.each<Era>(["2025", "2026"])("mcpChannel tool tracing over MCP %s", (era
     const nested = finished().find((candidate) => candidate.name === "nested lookup")!;
     expect(nested.spanContext().traceId).toBe(CLIENT_TRACE_ID);
     expect(parentSpanId(nested)).toBe(span.spanContext().spanId);
-    expectNoContent();
   });
 });
 
@@ -302,7 +294,8 @@ describe("mcpChannel tool trace context", () => {
     const seen: string[] = [];
     useTracing((trace) => {
       seen.push(trace.audience);
-      return { emit: true, recordInputs: true, recordOutputs: true };
+      const content = trace.audience === "public";
+      return { emit: true, recordInputs: content, recordOutputs: content };
     });
     await call(callRequest("2026", "lookup"));
     await call(
@@ -313,10 +306,10 @@ describe("mcpChannel tool trace context", () => {
     );
     expect(seen).toHaveLength(2);
     expect(seen[1]).toBe(seen[0]);
+    expect(seen[1]).not.toBe("public");
     for (const span of finished()) {
       expect(JSON.stringify(span.attributes)).not.toContain("attacker");
     }
-    // The policy allows content, but the declaration does not capture it.
     expectNoContent();
   });
 });
@@ -377,24 +370,15 @@ describe("invokeTool content capture", () => {
   const record = { emit: true, recordInputs: true, recordOutputs: true } as const;
 
   it("records outputs without inputs when only outputs are allowed", async () => {
-    useTracing(() => ({ emit: true, recordInputs: false, recordOutputs: true }), true);
+    useTracing(() => ({ emit: true, recordInputs: false, recordOutputs: true }));
     await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
     const span = toolSpan("lookup");
     expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
     expect(span.attributes["gen_ai.tool.call.result"]).toBeDefined();
   });
 
-  it("records neither when the OpenTelemetry declaration turns content off", async () => {
-    useTracing(() => record, false);
-    await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
-    const span = toolSpan("lookup");
-    expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
-    expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
-    expectNoContent();
-  });
-
   it("keeps a recorded failure's error off an existing parent span", async () => {
-    useTracing(() => record, true);
+    useTracing(() => record);
     const parent = apiTrace.getTracer("test.parent").startSpan("platform request");
     await apiContext.with(apiTrace.setSpan(apiContext.active(), parent), () =>
       invokeTool(runtime, "explode", { text: SENTINEL }, { auth: alice }),

@@ -1,6 +1,6 @@
 import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 
 import type { DurableDynamicSubagentSelection } from "#context/keys.js";
 import { createLogger } from "#internal/logging.js";
@@ -21,14 +21,12 @@ const log = createLogger("execution.agent-target");
 
 export type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSubagentSelection>>;
 
-/** One message to an agent, addressed by its invocation name. */
 export interface AgentActionInput {
   readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly target: string;
 }
 
-/** Where a new session with an agent starts: in this deployment, or at a remote agent. */
 export type SubagentStartTarget =
   | {
       readonly kind: "local";
@@ -42,10 +40,6 @@ export type SubagentStartTarget =
       readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
     };
 
-/**
- * Resolves an agent name against the calling agent's registry, its dynamic
- * selections, and the built-in root copy, as a dispatch request.
- */
 export function resolveAgentAction(input: {
   readonly bundle: CompiledBundle;
   readonly callId: string;
@@ -54,22 +48,40 @@ export function resolveAgentAction(input: {
 }): RuntimeAgentDispatchRequest {
   const definition = findAgentDefinition(input.bundle, input.dynamicSelections, input.input.target);
   if (definition === undefined) {
-    throw new FatalError(`Agent target "${input.input.target}" is not available to this agent.`);
+    throw new NonRetryableError(
+      `Agent target "${input.input.target}" is not available to this agent.`,
+    );
   }
-  const actionInput: JsonObject = {
-    message: normalizeAgentMessage(input.input.message),
-    ...(input.input.outputSchema !== undefined && { outputSchema: input.input.outputSchema }),
-  };
   const common = {
     callId: input.callId,
     description: definition.description ?? "",
-    input: actionInput,
+    input: agentActionInput(input.input),
     name: definition.name,
     nodeId: definition.nodeId,
   };
   return definition.kind === "remote"
     ? { ...common, kind: "remote-agent-call", remoteAgentName: definition.name }
     : { ...common, kind: "subagent-call", subagentName: definition.name };
+}
+
+export function remoteAgentNames(
+  bundle: CompiledBundle,
+  dynamicSelections: DynamicSubagentSelections,
+): readonly string[] {
+  const names = new Set(bundle.subagentRegistry.subagentsByName.keys());
+  for (const selection of Object.values(dynamicSelections)) {
+    if (selection !== null) names.add(selection.prepared.name);
+  }
+  return [...names].filter(
+    (name) => findAgentDefinition(bundle, dynamicSelections, name)?.kind === "remote",
+  );
+}
+
+function agentActionInput(input: AgentActionInput): JsonObject {
+  return {
+    message: normalizeAgentMessage(input.message),
+    ...(input.outputSchema !== undefined && { outputSchema: input.outputSchema }),
+  };
 }
 
 function findAgentDefinition(
@@ -94,10 +106,6 @@ function findAgentDefinition(
   return undefined;
 }
 
-/**
- * Plans a fresh child for a dispatch request. A dynamic agent whose selection
- * changed and a root copy outside the root session can't start.
- */
 export function resolveAgentStartTarget(input: {
   readonly action: RuntimeAgentDispatchRequest;
   readonly bundle: CompiledBundle;
@@ -121,7 +129,7 @@ export function resolveAgentStartTarget(input: {
       nodeId: action.nodeId,
       subagentName: action.name,
     });
-    throw new FatalError(
+    throw new NonRetryableError(
       `Subagent "${action.name}" is not available in the current session context.`,
     );
   }
@@ -131,7 +139,7 @@ export function resolveAgentStartTarget(input: {
       nodeId: action.nodeId,
       subagentName: action.subagentName,
     });
-    throw new FatalError('The built-in "agent" tool is only available to the root session.');
+    throw new NonRetryableError('The built-in "agent" tool is only available to the root session.');
   }
   if (action.kind === "remote-agent-call") {
     return {

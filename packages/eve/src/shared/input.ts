@@ -4,7 +4,6 @@ import type { Answer } from "#protocol/session-events/families/response.js";
 
 export type { Answer };
 
-/** Zod schema for one answer. */
 export const answerSchema = conforming<Answer>()(
   z
     .object({

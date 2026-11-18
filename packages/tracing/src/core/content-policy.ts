@@ -1,19 +1,3 @@
-/**
- * Which span attributes carry conversation content, and in which direction.
- *
- * Two vocabularies land on the same spans: the ones the library sets on its own
- * `agent.*` spans, and the ones the AI SDK's OpenTelemetry integration sets on
- * the model-call spans beneath them. A destination that declined content has to
- * be rid of both, so both are listed here rather than in the module that writes
- * each.
- *
- * Listed by name rather than by prefix because the prefixes are shared with
- * metadata that must survive: `ai.response.finish_reason` and
- * `gen_ai.tool.name` say what happened, not what was said. The cost is that a
- * new content attribute in a dependency is not covered until it is added here.
- */
-
-/** Prompts, instructions, tool arguments — what went in. */
 const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.channel.delivery.input",
   "agent.session.title",
@@ -31,12 +15,6 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "gen_ai.tool.definitions",
 ]);
 
-/**
- * Responses, reasoning, tool results — what came out.
- *
- * `ai.toolCall.args` is here rather than above because the AI SDK gates it on
- * `recordOutputs`; matching that is what keeps one destination's view coherent.
- */
 const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.approval.response",
   "ai.embedding",
@@ -51,6 +29,7 @@ const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "ai.response.tool_results",
   "ai.toolCall.args",
   "ai.toolCall.result",
+  "gen_ai.decision.results",
   "gen_ai.output.messages",
   "gen_ai.tool.call.result",
 ]);
@@ -89,13 +68,6 @@ function exportedAttributeValue(
   return value;
 }
 
-/**
- * Re-applies the capture-policy attributes that a size-based content strip
- * must not rewrite. Dropping content to fit a checkpoint budget is not the
- * destination declining it, so `agent.trace.content.input` and
- * `agent.trace.content.output` keep the record's real decision; otherwise a
- * restored turn would report "omitted" although capture was on.
- */
 export function preservingCapturePolicy(
   attributes: Readonly<Record<string, unknown>>,
   original: Readonly<Record<string, unknown>>,

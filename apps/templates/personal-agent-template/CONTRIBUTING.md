@@ -47,6 +47,7 @@ personal-agent-template/
 3. Make your changes
 4. Run checks:
    ```bash
+   pnpm test:regression
    pnpm typecheck
    ```
 5. Commit with a [Conventional Commits](https://www.conventionalcommits.org/) message
@@ -54,7 +55,7 @@ personal-agent-template/
 
 ## Pull Request Process
 
-1. Ensure `pnpm typecheck` passes
+1. Ensure `pnpm test:regression` and `pnpm typecheck` pass
 2. Update documentation if your change affects user-facing behavior
 3. Add a clear description of what changed and why
 4. Link related issues when applicable

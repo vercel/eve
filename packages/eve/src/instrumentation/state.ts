@@ -5,13 +5,6 @@ import { SERIALIZED_INSTRUMENTATION_STATE_KEYS } from "#shared/serialized-observ
 
 export { preserveSerializedInstrumentationState } from "#shared/serialized-observability-state.js";
 
-/**
- * What every provider has staged, flattened into one durable slot.
- *
- * Flat rather than nested by provider, because every read and write is already
- * scoped to a single `(provider, operation)` pair — nesting would buy a grouping
- * nothing asks for and make releasing one operation a two-level rewrite.
- */
 interface InstrumentationStateRecord {
   abandoned?: true;
   attemptId?: string;
@@ -28,11 +21,6 @@ export interface InstrumentationStateOwner {
 
 type InstrumentationStateMap = Readonly<Record<string, InstrumentationStateRecord>>;
 
-/**
- * Provider state lives in serialized Workflow context, not in the harness, so a
- * value staged by `call.requested` in one process is still there when
- * `call.settled` runs in another.
- */
 const InstrumentationStateKey = new ContextKey<InstrumentationStateMap>(
   SERIALIZED_INSTRUMENTATION_STATE_KEYS.providerState,
   {
@@ -43,25 +31,15 @@ const InstrumentationStateKey = new ContextKey<InstrumentationStateMap>(
   },
 );
 
-/** One provider's view of its own state for one operation. */
 export interface InstrumentationStateSlot {
   get(): JsonValue | undefined;
-  /** Stages a value; `undefined` releases the slot. */
   set(value: JsonValue | undefined): void;
 }
 
 interface InstrumentationStateLease extends InstrumentationStateSlot {
-  /** Makes later reads empty and writes no-ops. */
   revoke(): void;
 }
 
-/**
- * Scopes state to one provider and one operation.
- *
- * Two providers handling the same event get separate slots, and the same
- * provider gets a separate slot per operation, so neither can read or clobber
- * the other's.
- */
 export function instrumentationStateSlot(
   provider: string,
   idempotencyKey: string,
@@ -80,9 +58,6 @@ export function instrumentationStateSlot(
     },
     set: (value) => {
       if (!active) return;
-      // Reject a lossy value here rather than at the step boundary, where the
-      // throw would be attributed to serialization instead of to the handler
-      // that wrote it.
       const staged = value === undefined ? undefined : cloneAndFreezeJson(parseJsonValue(value));
       writeInstrumentationState((state) => {
         if (staged === undefined) return writeSlot(state, key, undefined);
@@ -96,7 +71,6 @@ export function instrumentationStateSlot(
   };
 }
 
-/** Persists that a provider's start handler timed out for this operation. */
 export function abandonInstrumentationState(
   provider: string,
   idempotencyKey: string,
@@ -124,13 +98,11 @@ export function isInstrumentationStateAbandoned(provider: string, idempotencyKey
   );
 }
 
-/** Releases one operation across namespaces, including providers no longer registered. */
 export function releaseAllInstrumentationState(idempotencyKey: string): void {
   const suffix = `\0${idempotencyKey}`;
   releaseMatchingInstrumentationState((key) => key.endsWith(suffix));
 }
 
-/** Releases attempt-owned children across namespaces when their terminals are omitted. */
 export function releaseAllInstrumentationAttemptState(attemptId: string): void {
   releaseMatchingInstrumentationState((_key, record) => record.attemptId === attemptId);
 }
@@ -194,7 +166,6 @@ function writeContextKey<T extends Readonly<Record<string, unknown>>>(
   loadContext().set(key, (state) => update(state ?? ({} as T)));
 }
 
-/** A provider name cannot contain NUL, so the pair cannot be ambiguous. */
 function stateKey(provider: string, idempotencyKey: string): string {
   return `${provider}\0${idempotencyKey}`;
 }

@@ -11,7 +11,6 @@ describe("value deltas", () => {
       const base = randomValue(random, 4);
       const next = edit(base, random, 4);
 
-      // The workflow body applies a deserialized delta to its deserialized copy of the base.
       const rebuilt = applyValueDelta(
         structuredClone(base),
         structuredClone(diffValue(base, next)),
@@ -50,7 +49,6 @@ describe("value deltas", () => {
     expect(diffValue(base, snapshotValue(base))).toBeUndefined();
   });
 
-  // https://github.com/vercel/eve/issues/5635
   it("carry one added row of a session projection table, not the whole table", () => {
     const base = emptySessionView();
     for (let index = 0; index < 100; index++) {
@@ -70,7 +68,6 @@ describe("value deltas", () => {
     const table: Record<string, string> = Object.create(null);
     table["__proto__"] = "Alice's row";
     const snapshot = snapshotValue(table);
-    // A fold edits a table in place.
     table.bob = "Bob's row";
 
     const rebuilt = applyValueDelta(snapshot, diffValue(snapshot, table));
@@ -82,7 +79,6 @@ describe("value deltas", () => {
   });
 });
 
-/** Adds a settled call to `view` in place, as a fold does. */
 function settleCall(view: SessionView, callId: string, output: string): void {
   (view.calls as Record<string, CallRow>)[callId] = {
     callId,
@@ -137,7 +133,6 @@ function randomValue(random: Random, depth: number): unknown {
 
 const LEAVES = ["string", "number", "date", "bytes", "literal"] as const;
 
-/** A copy of `value` with random edits, sharing what it leaves alone, as a step's result does. */
 function edit(value: unknown, random: Random, depth: number): unknown {
   if (random() < 0.3) return value;
   if (Array.isArray(value)) {
@@ -163,7 +158,6 @@ function edit(value: unknown, random: Random, depth: number): unknown {
   return random() < 0.5 ? randomValue(random, depth) : value;
 }
 
-/** Key order and `undefined` entries, which structural equality ignores. */
 function layout(value: unknown): string {
   return JSON.stringify(value, (_key, entry: unknown) =>
     entry === undefined ? "<undefined>" : entry,

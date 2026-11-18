@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, ref } from "../lib/tool";
 
+/** Lets the agent check one element state: visible, enabled, checked, focused, expanded, or selected. */
 export default desktopTool({
   description:
     "Check one element state: visible, enabled, checked, focused, expanded, or selected.",

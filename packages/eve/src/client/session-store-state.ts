@@ -24,6 +24,10 @@ export type SessionStoreStatus = "idle" | "busy" | "resuming";
  */
 export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<SendTurnPayload>;
 
+/**
+ * An immutable snapshot of a session store: the conversation state plus the raw events,
+ * session identity, store status, and latest error.
+ */
 export interface SessionStoreSnapshot extends ConversationState {
   /** Immutable lifecycle observations as of this complete commit. */
   readonly view: SessionView;

@@ -1,16 +1,3 @@
-// Reads a session an eve before v27 recorded. Those sessions stored one v26 `{type, data, meta}`
-// event per line; a v27 deployment shares their World, so it can read their history but not
-// their events. This reads each stored v26 event as the v27 commit it records, so every v27
-// reader folds the conversation as if v27 had written it: its messages, reasoning, calls and
-// their results, approvals and questions, sign-ins, subagents, clears, and compactions.
-//
-// It reads; it never writes. One stored v26 line reads as at most one v27 line, so positions
-// keep their meaning, and a v26 line that records nothing a v27 reader folds reads as none.
-// What v26 never recorded, such as a delivery's admission or the end of what a cancel cut, the
-// commit that implies it records, the way the v27 writer closes what an owner leaves open.
-//
-// Delete once no session a v27 deployment serves was recorded before v27.
-
 import { cascade } from "#harness/session-machine/cascade.js";
 import { FACT_CATALOG } from "#protocol/session-events/catalog.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
@@ -24,6 +11,8 @@ import {
 } from "#protocol/session-events/envelope.js";
 import type { Fact } from "#protocol/session-events/facts.js";
 import type { Capability, CallOutcome } from "#protocol/session-events/families/call.js";
+import type { InteractionOrigin } from "#protocol/session-events/families/interaction.js";
+import { traceContext } from "#protocol/session-events/families/session.js";
 import {
   v26InteractionOutcome,
   v26InteractionRequest,
@@ -37,17 +26,10 @@ import { isV26Line } from "#protocol/v26-lines.js";
 
 type Data = Readonly<Record<string, unknown>>;
 
-/** Reads consecutive stored lines of one session an eve before v27 started, from its first. */
 export interface V26HistoryReader {
-  /**
-   * The v27 line the record at `position` reads as, or `undefined` when it records nothing a v27
-   * reader folds, such as a streamed delta. A v27 line reads as itself: a v27 deployment that
-   * ends a stranded v26 session appends its end as one.
-   */
   read(record: unknown, position: number): StoredLine<SessionEvent> | undefined;
 }
 
-/** A reader for one session's stored v26 lines. Read them in order, from position 0. */
 export function createV26HistoryReader(): V26HistoryReader {
   const view = emptySessionView();
   const translator = new Translator(view);
@@ -69,24 +51,16 @@ export function createV26HistoryReader(): V26HistoryReader {
         : [];
       const built = translator.factsOf(event.type, data, { deliveryIds, position });
       if (built.length === 0) return undefined;
-      // Facts leave out absent fields, as a stored line carries them.
       const intents = JSON.parse(JSON.stringify(built)) as Fact[];
-      // The writer's own rule: a commit that ends an owner ends what it still holds.
       const facts = cascade(view, intents);
       const line: CommitLine<SessionEvent> = { at, facts };
       translator.noteIntroduced(facts);
-      // As the writer folds: a whole session's settled rows would make each commit cost more.
       foldLine(view, line, position, { retention: "operational" });
       return line;
     },
   };
 }
 
-/**
- * The v27 lines a v26 session's stored records read as, from position `from` on: one output per
- * record, a `position` marker for a record that reads as none, so cursors keep counting stored
- * lines. `records` must start at position 0: each record reads in light of those before it.
- */
 export function v26LineStream(
   records: ReadableStream<unknown>,
   from: number,
@@ -106,14 +80,6 @@ export function v26LineStream(
   );
 }
 
-/**
- * The events one session's saved v26 events read as, for an application that kept them: the
- * events a v27 reader of the session's stream would read from them, at the same positions. They
- * must be the session's events from its first, one per stored line, in order, as a v26 client
- * read them from position 0; the next stored line is then at `records.length`. If trailing
- * records emit nothing, the last event's `meta.next` retains that source coverage without
- * changing any event's original position. Save the returned reader metadata unchanged.
- */
 export function convertLegacyEvents(records: readonly unknown[]): SessionStreamEvent[] {
   if (!isSessionStarted(records[0])) {
     throw new TypeError(
@@ -147,7 +113,6 @@ export function convertLegacyEvents(records: readonly unknown[]): SessionStreamE
   return events;
 }
 
-/** A v27 event looks like a v26 one but for the stream position a reader stamped on it. */
 function hasStreamPosition(record: unknown): boolean {
   const meta = (record as { readonly meta?: unknown }).meta;
   return isRecord(meta) && meta.position !== undefined;
@@ -163,28 +128,19 @@ interface Context {
 }
 
 class Translator {
-  /** The turn that runs, as v26 named it. */
   private turnId: string | undefined;
-  /** The turn the next one follows; `null` after a clear. */
   private follows: string | null = null;
-  /** Each turn's model run per v26 step. */
   private readonly runs = new Map<string, string>();
   private readonly partCounts = new Map<string, number>();
-  /** The reply parts of the turn's latest run that replied. */
   private reply: { readonly runId: string; readonly parts: string[] } | undefined;
-  /** Calls a task serves: their v26 `action.result` only reports the task starting. */
   private readonly taskCalls = new Set<string>();
-  /** The approval that cleared or rejected each call. */
   private readonly approvals = new Map<string, string>();
   private readonly interactionCalls = new Map<string, string>();
-  /** The context change a compaction runs as, until it completes. */
+  private readonly children = new Map<string, string>();
   private compaction: string | undefined;
-  /** History v26 imported for the turn, for the `delivery.consumed` it records next. */
   private pendingHistory: { id?: string; role: "user" | "assistant"; text: string }[] | undefined;
-  /** The delivery `turn.started` admitted, for the message v26 records next. */
   private startingDelivery: string | undefined;
 
-  /** Every entity a commit introduced, by family: the view drops them once they close. */
   private readonly introduced = new Set<string>();
 
   private readonly view: SessionView;
@@ -214,9 +170,8 @@ class Translator {
       case "session.started":
         return [{ data: sessionStarted(data), type: "session.started" }];
       case "turn.started":
-        return this.startTurn(str(data.turnId), context);
+        return this.startTurn(str(data.turnId), context, data);
       case "history.imported":
-        // Folded into the turn's `delivery.consumed`, which v26 records next.
         this.pendingHistory = Array.isArray(data.messages)
           ? data.messages.flatMap((message) =>
               isRecord(message) &&
@@ -293,26 +248,28 @@ class Translator {
       case "compaction.completed":
         return this.compactionSettled("completed");
       case "session.waiting":
-        // Idle: whatever v26 left open, such as a compaction that failed without an event, ended.
         return this.compaction === undefined ? [] : this.compactionSettled("failed");
       case "session.completed":
         return [{ data: { outcome: "completed" }, type: "session.ended" }];
       case "session.failed":
         return sessionFailed(data, id);
       default:
-        // Deltas preview what the completed events record; approval candidates precede the
-        // resolution that settles them.
         return [];
     }
   }
 
-  private startTurn(turnId: string | undefined, context: Context): Fact[] {
+  private startTurn(turnId: string | undefined, context: Context, recorded: Data = {}): Fact[] {
     if (turnId === undefined || this.isIntroduced("turn", turnId)) return [];
     const facts: Fact[] = [];
     const deliveryId = this.unadmitted(context, `v26_${String(context.position)}`);
     facts.push(...this.admit(deliveryId));
     facts.push({
-      data: { cause: { deliveryId }, follows: this.follows, turnId },
+      data: {
+        cause: { deliveryId },
+        follows: this.follows,
+        trace: traceContext.safeParse(recorded.trace).data,
+        turnId,
+      },
       type: "turn.started",
     });
     this.turnId = turnId;
@@ -352,7 +309,6 @@ class Translator {
     return facts;
   }
 
-  /** The first of the line's deliveries v26 named that no turn consumed yet, or `fallback`. */
   private unadmitted(context: Context, fallback: string): string {
     return (
       context.deliveryIds.find(
@@ -400,7 +356,6 @@ class Translator {
     id: string,
   ): Fact[] {
     if (value === undefined) return [];
-    // A v26 writer that recorded no `step.started` for the step still names its run.
     const facts = this.runOf(data) === undefined ? this.stepStarted(data, id) : [];
     const runId = this.runOf(data);
     if (runId === undefined || !(this.isOpenRun(runId) || facts.length > 0)) return [];
@@ -497,7 +452,6 @@ class Translator {
     const callId = str(result.callId);
     const row = callId === undefined ? undefined : this.view.calls[callId];
     if (callId === undefined || row === undefined || row.status === "settled") return [];
-    // A task serves the call; its `task.settled` carries the call's result.
     if (this.taskCalls.has(callId)) return [];
     const error = isRecord(data.error) ? errorOf(data.error) : undefined;
     if (data.status === "rejected") {
@@ -578,18 +532,21 @@ class Translator {
   }
 
   private agentStarted(data: Data): Fact[] {
-    const sessionId = str(data.sessionId);
-    const callId = str(data.callId);
-    if (sessionId === undefined || callId === undefined || this.view.calls[callId] === undefined)
-      return [];
+    const started = childStarted(data);
+    const call = started === undefined ? undefined : this.view.calls[started.callId];
+    if (started === undefined || call === undefined) return [];
+    const { callId, name, sessionId, stream } = started;
+    this.children.set(`call:${callId}`, sessionId);
+    const taskId = str(data.taskId);
+    if (taskId !== undefined) this.children.set(`task:${taskId}`, sessionId);
     if (this.isIntroduced("child", sessionId)) return [];
     return [
       {
         data: {
-          name: str(data.name) ?? this.view.calls[callId].capability.name,
+          name: name ?? call.capability.name,
           owner: { callId },
           sessionId,
-          stream: str(data.streamPath) ?? `/eve/v1/session/${sessionId}/stream`,
+          stream,
         },
         type: "child.opened",
       },
@@ -599,29 +556,64 @@ class Translator {
   private inputRequested(data: Data): Fact[] {
     if (!Array.isArray(data.requests)) return [];
     const relayedBy = str(data.callId);
+    const taskId = str(data.taskId);
+    const turnId = str(data.turnId);
     return data.requests.flatMap((request): Fact[] => {
       if (!isRecord(request)) return [];
       const interactionId = str(request.requestId);
       if (interactionId === undefined || this.isIntroduced("interaction", interactionId)) return [];
       const action = isRecord(request.action) ? request.action : {};
       const callId = relayedBy ?? str(action.callId);
-      const turnId = str(data.turnId);
       const subject =
         callId !== undefined && this.view.calls[callId] !== undefined
           ? { callId }
-          : turnId !== undefined
-            ? { turnId }
-            : undefined;
+          : taskId !== undefined && this.view.tasks[taskId] !== undefined
+            ? { taskId }
+            : turnId !== undefined
+              ? { turnId }
+              : undefined;
       if (subject === undefined) return [];
-      if (callId !== undefined && request.kind === "tool-approval")
+      const origin = this.originOf(interactionId, action, relayedBy, taskId);
+      if (callId !== undefined && request.kind === "tool-approval" && origin === undefined)
         this.interactionCalls.set(interactionId, callId);
       return [
         {
-          data: { interactionId, request: v26InteractionRequest(request), subject },
+          data: {
+            interactionId,
+            origin,
+            request: v26InteractionRequest(request),
+            subject,
+          },
           type: "interaction.opened",
         },
       ];
     });
+  }
+
+  private originOf(
+    interactionId: string,
+    action: Data,
+    relayedBy: string | undefined,
+    taskId: string | undefined,
+  ): InteractionOrigin | undefined {
+    const asked = str(action.callId);
+    const serving =
+      relayedBy ?? (taskId === undefined ? undefined : this.view.tasks[taskId]?.startedBy.callId);
+    if (asked === undefined || serving === undefined || asked === serving) return undefined;
+    const servedTask = taskId ?? this.view.calls[serving]?.taskId;
+    const sessionId =
+      this.children.get(`call:${serving}`) ??
+      (servedTask === undefined ? undefined : this.children.get(`task:${servedTask}`));
+    if (sessionId === undefined) return undefined;
+    return {
+      call: {
+        callId: asked,
+        input: action.input === undefined ? undefined : (action.input as JsonValue),
+        name: str(action.toolName) ?? str(action.name) ?? "tool",
+      },
+      interactionId,
+      sessionId,
+    };
   }
 
   private turnWaiting(data: Data): Fact[] {
@@ -632,7 +624,6 @@ class Translator {
       .map((row) => ({ interactionId: row.interactionId }));
     if (awaiting.length === 0 || this.view.turns[turnId]?.status !== "running") return [];
     const facts: Fact[] = [{ data: { awaiting, turnId }, type: "turn.paused" }];
-    // The deliveries that led here are answered: the turn now waits on a person.
     for (const row of Object.values(this.view.deliveries)) {
       if (row.status === "consumed" && row.turnId === turnId)
         facts.push({
@@ -736,7 +727,6 @@ class Translator {
     const reply = end.outcome === "completed" ? this.reply?.parts : undefined;
     this.turnId = undefined;
     this.reply = undefined;
-    // `cascade` closes what the turn still holds and settles the deliveries it consumed.
     return [
       {
         data: {
@@ -791,6 +781,32 @@ class Translator {
   }
 }
 
+export interface V26ChildStarted {
+  readonly sessionId: string;
+  readonly callId: string;
+  readonly name?: string;
+  readonly stream: string;
+}
+
+export function v26ChildStarted(record: unknown): V26ChildStarted | undefined {
+  if (!isV26Line(record)) return undefined;
+  const event = record as { readonly type: string; readonly data?: unknown };
+  if (event.type !== "agent.started" || !isRecord(event.data)) return undefined;
+  return childStarted(event.data);
+}
+
+function childStarted(data: Data): V26ChildStarted | undefined {
+  const sessionId = str(data.sessionId);
+  const callId = str(data.callId);
+  if (sessionId === undefined || callId === undefined) return undefined;
+  return {
+    callId,
+    name: str(data.name),
+    sessionId,
+    stream: str(data.streamPath) ?? `/eve/v1/session/${sessionId}/stream`,
+  };
+}
+
 function sessionStarted(data: Data) {
   const invocation = isRecord(data.invocation) ? data.invocation : undefined;
   const parentSessionId = str(invocation?.parentSessionId);
@@ -806,15 +822,13 @@ function sessionStarted(data: Data) {
       isRecord(data.runtime) && typeof data.runtime.agentId === "string"
         ? (data.runtime as never)
         : undefined,
-    trace: isRecord(data.trace) ? (data.trace as never) : undefined,
+    trace: traceContext.safeParse(data.trace).data,
   };
 }
 
 function sessionFailed(data: Data, id: string): Fact[] {
   const error = errorOf(data);
   const details = isRecord(data.details) ? data.details : {};
-  // A v26 deployment ending a stranded session recorded what ended it. v27 records a reset as
-  // the control delivery it admitted, and names that delivery as the end's cause.
   if (error.code !== "session_stranded" || typeof details.trigger !== "string") {
     return [{ data: { error, outcome: "failed" }, type: "session.ended" }];
   }
@@ -873,7 +887,6 @@ function userParts(data: Data): UserPart[] {
           kind: "file",
           mediaType: part.mediaType,
           size: typeof part.size === "number" ? part.size : undefined,
-          // v26 kept no reference to a file's bytes beyond a client-resolvable URL.
           unavailable: url === undefined ? true : undefined,
           url,
         },

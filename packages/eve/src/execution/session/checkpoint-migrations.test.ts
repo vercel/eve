@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
-import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+} from "#execution/session/checkpoint.js";
 import { digestOf } from "#definitions/state.js";
 
 function checkpoint(version: number) {
@@ -119,7 +122,6 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
       imported: {
         checkpoint: {
           admittedDeliveryKeys: [],
-          // The caller speaks protocol 1, so the session relays it no requests.
           capabilities: { requestInput: false },
           history: [
             { content: "Alice asks for a report.", kind: "user", role: "user" },
@@ -189,13 +191,52 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
     expect(saved).toEqual(before);
   });
 
-  it("leaves a session to its owner only until a task it still runs finishes", () => {
-    const task = { calls: [], id: "t", results: [], run: { hookToken: "h", runId: "r" } };
-    expect(
-      migrateSessionCheckpoint(
-        eve083Checkpoint({ "eve.taskTable": { tasks: [task], version: 1 } }),
-      ),
-    ).toEqual({ detail: "checkpoint version 17: session holds a running task", kind: "busy" });
+  describe("a session that delegated", () => {
+    const run = { hookToken: "helper-hook", runId: "helper-run", started: true };
+    const idle = {
+      calls: [],
+      id: "helper-1",
+      kind: "agent",
+      name: "helper",
+      resumable: true,
+      results: [],
+      run,
+    };
+    const withTasks = (...tasks: object[]) =>
+      migrateSessionCheckpoint(eve083Checkpoint({ "eve.taskTable": { tasks, version: 1 } }));
+
+    it("moves past an idle subagent and lists its run to end", () => {
+      const result = withTasks(idle, { ...idle, id: "done", run: undefined });
+      if (result.kind !== "pre-v27") throw new Error(JSON.stringify(result));
+      expect(result.imported.retiredRuns).toEqual([
+        { hookToken: "helper-hook", runId: "helper-run" },
+      ]);
+      expect(result.imported.checkpoint.sessionState.snapshot.session.state).toEqual({});
+    });
+
+    it.each([
+      ["a task still runs", { ...idle, resumable: false }, "session holds a running task"],
+      [
+        "a subagent is working",
+        { ...idle, calls: [{ callId: "call-2", turnId: "turn_2" }] },
+        "session holds a running task",
+      ],
+      [
+        "a subagent's run hasn't started",
+        { ...idle, run: { ...run, started: false } },
+        "session holds a running task",
+      ],
+      [
+        "a finished task's result is unread",
+        { ...idle, results: [{ output: "Done.", status: "completed" }], run: undefined },
+        "session holds task results the model hasn't read",
+      ],
+    ])("leaves the session to its owner while %s", (_name, task, reason) => {
+      expect(withTasks(idle, task)).toEqual({
+        detail: `checkpoint version 17: ${reason}`,
+        kind: "busy",
+      });
+    });
   });
 });
 
@@ -208,7 +249,6 @@ const CALLBACK = {
   url: "https://caller.example/eve/v1/callback/callback-token",
 };
 
-/** An idle session an eve 0.83 owner hands off after its third turn. */
 function eve083Checkpoint(state: Record<string, unknown>, context: Record<string, unknown> = {}) {
   return {
     admittedDeliveryKeys: ["delivery-3"],
@@ -240,7 +280,6 @@ function eve083Checkpoint(state: Record<string, unknown>, context: Record<string
   };
 }
 
-/** An idle session an eve 0.69 owner hands off after its first turn: history still in its snapshot. */
 function eve069Checkpoint() {
   return {
     serializedContext: {

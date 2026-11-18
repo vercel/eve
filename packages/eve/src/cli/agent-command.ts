@@ -34,7 +34,6 @@ async function selectWorkspaceAgent(
   return workspace.members.find((member) => member.name === name)!.appRoot;
 }
 
-/** Adds consistent workspace-agent selection to an agent-scoped command. */
 export function agentCommand(
   command: Command,
   applicationContext: CliApplicationContext,

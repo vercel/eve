@@ -12,8 +12,9 @@ import { normalizeHookHandlers } from "#internal/authored-definition/hook.js";
 import { memoryMismatch, normalizeMemoryDefinition } from "#internal/authored-definition/memory.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import type { DynamicSchedulesDefinition } from "#public/schedules/subscription.js";
-import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
+import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
 import { stampScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
+import { namedScopeDefinition } from "#runtime/schedules/named-scope.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type {
   ResolvedDefinition,
@@ -26,11 +27,9 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 interface Scope {
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string | undefined;
-  /** The names the agent's tool files take, which an eve feature's tools yield to. */
   readonly toolFiles: ReadonlySet<string>;
 }
 
-/** Reattaches the code of a file the agent declares from its module, and checks its shape. */
 export async function resolveDefinition(
   definition: CompiledDefinition,
   scope: Scope,
@@ -63,10 +62,6 @@ export async function resolveDefinition(
   });
 }
 
-/**
- * Reattaches a schedule collection's definition from its module, and stamps it with where it
- * lives, so `schedules()` binds it wherever the agent's code passes it.
- */
 export async function resolveScheduleCollection(
   collection: CompiledScheduleCollectionDefinition,
   scope: Scope,
@@ -77,24 +72,36 @@ export async function resolveScheduleCollection(
       definition: collection,
       kindLabel: "schedule collection",
     });
-    const definition = normalizeScheduleCollectionDefinition(
+    const authored = normalizeScheduleCollectionDefinition(
       value,
       `Expected the schedule collection export from "${collection.logicalPath}" to be created with defineDynamicSchedules().`,
     ) as DynamicSchedulesDefinition<unknown>;
-    stampScheduleCollectionSource(value as object, {
+    const definition =
+      collection.namedScope === undefined
+        ? authored
+        : namedScopeDefinition(authored, collection.namedScope.name);
+    stampScheduleCollectionSource(definition, {
       application: collection.application,
       collection: collection.name,
       logicalPath: collection.logicalPath,
       sourceId: collection.sourceId,
     });
+    const namedScope = collection.namedScope;
+    const scopeEntry = namedScope === undefined ? undefined : authored.scopes?.[namedScope.name];
+    const scopeDescription = typeof scopeEntry === "object" ? scopeEntry.description : undefined;
     const offersTools =
-      definition.tool !== false &&
-      !scope.toolFiles.has(scheduleCollectionToolPrefix(collection.name));
+      definition.tool !== false && !scope.toolFiles.has(scheduleCollectionToolSlot(collection));
     return {
       definition,
       kind: "schedules",
       logicalPath: collection.logicalPath,
       name: collection.name,
+      ...(namedScope !== undefined && {
+        namedScope: {
+          ...namedScope,
+          ...(scopeDescription !== undefined && { description: scopeDescription }),
+        },
+      }),
       ...(offersTools && { offersTools: true as const }),
       sourceId: collection.sourceId,
       sourceKind: "module",
@@ -102,7 +109,6 @@ export async function resolveScheduleCollection(
   });
 }
 
-/** Reattaches a compiled `defineDynamic()` export's function from its module. */
 export async function resolveDynamicDefinition<T extends ModuleSourceRef>(
   definition: T,
   input: Omit<Scope, "toolFiles"> & { readonly kindLabel: string },

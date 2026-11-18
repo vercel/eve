@@ -124,7 +124,6 @@ describe("eve traces", () => {
     );
     const traces = await listLocalTraces(root);
 
-    // The opener still names the trace, so `eve trace ls` reads unchanged.
     expect(traces[0]!.conversationId).toBe("session-one");
     expect(ids(resolveLocalTraces(traces, "child-one"))).toEqual([TRACE_ONE]);
     expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE]);
@@ -215,7 +214,6 @@ describe("eve traces", () => {
     expect(output.out[0]).toContain("agent.session  85ms");
     expect(output.out[0]).toContain("agent.turn  85ms");
     expect(output.out[0]).toContain("agent.step  70ms");
-    // A zero-duration span with no descendants has no extent to borrow.
     expect(output.out[0]).toContain("user.marker  0ms");
   });
 
@@ -251,7 +249,6 @@ describe("eve traces", () => {
     expect(output.out[0]).toContain("$0.0031");
     expect(output.out[0]).toContain("agent.step [step 0, attempt 0]  70ms  ↑1.4K ↓213 $0.0031");
     expect(output.out[0]).toContain("ai.toolCall  10ms");
-    // Attributes and events stay behind --verbose.
     expect(output.out[0]).not.toContain("events:");
     expect(output.out[0]).not.toContain("agent.model.id:");
   });

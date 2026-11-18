@@ -8,7 +8,6 @@ import {
   type SlackInteractionCard,
 } from "#public/channels/slack/renderers.js";
 
-/** The parts of a handler's context these renderers read. */
 function context() {
   const thread = {
     postDirectMessage: vi.fn(async () => undefined),
@@ -20,7 +19,6 @@ function context() {
   };
 }
 
-/** Runs a composed chain's handler with the partial context above. */
 async function invoke(handler: unknown, event: unknown): Promise<void> {
   await (handler as (event: unknown, ctx: unknown) => Promise<void>)(event, context());
 }
@@ -71,6 +69,32 @@ describe("composeSlackRenderers", () => {
 
     expect(calls).toEqual(["renderer:C1", "default:Done!"]);
     expect(fallback).toHaveBeenCalledOnce();
+  });
+
+  it("hands renderers a call's streaming input, which eve's default leaves alone", async () => {
+    const deltas: string[] = [];
+    const chain = composeSlackRenderers(
+      [
+        defineSlackRenderer({
+          events: {
+            async "call.input"(event, _ctx, next) {
+              deltas.push(event.data.delta);
+              await next();
+            },
+          },
+        }),
+      ],
+      { events: {}, received: async () => undefined, taskCard: () => null },
+    );
+    const input: ChannelEventOf<"call.input"> = {
+      data: { callId: "call_0", delta: '{"root":', kind: "tool", name: "card" },
+      scope: { runId: "run_0", turnId: "turn_0" },
+      type: "call.input",
+    };
+
+    await invoke(chain.events["call.input"], input);
+
+    expect(deltas).toEqual(['{"root":']);
   });
 
   it("hands a sign-in's renderer only the private delivery surface", async () => {

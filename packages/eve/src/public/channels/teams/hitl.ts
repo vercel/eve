@@ -1,7 +1,3 @@
-/**
- * Teams Adaptive Card rendering and decode helpers for eve HITL prompts.
- */
-
 import { parseAnswer, type ValidatedAnswer } from "#shared/input.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import type {
@@ -20,28 +16,18 @@ import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { truncate } from "#public/channels/text.js";
 
-/** Adaptive Card attachment content type used by Teams. */
 export const TEAMS_ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive";
 
-/** Hidden data property used by eve HITL Adaptive Card actions. */
 export const TEAMS_HITL_DATA_KEY = "eve_input";
 
-/** ChoiceSet input id used for select-style HITL requests. */
 export const TEAMS_HITL_CHOICE_INPUT_ID = "eve_option";
 
-/** Text input id used for freeform HITL requests. */
 export const TEAMS_HITL_FREEFORM_INPUT_ID = "eve_freeform_text";
 
-/** Request kind carried on approval actions so lifecycle handling can distinguish them from questions. */
 export const TEAMS_HITL_REQUEST_KIND_KEY = "kind";
 
-/** Prompt carried on approval actions so a response can recover its card record. */
 export const TEAMS_HITL_PROMPT_KEY = "prompt";
 
-/**
- * A literal Adaptive Card paragraph. TextBlock renders markdown, so a model-written
- * `[docs](https://evil.example)` would show as a link to a different address. TextRun does not.
- */
 function literalText(
   text: string,
   run: { readonly color?: string; readonly fontType?: "Monospace" } = {},
@@ -59,7 +45,6 @@ function literalText(
   };
 }
 
-/** Renders one input request as a Teams message body containing an Adaptive Card. */
 export function renderInteractionMessage(
   request: Interaction,
   options: {
@@ -78,11 +63,6 @@ export function renderInteractionMessage(
   };
 }
 
-/**
- * Renders one input request as a Teams Adaptive Card attachment.
- * `options.adaptiveCardVersion` sets the card schema version (default "1.5").
- * Long prompt, choice, and action text is truncated to Teams card limits.
- */
 export function renderInteractionAttachment(
   request: Interaction,
   options: {
@@ -109,22 +89,19 @@ export function renderInteractionAttachment(
   };
 }
 
-/** Renders an answered Teams card that replaces a pending HITL prompt. */
 export function renderAnsweredInteractionMessage(input: {
+  readonly by?: string;
   readonly includeText?: boolean;
   readonly label?: string;
   readonly prompt: string;
 }): TeamsMessageBody {
-  const text = input.label ? `Answered: ${input.label}` : "Answered";
+  const answered = input.by ? `Answered by ${input.by}` : "Answered";
+  const text = input.label ? `${answered}: ${input.label}` : answered;
   const result = renderSettledInputRequestMessage(input.prompt, { color: "good", text });
   if (input.includeText !== false) return { ...result, text, textFormat: "plain" };
   return result;
 }
 
-/**
- * Renders the card that replaces a prompt no session can answer anymore: its
- * prompt, then `label`, as the session would have resolved it.
- */
 export function renderInactiveInputRequestMessage(
   prompt: string | undefined,
   label: string,
@@ -132,7 +109,6 @@ export function renderInactiveInputRequestMessage(
   return renderSettledInputRequestMessage(prompt, { text: label });
 }
 
-/** A card without its choices: `status` under the prompt, when the prompt is known. */
 function renderSettledInputRequestMessage(
   prompt: string | undefined,
   status: { readonly color?: string; readonly text: string },
@@ -153,24 +129,20 @@ function renderSettledInputRequestMessage(
   };
 }
 
-/** Returns true when a Teams activity carries an eve HITL submit payload. */
 export function isTeamsAnswerActivity(activity: TeamsActivity): boolean {
   return deriveTeamsAnswers(activity).length > 0;
 }
 
-/** Returns whether an eve HITL activity answers a tool approval. */
 export function isTeamsToolApprovalResponseActivity(activity: TeamsActivity): boolean {
   const value = readActivityValue(activity);
   const payload = value && readHitlPayload(value);
   return payload?.[TEAMS_HITL_REQUEST_KIND_KEY] === "tool-approval";
 }
 
-/** Reads the original prompt from a tool-approval submit activity. */
 export function readTeamsToolApprovalPrompt(activity: TeamsActivity): string | undefined {
   return isTeamsToolApprovalResponseActivity(activity) ? readTeamsInputPrompt(activity) : undefined;
 }
 
-/** Reads the prompt a submit activity answers, which every eve card carries in its submit data. */
 export function readTeamsInputPrompt(activity: TeamsActivity): string | undefined {
   const value = readActivityValue(activity);
   const payload = value && readHitlPayload(value);
@@ -178,12 +150,6 @@ export function readTeamsInputPrompt(activity: TeamsActivity): string | undefine
   return typeof prompt === "string" && prompt.length > 0 ? prompt : undefined;
 }
 
-/**
- * Decodes the eve HITL submit payload from a Teams activity. Returns a single
- * `Answer` (option selection, freeform text, or a bare requestId
- * acknowledgement), or an empty array when the activity has no recognizable
- * HITL payload or requestId.
- */
 export function deriveTeamsAnswers(activity: TeamsActivity): readonly ValidatedAnswer[] {
   const value = readActivityValue(activity);
   if (!value) return [];
@@ -209,12 +175,6 @@ export function deriveTeamsAnswers(activity: TeamsActivity): readonly ValidatedA
   return [parseAnswer({ interactionId: requestId })];
 }
 
-/**
- * Builds the HTTP body Teams expects after an Adaptive Card invoke action.
- * Defaults to statusCode 200 and message "Answer received."; `type` is always
- * the Teams activity-message content type.
- */
-/** Reads the recorded thread root carried by an eve HITL card submission. */
 export function readTeamsInputReplyToActivityId(activity: TeamsActivity): string | null {
   const value = readActivityValue(activity);
   if (!value) return null;
@@ -243,18 +203,19 @@ function renderInputs(request: Interaction): readonly Record<string, unknown>[] 
     request.request.options &&
     request.request.options.length > 0
   ) {
-    return [
-      {
-        choices: request.request.options.map((option) => ({
-          title: truncate(option.label, TEAMS_ADAPTIVE_CARD_CHOICE_TITLE_MAX_LENGTH),
-          value: option.id,
-        })),
-        id: TEAMS_HITL_CHOICE_INPUT_ID,
-        isMultiSelect: false,
-        style: "compact",
-        type: "Input.ChoiceSet",
-      },
-    ];
+    const { initialOptionId, options } = request.request;
+    const choiceSet: Record<string, unknown> = {
+      choices: options.map((option) => ({
+        title: truncate(option.label, TEAMS_ADAPTIVE_CARD_CHOICE_TITLE_MAX_LENGTH),
+        value: option.id,
+      })),
+      id: TEAMS_HITL_CHOICE_INPUT_ID,
+      isMultiSelect: false,
+      style: "compact",
+      type: "Input.ChoiceSet",
+    };
+    if (options.some((option) => option.id === initialOptionId)) choiceSet.value = initialOptionId;
+    return [choiceSet];
   }
 
   if (
@@ -280,8 +241,6 @@ function renderActions(
   replyToActivityId: string | undefined,
 ): readonly Record<string, unknown>[] {
   const payload = (optionId?: string): Record<string, unknown> => {
-    // The prompt the card shows rides along so a card can be retired without
-    // the session that posted it, such as when that session is gone.
     const value: Record<string, unknown> = {
       requestId: request.interactionId,
       [TEAMS_HITL_PROMPT_KEY]: truncate(

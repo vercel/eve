@@ -3,7 +3,6 @@ import { z } from "#compiled/zod/index.js";
 import { interactionRequestSchema } from "#protocol/session-events/families/interaction.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
 
-/** Shared JSON projection for invocation results. Sign-in callbacks stay on the server. */
 export const interactionJsonSchema = z.object({
   interactionId: z.string(),
   request: interactionRequestSchema.extend({

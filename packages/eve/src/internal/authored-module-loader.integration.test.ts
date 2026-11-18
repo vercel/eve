@@ -140,6 +140,86 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
     });
   });
 
+  it.each([
+    [
+      "inline",
+      'defineWorkflowTool({ description: "Probe", inputSchema: {}, async execute() { return 1; } })',
+      "",
+    ],
+    [
+      "local reference",
+      'defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run })',
+      "async function run() { return 1; }",
+    ],
+  ])(
+    "rejects a dynamic workflow tool with an %s executor without the directive during compilation",
+    async (_kind, tool, helper) => {
+      const app = await createApp({
+        files: {
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+          "agent/tools/probe.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+${helper}
+export default defineDynamic(() => ${tool});`,
+        },
+        name: "dynamic-missing-workflow-directive",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        'without "use workflow"',
+      );
+    },
+  );
+
+  it("compiles a dynamic workflow tool whose executor is a top-level workflow function", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/probe.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+async function run() { "use workflow"; return 1; }
+const probe = defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });
+export default defineDynamic(() => ({ probe }));`,
+      },
+      name: "dynamic-workflow-tool",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
+  it("compiles inline workflow methods of top-level const tools a defineDynamic() returns", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/support.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+export const escalate = defineWorkflowTool({ description: "Escalate", inputSchema: {}, async execute() { "use workflow"; return 1; } });
+export const review = defineWorkflowTool({ description: "Review", inputSchema: {}, async task() { "use workflow"; return 2; } });
+export default defineDynamic(() => ({ escalate, review }));`,
+      },
+      name: "dynamic-inline-workflow-tools",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+
+    const namespace = (await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "support.ts"),
+    )) as Record<string, Record<string, { workflowId?: unknown }>>;
+    expect(namespace.escalate?.execute?.workflowId).toBe(
+      "workflow//./agent/tools/support//escalate$execute",
+    );
+    expect(namespace.review?.task?.workflowId).toBe("workflow//./agent/tools/support//review$task");
+  });
+
   it("compiles a workflow tool that calls agent through an imported helper", async () => {
     const app = await createApp({
       files: {
@@ -334,7 +414,6 @@ export const result = true;
     expect(moduleNamespace.result).toBe("local-dotted-basename");
   });
 
-  // A dotted directory name looks like an asset import until its index resolves.
   it.each(["helpers", "helpers.v2"])(
     "resolves extensionless relative directory imports to index modules (%s)",
     async (directory) => {
@@ -578,12 +657,6 @@ export const result = true;
   });
 
   it("does not collide with authored modules that already declare __dirname", async () => {
-    // Regression: the Node ESM compatibility banner used to unconditionally
-    // prepend `const __dirname = ...` / `const __filename = ...` /
-    // `const require = ...` to every bundled chunk. When the authored
-    // source already declared one of those identifiers at the top level
-    // the bundled `.mjs` failed to load with
-    // `SyntaxError: Identifier '__dirname' has already been declared`.
     const app = await createApp({
       files: {
         "agent/channels/api/already-declared/webhook.ts": [
@@ -872,7 +945,6 @@ export const result = true;
         ].join("\n"),
       );
 
-      // Installed beside the workspace package, as pnpm lays it out.
       const dependencyRoot = join(packageRoot, "node_modules", "@aws-sdk", "client-kms");
       await mkdir(dependencyRoot, { recursive: true });
       await writeFile(
@@ -906,19 +978,12 @@ export const result = true;
       const moduleNamespace = await loadAuthoredModuleNamespace(modulePath);
 
       expect(moduleNamespace.result).toBe("kms-client-inlined");
-      // The dependency's source is inlined, not left as an external import.
       expect(await bundleAuthoredModuleCode(modulePath)).toContain("kms-client-inlined");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
 
-  // pnpm's store layout: an installed package's dependencies are store
-  // siblings, only resolvable from the package's real location. The compiled
-  // module map imports extension modules by literal path through the app's
-  // node_modules symlink (a dev-generation snapshot preserves that symlink
-  // while relocating every importer path), so bare imports must resolve from
-  // the module's realpath.
   async function createStoreSiblingInstall(input: {
     readonly appRoot: string;
     readonly storeRoot: string;
@@ -1560,11 +1625,9 @@ export const result = true;
     });
     await writeFile(moduleMapPath, code);
     const moduleMaps = {
-      // What `eve build` output and the `eve dev` host import.
       generation: (
         (await import(pathToFileURL(moduleMapPath).href)) as { default: CompiledModuleMap }
       ).default,
-      // What `eve eval`, sandbox prewarm, and the compiled-agent cache hydrate from source.
       authoredSource: await loadCompiledModuleMapFromAuthoredSource({
         compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
       }),
@@ -1624,9 +1687,6 @@ export const result = true;
     }
   });
 
-  // Rolldown can host its runtime helpers in a shared chunk that imports back
-  // from a chunk needing them, so the source graph is acyclic but the chunks
-  // are not: rolldown/rolldown#11341.
   it("evaluates authored modules whose shared chunks import each other", async () => {
     const tool = (body: readonly string[]) =>
       [...body, 'export default { description: "Read the schema.", execute() { return value; } };']
@@ -1827,14 +1887,6 @@ export const result = true;
   });
 
   it("recovers in the same process once a missing package is installed", async () => {
-    // Regression: bundling used to emit unresolvable package imports as
-    // bare externals, so the loader handed Node an import that could not
-    // resolve. That first failed import poisons Node's process-wide
-    // package-config cache with a negative entry for the package path;
-    // after installing the package (pnpm-style symlink, subpath export),
-    // the same process kept failing with the no-exports fallback error
-    // ("Cannot find module .../node_modules/@scope/pkg/sub") until restart.
-    // Failing at bundle time instead keeps the process recoverable.
     const app = await createApp({
       files: {
         "agent/channels/api/late-install/webhook.ts": [
@@ -1910,8 +1962,6 @@ describe("workspace member workflow ids", () => {
 export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute() { "use workflow"; return 1; } });
 `;
 
-  // Members have no package.json, so the package root is the workspace root
-  // while the app root, which owns workflow ids, is the member directory.
   async function compileMember(files: Record<string, string>) {
     const workspace = await createAppRoot("eve-workspace-member-workflow-ids-", {
       files: {
@@ -2011,7 +2061,6 @@ async function writeWorkspaceSourcePackage(
   );
 }
 
-/** Links the package into the app's `node_modules`, as a pnpm workspace does. */
 async function linkWorkspacePackage(appRoot: string, packageRoot: string): Promise<void> {
   await mkdir(join(appRoot, "node_modules", "@repo"), { recursive: true });
   await symlink(packageRoot, join(appRoot, "node_modules", "@repo", "sandbox-image"), "junction");

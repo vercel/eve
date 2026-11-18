@@ -18,8 +18,7 @@ import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // The request envelope includes instructions, the task block, and 10 advertised
 // tools; nothing is deferred. Keep room for the review/handoff checkpoint while
-// forcing the raw 2000x2000 file exchange (~5k history tokens) to compact. Its
-// text stub fits without summarization. When instructions or tools change,
+// forcing the raw 2000x2000 file exchange (~5k history tokens) to compact. When instructions or tools change,
 // re-measure `estimateRequestEnvelope` (packages/eve/src/harness/request-envelope.ts)
 // while `EVE_E2E_MODEL=mock pnpm exec eve eval --strict content-output-file-stub`
 // runs in this fixture. The allowance is below the actual envelope, so the
@@ -98,10 +97,9 @@ const taskModel = mockModel({
 
     if (regressionCase === "content-output-file-stub") {
       contentOutputHistoryShapes.push(renderHistoryShape(request));
-      // Compaction's tool-result cap heuristic rewrites the oversized content
-      // output in place: same messages, file part reduced to its text stub.
-      // The canary's absence is the detection signal — the raw payload can
-      // only be missing from the tool message if the cap ran.
+      // After compaction the kept tool result carries the file part as its
+      // text stub. The canary's absence is the detection signal: the raw
+      // payload is missing from the tool message only once it was stubbed.
       const toolText = request.messages.find((message) => message.role === "tool")?.text;
       const capped = toolText !== undefined && !toolText.includes(CONTENT_OUTPUT_PAYLOAD_CANARY);
       if (toolText !== undefined && capped) {
@@ -135,7 +133,7 @@ const taskModel = mockModel({
 
       toolCallCounts.set(regressionCase, contentOutputCalls + 1);
       return {
-        // This case isolates file capping; only the attachment supplies history pressure.
+        // This case isolates file stubbing; only the attachment supplies history pressure.
         usage: { inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + 1 },
         toolCalls: [
           {

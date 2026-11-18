@@ -34,10 +34,6 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
-/**
- * A runtime whose sessions have all ended, as after a run cancelled outside
- * eve. Like a real one, it answers after the webhook has been acknowledged.
- */
 function runtimeWithNoActiveSession(acknowledged: Promise<void>): Runtime {
   return {
     createSession: vi.fn(),
@@ -54,7 +50,6 @@ function runtimeWithNoActiveSession(acknowledged: Promise<void>): Runtime {
 }
 
 describe("an inactive press through the production dispatcher", () => {
-  /** A card edit that starts, then waits until the test lets it finish. */
   function heldEdit() {
     const started = createDeferred<void>();
     const release = createDeferred<void>();
@@ -68,11 +63,6 @@ describe("an inactive press through the production dispatcher", () => {
     };
   }
 
-  /**
-   * Serves `request` with `channel`'s real route against a runtime that has no
-   * active session, and returns the one task handed to the platform. It is
-   * wrapped, since awaiting a returned promise would wait for the task itself.
-   */
   async function dispatchInactivePress(
     channel: CompiledChannel,
     request: Request,
@@ -142,7 +132,6 @@ describe("an inactive press through the production dispatcher", () => {
         credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
       }),
     );
-    // An Action.Submit button posts a message activity carrying its data.
     const request = new Request("https://eve.test/press", {
       body: JSON.stringify({
         channelData: { tenant: { id: "TENANT" } },

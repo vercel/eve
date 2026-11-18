@@ -2,6 +2,8 @@ import { SKILL_TOOL } from "@eve-e2e/config/catalog-tools";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const SUBAGENT_DIRECTIVE = /ask the `([^`]+)` subagent with message:\s*([\s\S]+)/iu;
+const CONTINUE_DIRECTIVE =
+  /continue the `([^`]+)` subagent task `([^`]+)` with message:\s*([\s\S]+)/iu;
 const BASH_DIRECTIVE = /run the bash command `([^`]+)`/iu;
 const SKILL_DIRECTIVE = /load the `([^`]+)` skill/iu;
 
@@ -50,6 +52,21 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     }
   }
   const turnHasToolResult = lastToolResultIndex > lastAuthoredUserIndex;
+
+  const continued = CONTINUE_DIRECTIVE.exec(message);
+  if (continued?.[1] !== undefined && continued[2] !== undefined && continued[3] !== undefined) {
+    if (!turnHasToolResult) {
+      return {
+        toolCalls: [{ input: { message: continued[3], taskId: continued[2] }, name: continued[1] }],
+      };
+    }
+    // The task already answered in an earlier turn, so only a result after this message counts.
+    return (
+      taskResultOf(request, continued[1], lastAuthoredUserIndex) ?? {
+        toolCalls: [{ input: {}, name: "eve__task_wait" }],
+      }
+    );
+  }
 
   const subagent = SUBAGENT_DIRECTIVE.exec(message);
   if (subagent?.[1] !== undefined && subagent[2] !== undefined) {
@@ -139,9 +156,13 @@ function isFrameworkMessage(text: string): boolean {
   return trimmed.startsWith("[Tasks]") || trimmed.startsWith("<task_result");
 }
 
-function taskResultOf(request: MockModelRequest, tool: string): string | undefined {
+function taskResultOf(
+  request: MockModelRequest,
+  tool: string,
+  afterIndex = -1,
+): string | undefined {
   const pattern = new RegExp(`<task_result [^>]*tool="${tool}"[^>]*>([\\s\\S]*?)</task_result>`);
-  for (const entry of [...request.messages].reverse()) {
+  for (const entry of request.messages.slice(afterIndex + 1).reverse()) {
     if (entry.role !== "user") continue;
     const body = entry.text.match(pattern)?.[1];
     if (body !== undefined) return body;

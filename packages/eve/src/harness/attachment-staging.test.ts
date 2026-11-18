@@ -18,13 +18,6 @@ import {
 const UTF8 = new TextEncoder();
 const ATTACHMENTS_PATH_PATTERN = /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\//;
 
-/**
- * Minimal {@link ChannelAdapterContext} for tests that never encounter
- * an attachment ref. Backed by an empty {@link ContextContainer} so
- * any accidental ref will fail the `ChannelKey` lookup inside staging
- * and surface as a clear `missing-adapter` error instead of silently
- * succeeding.
- */
 const STUB_ADAPTER_CTX: ChannelAdapterContext = {
   ctx: new ContextContainer(),
   state: {},
@@ -73,11 +66,7 @@ describe("stageAttachmentsForAdapter", () => {
     expect(staged[0]).toEqual({ type: "text", text: "summarize this csv" });
     const filePart = staged[1] as FilePart;
     expect(filePart.type).toBe("file");
-    // mediaType is preserved in parallel with the ref so AI SDK
-    // consumers still see the expected shape.
     expect(filePart.mediaType).toBe("text/csv");
-    // data is an eve-sandbox: ref URL (NOT raw bytes) — the key
-    // invariant the refactor establishes.
     expect(isSandboxRefUrl(filePart.data)).toBe(true);
     const ref = decodeSandboxRef(filePart.data as URL);
     expect(ref.mediaType).toBe("text/csv");
@@ -172,10 +161,6 @@ describe("stageAttachmentsForAdapter", () => {
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename?.endsWith("/report.csv")).toBe(true);
-    // Post-staging `data` is the sandbox ref — not the bytes — so
-    // `session.history` never carries the raw payload across step
-    // boundaries. The bytes are written into the sandbox and
-    // rehydrated by the tool loop right before the model call.
     expect(isSandboxRefUrl(filePart.data)).toBe(true);
     const ref = decodeSandboxRef(filePart.data as URL);
     expect(ref.size).toBe(Buffer.byteLength(payload, "utf8"));
@@ -203,8 +188,6 @@ describe("stageAttachmentsForAdapter", () => {
     )) as UserContent;
     const filePart = staged[0] as FilePart;
 
-    // Post-staging, `data` is the sandbox ref URL; the decoded bytes
-    // live in the sandbox, not on the message.
     expect(isSandboxRefUrl(filePart.data)).toBe(true);
 
     const written = sandbox.writes[0]?.content as Buffer;
@@ -232,7 +215,6 @@ describe("stageAttachmentsForAdapter", () => {
     )) as UserContent;
     const filePart = staged[0] as FilePart;
 
-    // Same URL, no re-write, no re-fetch.
     expect(filePart.data).toBe(existingRef);
     expect(sandbox.writes).toHaveLength(0);
   });
@@ -303,8 +285,6 @@ describe("stageAttachmentsForAdapter", () => {
   it("falls back to application/octet-stream in the ref when mediaType is absent on the FilePart", async () => {
     const sandbox = mockSandbox();
     const content: UserContent = [
-      // mediaType omitted — the ref's `type` param still has to be
-      // populated because decodeSandboxRef rejects empty strings.
       { data: Buffer.from("bytes", "utf8"), filename: "x.bin", type: "file" } as FilePart,
     ];
 
@@ -322,11 +302,6 @@ describe("stageAttachmentsForAdapter", () => {
   });
 
   it("resolves authored paths through the sandbox so backend-specific workspace roots are honored", async () => {
-    // The runtime's real Vercel sandbox backend rewrites /workspace/...
-    // to /vercel/sandbox/workspace/..., matching what read_file and bash
-    // see. The mock sandbox does not itself rewrite (it anchors relative
-    // paths under /workspace/), so this test pins the expected format
-    // to make regressions in the staging path visible.
     const sandbox = mockSandbox();
     const content: UserContent = [
       {
@@ -418,8 +393,6 @@ describe("stageToolResultMedia", () => {
     expect(staged).toEqual(messages);
   });
 
-  // #4839: a throw here escapes the step after its model call and tools ran,
-  // so the step retries and replays them.
   it("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
     const ctx = unresumableSandboxContext();
     const toolResult = (value: unknown) =>
@@ -455,8 +428,6 @@ describe("stageToolResultMedia", () => {
     ]);
   });
 
-  // #4839: a sandbox that opens but rejects the write (a cached handle to a
-  // dead VM, a sandbox past its timeout) throws out of the step the same way.
   it("replaces a returned file with a note when the sandbox rejects the write", async () => {
     const sandbox = mockSandbox();
     const ctx = new ContextContainer();
@@ -503,8 +474,6 @@ describe("stageToolResultMedia", () => {
   });
 });
 
-// Each test hydrates under its own session id, so bytes cached by one test
-// never satisfy another.
 describe("hydrateSandboxAttachments", () => {
   function sessionContext(sessionId: string, sandbox: MockSandbox): ContextContainer {
     const ctx = new ContextContainer();
@@ -517,7 +486,6 @@ describe("hydrateSandboxAttachments", () => {
     return contextStorage.run(ctx, () => hydrateSandboxAttachments([{ content, role: "user" }]));
   }
 
-  // Staged outside any session, as by another process: nothing is cached.
   async function stageElsewhere(sandbox: MockSandbox, file: FilePart): Promise<FilePart> {
     const [staged] = (await stageAttachmentsForAdapter(
       [file],
@@ -585,7 +553,6 @@ describe("hydrateSandboxAttachments", () => {
       png("private.png", pngBytes(32, 32, 64)),
     );
 
-    // Bob's sandbox never held the file, so only a cache hit could inline it.
     const hydrated = await hydrate(sessionContext("ses_bob", mockSandbox()), [image]);
 
     expect(hydrated[0]?.content).toEqual([fileNotFound(image)]);
@@ -617,7 +584,6 @@ describe("hydrateSandboxAttachments", () => {
     const sandbox = mockSandbox();
     const bytes = pngBytes(32, 32, 64);
     const image = await stageElsewhere(sandbox, png("logo.png", bytes));
-    // Same size, different bytes: only the content address can tell them apart.
     await sandbox.session.writeBinaryFile({
       content: Buffer.alloc(bytes.byteLength, 0x41),
       path: image.filename!,

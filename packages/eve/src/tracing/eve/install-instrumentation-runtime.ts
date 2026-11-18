@@ -24,15 +24,6 @@ import { readConversationId } from "#shared/conversation-identity.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
 
-/**
- * Installs the process instrumentation runtime around a collected pipeline.
- *
- * `eve dev`'s zero-config default and an authored `agent/instrumentation/`
- * directory differ only in where the declared values came from.
- *
- * A directory that declared no OpenTelemetry still gets a bus: its providers
- * see every event, they just have no spans to hang them on.
- */
 export function installInstrumentationRuntime(input: {
   readonly collected: CollectedOtel;
   readonly frameworkVersion: string;
@@ -68,12 +59,11 @@ export function installInstrumentationRuntime(input: {
         mapping: eveOutputMapping(),
       }),
       idGenerator,
-      recordInputs: input.collected.settings.recordInputs,
-      recordOutputs: input.collected.settings.recordOutputs,
+      recordInputs: true,
+      recordOutputs: true,
       stateStore: new ContextAgentTraceStateStore(),
       tracePolicy: input.collected.settings.tracePolicy,
     });
-    // The span must exist before authored providers observe the lifecycle event.
     serialBefore.push({ ...agentOtel.hook, stateNamespace: "internal:otel" });
     prepareSessionTrace = agentOtel.prepareSessionTrace;
     prepareTurnTrace = agentOtel.prepareTurnTrace;
@@ -149,7 +139,6 @@ function sessionReleaseProvider(
   };
 }
 
-/** One failing drain must not take the others or the step awaiting them with it. */
 async function settleAll(operations: readonly (() => void | PromiseLike<void>)[]): Promise<void> {
   const results = await Promise.allSettled(operations.map(async (run) => run()));
   for (const result of results) {

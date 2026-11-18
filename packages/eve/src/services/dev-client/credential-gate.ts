@@ -11,20 +11,11 @@ export interface DevelopmentCredentialGrant {
   readonly resolveToken: () => Promise<DevelopmentOidcTokenResolution | string>;
 }
 
-/** Per-client authority for resolving and emitting remote Vercel credentials. */
 export interface DevelopmentCredentialGate {
-  /** The origin this gate is permanently bound to. */
   readonly serverOrigin: string;
-  /**
-   * Installs authority after Vercel verifies the exact origin.
-   * Returns a rollback that restores the prior grant if this grant is still current.
-   */
   authorize(grant: DevelopmentCredentialGrant): () => void;
-  /** The verified target's OIDC token for one request, or "" when unavailable. */
   resolveToken(): Promise<string>;
-  /** Non-credential Vercel headers (protection bypass), or {} when anonymous. */
   resolveBypassHeaders(): Promise<Readonly<Record<string, string>>>;
-  /** Token failure from the most recent {@link resolveToken}, or `undefined` if it resolved one. */
   lastTokenFailure(): DevelopmentOidcTokenFailure | undefined;
 }
 
@@ -35,7 +26,6 @@ type DevelopmentCredentialGateState =
       readonly resolveToken: () => Promise<DevelopmentOidcTokenResolution | string>;
     };
 
-/** Creates an anonymous credential gate bound to one client origin. */
 export function createDevelopmentCredentialGate(serverUrl: string): DevelopmentCredentialGate {
   const serverOrigin = new URL(serverUrl).origin;
   let state: DevelopmentCredentialGateState = { kind: "anonymous" };

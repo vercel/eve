@@ -1,7 +1,7 @@
 import { deserializeContext } from "#context/serialize.js";
 import { AuthKey } from "#context/keys.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { EventBinding } from "#runtime/connections/events/state.js";
@@ -13,13 +13,10 @@ import {
 } from "#runtime/connections/principal.js";
 import type { AlsContext } from "#context/container.js";
 
-/** Re-checks the run's saved binding against the deployed connection before any work runs as its creator. */
 export function resolveBinding(ctx: AlsContext, binding: EventBinding) {
-  const connection = ctx
-    .require(BundleKey)
-    .resolvedAgent.connections.find(
-      (connection) => connection.connectionName === binding.connectionName,
-    );
+  const connection = requireCompiledBundle(ctx).resolvedAgent.connections.find(
+    (connection) => connection.connectionName === binding.connectionName,
+  );
   const events = connection?.experimental_events;
   if (
     connection === undefined ||
@@ -37,7 +34,6 @@ export function resolveBinding(ctx: AlsContext, binding: EventBinding) {
   return { binding, connection, events, principal };
 }
 
-/** The hook token already routed this delivery to its binding; its content must still match. */
 function accepts(binding: EventBinding, payload: ConnectionEventPayload): boolean {
   const { delivery } = payload;
   return (
@@ -46,11 +42,6 @@ function accepts(binding: EventBinding, payload: ConnectionEventPayload): boolea
   );
 }
 
-/**
- * Runs one delivery's callback as the watch's creator. A crash before the
- * step completes re-runs the callback, so callbacks are idempotent on
- * deliveryId. A `terminated` delivery then retires the watch.
- */
 export async function dispatchConnectionEventStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly binding: EventBinding;
@@ -59,15 +50,13 @@ export async function dispatchConnectionEventStep(input: {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
   const { delivery } = input.payload;
-  // The receiver or the watch's run already matched the delivery's subscription.
   const resolved = accepts(input.binding, input.payload)
     ? resolveBinding(ctx, input.binding)
     : undefined;
   if (resolved === undefined) return;
   const { binding, connection } = resolved;
-  const bundle = ctx.require(BundleKey);
+  const bundle = requireCompiledBundle(ctx);
   const { callbacks } = resolved.events;
-  // The callback runs as its creator without replacing the last conversational caller.
   ctx.setVirtualContext(AuthKey, binding.auth);
   const operation =
     "event" in delivery ? "onEvent" : delivery.control.type === "gap" ? "onGap" : "onTerminated";

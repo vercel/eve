@@ -8,14 +8,12 @@ import {
   createStatefulMcpServer,
   type StatefulMcpServer,
 } from "#internal/testing/stateful-mcp-server.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
 vi.mock("#context/providers/session.js", () => ({
   sessionProvider: { create: () => undefined, key: { name: "test.session" } },
-}));
-vi.mock("#context/providers/tool-stubs.js", () => ({
-  toolStubProvider: { create: () => undefined, key: { name: "test.toolStubs" } },
 }));
 vi.mock("#context/providers/sandbox.js", () => ({
   sandboxProvider: { create: () => undefined, key: { name: "test.sandbox" } },
@@ -31,16 +29,17 @@ const connection: ResolvedConnectionDefinition = {
   url: "http://127.0.0.1:8000/mcp",
 };
 
-/** A fresh step context whose agent has the one connection. */
 function stepContext(): ContextContainer {
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, {
-    graph: { root: { agent: { connections: [connection], definitions: [] } } },
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      graph: { root: { agent: { connections: [connection], definitions: [] } } },
+    } as never),
+  );
   return ctx;
 }
 
-/** Runs one step whose body connects to the MCP server, then returns or throws. */
 async function runStepUsingConnection(outcome: "commit" | "fail"): Promise<void> {
   const ctx = stepContext();
   const scope = withContextScope(ctx, {} as HarnessSessionBase, async (session) => {
@@ -84,7 +83,6 @@ describe("withContextScope MCP session lifecycle", () => {
   it("a step returns within the termination deadline when the server never answers DELETE", async () => {
     const ctx = stepContext();
     vi.useFakeTimers({ toFake: ["setTimeout"] });
-    // A server that stopped answering: the DELETE arrives and never gets a response, but ends when aborted.
     let deleteArrived!: () => void;
     const terminationReached = new Promise<void>((resolve) => {
       deleteArrived = resolve;

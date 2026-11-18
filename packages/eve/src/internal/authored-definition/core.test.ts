@@ -402,6 +402,30 @@ describe("normalizeAgentDefinition", () => {
 });
 
 describe("normalizeScheduleDefinition", () => {
+  it.each(["", "  ", "Mars/Olympus", "+01:00", 42])(
+    "rejects invalid schedule timezone %j",
+    (timezone) => {
+      expect(() =>
+        normalizeScheduleDefinition(
+          { cron: "0 13 * * *", timezone, content: "Send a digest." },
+          "schedules/digest.ts:",
+        ),
+      ).toThrow(/schedules\/digest\.ts:.*IANA timezone/);
+    },
+  );
+
+  it.each([
+    ["america/los_angeles", "America/Los_Angeles"],
+    [" utc ", "UTC"],
+  ])("canonicalizes schedule timezone %j", (timezone, expected) => {
+    expect(
+      normalizeScheduleDefinition(
+        { cron: "0 13 * * *", timezone, content: "Send a digest." },
+        "schedules/digest.ts:",
+      ),
+    ).toMatchObject({ timezone: expected });
+  });
+
   it.each(["approval", "needsApproval"])("rejects the removed %s field", (field) => {
     expect(() =>
       normalizeScheduleDefinition(

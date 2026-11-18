@@ -1,7 +1,3 @@
-/**
- * Tool authoring helpers for `agent/tools/*.ts` files.
- */
-
 export {
   type DisabledToolSentinel,
   defineTool,

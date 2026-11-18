@@ -28,12 +28,6 @@ export interface BraintrustReporterConfig {
   readonly update?: boolean;
 }
 
-/**
- * Minimal typed surface of the Braintrust SDK consumed by this reporter.
- *
- * Declared locally so the `braintrust` package is never a compile-time
- * dependency. The reporter casts the dynamic import to this shape.
- */
 interface BraintrustSdk {
   init(options: {
     project?: string;
@@ -91,9 +85,6 @@ export function braintrustReporter(config: BraintrustReporterConfig = {}): EvalR
   return new BraintrustReporter(config);
 }
 
-/**
- * Reporter that uploads eval results to Braintrust as experiments.
- */
 class BraintrustReporter implements EvalReporter {
   readonly #config: BraintrustReporterConfig;
   #sdk: BraintrustSdk | undefined;
@@ -184,7 +175,6 @@ class BraintrustReporter implements EvalReporter {
     };
 
     this.#experiment.log({
-      // Braintrust upserts rows by id, so each attempt needs its own row id.
       id: formatAttemptLabel(result.id, result.attempt),
       input: evaluation?.description ?? "",
       output: outputOf(result.result) ?? "",
@@ -200,7 +190,6 @@ class BraintrustReporter implements EvalReporter {
     if (!this.#experiment) return;
 
     try {
-      // Flush pending writes before summarizing
       if (this.#sdk) {
         await this.#sdk.flush();
       }
@@ -218,15 +207,6 @@ class BraintrustReporter implements EvalReporter {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Peer dependency specifier kept in a variable so the dynamic import is
- * not statically analyzable and TypeScript does not require type
- * declarations for the package at compile time.
- */
 const BRAINTRUST_PACKAGE = "braintrust";
 
 async function loadBraintrustSdk(): Promise<BraintrustSdk> {

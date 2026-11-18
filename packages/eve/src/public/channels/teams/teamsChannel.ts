@@ -75,6 +75,7 @@ import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { teamsConversationSpace } from "#public/channels/teams/space.js";
 import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 
 const log = createLogger("teams.channel");
@@ -317,12 +318,16 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       teamId: state.teamId,
     }),
     audience: ({ state }) => teamsAudience(state.conversationType),
+    space: ({ state }) => teamsConversationSpace(state),
 
     context(state, session) {
       return rebuildTeamsContext(state, session, config);
     },
 
-    deliver(payload, channel) {
+    deliver(
+      payload,
+      channel: TeamsChannelContext & { readonly session: ChannelContext["session"] },
+    ) {
       const state = payload.state;
       const cards = state?.pendingPromptCards;
       if (cards !== undefined) {
@@ -331,7 +336,12 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           ...channel.state.pendingPromptCards,
         };
       }
-      const responders = state?.approvalResponderAccounts;
+      const caller = channel.session.auth.current;
+      const sender = payload.message === undefined ? undefined : state?.triggeringUser;
+      const responders =
+        caller !== null && sender !== undefined && sender !== null
+          ? { ...state?.approvalResponderAccounts, [caller.principalId]: sender }
+          : state?.approvalResponderAccounts;
       if (responders !== undefined) {
         channel.state.approvalResponderAccounts = {
           ...channel.state.approvalResponderAccounts,
@@ -365,8 +375,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           if (activity.type === "message") {
             waitUntil(
               isTeamsAnswerActivity(activity)
-                ? // The retired card is the notice here: a message has no private reply.
-                  dispatchAnswers({ activity, config, from, onAnswers }).then((answer) =>
+                ? dispatchAnswers({ activity, config, from, onAnswers }).then((answer) =>
                     answer?.outcome === "inactive" ? answer.retirement : undefined,
                   )
                 : dispatchMessage({
@@ -690,7 +699,6 @@ async function handleInvoke(input: {
   const reveal = readTeamsAuthorizationReveal(input.activity);
   if (reveal !== null) return Response.json(await revealAuthorization({ ...input, reveal }));
   if (isTeamsAnswerActivity(input.activity)) {
-    // Answered after delivery, so the presser learns when no session took it.
     const answer = await dispatchAnswers({
       activity: input.activity,
       config: input.config,
@@ -698,7 +706,6 @@ async function handleInvoke(input: {
       from: input.from,
     });
     if (answer?.outcome !== "inactive") return Response.json(teamsInvokeResponse());
-    // The reply doesn't wait for the card's edit, which the request still keeps.
     input.waitUntil(answer.retirement);
     return Response.json(teamsInvokeResponse({ message: INACTIVE_REQUEST_NOTICE }));
   }
@@ -711,7 +718,6 @@ async function handleInvoke(input: {
   return teamsOk();
 }
 
-/** Identifies the presser the same way a HITL card submission does. */
 async function revealAuthorization(input: {
   readonly activity: TeamsInvokeActivity;
   readonly config: TeamsChannelConfig;
@@ -741,11 +747,6 @@ async function revealAuthorization(input: {
   });
 }
 
-/**
- * Delivers a card submission and reports what became of it. When no session
- * can take it, the card's retirement has started and the caller keeps the
- * request alive until it settles.
- */
 async function dispatchAnswers(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
@@ -772,12 +773,11 @@ async function dispatchAnswers(input: {
         .from(cardContinuationToken(activity, state, readTeamsInputReplyToActivityId(activity)))
         .respond(answers, {
           auth,
-          state: approvalResponseStatePatch(activity, auth),
+          state: answerStatePatch(activity, auth),
         }),
     {
       async retirePrompt(label) {
         if (activity.replyToId === undefined) return;
-        // A card posted before prompts rode in its data still loses its buttons.
         await ctx.thread.update(
           activity.replyToId,
           renderInactiveInputRequestMessage(readTeamsInputPrompt(activity), label),
@@ -809,7 +809,6 @@ function stateFromActivity(
   };
 }
 
-/** Continues the thread a card recorded when posted, or the activity's own thread. */
 function cardContinuationToken(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
   state: TeamsChannelState,
@@ -823,12 +822,13 @@ function cardContinuationToken(
   });
 }
 
-function approvalResponseStatePatch(
+function answerStatePatch(
   activity: TeamsInvokeActivity | TeamsMessageActivity,
   auth: SessionAuthContext | null,
 ): Partial<TeamsChannelState> | undefined {
-  if (auth?.principalId === undefined || !isTeamsToolApprovalResponseActivity(activity)) {
-    return undefined;
+  if (auth?.principalId === undefined) return undefined;
+  if (!isTeamsToolApprovalResponseActivity(activity)) {
+    return { approvalResponderAccounts: { [auth.principalId]: activity.from } };
   }
   const requestId = deriveTeamsAnswers(activity)[0]?.interactionId;
   const activityId = activity.replyToId;

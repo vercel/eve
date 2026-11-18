@@ -7,7 +7,6 @@ import type {
 } from "#public/sandbox/docker-sandbox.js";
 import { defineDockerSandboxProvider } from "#sandbox/providers/docker.js";
 
-/** A harness over `DockerSandbox.environment(options)`, run against `cli`. */
 export function createDockerSandboxHarness(
   input: {
     readonly cli?: DockerCli;

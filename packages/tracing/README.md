@@ -6,7 +6,11 @@ peer dependency is `@opentelemetry/api`.
 
 ## Release notes
 
-The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/%40vercel%2Fagent-runs%40<version>/packages/tracing/CHANGELOG.md`.
+The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history, replacing `<version>` with that version:
+
+```text
+https://raw.githubusercontent.com/vercel/eve/refs/tags/%40vercel%2Fagent-runs%40<version>/packages/tracing/CHANGELOG.md
+```
 
 ## Setup
 
@@ -116,6 +120,10 @@ before the runtime records its dispatch. In a durable turn, calling
 `usage`, and optional response/content metadata. It returns only `result`.
 Without a callback, `modelCall(data)` returns a model handle.
 
+A turn records a model call that no step makes, such as a context compaction's
+summary request, with `turn.modelCall(data)`. It takes no callback and returns
+a model handle.
+
 ```ts
 const stream = await attempt.modelStream({ provider: "test", modelId: "model" }, () => ({
   result: response.stream,
@@ -146,6 +154,12 @@ await decision.complete({ usage: { inputTokens: 42, outputTokens: 3 } });
 
 Omit `identity` for a decision made outside any run. Decision usage isn't added
 to the turn's totals.
+
+`purpose` is recorded as `agent.decision.purpose`, and a decision in a run
+records `agent.turn.id`. Pass the per-question results as `output` in the
+OpenTelemetry GenAI `gen_ai.decision.results` shape; they are output content,
+recorded only when the capture records outputs. A refusal is a result, not a
+failure.
 
 ## AI SDK
 

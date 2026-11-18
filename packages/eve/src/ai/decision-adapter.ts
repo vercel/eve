@@ -8,13 +8,8 @@ export const DEFAULT_DECISION_MODEL = "typesafe-ai/jev";
 type AiSdkDecide = typeof aiSdk.experimental_decide;
 type AiSdkDecideOptions = Parameters<AiSdkDecide>[0];
 
-/** eve-owned instrumentation passed to the AI SDK; never part of the public options. */
 export type DecisionInstrumentation = Pick<AiSdkDecideOptions, "telemetry">;
 
-/**
- * Resolves a model ID as the AI SDK would, so a trace names the model that answers. An ID no
- * provider resolves stays a string, and the AI SDK reports why when it is called.
- */
 export function resolveDecisionModel(model: DecisionModel): DecisionModel {
   if (typeof model !== "string") return model;
   const local = localGatewayDecisionModel(model);
@@ -33,11 +28,6 @@ export function resolveDecisionModel(model: DecisionModel): DecisionModel {
   }
 }
 
-/**
- * `ai` is a peer dependency and its decision API is experimental, so a newer release may
- * graduate it to `decide` or drop it. Reading it from the namespace keeps that a clear runtime
- * error at the call site instead of a missing-export failure when `eve/ai` is imported.
- */
 function resolveAiSdkDecide(): AiSdkDecide {
   const decideWithAiSdk = Reflect.get(aiSdk, "decide") ?? Reflect.get(aiSdk, "experimental_decide");
   if (typeof decideWithAiSdk !== "function") {
@@ -48,7 +38,6 @@ function resolveAiSdkDecide(): AiSdkDecide {
   return decideWithAiSdk as AiSdkDecide;
 }
 
-/** Internal eval diagnostics retain SDK metadata without promising it to applications. */
 export function decideWithMetadata<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
 >(

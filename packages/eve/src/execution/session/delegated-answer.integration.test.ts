@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { workflowEntry } from "#execution/session/entry.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { defineTool } from "#tools/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
@@ -40,33 +37,28 @@ describe("delegated agent approval answers", () => {
         },
       ],
     });
-    const workflowRuntime = createWorkflowRuntime({
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-    });
     const childContinuationToken = "subagent:parent-session:call-1";
 
     await runtime.run(async () => {
-      const child = await startSessionOwner(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Use the approve_change tool exactly once." },
-          serializedContext: {
-            ...buildSerializedContext({
-              auth: ALICE,
-              channelKind: "subagent",
-              channelState: {
-                callId: "call-1",
-                parentContinuationToken: sessionInboxHookToken(childContinuationToken),
-                parentSessionId: "parent-session",
-                subagentName: "researcher",
-              },
-              continuationToken: childContinuationToken,
-            }),
-            "eve.capabilities": { requestInput: true },
-          },
+      const child = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Use the approve_change tool exactly once." },
+        serializedContext: {
+          ...buildSerializedContext({
+            auth: ALICE,
+            channelKind: "subagent",
+            channelState: {
+              callId: "call-1",
+              parentContinuationToken: sessionInboxHookToken(childContinuationToken),
+              parentSessionId: "parent-session",
+              subagentName: "researcher",
+            },
+            continuationToken: childContinuationToken,
+          }),
+          "eve.capabilities": { requestInput: true },
         },
-      ]);
+      });
       const stream = captureTurnEvents(child);
 
       try {
@@ -83,7 +75,7 @@ describe("delegated agent approval answers", () => {
         ]);
 
         await expect(
-          workflowRuntime.dispatchSession({
+          child.runtime.dispatchSession({
             command: {
               auth: ALICE,
               caller: {
@@ -98,7 +90,6 @@ describe("delegated agent approval answers", () => {
           }),
         ).resolves.toMatchObject({ sessionId: child.runId, status: "accepted" });
 
-        // The parent's message steers the held turn, so it withdraws the approval instead of answering it.
         const resumed = await withTimeout(stream.nextTurn(), "delegated approval answer");
         const outcomes = filterEventsByType(resumed, "interaction.settled")
           .filter(({ data }) => data.interactionId === approval!.data.interactionId)

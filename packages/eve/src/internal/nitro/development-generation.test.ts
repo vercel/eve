@@ -77,7 +77,6 @@ describe("development generation staging", () => {
       ...createGeneration("parallel"),
       sourceWatchPaths: ["/tmp/app/package.json"],
     });
-    // The watcher already covers the agent root, so only shared modules outside it are added.
     expect(await result).toMatchObject({
       fingerprint: "ready",
       sourceWatchPaths: ["/tmp/app/package.json", "/tmp/lib/run.ts"],

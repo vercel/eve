@@ -3,11 +3,8 @@ import { signInOf, type SignIn } from "#channel/sign-in.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openSignIns } from "#protocol/session-projection/reader.js";
 
-// A pending sign-in holds its turn near the tail. Bound button lookups in long-lived threads,
-// as on main; the lookup needs only sign-in rows, not a complete conversation projection.
 const PENDING_AUTHORIZATION_WINDOW = 500;
 
-/** The latest matching sign-in still open in the recent durable stream. */
 export async function findPendingAuthorization(
   session: Pick<Session, "stream">,
   matches: (signIn: SignIn) => boolean,

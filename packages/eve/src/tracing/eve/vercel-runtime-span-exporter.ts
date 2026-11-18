@@ -15,7 +15,6 @@ interface VercelRequestContextReader {
     | undefined;
 }
 
-/** The request-context transport behind @vercel/otel's automatic processor. */
 export function vercelRuntimeSpanExporter(): SpanExporter {
   return {
     export(spans, resultCallback) {
@@ -47,7 +46,6 @@ export function vercelRuntimeSpanExporter(): SpanExporter {
   };
 }
 
-/** Reports immediately so the span stays attached to its request context. */
 export function vercelRuntimeSpanProcessor(): SpanProcessor {
   const exporter = vercelRuntimeSpanExporter();
   let stopped = false;

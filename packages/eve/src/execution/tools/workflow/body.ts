@@ -1,7 +1,6 @@
 import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
 import { toolStubOutput } from "#tool-stubs/output.js";
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
-import { callToolStubStep } from "#execution/tool-stubs/steps.js";
+import { callToolStub } from "#execution/tool-stub-host.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -22,6 +21,7 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
+import type { RunHost } from "#execution/run-host.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
@@ -30,10 +30,8 @@ import { parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js
 import type { ToolContext } from "#tools/definition.js";
 
 export interface WorkflowBodyDefinition {
-  /** Everything the run needs to open `ctx.agent` sessions for its caller, and `ctx.agents`. */
   readonly agentContext: AgentSessionContext;
   readonly callId: string;
-  /** The entry point the run invokes, which decides the body's context. */
   readonly entry: WorkflowToolRunEntry;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
@@ -45,41 +43,28 @@ export interface WorkflowBodyDefinition {
 }
 
 export interface WorkflowBodyInput extends WorkflowBodyDefinition {
-  /** The run's control hook, which the session answers the body's questions on. */
   readonly hookToken: string;
   readonly owner: WorkflowToolRunInbox;
-  readonly runId?: string;
+  readonly runId: string;
+  readonly host: RunHost;
 }
 
-/**
- * How the session's commands reach a running body. What a command means
- * depends on the entry point: a cancel ends an `execute` or `task` call, but
- * only the current stretch of work of a `serve` task.
- */
 export interface WorkflowBodyControl {
-  /** Aborts when the run stops for good; the run then settles as cancelled. */
   readonly runSignal: AbortSignal;
-  /** The body is winding down cancelled work, which the run bounds with its cleanup deadline. */
   readonly unwinding: boolean;
   apply(command: WorkflowBodyCommand): void;
 }
 
-/** A body the run started and how its commands reach it. */
 export interface StartedWorkflowBody {
-  /** The body's pending questions, which the session's decisions settle. */
   readonly asks: WorkflowToolRunAsks;
-  /** Releases what the body opened, such as its `ctx.agent` sessions, once the run ends. */
   close(): Promise<void>;
   readonly control: WorkflowBodyControl;
   readonly outcome: Promise<WorkflowToolRunOutcome>;
-  /** What the body's `ctx.agent` sessions spent, which the run's outcome carries. */
   readonly usage: RunUsageTally;
 }
 
-// Workflow bodies replay deterministically, so they never receive model messages.
 type WorkflowCallContext = Omit<ToolContext, "messages"> & WorkflowToolContext;
 
-/** What an `execute` call a steering message stopped settles with when its body rejects. */
 const INTERRUPTED_OUTPUT = { interrupted: true } as const;
 
 type WorkflowCallEntryPoint = (
@@ -87,12 +72,6 @@ type WorkflowCallEntryPoint = (
   ctx: WorkflowCallContext,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
-/**
- * The signals of an `execute` or `task` call, which the run's commands abort.
- * The body's `abortSignal` aborts on a cancel and on an interrupt; the run's
- * signal only on a cancel, because an interrupted call still settles with the
- * body's result.
- */
 class WorkflowCallSignals implements WorkflowBodyControl {
   private readonly body = new AbortController();
   private readonly run = new AbortController();
@@ -110,7 +89,6 @@ class WorkflowCallSignals implements WorkflowBodyControl {
     return this.run.signal;
   }
 
-  /** A steering message stopped the body, and no cancel has. */
   get interrupted(): boolean {
     return this.body.signal.aborted && !this.run.signal.aborted;
   }
@@ -123,9 +101,6 @@ class WorkflowCallSignals implements WorkflowBodyControl {
     switch (command.kind) {
       case "cancel":
       case "end":
-        // The session retired the call's questions when it stopped the call,
-        // so it accepts no answer after this; settle them before the abort
-        // would ask to withdraw them.
         this.asks.cancelAll();
         this.run.abort(new WorkflowToolRunCancelledError(command.reason));
         this.body.abort(this.run.signal.reason);
@@ -134,13 +109,11 @@ class WorkflowCallSignals implements WorkflowBodyControl {
         this.body.abort(new WorkflowToolRunInterruptedError());
         return;
       case "call":
-        // Only a `serve` task takes later calls.
         return;
     }
   }
 }
 
-/** Starts the body of an `execute` or `task` call, which serves the call the run started with. */
 export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
   const from = createWorkflowBodyRef(input);
   const asks = new WorkflowToolRunAsks(from.runId);
@@ -151,6 +124,7 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
     auth: input.session.auth,
     control: input.hookToken,
     from,
+    host: input.host,
     owner: input.owner,
   };
   const usage = createRunUsageTally();
@@ -166,7 +140,6 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
   };
 }
 
-/** Executes one call's registered workflow body and reports progress to its owner. */
 async function executeCallBody(
   input: WorkflowBodyInput,
   ctx: WorkflowCallContext,
@@ -176,7 +149,7 @@ async function executeCallBody(
   try {
     const target = findStubTarget(input.agentContext.toolStubs, input.toolName);
     if (target !== undefined) {
-      const result = await callToolStubStep(target.scope, {
+      const result = await callToolStub(input.host.toolStubs, target.scope, {
         callId: stubCallId(input.session.id, input.session.turn.id, input.callId),
         tool: target.tool,
         input: input.input,
@@ -208,11 +181,6 @@ async function executeCallBody(
   }
 }
 
-/**
- * An authored result as the run's JSON outcome, parsed the way a local tool's
- * result is: undefined properties are omitted, a missing result is `null`,
- * and a value JSON can't carry throws, failing the run.
- */
 export function toWorkflowOutput(
   call: { readonly callId: string; readonly toolName: string },
   output: unknown,
@@ -223,7 +191,6 @@ export function toWorkflowOutput(
   );
 }
 
-/** A body's failure, or its cancellation when the run stopped. */
 export function toFailedOutcome(error: unknown, runSignal: AbortSignal): WorkflowToolRunOutcome {
   if (runSignal.aborted) {
     const { reason } = runSignal;
@@ -237,13 +204,13 @@ export function toFailedOutcome(error: unknown, runSignal: AbortSignal): Workflo
 
 export function createWorkflowBodyRef(
   input: WorkflowBodyDefinition & {
-    readonly runId?: string;
+    readonly runId: string;
   },
 ): WorkflowToolRunRef {
   const ref: WorkflowToolRunRef = {
     callId: input.callId,
     input: input.input,
-    runId: input.runId ?? getWorkflowMetadata().workflowRunId,
+    runId: input.runId,
     sequence: input.session.turn.sequence,
     stepIndex: input.stepIndex,
     toolName: input.toolName,
@@ -253,7 +220,8 @@ export function createWorkflowBodyRef(
 }
 
 export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput): TEntryPoint {
-  const entryPoint = readRegisteredWorkflow(input.workflowId);
+  const entryPoint =
+    input.host.resolveWorkflow?.(input.workflowId) ?? readRegisteredWorkflow(input.workflowId);
   if (typeof entryPoint !== "function") {
     throw new Error(
       `Tool "${input.toolName}" is not registered as a workflow in this deployment (${input.workflowId}). The tool was renamed or removed after this run started.`,
@@ -262,13 +230,6 @@ export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput)
   return entryPoint as TEntryPoint;
 }
 
-/**
- * The members every entry point's context shares, bound to the run. `ask`
- * is the entry point's own, since what it may ask for depends on its calls.
- * The members that describe a call, `abortSignal`, `agents`, `callId`, and
- * `session` (whose turn is the call's), come from the entry point, which
- * knows its calls.
- */
 export function createSharedContext(
   input: WorkflowBodyInput,
   agent: WorkflowSharedContext["agent"],
@@ -303,7 +264,6 @@ export function createSharedContext(
   };
 }
 
-/** `ctx.channel` for a call: the channel that serves the calling session. */
 export function workflowToolChannel(context: AgentSessionContext): InstrumentationChannel {
   const projection = context.channelMetadata;
   return {
@@ -313,7 +273,6 @@ export function workflowToolChannel(context: AgentSessionContext): Instrumentati
   };
 }
 
-/** `ctx.agents` for a call: the agents its context lists, frozen. */
 export function createAgentsView(context: AgentSessionContext): WorkflowSharedContext["agents"] {
   return Object.freeze(
     Object.fromEntries(
@@ -325,10 +284,6 @@ export function createAgentsView(context: AgentSessionContext): WorkflowSharedCo
   );
 }
 
-/**
- * The context of an `execute` or `task` call. They differ only in what aborts
- * `abortSignal`: the session interrupts only the `execute` calls a turn waits on.
- */
 function createCallContext(
   input: WorkflowBodyInput,
   signals: WorkflowCallSignals,
@@ -359,7 +314,6 @@ export class WorkflowToolRunCancelledError extends Error {
   }
 }
 
-/** Why an `execute` call's `abortSignal` aborted when a steering message arrived. */
 export class WorkflowToolRunInterruptedError extends Error {
   constructor() {
     super("A new message arrived while the turn waited on this call.");

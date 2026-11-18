@@ -12,20 +12,10 @@ import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-ch
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { createAgentDescriptionRouteArgs } from "#channel/agent-description.js";
-import { createChannelOperations } from "#channel/channel-operations.js";
-import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { createAttachSessionFn } from "#channel/session.js";
+import { createChannelRouteArgs } from "#channel/route-args.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
-import {
-  attachAgentInfoRouteResponse,
-  attachHomeRouteMetadata,
-  attachRouteChannelName,
-  attachRemoteAgentStreamHeadersResolver,
-  attachRouteSessionCreator,
-  attachSkillFileSource,
-} from "#internal/nitro/routes/channel-route-context.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import {
   type NitroArtifactsConfig,
   resolveNitroCompiledArtifactsSource,
@@ -40,32 +30,13 @@ import { getWorld } from "#internal/workflow/runtime.js";
 
 const log = createLogger("channel.dispatch");
 
-/**
- * Dispatches one channel request identified by `routeKey`.
- *
- * Each channel route is mounted as its own virtual Nitro handler with the
- * route key and artifacts config baked in. Nitro's router matches the URL
- * and populates `event.context.params`, so no custom URL matching is
- * needed — the handler looks up the channel by its `(method, urlPath)` key
- * directly. Each task a route registers through `ctx.waitUntil` goes to
- * `event.waitUntil()` as soon as it is registered, including work started
- * while a streamed body is still being sent, so webhook acknowledgements
- * can return immediately.
- *
- * Authored channels receive `RouteHandlerArgs`; framework-internal channels
- * receive the smaller `RouteContext` used by callback routes.
- */
 export async function dispatchChannelRequest(
   event: H3Event,
   routeKey: string,
   config: NitroArtifactsConfig,
 ): Promise<Response> {
-  // Decoded except for encoded `/` and `\`, so a param never gains a path
-  // separator the request path didn't have.
   const params = getRouterParams(event, { decode: true });
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
-    // Correlation does not require an eve-owned request span. Preserve any
-    // active platform request or function span before route resolution.
     const requestTraceContext =
       span?.reference ?? otelTrace.getSpan(otelContext.active())?.spanContext();
     const bundle = await resolveNitroChannelRuntimeBundle(config);
@@ -78,12 +49,6 @@ export async function dispatchChannelRequest(
       );
     }
 
-    // Channel identity is known only after resolution; a 404 span carries
-    // just the route. `span` is undefined when instrumentation opted out of
-    // channel-request tracing. Prefer the stamped instrumentation kind
-    // (`channel:<name>`) over the raw adapter kind — behaviorless authored
-    // channels keep adapter kind `"http"`, so the adapter alone would report
-    // `"http"` where the rest of the trace reports `channel:<name>`.
     span?.channel({ channelName: matchedChannel.name });
     const channelKind =
       getChannelInstrumentationKind(matchedChannel.definition) ?? matchedChannel.adapter?.kind;
@@ -105,12 +70,9 @@ export async function dispatchChannelRequest(
     try {
       return await withDevelopmentVercelOidcContext(config, event.req, async () => {
         if (matchedChannel.handler) {
-          // Authored CompiledChannel route — build RouteHandlerArgs.
           return await matchedChannel.handler(event.req, args);
         }
 
-        // Framework-internal fetch-only channel (e.g. the connection
-        // callback route). Build a RouteContext with the agent handle.
         const ctx: RouteContext = {
           waitUntil: args.waitUntil,
           params: args.params,
@@ -122,9 +84,6 @@ export async function dispatchChannelRequest(
     } catch (error) {
       const commandError = sessionCommandErrorResponse(error);
       if (commandError !== undefined) return commandError;
-      // Without this a handler throw is only Nitro's default 5xx, with no eve
-      // log. logError records the exception against the active request span,
-      // so traceChannelRequest must not record the returned 500 again.
       const errorId = logError(log, "channel handler threw", error, {
         routeKey,
         channel: matchedChannel.name,
@@ -228,8 +187,6 @@ async function buildRouteArgs(input: {
   const channelName = channel.name;
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
-  // Each task gets its own catch, so failed post-ack work (such as the Slack
-  // inbound dispatch) is logged instead of dropped by the platform.
   const waitUntil = (task: Promise<unknown>) => {
     event.waitUntil(
       Promise.resolve(task).catch((error: unknown) => {
@@ -256,17 +213,6 @@ async function buildRouteArgs(input: {
             traceId: requestTraceContext.traceId,
           },
   };
-  const channelOperations = createChannelOperations({
-    adapter,
-    channelName,
-    metadata: deliverySource,
-    runtime: bundle.runtime,
-    turnPolicy: channel.turnPolicy,
-  });
-  const attachSession = createAttachSessionFn(bundle.runtime, {
-    ...deliverySource,
-    turnPolicy: channel.turnPolicy,
-  });
   const to = createCrossChannelToFn(
     bundle.runtime,
     toCrossChannelTargets(bundle.channels),
@@ -274,58 +220,32 @@ async function buildRouteArgs(input: {
   );
 
   const agent = createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config));
-  const args = attachRouteSessionCreator(
-    attachHomeRouteMetadata(
-      attachRouteChannelName(
-        attachAgentInfoRouteResponse(
-          {
-            attachSession,
-            ...channelOperations,
-            ...agent.args,
-            invokeTool: createRouteInvokeTool({
-              agentName: bundle.agentName,
-              config,
-              origin: { adapter, agentName: bundle.agentName, channelName },
-              requestUrl: event.req.url,
-            }),
-            params,
-            requestIp,
-            to,
-            waitUntil,
-          },
-          async () => {
-            const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-            return await handleAgentInfoRequest(config);
-          },
-        ),
-        channelName,
-      ),
-      { agentName: bundle.agentName },
-    ),
-    async (input) => {
-      const { deliveryId, ...runInput } = input;
-      const generated = createChannelDeliveryMetadata(deliverySource);
-      const delivery = deliveryId === undefined ? generated : { ...generated, deliveryId };
-      const handle = await bundle.runtime.createSession({
-        ...runInput,
-        adapter,
-        channelName,
-        continuationToken:
-          input.continuationToken === undefined
-            ? undefined
-            : `${channelName}:${input.continuationToken}`,
-        delivery,
-        requestId,
-      });
-      return { ...handle, deliveryId: delivery.deliveryId };
+  return createChannelRouteArgs({
+    adapter,
+    agent: {
+      ...agent.args,
+      invokeTool: createRouteInvokeTool({
+        agentName: bundle.agentName,
+        config,
+        origin: { adapter, agentName: bundle.agentName, channelName },
+        requestUrl: event.req.url,
+      }),
     },
-  );
-  attachSkillFileSource(args, agent.skillFiles);
-  if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
-    attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
-  }
-
-  return args;
+    agentInfo: async () => {
+      const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+      return await handleAgentInfoRequest(config);
+    },
+    agentName: bundle.agentName,
+    deliverySource,
+    params,
+    remoteAgentStreamHeaders: bundle.resolveRemoteAgentStreamHeaders,
+    requestIp,
+    runtime: bundle.runtime,
+    skillFiles: agent.skillFiles,
+    to,
+    turnPolicy: channel.turnPolicy,
+    waitUntil,
+  });
 }
 
 async function resolveAcceptedDeploymentId(
@@ -334,9 +254,6 @@ async function resolveAcceptedDeploymentId(
   const hosted = process.env.VERCEL_DEPLOYMENT_ID?.trim();
   if (hosted !== undefined && hosted.length > 0) return validateDeploymentId(hosted);
 
-  // Scenario and inspection callers can invoke a development route directly,
-  // outside the dev worker whose transport secret proves that its World is
-  // installed. Those read-only calls keep the pre-existing unstamped shape.
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {
     return undefined;
   }
@@ -371,7 +288,6 @@ const routeKeyIndexes = new WeakMap<
   ReadonlyMap<string, ResolvedChannelDefinition>
 >();
 
-/** The channels of one resolved bundle by route key, built once per bundle. */
 function channelsByRouteKey(
   channels: readonly ResolvedChannelDefinition[],
 ): ReadonlyMap<string, ResolvedChannelDefinition> {
@@ -390,8 +306,6 @@ function channelsByRouteKey(
 
 function extractRequestIp(event: H3Event, config: NitroArtifactsConfig): string | null {
   if (config.kind === "development") {
-    // In the proxied dev topology the socket peer is the parent's loopback
-    // hop; the original client address arrives as parent-signed metadata.
     const trusted = readTrustedDevelopmentClientAddress(
       event.req.headers,
       process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],

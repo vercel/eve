@@ -13,31 +13,17 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 
 const RUNNER_READY_TIMEOUT_MS = 60_000;
-/** Matches a worker's own graceful budget; the CLI's close budget covers it. */
 const SHUTDOWN_TIMEOUT_MS = 15_000;
 
-/** One built host: a worker entry plus the workspace its workers read. */
 export interface DevHost {
-  /** Removes the host's workspace once no worker started from it is left. */
   readonly dispose?: () => Promise<void>;
   readonly entry: string;
   readonly workerData: Readonly<Record<string, unknown>>;
 }
 
-/** The part of the supervisor the rebuild coordinator drives. */
 export interface DevHostSwitch {
-  /** Boots a spare worker from the current host for the next {@link recycle}. */
   prepareSpare(): void;
-  /**
-   * Moves to a fresh worker on the current host. Node never unloads a module,
-   * so a worker keeps every generation it imported; a fresh one loads only
-   * the active generation.
-   */
   recycle(): Promise<void>;
-  /**
-   * Moves to a ready worker started from `host`. Rejects, and leaves the
-   * current worker serving, when the candidate fails readiness.
-   */
   swapTo(host: DevHost): Promise<void>;
 }
 
@@ -51,13 +37,11 @@ export interface DevServerListener {
 interface HostRecord {
   readonly host: DevHost;
   disposal: Promise<void> | undefined;
-  /** Workers started from this host that have not terminated yet. */
   workers: number;
 }
 
 interface Worker {
   readonly record: HostRecord;
-  /** Settles after the worker terminated and its host was released. */
   readonly released: Promise<void>;
   readonly runner: EveDevRunner;
 }
@@ -71,13 +55,6 @@ interface DevServerLogger {
   error(message: unknown, ...details: unknown[]): unknown;
 }
 
-/**
- * eve's development server: it answers parent-owned control routes, and
- * forwards everything else to one worker through env-runner's
- * `RunnerManager`. A swap waits for the candidate to be ready, and the
- * retired worker keeps serving the requests and WebSockets it already
- * admitted, however long a streaming turn takes, before it shuts down.
- */
 export class DevHostSupervisor implements DevHostSwitch {
   readonly #disposals = new Set<Promise<void>>();
   readonly #listeners = new Set<{ beginClose(): Promise<void>; destroySockets(): void }>();
@@ -85,7 +62,6 @@ export class DevHostSupervisor implements DevHostSwitch {
   readonly #manager = new RunnerManager();
   readonly #workers = new Set<Worker>();
   #active: Worker | undefined;
-  /** Settles when a worker becomes active or the server closes; created on demand. */
   #activeChange: PromiseWithResolvers<void> | undefined;
   #candidate: Worker | undefined;
   #chain: Promise<void> = Promise.resolve();
@@ -93,14 +69,12 @@ export class DevHostSupervisor implements DevHostSwitch {
   #closePromise: Promise<void> | undefined;
   #closed = false;
   #controlHandler: ((request: Request) => Promise<Response | undefined>) | undefined;
-  /** Host of the active worker; its workspace stays until another host replaces it. */
   #current: HostRecord | undefined;
   #spare: Spare | undefined;
   #workerCount = 0;
 
   constructor(logger: DevServerLogger = console) {
     this.#logger = logger;
-    // Fires only for the attached worker closing on its own.
     this.#manager.onClose(() => this.#restartAfterCrash());
   }
 
@@ -108,10 +82,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     this.#controlHandler = handler;
   }
 
-  /**
-   * Enables signed client-address metadata on forwarded requests. Without it
-   * a worker only sees the parent's loopback hop as the peer address.
-   */
   setClientAddressSecret(secret: string): void {
     this.#clientAddressSecret = secret;
   }
@@ -144,8 +114,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     this.#discardSpare();
     const worker = this.#start(record);
     const next: Spare = {
-      // A spare that closes or fails readiness is never ready, so a recycle
-      // waiting on it starts its own worker instead of waiting out the timeout.
       ready: worker.runner.waitForReady(RUNNER_READY_TIMEOUT_MS).then(
         () => true,
         () => {
@@ -232,8 +200,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     this.#closed = true;
     this.#wakeActiveWaiters();
 
-    // A candidate mid-readiness or a booting spare a recycle waits on would
-    // hold the swap queue until the readiness timeout.
     const closing = new Error("Development server is closing.");
     await Promise.all(
       [this.#candidate, this.#spare?.worker].map(async (worker) => {
@@ -244,8 +210,6 @@ export class DevHostSupervisor implements DevHostSwitch {
 
     const listeners = [...this.#listeners];
     const listenersClosed = listeners.map((listener) => listener.beginClose());
-    // Dropping client sockets aborts their proxied requests, so the workers'
-    // graceful shutdown does not wait out open streams.
     for (const listener of listeners) listener.destroySockets();
 
     const current = this.#current;
@@ -254,7 +218,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     this.#discardSpare();
     await this.#manager.shutdown(SHUTDOWN_TIMEOUT_MS);
     await Promise.all([...this.#workers].map(async (worker) => await worker.released));
-    // A host whose last worker crashed and failed to restart has no worker left to release it.
     if (current !== undefined && current.workers === 0) this.#dispose(current);
     await Promise.all(this.#disposals);
     await Promise.all(listenersClosed);
@@ -283,7 +246,6 @@ export class DevHostSupervisor implements DevHostSwitch {
         await worker.runner.waitForReady(RUNNER_READY_TIMEOUT_MS);
       } catch (error) {
         await worker.runner.close(error);
-        // A candidate host that never served disposes its workspace here.
         await worker.released;
         throw new Error(`Development worker failed before readiness: ${toErrorMessage(error)}`, {
           cause: error,
@@ -304,7 +266,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     if (this.#spare !== undefined && this.#spare.worker.record !== record) {
       this.#discardSpare();
     }
-    // A host whose last worker crashed has no worker left to release it.
     if (previous !== undefined && previous !== record && previous.workers === 0) {
       this.#dispose(previous);
     }
@@ -334,7 +295,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     return worker;
   }
 
-  /** Waits for a spare that is still booting: it started earlier than a new worker would. */
   async #takeSpare(record: HostRecord): Promise<Worker | undefined> {
     const spare = this.#spare;
     if (spare === undefined || spare.worker.record !== record || !(await spare.ready)) {
@@ -347,7 +307,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     return spare.worker;
   }
 
-  /** A booted spare ran Nitro's plugins, so it shuts down gracefully and runs their close hooks. */
   #discardSpare(): void {
     const spare = this.#spare;
     this.#spare = undefined;
@@ -379,8 +338,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     this.#active = undefined;
     this.#logger.error("[eve:dev] dev worker exited; restarting.");
     this.#enqueue(async () => {
-      // A swap queued before the crash already replaced the crashed worker;
-      // restarting now would swap retired code back in over it.
       if (this.#closed || this.#active !== undefined) return;
       await this.#swap(crashed.record, true);
     }).catch((error: unknown) => {
@@ -397,7 +354,6 @@ export class DevHostSupervisor implements DevHostSwitch {
       );
     });
     try {
-      // A worker can become active and crash before this waiter resumes, so re-check.
       while (this.#active === undefined && !this.#closed) {
         this.#activeChange ??= Promise.withResolvers<void>();
         await Promise.race([this.#activeChange.promise, timedOut]);
@@ -426,9 +382,6 @@ export class DevHostSupervisor implements DevHostSwitch {
     });
 
     try {
-      // The signal rides the proxied request: a client that leaves before
-      // response headers would otherwise keep the worker handler running, and
-      // a retired worker holding that exchange would never retire.
       const publicRequest = createPublicRequest(request, requestAbort.signal);
       stampDevelopmentClientAddress(
         publicRequest.headers,

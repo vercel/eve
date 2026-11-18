@@ -59,7 +59,6 @@ function sharedQuestion(question: AnyQuestion): SharedWireQuestion {
   return { key: question.key, message: question.message, required: question.required === true };
 }
 
-/** Removes runtime values and validators from one internal setup question. */
 export function setupQuestionToWire(question: AnyQuestion): SetupWireQuestion {
   const shared = sharedQuestion(question);
   if ("editable" in question) {

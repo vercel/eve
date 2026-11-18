@@ -3,7 +3,7 @@ import {
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
   type CompileMetadata,
-} from "#compiler/artifacts.js";
+} from "#compiler/artifact-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
@@ -51,16 +51,10 @@ const compileMetadataSchema: z.ZodType<CompileMetadata> = z
 
 const BUNDLED_COMPILE_METADATA_SOURCE = "bundled compile metadata";
 
-/**
- * Input for loading compile metadata from disk or bundled artifacts.
- */
 interface LoadCompileMetadataInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }
 
-/**
- * Error raised when compile metadata cannot be loaded or validated.
- */
 class LoadCompileMetadataError extends Error {
   readonly metadataPath?: string;
 
@@ -74,10 +68,6 @@ class LoadCompileMetadataError extends Error {
   }
 }
 
-/**
- * Loads and validates compile metadata when it is available for the current
- * artifact source.
- */
 export async function loadCompileMetadata(
   input: LoadCompileMetadataInput,
 ): Promise<CompileMetadata | null> {

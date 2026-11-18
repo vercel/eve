@@ -1,10 +1,3 @@
-/**
- * Skills in the catalog. Every skill the session can see loads through
- * `eve__skill({ name })`, deferred or not. The call resolves to one loader entry
- * whose name sits outside the tool namespace, because skills and tools have
- * separate names.
- */
-
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { skillTarget } from "#shared/action-request-name.js";
@@ -12,16 +5,12 @@ import { toInputSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
 
-/** A skill the session can load. */
 export interface CatalogSkill {
   readonly deferred: boolean;
   readonly description: string;
-  /** The instructions loading returns. */
   readonly markdown: string;
   readonly name: string;
-  /** The skill's `SKILL.md` under the skills root, when it has package files. */
   readonly path?: string;
-  /** The dynamic definition that offers it; the agent's own skills have none. */
   readonly source?: string;
 }
 
@@ -35,7 +24,6 @@ function skillName(input: unknown): string {
   return skill === undefined ? "" : ` ${skill}`;
 }
 
-/** The entry every `eve__skill` call resolves to, with the call's own `{ name }` input. */
 export function createSkillLoader(
   skills: ReadonlyMap<string, CatalogSkill>,
 ): HarnessToolDefinition {
@@ -43,7 +31,6 @@ export function createSkillLoader(
     description: "Loads a skill's instructions.",
     execute: (input: { readonly name: string }) => {
       const skill = skills.get(input.name);
-      // `eve__skill` validation resolves every skill before the call runs.
       if (skill === undefined) throw new Error(`No skill named "${input.name}".`);
       return skill.markdown;
     },
@@ -54,7 +41,6 @@ export function createSkillLoader(
   };
 }
 
-/** Why `eve__skill` can't load `name`: the closest skills, or the connection it names. */
 export function unknownSkillMessage(
   name: string,
   skills: ReadonlyMap<string, CatalogSkill>,

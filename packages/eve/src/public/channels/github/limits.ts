@@ -1,7 +1,5 @@
-/** Maximum body length accepted by GitHub issue and pull-request comments. */
 const GITHUB_COMMENT_BODY_MAX_LENGTH = 65_536;
 
-/** Splits a long comment body into GitHub-sized comment bodies. */
 export function splitGitHubCommentBody(
   body: string,
   maxLength = GITHUB_COMMENT_BODY_MAX_LENGTH,

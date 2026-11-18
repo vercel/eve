@@ -8,7 +8,6 @@ import {
 } from "#internal/bundler/authored-plugins.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
-/** Rolldown options shared by every authored module bundle of one package. */
 export function createAuthoredModuleBuildOptions(input: {
   readonly packageBoundaryPlugin: Plugin;
   readonly packageRoot: string;
@@ -20,7 +19,7 @@ export function createAuthoredModuleBuildOptions(input: {
     plugins: [
       ...input.plugins,
       ...createAuthoredPlugins({ packageRoot: input.packageRoot }),
-      createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+      createNodeEsmCompatBannerPlugin(),
       input.packageBoundaryPlugin,
     ],
     resolve: {
@@ -31,11 +30,6 @@ export function createAuthoredModuleBuildOptions(input: {
   };
 }
 
-/**
- * Source maps for bundles evaluated in this process. Node reads inline maps only
- * when source maps are enabled; otherwise V8 retains the map comment as part of
- * every imported module's source text, often most of its size.
- */
 export function evaluatedBundleSourcemap(): "inline" | false {
   return process.sourceMapsEnabled ? "inline" : false;
 }

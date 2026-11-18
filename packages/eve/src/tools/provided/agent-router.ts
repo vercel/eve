@@ -9,6 +9,9 @@ import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/work
 
 export type { AgentRouterInput };
 
+/**
+ * The workflow tool {@link agentRouter} returns, which routes a task to the best available subagent.
+ */
 export type AgentRouterTool = WorkflowTaskToolDefinition<AgentRouterInput, JsonValue>;
 
 /**

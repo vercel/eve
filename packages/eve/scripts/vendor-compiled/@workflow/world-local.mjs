@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-import { workflowWorldLocalStreamReadPlugin } from "./world-local-stream-reads.mjs";
 import { loadDeclaration } from "../_shared.mjs";
 
 const require = createRequire(import.meta.url);
@@ -19,9 +18,7 @@ function resolveWorkflowWorldLocalVersion() {
       if (manifest.name === "@workflow/world-local" && typeof manifest.version === "string") {
         return manifest.version;
       }
-    } catch {
-      // Keep walking toward the package root.
-    }
+    } catch {}
 
     const parentPath = dirname(currentPath);
 
@@ -60,8 +57,6 @@ const workflowWorldLocalVersionPlugin = {
 export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
-  chunkGroup: "workflow",
-  fingerprintFiles: ["dist/fs.js"],
   declaration: await loadDeclaration("workflow-world-local.d.ts"),
-  plugins: [workflowWorldLocalVersionPlugin, workflowWorldLocalStreamReadPlugin],
+  plugins: [workflowWorldLocalVersionPlugin],
 };

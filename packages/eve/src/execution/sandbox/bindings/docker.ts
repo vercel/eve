@@ -58,9 +58,6 @@ export {
   pruneDockerSandboxTemplates,
 } from "#execution/sandbox/bindings/docker-templates.js";
 
-/**
- * Stable provider name used for prepared-artifact storage and provider identity.
- */
 export const DOCKER_PROVIDER_NAME = "docker";
 
 type DockerSandboxPreparedArtifact = {
@@ -71,22 +68,8 @@ type DockerSandboxSessionState = {
   readonly version: 2;
 };
 
-/** Environment options the provider receives: eve runs `prepare` itself. */
 export type DockerSandboxProviderOptions = Omit<DockerSandboxEnvironmentOptions, "prepare">;
 
-/**
- * Creates the Docker sandbox provider.
- *
- * Two-phase lifecycle mapped onto Docker primitives:
- *
- * - `prepare` runs the base image, applies base setup, lets eve seed the
- *   workspace and skills and run the authored preparation, then
- *   `docker commit`s the container into a reusable template image.
- * - `start` starts (or restarts) one long-lived container per session
- *   from the template image. The container's filesystem carries session
- *   state across reconnects, so stopping only stops the container and the
- *   next `start` or `resume` restarts it with state intact.
- */
 export function createDockerSandboxProvider(
   createOptions: DockerSandboxProviderOptions,
   dockerCli?: DockerCli,
@@ -119,8 +102,6 @@ export function createDockerSandboxProvider(
     ]);
     if (inspect.exitCode === 0) return inspect.stdout.trim() === "true";
     if (/no such (?:container|object)/iu.test(inspect.stderr)) return undefined;
-    // Any other failure, such as a daemon that stopped after the cached check, must not
-    // read as a missing container: resume would discard the session's sandbox.
     daemonCheck = undefined;
     expectDockerSuccess(inspect, `inspect sandbox session container "${containerName}"`);
     return undefined;
@@ -165,8 +146,6 @@ export function createDockerSandboxProvider(
         });
         running = true;
       } catch (error) {
-        // Session container names derive from the session, so another
-        // process can win the create race. Accept only that exact loss.
         running = /is already in use/u.test(toErrorMessage(error))
           ? await inspectContainerRunning(containerName)
           : undefined;
@@ -192,6 +171,14 @@ export function createDockerSandboxProvider(
       const removed = await cli.run(["rm", "-f", containerName], { signal });
       if (removed.exitCode !== 0 && !/no such container/iu.test(removed.stderr)) {
         expectDockerSuccess(removed, `delete sandbox session container "${containerName}"`);
+      }
+    },
+    async onSessionIdle(context, state, { signal }) {
+      await ensureDaemon();
+      const containerName = state?.containerName ?? dockerSessionName(context);
+      const stopped = await cli.run(["stop", "-t", "0", containerName], { signal });
+      if (stopped.exitCode !== 0 && !/no such container/iu.test(stopped.stderr)) {
+        expectDockerSuccess(stopped, `stop idle sandbox session container "${containerName}"`);
       }
     },
     async prepare(context) {
@@ -257,7 +244,6 @@ export function createDockerSandboxProvider(
           resourcesPath === undefined ? undefined : { mountedAt: DOCKER_RESOURCES_MOUNT_PATH },
         );
 
-        // Quiesce before commit so the captured filesystem is stable.
         context.log("stopping template build container");
         expectDockerSuccess(
           await cli.run(["stop", "-t", "0", buildContainerIdentity]),
@@ -276,8 +262,6 @@ export function createDockerSandboxProvider(
         await touchDockerTemplateMarker(markerPath, imageReference);
       } finally {
         await cli.run(["rm", "-f", buildContainerName]).catch(() => {});
-        // The Dockerfile image only seeds this build; the committed
-        // template keeps its layers, and pruning the template frees them.
         if (dockerfile !== undefined) {
           await cli.run(["rmi", baseImage]).catch(() => {});
         }
@@ -290,7 +274,6 @@ export function createDockerSandboxProvider(
       return await openDockerSession(context, undefined, artifactValue, state.containerName, false);
     },
     async start(context, openOptions, artifactValue) {
-      // Callers that widen the option type, such as DefaultSandbox, reach here unchecked.
       if (openOptions?.networkPolicy !== undefined) {
         assertDockerNetworkPolicy(openOptions.networkPolicy);
       }
@@ -309,12 +292,6 @@ export function createDockerSandboxProvider(
   };
 }
 
-/**
- * The session's container name. One Docker daemon serves every app on the
- * host, so the app's storage path namespaces the session id. The template
- * and open options apply only when the container is created, so a session
- * keeps its container across rebuilds.
- */
 function dockerSessionName(context: SandboxSessionContext): string {
   return `eve-sbx-${createSandboxProviderIdentity({
     namespace: context.storagePath,

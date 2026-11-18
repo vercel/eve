@@ -1,14 +1,5 @@
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
-/**
- * The provider contract authored under `agent/instrumentation/`.
- *
- * Each file in the directory declares one independently configured provider.
- */
 
-// Type-only, so nothing couples the provider definition to the harness at
-// runtime. The event shapes are eve's own vocabulary; deriving the handler map
-// from the union below is what keeps the public contract from drifting away
-// from the bus that feeds it.
 import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
@@ -55,12 +46,21 @@ export interface InstrumentationSetupContext {
   readonly frameworkVersion: string;
 }
 
+/**
+ * Durable JSON state an instrumentation handler can carry from an operation's start event to
+ * its terminal event.
+ */
 export interface InstrumentationState {
+  /** Reads this operation's JSON value, or `undefined` when none is set. */
   get(): JsonValue | undefined;
   /** Stages a JSON value; `undefined` releases this operation's slot. */
   set(value: JsonValue | undefined): void;
 }
 
+/**
+ * Context passed to each {@link InstrumentationHandler}, including the operation's
+ * {@link InstrumentationState}.
+ */
 export interface InstrumentationContext {
   readonly state: InstrumentationState;
 }

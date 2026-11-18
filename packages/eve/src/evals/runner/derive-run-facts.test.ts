@@ -33,7 +33,6 @@ it("reads a call when two readers of one turn recorded its events out of order",
       type: "call.settled",
     },
   ]);
-  // The steering message's reader recorded the turn's later lines before the first reader's.
   const usageEvents = [...events.slice(2), ...events];
 
   expect(deriveRunFacts(events, { usageEvents }).toolCalls).toMatchObject([
@@ -68,7 +67,6 @@ function done(callId: string, output: unknown, owner = run0): SessionEvent {
   } as SessionEvent;
 }
 
-/** A turn that calls a tool, loads a skill, starts a subagent, and pauses on an approval. */
 const firstTurn: SessionEvent[] = [
   { data: {}, type: "session.started" },
   {
@@ -136,7 +134,6 @@ const firstTurn: SessionEvent[] = [
   },
 ] as SessionEvent[];
 
-/** The approval's answer runs the call; the next turn replies and fails. */
 const secondTurn: SessionEvent[] = [
   {
     data: { cause: { responseId: "r_0" }, interactionId: "i_0", outcome: "accepted" },
@@ -196,7 +193,6 @@ it("reads what a turn did: its calls by kind, the request it waits on, and its m
         output: { temperature: 4 },
         status: "completed",
       },
-      // An agent call reports the input the model sent its tool.
       {
         callId: "call_research",
         input: { id: "call_research" },
@@ -287,7 +283,6 @@ it("counts a responder's sign-in as an interaction requiring input", () => {
   expect(deriveRunFacts(events).parked).toBe(true);
 });
 
-// https://github.com/vercel/eve/issues/5157
 it("reads a partial answer's segment as parked on the request it left open", () => {
   const approval = (interactionId: string, callId: string): SessionEvent =>
     ({

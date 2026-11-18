@@ -13,10 +13,8 @@ import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 const SECRET = "linear-conformance-secret";
 let nextConversation = 0;
 
-// Anyone in the workspace can reply in an issue's agent session.
 const PEOPLE = { alice: "user_1", bob: "user_2" } as const;
 
-/** Drives Linear Agent Session webhooks and Agent Activity GraphQL mutations. */
 export function linearDriver(): ChannelDriver {
   nextConversation += 1;
   const sessionId = `agent-session-conformance-${nextConversation}`;
@@ -46,9 +44,7 @@ export function linearDriver(): ChannelDriver {
     });
   }
 
-  /** Files a person uploaded, by the `uploads.linear.app` URL their Markdown links to. */
   const uploads = new Map<string, SentFile>();
-  /** A person's words with each file inlined as Linear writes an upload: an image or a link. */
   function withUploads(text: string, files: readonly SentFile[]): string {
     const links = files.map((file) => {
       const url = `https://uploads.linear.app/conformance/${uploads.size + 1}/${file.name}`;
@@ -89,7 +85,6 @@ export function linearDriver(): ChannelDriver {
     name: "linear",
     personId: PEOPLE.alice,
     capabilities: ["another-person", "attachments", "text-replies"],
-    // An agent session lives on an issue the whole workspace can see.
     surface: "shared",
     createChannel: (record) =>
       linearChannel({
@@ -152,9 +147,7 @@ export function linearDriver(): ChannelDriver {
       };
       return {
         id: response.data.agentActivityCreate.agentActivity.id,
-        // An `auth` elicitation's sign-in link rides in its signal metadata.
         links: linkTargets(input.signalMetadata),
-        // The driver can't press Linear's native select, so nothing here is pressable.
         options: [],
         text: input.content.body,
       };

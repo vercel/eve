@@ -14,6 +14,10 @@ import type {
  */
 export type ToolAuthDefinition = AuthorizationDefinition;
 
+/**
+ * Alias of {@link ToolAuthDefinition}, the provider passed to the tool context's `getToken` or
+ * `requireAuth`.
+ */
 export type ToolAuthProvider = ToolAuthDefinition;
 
 /** Controls eve runtime behavior for an inline tool auth provider. */

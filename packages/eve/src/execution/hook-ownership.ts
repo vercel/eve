@@ -20,13 +20,10 @@ export async function disposeHook(hook: { dispose: () => unknown }): Promise<voi
 async function disposeAndThrow(hook: Hook<unknown>, error: unknown): Promise<never> {
   try {
     await disposeHook(hook);
-  } catch {
-    // The claim failure is authoritative; cleanup must not replace it.
-  }
+  } catch {}
   throw error;
 }
 
-/** Error names survive Workflow serialization across runtime boundaries. */
 export function isHookConflictError(error: unknown): error is {
   readonly conflictingRunId?: unknown;
   readonly name: "HookConflictError";
@@ -40,10 +37,6 @@ export function isHookConflictError(error: unknown): error is {
   );
 }
 
-/**
- * Another run took the hook's token with `experimental_force`. Matched by name:
- * `HookForceClaimedError.is` lives in a module the workflow bundle cannot load.
- */
 export function isHookForceClaimedError(error: unknown): error is {
   readonly claimedByRunId: string;
   readonly name: "HookForceClaimedError";
@@ -58,7 +51,7 @@ export function isHookForceClaimedError(error: unknown): error is {
   );
 }
 
-function createHookConflictError(
+export function createHookConflictError(
   token: string,
   conflictingRunId: string,
 ): Error & {

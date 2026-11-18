@@ -51,11 +51,9 @@ type TelegramSetupPlan =
       credentials: "portable";
       botToken: string;
       botUsername: string;
-      /** Overwrite a different `TELEGRAM_BOT_TOKEN` already in `.env.local`. */
       replaceBotToken: boolean;
     };
 
-/** Reads one unquoted or double-quoted value from dotenv text. */
 function envValue(contents: string | undefined, key: string): string | undefined {
   for (const line of contents?.split("\n") ?? []) {
     const trimmed = line.trim();
@@ -90,7 +88,6 @@ export async function prepareTelegramSetup(
   context: SetupPrepareContext,
   deps: TelegramSetupDeps = defaultDeps,
 ): Promise<TelegramSetupPlan> {
-  // Refuse an overwrite before setup creates a connector or edits `.env.local`.
   const channelPath = join(context.appRoot, CHANNEL_FILE);
   if (!context.force && (await deps.pathExists(channelPath))) {
     throw new WriteFileExistsError(channelPath);
@@ -205,7 +202,6 @@ async function applyTelegramSetup(plan: TelegramSetupPlan, context: SetupApplyCo
       { TELEGRAM_BOT_TOKEN: plan.botToken },
       { force: plan.replaceBotToken },
     );
-    // An existing secret still matches whatever webhook was registered with it.
     await appendEnv(envPath, {
       TELEGRAM_WEBHOOK_SECRET_TOKEN: randomBytes(32).toString("hex"),
     });

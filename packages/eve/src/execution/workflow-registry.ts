@@ -1,6 +1,4 @@
 declare global {
-  // The Workflow SDK's generated entrypoint resolves a run's function from this
-  // map; eve's transform creates it and registers every `"use workflow"` function.
   var __private_workflows: Map<string, unknown> | undefined;
 }
 

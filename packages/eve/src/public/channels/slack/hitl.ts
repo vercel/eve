@@ -1,20 +1,7 @@
-/**
- * Slack HITL widget rendering + click-decode helpers.
- *
- * Wire format: select-style HITL widgets mint `action_id =
- * ANSWER_ACTION_PREFIX + requestId`. Button widgets add a stable suffix so
- * every button in the same Slack actions block has a unique `action_id`.
- * The decoder requires that suffix for button payloads.
- *
- * Buttons surface the selected option on `action.value`; radio and
- * static selects surface it on `selected_option.value`. The decoder
- * picks whichever is set so the renderer can pick a widget kind on
- * UX grounds without changing the read path.
- */
-
 import {
   truncateCardBodyText,
   SLACK_SECTION_TEXT_MAX_LENGTH,
+  truncateContainerTitle,
   truncateModalTitle,
   truncatePlainText,
   truncateSectionText,
@@ -34,31 +21,29 @@ import type { SlackSessionTarget } from "#public/channels/slack/slackChannel.js"
  */
 export const ANSWER_ACTION_PREFIX = "eve_input:";
 
-/**
- * `action_id` prefix for the "Type your answer" button that opens a
- * freeform-answer modal. Splitting the prefix from {@link ANSWER_ACTION_PREFIX}
- * lets the route handler differentiate "this click is a final answer"
- * (resolve via `answers`) from "this click needs a modal first"
- * (call `views.open`, then resolve on `view_submission`).
- */
 export const HITL_FREEFORM_ACTION_PREFIX = "eve_input_freeform:";
 
-/**
- * `view.callback_id` carried on the freeform-answer modal. Used to
- * route the inbound `view_submission` back to this channel.
- */
 export const HITL_FREEFORM_MODAL_CALLBACK_ID = "eve_input_freeform_submit";
 
-/**
- * `block_id` of the modal's text-input block — the route reads the
- * submitted text out of `view.state.values[block_id][action_id]`.
- */
 export const HITL_FREEFORM_MODAL_BLOCK_ID = "eve_freeform_block";
 
-/**
- * `action_id` of the text input inside the freeform answer modal.
- */
 export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
+
+const USE_BLOCK_PREFIX = "eve_use:";
+const USE_LABEL_PREFIX = "Use ";
+
+export function answerLabelOf(action: {
+  readonly blockId?: string;
+  readonly label?: string;
+  readonly selectedOptionValue?: string;
+}): string | undefined {
+  const { blockId, label, selectedOptionValue } = action;
+  const isUseButton =
+    selectedOptionValue === undefined && blockId?.startsWith(USE_BLOCK_PREFIX) === true;
+  return isUseButton && label?.startsWith(USE_LABEL_PREFIX)
+    ? label.slice(USE_LABEL_PREFIX.length)
+    : label;
+}
 
 const HITL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}route:`;
 const HITL_CODE_CHANNEL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}code:`;
@@ -66,16 +51,14 @@ const HITL_CODE_CHANNEL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}code:`;
 /** Slack session a routed HITL widget answers back to. */
 export type SlackHitlRoute = SlackSessionTarget;
 
-/**
- * Maximum radio-button option count before the renderer falls back to
- * a `static_select` dropdown. Matches Slack's UX guidance (radio
- * groups stay readable up to ~6 items).
- */
 const RADIO_SELECT_OPTION_LIMIT = 6;
 const BUTTON_ACTION_ID_RE = /^(?:(?<kind>tool-approval):)?(?<requestId>.+):button:\d+$/u;
 const TOOL_INPUT_PREFIX = "*Tool input*\n```\n";
-const TOOL_INPUT_CODE_PREFIX = "```\n";
 const TOOL_INPUT_SUFFIX = "\n```";
+const TOOL_INPUT_PREVIEW_MAX_LENGTH = 1500;
+const TOOL_INPUT_VALUE_MAX_LENGTH = 500;
+const TOOL_INPUT_PREVIEW_MAX_FIELDS = 10;
+const APPROVAL_PAUSED_TEXT = "I've paused until someone approves or denies.";
 const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
 const ANSWERED_TEXT_SUFFIX = "*";
 
@@ -105,7 +88,6 @@ export interface DerivedHitlResponse {
   readonly route?: SlackHitlRoute;
 }
 
-/** A derived response whose input response already passed schema validation. */
 interface ValidatedHitlResponse extends DerivedHitlResponse {
   readonly response: ValidatedAnswer;
 }
@@ -126,7 +108,6 @@ export const answerFromSlackAction: (action: SlackHitlAction) => DerivedHitlResp
   action,
 ) => decodeHitlResponse(action);
 
-/** {@link answerFromSlackAction}, keeping the validated type `respond()` accepts. */
 export function decodeHitlResponse(action: SlackHitlAction): ValidatedHitlResponse | null {
   const decoded = decodeHitlActionId(action.actionId);
   if (decoded === null) return null;
@@ -152,16 +133,10 @@ function splitEncodedRequest(value: string): {
     : { requestId: value };
 }
 
-/**
- * Returns `true` when the action id was minted by an HITL widget the
- * framework rendered. Used by the channel route to split inbound
- * clicks into the HITL path vs. the user-owned `onInteraction` path.
- */
 export function isHitlAction(actionId: string): boolean {
   return actionId.startsWith(ANSWER_ACTION_PREFIX);
 }
 
-/** Decodes the framework-owned identity and optional return route from one action id. */
 export function decodeHitlActionId(actionId: string): DecodedHitlActionId | null {
   if (!actionId.startsWith(ANSWER_ACTION_PREFIX)) return null;
   let encoded = actionId.slice(ANSWER_ACTION_PREFIX.length);
@@ -210,6 +185,11 @@ function encodeHitlActionId(request: Interaction, route?: SlackHitlRoute): strin
  *   visible.
  * - `display === "select"` with more options → `static_select`
  *   dropdown so the picker stays scrollable.
+ * - Either select with an `initialOptionId` starts on that option and adds
+ *   a "Use <label>" button that submits it.
+ * - A tool approval whose call has input → one `container` holding the
+ *   prompt, a bounded preview of the input, and the buttons, so what is
+ *   being approved and the controls read as a single card.
  * - Anything else with options → Slack `card` blocks with action
  *   buttons. Best for visually distinct choices (allow / cancel /
  *   cancel).
@@ -236,7 +216,7 @@ export function renderInteractionBlocks(
     request.request.allowFreeform === true || !options || options.length === 0;
 
   if (options && options.length > 0 && request.request.display === "select") {
-    const widget =
+    const widget: Record<string, unknown> =
       options.length <= RADIO_SELECT_OPTION_LIMIT
         ? { type: "radio_buttons", action_id: actionId, options: options.map(buildOption) }
         : {
@@ -245,13 +225,30 @@ export function renderInteractionBlocks(
             options: options.map(buildOption),
             placeholder: { type: "plain_text", text: "Choose an option" },
           };
-    return [prompt, ...details, { type: "actions", elements: [widget] }];
+    const initial = options.find((option) => option.id === request.request.initialOptionId);
+    if (initial === undefined) return [prompt, ...details, { type: "actions", elements: [widget] }];
+    widget.initial_option = buildOption(initial);
+    const use = buildCardButton(
+      { id: initial.id, label: `${USE_LABEL_PREFIX}${initial.label}`, style: "primary" },
+      actionId,
+      0,
+    );
+    return [
+      prompt,
+      ...details,
+      {
+        type: "actions",
+        block_id: `${USE_BLOCK_PREFIX}${request.interactionId}`,
+        elements: [widget, use],
+      },
+    ];
   }
 
   if (options && options.length > 0) {
-    const card = renderInteractionCardBlock(request, actionId);
-    const details = renderToolInputContainerBlock(request);
-    return details === undefined ? [card] : [card, details];
+    const input = renderToolInputPreviewBlock(request);
+    return input === undefined
+      ? [renderInteractionCardBlock(request, actionId)]
+      : [renderApprovalContainerBlock(request, actionId, input)];
   }
 
   if (acceptsFreeform) {
@@ -277,74 +274,28 @@ export function renderInteractionBlocks(
   return [prompt];
 }
 
-/**
- * Splits approval details from their interactive controls. Slack includes the
- * originating message in `block_actions`, so putting large tool input beside
- * the buttons makes the callback body grow with model-authored input.
- */
 export function renderInteractionPostParts(
   request: Interaction,
   route?: SlackHitlRoute,
 ): SlackInteractionCardParts {
   const blocks = renderInteractionBlocks(request, route);
-  const [firstBlock, ...details] = blocks;
-  if (
-    !isApprovalRequest(request) ||
-    firstBlock === undefined ||
-    !isBlockType(firstBlock, "card") ||
-    details.length === 0
-  ) {
-    return {
-      controls: { blocks, text: formatInteractionFallbackText(request) },
-    };
-  }
-
-  return {
-    controls: { blocks: [firstBlock], text: escapeSlackText(request.request.prompt) },
-    details: { blocks: details, text: formatInteractionFallbackText(request) },
-  };
+  return { controls: { blocks, text: escapeSlackText(request.request.prompt) } };
 }
 
-/**
- * Creates the fallback text for one HITL request. Slack clients use this
- * outside the rich Block Kit surface, so include the same approval details
- * that appear in the blocks.
- */
-export function formatInteractionFallbackText(request: Interaction): string {
-  const prompt = escapeSlackText(request.request.prompt);
-  const details = formatToolInputDetails(request);
-  return details === undefined ? prompt : `${prompt}\n${details}`;
-}
-
-/**
- * Metadata round-tripped on the freeform-answer modal's
- * `private_metadata` field. Threaded from the button click that opens
- * the modal to the `view_submission` that closes it so the route can
- * deliver the answer back to the right session.
- */
 export type HitlFreeformModalMetadata = SlackSessionTarget & {
   readonly continuationToken: string;
-  /** Workspace whose app installation supplies credentials for modal follow-up API calls. */
   readonly installationTeamId?: string;
-  /** Slack conversation containing the interactive card. */
   readonly messageChannelId?: string;
+  readonly messageThreadTs?: string;
   readonly messageTs: string;
   readonly requestId: string;
+  readonly responseUrl?: string;
 };
 
-/**
- * Builds the `views.open` payload for the freeform-answer modal. The
- * triggering `prompt` is preserved as a header section so the user can
- * re-read what they're answering inside the modal. `prompt` is the posted
- * card's mrkdwn, which was escaped when the card was rendered.
- *
- * Title is auto-truncated to the Slack modal-title limit.
- */
 export function buildFreeformModalView(input: {
   readonly metadata: HitlFreeformModalMetadata;
   readonly prompt?: string;
 }): Record<string, unknown> {
-  // The title is plain_text, which Slack shows without decoding `&amp;`.
   const title = input.prompt ? truncateModalTitle(unescapeSlackText(input.prompt)) : "Your answer";
   const promptBlocks = input.prompt
     ? [{ type: "section", text: { type: "mrkdwn", text: truncateSectionText(input.prompt) } }]
@@ -373,10 +324,6 @@ export function buildFreeformModalView(input: {
   };
 }
 
-/**
- * True when an `action_id` was minted by the framework's freeform-answer
- * button (the click that opens a modal — not the final answer).
- */
 export function isFreeformAction(actionId: string): boolean {
   return actionId.startsWith(HITL_FREEFORM_ACTION_PREFIX);
 }
@@ -430,11 +377,35 @@ function renderInteractionCardBlock(
     },
     actions: cardButtonOptions(request).map((opt, index) => buildCardButton(opt, actionId, index)),
   };
-  // A tool approval holds the turn until someone acts, so say so on the card.
   if (isApprovalRequest(request)) {
-    card.subtext = { type: "mrkdwn", text: "I've paused until someone approves or denies." };
+    card.subtext = { type: "mrkdwn", text: APPROVAL_PAUSED_TEXT };
   }
   return card;
+}
+
+function renderApprovalContainerBlock(
+  request: Interaction,
+  actionId: string,
+  input: BlockKitBlock,
+): BlockKitBlock {
+  const buttons = cardButtonOptions(request).map((opt, index) =>
+    buildCardButton(opt, actionId, index),
+  );
+  const primaryFirst = [
+    ...buttons.filter((button) => button.style === "primary"),
+    ...buttons.filter((button) => button.style !== "primary"),
+  ];
+  const prompt = request.request.prompt.replace(/\s+/gu, " ").trim();
+  return {
+    type: "container",
+    title: {
+      type: "plain_text",
+      text: truncateContainerTitle(prompt || (request.call?.name ?? "Approve?")),
+    },
+    subtitle: { type: "mrkdwn", text: APPROVAL_PAUSED_TEXT },
+    has_header_divider: true,
+    child_blocks: [input, { type: "actions", elements: primaryFirst }],
+  };
 }
 
 function cardButtonOptions(request: Interaction): CardButtonOption[] {
@@ -459,16 +430,6 @@ function toCardButtonOption(option: SlackInteractionOption): CardButtonOption {
   return result;
 }
 
-/**
- * Renders the "answered" replacement blocks for a previously-posted
- * HITL card. Preserves the original prompt/detail blocks (so context
- * stays visible), appends a confirmation line naming the chosen answer,
- * and attributes the click to the user when their id is known.
- *
- * Slack's `chat.update` replaces every block in one shot, so the caller
- * passes the full list to `blocks` and the rendered fallback text to
- * `text`.
- */
 export function buildAnsweredBlocks(input: {
   readonly promptBlocks: readonly unknown[];
   readonly answerLabel: string;
@@ -480,8 +441,6 @@ export function buildAnsweredBlocks(input: {
       blocks.push(promptBlock);
     }
   }
-  // Freeform answers echo user-typed text, which can exceed the section
-  // limit on its own; cap the label so `chat.update` cannot fail.
   const answerLabel = truncateWithEllipsis(
     escapeSlackText(input.answerLabel),
     SLACK_SECTION_TEXT_MAX_LENGTH - ANSWERED_TEXT_PREFIX.length - ANSWERED_TEXT_SUFFIX.length,
@@ -506,30 +465,55 @@ function renderInteractionDetailBlocks(request: Interaction): BlockKitBlock[] {
     : [{ type: "section", text: { type: "mrkdwn", text: details } }];
 }
 
-function renderToolInputContainerBlock(request: Interaction): Record<string, unknown> | undefined {
-  const details = formatToolInputContainerText(request);
-  if (details === undefined) return undefined;
+type RichTextElement = Record<string, unknown>;
 
-  return {
-    type: "container",
-    title: { type: "plain_text", text: "Tool input" },
-    is_collapsible: true,
-    default_collapsed: true,
-    child_blocks: [{ type: "section", text: { type: "mrkdwn", text: details } }],
-  };
+function renderToolInputPreviewBlock(request: Interaction): BlockKitBlock | undefined {
+  if (!isApprovalRequest(request)) return undefined;
+  const input = request.call?.input;
+  if (input === undefined || input === null) return undefined;
+
+  if (typeof input !== "object" || Array.isArray(input)) {
+    const json = JSON.stringify(input, null, 2);
+    const text = truncateWithEllipsis(json, TOOL_INPUT_PREVIEW_MAX_LENGTH);
+    return richText([{ type: "rich_text_preformatted", elements: [plainText(text)] }]);
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>).filter(
+    ([, value]) => value !== undefined,
+  );
+  if (entries.length === 0) return undefined;
+
+  const lines: RichTextElement[] = [];
+  let budget = TOOL_INPUT_PREVIEW_MAX_LENGTH;
+  let shown = 0;
+  for (const [name, value] of entries) {
+    if (shown === TOOL_INPUT_PREVIEW_MAX_FIELDS || budget <= name.length + "...".length) break;
+    budget -= name.length;
+    const isText = typeof value === "string" && value.length > 0;
+    const raw = isText ? value : JSON.stringify(value);
+    const text = truncateWithEllipsis(raw, Math.min(TOOL_INPUT_VALUE_MAX_LENGTH, budget));
+    budget -= text.length;
+    if (shown > 0) lines.push(plainText("\n"));
+    lines.push({ ...plainText(name || '""'), style: { bold: true } }, plainText("  "));
+    lines.push(isText ? plainText(text) : { ...plainText(text), style: { code: true } });
+    shown += 1;
+  }
+  const hidden = entries.length - shown;
+  if (hidden > 0) {
+    lines.push({
+      ...plainText(`\n+${hidden} more field${hidden === 1 ? "" : "s"}`),
+      style: { italic: true },
+    });
+  }
+  return richText([{ type: "rich_text_section", elements: lines }]);
 }
 
-function formatToolInputContainerText(request: Interaction): string | undefined {
-  if (!isApprovalRequest(request)) return undefined;
+function richText(elements: RichTextElement[]): BlockKitBlock {
+  return { type: "rich_text", elements };
+}
 
-  const json = JSON.stringify(request.call?.input ?? {}, null, 2);
-  if (json === "{}") return undefined;
-  const escaped = escapeSlackText(json);
-
-  const bodyBudget =
-    SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_CODE_PREFIX.length - TOOL_INPUT_SUFFIX.length;
-  const body = truncateWithEllipsis(escaped, bodyBudget);
-  return `${TOOL_INPUT_CODE_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
+function plainText(text: string): RichTextElement {
+  return { type: "text", text };
 }
 
 function formatToolInputDetails(request: Interaction): string | undefined {
@@ -543,10 +527,6 @@ function formatToolInputDetails(request: Interaction): string | undefined {
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
   const body = truncateWithEllipsis(escaped, bodyBudget);
   return `${TOOL_INPUT_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
-}
-
-function isBlockType(value: unknown, type: string): boolean {
-  return typeof value === "object" && value !== null && (value as { type?: unknown }).type === type;
 }
 
 function isApprovalRequest(request: Interaction): boolean {

@@ -4,19 +4,6 @@ import type { AddressInfo, Socket } from "node:net";
 const STOP_FORCE_CLOSE_GRACE_MS = 250;
 const STOP_TIMEOUT_MS = 2_000;
 
-/**
- * Minimal in-process MCP server speaking the Streamable HTTP transport
- * subset used by `@ai-sdk/mcp`. Implements just enough to satisfy a
- * client doing `initialize` → `tools/list` → `tools/call` for one
- * tool. Notifications return 202; unknown methods return a JSON-RPC
- * "method not found" so optional discovery (`resources/list`,
- * `prompts/list`, etc.) degrades gracefully.
- *
- * The stub exposes one tool, `echo_marker`, which echoes back the
- * `marker` string supplied at construction time. Used by
- * `tui-connection-auth-user.ts` to prove the user-authenticated
- * `defineMcpClientConnection` path without depending on a remote MCP server.
- */
 const PROTOCOL_VERSION = "2025-11-25";
 
 export interface McpStubServerHandle {
@@ -45,14 +32,6 @@ interface JsonRpcError {
 
 export async function startMcpStubServer(input: {
   marker: string;
-  /**
-   * When true, every HTTP request must include a non-empty
-   * `Authorization: Bearer <token>` header. Unauth'd requests get a
-   * `401 Unauthorized`. Used by smokes that exercise OAuth-backed MCP
-   * connections; without this gate the smoke can't prove the access
-   * token actually reached MCP. Defaults to false to keep the legacy
-   * non-auth smoke path available.
-   */
   requireBearer?: boolean;
 }): Promise<McpStubServerHandle> {
   const { marker, requireBearer = false } = input;
@@ -176,7 +155,6 @@ function handleOne(
   ctx: { readonly marker: string },
 ): JsonRpcSuccess | JsonRpcError | null {
   if (message.id === undefined) {
-    // Notification, no response.
     return null;
   }
   const id = message.id;

@@ -5,10 +5,8 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
-import {
-  startWorkflowOnCurrentDeployment,
-  sessionTimeoutWorkflowReference,
-} from "#execution/workflow-runtime.js";
+import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
+import { sessionTimeoutWorkflowReference } from "#execution/workflow-references.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session/timeout-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";
@@ -16,7 +14,6 @@ import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
-/** Starts the durable timer that signals one session deadline. */
 export async function startSessionTimeoutStep(
   input: SessionTimeoutWorkflowInput,
 ): Promise<{ readonly runId: string }> {
@@ -26,7 +23,6 @@ export async function startSessionTimeoutStep(
   return { runId: run.runId };
 }
 
-/** Resumes the owning session when its durable timer elapses. */
 export async function signalSessionTimeoutStep(input: {
   readonly ownerRunId: string;
   readonly token: string;
@@ -40,13 +36,7 @@ export async function signalSessionTimeoutStep(input: {
     });
   } catch (error) {
     if (error instanceof StrandedSessionOwnerError) {
-      // A stranded owner another timer armed is that timer's to end.
       if (error.ownerRunId !== input.ownerRunId) return;
-      // An owner whose deployment was retired cannot finish itself, so the
-      // timer ends it instead. This bounds a retired session's lifetime: the
-      // timer is its own run, which the stranded replay guard does not skip,
-      // and a timer still sleeping has recorded no step, so it replays on this
-      // build and runs this step.
       await endStrandedSession(error, input.token, "timeout");
       return;
     }
@@ -56,7 +46,6 @@ export async function signalSessionTimeoutStep(input: {
   }
 }
 
-/** Cancels a timer whose session reached another terminal outcome first. */
 export async function cancelSessionTimeoutStep(input: { readonly runId: string }): Promise<void> {
   "use step";
 

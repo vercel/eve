@@ -13,7 +13,6 @@ describe("validateGatewayApiKey", () => {
     mocks.getCredits.mockResolvedValueOnce({ models: [] });
     await expect(validateGatewayApiKey("sk-good")).resolves.toEqual({ kind: "valid" });
 
-    // The provider's fetch must send the eve product token on the wire.
     const { fetch: providerFetch } = mocks.createGateway.mock.calls[0]![0] as {
       fetch: typeof globalThis.fetch;
     };

@@ -8,22 +8,12 @@ import {
 import { createMcpSkillsFeature, type McpSkillSource } from "#internal/mcp/skills.js";
 import { createMcpStreamableHttpServer } from "#internal/mcp/streamable-http-server.js";
 
-/**
- * A skill's files; `null` is listed but missing on read (a deterministic
- * `SkillReadError`), a function is called per read so a test can fail
- * transiently, and a path ending in `/` is an empty directory.
- */
 type Files = Readonly<Record<string, string | Uint8Array | null | (() => string)>>;
 
 const PROTOCOL = "2026-07-28";
 const encode = (content: string | Uint8Array) =>
   typeof content === "string" ? new TextEncoder().encode(content) : content;
 
-/**
- * A skill source as the route args provide one: the `skills` array is
- * stable for the life of the source, as a build's description is, and
- * `calls` counts listings and reads per skill.
- */
 function skillSource(skills: Readonly<Record<string, Files>>) {
   const calls = { list: new Map<string, number>(), read: new Map<string, number>() };
   const count = (calls: Map<string, number>, key: string) =>
@@ -66,7 +56,6 @@ function skillSource(skills: Readonly<Record<string, Files>>) {
   return { calls, source };
 }
 
-/** Every request builds a fresh server, as `mcpChannel` does. */
 function handler(skills: Readonly<Record<string, Files>>, source = skillSource(skills).source) {
   return async (method: string, params: Record<string, unknown> = {}) => {
     const mcp = createMcpStreamableHttpServer({
@@ -95,7 +84,6 @@ function handler(skills: Readonly<Record<string, Files>>, source = skillSource(s
   };
 }
 
-/** Whether each surface serves a skill: skills/list, resources/list, get, read, directory. */
 async function surfaces(call: ReturnType<typeof handler>, names: readonly string[]) {
   const listed = (await call("skills/list")).result?.skills.map((s: { uri: string }) => s.uri);
   const resources = (await call("resources/list")).result?.resources.map(
@@ -133,7 +121,6 @@ for (let index = 0; index < 511; index += 1) crowded[`data/${index}.txt`] = "";
 
 describe("MCP skills (SEP-2640)", () => {
   it("serves a skill whole on every surface or not at all", async () => {
-    // Without frontmatter, eve writes name and description from the catalog.
     const served: Record<string, Files> = {
       a: doc("a", "x"),
       [max]: doc(max, "d".repeat(1024)),
@@ -221,11 +208,9 @@ describe("MCP skills catalog", () => {
       ["b/notes.md", 1],
     ]);
 
-    // Only `SKILL.md` stays in memory; other files are read per request.
     expect((await call("resources/read", { uri: "skill://a/notes.md" })).result).toBeDefined();
     expect(calls.read.get("a/notes.md")).toBe(2);
 
-    // A new description, as after a recompile, lists and reads again.
     const recompiled = skillSource(skills);
     expect((await handler(skills, recompiled.source)("skills/list")).result?.skills).toHaveLength(
       2,

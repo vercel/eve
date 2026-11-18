@@ -1,8 +1,3 @@
-// Minimal declaration for the vendored slice of `chokidar` that eve relies
-// on. Only the `watch` entry point and the resulting watcher surface used by
-// `src/internal/nitro/host/dev-authored-source-watcher.ts` are typed here;
-// upstream chokidar's full type surface is intentionally not vendored.
-
 import type { EventEmitter } from "node:events";
 
 export type Matcher = string | RegExp | ((value: string) => boolean);

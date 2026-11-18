@@ -1,11 +1,3 @@
-/**
- * The tasks a turn has working: agents and tools that keep running while the
- * turn goes on. The transcript only ever grows at its end, so a task writes
- * one line when it starts and one when it ends; what it is doing in between
- * lives here in the activity drawer above the prompt, keeping live updates
- * out of immutable terminal scrollback.
- */
-
 import type { Block } from "./blocks.js";
 import { agentTaskLabel, isSelfModificationAgent } from "./tool-presentation.js";
 import type { Theme } from "./theme.js";
@@ -19,7 +11,6 @@ export type TaskKind = "agent" | "tool";
 export interface TaskEntry {
   readonly callId: string;
   readonly kind: TaskKind;
-  /** Display name, unique among working tasks. */
   readonly name: string;
   readonly toolName: string;
   readonly input: unknown;
@@ -29,18 +20,13 @@ export interface TaskEntry {
   readonly children?: readonly TaskEntry[];
   readonly omittedTasks?: number;
   readonly omittedAttention?: boolean;
-  /** An agent's latest words or thinking, one line. */
   step?: string;
-  /** Settled, waiting only for the agent's own last events. */
   finishing?: boolean;
-  /** An agent's own tool calls, newest last, for its activity and summary. */
   readonly childTools: Map<string, Block>;
 }
 
-/** Includes the heading and overflow summary, regardless of nesting. */
 const maxPanelRows = 15;
 
-/** Joins the working tasks' names for the turn bar: `Waiting for researcher and reviewer`. */
 export function waitingLabel(entries: readonly TaskEntry[]): string {
   if (entries.length === 1 && isSelfModificationAgent(entries[0]!.toolName)) {
     return "Modifying your agent";
@@ -51,7 +37,6 @@ export function waitingLabel(entries: readonly TaskEntry[]): string {
   return `Waiting for ${String(names.length)} tasks`;
 }
 
-/** Names the connections a parked session waits on: `Waiting for sign-in to Linear`. */
 export function signInLabel(names: readonly string[]): string {
   const unique = [...new Set(names)];
   if (unique.length === 1) return `Waiting for sign-in to ${unique[0]!}`;
@@ -59,7 +44,6 @@ export function signInLabel(names: readonly string[]): string {
   return `Waiting for ${String(unique.length)} sign-ins`;
 }
 
-/** What a working task is doing right now, in one short line. */
 function currentActivity(entry: TaskEntry): { text: string; attention: boolean } {
   if (entry.finishing === true) return { text: "Finishing", attention: false };
   const tools = [...entry.childTools.values()];
@@ -75,7 +59,6 @@ function currentActivity(entry: TaskEntry): { text: string; attention: boolean }
   return { text: "", attention: false };
 }
 
-/** Stable ownership order, with only one visible level of indentation. */
 function taskLabel(entry: TaskEntry): string {
   if (entry.kind !== "agent") return entry.name;
   return agentTaskLabel(entry.name);
@@ -118,13 +101,11 @@ export function renderTaskPanelRows(
   const contentBudget = Math.max(0, budget - (padded ? 4 : 2));
   const overflow = omitted > 0 || tasks.length * 2 > contentBudget;
   const capacity = Math.max(0, Math.floor((contentBudget - (overflow ? 1 : 0)) / 2));
-  // Approval requests must not disappear behind a busy branch's overflow summary.
   const attention = tasks.filter(({ entry }) => currentActivity(entry).attention);
   const selected = new Set(
     [...attention, ...tasks.filter((task) => !attention.includes(task))].slice(0, capacity),
   );
   const shown = tasks.filter((task) => selected.has(task));
-  // Each top-level task and its nested work form one group, so siblings don't run together.
   const groups: string[][] = [];
   for (const { entry, path } of shown) {
     const nested = path.length > 0;

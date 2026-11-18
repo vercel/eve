@@ -14,9 +14,9 @@ import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
 import type { ClientRedirectPolicy, ReconnectOptions } from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
+import { waitWithSignal } from "#shared/wait-with-signal.js";
 
 interface ResolvedStreamReconnectPolicy {
-  /** False when the caller owns cursor recovery: one connection, then stop. */
   readonly reconnect: boolean;
   readonly retryableStatuses: ReadonlySet<number>;
   readonly baseDelayMs: number;
@@ -24,10 +24,8 @@ interface ResolvedStreamReconnectPolicy {
   readonly maxDelayMs: number;
 }
 
-/** A read times out only to detect a dead connection: the route sends a heartbeat every 10s. */
 const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 30_000;
 
-/** Backoff between reconnects after a transport failure. Following readers retry forever. */
 export const RECONNECT_BACKOFF = { baseDelayMs: 250, maxDelayMs: 5_000 } as const;
 
 export const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
@@ -71,56 +69,34 @@ function resolveStreamReconnectPolicy(
   };
 }
 
-/**
- * Internal configuration for following a durable event stream.
- */
 interface FollowStreamInput {
-  /** Validates reader provenance before consuming any stream data. */
   readonly onOpen?: (headers: Headers) => void;
-  /** Committed source progress, including lines that materialize no recognized events. */
   readonly onPosition?: (position: number) => void;
-  /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly baseUrl: string;
   readonly resolveReconnectPolicy?: () => false | ReconnectOptions | undefined;
   readonly reconnect?: false | ReconnectOptions;
-  /** @internal Test override for reconnecting an open stream that stops producing bytes. */
+  /** @internal */
   readonly streamReadIdleTimeoutMs?: number;
   readonly resolveHeaders: () => Promise<Headers>;
   readonly redirect?: ClientRedirectPolicy;
-  /** eve stream route path, such as a session stream or a parent-origin subagent stream. */
   readonly path: string;
   readonly searchParams?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
-  /** The position of the first line to read. Negative values count back from the tail. */
   readonly startIndex: number;
-  /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
   readonly follow?: boolean;
+  readonly opened?: PendingStream;
 }
 
-/** One connection open; `requestTailIndex` asks the server to report the durable tail index. */
 interface OpenStreamInput extends FollowStreamInput {
   readonly requestTailIndex?: boolean;
 }
 
-/** One stored line and its position. A line this version can't read has `line: undefined`. */
 export interface FollowedLine {
   readonly line: StoredLine | undefined;
   readonly position: number;
 }
 
-/**
- * Follows one durable stream route from a position, reconnecting as the transport ends.
- *
- * A reader counts positions from its cursor, one per stored line, and jumps forward at each
- * position marker. `stream.ended` stops the follow; a lease end reconnects at once; anything
- * else is a transport failure, retried with capped backoff. Readers that follow retry forever,
- * and decide to stop from what they read. A tail-relative cursor becomes a position on the first
- * connection, from the tail the server reports.
- *
- * With `follow: false`, the first connection fixes the bound: the iterator yields lines until
- * the cursor passes that tail, reconnecting as needed, then returns instead of following.
- */
 export async function* followStreamLines(input: FollowStreamInput): AsyncGenerator<FollowedLine> {
   const resolvePolicy = () =>
     resolveStreamReconnectPolicy(
@@ -142,16 +118,25 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
     return input.follow === false && passedTail();
   };
 
+  let opened = input.opened;
   while (true) {
     const retryPolicy = resolvePolicy();
+    const requestTailIndex = (bounded || startIndex < 0) && tailIndex === undefined;
+    const early = opened;
+    opened = undefined;
     let connection: OpenedStream;
     try {
-      connection = await openStreamBody({
-        ...input,
-        retryPolicy,
-        startIndex,
-        requestTailIndex: (bounded || startIndex < 0) && tailIndex === undefined,
-      });
+      const adopted =
+        early === undefined
+          ? undefined
+          : requestTailIndex
+            ? void early.cancel()
+            : await waitWithSignal(early.opened, input.signal).catch((error: unknown) => {
+                early.cancel();
+                throw error;
+              });
+      connection =
+        adopted ?? (await openStreamBody({ ...input, retryPolicy, startIndex, requestTailIndex }));
     } catch (error) {
       if (input.signal?.aborted) return;
       throw error;
@@ -237,7 +222,6 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
     if (streamEnded || input.signal?.aborted || !resolvePolicy().reconnect) return;
     if (leaseEnded) continue;
 
-    // A transport failure. A one-shot read gives up after its budget of consecutive failures.
     failures += 1;
     if (input.follow === false && failures >= retryPolicy.maxAttempts) {
       throw new Error("The session stream kept disconnecting before the read reached its tail.");
@@ -258,10 +242,6 @@ export interface FollowedEvent {
   readonly cursor: number;
 }
 
-/**
- * Follows a stream route's v26 events: the records each line carries, rebuilt as v26 readers
- * expect them. Kept while v26 event types ride inside lines.
- */
 export async function* followStreamIterable(
   input: FollowStreamInput,
 ): AsyncGenerator<FollowedEvent> {
@@ -275,20 +255,18 @@ export async function* followStreamIterable(
   }
 }
 
-/** An opened connection: the response body plus the tail index from the response header, if any. */
-interface OpenedStream {
+export interface PendingStream {
+  readonly opened: Promise<OpenedStream | undefined>;
+  cancel(): void;
+}
+
+export interface OpenedStream {
   readonly headers: Headers;
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
   readonly tailIndex: number | undefined;
 }
 
-/**
- * Opens one stream response body, retrying transient failures with capped
- * exponential backoff (~35s total): brief network outages and the short
- * propagation window where a just-acknowledged session may not yet be
- * readable from the stream route.
- */
 export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
@@ -305,7 +283,6 @@ export async function openStreamBody(
   if (input.requestTailIndex === true) {
     searchParams.includeTailIndex = "1";
   }
-  // Recorded history stays readable after the session can no longer run.
   if (input.follow === false) {
     searchParams.follow = "false";
   }
@@ -362,7 +339,6 @@ export async function openStreamBody(
       try {
         readMessageStreamVersion(response.headers);
       } catch (error) {
-        // A follow stream otherwise stays open on the server, heartbeating to nobody.
         response.body.cancel().catch(() => {});
         connectionController.abort();
         throw error;
@@ -374,10 +350,6 @@ export async function openStreamBody(
         close: () => {
           if (closed) return;
           closed = true;
-          // Aborting a fetch after its response has resolved does not reliably
-          // propagate cancellation through every local HTTP transport. Cancel
-          // the body as well so its server-side Workflow stream releases its
-          // live chunk and close listeners before a reconnect opens another.
           response.body?.cancel().catch(() => {});
           connectionController.abort();
         },
@@ -390,7 +362,6 @@ export async function openStreamBody(
     lastHeaders = response.headers;
 
     const error = createClientError(response.status, lastBody, response.headers);
-    // 409 is retryable by default, but a stranded or earlier-eve session's 409 is final.
     if (!isRetryableStreamError(error, retryPolicy.retryableStatuses)) {
       throw error;
     }

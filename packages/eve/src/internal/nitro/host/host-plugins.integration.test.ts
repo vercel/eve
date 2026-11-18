@@ -1,8 +1,13 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
+import {
+  resolvePackageCompiledFilePath,
+  resolvePackageRoot,
+  resolveWorkflowModulePath,
+} from "#internal/application/package.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins, type HostPluginsInput } from "#internal/nitro/host/host-plugins.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
@@ -43,7 +48,6 @@ function plugins(overrides: Partial<HostPluginsInput> = {}): Plugin[] {
   );
 }
 
-/** Asserts each `[before, after]` plugin pair keeps its relative order. */
 function expectOrder(names: readonly string[], pairs: readonly (readonly [string, string])[]) {
   for (const [before, after] of pairs) {
     expect(names.indexOf(before), `${before} in ${names.join(", ")}`).toBeGreaterThanOrEqual(0);
@@ -109,7 +113,7 @@ describe("createHostPlugins", () => {
       await bundleThroughPlugins({ files: { [id]: STEP_SOURCE }, plugins: list, reexports: [id] });
 
     expect(await bundle(authoredStep)).toContain(
-      'registerStepFunction("step//./agent/steps/add//add", add)',
+      'registerStepFunction("step//./agent/steps/add//add", withWorkflowStepScope(add))',
     );
     expect(await bundle(distStep)).toContain(
       'registerStepFunction("step//./src/execution/fixture-step//add", add)',
@@ -133,8 +137,6 @@ describe("createHostPlugins", () => {
     });
     const builtins = resolveWorkflowModulePath("workflow/internal/builtins");
     const marker = (name: string) => `globalThis.marker = ${JSON.stringify(`${name} kept`)};\n`;
-    // Unclaimed modules are side-effect free, so the bundle drops every module
-    // the plugin does not keep.
     const code = await bundleThroughPlugins({
       files: {
         [`${WORKFLOW_DIR}/steps.mjs`]: [
@@ -163,5 +165,30 @@ describe("createHostPlugins", () => {
       expect(code).toContain(`${name} kept`);
     }
     expect(code).not.toContain("other kept");
+  });
+
+  it("loads eve's vendored dependencies natively in development hosts", async () => {
+    const eveModule = join(resolvePackageRoot(), "src", "internal", "fixture.ts");
+    const appModule = `${APP_ROOT}/agent/tools/fixture.ts`;
+    const nestedDependency = join(resolvePackageRoot(), "node_modules", "dep", "index.js");
+    const files = {
+      [eveModule]: 'export { z } from "#compiled/zod/index.js";\n',
+      [appModule]: 'export { z } from "#compiled/zod/index.js";\n',
+      [nestedDependency]: 'export { z } from "#compiled/zod/index.js";\n',
+    };
+    const bundle = async (native: boolean, id: string) =>
+      await bundleThroughPlugins({
+        files,
+        plugins: plugins({ loadVendoredDependenciesNatively: native }),
+        reexports: [id],
+      });
+    const nativeUrl = pathToFileURL(
+      resolvePackageCompiledFilePath("src/compiled/zod/index.js"),
+    ).href;
+
+    expect(await bundle(true, eveModule)).toContain(JSON.stringify(nativeUrl));
+    expect(await bundle(true, appModule)).toContain("unresolved:#compiled/zod/index.js");
+    expect(await bundle(true, nestedDependency)).toContain("unresolved:#compiled/zod/index.js");
+    expect(await bundle(false, eveModule)).toContain("unresolved:#compiled/zod/index.js");
   });
 });

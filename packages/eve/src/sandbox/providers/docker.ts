@@ -36,6 +36,10 @@ export function defineDockerSandboxProvider(
 
 const provider = defineDockerSandboxProvider();
 
+/**
+ * Sandbox provider that runs each sandbox in a local Docker container. Use `image(reference)` for
+ * an existing image, or `dockerfile()` for eve's default image or `agent/sandbox/Dockerfile`.
+ */
 export const DockerSandbox = {
   ...provider,
   dockerfile(

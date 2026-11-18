@@ -1,9 +1,5 @@
 import type { World } from "#compiled/@workflow/world/index.js";
 
-/**
- * Every session start claims its address atomically with admitting the run,
- * so a duplicate start is refused instead of becoming a second session.
- */
 export function assertStartClaims(world: World): void {
   if (world.capabilities?.atomicStartHook?.active === true) return;
   throw new Error(
@@ -11,12 +7,6 @@ export function assertStartClaims(world: World): void {
   );
 }
 
-/**
- * Mints the id `start()` will give the run and pins it on a view of the
- * World, so a start hook can carry metadata naming its own run. `start()`
- * names the run `wrun_<world.createRunId(options)>`; worlds without
- * `createRunId` get the same monotonic ULID `start()` would mint.
- */
 export function pinRunId(
   world: World,
   options: Readonly<Record<string, unknown>>,
@@ -40,7 +30,6 @@ function monotonicUlid(): string {
   const now = Date.now();
   if (now > lastTime) {
     lastTime = now;
-    // 256 is a multiple of 32, so masking keeps each digit uniform.
     lastRandom = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte & 31);
   } else {
     for (let index = 15; index >= 0; index--) {

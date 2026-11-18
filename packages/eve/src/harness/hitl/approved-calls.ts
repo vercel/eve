@@ -25,47 +25,30 @@ import type { ApprovedCall } from "#harness/session-machine/state.js";
 import { callSignInsSettled } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { AuthorizationChallenge, SignInCompleted } from "#harness/authorization.js";
+import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 
 export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
 
-/**
- * Runs approved local calls before the model reads their results. Like the calls a model step
- * runs inline, each streams its progress and result as it goes. The lifecycle owner places the
- * results in the steps that made the calls.
- */
-export async function runApprovedCalls(input: {
-  readonly approvals: readonly ApprovedCall[];
-  /** The entries of the step that asked, which the approved calls run. */
-  readonly tools: HarnessToolLookup;
-  readonly approvalMemory?: ApprovalMemory;
-  /** The conversation the tools read as `ctx.messages`. */
-  readonly messages: readonly ModelMessage[];
+export interface SignInReports {
+  readonly report: (call: ApprovedCall, failure?: Error | string) => Promise<void>;
+  readonly completed: (calls: readonly ApprovedCall[]) => SignInCompleted;
+}
+
+export function signInReports(input: {
   readonly publish: HandleEventFn;
-  readonly abortSignal: AbortSignal | undefined;
-  /** The step attempt's telemetry, which hears each execution as the AI SDK reports it. */
-  readonly telemetry?: TelemetryOptions;
-  /** Who approved each call, which it reads as `ctx.approval`; it still runs as the requester. */
-  readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
-  /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
   readonly view: () => Pick<SessionView, "projection">;
-}): Promise<{
-  readonly settled: readonly CallResult[];
-  readonly signIns: readonly ToolSignIn[];
-}> {
-  /**
-   * The sign-ins a call waited on end with the call, once `completeAuthorization` has run in it:
-   * accepted if it returned, failed with the reason it didn't. Reported before the call's result.
-   * A call that fails before its tool runs (its tool changed or went away, its stored input no
-   * longer validates, or the policy now refuses it) never reached `completeAuthorization`, so its
-   * failure isn't the sign-in's: the person finished signing in, and the call's own result tells
-   * the model why it didn't run.
-   */
-  const reportSignIns = async (call: ApprovedCall, failure?: Error | string): Promise<void> => {
-    if ((call.signIns?.length ?? 0) === 0) return;
+}): SignInReports {
+  const reported = new Map<string, Promise<void>>();
+  const settle = async (
+    call: ApprovedCall,
+    challenge: AuthorizationChallenge,
+    failure: Error | string | undefined,
+  ): Promise<void> => {
     const refused = isConnectionAuthorizationFailedError(failure) ? failure : undefined;
     const events = callSignInsSettled(
       input.view(),
-      call,
+      { ...call, signIns: [challenge] },
       failure === undefined
         ? undefined
         : {
@@ -76,6 +59,51 @@ export async function runApprovedCalls(input: {
     );
     if (events.length > 0) await input.publish(commitOf(events));
   };
+  const reportOne = (
+    call: ApprovedCall,
+    challenge: AuthorizationChallenge,
+    failure: Error | string | undefined,
+  ): Promise<void> => {
+    const key = signInAttemptKey(challenge);
+    let pending = reported.get(key);
+    if (pending === undefined) {
+      pending = settle(call, challenge, failure);
+      reported.set(key, pending);
+    }
+    return pending;
+  };
+  return {
+    report: async (call, failure) => {
+      await Promise.all(
+        (call.signIns ?? []).map((challenge) => reportOne(call, challenge, failure)),
+      );
+    },
+    completed: (calls) => async (result, failure) => {
+      if (result.attemptId === undefined) return;
+      for (const call of calls) {
+        const challenge = call.signIns?.find(({ attemptId }) => attemptId === result.attemptId);
+        if (challenge !== undefined) await reportOne(call, challenge, failure);
+      }
+    },
+  };
+}
+
+export async function runApprovedCalls(input: {
+  readonly approvals: readonly ApprovedCall[];
+  readonly tools: HarnessToolLookup;
+  readonly approvalMemory?: ApprovalMemory;
+  readonly messages: readonly ModelMessage[];
+  readonly publish: HandleEventFn;
+  readonly abortSignal: AbortSignal | undefined;
+  readonly telemetry?: TelemetryOptions;
+  readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
+  readonly view: () => Pick<SessionView, "projection">;
+  readonly signIns?: SignInReports;
+}): Promise<{
+  readonly settled: readonly CallResult[];
+  readonly signIns: readonly ToolSignIn[];
+}> {
+  const reportSignIns = (input.signIns ?? signInReports(input)).report;
   const executed = await Promise.allSettled(
     input.approvals.map(async (approval): Promise<CallOutcome> => {
       const { call } = approval;
@@ -102,7 +130,6 @@ export async function runApprovedCalls(input: {
           "recheck",
         );
       }
-      // A connection or dynamic tool can go away while its call waits for approval.
       const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;
       const message = unavailableToolMessage(toolName, searchable);
       const failed = failedCall({ callId, message, toolName });
@@ -112,9 +139,6 @@ export async function runApprovedCalls(input: {
     }),
   );
   const failed = executed.find((call) => call.status === "rejected");
-  // Only a cancellation rejects a call, and only one that hadn't started: it stays approved. The
-  // calls that settled keep their results, and the caller ends the cancelled turn after it
-  // records them.
   if (failed?.status === "rejected" && input.abortSignal?.aborted !== true) throw failed.reason;
   const completed = executed.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
   return {

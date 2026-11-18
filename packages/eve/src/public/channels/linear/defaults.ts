@@ -51,7 +51,6 @@ export function defaultLinearAuth(event: LinearAgentSessionEvent): SessionAuthCo
   };
 }
 
-/** Default Agent Session hook: dispatch created/prompted events with Linear user auth. */
 export function defaultOnAgentSession(
   _ctx: LinearSessionContext,
   event: LinearAgentSessionEvent,
@@ -60,13 +59,11 @@ export function defaultOnAgentSession(
   return { auth: defaultLinearAuth(event) };
 }
 
-/** Options used by built-in Linear event handlers. */
 interface LinearDefaultEventOptions {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
 }
 
-/** Built-in Linear event handlers for Agent Activity progress, replies, HITL, and errors. */
 export function createDefaultEvents(options: LinearDefaultEventOptions = {}): LinearChannelEvents {
   async function showPrompt(channel: LinearEventContext, request: Interaction): Promise<void> {
     await postActivity(
@@ -77,7 +74,6 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     );
   }
 
-  // A reply can only answer the elicitation it sees, so they post one at a time.
   const prompts = promptQueue(showPrompt);
 
   return {
@@ -113,7 +109,6 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         );
         return;
       }
-      // eve's own task controls, and tools that set `label: false`, stay out of view.
       if (!showsActivity(data.capability)) return;
       await postActivity(
         channel,
@@ -133,7 +128,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       const { data } = fact;
       const { channel } = ctx;
       const event = signInOf(sessionTables(ctx.view), data.interactionId);
-      if (event === undefined) return;
+      if (event === undefined || event.waitsOn !== undefined) return;
       const { displayName, url } = event;
       const userId = linearUserId(ctx);
       let authSignal: Parameters<typeof postActivity>[3];
@@ -163,7 +158,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       const { data } = fact;
       const { channel } = ctx;
       const event = signInOf(sessionTables(ctx.view), data.interactionId);
-      if (event === undefined) return;
+      if (event === undefined || event.waitsOn !== undefined) return;
       const { displayName } = event;
       if (data.outcome === "accepted") {
         await postActivity(
@@ -186,7 +181,6 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
 
     async "content.completed"({ data }, { channel }) {
       if (data.kind !== "text" || typeof data.value !== "string") return;
-      // Narration before calls posts as a thought with the next call.
       if (contentPhase(data.phase) === "narration") {
         channel.state.pendingToolCallMessage = data.value
           ? (firstNonEmptyLine(data.value) ?? null)

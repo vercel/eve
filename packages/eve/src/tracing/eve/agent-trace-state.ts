@@ -47,7 +47,6 @@ export interface AgentTurnChannelDeliveryTraceState {
   readonly requestTraceContext?: SpanContext;
 }
 
-/** Locates a dispatched tool call in its turn's trace tree, after the turn's own state is gone. */
 export interface AgentActionTraceState {
   readonly attemptId?: string;
   readonly attemptIndex: number;
@@ -57,12 +56,10 @@ export interface AgentActionTraceState {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly stepIndex: number;
-  /** When the SDK execution finished, for dispatches that report no acceptance time. */
   readonly toolEndTimeMs?: number;
   readonly turnId: string;
 }
 
-/** Provider-owned serializable storage for durable agent trace state. */
 export interface AgentTraceStateStore {
   get<K extends keyof AgentTraceValues>(
     kind: K,

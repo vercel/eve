@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { Client } from "../../src/client/client.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
-import { startEveDev } from "./dev-server-harness.js";
+import { startEveDev } from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 

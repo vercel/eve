@@ -16,7 +16,7 @@ import { SessionIdKey } from "#context/keys.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
@@ -25,7 +25,6 @@ import { eveOutputMapping } from "#tracing/eve/profile.js";
 
 const log = createLogger("connection.events");
 
-/** Only carry a validated W3C identity across durable steps, never baggage or content policy. */
 export function connectionEventTraceContext(value: unknown): SpanContext | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const { traceId, spanId, traceFlags } = value as Partial<SpanContext>;
@@ -58,7 +57,6 @@ export function connectionEventAttributes(input: {
   return attributes;
 }
 
-/** Preserve diagnostic categories without logging SDK request objects or provider response bodies. */
 export function connectionEventError(error: unknown): Error {
   const summary = new Error("Connection event operation failed");
   if (
@@ -109,7 +107,6 @@ type EventOperation =
   | "onGap"
   | "onTerminated";
 
-/** No model turn is needed to restore a session's trace policy in a durable event step. */
 export async function withConnectionEventSpan<T>(
   input: {
     ctx: AlsContext;
@@ -135,7 +132,6 @@ export async function withConnectionEventSpan<T>(
       try {
         return await execute(reference);
       } catch (error) {
-        // SDK and callback errors can include tokens or event bodies. Keep logs structural, too.
         logError(log, "connection event operation failed", connectionEventError(error), {
           ...attributes,
           operation: input.operation,
@@ -151,7 +147,7 @@ export async function withConnectionEventSpan<T>(
       saved?.decision ??
       resolveTracePolicy(settings.tracePolicy, {
         ...session.conversation,
-        agentName: input.ctx.require(BundleKey).resolvedAgent.config?.name ?? "eve",
+        agentName: sessionAgent(input.ctx).name ?? "eve",
       });
     const active = activeTraceOperation();
     const reference =

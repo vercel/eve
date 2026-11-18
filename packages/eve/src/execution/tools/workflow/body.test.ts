@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { expect, it, vi } from "vitest";
 import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
@@ -22,6 +23,7 @@ const agentContext = {
 
 const input = {
   agentContext,
+  host: workflowRunHost,
   callId: "call",
   entry: { entryPoint: "execute" },
   hookToken: "control",
@@ -73,8 +75,6 @@ it("points a workflow body that opens the sandbox to a step helper", async () =>
   });
 });
 
-// #3836: a selected option's answer carries `text: undefined`, and a tool that
-// returns it as-is, or returns nothing, must still complete with JSON.
 it.each([
   { expected: { optionId: "yes", status: "answered" }, returnsAnswer: true },
   { expected: null, returnsAnswer: false },

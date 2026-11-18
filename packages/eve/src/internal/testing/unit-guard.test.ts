@@ -3,12 +3,6 @@ import * as fs from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
-/**
- * Self-tests for the unit-guard setup file. These assertions confirm that the
- * guard is active when this file is loaded and that legitimate read-only
- * operations remain available.
- */
-
 describe("unit-guard", () => {
   it("blocks fs/promises write operations", async () => {
     await expect(fsPromises.writeFile("/tmp/eve-unit-guard-probe", "")).rejects.toThrow(

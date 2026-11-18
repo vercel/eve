@@ -33,38 +33,18 @@ import type { KernelConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
-/**
- * Factory that creates a {@link Runtime} for the given compiled
- * artifacts source and optional node id. Matches the signature of
- * `createWorkflowRuntime`, so callers pass the constructor directly —
- * no wrapper needed.
- */
-type CreateRuntime = (config: {
+export type CreateRuntime = (config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
 }) => Runtime;
 
-/**
- * Input for building a harness step for one resolved runtime node.
- */
 interface CreateExecutionNodeStepInput {
   readonly steeringSignal?: AbortSignal;
-  /** Cancellation signal forwarded to the kernel. */
   readonly abortSignal?: AbortSignal;
-  /**
-   * Session-level capabilities propagated from the runtime, so
-   * capability-gated behavior tracks the current run.
-   */
   readonly capabilities?: SessionCapabilities;
-  /** Runs only a context clear and returns to the parked session. */
   readonly clearOnly?: boolean;
-  /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
   readonly controlDelivery?: KernelConfig["controlDelivery"];
-  /**
-   * Runtime constructor used by the subagent tool executor to start
-   * delegated child runs on the same workflow runtime as the parent.
-   */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
   readonly signInCompletions?: KernelConfig["signInCompletions"];
@@ -72,14 +52,11 @@ interface CreateExecutionNodeStepInput {
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly setAttributes?: KernelConfig["setAttributes"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
+  readonly agent: RuntimeAgentIdentity;
   readonly node: ResolvedRuntimeAgentNode;
   readonly sessionUsageLimit?: KernelConfig["sessionUsageLimit"];
 }
 
-/**
- * Builds a harness step for one resolved runtime node using the execution-owned
- * tool, sandbox, and subagent wiring.
- */
 export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
   const tools = createNodeHarnessTools({ node: input.node });
@@ -97,7 +74,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     signInCompletions: input.signInCompletions,
     typedAnswers: input.typedAnswers,
     resolveModel,
-    runtimeIdentity: buildRuntimeIdentity(input.node),
+    runtimeIdentity: buildRuntimeIdentity(input.agent),
     sessionUsageLimit: input.sessionUsageLimit,
     tools,
     setAttributes: input.setAttributes,
@@ -112,16 +89,17 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   };
 }
 
-/**
- * Builds a {@link RuntimeIdentity} from the resolved runtime agent node
- * and the current eve package installation.
- */
-export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
+export interface RuntimeAgentIdentity {
+  readonly id: string;
+  readonly name?: string;
+}
+
+export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdentity {
   const packageInfo = resolveInstalledPackageInfo();
 
   const identity: RuntimeIdentity = {
-    agentId: node.turnAgent.id,
-    agentName: node.agent.config?.name,
+    agentId: agent.id,
+    agentName: agent.name,
     eveVersion: packageInfo.version,
   };
 
@@ -149,13 +127,6 @@ function createRuntimeModelResolver(
   return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
 }
 
-/**
- * Resolves unified {@link HarnessToolDefinition}s from the node's registries.
- *
- * For authored tools: copies all lifecycle fields from the resolved definition.
- * Prepared workflow-backed tools share the workflow-tool harness path.
- * Tools without `execute` (provider-managed) get entries with schema but no execute.
- */
 export function createNodeHarnessTools(input: {
   readonly node: ResolvedRuntimeAgentNode;
 }): HarnessToolMap {
@@ -198,7 +169,6 @@ function resolveHarnessToolDefinition(input: {
   }
 
   if (registeredTool === null) {
-    // Declared on the graph but absent from the registry (failed import, renamed export).
     log.warn("declared tool is not registered — omitting from toolset", {
       toolName: input.tool.name,
       nodeId: input.node.nodeId,
@@ -249,14 +219,6 @@ function createRegisteredHarnessToolDefinition(input: {
   return definition;
 }
 
-/**
- * Selects the harness-facing `execute` for one authored tool.
- *
- * - Source-backed tools are wrapped by {@link createToolExecuteWithAuth},
- *   which builds a token-aware context. Providers passed to
- *   `ctx.getToken(provider)` use tool-qualified auth scopes.
- * - Tools without `execute` (provider-managed) stay `undefined`.
- */
 function resolveAuthoredExecute(input: {
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;

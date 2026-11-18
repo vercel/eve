@@ -144,8 +144,6 @@ describe("discoverEvalFiles", () => {
 
     const evalsDir = join(tempDir, "evals");
     await mkdir(evalsDir, { recursive: true });
-    // Dataset evals build their rows with top-level await (ESM), so the
-    // authored-module bundler must support it.
     await writeFile(
       join(evalsDir, "dataset.eval.ts"),
       [

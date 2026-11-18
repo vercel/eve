@@ -2,11 +2,8 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { replyTextOf } from "#public/channels/reply.js";
 import { extname } from "node:path";
 
-/** Formats the user and assistant messages observed in one eval session. */
 export function formatEvalTranscript(events: readonly SessionStreamEvent[]): string {
   const messages: string[] = [];
-  // Imported history of the deliveries one line consumes precedes their messages, as the model
-  // reads them.
   let consumed: { readonly line: number | undefined; at: number } | undefined;
   for (const event of events) {
     const line = event.meta?.position?.line;
@@ -28,7 +25,6 @@ export function formatEvalTranscript(events: readonly SessionStreamEvent[]): str
   return messages.join("\n\n");
 }
 
-/** Infers the media type used when an eval attaches a local file. */
 export function inferMediaType(filePath: string): string {
   switch (extname(filePath).toLowerCase()) {
     case ".gif":

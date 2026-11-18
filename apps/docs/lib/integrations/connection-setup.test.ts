@@ -59,6 +59,30 @@ describe("Firecrawl connection setup", () => {
   });
 });
 
+describe("Context7 connection setup", () => {
+  it("shows the installed connection file with its tool allowlist in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/context7.ts", import.meta.url),
+      "utf8",
+    );
+    const quickStart = getIntegration("context7")!.quickStart!;
+
+    expect(quickStart).toContain(source.trim());
+    expect(quickStart).toContain('tools: { allow: ["resolve-library-id", "query-docs"] }');
+  });
+});
+
+describe("Stacktree connection setup", () => {
+  it("keeps the installed approval and Bearer authorization policy in the gallery", () => {
+    const integration = getIntegration("stacktree")!;
+    const quickStart = integration.quickStart!;
+
+    expect(quickStart).toContain("authorization: `Bearer ${process.env.STACKTREE_API_KEY!}`");
+    expect(quickStart).toContain('import { always } from "eve/tools/approval"');
+    expect(quickStart).toContain("approval: always()");
+  });
+});
+
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;
@@ -224,6 +248,26 @@ describe("Nimble extension setup", () => {
     expect(integration.configure).toContain("untrusted third-party content");
     expect(integration.configure).toContain("billable, non-idempotent");
     expect(integration.configure).toContain("requires approval for every call");
+  });
+});
+
+describe("Sanity Context extension setup", () => {
+  it("documents the organization-token mount and links the Sanity connection", () => {
+    const integration = getIntegration("sanity-context")!;
+
+    expect(integration.type).toBe("extension");
+    expect(integration.install).toContain("eve add extension/sanity-context");
+    expect(integration.quickStart).toContain("SANITY_CONTEXT_MCP_URL");
+    expect(integration.quickStart).toContain("SANITY_ORGANIZATION_TOKEN");
+    expect(integration.quickStart).toContain('import sanityContext from "@sanity/context-eve"');
+    expect(integration.quickStart).toContain("agent/extensions/sanity-context.ts");
+    expect(integration.configure).toContain("All tools are read-only.");
+    expect(integration.relatedResources?.map((resource) => resource.href)).toContain(
+      "/integrations/sanity",
+    );
+    expect(getIntegration("sanity")!.relatedResources?.map((resource) => resource.href)).toContain(
+      "/integrations/sanity-context",
+    );
   });
 });
 

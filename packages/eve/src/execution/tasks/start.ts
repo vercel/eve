@@ -40,24 +40,15 @@ const log = createLogger("execution.tasks");
 
 type TaskDispatchInput = StartWorkflowTaskInput & { readonly taskId: string };
 
-/** The call's answer, and the task start the dispatch reports for it. */
 interface TaskDispatchResult {
   readonly result: RuntimeToolResultActionResult;
   readonly session: HarnessSessionBase;
   readonly started?: TaskCallStart;
-  /** A dispatch admission refused the call before any run started. Not inferred from output. */
   readonly refusal?: "task-limit" | "task-unavailable";
 }
 
-/** The entry of a run that does a task's work. */
 type TaskRunEntry = Extract<WorkflowToolRunEntry, { readonly taskId: string }>;
 
-/**
- * Starts the run for a task its model step committed, once, and answers the
- * call with its receipt and the `task.started` data the next step publishes.
- * Runs inside the dispatch step, where the task's cap is enforced: past it,
- * the record is dropped and the call fails.
- */
 export async function startTaskRun(
   input: StartWorkflowTaskInput & { readonly entry: TaskRunEntry },
   admissionView = storedProjection(input.session.state).view,
@@ -68,7 +59,6 @@ export async function startTaskRun(
   const receipt = startReceipt(dispatch, entry.entryPoint === "serve");
   const table = readTaskTable(session.state);
   const record = findTask(table, taskId);
-  // Cancelled before the session could start it: there is nothing to run.
   if (admissionView.calls[task.callId]?.status === "settled") return { result: receipt, session };
   if (record === undefined)
     return {
@@ -103,12 +93,6 @@ export async function startTaskRun(
   };
 }
 
-/**
- * Sends a call to the `serve` task it names by `taskId`. The task must be
- * available to the tool, and a call that makes an idle task work again
- * counts toward the cap. The call is recorded, reported as started, and sent
- * to the task's run, whose body receives it from `receive()`.
- */
 export async function sendToTask(
   input: TaskDispatchInput,
   admissionView = storedProjection(input.session.state).view,
@@ -146,11 +130,6 @@ export async function sendToTask(
   };
 }
 
-/**
- * The entry of the run that dispatching `task` starts, or `undefined` when it
- * starts none: a call to a running task, or a task cancelled before the
- * session could start it. The task cap can still refuse a task's run.
- */
 export function runEntryToStart(
   table: TaskTable,
   view: SessionView,
@@ -171,11 +150,6 @@ export function runEntryToStart(
   }
 }
 
-/**
- * Whether dispatching `tasks` in order starts every run {@link runEntryToStart}
- * names. A call to a running task can take a slot under the task cap, and
- * sending to it can fail the batch, so such a batch never qualifies.
- */
 export function startsEveryRun(
   table: TaskTable,
   view: SessionView,
@@ -193,7 +167,6 @@ function workingTasks(view: SessionView) {
   return tasks(view, { status: "working" });
 }
 
-/** The `TOO_MANY_TASKS` error when the session already runs as many tasks as it may. */
 function tooManyTasks(
   input: TaskDispatchInput,
   view: SessionView,

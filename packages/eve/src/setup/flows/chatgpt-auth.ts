@@ -39,7 +39,6 @@ interface ChatGptAuthOptions {
   readonly headless?: boolean;
 }
 
-/** Signs in through the credential owner selected by the ChatGPT auth facade. */
 export async function ensureChatGptAuth(options: ChatGptAuthOptions = {}): Promise<void> {
   const broker = options.broker ?? getDefaultCodexTokenBroker();
   const store = options.store ?? getDefaultChatGptCredentialStore();
@@ -170,7 +169,6 @@ async function browserLogin(options: LoginOptions): Promise<ChatGptCredentials> 
     originator: "eve",
   }).toString();
   const callback = Promise.withResolvers<string>();
-  // Attach rejection handling before the listener starts, including immediate cancellation.
   void callback.promise.catch(() => {});
   const server = createServer(
     { requestTimeout: 10_000, headersTimeout: 10_000, maxHeaderSize: 8192 },

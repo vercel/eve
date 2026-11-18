@@ -7,15 +7,10 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { commitOf } from "./commit.js";
 
-// The context family's commits: a compaction change opens, its summary run starts, and the change
-// settles, completed or failed, with what its summary run spent.
-
-/** A context change starts. */
 export function startChange(data: FactOf<"context.started">["data"]): Commit {
   return commitOf([contextStarted(data)]);
 }
 
-/** A change's summary run is asked for and starts, in one commit. */
 export function startSummaryRun(input: {
   readonly changeId: string;
   readonly runId: string;
@@ -27,10 +22,6 @@ export function startSummaryRun(input: {
   ]);
 }
 
-/**
- * A compaction completes. Its summary run completes when a summary call returned, with what the
- * calls spent; a run that opened and returned nothing is abandoned.
- */
 export function completeCompaction(input: {
   readonly changeId: string;
   readonly runId: string;
@@ -52,7 +43,6 @@ export function completeCompaction(input: {
   ]);
 }
 
-/** A change's summary run failed, and the change with it; the run records what it spent. */
 export function failChange(
   view: SessionView,
   input: {
@@ -63,7 +53,6 @@ export function failChange(
 ): Commit {
   if (view.changes[input.changeId]?.status !== "running") return commitOf([]);
   const error = { code: "COMPACTION_FAILED", message: toErrorMessage(input.error) };
-  // The writer closes what else the run and its change held.
   const runs = openWork(view, { changeId: input.changeId }).runs;
   const { spent } = input;
   return commitOf([

@@ -19,7 +19,6 @@ import type { InteractionRequest } from "#protocol/session-events/families/inter
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
-// `any` passes through so `ToolDefinition<any, any>` stays the type every defined tool fits.
 type ApprovalContextInput<TInput> = 0 extends 1 & TInput
   ? TInput
   : unknown extends TInput
@@ -30,7 +29,6 @@ export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#too
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context"> & {
-  /** Who approved the call, when it runs after a person approved it. */
   readonly approval?: { readonly responder: SessionAuthContext };
 };
 
@@ -50,6 +48,7 @@ interface ToolDefinitionBase {
   readonly description: string;
 }
 
+/** Activity text for a tool's calls, shown by channels while a call runs and after it completes. */
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   /** Returns the presentation-safe label when one action invocation starts. */
   start(input: Readonly<TInput>): string;
@@ -59,13 +58,6 @@ export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string;
 }
 
-/**
- * Internal/compiled tool definition shape. Carries `name` because the
- * compiler stamps a path-derived identifier onto every tool entry.
- *
- * Authored public definitions (see {@link PublicToolDefinition}) do not
- * carry `name`; identity comes from the file path.
- */
 export interface InternalToolLabelDefinition {
   readonly complete?: (input: unknown, output: unknown) => string;
   readonly delta?: (input: unknown, partial: unknown) => string;
@@ -124,7 +116,7 @@ export interface InternalToolDefinitionWithExecuteFn<
  */
 export type ToolQuestion = Pick<
   InteractionRequest,
-  "prompt" | "title" | "options" | "allowFreeform" | "display"
+  "prompt" | "title" | "options" | "allowFreeform" | "display" | "initialOptionId"
 >;
 
 /**
@@ -281,10 +273,12 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   /**
    * Ends the turn after this tool succeeds, without another model call and
    * without a final reply. Use it for a tool whose action is the whole
-   * answer, such as reacting to a message. The turn ends only when every
-   * tool call in the model's step ends the turn and succeeds; a failed call
-   * lets the model recover. Ignored in delegated sessions, which must return
-   * a reply to their caller, and on turns that request structured output.
+   * answer, such as reacting to a message. Other tool calls in the same
+   * model step still run, including ones that wait on approval or a
+   * workflow, and the turn ends once they all settle, whatever their
+   * outcome; a failed ending call lets the model recover. Ignored in
+   * delegated sessions, which must return a reply to their caller, and on
+   * turns that request structured output.
    * With `true`, eve appends a sentence to the description the model sees
    * telling it the call ends its turn, so write `description` for what the
    * tool does.
@@ -486,10 +480,6 @@ export function disableTool(): DisabledToolSentinel {
   return { [DISABLED_TOOL]: true };
 }
 
-/**
- * Type guard: returns whether `value` is a {@link DisabledToolSentinel}
- * produced by {@link disableTool}.
- */
 export function isDisabledToolSentinel(value: unknown): value is DisabledToolSentinel {
   return typeof value === "object" && value !== null && Reflect.get(value, DISABLED_TOOL) === true;
 }

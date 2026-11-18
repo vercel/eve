@@ -1,7 +1,3 @@
-// The model response a step suspends while its calls run, and where their results go in it: a
-// step commits to history once every call it made has a result, so the model never reads a
-// call without one.
-
 import type { ModelMessage, ToolCallPart } from "ai";
 
 import type { SuspendedStep, TurnState } from "./state.js";
@@ -10,12 +6,10 @@ import { answeredCallIds } from "./view.js";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 export type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-/** The turn with `step` suspended after the steps it already holds. */
 export function suspend(turn: TurnState, step: SuspendedStep): TurnState {
   return { ...turn, suspended: [...turn.suspended, step] };
 }
 
-/** The ids of the calls a step's response made, except provider-executed ones. */
 export function stepCallIds(step: Pick<SuspendedStep, "messages">): ReadonlySet<string> {
   const ids = new Set<string>();
   for (const message of step.messages) {
@@ -27,16 +21,11 @@ export function stepCallIds(step: Pick<SuspendedStep, "messages">): ReadonlySet<
   return ids;
 }
 
-/** Every call the step made has a result: a pending approval's call has none yet. */
 export function isComplete(step: SuspendedStep): boolean {
   const answered = answeredCallIds(step.messages);
   return [...stepCallIds(step)].every((callId) => answered.has(callId));
 }
 
-/**
- * Places a result right after the message that made its call, under the call's name: a call
- * made through `eve__tool` or `eve__skill` keeps that name in history, whatever entry it ran.
- */
 export function withResult(
   messages: readonly ModelMessage[],
   result: ToolResultPart,
@@ -57,7 +46,6 @@ export function withResult(
   return next;
 }
 
-/** The messages without the results of the calls in `callIds`, which stay as unanswered calls. */
 export function withoutResults(
   messages: readonly ModelMessage[],
   callIds: ReadonlySet<string>,
@@ -71,7 +59,6 @@ export function withoutResults(
   });
 }
 
-/** The call with this id, and the index of the message that made it. */
 function findCall(
   messages: readonly ModelMessage[],
   callId: string,

@@ -118,9 +118,6 @@ describe("registerInstrumentationProvider", () => {
     expect(getInstrumentationProviders()).toEqual([]);
   });
 
-  // A slot that registers nothing is telemetry that silently does nothing —
-  // the failure this surface exists to prevent — so the shape check throws
-  // rather than skipping the file.
   it.each([
     ["a bare object", { events: {} }],
     ["a function", () => {}],
@@ -307,9 +304,6 @@ describe("finalizeInstrumentationProviders", () => {
   });
 
   it("still runs execution when no destination was declared", async () => {
-    // A directory with no `otel()` has nothing to hang a span on, so
-    // `runInContext` degrades to running the work directly rather than
-    // going missing.
     await register("rows", defineInstrumentation({}));
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });

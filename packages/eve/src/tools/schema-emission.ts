@@ -3,24 +3,14 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ToolSchemaSource } from "#tools/schema.js";
 
-// Kept apart from `#tools/schema.js`, which loads the AI SDK and a JSON Schema
-// validator: workflow code serializes `ctx.agent` output schemas with this
-// module, and everything it imports ships in every workflow bundle.
-
 export type SchemaDirection = "input" | "output";
 
-/** `null` and `undefined` pass through every conversion untouched. */
 export type SchemaResult<TSource, TResult> = TSource extends null | undefined ? TSource : TResult;
 
 type JsonSchemaEmitter = StandardJSONSchemaV1.Converter[SchemaDirection];
 
 const JSON_SCHEMA_TARGET: StandardJSONSchemaV1.Target = "draft-07";
 
-/**
- * Serializes an output schema source into canonical JSON Schema data (no
- * `$schema` key) for compiled artifacts, durable state, and protocol
- * responses. `null` and `undefined` pass through untouched.
- */
 export function serializeOutputSchema<T extends ToolSchemaSource | null | undefined>(
   source: T,
 ): SchemaResult<T, JsonObject> {
@@ -28,12 +18,6 @@ export function serializeOutputSchema<T extends ToolSchemaSource | null | undefi
   return emitJsonSchema(source, "output") as SchemaResult<T, JsonObject>;
 }
 
-/**
- * Normalizes one source into canonical JSON Schema data. Standard Schemas
- * emit their requested direction; plain data passes through. The `$schema`
- * version key is always stripped so every eve boundary carries one canonical
- * wire form.
- */
 export function emitJsonSchema(source: ToolSchemaSource, direction: SchemaDirection): JsonObject {
   const standard = getStandardSchemaProperties(source);
   if (standard === undefined) return withoutSchemaVersion(parseJsonObject(source));

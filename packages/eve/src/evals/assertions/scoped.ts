@@ -19,7 +19,6 @@ type AssertionScope =
       select(): EveEvalAssertionSubject;
     };
 
-/** Binds the shared assertion vocabulary to one aggregate, session, or turn scope. */
 export function createScopedAssertions(
   collector: AssertionCollector,
   scope: AssertionScope,
@@ -51,7 +50,6 @@ export function createScopedAssertions(
   };
 }
 
-/** Binds output-only assertions to a session or immutable turn snapshot. */
 export function createOutputAssertions(
   collector: AssertionCollector,
   scope: Extract<AssertionScope, { timing: "snapshot" }>,

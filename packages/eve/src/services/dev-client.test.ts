@@ -297,7 +297,6 @@ function createDevFetchMock(input: {
     return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
-          // Each read answers the latest accepted delivery with one completed turn.
           controller.enqueue(
             encoder.encode(
               testTurnFacts(0, "Done.", [`delivery-${nextDeliveryIndex}`])

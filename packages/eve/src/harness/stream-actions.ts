@@ -13,7 +13,6 @@ interface ProviderStreamActionBatch {
   observe(action: RuntimeActionRequestProjection): void;
 }
 
-/** Batches provider-managed calls that arrive in one streamed model response. */
 export function createProviderStreamActionBatch(input: {
   readonly emitFn: HarnessEmitFn;
   readonly state: ActionEventCoordinates;
@@ -34,7 +33,6 @@ export function createProviderStreamActionBatch(input: {
 
     const actions = [...pendingActions.values()];
     pendingActions.clear();
-    // The provider runs these as it streams: each is requested and started in one commit.
     const runId = input.state.runId ?? `${input.state.turnId}.run`;
     await input.emitFn(
       requestProviderCalls(

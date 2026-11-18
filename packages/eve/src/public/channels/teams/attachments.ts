@@ -27,9 +27,7 @@ const BOT_CONNECTOR_HOSTS = new Set([
   "smba.infra.gov.teams.microsoft.us",
   "smba.infra.dod.teams.microsoft.us",
 ]);
-// Files a person uploads to a bot download from a pre-authenticated SharePoint URL.
 const SHAREPOINT_HOST_SUFFIXES = [".sharepoint.com", ".sharepoint.us"];
-// `fileType` on a Teams file upload is the file's extension.
 const FILE_TYPE_MEDIA_TYPES: Readonly<Record<string, string>> = {
   csv: "text/csv",
   gif: "image/gif",
@@ -65,7 +63,6 @@ export interface TeamsFilesPolicy {
   readonly uploadPolicy: UploadPolicy;
 }
 
-/** Normalizes author-provided Teams file options. */
 export function normalizeTeamsFilesPolicy(config: TeamsFilesConfig | undefined): TeamsFilesPolicy {
   return {
     allowedHosts: config?.allowedHosts ?? [],
@@ -74,7 +71,6 @@ export function normalizeTeamsFilesPolicy(config: TeamsFilesConfig | undefined):
   };
 }
 
-/** Collects Teams attachment file parts unless file support is disabled. */
 export function collectTeamsFileParts(
   attachments: readonly TeamsAttachment[],
   policy: TeamsFilesPolicy,
@@ -97,7 +93,6 @@ export function collectTeamsFileParts(
   return parts;
 }
 
-/** Combines text + file parts into the MessagePart[] shape expected by the harness. */
 export function buildTeamsTurnMessage(
   text: string,
   fileParts: readonly MessageFilePart[],
@@ -109,11 +104,6 @@ export function buildTeamsTurnMessage(
   return [textPart, ...fileParts];
 }
 
-/**
- * Builds the channel `fetchFile` resolver for Teams file URLs. Returns null when
- * files are disabled or the URL host is not in `allowedHosts`; otherwise fetches
- * the bytes and throws on a non-2xx response.
- */
 export function createTeamsFetchFile(
   policy: TeamsFilesPolicy,
   api: TeamsApiOptions = {},

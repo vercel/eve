@@ -231,7 +231,6 @@ describe("McpConnectionClient", () => {
     });
     const sent = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
     try {
-      // Approved calls in one step run in parallel, in one context.
       await contextStorage.run(ctxWithAuth(userAuth("alice")), async () => {
         await new McpConnectionClient(connection).connect();
         const fetch: typeof globalThis.fetch = createMCPClient.mock.calls[0]![0].transport.fetch;
@@ -524,8 +523,6 @@ describe("McpConnectionClient authorization recovery", () => {
     await contextStorage.run(ctx, async () => {
       const err = await mcpClient.getToolMetadata().catch((e) => e);
       expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
-      // The bearer was cached during connect() and must be evicted on 401
-      // so the re-authorization retry does not reuse the dead token.
       expect(ctx.get(ConnectionAuthorizationTokensKey)?.test).toEqual({});
     });
   });
@@ -542,7 +539,6 @@ describe("McpConnectionClient without a token yet", () => {
     });
   }
 
-  /** An authorization that has no token until `signIn()` is called. */
   function pendingSignIn() {
     let token: string | undefined;
     const evict = vi.fn();
@@ -620,7 +616,6 @@ describe("McpConnectionClient without a token yet", () => {
     expect(err.message).toBe(
       'Connection "test" requires authorization (the server requires sign-in).',
     );
-    // There was no bearer to evict.
     expect(auth.evict).not.toHaveBeenCalled();
   });
 
@@ -690,7 +685,6 @@ describe("McpConnectionClient without a token yet", () => {
       }),
     );
 
-    // Eviction needs a runtime scope.
     const err = await contextStorage.run(ctxWithAuth(null), () =>
       client.executeTool("protected_tool", {}, { callId: "c1" }).catch((e) => e),
     );
@@ -1001,8 +995,6 @@ describe("resolveHeaders with an active context (principal resolution + cache)",
   });
 
   it("throws ConnectionAuthorizationFailedError (principal_required) for user-typed connections without any active context", async () => {
-    // No contextStorage.run wrapper here — this mirrors ad-hoc CLI /
-    // unit-test use where the session plumbing has not been set up.
     const connection = makeConnection({
       authorization: {
         getToken: async () => ({ token: "never-read" }),

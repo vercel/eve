@@ -29,7 +29,6 @@ export interface ResolvedVercelDeployment {
   readonly environment: string;
 }
 
-/** Proof that Vercel resolved one exact HTTPS origin under an authenticated scope. */
 export interface VerifiedVercelTarget {
   readonly [verifiedVercelTargetBrand]: true;
   readonly origin: `https://${string}`;
@@ -61,12 +60,10 @@ export interface VercelDeploymentResolutionDeps {
 
 type VercelDeploymentLookupScope =
   | {
-      /** An explicit Vercel scope selected for this lookup. */
       readonly scope?: string;
       readonly source?: never;
     }
   | {
-      /** A known project source, which also cross-checks the returned project id. */
       readonly scope?: never;
       readonly source: Pick<VercelProjectReference, "orgId" | "projectId">;
     };
@@ -81,7 +78,6 @@ function environmentForDeployment(deployment: z.infer<typeof VercelDeploymentSch
   return deployment.target === "production" ? "production" : "preview";
 }
 
-/** Resolves a Vercel deployment URL to its project and target environment. */
 export async function resolveVercelDeployment(
   input: {
     readonly workspaceRoot: string;
@@ -91,9 +87,6 @@ export async function resolveVercelDeployment(
   } & VercelDeploymentLookupScope,
 ): Promise<VercelDeploymentResolution> {
   const deps = { ...defaultDeps, ...input.deps };
-  // A deployment hostname is globally unique, so Vercel resolves it under the
-  // caller's own access without a scope. A selected scope repeats that lookup
-  // for one team; a known project source also cross-checks the returned project.
   const source = input.source;
   const scope = input.scope ?? source?.orgId;
 
@@ -118,8 +111,6 @@ export async function resolveVercelDeployment(
       return { kind: "cancelled" };
     }
     if (isNotFoundApiFailure(result.failure)) return { kind: "not-found" };
-    // A denied scope (e.g. an expired team SSO session) is distinct from a
-    // genuine miss: the caller can re-authenticate and retry.
     if (isForbiddenApiFailure(result.failure)) return { kind: "forbidden" };
     return { kind: "failed", failure: { cause: "vercel", failure: result.failure } };
   }
@@ -162,10 +153,6 @@ export async function resolveVercelDeployment(
       origin,
       deployment: {
         provider: "vercel",
-        // The OIDC `owner_id` claim and Trusted Sources key on the canonical
-        // team/owner id. Vercel's response carries it, so the verified target
-        // takes the owner from there rather than from any scope the caller may
-        // have queried with (which can be a slug).
         ownerId: parsed.data.ownerId,
         projectId: parsed.data.projectId,
         projectName: parsed.data.name,

@@ -89,10 +89,7 @@ export function createRemoteConnectionController(
       const resolveToken = async () =>
         (await options.resolveOidcToken?.(resolved.target.deployment)) ?? "";
       return options.credentials.authorize({ target: resolved.target, resolveToken });
-    } catch {
-      // Deployment metadata and ambient credentials are optional. The anonymous
-      // probe below remains the authoritative connection result.
-    }
+    } catch {}
     return undefined;
   };
 

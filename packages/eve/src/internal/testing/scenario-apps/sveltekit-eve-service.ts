@@ -8,15 +8,12 @@ interface SvelteKitEveServiceDescriptorOptions {
   readonly installDependencies?: boolean;
 }
 
-/**
- * A SvelteKit host with a generated eve Vercel service.
- */
 export function createSvelteKitEveServiceDescriptor(
   options: SvelteKitEveServiceDescriptorOptions = {},
 ): ScenarioAppDescriptor {
   return {
     dependencies: {
-      "@sveltejs/adapter-vercel": "^6.3.0",
+      "@sveltejs/adapter-vercel": "^6.3.5",
       "@sveltejs/kit": SVELTEKIT_VERSION,
       svelte: SVELTE_VERSION,
       vite: VITE_VERSION,

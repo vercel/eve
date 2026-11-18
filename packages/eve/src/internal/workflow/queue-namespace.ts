@@ -1,6 +1,5 @@
 export const WORKFLOW_QUEUE_NAMESPACE_ENV = "WORKFLOW_QUEUE_NAMESPACE";
 
-/** Derives a stable Workflow queue namespace from an eve agent's unique name. */
 export function deriveEveWorkflowQueueNamespace(agentName: string): string {
   const encodedAgentName = Array.from(new TextEncoder().encode(agentName), (byte) =>
     byte.toString(16).padStart(2, "0"),
@@ -9,22 +8,18 @@ export function deriveEveWorkflowQueueNamespace(agentName: string): string {
   return `eve${encodedAgentName}`;
 }
 
-/** Formats the Workflow queue prefix for an installed namespace. */
 export function workflowQueuePrefix(namespace: string): string {
   return `__${namespace}_wkf_workflow_`;
 }
 
-/** Derives the queue prefix consumed by an eve agent's workflow handler. */
 export function deriveEveWorkflowQueuePrefix(agentName: string): string {
   return workflowQueuePrefix(deriveEveWorkflowQueueNamespace(agentName));
 }
 
-/** Derives the queue topic registered for an eve agent's workflow handler. */
 export function deriveEveWorkflowQueueTopic(agentName: string): string {
   return `${deriveEveWorkflowQueuePrefix(agentName)}*`;
 }
 
-/** Builds the Vercel queue trigger that invokes an eve agent's flow function. */
 export function createEveWorkflowQueueTrigger(agentName: string) {
   return {
     type: "queue/v2beta" as const,
@@ -35,7 +30,6 @@ export function createEveWorkflowQueueTrigger(agentName: string) {
   };
 }
 
-/** Installs the agent-scoped namespace used by Workflow runtime operations. */
 export function installEveWorkflowQueueNamespace(agentName: string): string {
   const namespace = deriveEveWorkflowQueueNamespace(agentName);
   process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] = namespace;

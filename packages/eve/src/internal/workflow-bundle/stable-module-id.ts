@@ -1,10 +1,5 @@
 import { createHash } from "node:crypto";
 
-/**
- * Content-independent module identity derived from the module path alone, so
- * ids minted at build time stay comparable across rebuilds that do not move
- * the file.
- */
 export function stableModuleId(filename: string): string {
   let normalized = filename.replaceAll("\\", "/").replace(/[?#].*$/, "");
   const nodeModules = normalized.lastIndexOf("/node_modules/");

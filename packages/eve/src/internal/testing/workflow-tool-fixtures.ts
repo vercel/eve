@@ -1,11 +1,3 @@
-/**
- * Authored workflow tool bodies for integration tests. Each exported
- * `"use workflow"` function stands in for a tool's `execute`: the test tier's
- * bundler registers them in the workflow owner, and the harness sees the stubs the
- * client transform leaves behind, exactly as it would for an application's
- * `agent/tools/*.ts`.
- */
-
 import {
   createHook,
   getStepMetadata,
@@ -13,6 +5,8 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowStepToolContext, WorkflowToolContext } from "#tools/workflow-definition.js";
+import { stampedWorkflowBody } from "#internal/testing/stamped-workflow-body.js";
+import type { WorkflowBody } from "#tools/workflow-body.js";
 import { defineChannel, POST } from "#public/channels/index.js";
 import {
   ConnectionAuthorizationFailedError,
@@ -32,6 +26,14 @@ export async function deployServiceWorkflow(
 
   const plan = await planDeployStep(input.service);
   return { callId: ctx.callId, plan, sessionId: ctx.session.id };
+}
+
+export function deployServiceBody(): WorkflowBody {
+  return stampedWorkflowBody(deployServiceWorkflow, async (input, ctx) => ({
+    callId: ctx.callId,
+    plan: `plan:${input.service}`,
+    sessionId: ctx.session.id,
+  }));
 }
 
 export async function authorizedDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
@@ -65,11 +67,6 @@ export async function sandboxParallelPrepareWorkflow(input: DeployInput, ctx: Wo
 
 const STEP_RUNS = Symbol.for("eve.test.sandbox-step-runs");
 
-/**
- * How many times each sandbox-writing step ran, by file name, so a test can
- * rule out reruns. Steps run from their own bundled copy of this module, so
- * the count lives on `globalThis`.
- */
 export function sandboxStepRuns(): Map<string, number> {
   const shared = globalThis as typeof globalThis & { [STEP_RUNS]?: Map<string, number> };
   return (shared[STEP_RUNS] ??= new Map());
@@ -173,12 +170,20 @@ async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): 
   return token.slice("secret:".length);
 }
 
-export async function* confirmDeployWorkflow(
+export async function* confirmDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+
+  return yield* confirmDeploy(input, ctx);
+}
+
+export function confirmDeployBody(): WorkflowBody {
+  return stampedWorkflowBody(confirmDeployWorkflow, confirmDeploy);
+}
+
+async function* confirmDeploy(
   input: DeployInput,
   ctx: WorkflowToolContext,
 ): AsyncGenerator<string, { readonly approved: boolean; readonly service: string }> {
-  "use workflow";
-
   const plan = await planDeployStep(input.service);
   yield "awaiting approval";
   const answer = await ctx.ask({
@@ -199,6 +204,25 @@ export async function waitingForCleanupWorkflow(): Promise<void> {
   await workflowSleep("1h");
 }
 
+export function waitingForCleanupBody(): WorkflowBody {
+  return stampedWorkflowBody(
+    waitingForCleanupWorkflow as (input: unknown, ctx: WorkflowToolContext) => Promise<void>,
+    async (_input: unknown, ctx: WorkflowToolContext) => {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3_600_000).unref();
+        ctx.abortSignal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    },
+  );
+}
+
 export async function answerWithResponderWorkflow(
   _input: DeployInput,
   ctx: WorkflowToolContext,
@@ -213,10 +237,7 @@ export async function answerWithResponderWorkflow(
   return JSON.stringify({ answer, runStartPrincipal: ctx.session.auth.current?.principalId });
 }
 
-/** Returns `ctx.ask()`'s answer as-is; a selected option carries `text: undefined`. */
-export async function returnAskAnswerWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
-  "use workflow";
-
+async function returnAskAnswer(_input: DeployInput, ctx: WorkflowToolContext) {
   return await ctx.ask({
     display: "confirmation",
     options: [{ id: "approve", label: "Approve" }],
@@ -224,7 +245,16 @@ export async function returnAskAnswerWorkflow(_input: DeployInput, ctx: Workflow
   });
 }
 
-/** Asks two questions at once, so answering one leaves the other pending. */
+export async function returnAskAnswerWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+
+  return await returnAskAnswer(input, ctx);
+}
+
+export function returnAskAnswerBody(): WorkflowBody {
+  return stampedWorkflowBody(returnAskAnswerWorkflow, returnAskAnswer);
+}
+
 export async function confirmTwoStepsWorkflow(
   input: DeployInput,
   ctx: WorkflowToolContext,
@@ -246,11 +276,19 @@ export async function failingDeployWorkflow(input: DeployInput): Promise<never> 
   throw new Error(`deploy of ${input.service} exploded`);
 }
 
-export async function* reportingDeployWorkflow(
-  input: DeployInput,
-): AsyncGenerator<string, { readonly plan: string }> {
+export async function* reportingDeployWorkflow(input: DeployInput) {
   "use workflow";
 
+  return yield* reportingDeploy(input);
+}
+
+export function reportingDeployBody(): WorkflowBody {
+  return stampedWorkflowBody(reportingDeployWorkflow, reportingDeploy);
+}
+
+async function* reportingDeploy(
+  input: DeployInput,
+): AsyncGenerator<string, { readonly plan: string }> {
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
   return { plan };
@@ -262,7 +300,6 @@ async function planDeployStep(service: string): Promise<string> {
   return `plan:${service}`;
 }
 
-/** Holds in a step until `ctx.abortSignal` fires, then cleans up in `finally`. */
 export async function holdUntilAbortedWorkflow(
   input: DeployInput,
   ctx: WorkflowToolContext,
@@ -319,16 +356,23 @@ export async function askThenRaceWorkflow(
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
 }
 
-/** Receives the actual delegated result over the durable parent hook. */
 export async function receiveDelegatedResultWorkflow(token: string): Promise<unknown> {
   "use workflow";
   using result = createHook<unknown>({ token });
   return await result;
 }
 
-export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolContext) {
-  "use workflow";
+async function reportCaller(_input: unknown, ctx: WorkflowToolContext) {
   return { caller: ctx.session.auth.current?.principalId ?? null };
+}
+
+export async function reportCallerWorkflow(input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await reportCaller(input, ctx);
+}
+
+export function reportCallerBody(): WorkflowBody {
+  return stampedWorkflowBody(reportCallerWorkflow, reportCaller);
 }
 
 export async function failingServeWorkflow(): Promise<never> {
@@ -336,7 +380,6 @@ export async function failingServeWorkflow(): Promise<never> {
   throw new Error("Live serve workflow must not execute.");
 }
 
-/** Sends from a step, then waits durably, so the body replays past the recorded step. */
 export async function sendThenSleepWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
   "use workflow";
   const delivered = await sendSummary(ctx, input.service);
@@ -346,8 +389,6 @@ export async function sendThenSleepWorkflow(input: DeployInput, ctx: WorkflowToo
 
 async function sendSummary(ctx: WorkflowStepToolContext, userId: string) {
   "use step";
-  // A step loads its own copy of a channel module; eve matches it to the
-  // registered channel by its routes.
   const dm = defineChannel({ routes: [POST("/dm", async () => new Response("ok"))] });
   const delivery = await ctx.to(dm, { userId }).send("Here is the summary.", {
     auth: ctx.session.auth.current,
@@ -356,7 +397,6 @@ async function sendSummary(ctx: WorkflowStepToolContext, userId: string) {
   return { sessionId: delivery.sessionId };
 }
 
-/** Calls ctx.to() from a step and returns what it threw, for a test that reads the refusal. */
 export async function sendFromStepWorkflow(_input: unknown, ctx: WorkflowToolContext) {
   "use workflow";
   return await trySendNote(ctx);
@@ -371,4 +411,11 @@ async function trySendNote(ctx: WorkflowStepToolContext) {
   } catch (error) {
     return { refused: (error as Error).message };
   }
+}
+
+export async function napWorkflow(input: { readonly ms?: number }): Promise<{ slept: number }> {
+  "use workflow";
+  const ms = input.ms ?? 1_000;
+  await workflowSleep(ms);
+  return { slept: ms };
 }

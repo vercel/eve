@@ -1,31 +1,7 @@
-/**
- * Detection and rendering helpers for the Vercel Deployment Protection
- * "Authentication Required" challenge that fronts protected previews and
- * production deployments.
- *
- * When the eve development client (`eve remote connect …`) targets a deployment
- * that has Deployment Protection enabled and no valid bypass header is
- * attached, Vercel returns an HTML SSO challenge instead of routing the
- * request to the function. The raw HTML body is unhelpful in a CLI
- * context — it dumps a multi-kilobyte page where a one-line directive
- * would do.
- *
- * These helpers let the REPL detect the challenge and render a focused,
- * actionable message instead.
- */
-
 import { ClientError } from "#client/client-error.js";
 import type { DevelopmentOidcTokenFailure } from "#services/dev-client/request-headers.js";
 import { isObject } from "#shared/guards.js";
 
-/**
- * Substrings that uniquely identify the Vercel Deployment Protection
- * SSO challenge page. The page is generated server-side by Vercel and
- * its markup includes a stable `<title>` plus the SSO redirect URL.
- *
- * Both markers are required. Substring matching avoids coupling the CLI to the
- * page's DOM structure while keeping a generic error page out of the auth flow.
- */
 const VERCEL_AUTH_CHALLENGE_MARKERS: readonly string[] = [
   "vercel.com/sso-api",
   "<title>Authentication Required</title>",
@@ -35,7 +11,6 @@ const VERCEL_SSO_PATH = "/sso-api";
 
 const TRUSTED_SOURCES_ERROR_CODE = /^TRUSTED_SOURCES_[A-Z0-9_]+$/u;
 
-/** Returns the stable Trusted Sources code embedded in a Vercel error message. */
 export function vercelTrustedSourcesErrorCode(message: string): string | undefined {
   for (const line of message.replaceAll("\r\n", "\n").trim().split("\n")) {
     const candidate = line.trim();
@@ -44,7 +19,6 @@ export function vercelTrustedSourcesErrorCode(message: string): string | undefin
   return undefined;
 }
 
-/** Returns whether the body carries the complete Vercel SSO challenge signature. */
 function bodyLooksLikeVercelAuthChallenge(body: string): boolean {
   return body.length > 0 && VERCEL_AUTH_CHALLENGE_MARKERS.every((marker) => body.includes(marker));
 }
@@ -105,14 +79,6 @@ function bodyLooksLikeStructuredVercelAuthChallenge(body: string): boolean {
   );
 }
 
-/**
- * Returns `true` for a Vercel Deployment Protection challenge.
- *
- * Accepts both real {@link ClientError} instances and structurally
- * compatible duck-typed errors (`{ status, body, headers }`)
- * so callers can detect the challenge regardless of whether the
- * error survived a network/IPC boundary.
- */
 export function isVercelAuthChallenge(error: unknown): boolean {
   const candidate = error instanceof ClientError || isObject(error) ? error : undefined;
   if (
@@ -152,11 +118,6 @@ export function formatDevelopmentOidcTokenFailure(failure: DevelopmentOidcTokenF
   }
 }
 
-/**
- * Keeps the actionable Trusted Sources reason and stable error code while
- * dropping Vercel's per-request id. The id is useful in platform logs but is
- * noise in a command result and changes on every retry.
- */
 export function formatVercelTrustedSourcesFailure(message: string): string {
   const lines = message.replaceAll("\r\n", "\n").trim().split("\n");
   const codeIndex = lines.findIndex((line) => TRUSTED_SOURCES_ERROR_CODE.test(line.trim()));

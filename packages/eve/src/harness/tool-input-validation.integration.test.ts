@@ -26,7 +26,6 @@ type StreamPart =
     ? Part
     : never;
 
-/** Streams one scripted response per model call, in order. */
 function scriptedStreams(responses: readonly (readonly StreamPart[])[]) {
   const queue = [...responses];
   return async () => {

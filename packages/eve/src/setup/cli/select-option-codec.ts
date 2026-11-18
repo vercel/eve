@@ -7,11 +7,6 @@ export interface SelectOptionCodec<T extends PromptValue> {
   decode(key: string): T;
 }
 
-/**
- * Gives prompt options opaque transport keys while preserving their typed
- * values. Primitive stringification is not injective (`1` and `"1"` collide),
- * so renderer-facing keys must not be derived from option values.
- */
 export function createSelectOptionCodec<T extends PromptValue>(
   options: readonly PromptOption<T>[],
 ): SelectOptionCodec<T> {

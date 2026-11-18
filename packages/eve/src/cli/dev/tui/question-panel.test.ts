@@ -58,7 +58,6 @@ describe("renderQuestionPanel", () => {
         .filter((row) => row.includes("Connected Services"))
         .map((row) => row.indexOf("Connected Services"));
 
-    // Selected and unselected variants of the same row must not drift.
     expect(columnsOf(render({ cursor: 1 }))).toEqual(columnsOf(render({ cursor: 0 })));
   });
 
@@ -68,7 +67,6 @@ describe("renderQuestionPanel", () => {
     const focused = render({ cursor: 2 });
     expect(focused.at(-1)).toBe("     Type your own answer…");
 
-    // A draft remains in the inline field when the cursor moves away.
     const drafted = render({ cursor: 0, editor: { text: "custom", cursor: 6 } });
     expect(drafted.at(-1)).toBe("     custom");
   });
@@ -87,9 +85,6 @@ describe("renderQuestionPanel", () => {
       60,
     ).map(stripAnsi);
 
-    // Every prompt paragraph is its own row — a row secretly holding
-    // newlines breaks the live region's row accounting and leaks duplicate
-    // frames into scrollback on repaint.
     expect(rows).toContain("  Pick an idea:");
     expect(rows).toContain("  - **Coding** – learn a framework");
     expect(rows).toContain("  - **Data** – analytics");

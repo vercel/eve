@@ -57,24 +57,6 @@ export type AgentReasoningDefinition =
   | "high"
   | "xhigh";
 
-/**
- * How an agent's model is reached at runtime, decided at compile time from the
- * authored model value.
- *
- * - `gateway`: routed through the Vercel AI Gateway. This covers a bare model
- *   id string (resolved via the AI SDK global default provider), a
- *   `gateway(...)` instance, and a gateway id whose provider key is forwarded
- *   to the gateway via `providerOptions.gateway.byok`. `target` is the upstream
- *   provider slug carried in the model id (e.g. `"anthropic"`), best-effort.
- *   `byok` is set to that provider slug when a `providerOptions.gateway.byok`
- *   block is present.
- * - `external`: a direct provider instance (e.g. `anthropic(...)`) that bypasses
- *   the gateway and talks to the provider's own endpoint. `provider` is the AI
- *   SDK provider name (e.g. `"anthropic"`).
- *
- * This is a routing fact, not a model-existence check; it does not assert the
- * model id names a real model.
- */
 export type ModelRouting =
   | { kind: "gateway"; target: string; byok?: string }
   | { kind: "external"; provider: string };
@@ -83,12 +65,7 @@ export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
   source?: ModuleSourceRef;
-  /** Field of the `source` agent config export that holds this model; absent means `model`. */
   sourceField?: "compaction.model";
-  /**
-   * Key of the `agent({ models })` option that holds this model, when `source` is that tool's
-   * export rather than an agent config.
-   */
   sourceModelOption?: string;
   providerOptions?: Record<string, JsonObject>;
   promptCache?: AgentPromptCacheDefinition;
@@ -111,6 +88,10 @@ export interface EveLanguageModel {
 /** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
 export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
+/**
+ * A model together with settings that apply only when it is selected, such as reasoning effort
+ * and provider options.
+ */
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;
   /** Override the agent reasoning effort for this selection; omitted values inherit it. */
@@ -121,6 +102,10 @@ export interface PublicAgentModelSelectionDefinition {
   readonly modelOptions?: AgentModelOptionsDefinition;
 }
 
+/**
+ * What a dynamic model function returns: a model ID or instance, or a
+ * {@link PublicAgentModelSelectionDefinition}.
+ */
 export type PublicAgentDynamicModelResult =
   | PublicAgentStaticModelDefinition
   | PublicAgentModelSelectionDefinition;
@@ -149,17 +134,7 @@ export type PublicAgentModelDefinition =
   | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
-  /**
-   * Optional model used only for generating compaction summaries.
-   *
-   * When omitted, eve uses the active turn model for the summary call.
-   */
   model?: InternalAgentModelDefinition;
-  /**
-   * Fraction of the primary model context window that triggers compaction.
-   *
-   * eve defaults to `0.9` when this is omitted.
-   */
   thresholdPercent?: number;
 }
 
@@ -346,13 +321,8 @@ export interface AgentWorkflowDefinition {
  */
 export type AgentToolExposure = boolean | "deferred";
 
-/**
- * Compiled-side agent definition. Carries a `name` because the compiler
- * stamps the path-derived `agentId` onto every compiled agent node.
- */
 export type InternalAgentDefinition = {
   name: string;
-  /** Whether `agent.ts` authors an `approval`; the runtime loads it from `source`. */
   approval?: boolean;
   description?: string;
   build?: AgentBuildDefinition;
@@ -366,10 +336,6 @@ export type InternalAgentDefinition = {
   limits?: CompiledAgentLimitsDefinition;
 };
 
-/**
- * Compiled `limits`. `sessionUsage` is a function, so the manifest only marks that the agent
- * config module authors one; the runtime loads it from `source`.
- */
 export interface CompiledAgentLimitsDefinition {
   readonly sessionTimeoutMs?: number | false;
   readonly sessionUsage?: boolean;

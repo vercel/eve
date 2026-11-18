@@ -35,7 +35,9 @@ export default ["first", "later"].map((launchTurn) =>
       expectFiveReviewers(started);
       expectReviewSummary(started);
       await expectParallelReviews(t, started);
-      expectCacheReuse(t, [started]);
+      // This eval checks message-history reuse across task results, over a long series of
+      // parent requests, so one provider routing miss doesn't fail it.
+      expectCacheReuse(t, [started], { allowedMisses: 1 });
     },
   }),
 );

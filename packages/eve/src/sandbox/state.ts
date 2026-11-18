@@ -1,50 +1,51 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
-import type { SandboxProviderRuntime, SandboxSessionContext } from "#sandbox/provider.js";
+import type { SandboxProviderRuntime } from "#sandbox/provider.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
 
 export type SandboxSessionEndReason = "completed" | "expired" | "failed";
 
 export interface SandboxSessionState {
-  /**
-   * Set anew each time this session's access calls `start()`, which is an upsert,
-   * and kept on resume. Providers name a session's sandbox deterministically, so
-   * without it a sandbox recreated after it was gone would look like the old one
-   * to dynamic skills, which then write their files into it at the next turn. A
-   * sandbox that a sharing subagent or a borrowed workflow step starts keeps this
-   * session's generation. Absent in state saved by earlier releases.
-   */
   readonly generation?: string;
   readonly providerName: string;
   readonly state: SandboxPreparedArtifact;
   readonly stateProtocolVersion: number;
 }
 
-export interface SandboxState {
-  readonly session: SandboxSessionState | null;
+export interface SandboxRunning {
+  readonly idleTimeoutMs: number;
 }
 
-/**
- * Whether no provider can resume this persisted record, so callers treat it as
- * no sandbox: records saved before the provider redesign (eve 0.64) have no
- * `providerName`, and `microsandbox` was removed as a provider.
- */
+export interface SandboxState {
+  readonly session: SandboxSessionState | null;
+  readonly running?: SandboxRunning;
+}
+
+export function clearSandboxRunning(state: SandboxState | undefined): SandboxState | undefined {
+  return state?.running === undefined ? state : { session: state.session };
+}
+
+export function markSandboxRunning<Session extends { readonly sandboxState?: SandboxState }>(
+  session: Session,
+  idleTimeoutMs: number | undefined,
+): Session {
+  if (idleTimeoutMs === undefined) return session;
+  return {
+    ...session,
+    sandboxState: { session: session.sandboxState?.session ?? null, running: { idleTimeoutMs } },
+  };
+}
+
 export function isRetiredSandboxSessionState(state: SandboxSessionState): boolean {
   return state.providerName === undefined || state.providerName === "microsandbox";
 }
 
-/** Converts a record another provider wrote into this provider's state, or `undefined`. */
 type SandboxSessionStateAdopter = (
   state: SandboxSessionState,
 ) => SandboxPreparedArtifact | undefined;
 
 const adopters = new WeakMap<object, SandboxSessionStateAdopter>();
 
-/**
- * Lets an eve-owned provider resume records that another provider name wrote,
- * such as `DefaultSandbox` for sessions saved when it recorded the provider it
- * picked. Internal, so the public provider API is unchanged.
- */
 export function withAdoptedSandboxSessionStates<Implementation extends object>(
   implementation: Implementation,
   adopt: SandboxSessionStateAdopter,
@@ -53,12 +54,6 @@ export function withAdoptedSandboxSessionStates<Implementation extends object>(
   return implementation;
 }
 
-/**
- * The persisted record the current provider should resume, or `null` for no
- * sandbox. A record the provider cannot adopt is returned as-is; resuming it
- * starts a fresh sandbox, and handoff rejects it. An adopted record keeps its
- * `generation`, because it still names the same live sandbox.
- */
 export function resolvePersistedSandboxSessionState(
   state: SandboxSessionState | null | undefined,
   provider: SandboxProviderRuntime | undefined,
@@ -76,59 +71,54 @@ export function resolvePersistedSandboxSessionState(
       };
 }
 
-/** Session-end cleanup that also needs the current build's prepared artifact. */
-type SandboxSessionEndWithArtifact = (
-  context: SandboxSessionContext,
+interface RecordedSandboxProvider {
+  readonly implementation: SandboxProviderRuntime["implementation"];
+  readonly state: SandboxPreparedArtifact | null;
+}
+
+type RecordedSandboxProviderLookup = (
   state: SandboxPreparedArtifact | null,
-  options: {
-    readonly artifact: SandboxPreparedArtifact | undefined;
-    readonly reason: SandboxSessionEndReason;
-  },
-) => Promise<void>;
+  artifact: SandboxPreparedArtifact | undefined,
+) => RecordedSandboxProvider | undefined;
 
-const sessionEndsWithArtifact = new WeakMap<object, SandboxSessionEndWithArtifact>();
+const recordedSandboxProviderLookups = new WeakMap<object, RecordedSandboxProviderLookup>();
 
-/**
- * Lets an eve-owned provider receive the prepared artifact at session end,
- * such as `DefaultSandbox`, which finds the provider it selected there when
- * no state was recorded. Internal, so the public provider API is unchanged.
- */
-export function withSessionEndArtifact<Implementation extends object>(
+export function withRecordedSandboxProvider<Implementation extends object>(
   implementation: Implementation,
-  onSessionEnd: SandboxSessionEndWithArtifact,
+  lookup: RecordedSandboxProviderLookup,
 ): Implementation {
-  sessionEndsWithArtifact.set(implementation, onSessionEnd);
+  recordedSandboxProviderLookups.set(implementation, lookup);
   return implementation;
 }
 
-export function getSessionEndWithArtifact(
-  implementation: object,
-): SandboxSessionEndWithArtifact | undefined {
-  return sessionEndsWithArtifact.get(implementation);
+export async function resolveRecordedSandboxProvider(
+  provider: Pick<SandboxProviderRuntime, "implementation">,
+  state: SandboxPreparedArtifact | null,
+  loadArtifact: () => Promise<SandboxPreparedArtifact | undefined>,
+): Promise<RecordedSandboxProvider | undefined> {
+  const lookup = recordedSandboxProviderLookups.get(provider.implementation);
+  if (lookup === undefined) return { implementation: provider.implementation, state };
+  return lookup(state, await loadArtifact());
 }
 
-/**
- * Background work that may need the sandbox. It calls `open` only when it
- * does, so work that turns out to have nothing to do never opens it. Calling
- * the access's `get()` from the work waits on the work itself.
- */
+export function recordedSandboxStopsIdle(
+  provider: Pick<SandboxProviderRuntime, "implementation">,
+  recorded: SandboxSessionState | null | undefined,
+): boolean {
+  if (recorded === null || recorded === undefined) return true;
+  const lookup = recordedSandboxProviderLookups.get(provider.implementation);
+  const resolved = lookup === undefined ? provider : lookup(recorded.state, undefined);
+  return resolved === undefined || resolved.implementation.onSessionIdle !== undefined;
+}
+
 export type SandboxPreparation = (open: () => Promise<SandboxSession>) => Promise<void>;
 
 export interface SandboxAccess {
   readonly environment?: SandboxEnvironmentIdentity;
   captureState(): Promise<SandboxState>;
   delete?(options?: SandboxDeleteOptions): Promise<void>;
-  /** Resolves once the sandbox is open and every queued preparation has run. */
   get(): Promise<SandboxSession | null>;
-  /**
-   * Opens the sandbox without waiting for queued preparation, for framework
-   * work that needs only the connection, such as staging attachments.
-   */
   open(): Promise<SandboxSession | null>;
-  /**
-   * Queues `work` to run in the background, in order; without `work`, opens
-   * the sandbox in the background. Returns at once and never throws.
-   */
   prepare(work?: SandboxPreparation): void;
   stop(): Promise<void>;
 }

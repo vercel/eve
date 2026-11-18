@@ -3,7 +3,7 @@ import {
   readWorkflowToolEntryPoints,
   type WorkflowToolEntryPoint,
 } from "#tools/workflow-definition.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { TASK_ID_INPUT, withTaskIdSchema } from "#execution/tasks/task-id-input.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -38,12 +38,6 @@ import {
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
-/**
- * Canonical normalized shape of one authored tool default export.
- *
- * Identity is path-derived — the compiler stamps the filename slug onto
- * the compiled entry. This shape never carries an authored `name`.
- */
 type NormalizedAuthoredTool = Readonly<
   Omit<InternalToolDefinition, "name"> & {
     readonly behavior?: CompiledToolBehavior;
@@ -51,14 +45,12 @@ type NormalizedAuthoredTool = Readonly<
     readonly hasApproval: boolean;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
-    /** The input schema as eve sends it to a model, from the live authored schema. */
     readonly modelInputSchema: JsonObject;
     readonly workflow?: CompiledWorkflowEntry;
     readonly workflowProgram?: WorkflowProgramOptions;
   }
 >;
 
-/** The compiled entry point of a `defineWorkflowTool()` definition. */
 interface CompiledWorkflowEntry {
   readonly entryPoint: WorkflowToolEntryPoint;
   readonly workflowId: string;
@@ -67,26 +59,12 @@ type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
 
-/**
- * Result of normalizing one authored tool default export. Either a real tool
- * definition, a sentinel that disables a framework default, or a dynamic
- * tool resolver. In all cases the disable target / runtime name is the
- * authored file's slug, supplied by the compiler — this layer never sees
- * a name.
- */
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
   | { readonly kind: "web-search-tool"; readonly selection: WebSearchSelection }
   | { readonly kind: "dynamic-tool" };
 
-/**
- * Normalizes one authored tool default export. Recognizes real tool
- * definitions (`defineTool(...)`), disable sentinels (`disableTool()`), and the
- * provider-managed web-search definitions.
- *
- * Authored `name` fields are rejected — tool identity is path-derived.
- */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
     assertDynamicSentinelKeys(value, message);
@@ -130,9 +108,13 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
     );
   }
-  if (workflow !== undefined && record.endsTurn !== undefined) {
+  if (
+    workflow !== undefined &&
+    workflow.entryPoint !== "execute" &&
+    record.endsTurn !== undefined
+  ) {
     throw new Error(
-      `${message} "endsTurn" is not supported on defineWorkflowTool(). Workflow tools resume the turn when they finish; use defineTool() for a tool that ends the turn.`,
+      `${message} "endsTurn" applies only to execute(); task() calls return a receipt and serve() calls settle later, so they can't end the turn.`,
     );
   }
   expectOnlyKnownKeys(
@@ -161,7 +143,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);
-  // A workflow tool's entry point is its executor; the runtime loads the module for its hooks.
   const hasExecute = workflow !== undefined || record.execute !== undefined;
   if (!hasExecute && behavior?.handling?.kind !== "dispatch") {
     expectFunction(record.execute, message);
@@ -185,7 +166,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     inputSchema,
     modelInputSchema: modelInputSchemaOf(
       record.inputSchema,
-      // An agent dispatch runs as a `serve` task, as a `serve` workflow tool does.
       workflow?.entryPoint === "serve" || behavior?.handling?.kind === "dispatch",
     ),
   };
@@ -204,13 +184,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     definition.outputSchema = outputSchema;
   }
 
-  /*
-   * The compiler runs at build time and only validates that optional hooks
-   * (`approval`), when present, have the expected shape. The live
-   * references are captured later by `resolve-agent.ts` when it materializes
-   * the module export and attaches them to the ResolvedToolDefinition.
-   */
-  // `label: false` hides the tool's calls from activity.
   if (record.label !== undefined && record.label !== false) {
     const label = expectObjectRecord(record.label, message);
     expectOnlyKnownKeys(label, ["start", "complete", "delta"], message);
@@ -238,7 +211,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   };
 }
 
-/** Reads the one entry point `defineWorkflowTool()` accepted, which the build compiled to a workflow. */
 function readCompiledWorkflowEntry(
   record: Record<string, unknown>,
   message: string,
@@ -254,17 +226,12 @@ function readCompiledWorkflowEntry(
   return { entryPoint, workflowId };
 }
 
-/**
- * Only the live authored schema tells whether eve closes its objects for the
- * model, so the model-facing form is captured while the module is loaded.
- */
 function modelInputSchemaOf(source: unknown, serve: boolean): JsonObject {
   const schema = toInputSchema(source as ToolSchemaSource | undefined) ?? UNSPECIFIED_INPUT_SCHEMA;
   return serializeModelInputSchema(serve ? withTaskIdSchema(schema) : schema);
 }
 
-/** eve adds `taskId` to a `serve` tool's model input, so the tool's own input can't use it. */
-function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
+export function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
   const properties = inputSchema?.properties;
   if (!isObject(properties) || !(TASK_ID_INPUT in properties)) return;
   throw new Error(

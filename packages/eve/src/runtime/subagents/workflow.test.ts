@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { expect, it, vi } from "vitest";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
@@ -9,7 +10,6 @@ import { startServeBody } from "#execution/tools/workflow/serve.js";
 import type { AgentTurnResult } from "#shared/agent-turn-outcome.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** The agent's side of the task: the messages it read and the turns it owes a reply. */
 const agent = vi.hoisted(() => ({
   delivered: [] as WorkflowToolRunMessage[],
   models: [] as unknown[],
@@ -28,6 +28,7 @@ vi.mock("#execution/workflow-registry.js", async () => {
 vi.mock("#execution/agent-sessions/steps.js", () => ({
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
+  stopLateAgentSessionStep: async () => {},
   openAgentSessionStep: async ({
     message,
     model,
@@ -53,7 +54,6 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
   },
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
-  // Each message's reply hook; the agent reports the turn that read it through it.
   createHook: () => {
     let report: (payload: RuntimeActionResultHookPayload) => void = () => {};
     const reported = new Promise<RuntimeActionResultHookPayload>((resolve) => {
@@ -73,6 +73,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 const agentContext = {
   agents: {},
   capabilities: { requestInput: false },
+  remoteAgents: [] as readonly string[],
   parent: {
     callId: "call-1",
     rootSessionId: "session",
@@ -88,6 +89,7 @@ const alice: SessionAuth = {
 
 const input: WorkflowBodyInput = {
   agentContext,
+  host: workflowRunHost,
   callId: "call-1",
   entry: { entryPoint: "serve", taskId: "reviewer-7k2m9q" },
   input: { message: "Review the release plan." },
@@ -128,7 +130,6 @@ function turnEnded(
   };
 }
 
-/** Lets every pending step and hook delivery settle. */
 function settle(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -141,7 +142,6 @@ function replies(): Array<{ readonly callId: string; readonly output: unknown }>
   );
 }
 
-/** Alice asks the reviewer for a review; the reviewer has read her message. */
 async function startReview(): Promise<ReturnType<typeof startServeBody>> {
   agent.delivered.length = 0;
   agent.models.length = 0;
@@ -168,7 +168,6 @@ async function startModelReview(model?: string): Promise<ReturnType<typeof start
   });
 }
 
-/** Alice's next message: check the plan against the Friday freeze. */
 const fridayCheck = {
   call: {
     agentContext,
@@ -182,7 +181,6 @@ const fridayCheck = {
   kind: "call",
 } as const;
 
-/** The messages that carried the task's usage to its session, in order. */
 function usageMessages(): unknown[] {
   return agent.delivered.flatMap((message): unknown[] => {
     if (message.kind === "reply") return [{ reply: message.callIds, usage: message.usage }];
@@ -190,11 +188,6 @@ function usageMessages(): unknown[] {
   });
 }
 
-/**
- * Alice asks the reviewer for a review, and her next message reaches the task
- * `offset` microtasks after the reviewer's first turn ends. If `cancelled`,
- * she cancelled the review first, so the turn ends cancelled.
- */
 async function sendAsTheTurnEnds(offset: number, { cancelled }: { readonly cancelled: boolean }) {
   const started = await startReview();
   if (cancelled) started.control.apply({ kind: "cancel", reason: "Alice cancelled the review." });
@@ -273,10 +266,6 @@ it.each([
 });
 
 it("forwards a message that reaches the task at any point as the agent's turn ends", async () => {
-  // From joining the running turn to arriving after its reply, every arrival
-  // point is covered: the sweep stops once the first reply precedes the
-  // message. A cancelled turn ends through the same steps minus the reply, so
-  // the same sweep covers it.
   for (let offset = 0; ; offset += 1) {
     const answered = await sendAsTheTurnEnds(offset, { cancelled: false });
     const cancelled = await sendAsTheTurnEnds(offset, { cancelled: true });
@@ -290,9 +279,6 @@ it("forwards a message that reaches the task at any point as the agent's turn en
         "Review the release plan.",
         "Check it against the Friday freeze.",
       ]);
-      // The turn that read the message answers it. The first call gets one
-      // reply, unless cancelled: from its own turn or the one the message
-      // joined or started.
       expect(
         run.replies.filter(({ callId }) => callId === "call-2"),
         arrival,
@@ -357,7 +343,6 @@ it("counts a turn that messages joined once, on the reply that settles them all"
   const started = await startReview();
   started.control.apply(fridayCheck);
   await settle();
-  // The turn reports to the latest message it read, which settles both calls.
   agent.turns[1]?.(
     turnEnded({ kind: "succeeded", output: "Ready, and clear of the freeze." }, usage(800, 80)),
   );
@@ -396,7 +381,6 @@ it("sends nothing for a cancelled turn that spent nothing since the last reply",
   await settle();
   started.control.apply(fridayCheck);
   await settle();
-  // Alice cancels the check before the reviewer's model spends anything on it.
   started.control.apply({ kind: "cancel", reason: "Alice cancelled the check." });
   agent.turns[1]?.(turnEnded({ kind: "cancelled" }, usage(0, 0)));
   await settle();

@@ -1,25 +1,61 @@
+import { closeSync, globSync, openSync, readFileSync, readSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
+
+import { SHARED_STATE_USE } from "./test/setup/shared-state-use.js";
+import { workspaceChannelPackages } from "./test/setup/workspace-channel-packages.js";
 
 import { workflow } from "./src/internal/testing/workflow-vitest-plugin.js";
 
-/**
- * Tier 1 — Integration tests.
- *
- * Tests that exercise multiple eve modules together — typically through the
- * workflow SDK, the compiler, the discover pipeline, or the nitro routes —
- * without spawning subprocesses, binding real TCP ports, or shelling out to
- * the `eve` CLI. These tests may touch the filesystem (tmpdirs, generated
- * fixtures) and currently invoke the real compile pipeline while the
- * in-memory `AppHarness` (phase D) is under construction.
- *
- * If a test needs a subprocess, a real HTTP listener, or a real package
- * tarball install, move it to the scenario tier
- * (`test/scenarios/*.scenario.test.ts`).
- */
+const INTEGRATION_TESTS = ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"];
+const LINUX_ONLY_MARKER = "// @linux-only:";
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
+
+function integrationTestFiles(): string[] {
+  return globSync(INTEGRATION_TESTS, { cwd: ROOT }).map((file) => file.replaceAll("\\", "/"));
+}
+
+function linuxOnlyIntegrationTests(): string[] {
+  const head = Buffer.alloc(512);
+  return integrationTestFiles()
+    .filter((file) => {
+      const fd = openSync(ROOT + file, "r");
+      const firstLine = head.toString("utf8", 0, readSync(fd, head, 0, head.length, 0));
+      closeSync(fd);
+      if (!firstLine.startsWith(LINUX_ONLY_MARKER)) return false;
+      const reason = firstLine.slice(LINUX_ONLY_MARKER.length).split("\n", 1)[0]!.trim();
+      if (reason === "") throw new Error(`${file} is marked Linux-only without a reason.`);
+      return true;
+    })
+    .sort();
+}
+
+const linuxOnlyTests = linuxOnlyIntegrationTests();
+
+function isolatedIntegrationTests(): string[] {
+  return integrationTestFiles()
+    .filter((file) => SHARED_STATE_USE.test(readFileSync(ROOT + file, "utf8")))
+    .sort();
+}
+
+const isolatedTests = isolatedIntegrationTests();
+
+const EXCLUDE = [
+  "**/node_modules/**",
+  "test/scenarios/**",
+  ...(process.platform === "win32"
+    ? ["**/conformance*.integration.test.ts", ...linuxOnlyTests]
+    : []),
+];
+
+const SETUP_FILES = ["./test/setup/mock-ai-gateway.ts", "./test/setup/workflow-setup.ts"];
+
 export default defineConfig({
   plugins: [workflow()],
   resolve: {
     alias: [
+      ...workspaceChannelPackages,
       {
         find: /^#compiled\/(.+)\.js$/,
         replacement: new URL("./.generated/compiled/$1.js", import.meta.url).pathname,
@@ -31,26 +67,40 @@ export default defineConfig({
     ],
   },
   test: {
-    // Every line a session publishes is checked against the event contract, so a test that
-    // drives a session also fails on a fact a reader couldn't fold.
     env: { EVE_CHECK_SESSION_EVENTS: "1" },
     environment: "node",
-    exclude: [
-      "**/node_modules/**",
-      "test/scenarios/**",
-      // Channel conformance checks platform protocol, not the OS, and is slowest on Windows runners.
-      ...(process.platform === "win32" ? ["**/conformance*.integration.test.ts"] : []),
-    ],
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
-    include: ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"],
     server: {
       deps: {
-        // Imports matrix-js-sdk paths without file extensions, which Node's ESM loader rejects
-        // and bundlers resolve; registry template tests load it through Vite instead.
         inline: [/@beeper\/chat-adapter-matrix/u],
+        external: [/\.workflow-vitest[\\/]/],
       },
     },
-    setupFiles: ["./test/setup/mock-ai-gateway.ts"],
     testTimeout: 30_000,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "integration-isolated",
+          include: isolatedTests,
+          exclude: EXCLUDE,
+          setupFiles: ["./src/internal/testing/reset-test-realm.ts", ...SETUP_FILES],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "integration-shared",
+          include: INTEGRATION_TESTS,
+          exclude: [...EXCLUDE, ...isolatedTests],
+          isolate: false,
+          setupFiles: [
+            "./src/internal/testing/reset-test-realm.ts",
+            "./test/setup/shared-state-guard.ts",
+            ...SETUP_FILES,
+          ],
+        },
+      },
+    ],
   },
 });

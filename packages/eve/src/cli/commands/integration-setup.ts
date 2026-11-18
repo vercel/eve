@@ -38,7 +38,6 @@ export interface IntegrationSetupDependencies {
 
 const defaultIntegrationSetupDependencies: IntegrationSetupDependencies = {};
 
-/** Runs built-in integration setup after its registry payload is installed. */
 export async function runIntegrationSetupCommand(
   logger: RegistryCommandLogger,
   appRoot: string,

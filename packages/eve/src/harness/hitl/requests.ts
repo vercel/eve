@@ -47,7 +47,6 @@ export function readHitlState(state: SessionStateMap | undefined): HitlState {
   };
 }
 
-/** Unreadable checkpoint records must still prevent a handoff. */
 export function holdsHitlRequests(state: SessionStateMap | undefined): boolean {
   const requests = state?.[REQUESTS_KEY];
   if (requests === undefined) return false;
@@ -65,7 +64,6 @@ export interface HitlStateChange {
   readonly responders?: Readonly<Record<string, PendingResponder>>;
 }
 
-/** Changes and retirement share one save; the fold, not another ledger, owns record lifetime. */
 export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
   session: T,
   change: HitlStateChange,

@@ -272,7 +272,6 @@ describe("Slack setup", () => {
       expect.stringContaining("`slack/gone`, which was not found in team team"),
     );
     expect(selectedConnector(effects)).toBe(replacement);
-    // The file still names the missing UID, so apply patches it.
     expect(vi.mocked(effects.reconcileSlackUid).mock.calls[0]?.[3]).toBe("slack/gone");
   });
   it("leaves a portable-credential channel file alone and reports missing variables", async () => {

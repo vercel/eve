@@ -1,4 +1,3 @@
-/** Stops waiting without claiming to cancel work whose owner does not accept a signal. */
 export async function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal === undefined) return await promise;
   const aborted = Promise.withResolvers<never>();

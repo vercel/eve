@@ -1,6 +1,7 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
+/** Adds Linux desktop app control to an agent through the agent-desktop CLI, reading accessibility trees and acting on elements inside the agent's sandbox. */
 export default defineExtension({
   config: z.object({
     /** Binary name or path inside the sandbox. Install it in the sandbox environment's `prepare` with `installAgentDesktop`. */

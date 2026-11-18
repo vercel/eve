@@ -23,6 +23,9 @@ export type AgentModelsTool = WorkflowServeToolDefinition<AgentModelsToolInput, 
 /** One model an `agent({ models })` tool offers. */
 export type AgentToolModel = ModelOption;
 
+/**
+ * Options for {@link agent}. Pass `models` to let the model choose which model each new task runs on.
+ */
 export interface AgentToolOptions<
   TModels extends Readonly<Record<string, AgentToolModel>> = Readonly<
     Record<string, AgentToolModel>
@@ -97,7 +100,6 @@ export function agent(options: AgentToolOptions = {}): AgentTool | AgentModelsTo
   return attachAgentToolModels(
     frameworkTool(
       defineWorkflowTool({
-        // Choosing a model is the root session's decision; subagents never get this tool.
         availableInSubagents: false,
         description: [
           "Delegate a focused subtask to a copy of yourself, optionally on another model.",

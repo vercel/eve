@@ -12,13 +12,6 @@ export interface IdGenerator {
   generateTraceId(): string;
 }
 
-/**
- * A `SpanExporter`. Structural for the same reason the propagator is: the
- * instance comes from whichever `@opentelemetry/*` build the app installed, and
- * eve only ever hands it spans and waits for the callback.
- *
- * `code` is `ExportResultCode`: `0` succeeded, `1` failed.
- */
 export interface SpanExporter {
   export(
     spans: readonly unknown[],
@@ -28,11 +21,6 @@ export interface SpanExporter {
   shutdown(): Promise<void>;
 }
 
-/**
- * A `TextMapPropagator`, or one of the names `@vercel/otel` resolves for you.
- * Structural rather than imported: the instance comes from whichever
- * `@opentelemetry/*` build the app installed, not from eve's.
- */
 export type PropagatorOrName =
   | { inject(...args: never[]): void; extract(...args: never[]): unknown; fields(): string[] }
   | "auto"
@@ -40,7 +28,6 @@ export type PropagatorOrName =
   | "tracecontext"
   | "baggage";
 
-/** A `Sampler`, or one of the names `@vercel/otel` resolves for you. */
 export type SamplerOrName =
   | { shouldSample(...args: never[]): unknown; toString(): string }
   | "auto"
@@ -51,11 +38,6 @@ export type SamplerOrName =
   | "parentbased_traceidratio"
   | "traceidratio";
 
-/**
- * A `MetricReader`. Structural for the same reason the exporter is: the
- * instance comes from whichever `@opentelemetry/sdk-metrics` build the app
- * installed, and eve only ever hands it to `registerOTel`.
- */
 export interface MetricReader {
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;

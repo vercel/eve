@@ -1,6 +1,5 @@
 import { slackMrkdwnToMarkdown } from "#compiled/@chat-adapter/slack/format.js";
 
-/** Converts inbound Slack mrkdwn into markdown while preserving code spans and fences. */
 export function slackMrkdwnToGfm(input: string): string {
   const segments = splitCodeFences(input);
   return segments

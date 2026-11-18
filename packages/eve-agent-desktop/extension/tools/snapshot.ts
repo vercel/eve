@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { app, desktopTool, flag, surface, windowId } from "../lib/tool";
 
+/** Lets the agent read an app window's accessibility tree, whose actionable elements carry the refs the other desktop tools accept. */
 export default desktopTool({
   description:
     "Read an app window's accessibility tree as JSON. Actionable elements carry qualified refs (@<snapshot>:eN) for the other tools. Interactive-only and compact by default.",

@@ -13,21 +13,6 @@ import {
 
 import { theme } from "./lib/theme.ts";
 
-/**
- * End-to-end proof of the `/traces` alt-screen conversation viewer.
- *
- *   1. `/traces` opens on a seeded spool: system, user, assistant, and tool
- *      cards render; the long system prompt starts capped behind its card.
- *   2. `→`/`←` expand and collapse the selected card; a mouse click toggles
- *      it too.
- *   3. Enter opens the details drawer: metadata only — payload attributes
- *      stay on the cards and never leak into the drawer.
- *   4. `[` cycles to the older trace; Escape returns to the prompt with the
- *      transcript restored.
- *   5. An empty spool renders the empty state instead of an error.
- *
- * Needs no agent server and no model credentials.
- */
 const UNREACHABLE_HOST = "http://127.0.0.1:49214";
 process.env.EVE_TUI_UNICODE = "1";
 
@@ -35,8 +20,6 @@ const TRACE_ONE = "1".repeat(32);
 const TRACE_TWO = "2".repeat(32);
 
 const SYSTEM_PROMPT_TAIL = "END-OF-SYSTEM-PROMPT-MARKER";
-// Long enough to wrap past the collapsed card's preview cap, so the system
-// card has content hidden behind the expand affordance.
 const SYSTEM_PROMPT = `${"smoke system prompt guidance. ".repeat(24)}${SYSTEM_PROMPT_TAIL}`;
 
 void (async () => {
@@ -64,8 +47,6 @@ void (async () => {
     const step = "b".repeat(16);
     const model = "c".repeat(16);
     const action = "e".repeat(16);
-    // A real capture roots turns under the session span, so the
-    // fixture does too — turn discovery must not depend on root position.
     await writeSegment(appRoot, TRACE_ONE, {
       spanId: sessionRoot,
       name: "agent.session",
@@ -146,8 +127,6 @@ void (async () => {
         "agent.turn.id": "turn_0",
       },
     });
-    // A subagent child turn recorded into the same trace and parented to its
-    // dispatch action.
     await writeSegment(appRoot, TRACE_ONE, {
       spanId: "8".repeat(16),
       name: "agent.turn",
@@ -196,8 +175,6 @@ void (async () => {
       end: 900,
       attributes: { "gen_ai.conversation.id": "older-session" },
     });
-    // The viewer lists traces by segments-dir mtime (last span activity);
-    // same-millisecond writes would race, so pin the ordering explicitly.
     const now = new Date();
     await utimes(join(appRoot, ".eve", "traces", "v1", TRACE_ONE, "segments"), now, now);
     const older = new Date(now.getTime() - 60_000);
@@ -207,8 +184,6 @@ void (async () => {
     input.type("/traces");
     input.enter();
 
-    // The viewer opens in the conversation view: message cards with tool
-    // calls nested inside the assistant card, no chat prompt leaking.
     await screen.waitForText("smoke prompt", 5_000);
     await screen.waitForText("smoke reply", 5_000);
     await screen.waitForText("get_weather", 5_000);
@@ -217,13 +192,11 @@ void (async () => {
     }
     console.log(theme.muted("[tui-traces] /traces opened on the conversation cards"));
 
-    // The long system prompt starts capped behind the collapsed card.
     await screen.waitForText("Click to expand", 5_000);
     if (screen.snapshot().includes(SYSTEM_PROMPT_TAIL)) {
       throw new Error(`The system card did not cap its preview:\n${screen.snapshot()}`);
     }
 
-    // → expands the selected (system) card; ← collapses it again.
     input.right();
     await screen.waitForText(SYSTEM_PROMPT_TAIL, 5_000);
     await screen.waitForText("Click to collapse", 5_000);
@@ -234,9 +207,6 @@ void (async () => {
     }
     console.log(theme.muted("[tui-traces] arrow keys expand and collapse cards"));
 
-    // A mouse click toggles a card open too: an SGR press+release at row 3
-    // lands inside the first card (one header row, 1-based coordinates).
-    // The click acts on release so drag selections never toggle cards.
     input.send("\x1b[<0;10;4M");
     input.send("\x1b[<0;10;4m");
     await screen.waitForText(SYSTEM_PROMPT_TAIL, 5_000);
@@ -244,18 +214,12 @@ void (async () => {
     input.left();
     await screen.waitForText("Click to expand", 5_000);
 
-    // Dragging (press, SGR button-32 motion, release) selects text and
-    // copies it, confirmed by the toast. Row 4 is the first card's title
-    // row (two header rows, then the card's top band).
     input.send("\x1b[<0;3;5M");
     input.send("\x1b[<32;30;5M");
     input.send("\x1b[<0;30;5m");
     await screen.waitForText("Copied to clipboard", 5_000);
     console.log(theme.muted("[tui-traces] drag selection copies to the clipboard"));
 
-    // The details drawer stays metadata-only: the tool card carries the call
-    // payload inline ("city" in its Input section), while the drawer lists
-    // facts and metadata attributes — never the content keys.
     input.down();
     input.down();
     input.down();
@@ -273,14 +237,9 @@ void (async () => {
     }
     console.log(theme.muted("[tui-traces] details drawer shows metadata only"));
 
-    // Escape closes the drawer first: an ESC immediately followed by another
-    // key merges into an unfinished CSI in the input tokenizer and wedges
-    // every key after it (the lone-ESC flush never fires).
     input.send("\x1b");
     await waitForAbsence(screen, "agent.action.name", 5_000);
 
-    // The subagent child turn renders below the fold; End jumps to its cards,
-    // which carry the dispatch lineage badge.
     input.send("\x1b[F");
     await screen.waitForText("subagent:echo", 5_000);
     await screen.waitForText("delegated reply", 5_000);
@@ -288,8 +247,6 @@ void (async () => {
     input.send("\x1b[H");
     await screen.waitForText("Click to expand", 5_000);
 
-    // `[` cycles to the older trace — a turn with no model spans, so it
-    // renders the no-conversation placeholder.
     input.type("[");
     await screen.waitForText("older-se", 5_000);
     await screen.waitForText("No conversation content", 5_000);
@@ -298,7 +255,6 @@ void (async () => {
     }
     console.log(theme.muted("[tui-traces] [ cycled to the older trace"));
 
-    // The trace switch reset the drawer, so one Escape closes the viewer.
     input.send("\x1b");
     await screen.waitForIdlePrompt(5_000);
     if (screen.snapshot().includes("Click to expand")) {
@@ -306,7 +262,6 @@ void (async () => {
     }
     console.log(theme.muted("[tui-traces] escape closed the viewer back to the prompt"));
 
-    // Empty spool → the live empty state, not an error.
     const emptyRoot = await mkdtemp(join(tmpdir(), "eve-tui-traces-empty-"));
     try {
       const emptyRunner = bootRunner(emptyRoot);
@@ -334,8 +289,6 @@ void (async () => {
     input.enter();
     await withTimeout(runPromise, 5_000, "/exit did not terminate the runner");
   } catch (error) {
-    // Failures can leave the alt-screen viewer open: close it (q), wait for
-    // the prompt, then interrupt. A bare Ctrl+C would land in the viewer.
     input.type("q");
     await screen.waitForIdlePrompt(2_000).catch(() => {});
     input.ctrlC();

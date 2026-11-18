@@ -10,29 +10,14 @@ import { createLogger, formatError } from "#internal/logging.js";
 
 const log = createLogger("harness.local-trace-retention");
 
-/**
- * How long a trace must sit untouched before a sweep may act on it.
- *
- * Liveness is tracked per dev worker, so a draining worker's writes and a
- * waiting session restored into a replacement worker are both invisible to the
- * open-session set. Recent writes are the one liveness signal that crosses
- * processes, so nothing written this recently is evicted, and an
- * `atomicWriteFile` temp file is only reaped once this stale — a real write
- * renames within milliseconds.
- */
 const LOCAL_TRACE_QUIESCENCE_MS = 5 * 60 * 1_000;
 
 const LOCAL_TRACE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 const LOCAL_TRACE_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 const LOCAL_TRACE_RETAIN_COUNT = 20;
 
-/**
- * A bound that may be switched off individually, mirroring the `number | false`
- * idiom used by authored agent limits.
- */
 type RetentionBound = number | false;
 
-/** Resolved retention policy for one dev worker. */
 interface LocalTraceRetentionSettings {
   readonly enabled: boolean;
   readonly maxAgeMs: RetentionBound;
@@ -40,10 +25,8 @@ interface LocalTraceRetentionSettings {
   readonly retainCount: RetentionBound;
 }
 
-/** Which bound removed traces, reported for a single diagnostics line. */
 type LocalTracePruneReason = "maxAgeMs" | "maxTotalBytes";
 
-/** Outcome of one sweep. `removedTraces` counts trace directories, not spans. */
 interface LocalTracePruneResult {
   readonly reasons: readonly LocalTracePruneReason[];
   readonly reclaimedBytes: number;
@@ -53,7 +36,6 @@ interface LocalTracePruneResult {
 
 interface PruneLocalTraceStoreInput {
   readonly appRoot: string;
-  /** Traces whose session is open in this worker; never evicted. */
   readonly activeTraceIds: ReadonlySet<string>;
   readonly maxAgeMs?: RetentionBound;
   readonly maxTotalBytes?: RetentionBound;
@@ -68,17 +50,6 @@ interface StoredTrace {
   readonly traceId: string;
 }
 
-/**
- * Reads the retention policy from the environment.
- *
- * `eve dev` loads `.env.local` into `process.env` before the tracing runtime
- * installs, so these are authored there rather than in `agent.ts`: the store is
- * a property of one developer's machine, not of the deployed agent.
- *
- * Every bound accepts `off` to disable that axis alone. Unparseable values warn
- * and fall back to the default instead of throwing, because a typo in a dev env
- * file should not prevent the agent from booting.
- */
 export function resolveLocalTraceRetentionSettings(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): LocalTraceRetentionSettings {
@@ -90,19 +61,6 @@ export function resolveLocalTraceRetentionSettings(
   };
 }
 
-/**
- * Bounds the local trace store.
- *
- * A trace survives while its session is open, while it was written within the
- * quiescence window, while it is among the newest `retainCount`, and while it
- * is younger than `maxAgeMs`. Everything else is evicted oldest-first, taking
- * the age bound first and then whatever the `maxTotalBytes` budget still
- * demands.
- *
- * The count floor outranks both other bounds deliberately: a trace records
- * something that happened and cannot be regenerated, so returning to a quiet
- * project should not mean returning to an empty store.
- */
 export async function pruneLocalTraceStore(
   input: PruneLocalTraceStoreInput,
 ): Promise<LocalTracePruneResult> {
@@ -113,8 +71,6 @@ export async function pruneLocalTraceStore(
 
   const traces = await readStoredTraces(input.appRoot, now);
   const newestFirst = [...traces].sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
-  // `off` disables the bound, and this bound is a floor: disabling it removes
-  // the keep-newest guarantee rather than granting unlimited retention.
   const floor = new Set(newestFirst.slice(0, retainCount === false ? 0 : retainCount));
 
   const reasons = new Set<LocalTracePruneReason>();
@@ -163,15 +119,6 @@ const pruneRequest: PruneRequestState = {
   running: undefined,
 };
 
-/**
- * Requests a sweep without blocking the caller.
- *
- * One pending request is coalesced rather than dropped, so a session that
- * finishes while a sweep is already running still gets swept — the same
- * guarantee `requestDevelopmentGenerationPrune` gives dev runtime generations.
- * Failures are reported and otherwise swallowed: an unbounded store is
- * preferable to a broken dev server.
- */
 export function requestLocalTraceStorePrune(input: PruneLocalTraceStoreInput): void {
   pruneRequest.input = input;
   pruneRequest.requested = true;
@@ -194,11 +141,6 @@ function startPruning(): void {
     });
 }
 
-/**
- * Reports at `info` so it survives the default log threshold: a trace cannot be
- * regenerated, and there is no trace browser yet, so a silent deletion is
- * indistinguishable from a span that was never captured.
- */
 function report(result: LocalTracePruneResult): void {
   if (result.removedTraces === 0) return;
   log.info("pruned local traces", {
@@ -221,15 +163,9 @@ async function readStoredTraces(appRoot: string, now: number): Promise<StoredTra
         const path = join(schemaDirectory, entry.name);
         const segments = resolveLocalTraceSegmentsDirectory(appRoot, entry.name);
         await reapAbandonedTemporaryFiles(segments, now);
-        // Segments are added and never rewritten, so that directory's mtime is
-        // when the trace last received a span. A trace directory without one
-        // falls back to its own mtime so it is still bounded rather than
-        // invisible to the policy.
         const modifiedAtMs = (await directoryMtime(segments)) ?? (await directoryMtime(path));
         if (modifiedAtMs === undefined) return undefined;
         return {
-          // Measured across the whole trace directory, so anything the writer
-          // leaves behind counts against the budget.
           byteSize: await directorySize(path),
           modifiedAtMs,
           path,
@@ -240,11 +176,6 @@ async function readStoredTraces(appRoot: string, now: number): Promise<StoredTra
   return traces.filter((trace): trace is StoredTrace => trace !== undefined);
 }
 
-/**
- * Removes `atomicWriteFile` temp files left by a killed process. It clears its
- * own on a failed rename, but a process killed between write and rename leaves
- * one behind and nothing else would ever reclaim those bytes.
- */
 async function reapAbandonedTemporaryFiles(segmentsDirectory: string, now: number): Promise<void> {
   const entries = await readDirectoryEntries(segmentsDirectory);
   if (entries === undefined) return;
@@ -254,9 +185,7 @@ async function reapAbandonedTemporaryFiles(segmentsDirectory: string, now: numbe
     try {
       if (now - (await stat(path)).mtimeMs <= LOCAL_TRACE_QUIESCENCE_MS) continue;
       await rm(path, { force: true });
-    } catch {
-      // Raced with the writer that owns it; the next sweep sees the outcome.
-    }
+    } catch {}
   }
 }
 
@@ -280,22 +209,11 @@ async function directorySize(path: string): Promise<number> {
     }
     try {
       total += (await stat(child)).size;
-    } catch {
-      // Disappeared mid-sweep; it contributes nothing to the measured size.
-    }
+    } catch {}
   }
   return total;
 }
 
-/**
- * Reads a directory, reporting "no directory here" for both a missing path and
- * a path occupied by a file.
- *
- * A stray inode where the layout expects a directory must not disable the
- * sweep: the store would then grow forever, which is the failure this module
- * exists to prevent. Whatever occupies the path is measured as ordinary bytes
- * and aged out with the trace that holds it.
- */
 async function readDirectoryEntries(path: string): Promise<Dirent<string>[] | undefined> {
   try {
     return await readdir(path, { withFileTypes: true });

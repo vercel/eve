@@ -10,6 +10,7 @@ import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+/** Input to the provided `bash` tool: the command to run and how long to wait for it. */
 export interface BashToolInput {
   command: string;
   /**
@@ -117,7 +118,6 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool
   }),
 );
 
-/** Every key a `bash` result can have, across both statuses. */
 const BASH_OUTPUT_KEYS = new Set([
   "exitCode",
   "message",
@@ -148,7 +148,6 @@ function bashModelOutput(output: unknown): ToolModelOutput {
   return toolOutput.text(text === "" ? "(no output)" : text);
 }
 
-/** A `bash` result with no extra keys and the fields its status requires. */
 function isBashResult(output: unknown): output is BashToolOutput {
   if (typeof output !== "object" || output === null) return false;
   const value = output as Record<string, unknown>;

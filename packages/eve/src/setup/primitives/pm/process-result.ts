@@ -11,7 +11,6 @@ export type PackageManagerProcessTermination =
 export interface PackageManagerProcessResult {
   command: { executable: string; args: readonly string[]; cwd: string };
   termination: PackageManagerProcessTermination;
-  /** Byte-bounded stdout for commands whose caller needs to interpret it. */
   stdout: string;
 }
 

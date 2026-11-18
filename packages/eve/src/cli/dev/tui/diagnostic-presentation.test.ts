@@ -18,7 +18,6 @@ describe("presentDiagnostic", () => {
       ".eve/logs/dev.log",
     );
 
-    // The first line already names the error; stack frames add no headline.
     expect(presentation).toEqual({
       kind: "stored",
       summary: "Error: request failed",

@@ -10,9 +10,6 @@ interface NextEveProxyDescriptorOptions {
   readonly vercelVersion?: string;
 }
 
-/**
- * A Next.js host with routing middleware and a generated eve service.
- */
 export function createNextEveProxyDescriptor(
   options: NextEveProxyDescriptorOptions = {},
 ): ScenarioAppDescriptor {

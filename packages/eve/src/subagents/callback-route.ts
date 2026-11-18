@@ -1,3 +1,4 @@
+import { isRemoteReplyHookToken } from "#execution/callback-hook-tokens.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -20,8 +21,6 @@ import {
   V26_INPUT_REMOTE_AGENT_PROTOCOL,
 } from "#protocol/remote-agent-protocol.js";
 
-// The callback token grants access to the pending turn. Validate remote input
-// before handing it to the parent; the child session ID is not authority.
 const sessionInteractionCallbackSchema = z.object({
   callId: z.string().min(1),
   childSessionId: z.string().min(1),
@@ -68,7 +67,6 @@ const sessionInteractionCallbackSchema = z.object({
   ),
 });
 
-/** A settled remote turn must state its outcome; callers do not infer its lifecycle. */
 const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
   z.object({
     callId: z.string().min(1),
@@ -94,6 +92,7 @@ export async function handleSessionCallbackRequest(
   if (typeof token !== "string" || token.length === 0) {
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
   }
+  if (!isRemoteReplyHookToken(token)) return callbackNotPending();
 
   let body: unknown;
   try {
@@ -106,7 +105,6 @@ export async function handleSessionCallbackRequest(
   if (forwarded === null) {
     return Response.json({ error: "Invalid session input callback.", ok: false }, { status: 400 });
   }
-  // A protocol 2 callback that records nothing to mirror, such as an approval's own settlement.
   if (isEmptyRelay(forwarded)) return Response.json({ ok: true }, { status: 202 });
   const result = forwarded === undefined ? projectSessionCallbackResult(body) : undefined;
   if (result instanceof Response) return result;
@@ -117,20 +115,19 @@ export async function handleSessionCallbackRequest(
       forwarded ?? { kind: "runtime-action-result", results: [result] },
     );
   } catch {
-    return Response.json(
-      { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
-      { status: 404 },
-    );
+    return callbackNotPending();
   }
 
   return Response.json({ ok: true }, { status: 202 });
 }
 
-/**
- * A child's input callback as the payload its parent run reads: `undefined` when the body is not
- * one, or comes from a protocol this parent didn't agree to, and `null` when it claims to be but
- * doesn't parse. The callback URL names the protocol the parent agreed with the child.
- */
+function callbackNotPending(): Response {
+  return Response.json(
+    { code: REMOTE_CALLBACK_NOT_PENDING, error: REMOTE_CALLBACK_NOT_PENDING_MESSAGE, ok: false },
+    { status: 404 },
+  );
+}
+
 function readInteractionCallback(
   body: unknown,
   agreedProtocol: number | undefined,
@@ -138,17 +135,12 @@ function readInteractionCallback(
   const kind = callbackKind(body);
   if (kind === "subagent-interaction") {
     const parsed = sessionInteractionCallbackSchema.safeParse(body);
-    // The envelope schemas validate each fact's data, though zod infers it as `unknown`.
     return parsed.success ? (parsed.data as SubagentInteractionHookPayload) : null;
   }
   if (!PROTOCOL_TWO_INPUT_CALLBACK_KINDS.has(kind)) return undefined;
-  // A parent that agreed to protocol 2 reads its input as v27 relay facts.
   if (agreedProtocol === V26_INPUT_REMOTE_AGENT_PROTOCOL)
     return readProtocolTwoInputCallback(body) ?? null;
-  // An unmarked URL is a parent run from before v27, which a child's callback reaches once the
-  // deployment upgrades: it reads protocol 2 input as is, as its own deployment's route passed it.
   if (agreedProtocol === undefined) return parseProtocolTwoInputCallback(body) ?? null;
-  // A child that agreed to another protocol doesn't send these: refused as an unsupported kind.
   return undefined;
 }
 
@@ -188,8 +180,6 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
       outcome: payload.outcome,
       output: payload.output ?? "",
       subagentName: payload.subagentName,
-      // Per-result usage projection (usage spans); the run that opened the
-      // child tallies `outcome.usageDelta`, never this field, when present.
       usage: payload.outcome.usageDelta,
     };
   }

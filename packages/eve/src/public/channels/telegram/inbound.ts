@@ -1,10 +1,3 @@
-/**
- * Inbound Telegram update parsing and prompt shaping.
- *
- * The channel defines small, documented data shapes and does not return
- * Telegram's raw webhook payloads as the public API.
- */
-
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 
 /**
@@ -107,7 +100,6 @@ export interface TelegramInboundContext {
   readonly username?: string;
 }
 
-/** Parses one JSON-decoded Telegram update payload. */
 export function parseTelegramUpdate(value: unknown): TelegramUpdate | null {
   if (!isObject(value)) return null;
 
@@ -120,11 +112,6 @@ export function parseTelegramUpdate(value: unknown): TelegramUpdate | null {
   return null;
 }
 
-/**
- * Renders one {@link TelegramInboundContext} as a deterministic
- * `<telegram_context>` block with fixed response instructions and the chat and
- * user identity fields.
- */
 export function formatTelegramContextBlock(context: TelegramInboundContext): string {
   const lines = [
     "<telegram_context>",
@@ -281,7 +268,6 @@ function scorePhoto(photo: {
   return (photo.width ?? 0) * (photo.height ?? 0);
 }
 
-/** Parses the Telegram chat types eve recognizes from inbound and send responses. */
 export function parseTelegramChatType(value: unknown): TelegramChatType | null {
   if (value === "channel" || value === "group" || value === "private" || value === "supergroup") {
     return value;

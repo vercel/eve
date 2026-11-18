@@ -1,6 +1,5 @@
 const workspaceTails = new Map<string, Promise<void>>();
 
-/** Serializes operations that require an exclusive view of one self-modification workspace. */
 export async function withSelfModificationWorkspaceLock<T>(
   workspaceKey: string,
   operation: () => Promise<T>,

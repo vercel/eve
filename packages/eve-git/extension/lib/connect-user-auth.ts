@@ -13,7 +13,6 @@ import {
   type InteractiveAuthorizationDefinition,
 } from "eve/connections";
 
-/** The Connect calls the sign-in uses; injectable for tests. */
 export interface ConnectUserClient {
   readonly getTokenResponse: typeof getTokenResponse;
   readonly startAuthorization: typeof startAuthorization;
@@ -24,12 +23,6 @@ const CONNECT: ConnectUserClient = { getTokenResponse, startAuthorization, delet
 
 type Phase = "getToken" | "startAuthorization" | "completeAuthorization";
 
-/**
- * Connect-backed sign-in for user-scoped `gh` tokens. It mirrors
- * `connect({ connector, principalType: "user" })` from `@vercel/connect/eve`,
- * which eve cannot bundle because it imports `eve` itself. Requests carry no
- * authorization details, so one grant serves every repository.
- */
 export function connectUserAuthorization(
   connector: string,
   client: ConnectUserClient = CONNECT,
@@ -69,7 +62,6 @@ export function connectUserAuthorization(
             retryable: false,
           });
         }
-        // Name the destination service, as Connect's eve helper does.
         const displayName = response.connector?.serviceName ?? response.connector?.name;
         return {
           challenge: {
@@ -87,7 +79,6 @@ export function connectUserAuthorization(
     },
     completeAuthorization: ({ principal }) => token(principal, "completeAuthorization"),
     evict({ principal }) {
-      // Best effort: drop Connect's in-process token so re-authorization refreshes it.
       try {
         client.deleteTokenCacheEntry(connector, params(principal));
       } catch {}
@@ -95,11 +86,9 @@ export function connectUserAuthorization(
   };
 }
 
-/** Maps Connect errors to eve's authorization errors, as `@vercel/connect/eve` does for user connectors. */
 function translate(error: unknown, phase: Phase): Error {
   if (error instanceof UserAuthorizationRequiredError || error instanceof NoValidTokenError) {
     if (phase === "completeAuthorization") {
-      // The person reads this on the sign-in card, so it says what to do next.
       return new ConnectionAuthorizationFailedError("connect", {
         message:
           "The sign-in didn't finish, so you do not have access yet. Ask again for a new sign-in link and complete all steps to gain access.",

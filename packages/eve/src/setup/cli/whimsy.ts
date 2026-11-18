@@ -1,10 +1,3 @@
-/**
- * Playful spinner copy for the slow network waits in setup. Pools are keyed by
- * task on purpose: every message still names the step it belongs to, so when a
- * wait hangs (or a Connect timeout fires) the preceding line tells the user
- * which step is stuck. `{detail}` is replaced by the call site's specifics,
- * e.g. a team slug.
- */
 export type WhimsyTask = "auth" | "teams" | "projects" | "project-name" | "project-detect";
 
 const POOLS: Record<WhimsyTask, readonly string[]> = {
@@ -48,18 +41,8 @@ const POOLS: Record<WhimsyTask, readonly string[]> = {
   ],
 };
 
-/**
- * Last pick per task, so consecutive calls in one process never repeat the
- * same line — repeats read as a glitch, and back-to-back waits on the same
- * task (e.g. a retry) are exactly when variety matters.
- */
 const lastPick = new Map<WhimsyTask, number>();
 
-/**
- * Picks one message from the task's pool, never the same one twice in a row.
- * `pick` is injectable so tests (or deterministic contexts) can pin the
- * choice; the default rolls per call.
- */
 export function whimsyFor(
   task: WhimsyTask,
   detail?: string,
@@ -71,7 +54,6 @@ export function whimsyFor(
     return detail === undefined ? only : only.replaceAll("{detail}", detail);
   }
   const previous = lastPick.get(task);
-  // Roll over the pool minus the previous pick, then skip past it.
   const size = previous === undefined ? pool.length : pool.length - 1;
   let index = Math.min(size - 1, Math.floor(pick() * size));
   if (previous !== undefined && index >= previous) index += 1;
@@ -80,5 +62,4 @@ export function whimsyFor(
   return detail === undefined ? message : message.replaceAll("{detail}", detail);
 }
 
-/** Exposed so tests can assert membership instead of pinning one phrasing. */
 export const WHIMSY_POOLS = POOLS;

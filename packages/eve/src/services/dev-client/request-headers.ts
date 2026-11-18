@@ -13,18 +13,15 @@ const LocalDevelopmentUserOidcClaimsSchema = VercelOidcClaimsSchema.extend({
   user_id: z.string().min(1),
 });
 
-/** Vercel owner and project expected to have minted an OIDC token. */
 interface DevelopmentOidcTarget {
   readonly ownerId: string;
   readonly projectId: string;
-  /** Ignore an ambient token and ask Vercel for this exact project. */
   readonly forceRefresh?: boolean;
 }
 
 type VercelOidcClaimName = keyof z.infer<typeof VercelOidcClaimsSchema>;
 type InvalidVercelOidcClaim = VercelOidcClaimName | "claims";
 
-/** Why eve could not use a locally resolved Vercel OIDC token. */
 export type DevelopmentOidcTokenFailure =
   | { readonly kind: "resolution-failed"; readonly message: string }
   | {
@@ -40,16 +37,10 @@ export type DevelopmentOidcTokenFailure =
       readonly mismatchedClaims: readonly VercelOidcClaimName[];
     };
 
-/** Result of resolving and checking a Vercel OIDC token for one target. */
 export type DevelopmentOidcTokenResolution =
   | { readonly kind: "resolved"; readonly token: string }
   | DevelopmentOidcTokenFailure;
 
-/**
- * Resolves and claim-checks the local Vercel OIDC token for a verified target.
- * It does not authorize a destination; callers must verify the exact origin
- * first and install the result in a `DevelopmentCredentialGate`.
- */
 export async function resolveDevelopmentOidcToken(
   input: DevelopmentOidcTarget,
 ): Promise<DevelopmentOidcTokenResolution> {
@@ -66,13 +57,6 @@ export async function resolveDevelopmentOidcToken(
   }
 }
 
-/**
- * Resolves the current linked project's Vercel OIDC token for a local TUI request.
- *
- * An unavailable token deliberately becomes no bearer, so ordinary local
- * requests still reach `localDev()`; user-scoped Connect requests then report
- * that they need a Vercel user rather than trusting a client-supplied failure.
- */
 export async function resolveLinkedDevelopmentOidcToken(workspaceRoot: string): Promise<string> {
   const link = await readVercelProjectLink(workspaceRoot);
   if (link === undefined) return "";
@@ -84,9 +68,6 @@ export async function resolveLinkedDevelopmentOidcToken(workspaceRoot: string): 
   const result = await resolveDevelopmentOidcToken(target);
   if (result.kind === "resolved" && isLocalDevelopmentUserToken(result.token)) return result.token;
 
-  // @vercel/oidc can return an unexpired ambient token before it honors the
-  // linked target. A local Connect request needs a development user token, so
-  // retry only those stale or non-user candidates with an explicit refresh.
   if (result.kind !== "resolved" && result.kind !== "target-mismatch") return "";
   const refreshed = await resolveDevelopmentOidcToken({ ...target, forceRefresh: true });
   return refreshed.kind === "resolved" && isLocalDevelopmentUserToken(refreshed.token)
@@ -140,9 +121,4 @@ function decodeOidcPayload(token: string): unknown | undefined {
   }
 }
 
-/**
- * Vercel header used to bypass preview protection for framework-owned routes
- * during local CLI development. Paired with a Protection Bypass for
- * Automation token issued from Project Settings.
- */
 export const VERCEL_PROTECTION_BYPASS_HEADER = "x-vercel-protection-bypass";

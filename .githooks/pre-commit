@@ -1,3 +1,4 @@
 #!/bin/sh
 
+node ./scripts/check-docs-budget.mjs --staged || exit 1
 exec node ./scripts/pre-commit-fmt.mjs

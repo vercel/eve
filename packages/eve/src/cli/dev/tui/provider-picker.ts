@@ -10,20 +10,17 @@ import type { GatewayKeyValidation } from "#setup/validate-gateway-key.js";
 
 import { EMPTY_LINE, type LineState } from "./line-editor.js";
 
-/** The provider key row is either inert, editable, checking, or rejected. */
 export type ProviderPickerPhase =
   | { kind: "inactive" }
   | { kind: "editing"; editor: LineState }
   | { kind: "validating"; editor: LineState; key: string }
   | { kind: "invalid"; editor: LineState; message: string };
 
-/** One provider picker interaction: ordinary select state plus its key field. */
 interface ProviderPickerState {
   select: SelectState;
   phase: ProviderPickerPhase;
 }
 
-/** Semantic input after terminal-key and line-editor decoding. */
 export type ProviderPickerEvent =
   | { type: "move"; direction: "up" | "down" }
   | { type: "edit"; editor: LineState }
@@ -31,7 +28,6 @@ export type ProviderPickerEvent =
   | { type: "submit" }
   | { type: "validated"; validation: GatewayKeyValidation };
 
-/** One state transition; abort controllers remain in the terminal renderer. */
 type ProviderPickerTransition =
   | { kind: "ignore"; state: ProviderPickerState }
   | { kind: "render"; state: ProviderPickerState }
@@ -49,7 +45,6 @@ function keyPhase(
     : { kind: "inactive" };
 }
 
-/** Creates the select and blank inline key field for one provider menu. */
 export function initialProviderPickerState(
   options: readonly PromptOption<ProviderConnection>[],
   initialValue: ProviderConnection,
@@ -62,7 +57,6 @@ function ignore(state: ProviderPickerState): ProviderPickerTransition {
   return { kind: "ignore", state };
 }
 
-/** Applies one provider-menu event without creating terminal resources. */
 export function transitionProviderPicker(
   state: ProviderPickerState,
   event: ProviderPickerEvent,

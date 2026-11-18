@@ -1,11 +1,3 @@
-/**
- * The session event contract: the catalog of facts and progress records a session stream
- * carries, the shared fold that turns them into tables, and the selectors and guards that hooks,
- * channels, and clients read them with. No runtime dependencies.
- *
- * @packageDocumentation
- */
-
 export {
   type Family,
   type FactRole,
@@ -219,6 +211,7 @@ export {
   interaction,
   interactions,
   openInteractions,
+  nextPrompt,
   delivery,
   deliveries,
   queue,

@@ -1,4 +1,3 @@
-/** Decodes a Slack Web API request body captured from a mocked `fetch`. */
 export function decodeSlackApiBody(body: unknown, contentType: string | null): unknown {
   if (typeof body !== "string") return body;
   if (contentType?.includes("application/json")) return parseJson(body);

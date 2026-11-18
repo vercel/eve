@@ -5,8 +5,6 @@ import { emitStreamContent } from "#harness/emission.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
-// A call whose input isn't an object is introduced with its error. A tool that sets `label: false`
-// stays out of activity on that path too, and publishes no input preview that would show it first.
 it.each([
   { label: false as const, previews: 0, hidden: true },
   { label: undefined, previews: 1, hidden: undefined },

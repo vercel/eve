@@ -72,7 +72,6 @@ export interface ToolResultFromFn {
  */
 export const toolResultFrom: ToolResultFromFn = toolResultFromImpl;
 
-/** The tool name and output of a completed tool call. */
 function completedToolCall(
   source: ToolResultSource,
 ): { readonly callId: string; readonly output: unknown; readonly toolName: string } | undefined {

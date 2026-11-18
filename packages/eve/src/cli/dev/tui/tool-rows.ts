@@ -1,11 +1,3 @@
-/**
- * Renders a tool block's terminal rows: the indented header (status glyph,
- * verb-bold title, summarized args), the `│`-railed detail region —
- * aggregated batch items or a write's diffed content — closed by a `└`
- * corner, and the settled result line. Split from `blocks.ts` so the block
- * model and its per-kind renderers stay separable concerns.
- */
-
 import type { DisplayBlock, RenderBlockContext, ToolGroupItem, ToolStatus } from "./blocks.js";
 import type { ToolDetailLine } from "./line-diff.js";
 import type { Theme } from "./theme.js";
@@ -19,12 +11,7 @@ export function renderTool(
   theme: Theme,
   context: RenderBlockContext,
 ): string[] {
-  // Top-level tool rows sit one extra level in so their marks start at the
-  // prose text column (the character after the `│`/`▲` gutter). Nested
-  // subagent rows keep the tighter lead inside their section's rail.
   if ((block.depth ?? 0) === 0) {
-    // One cell here plus the row's own one-cell indent lands the mark at
-    // the shared tool column.
     return renderToolRows(block, width - 1, theme, context).map((row) => ` ${row}`);
   }
   return renderToolRows(block, width, theme, context);
@@ -43,8 +30,6 @@ function renderToolRows(
       : (block.title ?? "tool");
   const rows = [renderToolHeader(name, block.subtitle ?? "", icon, width, theme)];
 
-  // Detail region: `│`-railed rows closed by a `└` corner. Group items and
-  // write bodies share the rail so every accumulating tool reads the same.
   const railRows: string[] = [];
   if (block.toolGroupItems !== undefined) {
     railRows.push(...toolGroupItemRows(block.toolGroupItems, width, theme));
@@ -60,8 +45,6 @@ function renderToolRows(
   } else if (block.status === "done" && block.result && block.result.length > 0) {
     rows.push(resultLine(theme.glyph.arrow, block.result, width, theme, accent));
   } else if (block.status === "error" && block.result) {
-    // The failure summary hangs on a corner aligned under the title text,
-    // reading as the call's closing line rather than a returned value.
     rows.push(errorDetailLine(block.result, width, theme));
   } else if (block.status === "denied") {
     rows.push(resultLine(theme.glyph.arrow, "denied", width, theme, theme.colors.yellow));
@@ -87,17 +70,12 @@ export function renderToolHeader(
   return clipVisible(header, width);
 }
 
-/**
- * Only the verb carries the header's weight: `Ran find /workspace …` reads
- * as a bold action with its argument dimmed behind it, not one long banner.
- */
 function boldLeadingWord(text: string, theme: Theme): string {
   const split = text.indexOf(" ");
   if (split === -1) return theme.colors.bold(text);
   return `${theme.colors.bold(text.slice(0, split))}${theme.colors.dim(text.slice(split))}`;
 }
 
-/** Detail stays up while the call runs; after settling only writes keep it. */
 function showToolDetail(block: DisplayBlock): boolean {
   if (block.detailLines === undefined || block.detailLines.length === 0) return false;
   const status = block.status ?? "running";
@@ -105,13 +83,8 @@ function showToolDetail(block: DisplayBlock): boolean {
   return block.keepDetailWhenDone === true;
 }
 
-/**
- * An aggregated tool row lists at most this many member items; the rest
- * collapse into a single `… (N more)` line above the closing corner.
- */
 export const maxVisibleToolGroupItems = 5;
 
-/** A write's visible content is windowed to this many rail rows. */
 const maxVisibleToolDetailLines = 10;
 
 function railRow(body: string, theme: Theme): string {
@@ -136,13 +109,9 @@ function detailLineRows(lines: readonly ToolDetailLine[], width: number, theme: 
   const c = theme.colors;
   const visible = lines.slice(0, maxVisibleToolDetailLines);
   const hidden = lines.length - visible.length;
-  // A region with changes gets a marker column so `+`/`-` rows and their
-  // context stay aligned; plain content keeps the tighter rail.
   const hasDiff = visible.some((line) => line.kind === "added" || line.kind === "removed");
   const budget = Math.max(1, width - (hasDiff ? 5 : 4));
 
-  // Content lines clip rather than wrap: file bodies read best one row per
-  // logical line, and the window cap already bounds the region's height.
   const rows = visible.map((line) => {
     if (line.kind === "gap") {
       return railRow(c.dim(theme.glyph.ellipsis), theme);
@@ -170,8 +139,6 @@ function itemRows(items: readonly ToolGroupItem[], width: number, theme: Theme):
     return items.map((item) => railRow(theme.colors.gray(truncate(item.text, budget)), theme));
   }
 
-  // Failure summaries align into one column so a mixed batch scans like a
-  // table; long items yield to keep at least a short summary visible.
   const textColumn = Math.min(
     Math.max(...items.map((item) => visibleLength(item.text))),
     Math.max(8, budget - 9),
@@ -233,8 +200,6 @@ function toolGlyph(
 ): { icon: string; accent: (text: string) => string } {
   switch (status) {
     case "done":
-      // The settled form of the running pulse (`▪` held steady), not a green
-      // check: completed activity reads as a quiet one-line summary.
       return { icon: theme.colors.gray(theme.glyph.square), accent: theme.colors.gray };
     case "error":
       return { icon: theme.colors.red(theme.glyph.error), accent: theme.colors.red };

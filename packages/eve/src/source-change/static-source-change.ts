@@ -10,10 +10,6 @@ import {
 } from "#source-change/apply-agent-model-settings.js";
 import { applyModelSelectionToSource } from "#source-change/apply-model-selection.js";
 
-/**
- * Outcome of a static source change, returned to upstream callers (CLI, web
- * setup UI) so they can render success or route the bail to a guided fix.
- */
 type ApplyResult =
   | { readonly kind: "applied"; readonly from: string; readonly to: string }
   | {
@@ -30,27 +26,11 @@ type ApplyModelSettingsResult =
       readonly at: { readonly logicalPath: string; readonly line: number };
     };
 
-/**
- * Central, flat API for applying targeted edits to an agent's authored source.
- *
- * Built from a discovery manifest, which already carries every resource's
- * `ModuleSourceRef`, so each operation can locate the file it edits without
- * recompiling. Consumers depend only on this interface.
- */
 interface StaticSourceChange {
-  /**
-   * Rewrites the agent's `model` in `agent.ts` in place. Bails (no write) when
-   * the value isn't a string literal; the bail carries the source location so
-   * the caller can offer a manual fix.
-   */
   updateModelName(modelName: string): Promise<ApplyResult>;
-  /** Applies the `/model` draft in one source transform and one atomic rename. */
   updateModelSettings(patch: AgentModelSettingsPatch): Promise<ApplyModelSettingsResult>;
 }
 
-/**
- * Creates the {@link StaticSourceChange} surface bound to one discovered agent.
- */
 export function createStaticSourceChange(manifest: AgentSourceManifest): StaticSourceChange {
   return {
     updateModelName: (modelName) => updateAgentModelName(manifest, modelName),
@@ -128,17 +108,11 @@ async function writeSourceIfChanged(
   nextSource: string,
 ): Promise<void> {
   if (nextSource === sourceText) return;
-  // Write atomically so a crash cannot truncate the user's authored source.
   const temporaryPath = `${absolutePath}.${process.pid}.eve-tmp`;
   await writeFile(temporaryPath, nextSource, "utf8");
   await rename(temporaryPath, absolutePath);
 }
 
-/**
- * Refuses an edit whose output no longer parses as an agent config. The
- * transforms are AST-guided string surgery, so this invariant turns any
- * editor bug into a bail instead of a broken agent.ts.
- */
 async function editedSourceBail(
   sourceText: string,
   nextSource: string,

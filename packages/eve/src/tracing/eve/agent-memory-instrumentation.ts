@@ -17,6 +17,10 @@ import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 import { type AgentRun } from "#compiled/@vercel/agent-runs/index.js";
 import { activeTraceOperation } from "#compiled/@vercel/agent-runs/otel.js";
 
+export function recordMemoryToolStore(storeId: string, slot: string): void {
+  activeTraceOperation()?.memory?.store({ storeId, slot });
+}
+
 export function createAgentMemoryInstrumentation(input: {
   tracing: AgentRun;
   environment: ConversationEnvironment;

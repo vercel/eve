@@ -64,10 +64,6 @@ function parseJsonValueOrUndefined(value: unknown): JsonValue | undefined {
   }
 }
 
-/**
- * A run's `ctx.ask()` question, relayed like any request: an interaction the run opens, about
- * the call it serves. The run is the asker, so its question names the run as its origin.
- */
 export function workflowAskPayload(
   message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolAskRequest },
 ): SubagentInteractionHookPayload {
@@ -84,6 +80,7 @@ export function workflowAskPayload(
   if (authored.display !== undefined) request.display = authored.display;
   if (authored.title !== undefined) request.title = authored.title;
   if (authored.options !== undefined) request.options = [...authored.options];
+  if (authored.initialOptionId !== undefined) request.initialOptionId = authored.initialOptionId;
   return {
     callId: from.callId,
     childSessionId: from.runId,

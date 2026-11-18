@@ -1,0 +1,163 @@
+#!/bin/sh
+# Run read-only SQL over the searchable copy of Contentful content.
+#
+# Usage: sql 'SELECT ...'
+#        sql --warm
+#
+# Queries the tables entries, refs, pages, content_types, type_fields, and users, and
+# the full-text search(term) macro.
+# When the manifest lists a compacted database built by the last sync, the script opens
+# it read-only; otherwise, or when it can't be opened, it defines the same names as
+# views over the entry files (see views.sql), which is slower. Either way the SQL runs
+# once, with file access outside the copy disabled. Prints CSV with a header. Output
+# stops after 200 rows; the footer gives the row count, says when rows were cut, and
+# when the files were last updated from Contentful.
+#
+# --warm copies DuckDB and the database to local disk, printing nothing. The agent's
+# sandbox runs it in the background when it opens, so queries don't read from the Drive.
+
+set -eu
+
+root=${CONTENTFUL_DIR:-/contentful}
+here=$(cd "$(dirname "$0")" && pwd)
+limit=200
+tmp=${TMPDIR:-/tmp}
+
+[ $# -eq 1 ] || { echo "Usage: sql 'SELECT ...'" >&2; exit 2; }
+# DuckDB runs dot-commands such as .shell and .output that start the argument, bypassing
+# the file access settings below, so accept only SQL.
+case $1 in .*) echo "Only SQL statements are accepted." >&2; exit 2 ;; esac
+
+if [ ! -f "$root/manifest.json" ]; then
+  [ "$1" = --warm ] && exit 0
+  echo "Content isn't available to query in this session. Use run_contentful_query for entries, and get_contentful_schema for content types and fields." >&2
+  exit 1
+fi
+
+synced=$(sed -n 's/.*"syncedAt": *"\([^"]*\)".*/\1/p' "$root/manifest.json")
+database=$(sed -n 's/.*"database": *"\([^"/]*\)".*/\1/p' "$root/manifest.json")
+
+# Local copies are named after the sync, so a newer Drive snapshot never reuses an old
+# copy of DuckDB or the database.
+sync_id=${synced:-unsynced}
+
+runs() { [ -n "$1" ] && "$1" --version >/dev/null 2>&1; }
+
+# Find a DuckDB binary that runs: an explicit override, then a local copy of the binary
+# the sync stored with the database, then that binary on the Drive, then one on PATH.
+resolve_duckdb() {
+  if runs "${DUCKDB_BIN:-}"; then echo "$DUCKDB_BIN"; return; fi
+  if [ -f "$root/.bin/duckdb" ]; then
+    # Starting DuckDB from the Drive reads it over the network, and a Drive mounted
+    # without exec permission can't start it at all, so run a copy on local disk.
+    copy="$tmp/duckdb-mirror-$sync_id"
+    if ! runs "$copy"; then
+      { cp "$root/.bin/duckdb" "$copy.$$" && chmod 755 "$copy.$$" && mv -f "$copy.$$" "$copy"; } || rm -f "$copy.$$"
+    fi
+    if runs "$copy"; then echo "$copy"; return; fi
+    if runs "$root/.bin/duckdb"; then echo "$root/.bin/duckdb"; return; fi
+  fi
+  command -v duckdb 2>/dev/null || true
+}
+
+# The sandbox and its Drive snapshot don't change during a session, so the binary that
+# worked once is reused without starting it again just to check it.
+# Shell builtins only here: each extra process costs a few milliseconds per query.
+cache="$tmp/query-mirror-duckdb-$sync_id"
+duckdb=""
+if [ -f "$cache" ]; then
+  read -r duckdb <"$cache" || true
+  [ -x "$duckdb" ] || duckdb=""
+fi
+if [ -z "$duckdb" ]; then
+  duckdb=$(resolve_duckdb)
+  if [ -n "$duckdb" ]; then
+    printf '%s\n' "$duckdb" >"$cache.$$" 2>/dev/null && mv -f "$cache.$$" "$cache" 2>/dev/null || true
+  fi
+fi
+if [ -z "$duckdb" ]; then
+  [ "$1" = --warm ] && exit 0
+  echo "SQL isn't available in this session. Use run_contentful_query for entries, and get_contentful_schema for content types and fields." >&2
+  exit 1
+fi
+
+local_db="$tmp/query-mirror-$sync_id-$database"
+
+if [ "$1" = --warm ]; then
+  if [ -n "$database" ] && [ -f "$root/$database" ] && [ ! -f "$local_db" ]; then
+    { cp "$root/$database" "$local_db.$$" && mv -f "$local_db.$$" "$local_db"; } || rm -f "$local_db.$$"
+  fi
+  exit 0
+fi
+
+# Until the warm-up finishes copying it, read the database from the Drive.
+db=""
+if [ -n "$database" ]; then
+  if [ -f "$local_db" ]; then
+    db=$local_db
+  elif [ -f "$root/$database" ]; then
+    db="$root/$database"
+  fi
+fi
+
+# Check once that the database opens and has its tables and the search macro, so that
+# errors in the query itself are reported rather than retried against the files, and a
+# database built before search() or the users table existed falls back to the files.
+# The database doesn't change within a sync, so either result is remembered for it,
+# like the binary above.
+opened="$tmp/query-mirror-opened"
+if [ -n "$db" ]; then
+  checked=""
+  if [ -f "$opened" ]; then read -r checked <"$opened" || true; fi
+  if [ "$checked" != "$sync_id $db ok" ] && [ "$checked" != "$sync_id $db failed" ]; then
+    if "$duckdb" -readonly "$db" -c "SELECT 1 FROM entries LIMIT 0; SELECT 1 FROM users LIMIT 0; SELECT 1 FROM search('') LIMIT 0;" >/dev/null 2>&1; then
+      checked="$sync_id $db ok"
+    else
+      checked="$sync_id $db failed"
+    fi
+    printf '%s\n' "$checked" >"$opened.$$" 2>/dev/null && mv -f "$opened.$$" "$opened" 2>/dev/null || true
+  fi
+  if [ "$checked" = "$sync_id $db failed" ]; then
+    echo "# Queries are slower than usual in this session." >&2
+    db=""
+  fi
+fi
+
+# DuckDB may read only the copy: no other files, no extension downloads, and no
+# setting changes once the query starts.
+locked="SET autoinstall_known_extensions = false; SET autoload_known_extensions = false;"
+if [ -n "$db" ]; then
+  setup="SET enable_external_access = false; $locked"
+  set -- -readonly -csv "$db" -c "$setup SET lock_configuration = true;" -c "$1;"
+else
+  # Point the views at the configured root, so tests can use a local copy.
+  schema="$root/content-types.ndjson"
+  if [ ! -f "$schema" ]; then
+    # Copies synced before schemas were stored lack the file; empty schema tables keep the rest working.
+    schema="$tmp/query-mirror-no-schema.ndjson"
+    : >"$schema"
+  fi
+  users="$root/users.ndjson"
+  if [ ! -f "$users" ]; then
+    # Copies synced before users were stored lack the file; an empty users table keeps the rest working.
+    users="$tmp/query-mirror-no-users.ndjson"
+    : >"$users"
+  fi
+  setup="SET allowed_directories = ['$root/']; SET allowed_paths = ['$schema', '$users']; SET enable_external_access = false; $locked"
+  views=$(sed -e "s#'/contentful/content-types.ndjson'#'$schema'#g" -e "s#'/contentful/users.ndjson'#'$users'#g" -e "s#'/contentful/#'$root/#g" "$here/views.sql")
+  set -- -csv -c "$setup" -c "$views" -c "SET lock_configuration = true;" -c "$1;"
+fi
+if ! out=$("$duckdb" "$@" 2>&1); then
+  printf '%s\n' "$out" >&2
+  exit 1
+fi
+
+# Count and cut by CSV record: a quoted value can span lines, and a record ends at a
+# line break only when it holds an even number of quotes.
+printf '%s\n' "$out" | awk -v limit="$limit" -v synced="${synced:-an unknown time}" '
+  { if (record <= limit) print; quotes += gsub(/"/, "\""); if (quotes % 2 == 0) { record++; quotes = 0 } }
+  END {
+    rows = record > 0 ? record - 1 : 0
+    if (rows > limit) printf "# Showing %d of %d rows; add LIMIT/OFFSET or aggregate. Content as of %s\n", limit, rows, synced
+    else printf "# %d rows; content as of %s\n", rows, synced
+  }'

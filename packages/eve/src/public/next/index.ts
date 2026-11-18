@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import type { NextConfig } from "next";
 
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
-import { findEveProjectContext } from "#internal/project-context.js";
+import { type AgentWorkspace, findEveProjectContext } from "#internal/project-context.js";
+import { writeMultiAgentSummary } from "#internal/vercel-agent-summary.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
@@ -18,10 +19,6 @@ import {
 } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
-/**
- * Default private route namespace for manually configured Vercel
- * services. {@link WithEveOptions.servicePrefix} defaults to this value.
- */
 const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
@@ -32,20 +29,10 @@ const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve";
 type ArrayElement<T> = T extends readonly (infer TElement)[] ? TElement : never;
 type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
 
-/**
- * Next.js rewrite rule that {@link withEve} emits.
- */
 type EveNextRewriteRule = ArrayElement<NextRewrites>;
 
-/**
- * Resolved return type of a Next.js `rewrites` function: an array of rules, or
- * the sectioned `{ beforeFiles, afterFiles, fallback }` object.
- */
 type EveNextRewrites = NextRewrites;
 
-/**
- * Sectioned Next.js rewrite rules.
- */
 type EveNextRewriteSections = Extract<
   NextRewrites,
   {
@@ -55,10 +42,6 @@ type EveNextRewriteSections = Extract<
   }
 >;
 
-/**
- * Alias of Next.js's `NextConfig`, the config object form {@link withEve}
- * accepts (the other being {@link WithEveConfigFunction}).
- */
 type EveNextConfig = NextConfig;
 
 /**
@@ -334,9 +317,10 @@ function createDefaultBuildCommand(input: { readonly agentRoot: string }): strin
   return `node ${quoteVercelShellArgument(eveBinaryPath)} build`;
 }
 
-async function normalizeAgentsConfig(
-  options: WithEveOptions,
-): Promise<readonly ResolvedEveNextAgent[]> {
+async function normalizeAgentsConfig(options: WithEveOptions): Promise<{
+  readonly agents: readonly ResolvedEveNextAgent[];
+  readonly workspace?: AgentWorkspace;
+}> {
   const servicePrefixBase = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
   const resolveBuildCommand = (agentRoot: string, buildCommand: string | undefined) =>
     buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot });
@@ -349,27 +333,32 @@ async function normalizeAgentsConfig(
       context.workspace.root === eveRoot &&
       context.workspace.members.length > 0
     ) {
-      return context.workspace.members.map((member, index) => ({
-        appRoot: member.appRoot,
-        buildCommand: resolveBuildCommand(member.appRoot, undefined),
-        localProductionPortOffset: index,
-        name: member.name,
-        publicRoutePrefix: createNamedAgentRoutePrefix(member.name),
-        servicePrefix: createNamedAgentServicePrefix(servicePrefixBase, member.name),
-        workspaceMember: true,
-      }));
+      return {
+        agents: context.workspace.members.map((member, index) => ({
+          appRoot: member.appRoot,
+          buildCommand: resolveBuildCommand(member.appRoot, undefined),
+          localProductionPortOffset: index,
+          name: member.name,
+          publicRoutePrefix: createNamedAgentRoutePrefix(member.name),
+          servicePrefix: createNamedAgentServicePrefix(servicePrefixBase, member.name),
+          workspaceMember: true,
+        })),
+        workspace: context.workspace,
+      };
     }
 
     const appRoot = eveRoot;
-    return [
-      {
-        appRoot,
-        buildCommand: resolveBuildCommand(appRoot, undefined),
-        localProductionPortOffset: 0,
-        publicRoutePrefix: "",
-        servicePrefix: servicePrefixBase,
-      },
-    ];
+    return {
+      agents: [
+        {
+          appRoot,
+          buildCommand: resolveBuildCommand(appRoot, undefined),
+          localProductionPortOffset: 0,
+          publicRoutePrefix: "",
+          servicePrefix: servicePrefixBase,
+        },
+      ],
+    };
   }
 
   const entries = Object.entries(options.agents);
@@ -377,7 +366,7 @@ async function normalizeAgentsConfig(
     throw new Error("withEve agents must contain at least one named eve agent.");
   }
 
-  return entries.map(([name, config], index) => {
+  const agents = entries.map(([name, config], index) => {
     assertValidAgentName(name);
 
     const agentConfig = typeof config === "string" ? { root: config } : config;
@@ -394,22 +383,20 @@ async function normalizeAgentsConfig(
       ),
     };
   });
+  return { agents };
 }
 
 async function buildAgentWorkspaceExtensions(
   agents: readonly ResolvedEveNextAgent[],
 ): Promise<void> {
-  // Loaded lazily so development config loads skip the extension builder.
   const [{ buildWorkspaceExtensions }, { DiscoveryProjectResolutionError }] = await Promise.all([
     import("#internal/nitro/host/workspace-extensions.js"),
     import("#discover/project.js"),
   ]);
-  // Agents can mount the same extension, so build them one at a time.
   for (const agent of agents) {
     try {
       await buildWorkspaceExtensions(agent.appRoot);
     } catch (error) {
-      // The Next.js app can proxy to an agent built and deployed elsewhere.
       if (error instanceof DiscoveryProjectResolutionError) continue;
       throw error;
     }
@@ -423,7 +410,10 @@ async function buildAgentWorkspaceExtensions(
  * In development, starts `eve dev --no-ui --port 0` for the eve app and
  * rewrites eve protocol endpoints to that local URL. During `next build`,
  * builds each agent's mounted source-backed workspace extensions so the
- * Next.js type check can resolve them. In Vercel production,
+ * Next.js type check can resolve them. When `eveRoot` is an `agents/`
+ * workspace, `next build` also writes `<eveRoot>/.eve/agent-summary.json`, the
+ * multi-agent summary index Vercel uses for the project dashboard. In Vercel
+ * production,
  * writes Build Output service routes so Vercel sends eve protocol endpoints to
  * the eve service directly.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
@@ -438,12 +428,15 @@ export function withEve<TConfig extends object>(
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NEXT_HOST);
   assertValidWithEveOptions(options);
   return async function eveNextConfig(phase, context) {
-    const [agents, nextConfig] = await Promise.all([
+    const [{ agents, workspace }, nextConfig] = await Promise.all([
       normalizeAgentsConfig(options),
       resolveNextConfig(configOrFunction, phase, context),
     ]);
     if (phase === NEXT_PHASE_PRODUCTION_BUILD) {
       await buildAgentWorkspaceExtensions(agents);
+      if (workspace !== undefined) {
+        await writeMultiAgentSummary(workspace);
+      }
     }
     const existingRewrites = (nextConfig as NextConfig).rewrites;
     const configuredVercel = await ensureEveVercelOutputConfig({

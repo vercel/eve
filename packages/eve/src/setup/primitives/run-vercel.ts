@@ -13,11 +13,6 @@ const CONNECT_FEATURE_FLAG_ENV: Readonly<Record<string, string>> = {
 const VERCEL_NOT_FOUND_MESSAGE = "Vercel CLI not found. Install with: npm i -g vercel@latest";
 
 function buildSpawnEnv(extraEnv: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
-  // Strip coding-agent launch markers so the Vercel CLI never reacts to an
-  // agent it was not driving: eve invokes it explicitly (stdin, flags), and an
-  // inherited marker has turned a read-only `vercel whoami` into a login
-  // attempt. eve's own agent detection reads `process.env` directly, so this
-  // only changes what the child sees.
   return { ...withoutCodingAgentMarkers(process.env), ...CONNECT_FEATURE_FLAG_ENV, ...extraEnv };
 }
 
@@ -26,14 +21,6 @@ function commandArgs(args: string[], nonInteractive: boolean | undefined): strin
   return [...args, "--non-interactive"];
 }
 
-/**
- * Nearest existing directory at or above `dir`. The create flow runs
- * account-level vercel lookups (whoami, teams, gateway) from the project's
- * parent before it is scaffolded, so that path may not exist yet, and spawning
- * a child with a missing `cwd` throws ENOENT. Walking up keeps those
- * cwd-independent lookups working; an existing `dir` (every post-scaffold,
- * project-scoped call) is returned unchanged.
- */
 function existingDir(dir: string): string {
   let current = resolve(dir);
   while (!existsSync(current)) {
@@ -44,36 +31,18 @@ function existingDir(dir: string): string {
   return current;
 }
 
-/** Options common to shared Vercel CLI subprocess operations. */
 export interface RunVercelOptions {
   cwd: string;
   extraEnv?: Readonly<Record<string, string>>;
-  /** Pass `--non-interactive` and close stdin so automation cannot stop on a prompt. */
   nonInteractive?: boolean;
-  /** UTF-8 data written to stdin, used to keep connector secrets out of argv. */
   stdin?: string;
-  /** Streams command output to a parent-owned renderer instead of writing outside it. */
   onOutput?: ProcessOutputHandler;
-  /** Aborts the Vercel CLI subprocess when its parent setup flow is interrupted. */
   signal?: AbortSignal;
-  /**
-   * Hard deadline for the whole command. When it elapses the run settles as a
-   * failure and the child is killed (SIGTERM, then SIGKILL after a short
-   * grace). Unbounded when omitted — only safe for commands that cannot wait
-   * on external action, e.g. a Connect create parked on a browser OAuth.
-   */
   timeoutMs?: number;
 }
 
 const KILL_GRACE_MS = 5_000;
 
-/**
- * Arms the `timeoutMs` deadline on a spawned CLI child. `onTimeout` fires
- * first so the caller can settle its promise with a failure before the kill;
- * the SIGKILL escalation covers a CLI that ignores SIGTERM. Timers are
- * unref'd so a finished parent never lingers on them. Returns a disarm
- * function for the close handler.
- */
 function armDeadline(
   child: ChildProcess,
   timeoutMs: number | undefined,
@@ -186,46 +155,25 @@ function stdioForRun(
 
 type StdioChannel = "inherit" | "ignore" | "pipe";
 
-/** stdio layout for a Vercel CLI child: fully inherited, or per channel. */
 type VercelStdio = "inherit" | [StdioChannel, StdioChannel, StdioChannel];
 
-/** Why a run failed, carried so a caller can act on the cause. */
 interface VercelRunFailure {
   code?: number | null;
   errno?: string;
   message: string;
 }
 
-/** Terminal state of one Vercel CLI run, before it is shaped for the caller. */
 type VercelRunOutcome =
   | { ok: true; stdout: string; stderr: string }
   | ({ ok: false; stdout: string; stderr: string } & VercelRunFailure);
 
-/** How a public entry point drives the shared run and shapes its result. */
 interface VercelRunSpec<T> {
   stdio: VercelStdio;
-  /**
-   * Retain stdout and stderr for the caller. When false, stdout is streamed to
-   * the renderer instead and neither stream is kept in memory.
-   */
   capture: boolean;
-  /** Write diagnostics to `process.stderr` when no renderer is attached. */
   reportWithoutRenderer: boolean;
   result(outcome: VercelRunOutcome): T;
 }
 
-/**
- * Runs the Vercel CLI with the Connect feature flag enabled and settles exactly
- * once, whatever ends the run: a clean exit, a non-zero exit, a spawn error, a
- * failed stdin write, the `timeoutMs` deadline, or cancellation. Every public
- * entry point shares this lifecycle and differs only in its stdio layout and
- * result shape.
- *
- * A settled run flushes buffered output before its diagnostic so a partial
- * trailing line cannot appear after the failure it preceded. Cancellation and a
- * signal-driven exit stay silent: the timeout that killed the child has already
- * reported, and a user-driven abort is not a fault to narrate.
- */
 function runVercelProcess<T>(
   args: string[],
   options: RunVercelOptions,
@@ -329,12 +277,6 @@ function runVercelProcess<T>(
   });
 }
 
-/**
- * Runs a Vercel CLI command with the Connect feature flag enabled.
- *
- * When `onOutput` is supplied, stdout and stderr are emitted as complete lines
- * so an interactive parent can keep terminal rendering coherent.
- */
 export async function runVercel(args: string[], options: RunVercelOptions): Promise<boolean> {
   return runVercelProcess(args, options, {
     stdio: stdioForRun(options),
@@ -344,22 +286,12 @@ export async function runVercel(args: string[], options: RunVercelOptions): Prom
   });
 }
 
-/** Exit success plus captured stdout from an interactive Vercel CLI run. */
 export interface RunVercelCaptureResult {
   ok: boolean;
   stdout: string;
   stderr?: string;
 }
 
-/**
- * Runs an interactive Vercel CLI command while capturing its stdout.
- *
- * Unlike {@link captureVercel}, stdin stays attached to the terminal so the
- * command can drive prompts and browser-based OAuth flows, and stderr is
- * streamed to `onOutput` (the rail renderer) like {@link runVercel}. Only
- * stdout is captured, so a `--format json` payload can be parsed without
- * disturbing the interactive UI, which the Vercel CLI writes to stderr.
- */
 export async function runVercelCaptureStdout(
   args: string[],
   options: RunVercelOptions,
@@ -373,38 +305,18 @@ export async function runVercelCaptureStdout(
   });
 }
 
-/** Why a {@link captureVercel} lookup failed, preserved so callers can act on it. */
 export interface VercelCaptureFailure {
-  /** Process exit code, or `null` when killed by a signal; absent for a spawn error (the process never ran). */
   code?: number | null;
-  /** `error.code` from a spawn failure, e.g. `"ENOENT"` when `vercel` is not on `PATH`. */
   errno?: string;
-  /** Captured stderr (best-effort); empty when the process never ran. */
   stderr: string;
-  /** Captured stdout (best-effort), useful when a JSON API error exits non-zero. */
   stdout: string;
-  /** One-line human-readable summary, safe to surface to a user or agent. */
   message: string;
 }
 
-/**
- * Outcome of a {@link captureVercel} lookup: stdout on a clean exit, or the
- * failure diagnostic. The failure arm exists so a caller like the login check
- * can tell "not logged in" from "the CLI is missing" or "the API errored",
- * instead of collapsing every fault into a single `undefined`.
- */
 export type VercelCaptureResult =
   | { ok: true; stdout: string }
   | { ok: false; failure: VercelCaptureFailure };
 
-/**
- * Runs a Vercel CLI lookup and captures stdout.
- *
- * stderr is always captured so a failure's diagnostic survives, even with no
- * live `onOutput` renderer attached; when `onOutput` is supplied, stderr is
- * streamed to it and the failure summary is appended after a non-zero exit.
- */
-/** Shapes a failed run as the diagnostic {@link captureVercel} callers act on. */
 function toCaptureFailure(outcome: Extract<VercelRunOutcome, { ok: false }>): VercelCaptureFailure {
   const failure: VercelCaptureFailure = {
     stdout: outcome.stdout,

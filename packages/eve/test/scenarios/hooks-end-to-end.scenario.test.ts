@@ -15,11 +15,6 @@ import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.
 const createAppRoot = useTemporaryAppRoots();
 const APP_ROOT_OPTIONS = { packageName: "hooks-scenario-agent" } as const;
 
-/**
- * Pins the on-disk → bundle path: agent/hooks/** files compile, resolve,
- * and arrive on the runtime hook registry with live handlers attached.
- */
-
 const AGENT_SOURCE = `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n`;
 
 const AUDIT_HOOK_SOURCE = `export default {
@@ -79,7 +74,6 @@ describe("authored hooks end-to-end", () => {
     await mkdir(join(agentRoot, "hooks"), { recursive: true });
     await writeFile(join(agentRoot, "agent.mjs"), AGENT_SOURCE);
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise agent.\n");
-    // Leading digit fails the segment charset rule.
     await writeFile(join(agentRoot, "hooks", "1bad.mjs"), AUDIT_HOOK_SOURCE);
 
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(/hook/i);

@@ -52,7 +52,6 @@ export function defaultTeamsAuth(
   };
 }
 
-/** Default message hook: mention-gated dispatch with Teams user auth. */
 export async function defaultOnMessage(
   ctx: TeamsContext,
   message: TeamsMessageActivity,
@@ -88,7 +87,6 @@ async function showTeamsRequest(channel: TeamsHandlerChannel, request: Interacti
   };
 }
 
-/** Retires a request's card with its answer; a pressed approval's names who pressed it. */
 async function settleTeamsRequest(
   channel: TeamsHandlerChannel,
   settlement: RequestSettlement,
@@ -96,28 +94,23 @@ async function settleTeamsRequest(
   const { [settlement.interactionId]: card, ...rest } = channel.state.pendingPromptCards ?? {};
   if (card === undefined) return;
   const { kind, outcome, responder } = settlement;
-  const pressed =
-    kind === "approval" &&
-    responder !== undefined &&
-    (outcome === "accepted" || outcome === "declined");
+  const decided = outcome === "accepted" || outcome === "declined";
+  const account =
+    !decided || responder === undefined
+      ? undefined
+      : channel.state.approvalResponderAccounts?.[responder.id];
+  const actor = account?.name ?? account?.id;
   let label = resolvedPromptAnswer(settlement, card.options);
-  if (pressed) {
-    const account = channel.state.approvalResponderAccounts?.[responder.id];
-    const actor = account?.name ?? account?.id;
-    const decided = outcome === "accepted" ? "Approved" : "Cancelled";
-    label = actor === undefined ? decided : `${decided} by ${actor}`;
-  }
+  let by: string | undefined;
+  if (kind === "approval" && actor !== undefined) label = `${label} by ${actor}`;
+  else by = actor;
   await channel.thread.update(
     card.activityId,
-    renderAnsweredInteractionMessage({ includeText: false, label, prompt: card.prompt }),
+    renderAnsweredInteractionMessage({ by, includeText: false, label, prompt: card.prompt }),
   );
   channel.state.pendingPromptCards = rest;
 }
 
-/**
- * A Teams conversation as a sign-in shows on it: a personal chat gets the card with the sign-in
- * link; a group or channel, which can't be messaged privately here, a link-free status.
- */
 function teamsSignIns(channel: TeamsHandlerChannel): SignInSurface {
   return {
     private: channel.state.conversationType === "personal",
@@ -155,7 +148,6 @@ function signInOptions(channel: TeamsHandlerChannel, signIn: SignIn) {
   };
 }
 
-/** Built-in Teams event handlers for typing, replies, HITL, auth cards, and terminal errors. */
 export const defaultEvents: TeamsChannelEvents = surfaceEvents<TeamsHandlerChannel>({
   typing: (channel) => channel.thread.startTyping(),
   async post(channel, text) {
@@ -166,15 +158,12 @@ export const defaultEvents: TeamsChannelEvents = surfaceEvents<TeamsHandlerChann
   signIns: teamsSignIns,
 });
 
-/** A connection name for the Teams auth card (`linear` → `Linear`). */
 export function formatConnectionDisplayName(connectionName: string): string {
   return displayProperName(connectionName);
 }
 
-/** Builds final-state text for a completed connection authorization attempt. */
 export const buildAuthCompletedText = signInEndedText;
 
-/** Builds a Teams mention entity and matching text for one channel account. */
 export function teamsMentionUser(user: {
   readonly id: string;
   readonly name?: string;

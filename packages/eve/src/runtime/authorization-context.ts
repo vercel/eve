@@ -7,7 +7,6 @@ import {
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
 
-/** Shared getToken/requireAuth capability, independent of the executing tool or workflow. */
 export function createAuthorizationContext(input: {
   readonly scope: string;
   readonly boundResponder?: SessionAuthContext;
@@ -22,10 +21,6 @@ export function createAuthorizationContext(input: {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
       return await execution.getToken(resolve(provider, options));
     },
-    /**
-     * The given responder's stored token, resolved through this execution's
-     * providers; never starts or completes a sign-in.
-     */
     async getResponderToken(
       responder: SessionAuthContext,
       provider: ToolAuthProvider,

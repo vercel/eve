@@ -1,11 +1,5 @@
 import type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
 export type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
-/**
- * Minimal Telegram Bot API wrapper for the Telegram channel.
- *
- * The channel talks directly to Telegram's JSON HTTP API instead of
- * exposing a third-party SDK through eve public surfaces.
- */
 
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
@@ -54,8 +48,8 @@ export interface TelegramMessageResult {
 }
 
 /**
- * Body for Telegram's `sendMessage`. Only `text` is required; the remaining
- * snake_case fields are forwarded to Telegram unchanged.
+ * `sendMessage` fields that show a group or supergroup response to only one
+ * member, as an ephemeral message.
  */
 export interface TelegramEphemeralMessageParameters {
   /** Callback query that grants this ephemeral response's 15-second delivery window. */
@@ -64,6 +58,10 @@ export interface TelegramEphemeralMessageParameters {
   readonly receiver_user_id: number | string;
 }
 
+/**
+ * Body for Telegram's `sendMessage`. Only `text` is required; the remaining snake_case fields are
+ * forwarded to Telegram unchanged.
+ */
 export interface TelegramMessageBody {
   readonly disable_notification?: boolean;
   /** Delivers this group or supergroup response only to one member. */
@@ -76,7 +74,6 @@ export interface TelegramMessageBody {
   readonly text: string;
 }
 
-/** Telegram's documented text-message cap. */
 export const TELEGRAM_MESSAGE_TEXT_MAX_LENGTH = 4096;
 
 /**
@@ -96,14 +93,12 @@ export function telegramContinuationToken(input: {
   return `${String(input.chatId)}:${thread}:${conversation}`;
 }
 
-/** Resolves a Telegram bot token, falling back to `TELEGRAM_BOT_TOKEN`. */
 export async function resolveTelegramBotToken(token?: TelegramBotToken): Promise<string> {
   const source = token ?? process.env.TELEGRAM_BOT_TOKEN;
   if (!source) throw new Error("TELEGRAM_BOT_TOKEN is required.");
   return typeof source === "function" ? await source() : source;
 }
 
-/** Low-level Telegram JSON API call. */
 export async function callTelegramApi(input: {
   readonly apiBaseUrl?: string;
   readonly body?: JsonObject;
@@ -134,7 +129,6 @@ export async function callTelegramApi(input: {
   };
 }
 
-/** Sends a text message through Telegram's `sendMessage` method. */
 export async function sendTelegramMessage(
   input: TelegramApiOptions & {
     readonly body: TelegramMessageBody;
@@ -156,10 +150,6 @@ export async function sendTelegramMessage(
   return toTelegramMessageResult(response.body);
 }
 
-/**
- * Sends a Telegram chat action (e.g. `typing`) for the given chat. Pass
- * `messageThreadId` to scope the indicator to a forum topic.
- */
 export async function sendTelegramChatAction(
   input: TelegramApiOptions & {
     readonly action: string;
@@ -180,7 +170,6 @@ export async function sendTelegramChatAction(
   });
 }
 
-/** Answers a Telegram callback query so the user's client clears the spinner. */
 export async function answerTelegramCallbackQuery(
   input: TelegramApiOptions & {
     readonly callbackQueryId: string;
@@ -201,7 +190,6 @@ export async function answerTelegramCallbackQuery(
   });
 }
 
-/** Edits the text and optional reply markup for one Telegram message. */
 export async function editTelegramMessageText(
   input: TelegramApiOptions & {
     readonly chatId: number | string;
@@ -224,7 +212,6 @@ export async function editTelegramMessageText(
   });
 }
 
-/** Edits only the reply markup for one Telegram message. */
 export async function editTelegramMessageReplyMarkup(
   input: TelegramApiOptions & {
     readonly chatId: number | string;
@@ -245,7 +232,6 @@ export async function editTelegramMessageReplyMarkup(
   });
 }
 
-/** Resolves Telegram file metadata through `getFile`. */
 export async function getTelegramFile(
   input: TelegramApiOptions & {
     readonly fileId: string;
@@ -269,7 +255,6 @@ export async function getTelegramFile(
   return { filePath: result.file_path, raw: response.body };
 }
 
-/** Downloads file bytes from Telegram's file endpoint. */
 export async function downloadTelegramFile(
   input: TelegramApiOptions & {
     readonly filePath: string;
@@ -284,7 +269,6 @@ export async function downloadTelegramFile(
   );
 }
 
-/** Splits text into chunks Telegram will accept as individual sendMessage calls. */
 export function splitTelegramMessageText(text: string): readonly string[] {
   if (text.length <= TELEGRAM_MESSAGE_TEXT_MAX_LENGTH) return [text];
 

@@ -15,9 +15,6 @@ type ImportedJwtPublicKey =
 
 const importedJwtPublicKeyCache = new Map<string, Promise<ImportedJwtPublicKey>>();
 
-/**
- * Verifies one bearer token against a resolved ECDSA JWT strategy.
- */
 export async function authenticateJwtEcdsaStrategy(input: {
   readonly token: string;
   readonly strategy: ResolvedJwtEcdsaAuthStrategy;

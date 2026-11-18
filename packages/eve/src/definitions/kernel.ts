@@ -46,24 +46,12 @@ import { sessionDefinitions } from "./agent.js";
 import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
 import { staticUserInstructions } from "./instructions.js";
 
-// The kernel asks definitions what they add, on two schedules. Before each model call it evaluates
-// what they keep, with the conversation that call reads; everything else reads what that left,
-// and a process that lacks a kept value's code evaluates it again with its memos. After every
-// commit it runs the effects definitions name, so they notice a change when it happens. An
-// evaluation that fails fails the turn, and keeps nothing but the memos that succeeded.
-
 const log = createLogger("definitions");
 const neverAborted = new AbortController().signal;
 
-/** Where eve asks the definitions. */
 export type Where = Pick<DefinitionContext, "step" | "call" | "commit"> &
   Partial<Pick<DefinitionContext, "history" | "signal">>;
 
-/**
- * What each definition adds, where eve asks. `evaluate` evaluates what they keep, each at most once;
- * `read` reads what the latest evaluation kept, evaluating again only what this process lacks the
- * code of.
- */
 export function contributionsOf(
   definitions: readonly Definition[],
   container: ContextReader,
@@ -121,7 +109,6 @@ async function keepOne(
       });
       throw new DefinitionFailedError(definition.label, error);
     }
-    // The next model call evaluates it again, and fails the turn if it still fails.
     log.warn(`Dynamic value "${definition.label}" didn't evaluate for this step.`, {
       error: toErrorMessage(error),
     });
@@ -139,14 +126,11 @@ async function keepOne(
 export interface RunEffectsInput {
   readonly written: readonly WrittenEvent[];
   readonly abortSignal?: AbortSignal;
-  /** The conversation as of this commit, or `undefined` in a step that doesn't hold it. */
   readonly conversation?: readonly ModelMessage[];
-  /** Stops the running turn; absent when this commit can't stop one. */
   readonly cancelTurn?: CommitInput["cancelBeforeTurn"];
   readonly cancelBeforeTurn?: CommitInput["cancelBeforeTurn"];
 }
 
-/** Runs after every commit: the effects every definition names for it, in definition order. */
 export async function runEffects(ctx: ContextContainer, input: RunEffectsInput): Promise<void> {
   const definitions = await sessionDefinitions(ctx);
   writeDefinitionsState(
@@ -185,13 +169,8 @@ export async function runEffects(ctx: ContextContainer, input: RunEffectsInput):
   cancelBeforeTurn?.();
 }
 
-/** What a blocking effect threw, for the operation its commit started. */
 const blockingFailures = new WeakMap<object, unknown>();
 
-/**
- * Takes what a blocking effect threw after the commit that started an operation: the operation
- * then fails before it goes further.
- */
 export function takeBlockingFailure(ctx: object): unknown {
   if (!blockingFailures.has(ctx)) return undefined;
   const error = blockingFailures.get(ctx);
@@ -199,7 +178,6 @@ export function takeBlockingFailure(ctx: object): unknown {
   return error ?? new Error("A blocking effect failed.");
 }
 
-/** A dynamic value failed to evaluate before a model call: the turn fails. */
 export class DefinitionFailedError extends Error {
   override readonly name = "DefinitionFailedError";
   readonly definition: string;
@@ -210,13 +188,6 @@ export class DefinitionFailedError extends Error {
   }
 }
 
-/**
- * Prepares a step: on a move to another deployment, discards memos; drops what definitions the
- * bundle no longer has kept; and reads the call as it stands, which evaluates again each kept
- * value whose code this process doesn't hold, so a step that runs a tool call or reaches a
- * connection before its model call has them. Its memos return what they kept, so this asks
- * nothing of the outside world again.
- */
 export async function restoreDefinitions(
   ctx: ContextContainer,
   input: {
@@ -236,8 +207,6 @@ export async function restoreDefinitions(
       revision: input.revision,
     });
   }
-  // Outside production, EVE_DEFINITIONS_COLD=1 makes every step build its code as a fresh process
-  // would, which tests recovery without a restart. A deployment never reads it.
   if (process.env.NODE_ENV !== "production" && process.env.EVE_DEFINITIONS_COLD === "1") {
     const sessionId = ctx.get(SessionIdKey);
     if (sessionId !== undefined) forgetSessionLive(sessionId);
@@ -254,11 +223,6 @@ export async function restoreDefinitions(
   await draft.system();
 }
 
-/**
- * Sessions from before static user instructions were announced started their history with them.
- * One the history still holds counts as announced, so the same content doesn't join again. It
- * needs the deployment's files, so it can't move with the rest into the checkpoint upgrade.
- */
 function announceHeldInstructions(
   ctx: ContextContainer,
   conversation: readonly ModelMessage[] | undefined,
@@ -294,10 +258,6 @@ function announceHeldInstructions(
   });
 }
 
-/**
- * Drops what definitions the bundle no longer has kept, such as a dynamic instruction file a new
- * deployment deleted, so readers of the session's kept values stop offering what they held.
- */
 function dropRemovedSlots(ctx: ContextContainer, definitions: readonly Definition[]): void {
   const state = readDefinitionsState(ctx);
   const ids = new Set(definitions.map(({ id }) => id));
@@ -316,7 +276,6 @@ function dropRemovedSlots(ctx: ContextContainer, definitions: readonly Definitio
   writeDefinitionsState(ctx, { ...state, memos, slots });
 }
 
-/** Applies what definitions keep to the step's process-local state, such as its connection registry. */
 export async function installDefinitions(ctx: ContextContainer): Promise<void> {
   const installs = new Set((await sessionDefinitions(ctx)).map(({ install }) => install));
   for (const install of installs) await install?.(ctx);
@@ -334,11 +293,6 @@ interface Run {
   readonly choosesModel: boolean;
 }
 
-/**
- * Evaluates what one definition keeps, and keeps it. Returns whether it changed, or carries code,
- * which the evaluation built anew. Throws without changing what was kept; the memos that ran are
- * kept.
- */
 async function evaluate(
   ctx: ContextContainer,
   definition: Definition,
@@ -357,9 +311,6 @@ async function evaluate(
   );
   const value = parseJsonValue(result.value ?? null);
   const digest = digestOf(value);
-  // In development, evaluate again with the memos fixed: a value that changes anyway depends on
-  // something outside its memos, such as randomness or the time, and shows up now rather than
-  // after a cold start in production.
   if (isEveDevEnvironment() && run.mode === "evaluate") {
     const memos = openMemos({
       abortSignal: run.signal,
@@ -384,7 +335,6 @@ async function evaluate(
     );
     memos.close();
   }
-  // Nothing kept, and nothing before: the session holds no slot for it.
   if (value === null && previous === undefined && result.live === undefined) {
     return { changed: false, kept: { value } };
   }
@@ -410,10 +360,6 @@ async function evaluate(
   };
 }
 
-/**
- * Runs `fn` with `scope`'s memos. When it succeeds, the scope keeps what this run used; when it
- * fails, what ran joins what the scope had.
- */
 async function withMemos<T>(
   ctx: ContextContainer,
   input: { readonly scope: string; readonly label: string; readonly abortSignal?: AbortSignal },
@@ -461,8 +407,6 @@ function internalContext(
           }
         : run.mode === "restore"
           ? () => {
-              // Restoring runs before the step opens its sandbox. A memo that reads it under a
-              // new key would change the value anyway, so the next model call's evaluation does.
               throw new Error(
                 `"${definition.label}" called ctx.getSandbox() while eve rebuilt it in a fresh process, before the step opened its sandbox. eve evaluates it again, with the sandbox, before the next model call.`,
               );

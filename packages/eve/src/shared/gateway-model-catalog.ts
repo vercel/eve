@@ -35,14 +35,8 @@ const gatewayCatalogSchema = z.object({ data: z.array(z.unknown()) }).transform(
   }),
 );
 
-/** One model entry from the AI Gateway catalog response. */
 export type GatewayCatalogModel = z.infer<typeof gatewayCatalogModelSchema>;
 
-/**
- * Validates a Gateway catalog response. A malformed payload throws, but a
- * malformed entry is skipped so one experimental entry shape cannot discard
- * the rest of the catalog.
- */
 export function parseGatewayModelCatalog(input: unknown): GatewayCatalogModel[] {
   const result = gatewayCatalogSchema.safeParse(input);
   if (!result.success) {

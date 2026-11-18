@@ -1,7 +1,3 @@
-// End-to-end check against a real desktop in this machine, the same code path a
-// tool takes inside an eve sandbox. Opt in with AGENT_DESKTOP_LIVE=1 on an
-// Ubuntu 24.04+ host with passwordless sudo; it installs packages, as a
-// sandbox environment's prepare would.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -31,8 +27,6 @@ test(
     assert.equal(launched.app, "gnome-calculator");
 
     const press = async (name) => {
-      // Button names differ across gnome-calculator versions ("7" on Ubuntu,
-      // "7 7" elsewhere), so match a name substring instead of an exact one.
       const found = await tools.find.execute(
         { app: "gnome-calculator", role: "button", name, first: true },
         ctx,

@@ -10,6 +10,7 @@ import {
 } from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -39,6 +40,12 @@ type ChannelAddressCreateOptions<TState = undefined> = [TState] extends [undefin
   ? BaseChannelAddressCreateOptions
   : BaseChannelAddressCreateOptions & { readonly state?: Partial<TState> };
 
+export const startsNewAddress: unique symbol = Symbol("eve.channel.startsNewAddress");
+
+export interface StartsNewAddressOption {
+  readonly [startsNewAddress]?: true;
+}
+
 interface BaseChannelAddressDeliveryOptions {
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
@@ -57,23 +64,21 @@ export interface ChannelCreateResult {
   readonly session: Session;
 }
 
-/** Delivery options for a channel address whose continuation token is already bound. */
 export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends [undefined]
   ? BaseChannelAddressDeliveryOptions
   : BaseChannelAddressDeliveryOptions & { readonly state?: Partial<TState> };
 
-/**
- * Dynamic handle for whichever durable session currently owns one channel-local address.
- * Only {@link create} and {@link send} may create a session: when the address is unowned, and
- * `send` also in place of a stranded session that another eve version built. Sends to a session whose
- * owner is only unavailable throw `SessionStrandedError` and deliver nothing.
- * Responses to an address no session holds throw `SessionNotActiveError`.
- */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   create(options: ChannelAddressCreateOptions<TState>): Promise<ChannelCreateResult>;
-  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
-  send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
+  deliver(
+    input: SendPayload,
+    options: ChannelAddressDeliveryOptions<TState> & StartsNewAddressOption,
+  ): Promise<Delivery>;
+  send(
+    message: MessageContent,
+    options: ChannelAddressDeliveryOptions<TState> & StartsNewAddressOption,
+  ): Promise<Delivery>;
   respond(
     answers: SendPayload["answers"],
     options: ChannelAddressDeliveryOptions<TState>,
@@ -85,10 +90,8 @@ interface ChannelAddress<TState = undefined> {
   resolveSession(): Promise<Session | undefined>;
 }
 
-/** Factory for binding a route-local continuation token to a {@link ChannelAddress}. */
 type ChannelAddressFn<TState = undefined> = (continuationToken: string) => ChannelAddress<TState>;
 
-/** Creates one channel address backed by the runtime's continuation dispatch primitive. */
 export function createChannelAddress<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
@@ -114,8 +117,6 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
-      // A send a schedule makes carries its provenance, so the turn it starts knows no person
-      // asked for it.
       const store = contextStorage.getStore();
       const schedule = store === undefined ? undefined : readSessionSchedule(store);
       const commandWithoutCaller = {
@@ -152,24 +153,31 @@ export function createChannelAddress<TState = undefined>(input: {
         continuationToken: namespacedToken,
         delivery,
         initiatorAuth: options.initiatorAuth,
-        input: {
-          context: payload.context,
-          history: payload.history,
-          message: serializeFilePartsInMessage(payload.message) ?? "",
-          outputSchema: payload.outputSchema,
-          state: payload.state,
-        },
+        input: attachInputText(
+          {
+            context: payload.context,
+            history: payload.history,
+            message: serializeFilePartsInMessage(payload.message) ?? "",
+            outputSchema: payload.outputSchema,
+            state: payload.state,
+          },
+          readInputText(payload),
+        ),
         requestId: metadata.requestId,
         title: options.title,
       };
-      const result = await input.runtime.dispatchContinuation({
-        command,
-        continuationToken: namespacedToken,
-        successor: runInput,
-      });
-      if (result.status === "accepted")
+      const answering = payload.answers !== undefined && payload.answers.length > 0;
+      const result =
+        options[startsNewAddress] === true && !answering
+          ? undefined
+          : await input.runtime.dispatchContinuation({
+              command,
+              continuationToken: namespacedToken,
+              successor: runInput,
+            });
+      if (result?.status === "accepted")
         return commandDelivery(input.runtime, result, delivery.deliveryId);
-      if (payload.answers && payload.answers.length > 0) {
+      if (answering) {
         throw new SessionNotActiveError();
       }
       const started = await input.runtime.createSession(runInput);
@@ -187,7 +195,6 @@ export function createChannelAddress<TState = undefined>(input: {
       try {
         owner = await input.runtime.resolveContinuation(namespacedToken, { runnable: true });
       } catch (error) {
-        // Replacing a stranded session would end a conversation the caller may mean to import.
         if (!SessionStrandedError.is(error)) throw error;
         throw new SessionStrandedError(
           error.owner,
@@ -216,8 +223,6 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       });
-      // The start claims the address, so a concurrent `create()` or `send()` that took it first
-      // comes back as the owner, without this call's history.
       return {
         created: started.claimedContinuation !== false,
         session: toSession(started.sessionId),
@@ -276,7 +281,6 @@ export function createChannelAddress<TState = undefined>(input: {
   };
 }
 
-/** Builds a request-scoped factory for channel addresses on one authored channel. */
 export function createChannelAddressFn<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;

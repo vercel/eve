@@ -1,3 +1,4 @@
+/** Options for a sandbox's `delete()`, such as an abort signal. */
 export interface SandboxDeleteOptions {
   readonly signal?: AbortSignal;
 }
@@ -32,6 +33,10 @@ export function isSandboxPreparedArtifact(value: unknown): value is SandboxPrepa
   );
 }
 
+/**
+ * Read access to the authored files under the agent's `sandbox/` directory, by path relative to
+ * that directory.
+ */
 export interface SandboxProviderFiles {
   list(): Promise<readonly string[]>;
   read(path: string): Promise<Uint8Array>;

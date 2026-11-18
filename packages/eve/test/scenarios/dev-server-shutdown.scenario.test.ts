@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
-import { signalEveDevDuringStartup, startEveDev } from "./dev-server-harness.js";
+import { signalEveDevDuringStartup, startEveDev } from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
 describe("eve dev shutdown", () => {
-  // SIGINT and SIGTERM share one handler in `installShutdownSignal`; every
-  // scenario's `server.stop()` exercises the SIGTERM path.
   it("returns within one second after SIGINT", async () => {
     const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
     const server = await startEveDev(app.appRoot);

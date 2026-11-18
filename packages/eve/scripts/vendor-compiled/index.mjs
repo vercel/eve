@@ -1,8 +1,3 @@
-/**
- * Aggregates every per-package config in this directory into the flat list
- * the orchestrator passes to `runVendor`. Adding a new vendored package
- * means writing a new per-package file and importing it here.
- */
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
 import google from "./@ai-sdk/google.mjs";
@@ -45,8 +40,10 @@ import clackCore from "./@clack/core.mjs";
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
+import croner from "./croner.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
+import immer from "./immer.mjs";
 import jose from "./jose.mjs";
 import jsYaml from "./js-yaml.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
@@ -57,7 +54,6 @@ import picocolors from "./picocolors.mjs";
 import run from "./run.mjs";
 import semver from "./semver.mjs";
 import shadcnRegistry from "./shadcn-registry.mjs";
-import turndown from "./turndown.mjs";
 import zod from "./zod.mjs";
 import zodValidationError from "./zod-validation-error.mjs";
 
@@ -72,10 +68,12 @@ export const MODULES = [
   clackCore,
   chokidar,
   commander,
+  croner,
   eventsourceParserStream,
   envRunner,
   eveCatalog,
   google,
+  immer,
   jose,
   jsYaml,
   jsoncParser,
@@ -97,7 +95,6 @@ export const MODULES = [
   semver,
   shadcnRegistry,
   standardSchemaSpec,
-  turndown,
   vercelAgentRuns,
   vercelBlob,
   vercelConnect,

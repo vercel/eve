@@ -1,4 +1,3 @@
-/** Throws the signal's abort reason without requiring AbortSignal#throwIfAborted support. */
 export function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal === undefined) return;
 

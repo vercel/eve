@@ -362,6 +362,7 @@ describe("bare eve command", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 
@@ -439,6 +440,7 @@ describe("eve init compatibility flags", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 
@@ -473,6 +475,7 @@ describe("eve init compatibility flags", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 
@@ -496,6 +499,7 @@ describe("eve init compatibility flags", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ trackSetupStep: expect.any(Function) }),
     );
   });
 
@@ -588,12 +592,16 @@ describe("eve dev --input", () => {
       });
       const startup = {
         renderer: {},
-        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        finish: vi.fn(() => ({ draft: "", queued: [] })),
         shutdown: vi.fn(async () => {}),
       };
       const startDevelopmentTuiStartup = vi.fn(async () => startup);
       const runDevelopmentTui = vi.fn(async () => {});
-      vi.doMock("#cli/dev/tui/tui.js", () => ({ startDevelopmentTuiStartup, runDevelopmentTui }));
+      const onboardingResult = { outcome: { message: "", summary: "Connected" } };
+      const runStartupOnboarding = vi.fn(async () => onboardingResult);
+      vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+      vi.doMock("#cli/dev/tui/startup-onboarding.js", () => ({ runStartupOnboarding }));
+      vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui }));
       const startHost = vi.fn(() => ({
         start: async () => {
           await ready;
@@ -614,6 +622,8 @@ describe("eve dev --input", () => {
           );
           try {
             await vi.waitFor(() => expect(startDevelopmentTuiStartup).toHaveBeenCalledOnce());
+            if (onboard)
+              await vi.waitFor(() => expect(runStartupOnboarding).toHaveBeenCalledOnce());
             expect(runDevelopmentTui).not.toHaveBeenCalled();
           } finally {
             release();
@@ -621,11 +631,204 @@ describe("eve dev --input", () => {
           }
         });
         expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ startup }));
+        if (onboard) {
+          expect(runDevelopmentTui).toHaveBeenCalledWith(
+            expect.objectContaining({ startupOnboarding: onboardingResult }),
+          );
+        } else {
+          expect(runStartupOnboarding).not.toHaveBeenCalled();
+        }
       } finally {
+        vi.doUnmock("#cli/dev/tui/startup.js");
+        vi.doUnmock("#cli/dev/tui/startup-onboarding.js");
         vi.doUnmock("#cli/dev/tui/tui.js");
       }
     },
   );
+
+  it("stops onboarding before shutting down when the host fails to start", async () => {
+    const order: string[] = [];
+    const startup = {
+      renderer: {},
+      finish: vi.fn(() => ({ draft: "", queued: [] })),
+      shutdown: vi.fn(async () => {
+        order.push("shutdown");
+      }),
+    };
+    let fail!: (error: Error) => void;
+    const runStartupOnboarding = vi.fn(
+      async (input: { signal: AbortSignal }) =>
+        await new Promise((resolve) => {
+          input.signal.addEventListener("abort", () => {
+            order.push("onboarding stopped");
+            resolve({ outcome: { cancelled: true } });
+          });
+        }),
+    );
+    vi.doMock("#cli/dev/tui/startup.js", () => ({
+      startDevelopmentTuiStartup: vi.fn(async () => startup),
+    }));
+    vi.doMock("#cli/dev/tui/startup-onboarding.js", () => ({ runStartupOnboarding }));
+    const startHost = vi.fn(() => ({
+      start: async () =>
+        await new Promise<never>((_, reject) => {
+          fail = reject;
+        }),
+      close: async () => {},
+    }));
+    try {
+      await withInteractiveTerminal(async () => {
+        const run = runCli(["dev", "--onboard"], { error: () => {}, log: () => {} }, { startHost });
+        await vi.waitFor(() => expect(runStartupOnboarding).toHaveBeenCalledOnce());
+        fail(new Error("port in use"));
+        await expect(run).rejects.toThrow("port in use");
+      });
+      expect(order).toEqual(["onboarding stopped", "shutdown"]);
+    } finally {
+      vi.doUnmock("#cli/dev/tui/startup.js");
+      vi.doUnmock("#cli/dev/tui/startup-onboarding.js");
+    }
+  });
+
+  describe("onboarding on the startup screen", () => {
+    function startupScreen() {
+      let requestExit!: () => void;
+      const startup = {
+        renderer: {},
+        finish: vi.fn(() => ({ draft: "", queued: [] })),
+        shutdown: vi.fn(async () => {}),
+      };
+      const startDevelopmentTuiStartup = vi.fn(async (input: { onExitRequest: () => void }) => {
+        requestExit = input.onExitRequest;
+        return startup;
+      });
+      const signals: AbortSignal[] = [];
+      const settle = Promise.withResolvers<{ outcome: { message?: string; cancelled?: true } }>();
+      const runStartupOnboarding = vi.fn(
+        async (input: {
+          signal: AbortSignal;
+          onOnboardingStep?: (event: { flow: "onboarding"; step: "model_provider" }) => void;
+        }) => {
+          signals.push(input.signal);
+          input.onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
+          input.signal.addEventListener("abort", () =>
+            settle.resolve({ outcome: { cancelled: true } }),
+          );
+          return await settle.promise;
+        },
+      );
+      const runDevelopmentTui = vi.fn(async () => {});
+      vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+      vi.doMock("#cli/dev/tui/startup-onboarding.js", () => ({ runStartupOnboarding }));
+      vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui }));
+      return {
+        startup,
+        runDevelopmentTui,
+        onboardingSignal: () => signals[0],
+        finishOnboarding: () => settle.resolve({ outcome: { message: "" } }),
+        requestExit: () => requestExit(),
+        opened: () => vi.waitFor(() => expect(runStartupOnboarding).toHaveBeenCalledOnce()),
+      };
+    }
+
+    afterEach(() => {
+      vi.doUnmock("#cli/dev/tui/startup.js");
+      vi.doUnmock("#cli/dev/tui/startup-onboarding.js");
+      vi.doUnmock("#cli/dev/tui/tui.js");
+    });
+
+    it.each([
+      ["attaches to an existing server", "existing" as const],
+      ["starts a server that keeps running", "started" as const],
+    ])("keeps onboarding open when eve dev %s", async (_name, kind) => {
+      const screen = startupScreen();
+      const startHost = vi.fn(() => ({
+        start: async () => ({ kind, appRoot: "/canonical/app", url: "http://127.0.0.1:4321/" }),
+        wait: () => new Promise<void>(() => {}),
+        close: async () => {},
+      }));
+
+      await withInteractiveTerminal(async () => {
+        const run = runCli(["dev", "--onboard"], { error: () => {}, log: () => {} }, { startHost });
+        await screen.opened();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(screen.onboardingSignal()?.aborted).toBe(false);
+        screen.finishOnboarding();
+        await run;
+      });
+
+      expect(screen.runDevelopmentTui).toHaveBeenCalledOnce();
+    });
+
+    it("stops onboarding and reports the server's exit when it exits after starting", async () => {
+      const screen = startupScreen();
+      const exited = Promise.withResolvers<void>();
+      const startHost = vi.fn(() => ({
+        start: async () => ({
+          kind: "started" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:4321/",
+        }),
+        wait: () => exited.promise,
+        close: async () => {},
+      }));
+
+      await withInteractiveTerminal(async () => {
+        const run = runCli(["dev", "--onboard"], { error: () => {}, log: () => {} }, { startHost });
+        await screen.opened();
+        exited.reject(new Error("server crashed"));
+        await expect(run).rejects.toThrow("server crashed");
+      });
+
+      expect(screen.onboardingSignal()?.aborted).toBe(true);
+      expect(screen.startup.shutdown).toHaveBeenCalled();
+      expect(screen.runDevelopmentTui).not.toHaveBeenCalled();
+    });
+
+    it("stops onboarding without loading the full UI when eve dev is stopped", async () => {
+      const screen = startupScreen();
+      const startHost = vi.fn(() => ({
+        start: () => new Promise<never>(() => {}),
+        close: async () => {},
+      }));
+
+      const telemetry = {
+        trackDevContext: vi.fn(),
+        trackSetupStep: vi.fn(),
+        trackSetupTerminal: vi.fn(),
+      };
+      const program = createCliProgram(
+        { error: () => {}, log: () => {} },
+        { startHost },
+        {
+          resolve: async () => {},
+          resolveAgent: async () => ({
+            appRoot: "/app",
+            environmentRoot: "/app",
+            kind: "standalone" as const,
+          }),
+          root: "/app",
+        },
+        telemetry,
+      );
+
+      await withInteractiveTerminal(async () => {
+        const run = program.parseAsync(["dev", "--onboard"], { from: "user" });
+        await screen.opened();
+        screen.requestExit();
+        await run;
+      });
+
+      expect(screen.onboardingSignal()?.aborted).toBe(true);
+      expect(telemetry.trackSetupTerminal).toHaveBeenCalledExactlyOnceWith({
+        flow: "onboarding",
+        step: "model_provider",
+        result: "cancelled",
+      });
+      expect(screen.startup.shutdown).toHaveBeenCalled();
+      expect(screen.runDevelopmentTui).not.toHaveBeenCalled();
+    });
+  });
 
   it.each([["dev"], ["remote", "connect", "--url", "https://example.com"]])(
     "passes --show-* display flags through %s",
@@ -671,6 +874,60 @@ describe("eve dev --input", () => {
       );
     },
   );
+
+  it("pre-fills the prompt eve init carried over, without passing it to child processes", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    process.env.EVE_INIT_INPUT = "Help Alice plan her week";
+    try {
+      const runDevelopmentTui = await runInteractiveDev(["dev", "--onboarded"], { startHost });
+      expect(runDevelopmentTui).toHaveBeenCalledWith(
+        expect.objectContaining({ initialInput: "Help Alice plan her week" }),
+      );
+      expect(process.env.EVE_INIT_INPUT).toBeUndefined();
+    } finally {
+      delete process.env.EVE_INIT_INPUT;
+    }
+  });
+
+  it("keeps messages queued during eve init queued on the startup screen", async () => {
+    const startup = {
+      renderer: {},
+      finish: vi.fn(() => ({ draft: "", queued: [] })),
+      shutdown: vi.fn(async () => {}),
+    };
+    const startDevelopmentTuiStartup = vi.fn(async () => startup);
+    vi.doMock("#cli/dev/tui/startup.js", () => ({ startDevelopmentTuiStartup }));
+    vi.doMock("#cli/dev/tui/tui.js", () => ({ runDevelopmentTui: vi.fn(async () => {}) }));
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    process.env.EVE_INIT_QUEUED_INPUT = JSON.stringify(["Help Alice", "and Bob"]);
+    try {
+      await withInteractiveTerminal(async () => {
+        await runCli(["dev", "--onboarded"], { error: () => {}, log: () => {} }, { startHost });
+      });
+      expect(startDevelopmentTuiStartup).toHaveBeenCalledWith(
+        expect.objectContaining({ queuedInput: ["Help Alice", "and Bob"] }),
+      );
+      expect(process.env.EVE_INIT_QUEUED_INPUT).toBeUndefined();
+    } finally {
+      delete process.env.EVE_INIT_QUEUED_INPUT;
+      vi.doUnmock("#cli/dev/tui/startup.js");
+      vi.doUnmock("#cli/dev/tui/tui.js");
+    }
+  });
 
   it("passes the default extension opt-out to the local server", async () => {
     const startHost = vi.fn(() => ({
@@ -1242,8 +1499,6 @@ describe("eve dev boot progress", () => {
     expect(tuiReporter).toBe(hostReporter);
     expect(writes.join("")).toContain("Starting your agent");
     expect(writes.join("")).not.toContain("compiling agent");
-    // Replaying every write through a terminal emulator: the boot progress row
-    // is erased, leaving a clean screen for the error to print onto.
     const screen = new MockScreen({ columns: 80, rows: 10 });
     screen.write(writes.join(""));
     expect(screen.snapshot()).toBe("");
@@ -1407,8 +1662,6 @@ describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
       logs: "error",
-      // Collapsed reasoning is the fixed thinking line; `--show-reasoning full`
-      // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });

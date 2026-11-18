@@ -9,7 +9,6 @@ import {
 import { normalizeHookHandlers } from "#internal/authored-definition/hook.js";
 import { memoryMismatch, normalizeMemoryDefinition } from "#internal/authored-definition/memory.js";
 
-/** A hook, with the events it handles. */
 export async function compileHookEntry(
   source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
@@ -19,7 +18,6 @@ export async function compileHookEntry(
   return compiledDefinition("hook", source, slug, { eventNames: Object.keys(handlers) });
 }
 
-/** A memory, in the slot its path names. */
 export async function compileMemoryDefinition(
   source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,

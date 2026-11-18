@@ -10,12 +10,6 @@ import { normalizeDynamicRemoteAgent } from "#runtime/subagents/dynamic-remote-a
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 
-/**
- * Builds a dynamic remote agent's credentials from the binding its child was opened with: the
- * definition runs again with the session as the binding holds it, and memos return the bound
- * results without running. The destination it returns must be the one the child was opened at,
- * or the request fails rather than send credentials elsewhere.
- */
 export async function remoteAgentCredentials(input: {
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
   readonly nodeId: string;
@@ -86,7 +80,6 @@ function destinationChanged(name: string): Error {
   );
 }
 
-/** The session's public view folded from its stream up to `position`, as a client would. */
 async function foldSessionViewTo(sessionId: string, position: number): Promise<SessionView> {
   const view = emptySessionView();
   for await (const { line, position: at } of streamSessionLines(sessionId, { follow: false })) {

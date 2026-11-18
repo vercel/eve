@@ -15,10 +15,6 @@ export interface ExtensionBuildCliLogger {
 
 const buildLog = createLogger("extension-build");
 
-/**
- * Builds the current package as an eve extension. Requires
- * `package.json#eve.extension` declaring distinct source and dist roots.
- */
 export async function runExtensionBuildCommand(
   logger: ExtensionBuildCliLogger,
   appRoot: string,

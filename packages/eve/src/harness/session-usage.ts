@@ -13,12 +13,10 @@ export const NO_USAGE: TokenUsage = {
   outputTokens: 0,
 };
 
-/** Lifetime spend comes only from committed usage facts, including delegated spend. */
 export function sessionUsage(session: { readonly state?: SessionStateMap }): TokenUsage {
   return storedProjection(session.state).view.usage.total;
 }
 
-/** Own model runs include summaries; delegated spend belongs to the calls that delegated. */
 export function turnUsage(view: SessionView, turnId: string): TokenUsage {
   let total = NO_USAGE;
   for (const run of Object.values(view.runs)) {
@@ -30,7 +28,6 @@ export function turnUsage(view: SessionView, turnId: string): TokenUsage {
   return total;
 }
 
-/** A persistent child reports each committed unit of spend to its parent exactly once. */
 export function takeSessionUsageDelta<T extends { readonly state?: SessionStateMap }>(
   session: T,
 ): { readonly delta: TokenUsage; readonly session: T } {
@@ -41,7 +38,6 @@ export function takeSessionUsageDelta<T extends { readonly state?: SessionStateM
   };
 }
 
-/** Spend outside a turn must not be claimed again by a later turn's report. */
 export function markUsageReported<T extends { readonly state?: SessionStateMap }>(
   session: T,
   usage: TokenUsage,

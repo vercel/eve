@@ -13,10 +13,6 @@ import { checksSessionEvents } from "#shared/dev-checks.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "./view.js";
 
-// A step-local holder for the projection as the step publishes. It survives provider scope
-// resets but never serializes with context; the step saves it into session state. Rooted on
-// `globalThis`, like the context key registry, so every bundled copy of eve in a step, such as
-// a channel's, reads the same one.
 const LIVE_PROJECTIONS_GLOBAL_KEY = Symbol.for("eve.live-session-projections");
 type LiveProjectionsGlobal = typeof globalThis & {
   [LIVE_PROJECTIONS_GLOBAL_KEY]?: WeakMap<ContextReader, { projection: SessionProjection }>;
@@ -31,10 +27,6 @@ export function enterSessionProjection(
   liveProjections.set(ctx, { projection: storedProjection(state) });
 }
 
-/**
- * Enters a checkpointed projection directly, for a step that publishes without the session's
- * state, as the session's end does.
- */
 export function enterSessionProjectionAt(
   ctx: ContextReader,
   projection: SessionProjection | undefined,
@@ -42,7 +34,6 @@ export function enterSessionProjectionAt(
   liveProjections.set(ctx, { projection: projection ?? storedProjection(undefined) });
 }
 
-/** Enters the stored projection unless this step already did. */
 export function ensureSessionProjection(
   ctx: ContextReader,
   state: SessionStateMap | undefined,
@@ -50,17 +41,12 @@ export function ensureSessionProjection(
   if (!liveProjections.has(ctx)) enterSessionProjection(ctx, state);
 }
 
-/**
- * The current step's projection, or `undefined` outside a session step, such as a workflow-step
- * tool, which runs without one.
- */
 export function liveProjection(
   ctx: ContextReader | undefined = contextStorage.getStore(),
 ): SessionProjection | undefined {
   return ctx === undefined ? undefined : liveProjections.get(ctx)?.projection;
 }
 
-/** The projection as of the last event the current step published. */
 export function currentProjection(
   ctx: ContextReader | undefined = contextStorage.getStore(),
 ): SessionProjection {
@@ -69,7 +55,6 @@ export function currentProjection(
   return live.projection;
 }
 
-/** The step's live projection, or the session's stored one when no step entered it. */
 export function projectionFor(
   ctx: ContextReader,
   state: SessionStateMap | undefined,
@@ -77,15 +62,10 @@ export function projectionFor(
   return liveProjections.get(ctx)?.projection ?? storedProjection(state);
 }
 
-/** The position of the next line the step writes. */
 export function nextLinePosition(ctx: ContextReader): number {
   return currentProjection(ctx).view.position;
 }
 
-/**
- * Records that the step wrote one line at `position`: its commit folds into the public view, and
- * its events into what the view can't hold.
- */
 export function recordPublishedLine(
   ctx: ContextReader,
   line: StoredLine,
@@ -98,15 +78,8 @@ export function recordPublishedLine(
   live.projection = advance(live.projection, line, position, events);
 }
 
-/**
- * Checks a line a step folds itself, where no publisher checked it: a detached step's, or a test
- * sink's. Under the same switch as the publisher's checks, a violation fails the fold.
- */
 export function checkFoldedLine(view: PublicSessionView, line: StoredLine, position: number): void {
-  // Progress rules need what earlier records announced, which a checker seeded per line lacks.
   if (!checksSessionEvents() || !("facts" in line)) return;
-  // A projection with no start is a fragment's, such as a test session's: the session's creation
-  // wrote its start, before any step.
   const starts =
     "facts" in line && (line.facts[0] as SessionEvent | undefined)?.type === "session.started";
   const seed =
@@ -125,10 +98,6 @@ export function checkFoldedLine(view: PublicSessionView, line: StoredLine, posit
   );
 }
 
-/**
- * The public view after one line. A commit folds into a copy, so earlier holders keep theirs; a
- * progress record changes no table, so only the position moves.
- */
 function advanceView(
   view: PublicSessionView,
   line: StoredLine,
@@ -140,12 +109,10 @@ function advanceView(
   return next;
 }
 
-/** The public view as of the last line the step wrote, if a step entered its projection. */
 export function enteredView(ctx: ContextReader): PublicSessionView | undefined {
   return liveProjections.get(ctx)?.projection.view;
 }
 
-/** The projection after one line: its view, then what the view can't hold. */
 export function advance(
   projection: SessionProjection,
   line: StoredLine,
@@ -162,24 +129,18 @@ export function advance(
   );
 }
 
-/** The public view as of the last line the step wrote. */
 export function currentView(
   ctx: ContextReader | undefined = contextStorage.getStore(),
 ): PublicSessionView {
   return currentProjection(ctx).view;
 }
 
-// The session as the step's last applied transition left it. Each transition publishes its events
-// before the step writes its state, so a step cut short (a cancelled model call) keeps the state
-// that matches what it published instead of rolling back past it.
 const appliedSessions = new WeakMap<ContextReader, HarnessSessionBase>();
 
-/** Records the session a transition the step published produced. */
 export function recordAppliedSession(ctx: ContextReader, session: HarnessSessionBase): void {
   appliedSessions.set(ctx, session);
 }
 
-/** The session the step's last applied transition produced, if it applied any. */
 export function appliedSession<T extends HarnessSessionBase>(ctx: ContextReader): T | undefined {
   return appliedSessions.get(ctx) as T | undefined;
 }
@@ -191,7 +152,6 @@ export function saveSessionProjection<T extends HarnessSessionBase>(
   return saveProjection(session, currentProjection(ctx));
 }
 
-/** The session saves the coordinates and public view its steps read. */
 export function saveProjection<T extends HarnessSessionBase>(
   session: T,
   projection: SessionProjection,
@@ -199,14 +159,11 @@ export function saveProjection<T extends HarnessSessionBase>(
   return { ...session, state: { ...session.state, [SESSION_PROJECTION_STATE_KEY]: projection } };
 }
 
-/** The projection one step reads and folds what it publishes into. */
 export interface StepProjection {
   read(): SessionProjection;
-  /** Folds a publication no sink folded, preserving its commit boundaries. */
   record(publication: SessionPublication): void;
 }
 
-/** A step's projection: the context's live one, which the publish sink folds. */
 export function stepProjection(
   ctx: ContextReader,
   state: SessionStateMap | undefined,
@@ -218,7 +175,6 @@ export function stepProjection(
   };
 }
 
-/** Folds a publication into the step's live projection, as the publish sink does. */
 export function foldPublication(ctx: ContextReader, publication: SessionPublication): void {
   const events = cascade(currentProjection(ctx).view, eventsOf(publication));
   for (const line of linesOf(events, new Date().toISOString())) {

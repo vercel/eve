@@ -16,7 +16,6 @@ const line = (deliveryId: string) => ({
   facts: [{ data: { deliveryId }, type: "delivery.admitted" }],
 });
 
-/** Serves each request the next body, recording the `startIndex` it asked for. */
 function serve(bodies: readonly (readonly unknown[])[], tailIndex?: number) {
   const starts: number[] = [];
   let next = 0;

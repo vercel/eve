@@ -35,7 +35,6 @@ function pnpmBuildPolicyChoice(value: unknown): PnpmBuildPolicyChoice | undefine
     : undefined;
 }
 
-/** Resolves declared pnpm build-script decisions before registry installation begins. */
 export async function prepareDeclaredPnpmBuildPolicy(
   input: {
     readonly logger: RegistryCommandLogger;

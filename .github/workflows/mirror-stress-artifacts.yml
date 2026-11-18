@@ -48,6 +48,9 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment:
+      name: eve-benchmark-publish
+      deployment: false
     steps:
       - name: Require main
         if: github.ref != 'refs/heads/main'

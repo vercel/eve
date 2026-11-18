@@ -3,21 +3,10 @@ import type { ScheduleSourceRef } from "#discover/manifest.js";
 import { normalizeScheduleDefinition } from "#internal/authored-definition/core.js";
 import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import type { CompiledScheduleDefinition } from "#compiler/manifest.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { workflowCallbackErrorMessage } from "#shared/workflow-tool-context.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 
-/**
- * Compiles one authored schedule into the normalized shape consumed by
- * the runtime scheduler.
- *
- * Schedules are single files: `schedules/<name>.{ts,md}`. The markdown
- * form always produces a fire-and-forget schedule (`markdown` body, no
- * `run`). The TypeScript form may declare either `markdown` or `run`
- * (exactly one). The schedule name is derived from the relative file
- * path under `schedules/` minus the extension
- * (`schedules/billing/invoice-sweep.ts` → `"billing/invoice-sweep"`).
- */
 export function compileScheduleDefinition(
   _agentRoot: string,
   source: ScheduleSourceRef,
@@ -37,6 +26,7 @@ export function compileScheduleDefinition(
 
   const compiled = {
     cron: definition.cron,
+    ...(definition.timezone !== undefined && { timezone: definition.timezone }),
     hasRun: definition.run !== undefined,
     logicalPath: source.logicalPath,
     name: deriveScheduleName(source.logicalPath),

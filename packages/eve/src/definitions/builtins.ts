@@ -1,23 +1,29 @@
 import { sessionOffersTasks } from "#execution/catalog/step-catalog.js";
 import { withTaskTools } from "#execution/tasks/model-step.js";
 import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
-import { type Definition, once, section, SECTION_ORDER, type ToolEntry } from "./definition.js";
+import {
+  type Definition,
+  once,
+  section,
+  SECTION_ORDER,
+  type StepInfo,
+  type ToolEntry,
+} from "./definition.js";
 
-/**
- * What eve adds for its own features, seeing everything the agent declares: the task tools and
- * their note when the session offers tasks.
- */
 export const builtins: Definition = {
   contribute: ({ container, step }) => ({
     arrange: (draft) => {
       const offersTasks = once(
         async () =>
           step !== undefined &&
-          sessionOffersTasks({
-            ctx: container,
-            session: step.session,
-            tools: [...(await draft.tools()).entries.values()].map(({ definition }) => definition),
-          }),
+          (hasRunningTask(step) ||
+            sessionOffersTasks({
+              ctx: container,
+              session: step.session,
+              tools: [...(await draft.tools()).entries.values()].map(
+                ({ definition }) => definition,
+              ),
+            })),
       );
       return {
         system: async () => [
@@ -55,3 +61,8 @@ export const builtins: Definition = {
   id: "eve.builtins",
   label: "eve's builtins",
 };
+
+function hasRunningTask(step: StepInfo): boolean {
+  const tasks = step.view?.().projection.view.tasks ?? {};
+  return Object.values(tasks).some((task) => task.status === "running");
+}

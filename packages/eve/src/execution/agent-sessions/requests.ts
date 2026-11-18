@@ -3,28 +3,24 @@ import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
 
-/** A child's interaction fact, which the session that owns the run mirrors up to the root. */
 export type AgentSessionRequest = SubagentInteractionHookPayload;
 
-/**
- * Sends a child's interaction fact to the session that owns the run, which proxies it up the
- * owner chain to the root. Answers route back down to the child by interaction id; a remote
- * child's answers go to its remote session.
- */
 export async function forwardAgentSessionRequest(input: {
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunInbox;
   readonly replyTo: string;
   readonly request: AgentSessionRequest;
   readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
+  readonly sessionKey: string;
 }): Promise<void> {
-  const { from, remote, request } = input;
+  const { from, remote } = input;
+  const request =
+    remote === undefined ? input.request : remoteRequest(input.request, input.sessionKey);
   const route =
     request.route === undefined
       ? undefined
       : {
           ...request.route,
-          // Only the child's own inbox reaches it.
           ...(request.route.childSessionInbox?.sessionId !== request.childSessionId && {
             childSessionInbox: undefined,
           }),
@@ -36,4 +32,38 @@ export async function forwardAgentSessionRequest(input: {
     replyTo: input.replyTo,
     request: { event: route === undefined ? request : { ...request, route }, kind: "relay" },
   });
+}
+
+function remoteRequest(request: AgentSessionRequest, sessionKey: string): AgentSessionRequest {
+  return {
+    ...request,
+    events: request.events.map((event): AgentSessionRequest["events"][number] => {
+      const interactionId = remoteInteractionId(sessionKey, event.data.interactionId);
+      switch (event.type) {
+        case "interaction.opened": {
+          const origin = {
+            sessionId: request.childSessionId,
+            ...event.data.origin,
+            interactionId: event.data.interactionId,
+          };
+          const signIn = event.data.request.signIn;
+          if (signIn === undefined)
+            return { ...event, data: { ...event.data, interactionId, origin } };
+          const { grant: _grant, waitsOn: _waitsOn, ...claimed } = signIn;
+          const asked = { ...event.data.request, signIn: claimed };
+          return { ...event, data: { ...event.data, interactionId, origin, request: asked } };
+        }
+        case "interaction.settled":
+          return { ...event, data: { ...event.data, interactionId } };
+        case "response.admitted":
+          return { ...event, data: { ...event.data, interactionId } };
+        case "response.settled":
+          return { ...event, data: { ...event.data, interactionId } };
+      }
+    }),
+  };
+}
+
+function remoteInteractionId(sessionKey: string, interactionId: string): string {
+  return `${sessionKey}/${interactionId}`;
 }

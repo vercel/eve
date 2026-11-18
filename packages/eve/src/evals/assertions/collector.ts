@@ -14,10 +14,6 @@ import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
 export type AssertionOutcome = AssertionEvaluation;
 
-/**
- * A scoped assertion evaluated lazily after `test(t)` returns. The selected
- * subject may be the aggregate run, one session, or one immutable turn.
- */
 export interface RunAssertion {
   readonly name: string;
   evaluate(result: EveEvalAssertionSubject): AssertionOutcome | Promise<AssertionOutcome>;
@@ -32,38 +28,26 @@ interface MutableEntry {
   readonly kind: "deferred" | "resolved";
   readonly spec?: RunAssertion;
   readonly selectSubject?: (result: EveEvalTaskResult) => EveEvalAssertionSubject;
-  /** The measurement once produced; stays `undefined` when the scorer threw. */
   score: number | undefined;
   message?: string;
   metadata?: Readonly<Record<string, unknown>>;
-  /** A model/value assertion that threw — a hard failure regardless of severity. */
   errored: boolean;
 }
 
-/**
- * Collects the assertions recorded by an eval's `test(t)`. Run-level
- * assertions register a deferred spec; value/judge assertions evaluate their
- * captured value immediately (the value is ephemeral) and register the pending
- * promise. {@link finalize} resolves everything against the final result and
- * produces the ordered {@link AssertionResult} list the verdict reads.
- */
 export class AssertionCollector {
   readonly #entries: MutableEntry[] = [];
   readonly #pending: Promise<void>[] = [];
 
-  /** The target's root agent tools, which tool-name assertions are checked against. */
   readonly tools: TargetTools | undefined;
 
   constructor(tools?: TargetTools) {
     this.tools = tools;
   }
 
-  /** Whether the eval has already recorded an assertion. */
   get hasEntries(): boolean {
     return this.#entries.length > 0;
   }
 
-  /** Register a deferred assertion against a turn or session scope. */
   recordScoped(
     spec: RunAssertion,
     selectSubject: (result: EveEvalTaskResult) => EveEvalAssertionSubject,
@@ -73,7 +57,6 @@ export class AssertionCollector {
     return makeHandle(entry);
   }
 
-  /** Register a value/judge assertion, evaluating the captured value now. */
   recordValue(input: {
     readonly name: string;
     readonly key?: string;
@@ -86,7 +69,6 @@ export class AssertionCollector {
     return makeHandle(entry);
   }
 
-  /** Record a score. It has no verdict unless the handle chains `.gate()` or `.atLeast()`. */
   recordScore(evaluation: ScoreInput): AssertionHandle {
     return this.recordValue({
       name: "score",
@@ -95,7 +77,6 @@ export class AssertionCollector {
     });
   }
 
-  /** Record an already-computed assertion outcome and return whether it passed. */
   recordOutcome(input: { readonly name: string; readonly outcome: AssertionOutcome }): boolean {
     const entry = this.#add({ name: input.name, severity: "gate", kind: "resolved" });
     entry.score = input.outcome.score;
@@ -104,7 +85,6 @@ export class AssertionCollector {
     return computePassed(entry) === true;
   }
 
-  /** Record and await a required value assertion, returning whether it passed. */
   async recordRequirement(input: {
     readonly name: string;
     readonly threshold?: number;
@@ -115,10 +95,6 @@ export class AssertionCollector {
     return computePassed(entry) === true;
   }
 
-  /**
-   * Awaits every pending value/judge assertion, evaluates the deferred
-   * run-level assertions against `result`, and returns the recorded results.
-   */
   async finalize(result: EveEvalTaskResult): Promise<readonly AssertionResult[]> {
     await Promise.all(this.#pending);
 
@@ -177,15 +153,10 @@ function toResult(entry: MutableEntry): AssertionResult {
   };
 }
 
-/** The effective minimum passing score: a gate defaults to 1, a soft entry has none. */
 function ruleThreshold(entry: MutableEntry): number | undefined {
   return entry.threshold ?? (entry.severity === "gate" ? 1 : undefined);
 }
 
-/**
- * Verdict of the entry's rule. A thrown scorer fails; an entry without a rule
- * (soft, no threshold) has no verdict.
- */
 function computePassed(entry: MutableEntry): boolean | undefined {
   if (entry.errored) return false;
   const threshold = ruleThreshold(entry);
@@ -211,9 +182,6 @@ async function settleEntry(
     entry.message = outcome.message;
     entry.metadata = outcome.metadata;
   } catch (error: unknown) {
-    // A judge/value assertion that throws (e.g. a judge model error) is a
-    // hard failure, surfaced as a failed gate rather than aborting the run.
-    // A thrown scorer produces no measurement, so the score stays absent.
     entry.severity = "gate";
     entry.threshold = undefined;
     entry.message = toErrorMessage(error);

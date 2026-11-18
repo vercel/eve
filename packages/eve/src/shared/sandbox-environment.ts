@@ -7,6 +7,7 @@ const ENVIRONMENT = Symbol.for("eve.sandbox-environment");
 const PROVIDER_RUNTIME = Symbol.for("eve.sandbox-provider-runtime");
 const SELECTOR_ENVIRONMENT = Symbol.for("eve.sandbox-selector-environment");
 
+/** What eve passes to a {@link SandboxSelector}: the session the sandbox is opened for. */
 export interface SandboxSelectorContext {
   readonly session: {
     readonly auth: SessionAuth;
@@ -16,10 +17,15 @@ export interface SandboxSelectorContext {
   };
 }
 
+/**
+ * The function passed to `defineSandbox()` that opens the session's sandbox, usually with
+ * `environment.open()`.
+ */
 export type SandboxSelector = (
   context: SandboxSelectorContext,
 ) => Promise<RuntimeSandboxSession> | RuntimeSandboxSession;
 
+/** The arguments `open()` accepts for an environment's open options: none, optional, or required. */
 export type SandboxOpenArguments<Options> = Options extends undefined
   ? []
   : Record<never, never> extends Options
@@ -33,6 +39,10 @@ export interface SandboxEnvironmentIdentity {
   readonly provider: string;
 }
 
+/**
+ * A configured sandbox environment from a provider, such as `DefaultSandbox.environment()`. Call
+ * `open()` inside `defineSandbox()` to open the session's sandbox.
+ */
 export interface SandboxEnvironment<
   Options extends object | undefined = object,
   Session extends SandboxSession = SandboxSession,

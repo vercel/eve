@@ -1,15 +1,33 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
 import { pathExists } from "#setup/path-exists.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
-import { tryInitializeGit } from "./init-git.js";
+import { startGitInitialization, tryInitializeGit } from "./init-git.js";
 
 const createScratchDirectory = useTemporaryDirectories();
+const runFile = promisify(execFile);
+
+async function withGitIdentity(run: () => Promise<void>): Promise<void> {
+  const isolatedConfig = join(await createScratchDirectory("eve-init-git-config-"), "gitconfig");
+  await writeFile(isolatedConfig, "[user]\n\tname = eve\n\temail = eve@example.com\n");
+
+  const previousEnv = { ...process.env };
+  process.env.GIT_CONFIG_GLOBAL = isolatedConfig;
+  process.env.GIT_CONFIG_NOSYSTEM = "1";
+
+  try {
+    await run();
+  } finally {
+    process.env = previousEnv;
+  }
+}
 
 async function withoutGitIdentity(projectPath: string, run: () => Promise<void>): Promise<void> {
   const isolatedConfig = join(projectPath, "gitconfig");
@@ -34,6 +52,39 @@ async function withoutGitIdentity(projectPath: string, run: () => Promise<void>)
     process.env = previousEnv;
   }
 }
+
+describe("startGitInitialization", () => {
+  it("commits files written after setup started, such as the lockfile", async () => {
+    const projectPath = await createScratchDirectory("eve-init-git-split-");
+    await writeFile(join(projectPath, "package.json"), "{}\n");
+
+    await withGitIdentity(async () => {
+      const git = startGitInitialization(projectPath);
+      await git.settled();
+      await writeFile(join(projectPath, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+
+      await expect(git.commit()).resolves.toEqual({ kind: "initialized" });
+      const { stdout } = await runFile("git", ["ls-files"], { cwd: projectPath });
+      expect(stdout.split("\n").filter(Boolean).toSorted()).toEqual([
+        "package.json",
+        "pnpm-lock.yaml",
+      ]);
+    });
+  });
+
+  it("lets a failed project be removed once setup settles", async () => {
+    const projectPath = await createScratchDirectory("eve-init-git-settled-");
+    await writeFile(join(projectPath, "package.json"), "{}\n");
+
+    await withGitIdentity(async () => {
+      const git = startGitInitialization(projectPath);
+      await git.settled();
+      await rm(projectPath, { recursive: true });
+    });
+
+    await expect(pathExists(projectPath)).resolves.toBe(false);
+  });
+});
 
 describe("tryInitializeGit", () => {
   it("retains an initialized repository when the initial commit fails", async () => {

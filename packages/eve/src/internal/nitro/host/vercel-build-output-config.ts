@@ -12,26 +12,24 @@ import {
 
 export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
 
-// Nitro emits `config.json` routes in `functionRules` key order; this order keeps it stable.
+type FunctionRule = {
+  environment: Record<string, string>;
+  experimentalTriggers?: ReturnType<(typeof QUEUE_TRIGGERS)[HostRouteVercelFunction]>[];
+  maxDuration?: "max";
+};
+
+export const VERCEL_SCHEDULES_FUNCTION_ROUTE = "/_vercel/tasks";
+
 const QUEUE_TRIGGERS = {
   "workflow-queue": createEveWorkflowQueueTrigger,
   "schedule-queue": createEveScheduleQueueTrigger,
 } satisfies Record<HostRouteVercelFunction, (agentName: string) => object>;
 
-/**
- * Builds eve's Vercel preset options.
- *
- * Each route that needs its own function gets a `functionRules` entry, so
- * Nitro emits a dedicated `.func` from the same build output carrying the
- * agent's queue trigger, an extended execution window, and the environment
- * the deployed runtime needs. Every other function setting (runtime, memory,
- * streaming) is inherited from the base server function config.
- */
 export function createEveVercelOptions(input: {
   agentName: string;
   enabled: boolean;
   publicRoutePrefix?: string;
-  routeTable: Pick<HostRouteTable, "cronHandlerRoute" | "routes">;
+  routeTable: Pick<HostRouteTable, "routes" | "scheduleTasks">;
   workspaceMember?: boolean;
 }) {
   if (!input.enabled) {
@@ -39,14 +37,9 @@ export function createEveVercelOptions(input: {
   }
 
   const environment: Record<string, string> = {
-    // Reject replay decisions made from an event log that missed a
-    // concurrent wake.
     WORKFLOW_PRECONDITION_GUARD: "1",
   };
 
-  // Bake the agent's public mount into the flow function so callback-URL
-  // minting inside the deployed workflow runtime resolves a routable path
-  // when a multi-agent host proxies the agent behind a prefix.
   const publicRoutePrefix = normalizePublicRoutePrefix(input.publicRoutePrefix);
   if (publicRoutePrefix !== undefined) {
     environment[EVE_PUBLIC_ROUTE_PREFIX_ENV] = publicRoutePrefix;
@@ -55,30 +48,47 @@ export function createEveVercelOptions(input: {
     environment[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] = "1";
   }
 
+  const functionRules: Record<string, FunctionRule> = Object.fromEntries([
+    ...Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
+      input.routeTable.routes
+        .filter((route) => "vercelFunction" in route && route.vercelFunction === vercelFunction)
+        .map((route) => [
+          route.path,
+          {
+            maxDuration: "max" as const,
+            experimentalTriggers: [createTrigger(input.agentName)],
+            environment,
+          },
+        ]),
+    ),
+    ...(input.routeTable.scheduleTasks.length > 0
+      ? [[VERCEL_SCHEDULES_FUNCTION_ROUTE, { environment }]]
+      : []),
+  ]);
+
+  const schedules = Object.fromEntries(
+    input.routeTable.scheduleTasks
+      .filter((task) => task.timezone !== undefined)
+      .map((task) => [
+        task.nitroTaskName,
+        {
+          schedule: task.cron,
+          timezone: task.timezone,
+          function: VERCEL_SCHEDULES_FUNCTION_ROUTE.slice(1),
+        },
+      ]),
+  );
+
   return {
     config: {
       version: 3 as const,
+      ...(Object.keys(schedules).length > 0 && { schedules }),
       framework: {
         slug: EVE_PACKAGE_NAME,
         version: resolveInstalledPackageInfo().version,
       },
     },
-    ...(input.routeTable.cronHandlerRoute !== undefined && {
-      cronHandlerRoute: input.routeTable.cronHandlerRoute,
-    }),
-    functionRules: Object.fromEntries(
-      Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
-        input.routeTable.routes
-          .filter((route) => "vercelFunction" in route && route.vercelFunction === vercelFunction)
-          .map((route) => [
-            route.path,
-            {
-              maxDuration: "max" as const,
-              experimentalTriggers: [createTrigger(input.agentName)],
-              environment,
-            },
-          ]),
-      ),
-    ),
+    schedules: "private" as const,
+    functionRules,
   };
 }

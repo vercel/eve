@@ -12,7 +12,6 @@ import { restoreDefinitions } from "#definitions/kernel.js";
 import { contextStorage } from "#context/container.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 
-/** The system prompt's parts after its first: the dynamic system instructions. */
 const system = async (ctx: ReturnType<typeof definitionSession>["ctx"]) => {
   const prompt = await stepSystem({
     config: { tools: new Map() },

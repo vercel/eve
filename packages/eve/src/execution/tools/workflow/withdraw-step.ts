@@ -1,6 +1,8 @@
 import { readDurableSession } from "#execution/durable-session-store.js";
 import type {
+  Entered,
   PublishedSessionEvents,
+  SessionStepInput,
   SessionStepState,
 } from "#execution/publish-session-events.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
@@ -8,18 +10,11 @@ import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Relay } from "#harness/hitl/relays.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
 
-/**
- * Decides a run's request to withdraw a question. A question the session
- * still offers is withdrawn, so channels stop offering it. One it no longer
- * offers was already answered or withdrawn when its turn was cancelled. Either
- * way the run hears `withdrawn`, after any answer the session sent it first, so
- * the question resolves from the session's first decision.
- */
 export async function withdrawWorkflowToolRunQuestionStep(
   input: WithdrawQuestionInput,
 ): Promise<SessionStateTransition> {
@@ -27,20 +22,20 @@ export async function withdrawWorkflowToolRunQuestionStep(
   return await withSessionStateDelta(input, withdrawWorkflowToolRunQuestion);
 }
 
-type WithdrawQuestionInput = SessionStepState & {
+type WithdrawQuestionInput = SessionStepInput & {
   readonly control: string;
   readonly requestId: string;
   readonly runId: string;
 };
 
 async function withdrawWorkflowToolRunQuestion(
-  input: WithdrawQuestionInput,
+  input: Entered<WithdrawQuestionInput>,
 ): Promise<PublishedSessionEvents> {
   const decision: WorkflowToolRunControlMessage = {
     kind: "withdrawn",
     requestId: input.requestId,
   };
-  await ignoreGoneTarget(resumeHook(input.control, decision));
+  await ignoreGoneTarget(resumeRoutedHook(input.control, decision));
   return await relayWithdrawnRequests(
     input,
     (requestId, route) =>
@@ -50,12 +45,8 @@ async function withdrawWorkflowToolRunQuestion(
   );
 }
 
-/**
- * Withdraws the requests a finished run left open: its own questions and those
- * of the sessions it opened, which ended with it. Nobody can answer them now.
- */
 export async function withdrawFinishedRunQuestionsStep(
-  input: SessionStepState & { readonly runId: string },
+  input: SessionStepInput & { readonly runId: string },
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, (target) =>
@@ -63,10 +54,6 @@ export async function withdrawFinishedRunQuestionsStep(
   );
 }
 
-/**
- * Withdraws the relayed requests `select` picks through the machine's `finishRun`, for a step
- * that owns the session. Their routes drop with the save, once the projection shows them closed.
- */
 export async function relayWithdrawnRequests(
   input: SessionStepState,
   select: (requestId: string, route: Relay) => boolean,

@@ -28,7 +28,7 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
   await mkdir(functionDirectory, { recursive: true });
   await writeFile(
     join(functionDirectory, ".vc-config.json"),
-    `${JSON.stringify({ runtime: "nodejs24.x" }, null, 2)}\n`,
+    `${JSON.stringify({ runtime: "nodejs26.x" }, null, 2)}\n`,
   );
   await writeFile(
     join(outputDir, "config.json"),
@@ -83,7 +83,7 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
         {
           experimentalTriggers: [{ topic: "eve-test", type: "queue/v2beta" }],
           maxDuration: "max",
-          runtime: "nodejs24.x",
+          runtime: "nodejs26.x",
         },
         null,
         2,
@@ -180,7 +180,6 @@ async function createPreparedHost(appRoot: string): Promise<PreparedApplicationH
   };
 }
 
-/** The public route prefix the host bakes into its Vercel functions. */
 function publicRoutePrefixOf(spec: HostSpec): string | undefined {
   return Object.values(spec.vercel?.functionRules ?? {})[0]?.environment[
     EVE_PUBLIC_ROUTE_PREFIX_ENV

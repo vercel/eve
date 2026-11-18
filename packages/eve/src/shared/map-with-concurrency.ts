@@ -1,4 +1,3 @@
-/** Maps `items` with at most `limit` calls in flight, preserving input order. */
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,

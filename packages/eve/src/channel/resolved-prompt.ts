@@ -3,11 +3,6 @@ import type { InteractionOption } from "#protocol/session-events/families/intera
 
 type PromptOption = Pick<InteractionOption, "id" | "label">;
 
-/**
- * How eve resolved a posted prompt, such as `Approved` or a chosen option's
- * label. A request that ends without an answer, such as one withdrawn when its
- * turn is cancelled, is no longer needed.
- */
 export function resolvedPromptAnswer(
   resolution: RequestSettlement,
   options: readonly PromptOption[] = [],
@@ -21,19 +16,28 @@ export function resolvedPromptAnswer(
   return options.find((option) => option.id === answer?.optionId)?.label ?? answer?.text;
 }
 
-/** The line a prompt shows once resolved, such as `Approved` or `Answered: Saturday`. */
 export function resolvedPromptLabel(
   resolution: RequestSettlement,
   options: readonly PromptOption[] = [],
+  by?: string,
 ): string {
   const answer = resolvedPromptAnswer(resolution, options);
+  const decided = resolution.outcome === "accepted" || resolution.outcome === "declined";
+  const named = by === undefined || by === "" || !decided ? "" : ` by ${by}`;
   if (isAnswered(resolution)) {
-    return answer === undefined ? "Answered" : `Answered: ${answer}`;
+    return answer === undefined ? `Answered${named}` : `Answered${named}: ${answer}`;
   }
-  return answer ?? "";
+  return answer === undefined ? "" : `${answer}${named}`;
 }
 
-/** A question or budget prompt someone answered. */
+export function responderName(
+  names: Readonly<Record<string, string>> | undefined,
+  resolution: RequestSettlement,
+): string | undefined {
+  const id = resolution.responder?.id;
+  return id === undefined ? undefined : names?.[id];
+}
+
 export function isAnswered(resolution: RequestSettlement): boolean {
   return (
     resolution.kind !== "approval" &&

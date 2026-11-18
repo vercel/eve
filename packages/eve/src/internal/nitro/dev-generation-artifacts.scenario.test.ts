@@ -125,8 +125,6 @@ describe("development generation artifacts", () => {
     const moduleNamespace = moduleMap.nodes[subagent!.nodeId]?.modules[sourceId!] as {
       default: DynamicSentinel<Record<string, unknown>, unknown>;
     };
-    // Credentials are code the definition builds, so the runtime builds them where it needs them:
-    // nothing is transformed or registered for them.
     const remote = dynamicEvaluate(moduleNamespace.default)({}) as {
       headers(): Record<string, string>;
       url: string;
@@ -674,8 +672,6 @@ export default defineExtension();
       /use start\(execute\) from eve\/workflow\/api/u,
     );
 
-    // A helper the step imports is part of the workflow source graph; an
-    // unrelated tool is not.
     await writeFile(
       join(app.appRoot, "agent", "lib", "plan.mjs"),
       `export const PLAN_PREFIX = "plan v2:";
@@ -816,9 +812,6 @@ async function writeDependencyFixture(appRoot: string): Promise<string> {
     join(bundledRoot, "package.json"),
     `${JSON.stringify({ exports: "./index.mjs", name: "fixture-bundled", type: "module" })}\n`,
   );
-  // eve vendors `@workflow/*`, so a transitive workflow import reachable only
-  // through an inlined dependency must be inlined with it — a bare specifier
-  // would be unresolvable once the generation outlives `node_modules`.
   await writeFile(
     join(bundledRoot, "index.mjs"),
     [

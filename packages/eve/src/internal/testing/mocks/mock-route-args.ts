@@ -1,6 +1,5 @@
 import type { RouteHandlerArgs } from "#channel/routes.js";
 
-/** The agent route args, for tests whose routes never call them. */
 export function mockAgentRouteArgs(): Pick<
   RouteHandlerArgs,
   "describe" | "invokeTool" | "listSkillFiles" | "readSkill"

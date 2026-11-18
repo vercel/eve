@@ -16,7 +16,6 @@ const CHUNK = "server/chunks/tool.mjs";
 interface ChunkImports {
   readonly static?: string[];
   readonly dynamic?: string[];
-  /** Rendered chunk code; Nitro rewrites traced placeholders only here. */
   readonly code?: string;
 }
 
@@ -32,7 +31,6 @@ function chunk(imports: ChunkImports): CheckedBundle {
   };
 }
 
-/** An output directory whose chunk directory exists, as after Nitro writes it. */
 async function createOutput(): Promise<string> {
   const outputDir = await realpath(await createScratchDirectory("eve-external-output-check-"));
   await mkdir(join(outputDir, "server", "chunks"), { recursive: true });
@@ -101,8 +99,6 @@ describe("checkExternalDependencyOutput", () => {
   });
 
   it("rejects when the export Node selects is missing from the output", async () => {
-    // Node's ESM loader selects `node-addons` by default, while Nitro's tracer
-    // copies only the `import` target.
     const outputDir = await createOutput();
     await writePackage(join(outputDir, "server", "node_modules", "ext"), {
       exports: { "node-addons": "./addons.js", import: "./index.js" },
@@ -123,7 +119,6 @@ describe("checkExternalDependencyOutput", () => {
   });
 
   it("rejects an external that resolves outside the output", async () => {
-    // A copied or deployed output cannot follow a link back into the workspace.
     const outputDir = await createOutput();
     const workspacePackage = join(await createScratchDirectory("eve-external-workspace-"), "ext");
     await writePackage(workspacePackage, { exports: "./index.js", files: ["index.js"] });
@@ -149,7 +144,6 @@ describe("checkExternalDependencyOutput", () => {
 
     await expect(
       check(outputDir, {
-        // A config value naming the package is not an import of it.
         code: 'import { value } from "../node_modules/.nitro/ext@1.0.0/index.js";\nconst engine = "ext";\n',
         static: ["nitro:traced/0/ext"],
       }),

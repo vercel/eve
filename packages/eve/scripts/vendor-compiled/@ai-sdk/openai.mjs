@@ -1,25 +1,8 @@
 import { createDeclarationCopier } from "../_shared.mjs";
 
-/**
- * Type declarations are copied verbatim from the installed
- * @ai-sdk/openai version. The previous hand-written stub declared only
- * `openai.tools.webSearch()`, hiding the full OpenAIProvider /
- * OpenAIResponsesLanguageModel / OpenAIChatLanguageModel surface
- * upstream actually exports. Copying upstream keeps eve's vendored
- * types in sync without hand-editing on every AI SDK bump.
- *
- * Rewrites:
- *
- * - `@ai-sdk/provider` → already vendored, re-route both the named and
- *   the `import * as _ai_sdk_provider` namespace import at the vendored
- *   copy.
- * - `@ai-sdk/provider-utils` → type-only vendored upstream declarations.
- * - `zod/v4` → eve's vendored Zod v4 declarations.
- */
 export default {
   packageName: "@ai-sdk/openai",
   compiledPath: "@ai-sdk/openai",
-  chunkGroup: "workflow",
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       "@ai-sdk/provider": { kind: "vendored", compiledPath: "@ai-sdk/provider" },

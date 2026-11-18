@@ -33,7 +33,6 @@ interface RegisterAcpCommandOptions {
   readonly startHost?: (appRoot: string, options?: DevelopmentServerOptions) => DevelopmentServer;
 }
 
-/** Registers the ACP stdio bridge for local and deployed eve agents. */
 export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
   agentCommand(options.program.command("acp"), options.applicationContext, (command) => {
     const commandOptions = command.opts<AcpCliOptions>();

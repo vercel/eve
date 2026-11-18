@@ -64,7 +64,6 @@ it("builds the generated Web Chat service with pnpm dependencies installed only 
   );
   const webService = JSON.parse(configured.stdout) as { root: string; buildCommand?: string };
   const webRoot = join(appRoot, webService.root);
-  // Vercel synthesizes this nested package when no app manifest/build command exists.
   await writeFile(
     join(webRoot, "package.json"),
     JSON.stringify({ scripts: { "vercel-build": "next build" } }),
@@ -76,7 +75,6 @@ it("builds the generated Web Chat service with pnpm dependencies installed only 
     env: {
       ...process.env,
       NEXT_TELEMETRY_DISABLED: "1",
-      // The test runner's workspace executables must not mask a missing app binary.
       PATH: process.env.PATH?.split(delimiter)
         .filter((entry) => !entry.includes("node_modules"))
         .join(delimiter),

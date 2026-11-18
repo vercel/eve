@@ -1,8 +1,3 @@
-/**
- * Server-side session access for code running inside an eve deployment,
- * such as hooks, tools, schedules, and channel routes.
- */
-
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import type { SessionReader } from "#shared/session.js";
 

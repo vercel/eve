@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, repeated } from "../lib/tool";
 
+/** Lets the agent launch an application on the desktop and wait for its window, attaching to an already running instance. */
 export default desktopTool({
   description:
     "Launch an application on the desktop and wait for its window. Attaches to an already running instance.",

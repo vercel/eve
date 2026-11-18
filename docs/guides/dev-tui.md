@@ -104,7 +104,7 @@ While tasks work, a drawer above the prompt shows each task's name, latest tool,
 
 The prompt stays open while the agent works, including turns started elsewhere, such as a scheduled run. Pressing `Enter` during a turn sends your message as steering, which adds it to the running turn:
 
-- Before the agent starts writing its reply, steering stops the model and continues the turn with your message. Running tools finish first.
+- Before the agent starts writing its reply or an eve tool call's input, steering stops the model and continues the turn with your message. Running tools finish first.
 - After the reply starts, the streamed text stays, and your message joins the turn at its next step. See [Message delivery and steering](../concepts/execution-model-and-durability#message-delivery-and-steering).
 
 Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or run `/cancel`, to cancel a running turn. A cancel sent before the turn starts applies only to that turn, never to a later one. If the cancel doesn't finish, press `Ctrl+C` again to stop waiting and start a new session; the next `Ctrl+C` exits. At an idle prompt, press `Ctrl+C` twice to exit.

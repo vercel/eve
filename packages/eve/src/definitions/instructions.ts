@@ -4,7 +4,7 @@ import type { AlsContext } from "#context/container.js";
 import type { Announcement } from "#harness/announcements.js";
 import { digestOf } from "#definitions/state.js";
 import { agentInstructionsOf, renderInstructionsBlock } from "#runtime/prompt/compose.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicDefinition } from "#runtime/types.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
@@ -12,10 +12,6 @@ import { authoredEvaluate, type Definition, section, SECTION_ORDER } from "./def
 
 type Instruction = { readonly role: "system" | "user"; readonly content: string };
 
-/**
- * The agent's static instructions: its system instructions as one block of eve's default prompt,
- * and its user instructions announced, as dynamic ones are.
- */
 export const instructions: Definition = {
   contribute: ({ container }) => ({
     announcements: () =>
@@ -26,7 +22,7 @@ export const instructions: Definition = {
         ]),
       ),
     system: () => {
-      const block = agentInstructionsOf(container.get(BundleKey)?.resolvedAgent.instructions);
+      const block = agentInstructionsOf(compiledBundleOf(container)?.resolvedAgent.instructions);
       return [
         section("eve.instructions", block === undefined ? "" : renderInstructionsBlock(block), {
           order: SECTION_ORDER.instructions,
@@ -38,11 +34,10 @@ export const instructions: Definition = {
   label: "the agent's instructions",
 };
 
-/** What the agent's workspace holds, where it has one. */
 export const workspace: Definition = {
   contribute: ({ container }) => ({
     system: () => {
-      const spec = container.get(BundleKey)?.turnAgent?.workspaceSpec;
+      const spec = compiledBundleOf(container)?.turnAgent?.workspaceSpec;
       const text = spec === undefined ? undefined : createWorkspacePromptSection(spec);
       return text === undefined
         ? []
@@ -53,11 +48,6 @@ export const workspace: Definition = {
   label: "the agent's workspace",
 };
 
-/**
- * A `defineDynamic()` in `agent/instructions/`. A system instruction is a part of the system
- * prompt of its own while its definition returns it; a user instruction is announced: it joins the
- * conversation when its content changes, and stays there.
- */
 export function instructionsDefinition(
   resolver: ResolvedDynamicDefinition<"instructions">,
 ): Definition {
@@ -117,10 +107,6 @@ function instructionOf(
   return content.length === 0 ? null : { content, role: normalized.role ?? "system" };
 }
 
-/**
- * A user instruction, announced under its digest, which the same content repeats. Without content
- * the key forgets it, so the same content returned later joins again.
- */
 function userInstruction(content: string | undefined, digest: string): Announcement {
   return {
     initial: "",
@@ -130,11 +116,10 @@ function userInstruction(content: string | undefined, digest: string): Announcem
   };
 }
 
-/** The agent's static user instructions, each under its announcement's key. */
 export function staticUserInstructions(
   container: Pick<AlsContext, "get">,
 ): readonly { readonly key: string; readonly content: string }[] {
-  return (container.get(BundleKey)?.resolvedAgent.instructions ?? []).flatMap((entry) => {
+  return (compiledBundleOf(container)?.resolvedAgent.instructions ?? []).flatMap((entry) => {
     const content = entry.content.trim();
     return entry.role === "user" && content.length > 0
       ? [{ content, key: `eve.instructions:${entry.name}` }]

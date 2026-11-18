@@ -25,7 +25,6 @@ export function summarizeInstrumentationPrincipal(
   );
 }
 
-/** A principal as instrumentation records it: a known type, plus its id when given and bounded. */
 export function instrumentationPrincipal(
   principalType: string,
   principalId: string | undefined,

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "tasks": {
+    "build:app": {
+      "dependsOn": ["^build:app"],
+      "env": [
+        "BETTER_AUTH_*",
+        "BLOB_*",
+        "DATABASE_URL",
+        "EVE_NEXT_*",
+        "*_CONNECTOR_UID",
+        "KERNEL_*",
+        "LINQ_*",
+        "LINK_*",
+        "STRIPE_PUBLISHABLE_KEY",
+        "NODE_ENV",
+        "SECRET_ENCRYPTION_KEY",
+        "VERCEL_*"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "next-env.d.ts"]
+    },
+    "build:vercel": {
+      "dependsOn": ["db:migrate"],
+      "env": [
+        "BETTER_AUTH_*",
+        "BLOB_*",
+        "DATABASE_URL",
+        "*_CONNECTOR_UID",
+        "KERNEL_*",
+        "LINQ_*",
+        "LINK_*",
+        "STRIPE_PUBLISHABLE_KEY",
+        "NODE_ENV",
+        "SECRET_ENCRYPTION_KEY",
+        "VERCEL_*"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "next-env.d.ts"]
+    },
+    "db:migrate": {
+      "cache": false,
+      "env": ["DATABASE_URL_UNPOOLED"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"]
+    },
+    "dev:app": {
+      "cache": false,
+      "passThroughEnv": [
+        "BETTER_AUTH_*",
+        "BLOB_*",
+        "DATABASE_URL",
+        "*_CONNECTOR_UID",
+        "KERNEL_*",
+        "LINQ_*",
+        "LINK_*",
+        "STRIPE_PUBLISHABLE_KEY",
+        "NODE_ENV",
+        "SECRET_ENCRYPTION_KEY",
+        "VERCEL_*"
+      ],
+      "persistent": true
+    },
+    "deploy:app": {
+      "cache": false
+    },
+    "format:check": {
+      "outputs": []
+    },
+    "knip": {
+      "outputs": []
+    },
+    "lint:app": {
+      "outputs": []
+    },
+    "start:app": {
+      "cache": false,
+      "passThroughEnv": [
+        "BETTER_AUTH_*",
+        "BLOB_*",
+        "DATABASE_URL",
+        "*_CONNECTOR_UID",
+        "KERNEL_*",
+        "LINQ_*",
+        "LINK_*",
+        "STRIPE_PUBLISHABLE_KEY",
+        "NODE_ENV",
+        "SECRET_ENCRYPTION_KEY",
+        "VERCEL_*"
+      ],
+      "persistent": true
+    },
+    "test:app": {
+      "outputs": []
+    },
+    "types:generate": {
+      "outputs": [".next/types/**", "next-env.d.ts"]
+    },
+    "types:check:app": {
+      "dependsOn": ["types:generate"],
+      "outputs": ["*.tsbuildinfo"]
+    }
+  }
+}

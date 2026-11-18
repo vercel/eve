@@ -49,7 +49,6 @@ describe("presentTool", () => {
       url: "https://example.com/\u001b[2J\u0007path",
     });
 
-    // Control code points are removed; printable remnants are harmless.
     expect(presentation.title).toBe("Fetch https://example.com/[2Jpath");
     expect(presentation.group?.item).toBe("https://example.com/[2Jpath");
     expect(presentation.group?.item).not.toContain("\u001b");
@@ -106,13 +105,11 @@ describe("presentTool", () => {
   });
 
   it("renders web_search across both provider input shapes", () => {
-    // Anthropic's provider-managed tool sends a top-level query.
     expect(presentTool("web_search", { query: "eve framework" })).toMatchObject({
       title: "Search eve framework",
       group: { verb: "Search", singularNoun: "query", pluralNoun: "queries" },
     });
 
-    // Provider-managed variants send an objective/search_query pair.
     expect(
       presentTool("web_search", {
         objective: "Find confirmed public events",
@@ -123,7 +120,6 @@ describe("presentTool", () => {
       "Search public events 2026",
     );
 
-    // OpenAI nests the argument under `action`.
     expect(
       presentTool("web_search", { action: { type: "search", queries: ["smoke"] } }).title,
     ).toBe("Search smoke");
@@ -190,7 +186,6 @@ describe("presentTool", () => {
   });
 
   it("keeps eve's own copy for builtin tools over their provided labels", () => {
-    // Provided tools define labels too; eve's copy keeps them groupable.
     const presentation = presentTool("bash", { command: "ls" }, { label: "bash ls" });
     expect(presentation.title).toBe("Run ls");
     expect(presentation.group?.verb).toBe("Run");
@@ -206,11 +201,9 @@ describe("presentTool", () => {
     expect(parsed.doneTitle).toBe("Delegated subagent(stock price)");
     expect(parsed.subtitle).toBe("Look up GOOG.");
 
-    // The tool's name carries the target, so it shows before args parse.
     expect(presentPreparingTool("stock-price", { isSubagent: true }).title).toBe(
       "Delegate subagent(stock price) …",
     );
-    // An extension's subagents go by their own name, and its `agent` by the extension's.
     expect(presentTool("crm__researcher", {}, { isSubagent: true }).title).toBe(
       "Delegate subagent(researcher)",
     );
@@ -224,7 +217,6 @@ describe("presentTool", () => {
     );
     expect(selfModification.title).toBe("Delegate agent editor");
     expect(selfModification.doneTitle).toBe("Delegated agent editor");
-    // Without roster knowledge the generic formatter keeps its shape.
     expect(presentTool("stock-price", { message: "x" }).title).toBe("Stock price");
   });
 

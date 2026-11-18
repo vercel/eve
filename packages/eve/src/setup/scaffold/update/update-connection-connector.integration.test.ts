@@ -30,7 +30,6 @@ describe("updateConnectionConnectorUid", () => {
     expect(result.patched).toBe(true);
     const updated = await readFile(path, "utf8");
     expect(updated).toContain('connect("oauth/linear-123")');
-    // The import line is left untouched.
     expect(updated).toContain('import { connect } from "@vercel/connect/eve";');
   });
 

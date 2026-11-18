@@ -3,7 +3,6 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 const TURN_CLIENT_CONTEXT_STATE_KEY = "eve.harness.turnClientContext";
 
 interface TurnClientContextState {
-  /** Position of ephemeral client context in each model request for this turn. */
   readonly insertionIndex: number;
   readonly messages: readonly string[];
   readonly turnId: string;

@@ -58,12 +58,10 @@ export type RegistrySearchMetadata = Pick<
   "docs" | "hidden" | "implementation"
 >;
 
-/** Parses eve-owned metadata from a registry item manifest. */
 export function eveMetadataFromRegistryItem(item: unknown) {
   return EveRegistryItemMetadataSchema.parse(item).meta?.eve;
 }
 
-/** Extracts search metadata from the eve-owned official registry catalog. */
 export function parseOfficialRegistrySearchMetadata(
   input: unknown,
 ): ReadonlyMap<string, RegistrySearchMetadata> {
@@ -78,7 +76,6 @@ export function parseOfficialRegistrySearchMetadata(
   return metadata;
 }
 
-/** Parses the fields used by the human-readable registry item view. */
 export function parseRegistryPresentationManifest(input: unknown) {
   return RegistryPresentationManifestSchema.safeParse(input).data;
 }

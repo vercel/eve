@@ -12,34 +12,17 @@ import { executeTask } from "#evals/runner/execute-task.js";
 import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { computeEvalVerdict } from "#evals/runner/verdict.js";
 
-/**
- * Options for executing one eval.
- */
 export interface ExecuteEvalOptions {
   readonly evaluation: EveEval;
-  /** Receives `t.log` lines as the eval runs (used by `--verbose`). */
   readonly onLog?: (message: string) => void;
-  /** Receives the first trace context observed for each session. */
   readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
-  /** Shared setup context; stays in the runner process. */
   readonly setupContext?: unknown;
   readonly target: EveEvalTargetHandle;
-  /** Overrides the eval's own `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
-  /** Runner-owned start time, shared with reporter lifecycle events. */
   readonly startedAt?: string;
-  /**
-   * Pre-configured client for communicating with the eve agent.
-   * The CLI constructs this once with the appropriate auth and headers,
-   * and every eval creates fresh sessions from it.
-   */
   readonly client: Client;
 }
 
-/**
- * Executes one eval end to end: runs `test(t)`, collects its assertions, and
- * computes the verdict.
- */
 export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalResult> {
   const { evaluation, target, client } = options;
   const startedAt = options.startedAt ?? new Date().toISOString();

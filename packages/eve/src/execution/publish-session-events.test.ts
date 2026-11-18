@@ -7,6 +7,7 @@ const target = () => ({
   serializedContext: {},
   sessionState: createTestSessionState(),
   sessionWritable: new WritableStream<Uint8Array>(),
+  rerun: false,
 });
 it("rejects overlapping turn snapshots before restoring or publishing", async () => {
   await expect(

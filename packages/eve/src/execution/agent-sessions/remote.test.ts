@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
@@ -19,7 +19,6 @@ import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credent
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import { digestOf } from "#definitions/state.js";
 
-// The parent's stream, which a restore folds its view from: here, nothing yet.
 vi.mock("#execution/session-event-stream.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-event-stream.js")>()),
   streamSessionLines: async function* () {},
@@ -100,7 +99,6 @@ describe("resolveRemoteAgentStreamHeaders", () => {
 });
 
 describe("dynamic remote agent credentials", () => {
-  /** A dynamic subagent whose remote agent and token follow the caller's tenant, looked up once. */
   const tenantRemote = {
     evaluate: async (ctx: {
       readonly session: { readonly auth: { readonly current: SessionAuthContext | null } };
@@ -132,7 +130,6 @@ describe("dynamic remote agent credentials", () => {
       },
     },
   } as never;
-  /** The binding a child opened for `tenantId` keeps, with the tenant its memo looked up. */
   const bindingFor = (tenantId: string, tenant: object): DynamicRemoteBinding => ({
     at: "2026-01-01T00:00:00.000Z",
     channel: { kind: "unknown", metadata: {} },
@@ -166,7 +163,6 @@ describe("dynamic remote agent credentials", () => {
   });
 
   it("sends no credentials to a destination the binding doesn't lead to", async () => {
-    // The child opened in the eu region; this request names another destination.
     await expect(
       remoteAgentCredentials({
         binding: bindingFor("acme", { id: "acme", region: "us" }),
@@ -369,7 +365,6 @@ describe("startRemoteAgentSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body as string));
     expect(bodies.map((body) => body.protocolVersion)).toEqual([3, 2]);
-    // The same create and callback, its URL marked with the protocol it now agrees to.
     expect(new URL(bodies[0].callback.url).searchParams.get("eveRemoteProtocol")).toBe("3");
     expect(bodies[1]).toEqual({
       ...bodies[0],
@@ -403,7 +398,7 @@ describe("startRemoteAgentSession", () => {
         remote: createRemoteAgent(),
         session: { continuationToken: "eve:parent-token" },
       }),
-    ).rejects.toBeInstanceOf(FatalError);
+    ).rejects.toBeInstanceOf(NonRetryableError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -547,7 +542,6 @@ describe("startRemoteAgentSession", () => {
         callId: "call-remote",
         subagentName: "research",
         token: "eve:parent-token",
-        // Every callback URL names the protocol the parent and child agreed.
         url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token?eveRemoteProtocol=3",
       },
       message: [
@@ -588,7 +582,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow("may have completed");
     await expect(result).rejects.toThrow("Do not retry automatically");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -614,7 +608,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow("may have completed");
     await expect(result).rejects.toThrow("Remote session: remote-session");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -639,7 +633,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow(`protocol ${String(REMOTE_AGENT_PROTOCOL_VERSION + 1)}`);
     await expect(result).rejects.not.toThrow("may have completed");
   });
@@ -1102,19 +1096,56 @@ describe("respondToRemoteAgentSession", () => {
   });
 
   it("names a current-protocol child's answers, so a retried step repeats the same delivery", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { deliveryId: "receipt-1", ok: true, sessionId: "remote-session" },
+          { status: 202 },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
-    await respondToRemoteAgentSession({
-      auth: null,
-      headers: {},
-      idempotencyKey: "eve-answers:abc",
-      remote: { name: "research", sessionId: "remote-session", url: "https://remote.example.com" },
-      responses: [{ interactionId: "approval-1", optionId: "approve" }],
-    });
+    await expect(
+      respondToRemoteAgentSession({
+        auth: null,
+        headers: {},
+        idempotencyKey: "eve-answers:abc",
+        remote: {
+          name: "research",
+          sessionId: "remote-session",
+          url: "https://remote.example.com",
+        },
+        responses: [{ interactionId: "approval-1", optionId: "approve" }],
+      }),
+    ).resolves.toBe("receipt-1");
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       answers: [{ interactionId: "approval-1", optionId: "approve" }],
       idempotencyKey: "eve-answers:abc",
     });
+  });
+
+  it("keeps no receipt that is too long to store or that another session gave", async () => {
+    const receipts = [
+      { deliveryId: "r".repeat(257), ok: true, sessionId: "remote-session" },
+      { deliveryId: "receipt-1", ok: true, sessionId: "other-session" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(receipts.shift(), { status: 202 })),
+    );
+    const respond = () =>
+      respondToRemoteAgentSession({
+        auth: null,
+        headers: {},
+        remote: {
+          name: "research",
+          sessionId: "remote-session",
+          url: "https://remote.example.com",
+        },
+        responses: [{ interactionId: "approval-1", optionId: "approve" }],
+      });
+    await expect(respond()).resolves.toBeUndefined();
+    await expect(respond()).resolves.toBeUndefined();
   });
 
   it("answers a protocol 2 child with the v26 responses it takes", async () => {
@@ -1129,7 +1160,6 @@ describe("respondToRemoteAgentSession", () => {
     await respondToRemoteAgentSession({
       auth: responder,
       headers: { authorization: "Bearer remote-token" },
-      // Protocol 2 rejects fields it doesn't know, so the key stays off the wire.
       idempotencyKey: "eve-answers:abc",
       remote: {
         earlierProtocol: 2,
@@ -1171,7 +1201,6 @@ describe("continueRemoteAgentSession", () => {
       await continueRemoteAgentSession({
         earlierProtocol,
         auth: null,
-        // Earlier protocols reject fields they don't know, so the key stays off the wire.
         idempotencyKey: "agent-session:run:step:remote-session:send",
         callback: {
           callId: "call-next",
@@ -1193,7 +1222,6 @@ describe("continueRemoteAgentSession", () => {
               callId: "call-next",
               subagentName: "research",
               token: "parent-inbox",
-              // Marked with the protocol it agreed, so its route reads that protocol's input.
               url: `https://caller.example.com/eve/v1/callback/parent-inbox?eveRemoteProtocol=${earlierProtocol}`,
             },
             message: "follow up",

@@ -8,11 +8,6 @@ import {
   type WorkflowFunction,
 } from "#internal/workflow/runtime.js";
 
-/**
- * Starts a session owner run stamped with the running eve version, as
- * `createSession` does. Ingress on single-deployment Worlds treats an owner
- * without the stamp as stranded, so a bare `start` would never accept input.
- */
 export async function startSessionOwner<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult>,
   args: TArgs,
@@ -39,36 +34,28 @@ interface WorkflowHookLike {
   readonly token: string;
 }
 
-/**
- * Waits for a Workflow hook in integration tests.
- */
 export async function waitForHook(
   run: WorkflowRunLike,
   options: { pollInterval?: number; timeout?: number; token?: string } = {},
 ): Promise<WorkflowHookLike> {
   const world = await getWorld();
   const timeout = options.timeout ?? 30_000;
-  const pollInterval = options.pollInterval ?? 100;
+  const pollInterval = options.pollInterval ?? 25;
   const deadline = Date.now() + timeout;
 
   while (Date.now() < deadline) {
-    const [hooks, events] = await Promise.all([
-      world.hooks.list({ runId: run.runId }).then((result) => result.data),
-      fetchAllEvents(world, run.runId),
-    ]);
-    const receivedCorrelationIds = new Set(
-      events
-        .filter((event) => event.eventType === "hook_received")
-        .map((event) => event.correlationId),
-    );
-    const pendingHook = hooks.find(
-      (hook) =>
-        !receivedCorrelationIds.has(hook.hookId) &&
-        (options.token === undefined || hook.token === options.token),
+    const hooks = await world.hooks.list({ runId: run.runId }).then((result) => result.data);
+    const candidates = hooks.filter(
+      (hook) => options.token === undefined || hook.token === options.token,
     );
 
-    if (pendingHook !== undefined) {
-      return pendingHook;
+    if (candidates.length > 0) {
+      const receivedCorrelationIds = await receivedHookIds(world, run.runId, candidates);
+      const pendingHook = candidates.find((hook) => !receivedCorrelationIds.has(hook.hookId));
+
+      if (pendingHook !== undefined) {
+        return pendingHook;
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -81,7 +68,6 @@ export async function waitForHook(
   );
 }
 
-/** Waits until some run holds the hook `token`, and resolves that run. */
 export async function waitForHookOwner(
   token: string,
   timeout = 30_000,
@@ -97,28 +83,23 @@ export async function waitForHookOwner(
   }
 }
 
-async function fetchAllEvents(
+async function receivedHookIds(
   world: Awaited<ReturnType<typeof getWorld>>,
   runId: string,
-): Promise<WorkflowEventLike[]> {
-  const allEvents: WorkflowEventLike[] = [];
-  let cursor: string | undefined;
+  hooks: readonly WorkflowHookLike[],
+): Promise<Set<string>> {
+  const received = await Promise.all(
+    hooks.map(async (hook) => {
+      const events = await world.events.listByCorrelationId({
+        correlationId: hook.hookId,
+        resolveData: "none",
+        runId,
+      });
+      return events.data.some((event: WorkflowEventLike) => event.eventType === "hook_received")
+        ? hook.hookId
+        : undefined;
+    }),
+  );
 
-  do {
-    const pagination: { cursor?: string; limit: number } = { limit: 1000 };
-
-    if (cursor !== undefined) {
-      pagination.cursor = cursor;
-    }
-
-    const result = await world.events.list({
-      pagination,
-      resolveData: "none",
-      runId,
-    });
-    allEvents.push(...result.data);
-    cursor = result.hasMore === true && result.cursor !== null ? result.cursor : undefined;
-  } while (cursor !== undefined);
-
-  return allEvents;
+  return new Set(received.filter((hookId) => hookId !== undefined));
 }

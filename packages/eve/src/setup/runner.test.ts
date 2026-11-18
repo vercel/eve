@@ -132,8 +132,6 @@ describe("runHeadless", () => {
   });
 });
 
-// The single-gather shape (see step.ts): both runners call the same gather, so
-// the runner-level differences shrink to cancel folding and the retry loop.
 describe("unified boxes", () => {
   it("runs one gather face through both runners", async () => {
     const interactive = await runInteractive([box("u"), box("legacy")], { log: [] }, silentSink);

@@ -16,7 +16,6 @@ import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { always } from "#tools/approval/policies.js";
 
-/** Alice's session over `input`, with the session context approval policies read. */
 async function session(input: Parameters<typeof catalogContext>[0]) {
   const context = await catalogContext(input);
   context.ctx.set(SessionKey, {
@@ -32,7 +31,6 @@ async function session(input: Parameters<typeof catalogContext>[0]) {
 }
 
 const ASKS = { awaitsPerson: true, denied: false };
-// A call the gate lets run carries its clearance.
 const RUNS = { clearance: { callId: "call-get_weather" }, denied: false };
 
 describe("agent approval in the step catalog", () => {
@@ -114,7 +112,6 @@ describe("agent approval in the step catalog", () => {
       approval: () => "user-approval",
       tools: [
         inlineTool("no_reply", { frameworkTool: true, interactionOnly: true }),
-        // A framework-marked tool named like a built-in, such as a remote agent named `sleep`.
         inlineTool("sleep", { frameworkTool: true }),
         subagentTool("ask_question", { frameworkTool: true }),
       ],
@@ -149,7 +146,6 @@ describe("resolveAgentApproval", () => {
 
   it("runs the root's policy once in the root session", () => {
     const root: ApprovalPolicy = () => "user-approval";
-    // A copy of the root's agent object must not make the root's policy run twice.
     expect(resolveAgentApproval(bundle(root, () => "user-approval"))).toBe(root);
   });
 

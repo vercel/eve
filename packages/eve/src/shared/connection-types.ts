@@ -1,10 +1,4 @@
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
-/**
- * Protocol-agnostic interfaces for the connection system.
- *
- * Framework tools and the context provider depend only on these
- * interfaces, not on any protocol-specific implementation such as MCP.
- */
 
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { SessionContext } from "#context/session-context.js";
@@ -31,15 +25,6 @@ export interface TokenResult {
   readonly providerSubject?: string;
 }
 
-/**
- * Wire protocol a connection speaks.
- *
- * Stamped onto a connection definition by the `define*` factory that
- * produced it (`defineMcpClientConnection` → `"mcp"`,
- * `defineOpenAPIConnection` → `"openapi"`) and carried through the
- * compiled manifest so the runtime registry can pick the matching
- * client implementation. Never authored directly.
- */
 export type ConnectionProtocol = "mcp" | "openapi";
 
 /**
@@ -417,41 +402,27 @@ export function defineInteractiveAuthorization<Resume extends JsonValue = never>
   return { ...definition, principalType: "user" };
 }
 
-/**
- * Whether an authorization definition supports the framework-owned
- * interactive OAuth flow.
- */
 export function supportsInteractiveAuthorization(
   authorization: Readonly<AuthorizationDefinition> | undefined,
 ): boolean {
   return authorization?.startAuthorization !== undefined;
 }
 
-/** Metadata for a single tool exposed by a connection. */
 export interface ConnectionToolMetadata {
   readonly annotations?: Record<string, unknown>;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
   readonly name: string;
-  /**
-   * The OpenAPI `operationId` the tool was generated from. The tool name is a
-   * sanitized form of it, so connection filters match both.
-   */
   readonly operationId?: string;
   readonly outputSchema?: Record<string, unknown>;
 }
 
-/** Per-call options for {@link ConnectionClient.executeTool}. */
 export interface ConnectionToolExecuteOptions {
-  /** Signal forwarded into the underlying transport. */
   readonly abortSignal?: AbortSignal;
-  /** Replay-stable id of the authored tool call. */
   readonly callId: string;
 }
 
-/** A live client for a single connection. */
 export interface ConnectionClient {
-  /** eve-owned event actions, separate from remote protocol tools and their filters. */
   readonly eventActions?: ConnectionEventActionHandler;
   close(): Promise<void>;
   connect(): Promise<unknown>;

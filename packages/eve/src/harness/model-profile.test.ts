@@ -42,7 +42,11 @@ describe("resolveModelProfile", () => {
     [
       "Bedrock Converse with an Anthropic model id",
       model("amazon-bedrock", "ANTHROPIC.claude-3-5-sonnet-20241022-v2:0"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "amazon-bedrock" },
+      {
+        ...direct,
+        anthropicCache: { ttl: "5m" },
+        provider: "amazon-bedrock",
+      },
     ],
     [
       "Bedrock Converse with another model id",
@@ -75,7 +79,11 @@ describe("resolveModelProfile", () => {
     [
       "an opaque Bedrock inference profile declared as Anthropic",
       model("amazon-bedrock", "arn:aws:bedrock:us-east-1:123:application-inference-profile/abc"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "amazon-bedrock" },
+      {
+        ...direct,
+        anthropicCache: { ttl: "5m" },
+        provider: "amazon-bedrock",
+      },
       { anthropic: {} },
     ],
     [
@@ -85,10 +93,21 @@ describe("resolveModelProfile", () => {
       { anthropic: { ttl: "1h" } },
     ],
     [
-      "a Gateway model, which caches on its own",
+      "a Gateway Anthropic model with a 1-hour cache, which takes eve's own breakpoints",
+      "anthropic/claude-opus-5",
+      {
+        ...direct,
+        anthropicCache: { ttl: "1h" },
+        gateway: true,
+        provider: "anthropic",
+      },
+      { anthropic: { ttl: "1h" } },
+    ],
+    [
+      "a Gateway Anthropic model with the default 5-minute cache, which stays on Gateway's automatic caching",
       "anthropic/claude-opus-5",
       { ...direct, gateway: true, provider: "anthropic" },
-      { anthropic: { ttl: "1h" } },
+      { anthropic: {} },
     ],
   ])("describes %s", (_, input, expected, promptCache) => {
     expect(resolveModelProfile(input, promptCache)).toEqual(expected);

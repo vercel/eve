@@ -1,10 +1,6 @@
 import type { SessionStateMap } from "#harness/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
-/**
- * History passed to `create()` waits in session state until the first message, so it joins
- * history through the same turn-input path as `send()` history and is published with that turn.
- */
 const PENDING_HISTORY_STATE_KEY = "eve.session.pendingHistory";
 
 export function withPendingHistory(

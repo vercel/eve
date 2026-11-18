@@ -1,10 +1,3 @@
-/**
- * Inbound Discord interaction parsing and prompt shaping.
- *
- * The channel owns small, documented data shapes instead of exposing
- * Discord's raw interaction payloads as the primary public API.
- */
-
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 
 /** Maps the Discord interaction kinds the channel handles to their wire `type` integers. */
@@ -15,7 +8,6 @@ export const DISCORD_INTERACTION_TYPE = {
   PING: 1,
 } as const;
 
-/** Maps Discord interaction callback kinds to the wire `type` integers used in interaction responses. */
 export const DISCORD_INTERACTION_RESPONSE_TYPE = {
   CHANNEL_MESSAGE_WITH_SOURCE: 4,
   DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5,
@@ -24,7 +16,6 @@ export const DISCORD_INTERACTION_RESPONSE_TYPE = {
   PONG: 1,
 } as const;
 
-/** Discord message `flags` bit (1 << 6 = 64) marking a response ephemeral (visible only to the invoking user). */
 export const DISCORD_EPHEMERAL_MESSAGE_FLAG = 1 << 6;
 
 /** Discord user metadata surfaced by inbound interactions. */
@@ -80,7 +71,6 @@ export interface DiscordAttachment {
   readonly size?: number;
 }
 
-/** Discord's option type for an attachment; its value is the attachment's id. */
 const ATTACHMENT_OPTION_TYPE = 11;
 
 /** Parsed Discord slash/application command interaction. */
@@ -142,7 +132,6 @@ export interface DiscordInboundContext {
   readonly username?: string;
 }
 
-/** Parses one JSON-decoded Discord interaction payload. */
 export function parseDiscordInteraction(value: unknown): DiscordInteraction | null {
   if (!isObject(value)) return null;
   const type = value.type;
@@ -158,7 +147,6 @@ export function parseDiscordInteraction(value: unknown): DiscordInteraction | nu
   return null;
 }
 
-/** Returns the model-facing prompt for a command: the value of a `message` option when present and non-blank, otherwise a reconstructed `/command opt:value ...` string. */
 export function commandInteractionMessage(interaction: DiscordCommandInteraction): string {
   const message = findOptionValue(interaction.options, "message");
   if (typeof message === "string" && message.trim().length > 0) return message;
@@ -167,7 +155,6 @@ export function commandInteractionMessage(interaction: DiscordCommandInteraction
   return optionText ? `/${interaction.commandName} ${optionText}` : `/${interaction.commandName}`;
 }
 
-/** Renders one {@link DiscordInboundContext} as a deterministic context block. */
 export function formatDiscordContextBlock(context: DiscordInboundContext): string {
   const lines = [
     "<discord_context>",
@@ -283,7 +270,6 @@ function parseMember(value: unknown): DiscordMember | undefined {
   };
 }
 
-/** Parses a raw Discord user object, as interactions and Gateway messages carry it. */
 export function parseDiscordUser(value: unknown): DiscordUser | null {
   if (!isObject(value) || !isNonEmptyString(value.id) || !isNonEmptyString(value.username)) {
     return null;
@@ -314,7 +300,6 @@ function parseOptions(value: unknown): DiscordCommandOption[] {
   return options;
 }
 
-/** The attachments the command's attachment options name, from the interaction's `resolved` data. */
 function resolveAttachments(
   options: readonly DiscordCommandOption[],
   resolved: unknown,
@@ -328,7 +313,6 @@ function resolveAttachments(
   });
 }
 
-/** Parses a raw Discord attachment object, as Gateway messages and resolved command data carry it. */
 export function parseDiscordAttachment(raw: unknown): DiscordAttachment | null {
   if (
     !isObject(raw) ||
@@ -398,7 +382,6 @@ function formatCommandOptions(options: readonly DiscordCommandOption[]): string 
 }
 
 function formatOption(option: DiscordCommandOption): string {
-  // An attachment option's value is an id; the file reaches the model as its own part.
   if (option.type === ATTACHMENT_OPTION_TYPE) return "";
   if (option.value !== undefined) return `${option.name}:${String(option.value)}`;
   const nested = formatCommandOptions(option.options);

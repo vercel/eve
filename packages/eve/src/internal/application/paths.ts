@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
@@ -22,9 +22,6 @@ export interface ApplicationInfo {
   workflowSourceDir: string;
 }
 
-/**
- * Resolves an application root from the current working directory.
- */
 export function resolveApplicationRoot(cwd: string = process.cwd()): string {
   return resolve(cwd);
 }
@@ -33,42 +30,16 @@ function getWorkflowBuildCacheKey(appRoot: string): string {
   return createHash("sha256").update(appRoot).digest("hex").slice(0, 12);
 }
 
-/**
- * Reports whether the current process is running inside a Vercel build or
- * deployment. Vercel sets `VERCEL` in both build and runtime environments, so
- * this is the canonical signal for "managed by Vercel" versus self-hosted.
- */
 function isVercelBuildEnvironment(): boolean {
   return Boolean(process.env.VERCEL);
 }
 
-/**
- * Resolves the package-owned Workflow DevKit bundle directory for a target app.
- *
- * This directory is intentionally placed under the package root rather than the
- * application root so package-owned workflow caches are shared across generated
- * app roots without relying on app-local installed dependencies.
- *
- * Each application root receives a unique hash-keyed subdirectory so parallel
- * builds targeting different app roots never collide. The key is derived from
- * `appRoot` alone, so every code path that resolves a cache directory
- * converges on the same location.
- */
 export function resolveWorkflowBuildDirectory(appRoot: string): string {
   const workflowCacheRoot = join(resolvePackageRoot(), ".eve", "workflow-cache");
   pruneStaleWorkflowCacheSiblings(workflowCacheRoot);
   return join(workflowCacheRoot, getWorkflowBuildCacheKey(appRoot));
 }
 
-/*
- * Defensive cleanup: removes legacy sibling cache directories whose recorded
- * eveVersion does not match the currently installed eve. Earlier versions
- * keyed the cache directory by `appRoot + workflowId` (which embedded the
- * eve version), so an upgrade left one or more orphaned directories on
- * disk. Without this sweep those directories can still be picked up by
- * downstream build steps and bake stale step IDs (e.g.
- * `step//eve@0.18.3//...`) into a freshly built dev bundle.
- */
 function pruneStaleWorkflowCacheSiblings(workflowCacheRoot: string): void {
   if (!existsSync(workflowCacheRoot)) {
     return;
@@ -91,22 +62,14 @@ function pruneStaleWorkflowCacheSiblings(workflowCacheRoot: string): void {
       if (typeof parsed.eveVersion === "string" && parsed.eveVersion !== currentVersion) {
         rmSync(entryPath, { force: true, recursive: true });
       }
-    } catch {
-      // Best-effort cleanup; ignore corrupt metadata.
-    }
+    } catch {}
   }
 }
 
-/**
- * Resolves the cache directory used for durable local sandbox snapshots.
- */
 export function resolveSandboxCacheDirectory(appRoot: string): string {
   return join(appRoot, ".eve", "sandbox-cache");
 }
 
-/**
- * Resolves the production Nitro output directory for an app.
- */
 export function resolveOutputDirectory(appRoot: string): string {
   if (isVercelBuildEnvironment()) {
     return join(appRoot, ".vercel", "output");
@@ -115,9 +78,6 @@ export function resolveOutputDirectory(appRoot: string): string {
   return join(appRoot, ".output");
 }
 
-/**
- * Returns structured app information for diagnostics and CLI output.
- */
 export function getApplicationInfo(appRoot: string): ApplicationInfo {
   return {
     appRoot,

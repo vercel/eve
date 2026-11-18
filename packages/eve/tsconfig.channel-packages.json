@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  // Tests for the workspace's first-party channel packages, against eve's own source. Their
+  // sources sit outside this package, so they typecheck apart from eve's emitting program.
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "paths": {
+      "@eve/recall": ["../eve-recall/src/index.ts"],
+      "eve/channels": ["./src/public/channels/index.ts"],
+      "eve/context": ["./src/public/context/index.ts"],
+      "eve/events": ["./src/public/events/index.ts"],
+      "eve/internal/channels": ["./src/internal/channels.ts"]
+    }
+  },
+  "include": ["test/channels/**/*.ts"],
+  "exclude": []
+}

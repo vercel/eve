@@ -1,9 +1,4 @@
 import { readConnectionEventsBackend } from "#shared/connection-events.js";
-/**
- * Structural validation for authored connection auth definitions. Returns
- * `undefined` on success or a context-free error fragment for the caller to
- * prefix.
- */
 
 import type {
   AuthorizationDefinition,
@@ -12,13 +7,6 @@ import type {
 } from "#shared/connection-types.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 
-/**
- * Validates that authored `auth` conforms to the connection auth contract.
- *
- * Returns `undefined` on success; otherwise a descriptive message
- * fragment starting with `The "<fieldName>"...` that the caller is expected
- * to prefix with its own context.
- */
 export function validateAuthorizationSpec(
   authorization: unknown,
   fieldName = "auth",
@@ -72,12 +60,6 @@ export function validateAuthorizationSpec(
   return undefined;
 }
 
-/**
- * Validates and normalizes an authored auth definition into the runtime shape.
- *
- * `getToken`-only auth defaults to `principalType: "app"` so static tokens and
- * custom bearer-token fetchers do not need extra boilerplate.
- */
 export function normalizeAuthorizationSpec(
   authorization: unknown,
   prefix: string,

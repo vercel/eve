@@ -4,10 +4,6 @@ import { verifyDiscordRequest } from "#public/channels/discord/verify.js";
 
 const log = createLogger("discord.channel");
 
-/**
- * Verifies an inbound Discord request and returns its raw body, or
- * `null` when verification fails.
- */
 export async function verifyDiscordInbound(
   req: Request,
   credentials: DiscordChannelCredentials | undefined,

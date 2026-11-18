@@ -6,7 +6,6 @@ interface OutputBudget {
   remaining: number;
 }
 
-/** Collect both streams under one byte budget; closing never waits on a sandbox-controlled cancel acknowledgement. */
 export function collectCommandOutput(process: SandboxProcess): {
   result: Promise<SandboxCommandResult>;
   close(): void;

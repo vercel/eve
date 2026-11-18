@@ -1,8 +1,3 @@
-/**
- * Test fixture exercising the `createDurableSessionValues` /
- * `readDurableSession` round-trip from inside a real workflow runtime.
- * The workflow test-time bundle builder discovers this directory.
- */
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import {
@@ -13,10 +8,8 @@ import {
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession } from "#harness/types.js";
 
-/** Carries the test's marker through the durable session. */
 const MARKER_KEY = "test.marker";
 
-/** Synthetic minimal session for storage-layer round-trips. */
 function buildSyntheticSession(input: {
   sessionId: string;
   marker: string;
@@ -45,7 +38,6 @@ interface DurableSessionValues {
   readonly sessionState: DurableSessionState;
 }
 
-/** Writes one synthetic snapshot into the returned durable values. */
 async function durableSessionWriteStep(input: {
   readonly marker: string;
   readonly historyDepth: number;
@@ -62,11 +54,6 @@ async function durableSessionWriteStep(input: {
   return createDurableSessionValues(session);
 }
 
-/**
- * Writes a synthetic snapshot **after** the first attempt throws.
- * Verifies the retry's returned state, not the seed state, is what
- * the next read sees.
- */
 async function durableSessionWriteWithRetryStep(input: {
   readonly marker: string;
   readonly historyDepth: number;
@@ -89,7 +76,6 @@ async function durableSessionWriteWithRetryStep(input: {
   return { attempt: meta.attempt, values: createDurableSessionValues(session) };
 }
 
-/** Reads the latest snapshot and projects the fields the test asserts on. */
 async function durableSessionReadStep(input: DurableSessionValues): Promise<{
   readonly marker: string;
   readonly historyDepth: number;
@@ -106,11 +92,6 @@ async function durableSessionReadStep(input: DurableSessionValues): Promise<{
   };
 }
 
-/**
- * Drives a deterministic write/read sequence and returns each read's
- * outcome. `sessionId` comes from `workflowRunId` to mirror production
- * session identity.
- */
 interface DurableSessionStoreFixtureInput {
   readonly markers: readonly { readonly marker: string; readonly historyDepth: number }[];
 }
@@ -166,7 +147,6 @@ export async function durableSessionStoreFixtureWorkflow(
   };
 }
 
-/** Forces a write-step retry and reads back the retry's returned state. */
 interface DurableSessionRetryFixtureResult {
   readonly sessionId: string;
   readonly writeAttempt: number;
@@ -182,8 +162,6 @@ export async function durableSessionRetryFixtureWorkflow(): Promise<DurableSessi
 
   const { workflowRunId: sessionId } = getWorkflowMetadata();
 
-  // Seed write mirrors production, where `createSessionStep` always
-  // creates the first durable session state before later turns run.
   await durableSessionWriteStep({
     historyDepth: 0,
     marker: "seed",

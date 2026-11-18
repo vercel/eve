@@ -7,6 +7,7 @@ import {
   followsToolResults,
   type HarnessModelMessage,
   normalizeModelMessages,
+  turnAnchorOf,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { hasUnansweredToolCall } from "#harness/model-call/response.js";
@@ -20,107 +21,84 @@ import { followingToolResults, type TurnInput } from "./intake.js";
 
 type ClientContext = NonNullable<ReturnType<typeof getTurnClientContextState>>;
 
-/**
- * What the model reads this step: durable history, which holds the turn's input, with the task
- * results the step delivers, and the client's context for the turn, which keeps one position
- * across the turn's steps and never joins history.
- */
 export interface Prompt {
-  /** Durable messages. Compaction may rewrite them. */
   messages: HarnessModelMessage[];
   clientContext: ClientContext | undefined;
 }
 
 export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
   const built = await settleHistory(step, turn);
+  step.session = built.session;
   return {
     clientContext: getTurnClientContextState(step.session.state, turn.turnId),
     messages: built.messages,
   };
 }
 
-/**
- * History repaired and with the task results the step delivers, and the turn as the repair left
- * its client context's position.
- */
 async function settleHistory(
   step: Step,
   turn: TurnInput,
-): Promise<{ readonly messages: HarnessModelMessage[]; readonly turn: TurnInput }> {
+): Promise<{
+  readonly messages: HarnessModelMessage[];
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
+}> {
   const repaired = repairToolHistory({
     endsRequest: turn.messages.length === 0,
     messages: step.session.history,
     insertionIndex: turn.storedClientContext?.insertionIndex,
   });
-  step.session = changeHistory(step.session, { repaired: repaired.messages });
-  // Its own copy: task results join it below.
-  const messages = [...step.session.history];
+  let session = changeHistory(step.session, { repaired: repaired.messages });
+  const messages = [...session.history];
   if (turn.storedClientContext !== undefined && repaired.insertionIndex !== undefined) {
     const storedClientContext = {
       ...turn.storedClientContext,
       insertionIndex: repaired.insertionIndex,
     };
     turn = { ...turn, storedClientContext };
-    step.session = setTurnClientContextState(step.session, storedClientContext);
+    session = setTurnClientContextState(session, storedClientContext);
   }
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
-      session: step.session,
+      session,
       tools: await stepCatalog(step),
     });
-    step.session = taskContext.session;
-    // A turn a task's result starts brings no input of its own: what eve adds for the turn
-    // sits ahead of the results instead.
+    session = taskContext.session;
     messages.push(
       ...taskContext.messages.map((message) =>
         message.role === "user" ? anchorToTurn(message, turn.turnId) : message,
       ),
     );
   }
-  return { messages, turn };
+  return { messages, session, turn };
 }
 
-/**
- * The turn's input joins history before the model call, so a call that fails leaves it there, and
- * the prompt the call reads. The client's context keeps the position it takes here.
- */
-export async function commitTurnInput(step: Step, turn: TurnInput): Promise<Prompt> {
-  const settled = await settleHistory(step, turn);
-  const messages = placeTurnInput(step, settled.messages, settled.turn);
-  step.session = changeHistory(step.session, { extend: messages });
+export function commitTurnInput(step: Step, prepared: PreparedPrompt): Prompt {
+  step.session = prepared.session;
+  if (prepared.clientContext !== undefined) {
+    step.session = setTurnClientContextState(step.session, prepared.clientContext);
+  }
+  step.session = changeHistory(step.session, { extend: prepared.messages });
   return {
-    clientContext: getTurnClientContextState(step.session.state, turn.turnId),
+    clientContext: getTurnClientContextState(step.session.state, prepared.turn.turnId),
     messages: [...step.session.history],
   };
 }
 
-/**
- * The prompt the session's dynamic values are evaluated with: history and the turn's input,
- * without the task results and the client context's position a prompt settles.
- */
-export function previewPrompt(step: Step, turn: TurnInput): Prompt {
-  const messages = validateHarnessModelMessages([...step.session.history]);
+export async function previewPrompt(step: Step, turn: TurnInput): Promise<PreparedPrompt> {
+  const settled = await settleHistory(step, turn);
+  const messages = validateHarnessModelMessages(settled.messages);
   return {
-    clientContext: turnClientContext(messages, turn),
-    messages: withTurnInput(messages, turn),
+    ...settled,
+    clientContext: turnClientContext(messages, settled.turn),
+    messages: withTurnInput(messages, settled.turn),
   };
 }
 
-/**
- * The turn's input after `messages`, past a tool-result boundary when they end in tool results.
- * The client's context takes its position here, and never joins the messages.
- */
-function placeTurnInput(
-  step: Step,
-  messages: readonly HarnessModelMessage[],
-  turn: TurnInput,
-): HarnessModelMessage[] {
-  const clientContext = turnClientContext(messages, turn);
-  if (clientContext !== undefined) {
-    step.session = setTurnClientContextState(step.session, clientContext);
-  }
-  return withTurnInput(messages, turn);
+interface PreparedPrompt extends Prompt {
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
 }
 
 function turnClientContext(
@@ -145,14 +123,16 @@ function withTurnInput(
   ];
 }
 
-/** `messages`, the prompt's by default, with the client's context at its position. */
 export function withClientContext(
   prompt: Prompt,
   messages: readonly HarnessModelMessage[] = prompt.messages,
 ): HarnessModelMessage[] {
   const { clientContext } = prompt;
   if (clientContext === undefined || clientContext.messages.length === 0) return [...messages];
-  const insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  let insertionIndex = Math.min(Math.max(0, clientContext.insertionIndex), messages.length);
+  while (insertionIndex < messages.length && isAnnouncement(messages[insertionIndex]!)) {
+    insertionIndex += 1;
+  }
   return [
     ...messages.slice(0, insertionIndex),
     ...clientContext.messages.map((content) =>
@@ -162,15 +142,18 @@ export function withClientContext(
   ];
 }
 
-/** The prompt as the model reads it: with the client's context. */
+function isAnnouncement(message: HarnessModelMessage): boolean {
+  return (
+    message.role === "user" &&
+    (message.kind === "context.state" || message.kind === "context.instruction") &&
+    turnAnchorOf(message) === undefined
+  );
+}
+
 export function projectPrompt(prompt: Prompt): HarnessModelMessage[] {
   return validateHarnessModelMessages(normalizeModelMessages(withClientContext(prompt)));
 }
 
-/**
- * Compaction rewrote the durable messages: the client's context keeps its distance from the end,
- * so it stays after the turn's input.
- */
 export function compactPrompt(step: Step, prompt: Prompt, messages: HarnessModelMessage[]): void {
   const { clientContext } = prompt;
   if (clientContext !== undefined) {

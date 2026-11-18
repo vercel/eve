@@ -65,6 +65,8 @@ jobs:
       max_parallel: ${{ steps.plan.outputs.max_parallel }}
       evals_per_leg: ${{ steps.plan.outputs.evals_per_leg }}
       dev_startup: ${{ steps.plan.outputs.dev_startup }}
+      package: ${{ steps.plan.outputs.package }}
+      init: ${{ steps.plan.outputs.init }}
       keep_state: ${{ steps.plan.outputs.keep_state }}
     steps:
       - name: Require main
@@ -166,13 +168,15 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 90
+    environment:
+      name: eve-ci
+      deployment: false
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.live_matrix) }}
     env:
-      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
     steps:
@@ -225,6 +229,7 @@ jobs:
       - name: Run fixture evals
         working-directory: ${{ matrix.dir }}
         env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           KEEP_STATE_FLAG: ${{ needs.plan.outputs.keep_state == 'true' && '--keep-state' || '' }}
         run: |
           pnpm run --if-present e2e:prepare
@@ -454,6 +459,9 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 60
+    environment:
+      name: eve-ci
+      deployment: false
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -565,11 +573,12 @@ jobs:
           retention-days: 1
 
   # `eve dev` startup for the benchmark agents in e2e/benchmark.json
-  # `devStartup`, recorded as run-level framework records.
+  # `devStartup`, eve's package and install size (`package`), and a fresh
+  # `npx eve init` (`init`), recorded as run-level framework records.
   dev-startup:
     name: dev-startup
     needs: plan
-    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.dev_startup != 'null'
+    if: needs.plan.outputs.run == 'true' && (needs.plan.outputs.dev_startup != 'null' || needs.plan.outputs.package != 'null' || needs.plan.outputs.init != 'null')
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 45
@@ -601,9 +610,8 @@ jobs:
       - name: Build eve package
         run: pnpm build:eve
 
-      - name: Run startup benchmark
+      - name: Record startup job metadata
         env:
-          DEV_STARTUP: ${{ needs.plan.outputs.dev_startup }}
           PLANNED_SHA: ${{ needs.plan.outputs.sha }}
           RUNNER_OS_NAME: ${{ runner.os }}
         run: |
@@ -611,12 +619,46 @@ jobs:
           mkdir -p "$out"
           jq -n --arg sha "$PLANNED_SHA" --arg runner_os "$RUNNER_OS_NAME" \
             '{sha: $sha, runner_os: $runner_os}' >"$out/meta.json"
+
+      - name: Run startup benchmark
+        if: needs.plan.outputs.dev_startup != 'null'
+        env:
+          DEV_STARTUP: ${{ needs.plan.outputs.dev_startup }}
+        run: |
+          out="$RUNNER_TEMP/dev-startup"
           runs="$(jq -r '.runs' <<<"$DEV_STARTUP")"
           while read -r name tools; do
             if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-startup.mjs" packages/eve "$runs" "$tools" >"$out/$name.jsonl"; then
               echo "::warning::Startup benchmark for $name failed; its runs are recorded as missing."
             fi
           done < <(jq -r '.subjects[] | "\(.name) \(.tools)"' <<<"$DEV_STARTUP")
+
+      # After the startup benchmark, so its installs never share the runner
+      # with a timed `eve dev`.
+      - name: Run package size benchmark
+        if: needs.plan.outputs.package != 'null'
+        env:
+          PACKAGE_PROBE: ${{ needs.plan.outputs.package }}
+        run: |
+          out="$RUNNER_TEMP/dev-startup"
+          runs="$(jq -r '.runs' <<<"$PACKAGE_PROBE")"
+          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-package.mjs" packages/eve "$runs" >"$out/package.jsonl"; then
+            echo "::warning::Package size benchmark failed; its runs are recorded as missing."
+          fi
+
+      # Last: each run installs from the registry and starts `eve dev`, so it
+      # never shares the runner with another probe. Each run's terminal output
+      # (init-<run>.log) is uploaded with the results.
+      - name: Run init benchmark
+        if: needs.plan.outputs.init != 'null'
+        env:
+          INIT_PROBE: ${{ needs.plan.outputs.init }}
+        run: |
+          out="$RUNNER_TEMP/dev-startup"
+          runs="$(jq -r '.runs' <<<"$INIT_PROBE")"
+          if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-init.mjs" packages/eve "$runs" "$out" >"$out/init.jsonl"; then
+            echo "::warning::Init benchmark failed; its runs are recorded as missing."
+          fi
 
       - name: Upload startup results
         if: always()
@@ -634,6 +676,9 @@ jobs:
     needs: [plan, run-live, run-mock, run-hosted, dev-startup]
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
+    environment:
+      name: eve-benchmark-publish
+      deployment: false
     steps:
       - name: Checkout harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

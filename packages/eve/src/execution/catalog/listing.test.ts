@@ -25,7 +25,6 @@ async function announce(state: CatalogState, announced?: Readonly<Record<string,
     skills: state.skills,
     tools: state.tools,
   });
-  // What the harness would announce: a key it never announced stays quiet at its initial value.
   return Object.fromEntries(
     Object.entries(catalogAnnouncements(catalog)).filter(
       ([key, announcement]) =>
@@ -34,15 +33,10 @@ async function announce(state: CatalogState, announced?: Readonly<Record<string,
   );
 }
 
-/** The listing a session's first step appends. */
 async function baseline(state: CatalogState): Promise<string | undefined> {
   return (await announce(state)).catalog?.render(undefined);
 }
 
-/**
- * What the model reads when the catalog goes from `previous` to `next`. Like
- * the harness, nothing is appended while the recorded value stays the same.
- */
 async function appended(previous: CatalogState, next: CatalogState): Promise<string | undefined> {
   const before = (await announce(previous)).catalog!.value;
   const after = (await announce(next, { catalog: before })).catalog;
@@ -51,7 +45,6 @@ async function appended(previous: CatalogState, next: CatalogState): Promise<str
 
 const deferred = (name: string) => inlineTool(name, { deferred: true });
 
-/** `count` deferred tools under `namespace`. */
 const namespace = (name: string, count: number) =>
   Array.from({ length: count }, (_, index) => deferred(`${name}__tool_${index}`));
 
@@ -62,7 +55,6 @@ const NAMESPACES =
 const CONNECTIONS =
   'Connections, whose tools are named <connection>__<tool>; search one connection\'s tools with "<connection>__":';
 
-/** A catalog shaped like a real agent's: vendored namespaces, loose entries, and connections. */
 const INK: CatalogState = {
   connections: [
     { description: "Pet store inventory API", name: "petstore" },
@@ -154,7 +146,6 @@ describe("catalogAnnouncements", () => {
     const listing = await baseline({
       connections: [{ description: "Linear issues", name: "linear" }],
       tools: [
-        // Smaller than every listed namespace, though first by name.
         ...namespace("aa", 1),
         ...namespace("ab", 1),
         ...large.flatMap((name, index) => namespace(name, 2 + (index % 3))),
@@ -239,7 +230,6 @@ describe("catalogAnnouncements", () => {
         connections: twenty.map((name) => ({ name: `svc_${name}` })),
         tools: twenty.flatMap((name) => namespace(name, 2)),
       };
-      // A larger namespace and an earlier connection push ns20 and svc_ns20 past their caps.
       const next: CatalogState = {
         connections: [{ name: "svc_ns00" }, ...previous.connections!],
         tools: [...namespace("top", 3), ...previous.tools!],

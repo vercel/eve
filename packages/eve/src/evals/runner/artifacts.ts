@@ -3,20 +3,11 @@ import { dirname, join } from "node:path";
 
 import type { EveEvalResult, EveEvalRunSummary } from "#evals/types.js";
 
-/**
- * Resolves the artifact output directory for one `eve eval` run.
- *
- * Layout: `.eve/evals/<timestamp>/`
- */
 export function resolveArtifactDirectory(appRoot: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return join(appRoot, ".eve", "evals", timestamp);
 }
 
-/**
- * Writes all artifacts for a completed eval run: a run summary, a JSONL
- * results index, and per-eval detail/event files under `evals/`.
- */
 export async function writeArtifacts(
   artifactDir: string,
   summary: EveEvalRunSummary,
@@ -129,19 +120,11 @@ function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
   };
 }
 
-/**
- * Repeated attempts get an `.attempt-<n>` suffix. Sanitizing replaces `.` in
- * ids, so the suffix cannot collide with another eval's artifact path.
- */
 function artifactBaseName(result: EveEvalResult): string {
   const base = sanitizeArtifactPath(result.id);
   return result.attempt === undefined ? base : `${base}.attempt-${result.attempt}`;
 }
 
-/**
- * Eval ids contain `/` for directory nesting; keep that nesting in the
- * artifact tree and sanitize every other unsafe character per segment.
- */
 function sanitizeArtifactPath(id: string): string {
   return id
     .split("/")

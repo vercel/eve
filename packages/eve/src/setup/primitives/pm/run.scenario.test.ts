@@ -10,10 +10,6 @@ import { packageManagerInstallSucceeded, runPackageManagerInstall } from "./run.
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// The argv-level unit tests in run-pnpm.test.ts pin which flags we pass; these
-// scenarios pin what real pnpm does with them. Both layouts stay offline:
-// `workspace:*` and `file:` specifiers never touch the registry.
-
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -61,8 +57,6 @@ describe("runPackageManagerInstall (real pnpm)", () => {
     ).toBe(true);
 
     await expect(pathExists(join(memberRoot, "node_modules", "scratch-lib"))).resolves.toBe(true);
-    // The workspace owns the lockfile; a standalone (`--ignore-workspace`)
-    // install would have failed on `workspace:*` or written one here.
     await expect(pathExists(join(root, "pnpm-lock.yaml"))).resolves.toBe(true);
     await expect(pathExists(join(memberRoot, "pnpm-lock.yaml"))).resolves.toBe(false);
   });
@@ -90,8 +84,6 @@ describe("runPackageManagerInstall (real pnpm)", () => {
       name: "scratch-nested-agent",
       private: true,
     });
-    // Existing projects commonly already have node_modules. Its presence must
-    // not suppress unclaimed-workspace detection.
     await mkdir(join(nestedRoot, "node_modules"), { recursive: true });
 
     const { lines, onOutput } = collectOutput();

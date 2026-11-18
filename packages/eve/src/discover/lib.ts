@@ -3,40 +3,21 @@ import type { DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { discoverNamedSourceDirectory } from "#discover/grammar.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
 
-/**
- * Diagnostic emitted when the authored `lib/` root exists but is not a
- * directory.
- */
 export const DISCOVER_LIB_DIRECTORY_INVALID = "discover/lib-directory-invalid";
 
-/**
- * Diagnostic emitted when discovery finds an entry under the authored `lib/`
- * tree that is neither a regular file nor a directory.
- */
 export const DISCOVER_LIB_ENTRY_UNSUPPORTED = "discover/lib-entry-unsupported";
 
-/**
- * Input for discovering authored helper modules under `lib/`.
- */
 interface DiscoverLibSourcesInput {
   agentRoot: string;
   rootEntries: readonly ProjectSourceEntry[];
   source: ProjectSource;
 }
 
-/**
- * Result of recursively discovering authored helper modules under `lib/`.
- */
 interface DiscoverLibSourcesResult {
   diagnostics: DiscoverDiagnostic[];
   lib: ModuleSourceRef[];
 }
 
-/**
- * Discovers module-only helper sources under `lib/` without executing
- * authored modules. Other files, such as JSON data imported by a helper, are
- * left to the bundler.
- */
 export async function discoverLibSources(
   input: DiscoverLibSourcesInput,
 ): Promise<DiscoverLibSourcesResult> {

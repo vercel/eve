@@ -1,9 +1,6 @@
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
-// How a call's result reads on `call.settled`: an explicitly failed runtime result failed.
-// Error-shaped JSON can also be an ordinary successful tool value; its fields aren't a status.
-
 export function callOutcomeOf(result: RuntimeActionResult): {
   readonly outcome: "completed" | "failed";
   readonly error?: ErrorInfo;

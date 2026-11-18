@@ -7,9 +7,12 @@ import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 
 const position = { sequence: 1, stepIndex: 0, turnId: "child-turn" };
 
-const AGREED = "https://parent.example.com/eve/v1/callback/parent-hook?eveRemoteProtocol=2";
+const REPLY = "eve:reply:v1:parent-hook";
 
-function post(body: unknown, url = AGREED, token = "parent-hook") {
+const UNMARKED = `https://parent.example.com/eve/v1/callback/${encodeURIComponent(REPLY)}`;
+const AGREED = `${UNMARKED}?eveRemoteProtocol=2`;
+
+function post(body: unknown, url = AGREED, token = REPLY) {
   return handleSessionCallbackRequest(
     new Request(url, {
       body: JSON.stringify(body),
@@ -49,7 +52,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     const response = await post(approvalRequest);
     expect(response.status).toBe(202);
     expect(resumeRunnableHook).toHaveBeenCalledWith(
-      "parent-hook",
+      REPLY,
       expect.objectContaining({
         callId: "delegate",
         events: [
@@ -79,7 +82,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       subagentName: "deployer",
     });
     expect(response.status).toBe(202);
-    expect(resumeRunnableHook).toHaveBeenCalledWith("parent-hook", {
+    expect(resumeRunnableHook).toHaveBeenCalledWith(REPLY, {
       callId: "delegate",
       childSessionId: "child-session",
       events: [
@@ -124,8 +127,6 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
   });
 
   it("passes a protocol 2 callback as is to a parent run from before v27", async () => {
-    // Its URL names no protocol: the run reads protocol 2 input itself, as its own deployment's
-    // route passed it, so the child's request reaches it across the parent's upgrade.
     const nested = {
       ...approvalRequest,
       remote: {
@@ -134,9 +135,9 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
         url: "https://grandchild.example.com",
       },
     };
-    const response = await post(nested, "https://parent.example.com/eve/v1/callback/parent-hook");
+    const response = await post(nested, UNMARKED);
     expect(response.status).toBe(202);
-    expect(resumeRunnableHook).toHaveBeenCalledWith("parent-hook", nested);
+    expect(resumeRunnableHook).toHaveBeenCalledWith(REPLY, nested);
 
     resumeRunnableHook.mockClear();
     const approved = {
@@ -154,16 +155,12 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
       kind: "subagent-authorization-event",
       subagentName: "deployer",
     };
-    await post(approved, "https://parent.example.com/eve/v1/callback/parent-hook");
-    // Such a run reads an approval's own settlement too.
-    expect(resumeRunnableHook).toHaveBeenCalledWith("parent-hook", approved);
+    await post(approved, UNMARKED);
+    expect(resumeRunnableHook).toHaveBeenCalledWith(REPLY, approved);
   });
 
   it("refuses protocol 2 input on a URL that agreed to another protocol", async () => {
-    const response = await post(
-      approvalRequest,
-      "https://parent.example.com/eve/v1/callback/parent-hook?eveRemoteProtocol=3",
-    );
+    const response = await post(approvalRequest, `${UNMARKED}?eveRemoteProtocol=3`);
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Unsupported callback kind.",
@@ -175,7 +172,7 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
   it("refuses a malformed protocol 2 callback to a parent run from before v27", async () => {
     const response = await post(
       { ...approvalRequest, event: { ...position, requests: [] } },
-      "https://parent.example.com/eve/v1/callback/parent-hook",
+      UNMARKED,
     );
     expect(response.status).toBe(400);
     expect(resumeRunnableHook).not.toHaveBeenCalled();
@@ -190,11 +187,26 @@ describe("handleSessionCallbackRequest from a protocol 2 child", () => {
     });
   });
 
+  it.each([
+    ["a hook authored code named", "order:1042"],
+    ["a session's inbox", "eve:inbox:v1:eve:session:wrun_1:inbox"],
+  ])("answers not pending for %s, without reading the request or resuming it", async (_, token) => {
+    const request = new Request(AGREED, { body: JSON.stringify(approvalRequest), method: "POST" });
+    const response = await handleSessionCallbackRequest(request, {
+      params: { token },
+      requestIp: null,
+      waitUntil: () => {},
+    });
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ code: "CALLBACK_NOT_PENDING" });
+    expect(request.bodyUsed).toBe(false);
+    expect(resumeRunnableHook).not.toHaveBeenCalled();
+  });
+
   it("answers 404 when the call is no longer pending", async () => {
     resumeRunnableHook.mockRejectedValue(new Error("hook not found"));
     const response = await post(approvalRequest);
     expect(response.status).toBe(404);
-    // The same message as every protocol's route, now with a code a child can read.
     await expect(response.json()).resolves.toEqual({
       code: "CALLBACK_NOT_PENDING",
       error: "Session callback not pending.",

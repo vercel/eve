@@ -26,7 +26,6 @@ import { findClosestLinkedVercelDirectory } from "#shared/vercel-output-director
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 
-/** Validate `EVE_BASE_URL` and reduce it to its origin, when set. */
 export function readEveBaseUrlOrigin(): string | undefined {
   const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
   if (configuredEveBaseUrl === undefined || configuredEveBaseUrl.length === 0) {
@@ -41,16 +40,8 @@ export function readEveBaseUrlOrigin(): string | undefined {
   return url.origin;
 }
 
-/**
- * One eve agent mounted by a framework integration. `publicRoutePrefix` is
- * empty for a standalone agent, which mounts at `/eve/v1`.
- */
 export type EveFrameworkAgent = Omit<EveVercelAgentTarget, "buildCommand" | "devCommand">;
 
-/**
- * Resolve the agents an eve project mounts: a standalone `agent/`, a flat
- * agent root, or every member of an `agents/` workspace at `/eve/<name>`.
- */
 export async function resolveEveAgents(projectRoot: string): Promise<readonly EveFrameworkAgent[]> {
   const context = await findEveProjectContext(projectRoot);
   if (
@@ -68,12 +59,6 @@ export async function resolveEveAgents(projectRoot: string): Promise<readonly Ev
   return [{ appRoot: projectRoot, publicRoutePrefix: "" }];
 }
 
-/**
- * Resolve the dev server one agent's routes proxy to: the `EVE_BASE_URL` env
- * var if set, then a healthy shared server already running for the agent, then
- * a freshly spawned `eve dev --no-ui --port 0`. `process` is set only when
- * this call spawned the server, so the caller owns its shutdown.
- */
 export async function resolveEveAgentDevServer(
   agent: EveFrameworkAgent,
   host: EveFrameworkHost,
@@ -93,11 +78,6 @@ export async function resolveEveAgentDevServer(
   });
 }
 
-/**
- * Add each agent's generated Vercel service and routes to the Build Output
- * config `readConfig` returns. Returns `undefined` when the project's
- * `vercel.json` or `vercel.ts` declares the services instead.
- */
 export async function addEveVercelServices(
   readConfig: () => Promise<VercelServicesConfig>,
   input: {
@@ -107,9 +87,6 @@ export async function addEveVercelServices(
     readonly hostRoot: string;
   },
 ): Promise<VercelServicesConfig | undefined> {
-  // Config lives at the host root, where the build output is written, not at
-  // the eve project root that `eveRoot` can move elsewhere. With a Vercel Root
-  // Directory the linked project root holds it instead.
   const vercelDirectory = await findClosestLinkedVercelDirectory(input.hostRoot);
   const linkedRoot = vercelDirectory === undefined ? input.hostRoot : dirname(vercelDirectory);
   for (const root of new Set([input.hostRoot, linkedRoot])) {
@@ -118,8 +95,6 @@ export async function addEveVercelServices(
     }
   }
 
-  // A vercel.json at the host root wins; otherwise the linked project root's
-  // config describes the deploy.
   const hostConfig = await readVercelJsonFile(join(input.hostRoot, "vercel.json"));
   const rootConfig =
     linkedRoot === input.hostRoot || hasServices(hostConfig.services)
@@ -131,8 +106,6 @@ export async function addEveVercelServices(
       if (findConfiguredEveServiceEntry(rootServices, agent) !== undefined) {
         continue;
       }
-      // Named agents must use the exact generated service name, which can be
-      // hashed when the agent name has characters Vercel rejects.
       const expectedService =
         agent.name === undefined
           ? `an eve service (framework "eve")`

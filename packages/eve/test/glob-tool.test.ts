@@ -10,17 +10,7 @@ import { executeGlobOnSandbox, type GlobResult } from "../src/execution/sandbox/
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 interface FakeAccessOptions {
-  /**
-   * Exit code returned by the ripgrep capability probe that runs before
-   * each glob call. Defaults to `0` (ripgrep is available) so tests
-   * exercise the ripgrep code path by default. Set to a non-zero
-   * code other than `0` or `1` to force the POSIX fallback branch.
-   */
   readonly probeExitCode?: number;
 }
 
@@ -48,8 +38,6 @@ function createFakeAccess(
 
     async get() {
       return {
-        // Use a fresh id per fake session so the ripgrep-probe cache
-        // (keyed by `session.id`) does not leak across tests.
         id: `test-glob-sandbox-${crypto.randomUUID()}`,
         async readFile() {
           return null;
@@ -98,15 +86,7 @@ async function runInContext(
   return contextStorage.run(ctx, () => fn(sandbox!));
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("executeGlobOnSandbox", () => {
-  // ---------------------------------------------------------------------------
-  // Default behavior
-  // ---------------------------------------------------------------------------
-
   it("searches the workspace root when path is omitted", async () => {
     let capturedCommand = "";
     const result = (await runInContext(
@@ -137,10 +117,6 @@ describe("executeGlobOnSandbox", () => {
     expect(result.path).toBe("/workspace/src");
   });
 
-  // ---------------------------------------------------------------------------
-  // Path validation
-  // ---------------------------------------------------------------------------
-
   it("expands a leading $HOME before searching", async () => {
     let capturedCommand = "";
     const result = (await runInContext(
@@ -163,10 +139,6 @@ describe("executeGlobOnSandbox", () => {
     expect(result.path).toBe("/home/agent/.agents/skills/research");
   });
 
-  // ---------------------------------------------------------------------------
-  // Empty results
-  // ---------------------------------------------------------------------------
-
   it("returns 'No files found' when rg returns empty output", async () => {
     const result = (await runInContext(
       () => ({ exitCode: 1, stderr: "", stdout: "" }),
@@ -177,10 +149,6 @@ describe("executeGlobOnSandbox", () => {
     expect(result.count).toBe(0);
     expect(result.truncated).toBe(false);
   });
-
-  // ---------------------------------------------------------------------------
-  // Parsing
-  // ---------------------------------------------------------------------------
 
   it("parses multiple file paths from rg stdout", async () => {
     const stdout = "/workspace/a.ts\n/workspace/b.ts\n/workspace/c.ts\n";
@@ -196,12 +164,7 @@ describe("executeGlobOnSandbox", () => {
     expect(result.truncated).toBe(false);
   });
 
-  // ---------------------------------------------------------------------------
-  // Limit and truncation
-  // ---------------------------------------------------------------------------
-
   it("truncates when result count exceeds limit", async () => {
-    // Generate limit+1 lines to trigger truncation
     const lines = Array.from({ length: 6 }, (_, i) => `/workspace/file${i}.ts`);
     const stdout = `${lines.join("\n")}\n`;
 
@@ -217,9 +180,6 @@ describe("executeGlobOnSandbox", () => {
   });
 
   it("default limit is 100", async () => {
-    // Truncation is now enforced in JS rather than via a shell pipe, so
-    // the command itself carries no limit argument. Verify via behavior:
-    // emitting 101 results triggers truncation.
     const lines = Array.from({ length: 101 }, (_, i) => `/workspace/file${i}.ts`);
     const result = (await runInContext(
       () => ({ exitCode: 0, stderr: "", stdout: `${lines.join("\n")}\n` }),
@@ -252,8 +212,6 @@ describe("executeGlobOnSandbox", () => {
       (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts", limit: 5000 }),
     )) as GlobResult;
 
-    // Short filenames stay well under the 50 KiB byte cap so the
-    // 1000-file hard cap takes effect.
     expect(result.count).toBe(1000);
     expect(result.truncated).toBe(true);
   });
@@ -272,10 +230,6 @@ describe("executeGlobOnSandbox", () => {
     expect(capturedCommand).not.toContain("|");
   });
 
-  // ---------------------------------------------------------------------------
-  // Shell quoting
-  // ---------------------------------------------------------------------------
-
   it("shell-quotes patterns with special characters", async () => {
     let capturedCommand = "";
     await runInContext(
@@ -286,7 +240,6 @@ describe("executeGlobOnSandbox", () => {
       (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.{ts,tsx}" }),
     );
 
-    // The pattern should be wrapped in single quotes
     expect(capturedCommand).toContain("'**/*.{ts,tsx}'");
   });
 
@@ -304,10 +257,6 @@ describe("executeGlobOnSandbox", () => {
     expect(capturedCommand).toContain("'/workspace/my project'");
   });
 
-  // ---------------------------------------------------------------------------
-  // Path normalization
-  // ---------------------------------------------------------------------------
-
   it("normalizes paths with dot segments", async () => {
     const result = (await runInContext(
       () => ({ exitCode: 0, stderr: "", stdout: "/workspace/src/foo.ts\n" }),
@@ -316,10 +265,6 @@ describe("executeGlobOnSandbox", () => {
 
     expect(result.path).toBe("/workspace/src");
   });
-
-  // ---------------------------------------------------------------------------
-  // Workspace path invariant
-  // ---------------------------------------------------------------------------
 
   it("passes the logical /workspace path directly into the rg command", async () => {
     let capturedCommand = "";
@@ -349,15 +294,6 @@ describe("executeGlobOnSandbox", () => {
     expect(result.content).toContain("/workspace/src/b.ts");
   });
 
-  // ---------------------------------------------------------------------------
-  // Error handling
-  // ---------------------------------------------------------------------------
-  //
-  // Regression guard: the glob tool must surface sandbox-level failures
-  // (missing `rg`, IO errors) as thrown errors. Silently returning
-  // "No files found" on failure hides bugs like ripgrep not being
-  // installed in a Vercel sandbox.
-
   it("falls back to POSIX find when the probe reports `rg` is not installed", async () => {
     let capturedCommand = "";
     const result = (await runInContext(
@@ -373,7 +309,6 @@ describe("executeGlobOnSandbox", () => {
       { probeExitCode: 127 },
     )) as GlobResult;
 
-    // POSIX find, not ripgrep.
     expect(capturedCommand.startsWith("find ")).toBe(true);
     expect(capturedCommand).not.toMatch(/^rg\b/);
     expect(result.count).toBe(1);

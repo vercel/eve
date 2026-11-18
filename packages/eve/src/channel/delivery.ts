@@ -4,7 +4,6 @@ import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { Runtime, SessionCommand, SessionCommandResult } from "#channel/types.js";
 import type { Delivery } from "#shared/delivery.js";
 
-/** Turns an accepted internal dispatch into its public, followable receipt. */
 export function commandDelivery(
   runtime: Runtime,
   result: SessionCommandResult<Exclude<SessionCommand, { readonly kind: "prewarm" }>>,

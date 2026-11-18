@@ -123,7 +123,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** The tool's input schema and a function returning the issues it reports for an input. */
 async function inputContract(spec: Record<string, unknown>, toolName: string) {
   const client = new OpenApiConnectionClient(
     makeConnection({ spec, url: "https://api.example.com" }),
@@ -144,7 +143,6 @@ describe("OpenApiConnectionClient", () => {
 
     expect(names).toContain("getProject");
     expect(names).toContain("createProject");
-    // Operation without an operationId gets a synthesized name.
     expect(names).toContain("get_v1_health");
   });
 
@@ -284,7 +282,6 @@ describe("OpenApiConnectionClient", () => {
         },
       },
     });
-    // `nullable` is not a draft 2020-12 keyword and must not survive anywhere.
     expect(JSON.stringify(createItem?.inputSchema)).not.toContain("nullable");
   });
 
@@ -610,7 +607,6 @@ describe("OpenApiConnectionClient", () => {
     expect(await issues({ body: tree(20, true) })).toBeDefined();
   });
 
-  // Regression for https://github.com/vercel/eve/issues/3267
   it("keeps nested union constraints so valid deep input validates", async () => {
     const property = {
       oneOf: [
@@ -1179,8 +1175,6 @@ describe("OpenApiConnectionClient", () => {
     };
     const client = new OpenApiConnectionClient(makeConnection({ spec }));
 
-    // Schemas the local validator cannot evaluate stay advertised and pass
-    // values through instead of dropping the operation — the API validates.
     await expect(client.getToolMetadata()).resolves.toMatchObject([
       { name: "getValid" },
       { name: "getInvalid", inputSchema: { properties: { state: { enum: "not-an-array" } } } },
@@ -1354,7 +1348,6 @@ describe("OpenApiConnectionClient", () => {
   });
 });
 
-/** Builds a minimal spec whose single operation requires `scheme`. */
 function securitySpec(scheme: Record<string, unknown>): Record<string, unknown> {
   return {
     openapi: "3.0.3",

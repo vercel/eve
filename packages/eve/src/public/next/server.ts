@@ -38,12 +38,6 @@ function readEveBaseUrlEnvironment(): string | undefined {
   return new URL(configuredUrl).origin;
 }
 
-/**
- * Start the built eve server for `appRoot` on `origin` once per process. Named
- * agents may share a root, each on its own port, so both identify the server.
- * `next start` calls this while loading config, because Next serves the
- * rewrites saved by `next build` and never calls `rewrites()` again.
- */
 export async function ensureEveProductionServer(input: {
   readonly appRoot: string;
   readonly origin: string;
@@ -71,7 +65,6 @@ export async function resolveEveDestinationPrefix(input: {
   readonly devServerTimeoutMs?: number;
   readonly logLabel?: string;
   readonly productionDestinationPrefix: string;
-  /** Workspace member selected when spawning the local eve dev server. */
   readonly workspaceAgentName?: string;
 }): Promise<string> {
   if (process.env.NODE_ENV === "production") {

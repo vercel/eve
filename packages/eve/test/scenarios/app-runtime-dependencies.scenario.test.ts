@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -22,10 +22,7 @@ const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories({ scope: "file" });
 const DEPLOYABLE_BUILD_OPTIONS = { skipSandboxPrewarm: false } as const;
 
-/** Every `.mjs`/`.js` file under `rootDirectory`, keyed by path. */
 async function readJavaScriptModules(rootDirectory: string): Promise<Map<string, string>> {
-  // `withFileTypes` so directories named like modules (for example the
-  // traced `sql.js` package directory) are not read as files.
   const entries = await readdir(rootDirectory, { recursive: true, withFileTypes: true });
   const modules = new Map<string, string>();
   for (const entry of entries) {
@@ -108,6 +105,7 @@ describe("self-hosted production output", () => {
       label: "self-hosted",
       dependencies: {
         "fixture-cjs-path-globals-dep": "1.0.0",
+        "fixture-own-path-globals-dep": "1.0.0",
         "fixture-runtime-dep": "1.0.0",
       },
       files: {
@@ -122,13 +120,14 @@ describe("self-hosted production output", () => {
           "};",
           "",
         ].join("\n"),
-        "agent/tools/use_cjs_dep.ts": [
+        "agent/tools/use_path_globals_deps.ts": [
           'import pathGlobals from "fixture-cjs-path-globals-dep";',
+          'import ownPathGlobals from "fixture-own-path-globals-dep";',
           "",
           "export default {",
-          '  description: "Use the fixture CJS path globals dependency.",',
+          '  description: "Use the fixture path globals dependencies.",',
           "  execute() {",
-          "    return pathGlobals;",
+          "    return { ownPathGlobals, pathGlobals };",
           "  },",
           "};",
           "",
@@ -157,12 +156,29 @@ describe("self-hosted production output", () => {
       },
       {
         "index.cjs": [
-          'const path = require("node:path");',
+          "module.exports = { dirname: __dirname, filename: __filename };",
+          "globalThis.__fixtureCjsPathGlobals = module.exports;",
           "",
-          "module.exports = {",
-          "  dirnameBasename: path.basename(__dirname),",
-          "  filenameBasename: path.basename(__filename),",
-          "};",
+        ].join("\n"),
+      },
+    );
+    await writePackage(
+      join(appRoot, "node_modules", "fixture-own-path-globals-dep"),
+      {
+        exports: { ".": "./index.js" },
+        name: "fixture-own-path-globals-dep",
+        type: "module",
+        version: "1.0.0",
+      },
+      {
+        "index.js": [
+          'import { join } from "node:path";',
+          "",
+          'const __dirname = join("fixture-own", "dirname");',
+          'const __filename = join(__dirname, "index.js");',
+          "",
+          "globalThis.__fixtureOwnPathGlobals = { dirname: __dirname, filename: __filename };",
+          "export default globalThis.__fixtureOwnPathGlobals;",
           "",
         ].join("\n"),
       },
@@ -184,20 +200,46 @@ describe("self-hosted production output", () => {
   });
 
   it("provides CommonJS path globals to bundled dependencies", async () => {
-    const bundledDependencyModule = [
-      ...(await readJavaScriptModules(join(outputDir, "server"))).entries(),
-    ].find(([, source]) => source.includes("dirnameBasename"));
+    const serverDirectory = await realpath(join(outputDir, "server"));
+    const chunks = [...(await readJavaScriptModules(serverDirectory)).entries()];
+    const findChunk = (marker: string) => chunks.find(([, source]) => source.includes(marker))?.[0];
+    const commonJsChunk = findChunk("__fixtureCjsPathGlobals");
+    const ownChunk = findChunk("__fixtureOwnPathGlobals");
 
-    expect(bundledDependencyModule).toBeDefined();
-    expect(
-      existsSync(join(outputDir, "server", "node_modules", "fixture-cjs-path-globals-dep")),
-    ).toBe(false);
-    await import(pathToFileURL(bundledDependencyModule![0]).href);
+    expect(commonJsChunk).toBeDefined();
+    expect(ownChunk).toBeDefined();
+    expect(existsSync(join(serverDirectory, "node_modules", "fixture-cjs-path-globals-dep"))).toBe(
+      false,
+    );
+    const chunkUrls = [commonJsChunk!, ownChunk!].map((path) => pathToFileURL(path).href);
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `for (const chunkUrl of ${JSON.stringify(chunkUrls)}) {
+  for (const exported of Object.values(await import(chunkUrl))) {
+    if (typeof exported === "function") exported();
+  }
+}
+process.stdout.write(JSON.stringify({
+  commonJs: globalThis.__fixtureCjsPathGlobals,
+  own: globalThis.__fixtureOwnPathGlobals,
+}));`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual({
+      commonJs: { dirname: dirname(commonJsChunk!), filename: commonJsChunk },
+      own: {
+        dirname: join("fixture-own", "dirname"),
+        filename: join("fixture-own", "dirname", "index.js"),
+      },
+    });
   });
 
   it("leaves out the generated JavaScript sandbox and just-bash when nothing selects them", async () => {
-    // The just-bash engine resolves in this workspace (it is an eve
-    // devDependency), but resolvability is not opt-in.
     const tracedDependencies = await readTracedDependencies(outputDir);
     const serverEntries = await readdir(join(outputDir, "server"), { recursive: true });
 
@@ -299,11 +341,6 @@ describe("hosted Vercel output", () => {
   it("serves health without local-only runtime infrastructure", async () => {
     const runtimeSource = await readJavaScriptSource(join(outputDir, "functions"));
     expectNoLocalRuntimeInfrastructure(runtimeSource);
-    // The world-local canary is its log prefix, not names other packages
-    // legitimately mention without bundling world-local code: the
-    // semantic-error catalog embeds error-class names like
-    // `DataDirAccessError`, and @workflow/core's runtime world factory
-    // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
     expect(runtimeSource).not.toContain("[world-local]");
     expect(runtimeSource).not.toContain("[Unprintable QuickJS value]");
 
@@ -333,7 +370,6 @@ describe("hosted Vercel output", () => {
     );
 
     expect(instrumentationModule).toBeDefined();
-    // A fresh process: sibling tests may already have evaluated this chunk in-process.
     const probe = spawnSync(
       process.execPath,
       [
@@ -382,7 +418,6 @@ describe("a just-bash sandbox config", () => {
     const appRoot = await writeApp({
       label: "just-bash",
       files: {
-        // The compiled sandbox config is the opt-in signal.
         "agent/sandbox.ts": [
           'import { defineSandbox } from "eve/sandbox";',
           'import { JustBashSandbox } from "eve/sandbox/just-bash";',
@@ -393,7 +428,6 @@ describe("a just-bash sandbox config", () => {
         ].join("\n"),
       },
     });
-    // Authored modules resolve `eve/sandbox` through the app's node_modules.
     await mkdir(join(appRoot, "node_modules"), { recursive: true });
     await symlink(EVE_PACKAGE_ROOT, join(appRoot, "node_modules", "eve"), "dir");
 

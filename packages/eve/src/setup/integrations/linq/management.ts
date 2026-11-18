@@ -12,7 +12,6 @@ interface LinqManagementDeps {
 
 const defaultDeps: LinqManagementDeps = { fetch };
 
-/** Lists the phone numbers assigned to a Linq partner API token. */
 export async function listLinqPhoneNumbers(
   apiToken: string,
   signal?: AbortSignal,

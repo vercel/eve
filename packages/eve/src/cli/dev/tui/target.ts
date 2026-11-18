@@ -8,10 +8,8 @@ import type {
 
 export type { LocalDevelopmentTarget, RemoteDevelopmentTarget };
 
-/** Local or remote server backing one development TUI session. */
 export type DevelopmentTuiTarget = DevelopmentTarget;
 
-/** Resolves the explicit name, remote host, or humanized local folder shown by the TUI. */
 export function resolveTuiTitle(input: {
   readonly name: string | undefined;
   readonly target: DevelopmentTuiTarget;
@@ -36,7 +34,6 @@ export function resolveTuiTitle(input: {
   return humanized.length > 0 ? humanized : undefined;
 }
 
-/** Returns the URL host shown in remote status and authentication messages. */
 export function remoteHost(target: RemoteDevelopmentTarget): string {
   return new URL(target.serverUrl).host;
 }

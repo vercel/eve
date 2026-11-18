@@ -25,109 +25,35 @@ import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 
-/**
- * Declarative description of a mock sandbox surface.
- *
- * Mock sandboxes capture every interaction in-memory: `writeFile` stores
- * bytes, `readFile` returns previously stored content, and `run`
- * dispatches to a declarative stub map (or a user-supplied default
- * handler). Tests can read the captured state off the returned
- * `MockSandbox` after running a tool to assert on ordering, arguments,
- * or file contents without touching disk or spawning processes.
- */
 interface MockSandboxInput {
-  /** Callback invoked when authored runtime code deletes this sandbox. */
   readonly delete?: () => Promise<void> | void;
-  /**
-   * Stable sandbox identifier. Defaults to `"sbx_mock"`.
-   */
   readonly id?: string;
-  /** Sandbox name exposed by Vercel sessions. Defaults to `"sbx_mock"`. */
   readonly name?: string;
-  /**
-   * Initial file contents visible to the sandbox.
-   *
-   * Keys are paths (relative paths are anchored under `/workspace`, matching
-   * the real public-surface contract).
-   */
   readonly initialFiles?: Readonly<Record<string, string>>;
-  /**
-   * Pre-registered command responses keyed by the exact command string. The
-   * first matching entry for a `run({ command })` call wins. Missing keys
-   * fall through to {@link MockSandboxInput.run}.
-   */
   readonly commands?: Readonly<Record<string, SandboxCommandResult>>;
-  /**
-   * Fallback command handler. Invoked when the request does not match a
-   * {@link MockSandboxInput.commands} entry. Defaults to a no-op exit code 0
-   * handler with empty stdout/stderr.
-   */
   readonly run?: (
     options: SandboxRunOptions,
   ) => Promise<SandboxCommandResult> | SandboxCommandResult;
-  /** Callback invoked when authored runtime code stops this sandbox. */
   readonly stop?: () => Promise<void> | void;
 }
 
-/**
- * One write observed by {@link MockSandbox} with the exact `content`
- * argument preserved. Binary payloads (`Uint8Array`) are kept as-is so
- * tests that care about byte fidelity (attachment staging, file upload
- * pipelines) can assert on the raw bytes.
- */
 export interface MockSandboxWrite {
   readonly path: string;
   readonly content: string | Uint8Array;
 }
 
-/**
- * A materialized mock sandbox returned from {@link mockSandbox}.
- *
- * Exposes the `SandboxAccess` object expected by context plumbing plus
- * inspection affordances (`commandLog`, `files`, `writes`) that tests
- * assert against.
- */
 export interface MockSandbox {
-  /** Drop-in `SandboxAccess` suitable for `ctx.set(SandboxKey, ...)`. */
   readonly access: SandboxAccess;
-  /**
-   * Direct handle to the underlying sandbox session. Exposed for tests that
-   * want to call the session surface outside a `ctx` scope.
-   */
   readonly session: NetworkPolicySandboxSession;
-  /** A provider connection over the same sandbox; its `stop` calls {@link MockSandboxInput.stop}. */
   readonly connection: SandboxConnection<Pick<NetworkPolicySandboxSession, "setNetworkPolicy">>;
-  /** Ordered log of every command received through `run`/`spawn`. */
   readonly commandLog: readonly string[];
-  /** Ordered log of every path received through `removePath`. */
   readonly removedPaths: readonly string[];
-  /** Ordered log of every network policy applied via `setNetworkPolicy`. */
   readonly networkPolicyUpdates: readonly SandboxNetworkPolicy[];
-  /**
-   * Mutable map of current file contents. Binary writes are stored as
-   * the UTF-8 decoding of the bytes; use {@link MockSandbox.writes} for
-   * byte-exact assertions.
-   */
   readonly files: Map<string, string>;
-  /**
-   * Mutable map of the exact bytes observed on the most recent write
-   * for each resolved path. Populated for every `writeFile` call and
-   * consumed by {@link SandboxAccess.readFileBytes} on the mock
-   * `access` so attachment hydration sees byte-for-byte identical
-   * content.
-   */
   readonly fileBytes: Map<string, Buffer>;
-  /**
-   * Ordered log of every write received through `writeFile`, preserving
-   * the exact `content` argument (including `Uint8Array` payloads) so
-   * tests can assert byte-level fidelity.
-   */
   readonly writes: readonly MockSandboxWrite[];
 }
 
-/**
- * Builds an in-memory {@link MockSandbox} from a declarative descriptor.
- */
 export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   const files = new Map<string, string>();
   const fileBytes = new Map<string, Buffer>();
@@ -274,7 +200,6 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     writeFiles: async (options) => await session.writeFiles(options),
   };
 
-  // Queued preparation runs in order; `get()` waits for it, as the runtime's does.
   let preparations: Promise<unknown> = Promise.resolve();
   const access: SandboxAccess = {
     async captureState(): Promise<SandboxState> {
@@ -311,11 +236,6 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   };
 }
 
-/**
- * Wraps a pre-materialized {@link SandboxCommandResult} in a synthetic
- * {@link SandboxProcess} so the mock `spawn` path can satisfy the same
- * shape live backends expose.
- */
 function synthesizeMockProcess(result: SandboxCommandResult): SandboxProcess {
   const encoder = new TextEncoder();
   return {

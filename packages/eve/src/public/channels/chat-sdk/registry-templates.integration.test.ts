@@ -1,14 +1,7 @@
-/**
- * Loads each Chat SDK channel template from eve's registry exactly as `eve add`
- * installs it, with its real adapter package, and checks what a person on that
- * platform experiences. Webhooks are synthetic (the adapters' own parsing is
- * theirs to test), and no request leaves the process: any network call an
- * adapter makes counts as the platform accepting it.
- */
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -47,11 +40,8 @@ const templates = (
 const b64 = (value: string) => Buffer.from(value).toString("base64url");
 
 interface Platform {
-  /** A direct-message thread, in the id format the adapter decodes. */
   readonly thread: string;
-  /** The id of the `sent`th message the adapter sent, when it checks their format. */
   readonly sentMessageId?: (sent: number) => string;
-  /** Why the adapter can't send without a live platform, if it can't. */
   readonly streamingUntestable?: string;
 }
 
@@ -82,7 +72,6 @@ const PLATFORMS: Record<string, Platform> = {
   "channel/chat-sdk-zernio": { thread: "zernio:account-1:conversation-1" },
 };
 
-/** Values for env vars whose format the adapter checks; the rest get a placeholder. */
 const SAMPLE_ENV: Record<string, string> = {
   GMAIL_LABEL_ID: "Label_1",
   GMAIL_MAILBOX: "agent@example.com",
@@ -92,7 +81,6 @@ const SAMPLE_ENV: Record<string, string> = {
   GMAIL_TOPIC_NAME: "projects/project/topics/gmail",
   GOOGLE_CHAT_CREDENTIALS: JSON.stringify({
     client_email: "bot@project.iam.gserviceaccount.com",
-    // The adapter signs its token request with this key before calling Google.
     private_key: generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
       format: "pem",
       type: "pkcs8",
@@ -101,6 +89,7 @@ const SAMPLE_ENV: Record<string, string> = {
     type: "service_account",
   }),
   GOOGLE_CHAT_PROJECT_NUMBER: "123456789",
+  LARK_DOMAIN: "lark",
   LIVEBLOCKS_SECRET_KEY: "sk_test_conformance",
   LIVEBLOCKS_WEBHOOK_SECRET: "whsec_Y29uZm9ybWFuY2U=",
   MATRIX_BASE_URL: "https://matrix.example.com",
@@ -108,8 +97,6 @@ const SAMPLE_ENV: Record<string, string> = {
   RESEND_FROM_ADDRESS: "agent@example.com",
   SENDBLUE_FROM_NUMBER: "+15550000000",
 };
-
-// ── Network guard ───────────────────────────────────────────────────────────
 
 let networkAttempts = 0;
 
@@ -120,7 +107,6 @@ function attemptNetwork(): never {
   throw new NetworkAttempt("Network access is blocked in registry template tests.");
 }
 
-/** Runs `call`, treating a network request it makes as the platform accepting it. */
 async function reachesPlatform<T>(call: () => Promise<T>): Promise<T | "sent"> {
   const before = networkAttempts;
   try {
@@ -138,10 +124,6 @@ beforeAll(() => {
     vi.spyOn(http, "request").mockImplementation(attemptNetwork);
     vi.spyOn(http, "get").mockImplementation(attemptNetwork);
   }
-  // Start Chat SDK without the network: adapters whose startup calls the platform
-  // (bot identity lookups, logins) start anyway, as they would once it answered.
-  // Some templates initialize at import, before a test can reach their adapter,
-  // so this hooks Chat SDK's own init path rather than each adapter.
   const ensureInitialized = Reflect.get(Chat.prototype, "ensureInitialized") as () => Promise<void>;
   const tolerant = new WeakSet<Adapter>();
   vi.spyOn(Chat.prototype as any, "ensureInitialized").mockImplementation(function (this: Chat) {
@@ -156,7 +138,6 @@ beforeAll(() => {
     }
     return ensureInitialized.call(this);
   });
-  // The Gmail template keeps state in Redis; give it memory state instead.
   vi.doMock(resolveFromDocs("@chat-adapter/state-redis"), () => ({
     createRedisState: () => createMemoryState(),
   }));
@@ -169,14 +150,20 @@ afterAll(() => {
 });
 
 function resolveFromDocs(specifier: string): string {
-  const pkg = realpathSync(join(DOCS, "node_modules", specifier));
-  const manifest = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
-  const entry =
-    manifest.exports?.["."]?.import ?? manifest.exports?.["."]?.default ?? manifest.module;
-  return join(pkg, typeof entry === "string" ? entry : entry.default);
+  for (let directory = join(DOCS, "registry", "channels"); ; directory = dirname(directory)) {
+    const pkg = join(directory, "node_modules", specifier);
+    if (existsSync(join(pkg, "package.json"))) {
+      const real = realpathSync(pkg);
+      const manifest = JSON.parse(readFileSync(join(real, "package.json"), "utf8"));
+      const entry =
+        manifest.exports?.["."]?.import ?? manifest.exports?.["."]?.default ?? manifest.module;
+      return join(real, typeof entry === "string" ? entry : entry.default);
+    }
+    if (dirname(directory) === directory) {
+      throw new Error(`${specifier} is not installed above ${DOCS}`);
+    }
+  }
 }
-
-// ── Loading a template ──────────────────────────────────────────────────────
 
 interface LoadedTemplate {
   readonly adapter: Adapter;
@@ -199,7 +186,6 @@ function loadTemplate(item: RegistryItem): Promise<LoadedTemplate> {
 }
 
 async function importTemplate(item: RegistryItem): Promise<LoadedTemplate> {
-  // Only the env vars the registry tells users to set.
   for (const name of Object.keys(item.envVars ?? {})) {
     vi.stubEnv(name, SAMPLE_ENV[name] ?? `test-${name.toLowerCase()}`);
   }
@@ -214,7 +200,6 @@ async function importTemplate(item: RegistryItem): Promise<LoadedTemplate> {
   if (!platform) throw new Error(`Add ${item.name} to PLATFORMS.`);
   const threadId = platform.thread;
 
-  // Webhooks carry `{ id, text, attachments? }`; the template's own handlers take it from there.
   adapter.handleWebhook = async (request, options) => {
     const body = (await request.json()) as {
       id: string;
@@ -250,11 +235,8 @@ function personMessage(
   });
 }
 
-// ── Driving a template ──────────────────────────────────────────────────────
-
 let nextMessage = 0;
 
-/** Posts webhooks to the template's route at once, with `send` standing in for eve. */
 async function deliver(
   template: LoadedTemplate,
   bodies: readonly { text: string; attachments?: Message["attachments"] }[],
@@ -279,11 +261,6 @@ async function deliver(
   return send;
 }
 
-/**
- * Streams `deltas` through the template's channel as eve would, then returns
- * the messages the person is left looking at: each post adds one, each edit
- * replaces it.
- */
 async function streamReply(template: LoadedTemplate, deltas: readonly string[]) {
   const shown = new Map<string, string>();
   let sent = 0;
@@ -319,7 +296,6 @@ async function streamReply(template: LoadedTemplate, deltas: readonly string[]) 
     for (const [index, delta] of deltas.entries()) {
       await callChannelEvent(
         channelAdapter,
-        // The first delta announces the part's kind.
         channelEvent("content.delta", {
           delta,
           partId: "part-1",
@@ -345,8 +321,6 @@ async function streamReply(template: LoadedTemplate, deltas: readonly string[]) 
   }
   return [...shown.values()];
 }
-
-// ── Tests ───────────────────────────────────────────────────────────────────
 
 describe.each(templates.map((item) => [item.name, item] as const))("%s", (_, item) => {
   it("starts with only the env vars the registry lists", async () => {
@@ -378,7 +352,6 @@ describe.each(templates.map((item) => [item.name, item] as const))("%s", (_, ite
 
   it("hands the agent every message a person sends in quick succession", async () => {
     const template = await loadTemplate(item);
-    // eve takes a moment to accept each message, so the second arrives mid-handoff.
     const send = vi.fn(
       () => new Promise((resolve) => setTimeout(() => resolve({ id: "session-1" }), 50)),
     );

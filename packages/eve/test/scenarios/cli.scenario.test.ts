@@ -187,8 +187,6 @@ describe("runCli", () => {
 
   it("writes all of a large `eve info --json` document before the bin exits", async () => {
     const appRoot = await createMinimalAppRoot("eve-cli-info-json-pipe-");
-    // Far larger than a pipe or socket buffer, so most of it is still queued
-    // when the command resolves.
     const descriptionLength = 1024 * 1024;
     await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
     await writeFile(
@@ -211,8 +209,6 @@ describe("runCli", () => {
       [EVE_BIN_PATH, "info", "--json"],
       {
         cwd: appRoot,
-        // A telemetry flush yields to the event loop, which would drain stdout
-        // and hide an early exit.
         env: { ...process.env, EVE_TELEMETRY_DISABLED: "1" },
         maxBuffer: 16 * 1024 * 1024,
       },
@@ -354,13 +350,26 @@ describe("runCli", () => {
     }
   });
 
-  it("preserves imported tool schema composition in the built server", async () => {
+  it("starts an existing built app with local Workflow data under .eve and composed tool schemas", async () => {
     const { buildApplication } = await import("../../src/internal/nitro/host.js");
     const { appRoot } = await scenarioApp(COMPOSED_TOOL_SCHEMAS_DESCRIPTOR);
-    await buildApplication(appRoot, { skipSandboxPrewarm: true });
+    await buildApplication(appRoot, { skipSandboxPrewarm: false });
     const server = await startPackagedEveStart(appRoot);
 
     try {
+      const health = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url));
+      const healthJson = (await health.json()) as { ok?: unknown; status?: unknown };
+
+      expect(health.status).toBe(200);
+      expect(healthJson).toMatchObject({ ok: true, status: "ready" });
+      expect(server.stdout()).toContain("[START] server listening at");
+      await expect(
+        access(join(resolveLocalWorkflowWorldDataDirectory(appRoot), "version.txt")),
+      ).resolves.toBeUndefined();
+      await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+
       const response = await fetch(new URL("/schema-composition", server.url), {
         signal: AbortSignal.timeout(10_000),
       });
@@ -370,34 +379,6 @@ describe("runCli", () => {
         parsed: { action: "echo", input: { value: "hello" } },
         invalidAccepted: false,
         output: { result: { value: "hello" } },
-      });
-    } finally {
-      await server.stop();
-    }
-  }, 120_000);
-
-  it("starts an existing built app with local Workflow data under .eve", async () => {
-    const { buildApplication } = await import("../../src/internal/nitro/host.js");
-    const appRoot = await createMinimalAppRoot("eve-cli-start-health-");
-
-    await buildApplication(appRoot, {
-      skipSandboxPrewarm: false,
-    });
-
-    const server = await startPackagedEveStart(appRoot);
-
-    try {
-      const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url));
-      const responseJson = (await response.json()) as { ok?: unknown; status?: unknown };
-
-      expect(response.status).toBe(200);
-      expect(responseJson).toMatchObject({ ok: true, status: "ready" });
-      expect(server.stdout()).toContain("[START] server listening at");
-      await expect(
-        access(join(resolveLocalWorkflowWorldDataDirectory(appRoot), "version.txt")),
-      ).resolves.toBeUndefined();
-      await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
-        code: "ENOENT",
       });
     } finally {
       await server.stop();
@@ -424,8 +405,6 @@ describe("runCli", () => {
       join(workspaceRoot, "agent", "agent.mjs"),
       'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
     );
-    // No instructions.md or instructions.ts â discovery should fail with
-    // DISCOVER_REQUIRED_INSTRUCTIONS_MISSING.
 
     process.chdir(workspaceRoot);
 

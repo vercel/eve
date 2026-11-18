@@ -37,7 +37,6 @@ export type EveCliSetupStep =
   | "registry_install";
 export type EveCliSetupTerminalResult = "completed" | "cancelled" | "error";
 
-/** A bounded, non-sensitive reason for a failed setup terminal event. */
 export type EveCliSetupFailureCode =
   | "target_resolution"
   | "target_conflict"
@@ -152,13 +151,10 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["traces:show", "traces:show"],
 ]);
 
-/** Explicit privacy allowlist for command values emitted by CLI telemetry. */
 export const cliTelemetryCommandPaths = new Set(CLI_TELEMETRY_COMMANDS.keys());
 
-/** Internal command paths that must never emit telemetry. */
 export const internalCliCommandPaths = new Set(["telemetry:flush"]);
 
-/** Returns only an allowlisted command path; it never includes user input. */
 export function canonicalCommand(argv: readonly string[]): string {
   const firstArgument = argv[0];
   if (firstArgument === "--help" || firstArgument === "-h") return "help";
@@ -244,9 +240,7 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
       );
       try {
         await markEveTelemetryNotified();
-      } catch {
-        // Failing to persist the notice must not affect the command.
-      }
+      } catch {}
     },
     async flush() {
       if (!(await isEnabled()) || events.length === 0) return;
@@ -281,9 +275,7 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
         );
         child.on("error", () => {});
         child.unref();
-      } catch {
-        // Telemetry must never affect command output or exit status.
-      }
+      } catch {}
     },
   };
 }

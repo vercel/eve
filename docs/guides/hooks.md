@@ -61,27 +61,12 @@ interface HookBaseContext extends SessionContext {
 - `ctx.turn` is the latest turn, including one that ended, or `null` before the first turn.
 - `ctx.now` is the time eve recorded the event.
 - `ctx.memo(key, fn)` follows the [dynamic-value memo rules](./dynamic-capabilities#memo-rules).
-- `ctx.view` is a read-only snapshot of the session, taken with the event. Read what changed from the event and where things stand from the view. On `call.settled`, `call(ctx.view, event.data.callId)` from `eve/events` returns the call's name, kind, input, output, and state.
+- `ctx.view` is a read-only snapshot of the session, taken with the event. Read what changed from the event; for session state, use selectors from `eve/events` on `ctx.view` instead of reconstructing it yourself. On `call.settled`, `call(ctx.view, event.data.callId)` returns the call's name, kind, input, output, and state. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
 - Hooks don't receive the assembled conversation history.
 
 For `task.started`, `task.ended`, and `child.opened`, `ctx.session.id` is the session that started the task or opened the child session, even when the event arrives between turns. These hooks can call `ctx.getSandbox()` on that session, and their state and sandbox changes carry into its next turn.
 
-A hook can stop the session's sandbox at a point you choose:
-
-```ts title="agent/hooks/stop-after-turn.ts"
-import { defineHook } from "eve/hooks";
-
-export default defineHook({
-  events: {
-    async "turn.settled"(_event, ctx) {
-      const sandbox = await ctx.getSandbox();
-      await sandbox.stop();
-    },
-  },
-});
-```
-
-Every built-in sandbox backend stops the compute but keeps the session and its filesystem. On Vercel, the sandbox starts again on its next use. A failed stop follows the normal [hook failure behavior](#what-happens-when-a-hook-throws).
+eve stops an idle session's sandbox on its own, without starting it to stop it. Set `idleTimeoutMs` on the sandbox environment to choose when; see [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox).
 
 ### Narrowing tool results
 

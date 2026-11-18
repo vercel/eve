@@ -14,12 +14,14 @@ import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
-  sessionTimeoutWorkflowReference,
   startWorkflowOnDeployment,
   startWorkflowOnCurrentDeployment,
+} from "#execution/workflow-runtime.js";
+import {
+  sessionTimeoutWorkflowReference,
   workflowEntryReference,
   workflowToolRunWorkflowReference,
-} from "#execution/workflow-runtime.js";
+} from "#execution/workflow-references.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
@@ -34,9 +36,7 @@ const OWNER_RUN_ID = "wrun_owner-run";
 const getHookByTokenMock = vi.fn();
 const getRunRecordMock = vi.fn();
 const world = {
-  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
   capabilities: { atomicStartHook: { active: true }, deploymentAffinity: true },
-  // A session start pins the run id, so `start()` names the run `wrun_owner-run`.
   createRunId: () => "owner-run",
   getDeploymentId: vi.fn(async () => "dpl_current"),
   runs: { get: getRunRecordMock },
@@ -84,9 +84,6 @@ describe("workflowEntryReference", () => {
   it("uses the installed eve package identity for the runtime workflow id", () => {
     const packageInfo = resolveInstalledPackageInfo();
 
-    // The runtime references intentionally omit the `@<pkg.version>` stamp
-    // so an explicitly targeted deployment finds the same workflow even when
-    // eve itself has been upgraded.
     expect(workflowEntryReference.workflowId).toBe(`workflow//${packageInfo.name}//workflowEntry`);
     expect(workflowEntryReference.workflowId).not.toContain("/src/execution/");
     expect(workflowEntryReference.workflowId).not.toContain("@");
@@ -1263,5 +1260,55 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(serialized["eve.sessionTraceSeed"]).toBeUndefined();
     expect(serialized["eve.otelTraceEnabled"]).toBe(false);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("false");
+  });
+});
+
+describe("createWorkflowRuntime#getLineStream", () => {
+  const encoder = new TextEncoder();
+  function sessionReadable(onPull: () => void) {
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            onPull();
+            controller.enqueue(encoder.encode(`${JSON.stringify({ line: 1 })}\n`));
+            controller.close();
+          },
+        }),
+    });
+  }
+
+  it("opens a followed stream while it checks the session", async () => {
+    let releaseCheck: (run: unknown) => void = () => {};
+    getRunRecordMock.mockReturnValue(new Promise((resolve) => (releaseCheck = resolve)));
+    let pulled = false;
+    sessionReadable(() => (pulled = true));
+
+    const lines = createWorkflowRuntime({
+      compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+    }).getLineStream("session-1");
+    await vi.waitFor(() => expect(pulled).toBe(true));
+    expect(getRunRecordMock).toHaveBeenCalledWith("session-1", { resolveData: "none" });
+    releaseCheck({ status: "running" });
+
+    const reader = (await lines).getReader();
+    expect(await reader.read()).toEqual({ done: false, value: { line: 1 } });
+    expect(await reader.read()).toEqual({ done: true, value: undefined });
+  });
+
+  it("cancels the opened stream when the session check fails", async () => {
+    getRunRecordMock.mockRejectedValue(new WorkflowRunNotFoundError("session-1"));
+    const cancel = vi.fn();
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}), cancel }),
+    });
+
+    await expect(
+      createWorkflowRuntime({
+        compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+      }).getLineStream("session-1"),
+    ).rejects.toBeInstanceOf(WorkflowRunNotFoundError);
+    expect(cancel).toHaveBeenCalled();
   });
 });

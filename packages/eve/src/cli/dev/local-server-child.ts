@@ -2,7 +2,6 @@ import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 import { getDevelopmentSandboxRunId } from "#execution/sandbox/development-run.js";
 import { prewarmDevelopmentBuildProcess } from "#internal/nitro/host/dev-build-host.js";
 
-// The first build process loads the compiler while this process loads the server.
 prewarmDevelopmentBuildProcess();
 const [{ createDevelopmentServer }, { reconcileCleanupIntents, recordCleanupIntent }] =
   await Promise.all([
@@ -49,8 +48,6 @@ const stop = () => {
 process.on("message", (message: { type?: string }) => {
   if (message.type === "shutdown") stop();
 });
-// IPC disconnect is the parent-death signal: it fires however the parent
-// exits (including SIGKILL), which no portable OS mechanism covers.
 process.once("disconnect", stop);
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);

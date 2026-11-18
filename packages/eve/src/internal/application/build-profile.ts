@@ -3,19 +3,15 @@ import { dirname, join, relative, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { gzipSync } from "node:zlib";
 
-/** Version of the machine-readable `eve build --profile` report schema. */
 export const APPLICATION_BUILD_PROFILE_SCHEMA_VERSION = 1 as const;
 
-/** Deployment target represented by one build profile. */
 export type ApplicationBuildProfileTarget = "local" | "vercel";
 
-/** One completed phase in an application build profile. */
 export interface ApplicationBuildProfilePhase {
   readonly durationMs: number;
   readonly name: string;
 }
 
-/** Size totals for one Vercel function directory in the published output. */
 interface ApplicationBuildProfileFunctionBundle {
   readonly files: number;
   readonly gzipBytes: number;
@@ -23,7 +19,6 @@ interface ApplicationBuildProfileFunctionBundle {
   readonly rawBytes: number;
 }
 
-/** Final output-size measurements collected after a successful publication. */
 export interface ApplicationBuildProfileOutput {
   readonly files: number;
   readonly functionBundles: readonly ApplicationBuildProfileFunctionBundle[];
@@ -31,15 +26,12 @@ export interface ApplicationBuildProfileOutput {
   readonly rawBytes: number;
 }
 
-/** Timing data gathered while an application build runs. */
 interface ApplicationBuildProfileTiming {
   readonly durationMs: number;
   readonly phases: readonly ApplicationBuildProfilePhase[];
 }
 
-/** Stable JSON document written by `eve build --profile <path>`. */
 export interface ApplicationBuildProfile {
-  /** Build identity exposed to the Workflow World; self-hosted output only. */
   readonly deploymentId?: string | undefined;
   readonly durationMs: number;
   readonly kind: "eve-build-profile";
@@ -99,10 +91,6 @@ function addFileSize(size: MutableOutputSize, fileSize: FileSize): void {
   size.gzipBytes += fileSize.gzipBytes;
 }
 
-/**
- * Records elapsed build phases only when profile output was requested. The
- * injected clock keeps its serialization behavior independently testable.
- */
 export class ApplicationBuildProfiler {
   readonly #now: () => number;
   readonly #phases: ApplicationBuildProfilePhase[] = [];
@@ -143,7 +131,6 @@ export class ApplicationBuildProfiler {
   }
 }
 
-/** Creates the versioned report shape from completed timings and output measurements. */
 export function createApplicationBuildProfile(input: {
   readonly deploymentId?: string | undefined;
   readonly output: ApplicationBuildProfileOutput;
@@ -161,10 +148,6 @@ export function createApplicationBuildProfile(input: {
   };
 }
 
-/**
- * Measures regular files in the published output without following symlinks.
- * Each `.func` directory receives its own subtotal for Vercel output.
- */
 export async function measureApplicationBuildOutput(
   outputDirectory: string,
 ): Promise<ApplicationBuildProfileOutput> {
@@ -215,7 +198,6 @@ export async function measureApplicationBuildOutput(
   };
 }
 
-/** Writes one formatted profile JSON document outside the build output. */
 export async function writeApplicationBuildProfile(
   outputPath: string,
   profile: ApplicationBuildProfile,

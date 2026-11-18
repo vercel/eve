@@ -1,6 +1,3 @@
-// The history eve keeps of a conversation an older execution model recorded, as both importers read
-// it: the legacy-session driver import and the pre-v27 handoff import.
-
 import type { ModelMessage } from "ai";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
 
