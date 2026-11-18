@@ -111,8 +111,12 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
         })),
       ...runs
         .filter((run) => run.probe.operation === operation && sendsProbeRequest(run))
-        // A tool whose schema takes both input forms is graded on the first one it accepts.
-        .filter((run, index, sent) => sent.findIndex(({ file }) => file === run.file) === index)
+        // Grade each tool on the first input form it accepts and on any other form that
+        // places the requested order, so every way it can place that order is covered.
+        .filter(
+          (run, index, sent) =>
+            sent.findIndex(({ file }) => file === run.file) === index || implementsProbe(run),
+        )
         .map(({ name, tool, nested }) => ({
           name,
           approval: tool.approval,
