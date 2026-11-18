@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/pull/6551
 status: proposed
-last_updated: "2026-11-18"
+last_updated: 2026-11-18
 ---
 
 # Per-user model credentials
@@ -72,8 +72,9 @@ export default defineAgent({
 A signed-in person gets `ownGateway`. Every other session gets the plain model ID, which runs on
 the project's AI Gateway credential, as it does today.
 
-`defineModel` takes and returns a `ModelDefinition`, also exported from `eve/models`. `id`, `auth`,
-and `create` are required:
+`defineModel` takes a `ModelDefinition` and returns a branded `DefinedModel`, as `defineAgent`
+returns a `DefinedAgent`. Both types come from `eve/models`. `id`, `auth`, and `create` are
+required:
 
 | Field     | Type                                            | Purpose                                                                                                                                                                                                                 |
 | --------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -82,7 +83,8 @@ and `create` are required:
 | `create`  | `(credential: TokenResult) => EveLanguageModel` | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                                       |
 | `authKey` | `string`                                        | Sets the sign-in name and the token cache key. Required when `auth` has no Vercel Connect connector. See [Sign-in name](#sign-in-name).                                                                                 |
 
-eve accepts a `ModelDefinition` wherever it takes the model for a session's turns:
+eve accepts a `DefinedModel` wherever it takes the model for a session's turns. A plain object with
+the same fields doesn't compile:
 
 - `defineAgent({ model })` on the root agent and on a declared subagent.
   `defineAgent({ model: ownGateway })` runs every session on the person's own credential, and fails
@@ -130,17 +132,20 @@ When `getToken` throws `ConnectionAuthorizationRequiredError` and `auth` has
 `request.kind: "sign-in"` and the turn as its subject. Channels show their existing sign-in prompt,
 and the turn pauses under the same `turnId`.
 
-- **The person connects.** The step runs again from the start. The dynamic functions run, eve
-  completes the authorization with the selected model's `auth`, settles the sign-in `accepted`, and
-  calls the model.
+- **The person connects.** eve settles the sign-in `accepted` when the callback arrives, as it does
+  for any sign-in no tool call owns. The step runs again from the start: the dynamic functions run,
+  eve completes the authorization with the selected model's `auth`, and calls the model. If
+  completing the authorization fails, the turn fails with `MODEL_AUTHORIZATION_FAILED`.
 - **The person declines.** eve settles the sign-in `declined` before the dynamic functions run, so
   a dynamic `model` can read the decline from `ctx.view` and return another model.
 - **The person sends a message.** The sign-in ends `withdrawn`, and the step runs again. Unless a
   dynamic `model` picks another model, the turn fails with `MODEL_AUTHORIZATION_FAILED`.
-- **The selection changes before the callback.** Only a model with the same sign-in name can
-  complete the authorization, so the newly selected model replies, and eve settles the open sign-in
-  `interrupted` when the turn ends. The person's Vercel Connect grant stays stored, so the next
+- **The selection changes before the callback.** The callback settles the sign-in `accepted`, and
+  the newly selected model replies. The person's Vercel Connect grant stays stored, so the next
   `getToken` for that connector returns its token.
+
+Each turn step drops the callbacks whose sign-in has closed, so a later turn never reads an old
+decline or an unused code.
 
 A fallback needs no new API:
 
@@ -174,7 +179,9 @@ neither a connector nor an `authKey`.
 ### A rejected credential
 
 When the provider answers with `401`, eve drops the token, calls `auth.evict`, resolves the
-credential again, and retries the call once, as MCP connections do. After a second `401`, eve opens
+credential again, and retries the call once, as MCP connections do. The retry covers the whole
+model call, including a `401` the provider's stream emits, and goes through the model call's own
+attempt bookkeeping. After a second `401`, eve opens
 a new sign-in. When the provider rejects the credential from a sign-in in the same step, the turn
 fails with `MODEL_AUTHORIZATION_FAILED`. Other statuses, such as `402` or `403`, fail the call as
 any provider error does. eve reads the `statusCode` on the model-call error, so the retry works for
@@ -205,7 +212,8 @@ message; eve drops the failed turn's input, including a message that withdrew th
   completing it continues the child. A root copy from the built-in `agent` tool works the same way.
 - In a turn, compaction's summary call reuses the turn's model and credential, and a `401` on that
   call opens a sign-in, as on the model call. Compaction between turns resolves the credential
-  itself and never opens a sign-in; without a credential, the compaction fails.
+  itself and never opens a sign-in; without a credential, the compaction fails. With
+  `compaction.model` set, compaction never resolves the turn model's credential.
 - When eve can't rerun the dynamic `model` function that returned a `defineModel` value, such as
   after a restart between turns, the call fails. eve never runs it on the project's credential.
 - When eve mocks authored models (`NODE_ENV=test` or `EVE_MOCK_AUTHORED_MODELS=1`), it replaces a
