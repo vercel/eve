@@ -132,9 +132,16 @@ export async function commitDockerTemplateImage(input: {
     return "committed";
   }
 
-  const publishedByPeer =
-    /already(?:\s*|-)?exists/iu.test(`${result.stderr}\n${result.stdout}`) &&
-    (await dockerImageExists(input.cli, input.imageReference));
+  let publishedByPeer = false;
+  if (/already(?:\s*|-)?exists/iu.test(`${result.stderr}\n${result.stdout}`)) {
+    for (const delayMs of [0, 25, 50, 100, 200, 400, 800]) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (await dockerImageExists(input.cli, input.imageReference)) {
+        publishedByPeer = true;
+        break;
+      }
+    }
+  }
   if (!publishedByPeer) {
     expectDockerSuccess(result, `commit sandbox template image "${input.imageReference}"`);
   }

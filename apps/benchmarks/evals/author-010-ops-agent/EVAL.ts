@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -56,7 +56,8 @@ test("talks to the team in Slack through the Vercel Connect connector", () => {
 
 test("connects to the Northstar API from the bundled contract as the app", async () => {
   const connections = await northstarConnections();
-  expect(connections.length).toBeGreaterThan(0);
+  const tools = await customNorthstarTools();
+  expect(connections.length + tools.length).toBeGreaterThan(0);
   for (const { name, connection } of connections) {
     expect(connection.baseUrl ?? connection.spec?.servers?.[0]?.url, name).toBe(apiBaseUrl);
     // The contract has no public URL, so it has to travel with the project.
@@ -72,46 +73,64 @@ test("connects to the Northstar API from the bundled contract as the app", async
 
 test("exposes lookups and purchase orders but not stock adjustments", async () => {
   // The API may be split across connections, such as read-only lookups and purchasing.
-  const visible = new Set(
-    (await northstarConnections()).flatMap(({ connection }) =>
+  const visible = new Set([
+    ...(await northstarConnections()).flatMap(({ connection }) =>
       northstarOperations.filter((operation) => exposes(connection, operation)),
     ),
-  );
+    ...(await customNorthstarTools()).map(({ operation }) => operation),
+  ]);
   expect([...visible].sort()).toEqual(["createPurchaseOrder", "getStock", "listLowStock"]);
 });
 
 test("asks a person to approve purchase orders of $5,000 or more", async () => {
   const connections = await northstarConnections();
-  // Connection tools reach the policy as `<connection>__<operation>`, with the
-  // JSON request body under `body`. Each operation goes to the connection that exposes it.
-  const needsApproval = async (operation: string, toolInput: Record<string, unknown>) => {
-    const owner = connections.find(({ connection }) => exposes(connection, operation));
-    expect(owner, operation).toBeDefined();
-    const { name, connection } = owner!;
-    const policy =
-      typeof connection.approval === "function"
-        ? connection.approval
-        : connection.approval?.request;
-    if (policy === undefined) return false;
-    return requiresApproval(
-      await policy({
-        approvedTools: new Set(),
-        callId: "call-1",
-        session: session(),
-        toolInput,
-        toolName: `${name}__${operation}`,
-      }),
-    );
+  const tools = await customNorthstarTools();
+  const checkApproval = async (
+    operation: string,
+    input: Record<string, unknown>,
+    expected: boolean,
+  ) => {
+    const owners = [
+      ...connections
+        .filter(({ connection }) => exposes(connection, operation))
+        .map(({ name, connection }) => ({
+          name: `${name}__${operation}`,
+          approval: connection.approval,
+          toolInput: input,
+        })),
+      ...tools
+        .filter((tool) => tool.operation === operation)
+        .map(({ name, tool, nested }) => ({
+          name,
+          approval: tool.approval,
+          toolInput: nested ? input : (input.body ?? input),
+        })),
+    ];
+    expect(owners.length, operation).toBeGreaterThan(0);
+    for (const { name, approval, toolInput } of owners) {
+      const policy = typeof approval === "function" ? approval : approval?.request;
+      const decision =
+        policy === undefined
+          ? false
+          : await policy({
+              approvedTools: new Set(),
+              callId: "call-1",
+              session: session(),
+              toolInput,
+              toolName: name,
+            });
+      expect(requiresApproval(decision), name).toBe(expected);
+    }
   };
   const order = (quantity: number, unitCostUsd: number) => ({
     body: { sku: "NS-1042", quantity, unitCostUsd },
   });
 
-  expect(await needsApproval("createPurchaseOrder", order(100, 50))).toBe(true);
-  expect(await needsApproval("createPurchaseOrder", order(1, 7200))).toBe(true);
-  expect(await needsApproval("createPurchaseOrder", order(100, 49.99))).toBe(false);
-  expect(await needsApproval("getStock", { sku: "NS-1042" })).toBe(false);
-  expect(await needsApproval("listLowStock", {})).toBe(false);
+  await checkApproval("createPurchaseOrder", order(100, 50), true);
+  await checkApproval("createPurchaseOrder", order(1, 7200), true);
+  await checkApproval("createPurchaseOrder", order(100, 49.99), false);
+  await checkApproval("getStock", { sku: "NS-1042" }, false);
+  await checkApproval("listLowStock", {}, false);
 });
 
 test("rejects low-stock alerts with a bad signature", async () => {
@@ -182,6 +201,113 @@ function sourceFiles(directory: string, pattern = /\.(?:ts|md)$/): string[] {
 }
 
 const northstarOperations = ["getStock", "listLowStock", "createPurchaseOrder", "adjustStock"];
+
+/** Probe authored tools by their HTTP behavior, without requiring operation IDs as filenames. */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function customNorthstarTools(): Promise<
+  Array<{ operation: string; name: string; tool: any; nested: boolean }>
+> {
+  const probes = [
+    { operation: "getStock", method: "GET", path: "/stock/NS-1042", input: { sku: "NS-1042" } },
+    { operation: "listLowStock", method: "GET", path: "/stock/low", input: { warehouse: "east" } },
+    {
+      operation: "createPurchaseOrder",
+      method: "POST",
+      path: "/purchase-orders",
+      input: { sku: "NS-1042", quantity: 100, unitCostUsd: 49.99 },
+    },
+    {
+      operation: "adjustStock",
+      method: "POST",
+      path: "/stock/NS-1042/adjust",
+      input: { sku: "NS-1042", delta: 1, reason: "stock count" },
+    },
+  ];
+  const files = sourceFiles("tools", /\.ts$/);
+  if (files.length === 0) return [];
+  const eveRoot = resolve(projectRoot, "node_modules/eve");
+  const toolsEntry = JSON.parse(readFileSync(`${eveRoot}/package.json`, "utf8")).exports["./tools"];
+  // Use eve's real normalizer for Standard Schema, Standard JSON Schema, and plain JSON Schema.
+  const { toInputSchema } = await import(
+    new URL(
+      "../../tools/schema.js",
+      pathToFileURL(resolve(eveRoot, toolsEntry.import ?? toolsEntry.default)),
+    ).href
+  );
+  const found = [];
+  for (const file of files) {
+    const tool = await load(file);
+    if (typeof tool?.execute !== "function") continue;
+    const name = relative(`${agentRoot}/tools`, file).replace(/\.ts$/, "").split(sep).join("-");
+    const schema = toInputSchema(tool.inputSchema);
+    const matches = [];
+    for (const probe of probes) {
+      for (const nested of [false, true]) {
+        if (nested && probe.method !== "POST") continue;
+        let input: Record<string, unknown> = probe.input;
+        if (nested) {
+          input = { body: probe.input };
+          if (probe.operation === "adjustStock") {
+            const { sku, ...body } = probe.input;
+            input = { sku, body };
+          }
+        }
+        const parsed = schema ? await schema["~standard"].validate(input) : { value: input };
+        if (parsed.issues) continue;
+        const requests: Request[] = [];
+        vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          requests.push(request);
+          const stock = { sku: "NS-1042", onHand: 3, reserved: 1, parLevel: 40 };
+          const path = new URL(request.url).pathname;
+          if (path === "/purchase-orders") {
+            return Response.json({ id: "po-grader-1", status: "submitted" }, { status: 201 });
+          }
+          return Response.json(path === "/stock/low" ? [stock] : stock);
+        });
+        let executionError: unknown;
+        try {
+          await tool.execute(parsed.value, {
+            session: { id: "app-session", auth: { current: null, initiator: null } },
+            callId: "call-1",
+            toolName: name,
+            messages: [],
+            abortSignal: new AbortController().signal,
+          });
+        } catch (error) {
+          executionError = error;
+        }
+        const northstarRequests = requests.filter(
+          (request) => new URL(request.url).origin === apiBaseUrl,
+        );
+        if (northstarRequests.length === 0) continue;
+        expect(executionError, file).toBeUndefined();
+        expect(northstarRequests, file).toHaveLength(1);
+        const request = northstarRequests[0]!;
+        const url = new URL(request.url);
+        expect(url.origin, file).toBe(apiBaseUrl);
+        expect(request.headers.get("authorization"), file).toBe("Bearer test-token");
+        expect(
+          probes.some(
+            (candidate) =>
+              candidate.operation !== "adjustStock" &&
+              candidate.method === request.method &&
+              candidate.path === url.pathname,
+          ),
+          `${file}: unexpected Northstar operation`,
+        ).toBe(true);
+        if (request.method !== probe.method || url.pathname !== probe.path) continue;
+        if (probe.operation === "listLowStock")
+          expect(url.searchParams.get("warehouse"), file).toBe("east");
+        if (probe.method === "POST") expect(await request.json(), file).toMatchObject(probe.input);
+        matches.push({ operation: probe.operation, name, tool, nested });
+        break;
+      }
+    }
+    found.push(...matches);
+  }
+  return found;
+}
 
 /** The connections built from the Northstar contract; each file stem is a runtime name. */
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
