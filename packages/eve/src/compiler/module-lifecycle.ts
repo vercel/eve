@@ -57,6 +57,7 @@ export function markConfigRuntimeEntries(
     config.compaction?.model?.source,
     config.limits?.sessionUsage === true ? config.source : undefined,
     config.approval === true ? config.source : undefined,
+    config.compaction?.dynamicModel === true ? config.source : undefined,
   ];
   for (const source of sources) {
     if (source !== undefined) evaluation.requireRuntimeEntry(source.sourceId);
