@@ -100,7 +100,7 @@ describe("integration catalog", () => {
   it("uses Agentcard's streamable HTTP MCP endpoint", () => {
     const agentcard = getIntegrationEntry("agentcard")!;
 
-    expect(agentcard.tagline).toBe("let agents buy online");
+    expect(agentcard.tagline).toBe("Shop real merchants and pay with single-use virtual cards.");
     expect(agentcard.connection!.mcp!.url).toBe("https://mcp.agentcard.sh/mcp");
   });
 
