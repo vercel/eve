@@ -56,8 +56,8 @@ test("talks to the team in Slack through the Vercel Connect connector", () => {
 
 test("connects to the Northstar API from the bundled contract as the app", async () => {
   const connections = await northstarConnections();
-  const tools = await customNorthstarTools();
-  expect(connections.length + tools.length).toBeGreaterThan(0);
+  const runs = await customNorthstarToolRuns();
+  expect(connections.length + runs.length).toBeGreaterThan(0);
   for (const { name, connection } of connections) {
     expect(connection.baseUrl ?? connection.spec?.servers?.[0]?.url, name).toBe(apiBaseUrl);
     // The contract has no public URL, so it has to travel with the project.
@@ -69,22 +69,33 @@ test("connects to the Northstar API from the bundled contract as the app", async
     expect(auth?.credentialOwner ?? "app", name).toBe("app");
     expect(await auth.getToken({}), name).toMatchObject({ token: "test-token" });
   }
+  for (const { file, requests } of runs) {
+    for (const request of requests) {
+      expect(request.authorization, file).toBe("Bearer test-token");
+    }
+  }
 });
 
 test("exposes lookups and purchase orders but not stock adjustments", async () => {
   // The API may be split across connections, such as read-only lookups and purchasing.
+  // An authored tool provides an operation only when it calls it as the contract
+  // describes, and any other Northstar endpoint it reaches counts as exposed.
+  const runs = await customNorthstarToolRuns();
   const visible = new Set([
     ...(await northstarConnections()).flatMap(({ connection }) =>
       northstarOperations.filter((operation) => exposes(connection, operation)),
     ),
-    ...(await customNorthstarTools()).map(({ operation }) => operation),
+    ...runs.filter(implementsProbe).map(({ probe }) => probe.operation),
+    ...runs
+      .flatMap(({ requests }) => requests.map(operationOf))
+      .filter((operation) => !allowedOperations.includes(operation)),
   ]);
-  expect([...visible].sort()).toEqual(["createPurchaseOrder", "getStock", "listLowStock"]);
+  expect([...visible].sort()).toEqual(allowedOperations);
 });
 
 test("asks a person to approve purchase orders of $5,000 or more", async () => {
   const connections = await northstarConnections();
-  const tools = await customNorthstarTools();
+  const runs = await customNorthstarToolRuns();
   const checkApproval = async (
     operation: string,
     input: Record<string, unknown>,
@@ -98,8 +109,8 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
           approval: connection.approval,
           toolInput: input,
         })),
-      ...tools
-        .filter((tool) => tool.operation === operation)
+      ...runs
+        .filter((run) => run.probe.operation === operation && sendsProbeRequest(run))
         .map(({ name, tool, nested }) => ({
           name,
           approval: tool.approval,
@@ -200,29 +211,86 @@ function sourceFiles(directory: string, pattern = /\.(?:ts|md)$/): string[] {
     .sort();
 }
 
-const northstarOperations = ["getStock", "listLowStock", "createPurchaseOrder", "adjustStock"];
+interface NorthstarProbe {
+  readonly operation: string;
+  readonly method: "GET" | "POST";
+  readonly path: string;
+  readonly input: Record<string, unknown>;
+}
 
-/** Probe authored tools by their HTTP behavior, without requiring operation IDs as filenames. */
-// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
-async function customNorthstarTools(): Promise<
-  Array<{ operation: string; name: string; tool: any; nested: boolean }>
-> {
-  const probes = [
-    { operation: "getStock", method: "GET", path: "/stock/NS-1042", input: { sku: "NS-1042" } },
-    { operation: "listLowStock", method: "GET", path: "/stock/low", input: { warehouse: "east" } },
-    {
-      operation: "createPurchaseOrder",
-      method: "POST",
-      path: "/purchase-orders",
-      input: { sku: "NS-1042", quantity: 100, unitCostUsd: 49.99 },
-    },
-    {
-      operation: "adjustStock",
-      method: "POST",
-      path: "/stock/NS-1042/adjust",
-      input: { sku: "NS-1042", delta: 1, reason: "stock count" },
-    },
-  ];
+const northstarProbes: readonly NorthstarProbe[] = [
+  { operation: "getStock", method: "GET", path: "/stock/NS-1042", input: { sku: "NS-1042" } },
+  { operation: "listLowStock", method: "GET", path: "/stock/low", input: { warehouse: "east" } },
+  {
+    operation: "createPurchaseOrder",
+    method: "POST",
+    path: "/purchase-orders",
+    input: { sku: "NS-1042", quantity: 100, unitCostUsd: 49.99 },
+  },
+  {
+    operation: "adjustStock",
+    method: "POST",
+    path: "/stock/NS-1042/adjust",
+    input: { sku: "NS-1042", delta: 1, reason: "stock count" },
+  },
+];
+
+const northstarOperations = northstarProbes.map(({ operation }) => operation);
+
+const allowedOperations = ["createPurchaseOrder", "getStock", "listLowStock"];
+
+interface NorthstarRequest {
+  readonly method: string;
+  readonly url: URL;
+  readonly authorization: string | null;
+  readonly body: unknown;
+}
+
+/** One run of an authored tool with a probe's input, and the Northstar requests it made. */
+interface NorthstarToolRun {
+  readonly file: string;
+  readonly name: string;
+  // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+  readonly tool: any;
+  readonly nested: boolean;
+  readonly probe: NorthstarProbe;
+  readonly requests: readonly NorthstarRequest[];
+  readonly error: unknown;
+}
+
+function sendsProbeRequest({ probe, requests }: NorthstarToolRun): boolean {
+  return requests.some(({ method, url }) => method === probe.method && url.pathname === probe.path);
+}
+
+function implementsProbe({ error, probe, requests }: NorthstarToolRun): boolean {
+  if (error !== undefined) return false;
+  return requests.some(({ method, url, body }) => {
+    if (method !== probe.method || url.pathname !== probe.path) return false;
+    // `warehouse` is optional, so a tool may leave it out, but it must not change it.
+    const warehouse = url.searchParams.get("warehouse");
+    if (probe.operation === "listLowStock" && warehouse !== null && warehouse !== "east") {
+      return false;
+    }
+    const sent = body as Record<string, unknown> | null | undefined;
+    return (
+      probe.method !== "POST" ||
+      Object.entries(probe.input).every(([key, value]) => sent?.[key] === value)
+    );
+  });
+}
+
+function operationOf({ method, url }: NorthstarRequest): string {
+  const probe = northstarProbes.find(
+    (candidate) => candidate.method === method && candidate.path === url.pathname,
+  );
+  return probe?.operation ?? `${method} ${url.pathname}`;
+}
+
+/**
+ * Run authored tools with each operation's input, without requiring operation IDs as
+ * filenames. This records what each tool did, and each test grades only its own part.
+ */
+async function customNorthstarToolRuns(): Promise<NorthstarToolRun[]> {
   const files = sourceFiles("tools", /\.ts$/);
   if (files.length === 0) return [];
   const eveRoot = resolve(projectRoot, "node_modules/eve");
@@ -234,14 +302,13 @@ async function customNorthstarTools(): Promise<
       pathToFileURL(resolve(eveRoot, toolsEntry.import ?? toolsEntry.default)),
     ).href
   );
-  const found = [];
+  const runs: NorthstarToolRun[] = [];
   for (const file of files) {
     const tool = await load(file);
     if (typeof tool?.execute !== "function") continue;
     const name = relative(`${agentRoot}/tools`, file).replace(/\.ts$/, "").split(sep).join("-");
     const schema = toInputSchema(tool.inputSchema);
-    const matches = [];
-    for (const probe of probes) {
+    for (const probe of northstarProbes) {
       for (const nested of [false, true]) {
         if (nested && probe.method !== "POST") continue;
         let input: Record<string, unknown> = probe.input;
@@ -254,18 +321,31 @@ async function customNorthstarTools(): Promise<
         }
         const parsed = schema ? await schema["~standard"].validate(input) : { value: input };
         if (parsed.issues) continue;
-        const requests: Request[] = [];
-        vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-          const request = new Request(input, init);
-          requests.push(request);
+        const requests: NorthstarRequest[] = [];
+        vi.stubGlobal("fetch", async (resource: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(resource, init);
+          const url = new URL(request.url);
+          if (url.origin === apiBaseUrl) {
+            requests.push({
+              method: request.method,
+              url,
+              authorization: request.headers.get("authorization"),
+              body:
+                request.method === "POST"
+                  ? await request
+                      .clone()
+                      .json()
+                      .catch(() => undefined)
+                  : undefined,
+            });
+          }
           const stock = { sku: "NS-1042", onHand: 3, reserved: 1, parLevel: 40 };
-          const path = new URL(request.url).pathname;
-          if (path === "/purchase-orders") {
+          if (url.pathname === "/purchase-orders") {
             return Response.json({ id: "po-grader-1", status: "submitted" }, { status: 201 });
           }
-          return Response.json(path === "/stock/low" ? [stock] : stock);
+          return Response.json(url.pathname === "/stock/low" ? [stock] : stock);
         });
-        let executionError: unknown;
+        let error: unknown;
         try {
           await tool.execute(parsed.value, {
             session: { id: "app-session", auth: { current: null, initiator: null } },
@@ -274,39 +354,17 @@ async function customNorthstarTools(): Promise<
             messages: [],
             abortSignal: new AbortController().signal,
           });
-        } catch (error) {
-          executionError = error;
+        } catch (caught) {
+          error = caught;
         }
-        const northstarRequests = requests.filter(
-          (request) => new URL(request.url).origin === apiBaseUrl,
-        );
-        if (northstarRequests.length === 0) continue;
-        expect(executionError, file).toBeUndefined();
-        expect(northstarRequests, file).toHaveLength(1);
-        const request = northstarRequests[0]!;
-        const url = new URL(request.url);
-        expect(url.origin, file).toBe(apiBaseUrl);
-        expect(request.headers.get("authorization"), file).toBe("Bearer test-token");
-        expect(
-          probes.some(
-            (candidate) =>
-              candidate.operation !== "adjustStock" &&
-              candidate.method === request.method &&
-              candidate.path === url.pathname,
-          ),
-          `${file}: unexpected Northstar operation`,
-        ).toBe(true);
-        if (request.method !== probe.method || url.pathname !== probe.path) continue;
-        if (probe.operation === "listLowStock")
-          expect(url.searchParams.get("warehouse"), file).toBe("east");
-        if (probe.method === "POST") expect(await request.json(), file).toMatchObject(probe.input);
-        matches.push({ operation: probe.operation, name, tool, nested });
-        break;
+        if (requests.length === 0) continue;
+        const run = { file, name, tool, nested, probe, requests, error };
+        runs.push(run);
+        if (sendsProbeRequest(run)) break;
       }
     }
-    found.push(...matches);
   }
-  return found;
+  return runs;
 }
 
 /** The connections built from the Northstar contract; each file stem is a runtime name. */
