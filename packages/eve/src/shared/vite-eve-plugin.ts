@@ -1,12 +1,11 @@
 import type { ChildProcess } from "node:child_process";
-import { cp, writeFile } from "node:fs/promises";
+import { cp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import type { Plugin, PluginOption, ProxyOptions, UserConfig, ViteBuilder } from "vite";
 
 import {
   parseVercelServicesConfig,
-  readVercelJsonFile,
   type VercelServicesConfig,
 } from "#internal/vercel/vercel-services-config.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
@@ -17,6 +16,7 @@ import {
   resolveEveAgentDevServer,
   resolveEveAgents,
   type EveFrameworkAgent,
+  type VercelProjectConfig,
 } from "#shared/framework-eve-integration.js";
 import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framework-eve-server.js";
 import { readOptionalFile } from "#shared/read-optional-file.js";
@@ -98,29 +98,56 @@ export function createEveVitePlugin(input: {
   let nitroModuleInstalled = false;
   let nitroServesPreview = false;
 
-  async function writeStaticVercelOutput(builder: ViteBuilder): Promise<VercelServicesConfig> {
+  function staticOutputError(reason: string, fix: string): Error {
+    return new Error(
+      `The eve ${host.label} plugin cannot deploy this app to Vercel as static files because ${reason}, and no framework or adapter wrote .vercel/output. ${fix}, use a framework or adapter that writes .vercel/output during vite build, or compose eve in vercel.ts with withEve from "eve/vercel".`,
+    );
+  }
+
+  async function writeStaticVercelOutput(
+    builder: ViteBuilder,
+    project: VercelProjectConfig,
+  ): Promise<VercelServicesConfig> {
+    const addNitro = `Add nitro() from "nitro/vite" to the plugins in vite.config.ts`;
+    if (builder.config.appType === "custom") {
+      throw staticOutputError(`it renders on a server (appType is "custom")`, addNitro);
+    }
+    if (builder.config.build.ssr) {
+      throw staticOutputError("it renders on a server (this is an SSR build)", addNitro);
+    }
     const client = builder.environments.client ?? builder;
     const clientOutDir = resolve(viteRoot, client.config.build.outDir);
     if ((await readOptionalFile(join(clientOutDir, "index.html"))) === undefined) {
+      throw builder.config.appType === "mpa"
+        ? staticOutputError(
+            `${clientOutDir} has no root index.html`,
+            "Add a root index.html to the multi-page app",
+          )
+        : staticOutputError(`it renders on a server (${clientOutDir} has no index.html)`, addNitro);
+    }
+    if (project.vercelTsPath !== undefined) {
       throw new Error(
-        `The eve ${host.label} plugin found no Vercel Build Output and no index.html in ${clientOutDir} after the build, so it cannot deploy this server-rendered app as static files. Add nitro() from "nitro/vite" to the plugins in vite.config.ts, use a framework or adapter that writes .vercel/output during vite build, or compose eve in vercel.ts with withEve from "eve/vercel".`,
+        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelTsPath} configures the project, and Vercel does not apply its routing to a Build Output. Compose eve in vercel.ts with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
-    const vercelJsonPath = join(viteRoot, "vercel.json");
-    const vercelJson = await readVercelJsonFile(vercelJsonPath);
     const routingFields = VERCEL_JSON_ROUTING_FIELDS.filter(
-      (field) => vercelJson[field] !== undefined,
+      (field) => project.vercelJson[field] !== undefined,
     );
     if (routingFields.length > 0) {
       throw new Error(
-        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${vercelJsonPath} defines ${routingFields.join(", ")}, which Vercel does not apply to a Build Output. Move that configuration to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
+        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelJsonPath} defines ${routingFields.join(", ")}, which Vercel does not apply to a Build Output. Move that configuration to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
-    await cp(clientOutDir, join(viteRoot, ".vercel", "output", "static"), { recursive: true });
+    const base = builder.config.base.startsWith("/") ? builder.config.base : "/";
+    const staticRoot = join(viteRoot, ".vercel", "output", "static");
+    await rm(staticRoot, { force: true, recursive: true });
+    await cp(clientOutDir, join(staticRoot, base), { recursive: true });
     return {
       routes: [
         { handle: "filesystem" },
-        ...(builder.config.appType === "spa" ? [{ src: "/(.*)", dest: "/index.html" }] : []),
+        ...(builder.config.appType === "spa"
+          ? [{ src: `${base}(.*)`, dest: `${base}index.html` }]
+          : []),
       ],
       version: 3,
     };
@@ -128,18 +155,23 @@ export function createEveVitePlugin(input: {
 
   async function addEveVercelServicesToOutput(builder?: ViteBuilder): Promise<void> {
     const outputConfigPath = join(viteRoot, ".vercel", "output", "config.json");
+    const staticOutputMarkerPath = join(viteRoot, ".vercel", "eve-static-output.json");
+    let wroteStaticOutput = false;
     const config = await addEveVercelServices(
-      async () => {
+      async (project) => {
         const source = await readOptionalFile(outputConfigPath);
-        if (source !== undefined) {
+        const ownsOutput =
+          builder !== undefined && source === (await readOptionalFile(staticOutputMarkerPath));
+        if (source !== undefined && !ownsOutput) {
           return parseVercelServicesConfig(JSON.parse(source), outputConfigPath);
         }
-        if (builder !== undefined) {
-          return await writeStaticVercelOutput(builder);
+        if (builder === undefined) {
+          throw new Error(
+            `The eve ${host.label} plugin found no Vercel Build Output at ${outputConfigPath} after the build. Use a framework or adapter that writes .vercel/output during vite build, or compose eve in vercel.ts with withEve from "eve/vercel".`,
+          );
         }
-        throw new Error(
-          `The eve ${host.label} plugin found no Vercel Build Output at ${outputConfigPath} after the build. Use a framework or adapter that writes .vercel/output during vite build, or compose eve in vercel.ts with withEve from "eve/vercel".`,
-        );
+        wroteStaticOutput = true;
+        return await writeStaticVercelOutput(builder, project);
       },
       {
         agents,
@@ -149,7 +181,11 @@ export function createEveVitePlugin(input: {
       },
     );
     if (config !== undefined) {
-      await writeFile(outputConfigPath, `${JSON.stringify(config, null, 2)}\n`);
+      const source = `${JSON.stringify(config, null, 2)}\n`;
+      await writeFile(outputConfigPath, source);
+      if (wroteStaticOutput) {
+        await writeFile(staticOutputMarkerPath, source);
+      }
     }
   }
 

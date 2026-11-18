@@ -78,8 +78,14 @@ export async function resolveEveAgentDevServer(
   });
 }
 
+export interface VercelProjectConfig {
+  readonly vercelJson: VercelServicesConfig;
+  readonly vercelJsonPath: string;
+  readonly vercelTsPath: string | undefined;
+}
+
 export async function addEveVercelServices(
-  readConfig: () => Promise<VercelServicesConfig>,
+  readConfig: (project: VercelProjectConfig) => Promise<VercelServicesConfig>,
   input: {
     readonly agents: readonly EveFrameworkAgent[];
     readonly eveBuildCommand: string | undefined;
@@ -89,17 +95,26 @@ export async function addEveVercelServices(
 ): Promise<VercelServicesConfig | undefined> {
   const vercelDirectory = await findClosestLinkedVercelDirectory(input.hostRoot);
   const linkedRoot = vercelDirectory === undefined ? input.hostRoot : dirname(vercelDirectory);
+  let vercelTsPath: string | undefined;
   for (const root of new Set([input.hostRoot, linkedRoot])) {
-    if ((await readOptionalFile(join(root, "vercel.ts")))?.includes("eve/vercel")) {
+    const path = join(root, "vercel.ts");
+    const source = await readOptionalFile(path);
+    if (source?.includes("eve/vercel")) {
       return undefined;
+    }
+    if (source !== undefined) {
+      vercelTsPath ??= path;
     }
   }
 
-  const hostConfig = await readVercelJsonFile(join(input.hostRoot, "vercel.json"));
-  const rootConfig =
+  const hostConfigPath = join(input.hostRoot, "vercel.json");
+  const hostConfig = await readVercelJsonFile(hostConfigPath);
+  const rootConfigPath =
     linkedRoot === input.hostRoot || hasServices(hostConfig.services)
-      ? hostConfig
-      : await readVercelJsonFile(join(linkedRoot, "vercel.json"));
+      ? hostConfigPath
+      : join(linkedRoot, "vercel.json");
+  const rootConfig =
+    rootConfigPath === hostConfigPath ? hostConfig : await readVercelJsonFile(rootConfigPath);
   const rootServices = createServiceConfigRecord(rootConfig.services);
   if (Object.keys(rootServices).length > 0) {
     for (const agent of input.agents) {
@@ -123,7 +138,11 @@ export async function addEveVercelServices(
     );
   }
 
-  const config = await readConfig();
+  const config = await readConfig({
+    vercelJson: rootConfig,
+    vercelJsonPath: rootConfigPath,
+    vercelTsPath,
+  });
   const assembled = assembleEveVercelServices({
     agents: input.agents.map((agent) => ({
       agent: {

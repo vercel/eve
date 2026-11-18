@@ -1,10 +1,10 @@
 import { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConfigEnv, Plugin, UserConfig, ViteBuilder } from "vite";
+import type { AppType, ConfigEnv, Plugin, UserConfig } from "vite";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { VercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
@@ -55,17 +55,40 @@ async function runConfigResolved(plugin: Plugin): Promise<void> {
   });
 }
 
-async function runBuildAppWithBuiltClient(plugin: Plugin): Promise<void> {
+async function writeClientBuild(root: string, files: Record<string, string>): Promise<void> {
+  await rm(join(root, "dist"), { force: true, recursive: true });
+  for (const [path, contents] of Object.entries(files)) {
+    await mkdir(dirname(join(root, "dist", path)), { recursive: true });
+    await writeFile(join(root, "dist", path), contents);
+  }
+}
+
+async function buildForVercel(
+  root: string,
+  build: { appType?: AppType; base?: string; ssr?: boolean } = {},
+): Promise<void> {
+  vi.stubEnv("VERCEL", "1");
+  const plugin = createEveVitePlugin({ host, options: {} });
+  await runConfig(plugin, root, buildEnv);
   const buildApp = plugin.buildApp as {
     handler: (builder: {
-      config: Pick<ViteBuilder["config"], "appType">;
+      config: { appType: AppType; base: string; build: { outDir: string; ssr: boolean } };
       environments: Record<string, { config: { build: { outDir: string } }; isBuilt: boolean }>;
     }) => Promise<void>;
   };
   await buildApp.handler({
-    config: { appType: "spa" },
+    config: {
+      appType: build.appType ?? "spa",
+      base: build.base ?? "/",
+      build: { outDir: "dist", ssr: build.ssr ?? false },
+    },
     environments: { client: { config: { build: { outDir: "dist" } }, isBuilt: true } },
   });
+}
+
+async function readOutputRoutes(root: string): Promise<unknown[]> {
+  const source = await readFile(join(root, ".vercel", "output", "config.json"), "utf8");
+  return (JSON.parse(source) as { routes: unknown[] }).routes;
 }
 
 afterEach(() => {
@@ -207,36 +230,102 @@ describe("createEveVitePlugin", () => {
     expect(createEveVitePlugin({ host, options: {} })).toHaveProperty("buildApp.order", "post");
   });
 
-  it("asks a server-rendered app for an adapter when the build writes no Build Output", async () => {
-    vi.stubEnv("VERCEL", "1");
+  it.each<{ appType: AppType; error: RegExp; files: Record<string, string> }>([
+    {
+      appType: "spa",
+      error: /renders on a server \(.*dist has no index\.html\).*Add nitro\(\) from "nitro\/vite"/,
+      files: { "assets/entry.js": "" },
+    },
+    {
+      appType: "custom",
+      error: /renders on a server \(appType is "custom"\).*Add nitro\(\) from "nitro\/vite"/,
+      files: { "index.html": "<!doctype html>\n" },
+    },
+    {
+      appType: "mpa",
+      error: /dist has no root index\.html.*Add a root index\.html to the multi-page app/,
+      files: { "about.html": "<!doctype html>\n" },
+    },
+  ])("refuses static output for appType $appType without a deployable index.html", async (row) => {
     const root = await createAgentProject();
-    await mkdir(join(root, "dist", "assets"), { recursive: true });
-    const plugin = createEveVitePlugin({ host, options: {} });
-    await runConfig(plugin, root, buildEnv);
+    await writeClientBuild(root, row.files);
 
-    await expect(runBuildAppWithBuiltClient(plugin)).rejects.toThrow(
-      /no index\.html in .*dist.*Add nitro\(\) from "nitro\/vite"/,
-    );
+    await expect(buildForVercel(root, { appType: row.appType })).rejects.toThrow(row.error);
     expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
   });
 
-  it("names the vercel.json routing fields a static Build Output would drop", async () => {
-    vi.stubEnv("VERCEL", "1");
+  it("mounts the static output and SPA fallback under an absolute base", async () => {
     const root = await createAgentProject();
-    await mkdir(join(root, "dist"), { recursive: true });
-    await writeFile(join(root, "dist", "index.html"), "<!doctype html>\n");
+    await writeClientBuild(root, { "assets/app.js": "", "index.html": "<!doctype html>\n" });
+
+    await buildForVercel(root, { base: "/app/" });
+
+    const staticRoot = join(root, ".vercel", "output", "static");
+    expect(existsSync(join(staticRoot, "app", "index.html"))).toBe(true);
+    expect(existsSync(join(staticRoot, "app", "assets", "app.js"))).toBe(true);
+    expect((await readOutputRoutes(root)).slice(-2)).toEqual([
+      { handle: "filesystem" },
+      { dest: "/app/index.html", src: "/app/(.*)" },
+    ]);
+  });
+
+  it("regenerates the static output it wrote and leaves adapter output alone", async () => {
+    const root = await createAgentProject();
+    const staticRoot = join(root, ".vercel", "output", "static");
+    await writeClientBuild(root, { "assets/old.js": "", "index.html": "<!doctype html>\n" });
+    await buildForVercel(root);
+
+    await expect(buildForVercel(root, { ssr: true })).rejects.toThrow(
+      /renders on a server \(this is an SSR build\)/,
+    );
+
+    await writeClientBuild(root, { "assets/new.js": "", "index.html": "<!doctype html>\n" });
+    await buildForVercel(root);
+    expect(await readdir(join(staticRoot, "assets"))).toEqual(["new.js"]);
+
     await writeFile(
-      join(root, "vercel.json"),
-      JSON.stringify({ cleanUrls: true, rewrites: [{ source: "/a", destination: "/b" }] }),
+      join(root, ".vercel", "output", "config.json"),
+      JSON.stringify({ routes: [{ handle: "filesystem" }], version: 3 }),
     );
-    const plugin = createEveVitePlugin({ host, options: {} });
-    await runConfig(plugin, root, buildEnv);
+    await writeClientBuild(root, { "assets/newer.js": "", "index.html": "<!doctype html>\n" });
+    await buildForVercel(root);
+    expect(await readdir(join(staticRoot, "assets"))).toEqual(["new.js"]);
+    expect(await readOutputRoutes(root)).not.toContainEqual(
+      expect.objectContaining({ dest: "/index.html" }),
+    );
+  });
 
-    await expect(runBuildAppWithBuiltClient(plugin)).rejects.toThrow(
-      /vercel\.json defines rewrites, cleanUrls, .*withEve from "eve\/vercel"/,
+  it("refuses static output when a vercel.ts configures the project without withEve", async () => {
+    const root = await createAgentProject();
+    await writeClientBuild(root, { "index.html": "<!doctype html>\n" });
+    await writeFile(join(root, "vercel.ts"), "export default { cleanUrls: true };\n");
+
+    await expect(buildForVercel(root)).rejects.toThrow(
+      /vercel\.ts configures the project.*Compose eve in vercel\.ts with withEve/,
     );
     expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
   });
+
+  it.each(["app root", "linked project root"])(
+    "names the vercel.json routing fields at the %s that a static Build Output would drop",
+    async (location) => {
+      const projectRoot = await createTemporaryDirectory("eve-vite-plugin-");
+      const appRoot = location === "app root" ? projectRoot : join(projectRoot, "web");
+      await mkdir(join(appRoot, "agent"), { recursive: true });
+      await mkdir(join(projectRoot, ".vercel"), { recursive: true });
+      await writeFile(join(projectRoot, ".vercel", "project.json"), "{}");
+      await writeFile(
+        join(projectRoot, "vercel.json"),
+        JSON.stringify({ cleanUrls: true, rewrites: [{ source: "/a", destination: "/b" }] }),
+      );
+      await writeClientBuild(appRoot, { "index.html": "<!doctype html>\n" });
+
+      await expect(buildForVercel(appRoot)).rejects.toThrow(
+        `${join(projectRoot, "vercel.json")} defines rewrites, cleanUrls`,
+      );
+      expect(existsSync(join(appRoot, ".vercel", "output"))).toBe(false);
+    },
+  );
 
   it("merges the generated eve service into the user's Nitro Vercel config", async () => {
     vi.stubEnv("VERCEL", "1");
