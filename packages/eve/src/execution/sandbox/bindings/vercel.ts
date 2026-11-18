@@ -1,3 +1,7 @@
+import {
+  sandboxConnectionDisposal,
+  withSandboxConnectionDisposal,
+} from "#execution/sandbox/connection-disposal.js";
 import { randomBytes } from "node:crypto";
 
 import type {
@@ -348,7 +352,7 @@ async function prepareTemplateSnapshot(
     try {
       await input.context.populate(connection);
     } finally {
-      await connection.close?.();
+      await sandboxConnectionDisposal(connection)?.();
     }
     await ensureVercelSandboxBaseRuntime(sandbox);
     return (await sandbox.snapshot()).snapshotId;
@@ -511,13 +515,19 @@ function createVercelConnection(
   sandbox: VercelSandbox,
 ): SandboxConnection<VercelSandboxExtensions> {
   let timeout: ReturnType<typeof createVercelTimeout> | undefined;
+  let disposed = false;
   let closing: Promise<void> | undefined;
   const activeTimeout = async () => {
     while (closing !== undefined) await closing;
+    if (disposed)
+      throw new Error(
+        "This sandbox handle belongs to a finished execution scope. Call ctx.getSandbox() in the current scope.",
+      );
     return (timeout ??= createVercelTimeout(sandbox));
   };
   const close = (stop = false): Promise<void> => {
     const next = Promise.resolve(closing)
+      .catch(() => undefined)
       .then(async () => {
         const current = timeout;
         timeout = undefined;
@@ -531,8 +541,7 @@ function createVercelConnection(
     return next;
   };
   const setNetworkPolicy = createVercelNetworkPolicySetter(sandbox);
-  return {
-    close: () => close(),
+  const connection: SandboxConnection<VercelSandboxExtensions> = {
     extensions: {
       name: sandbox.name,
       setNetworkPolicy: async (policy) =>
@@ -608,6 +617,10 @@ function createVercelConnection(
       }, options.signal);
     },
   };
+  return withSandboxConnectionDisposal(connection, async () => {
+    disposed = true;
+    await close();
+  });
 }
 
 const REALPATH_ARGUMENT_BYTES = 64 * 1024;

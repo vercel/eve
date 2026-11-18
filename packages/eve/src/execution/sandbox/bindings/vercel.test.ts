@@ -1,3 +1,7 @@
+import { sandboxConnectionDisposal } from "#execution/sandbox/connection-disposal.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
 import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +24,10 @@ import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
+
+vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
+  loadSandboxPreparedArtifact: vi.fn(async () => ({ snapshotId: "prepared-snapshot" })),
+}));
 
 vi.mock("#compiled/@vercel/oidc/index.js", () => ({
   getVercelOidcToken: vi.fn(async () => {
@@ -2253,7 +2261,94 @@ describe("createVercelSandbox", () => {
 
 describe("Vercel active timeout", () => {
   beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  afterEach(async () => {
+    await shutdownActiveSandboxConnections();
+    vi.useRealTimers();
+  });
+
+  async function runtimeSession() {
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const fake = createFakeVercelProvider(sessionSandbox);
+    const environment = defineSandboxProvider({
+      name: "vercel",
+      environment: () =>
+        createVercelImplementation({
+          createSandbox: async ({ createOptions, sandboxModule }) =>
+            sandboxModule.Sandbox.create(createOptions),
+          loadSandboxModule: async () => fake.sandboxModule as never,
+        }),
+    }).environment();
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: { kind: "bundled" },
+      nodeId: "__root__",
+      sessionId: "timeout-test",
+      state: null,
+      registry: {
+        sandbox: {
+          definition: {
+            environment,
+            kind: "independent",
+            logicalPath: "sandbox.ts",
+            selector: defineSandbox(() => environment.open()),
+            revisionHash: "hash",
+            sourceId: "sandbox",
+            sourceKind: "module",
+          },
+          workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+        },
+      },
+    });
+    const sandbox = await access.get();
+    if (sandbox === null) throw new Error("Expected a sandbox");
+    return { access, sandbox, sessionSandbox };
+  }
+
+  it.each(["release", "stop-reuse", "stop-reopen-reuse"] as const)(
+    "ends renewal at scope %s without losing shutdown cleanup",
+    async (lifecycle) => {
+      const { access, sandbox, sessionSandbox } = await runtimeSession();
+      if (lifecycle !== "release") await access.stop();
+      if (lifecycle === "stop-reopen-reuse") await access.get();
+      const finished = Promise.withResolvers<{ exitCode: number }>();
+      const command = createMockDetachedCommand();
+      command.wait.mockReturnValue(finished.promise);
+      sessionSandbox.runCommand.mockResolvedValue(command);
+      const process = await sandbox.spawn({ command: "train" });
+      await vi.advanceTimersByTimeAsync(16 * 60_000);
+      const extend = sessionSandbox.currentSession().extendTimeout;
+      expect(extend).toHaveBeenCalled();
+      const calls = extend.mock.calls.length;
+      const stops = sessionSandbox.stop.mock.calls.length;
+      await access.release();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(extend).toHaveBeenCalledTimes(calls);
+      expect(sessionSandbox.stop).toHaveBeenCalledTimes(stops);
+      await expect(sandbox.spawn({ command: "orphan" })).rejects.toThrow(
+        "finished execution scope",
+      );
+      finished.resolve({ exitCode: 0 });
+      await process.wait();
+      await shutdownActiveSandboxConnections();
+      expect(sessionSandbox.stop).toHaveBeenCalledTimes(stops + 1);
+    },
+  );
+
+  it("deletes the sandbox even when an overlapping stop fails", async () => {
+    const { access, sessionSandbox } = await runtimeSession();
+    const stopped = Promise.withResolvers<void>();
+    sessionSandbox.stop.mockReturnValueOnce(stopped.promise);
+    const stopping = access.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
+    const ending = access.end("completed");
+    await vi.advanceTimersByTimeAsync(0);
+    const failedStop = expect(stopping).rejects.toThrow("stop failed");
+    stopped.reject(new Error("stop failed"));
+    await failedStop;
+    await ending;
+    expect(sessionSandbox.delete).toHaveBeenCalledTimes(1);
+    await access.release();
+  });
 
   async function runningCommand() {
     const { handle, sessionSandbox } = await createTestVercelSession();
@@ -2298,15 +2393,15 @@ describe("Vercel active timeout", () => {
     const calls = session.extendTimeout.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(session.extendTimeout).toHaveBeenCalledTimes(calls);
-    await handle.connection.close?.();
+    await sandboxConnectionDisposal(handle.connection)?.();
   });
 
-  it.each(["close", "stop", "abort", "kill"] as const)(
+  it.each(["dispose", "stop", "abort", "kill"] as const)(
     "stops renewing on %s even if command completion has not arrived",
     async (ending) => {
       const { handle, sessionSandbox, finished, process, abort } = await runningCommand();
       const extend = sessionSandbox.currentSession().extendTimeout;
-      if (ending === "close") await handle.connection.close?.();
+      if (ending === "dispose") await sandboxConnectionDisposal(handle.connection)?.();
       if (ending === "stop") await handle.connection.stop();
       if (ending === "abort") abort.abort();
       if (ending === "kill") await process.kill();
@@ -2315,7 +2410,7 @@ describe("Vercel active timeout", () => {
       expect(extend).toHaveBeenCalledTimes(calls);
       finished.resolve({ exitCode: 0 });
       await process.wait();
-      await handle.connection.close?.();
+      await sandboxConnectionDisposal(handle.connection)?.();
     },
   );
 
@@ -2332,7 +2427,7 @@ describe("Vercel active timeout", () => {
     expect(session.extendTimeout).toHaveBeenCalledTimes(calls);
     finished.resolve({ exitCode: 0 });
     expect(await process.wait()).toEqual({ exitCode: 0 });
-    await handle.connection.close?.();
+    await sandboxConnectionDisposal(handle.connection)?.();
   });
 
   it("renews for a new operation immediately after the last operation cancels an extension", async () => {
@@ -2357,7 +2452,7 @@ describe("Vercel active timeout", () => {
     await first;
     expect(session.extendTimeout).toHaveBeenCalledTimes(2);
     expect(session.startedAt.getTime() + session.timeout).toBeGreaterThan(Date.now() + 60_000);
-    await handle.connection.close?.();
+    await sandboxConnectionDisposal(handle.connection)?.();
   });
 
   it("keeps a file transfer alive until the reader cancels it", async () => {
@@ -2384,7 +2479,7 @@ describe("Vercel active timeout", () => {
     expect(session.extendTimeout).toHaveBeenCalledTimes(calls);
     canceled.resolve();
     await canceling;
-    await handle.connection.close?.();
+    await sandboxConnectionDisposal(handle.connection)?.();
   });
 
   it("aborts renewal before stopping compute and waits for stop before reusing the handle", async () => {
@@ -2415,6 +2510,6 @@ describe("Vercel active timeout", () => {
     expect(await reading).toBeNull();
     finished.resolve({ exitCode: 0 });
     await process.wait();
-    await handle.connection.close?.();
+    await sandboxConnectionDisposal(handle.connection)?.();
   });
 });
