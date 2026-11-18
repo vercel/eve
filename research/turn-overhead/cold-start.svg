@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="262" viewBox="0 0 1040 262">
+<defs>
+<pattern id="grid" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M16 0H0V16" fill="none" stroke="#ebebeb" stroke-width="1"/></pattern>
+<pattern id="hatch-ink" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff"/><line x1="0" y1="0" x2="0" y2="6" stroke="#0a0a0a" stroke-width="1.5"/></pattern>
+<pattern id="hatch-blue" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff"/><line x1="0" y1="0" x2="0" y2="6" stroke="#006bff" stroke-width="1.5"/></pattern>
+<pattern id="dots" width="5" height="5" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#fff"/><circle cx="2.5" cy="2.5" r="0.9" fill="#0a0a0a"/></pattern>
+<marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#0a0a0a"/></marker>
+<marker id="arrow-blue" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#006bff"/></marker>
+</defs>
+<rect width="1040" height="262" fill="#ffffff"/>
+<rect width="1040" height="262" fill="url(#grid)"/>
+<rect x="0.5" y="0.5" width="1039" height="261" fill="none" stroke="#0a0a0a"/>
+<rect x="0.5" y="0.5" width="1039" height="32" fill="#ffffff" stroke="#0a0a0a"/>
+<rect x="0.5" y="0.5" width="64" height="32" fill="#0a0a0a"/>
+<text x="32.5" y="21.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#ffffff" text-anchor="middle" font-weight="400" letter-spacing="0.06em">FIG. 4</text>
+<text x="80.0" y="21.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0a0a0a" text-anchor="start" font-weight="400" letter-spacing="0.06em">IDLE SLACK THREAD WITH INLINE DELIVERY: SERVER COLD START, THEN THE TURN</text>
+<line x1="250.0" y1="56" x2="250.0" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="250.0" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">0</text>
+<line x1="329.5" y1="56" x2="329.5" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="329.5" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">250</text>
+<line x1="409.1" y1="56" x2="409.1" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="409.1" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">500</text>
+<line x1="488.6" y1="56" x2="488.6" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="488.6" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">750</text>
+<line x1="568.2" y1="56" x2="568.2" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="568.2" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">1000</text>
+<line x1="647.7" y1="56" x2="647.7" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="647.7" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">1250</text>
+<line x1="727.3" y1="56" x2="727.3" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="727.3" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">1500</text>
+<line x1="806.8" y1="56" x2="806.8" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="806.8" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">1750</text>
+<line x1="886.4" y1="56" x2="886.4" y2="170" stroke="#d4d4d4" stroke-dasharray="2 3"/>
+<text x="886.4" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">2000</text>
+<text x="976.0" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="start" font-weight="400">ms</text>
+<text x="16.0" y="83.0" font-family="'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11.5" fill="#0a0a0a" text-anchor="start" font-weight="600">edge → model call</text>
+<text x="16.0" y="97.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="start" font-weight="400">inline spike build</text>
+<rect x="250.0" y="70" width="152.7" height="30" fill="url(#hatch-ink)" stroke="#0a0a0a" stroke-width="1"/><rect x="253.0" y="78.0" width="82.8" height="14" fill="#fff"/><text x="256.0" y="89.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">platform 480</text>
+<rect x="402.7" y="70" width="44.5" height="30" fill="url(#hatch-ink)" stroke="#0a0a0a" stroke-width="1"/>
+<rect x="447.3" y="70" width="89.1" height="30" fill="#0a0a0a" stroke="#ffffff" stroke-width="1"/><text x="453.3" y="89.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="400">instr. 280</text>
+<rect x="536.4" y="70" width="146.4" height="30" fill="#0a0a0a" stroke="#ffffff" stroke-width="1"/><text x="542.4" y="89.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="400">server import 460</text>
+<rect x="682.7" y="70" width="229.1" height="30" fill="#ffffff" stroke="#a1a1a1" stroke-width="1"/><text x="688.7" y="89.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#6f6f6f" text-anchor="start" font-weight="400">webhook → model call 720</text>
+<text x="16.0" y="141.0" font-family="'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11.5" fill="#0a0a0a" text-anchor="start" font-weight="600">import, profiled</text>
+<text x="16.0" y="155.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="start" font-weight="400">3 cold instances, ms</text>
+<rect x="447.3" y="128" width="95.5" height="30" fill="#0a0a0a" stroke="#ffffff" stroke-width="1"/>
+<rect x="542.7" y="128" width="18.5" height="30" fill="url(#hatch-ink)" stroke="#0a0a0a" stroke-width="1"/>
+<rect x="561.2" y="128" width="15.0" height="30" fill="url(#hatch-ink)" stroke="#0a0a0a" stroke-width="1"/>
+<rect x="576.1" y="128" width="15.9" height="30" fill="#0a0a0a" stroke="#ffffff" stroke-width="1"/>
+<rect x="592.0" y="128" width="15.9" height="30" fill="#0a0a0a" stroke="#ffffff" stroke-width="1"/>
+<rect x="608.0" y="128" width="47.7" height="30" fill="#0a0a0a" stroke="#ffffff" stroke-width="1"/>
+<rect x="655.7" y="128" width="81.1" height="30" fill="#ffffff" stroke="#a1a1a1" stroke-width="1"/>
+<path d="M447.3 104 V114 H682.7 V104" fill="none" stroke="#0a0a0a"/>
+<rect x="16" y="168" width="14" height="14" fill="#0a0a0a"/><text x="23.0" y="179.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">1</text>
+<text x="38.0" y="180.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">parse + compile 7MB ESM  ~300</text>
+<rect x="268" y="168" width="14" height="14" fill="#0a0a0a"/><text x="275.0" y="179.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">2</text>
+<text x="290.0" y="180.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">file reads  ~58</text>
+<rect x="520" y="168" width="14" height="14" fill="#0a0a0a"/><text x="527.0" y="179.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">3</text>
+<text x="542.0" y="180.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">GC  ~47</text>
+<rect x="772" y="168" width="14" height="14" fill="#0a0a0a"/><text x="779.0" y="179.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">4</text>
+<text x="794.0" y="180.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">eve core + h3: Zod schemas  ~50</text>
+<rect x="16" y="190" width="14" height="14" fill="#0a0a0a"/><text x="23.0" y="201.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">5</text>
+<text x="38.0" y="202.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">OTel SDK CommonJS init  ~50</text>
+<rect x="268" y="190" width="14" height="14" fill="#0a0a0a"/><text x="275.0" y="201.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">6</text>
+<text x="290.0" y="202.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">other chunks, 10–30 each</text>
+<rect x="520" y="190" width="14" height="14" fill="#0a0a0a"/><text x="527.0" y="201.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">7</text>
+<text x="542.0" y="202.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#0a0a0a" text-anchor="start" font-weight="400">rest of the profile</text>
+<text x="495.0" y="147.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">1</text>
+<text x="552.0" y="147.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#0a0a0a" text-anchor="middle" font-weight="400">2</text>
+<text x="631.8" y="147.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#fff" text-anchor="middle" font-weight="400">6</text>
+<text x="696.2" y="147.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">7</text>
+<text x="16.0" y="244.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="start" font-weight="400">Row 2 is the import under the V8 sampler (~850–980ms in total), which runs slower than row 1&#x27;s unprofiled ~740ms. Webhook → model call mixes Slack, eve and Workflow time.</text>
+</svg>
