@@ -183,14 +183,14 @@ const CARD_CORS = {
 };
 
 function parsePublicOrigin(origin: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    throw new Error(`a2aChannel publicOrigin must be an absolute URL. Received: ${origin}`);
+  const parsed = URL.parse(origin);
+  if (parsed === null) {
+    throw new Error("a2aChannel publicOrigin must be an absolute URL.");
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error(`a2aChannel publicOrigin must be an http(s) origin. Received: ${origin}`);
+    throw new Error(
+      `a2aChannel publicOrigin must be an http(s) origin. Received protocol: ${parsed.protocol}`,
+    );
   }
   if (
     parsed.pathname !== "/" ||
@@ -200,7 +200,7 @@ function parsePublicOrigin(origin: string): string {
     parsed.password !== ""
   ) {
     throw new Error(
-      `a2aChannel publicOrigin must be an origin with no path, query, or credentials; set route for the path. Received: ${origin}`,
+      `a2aChannel publicOrigin must be an origin with no path, query, or credentials; set route for the path. Received: ${parsed.origin}${parsed.pathname}`,
     );
   }
   return parsed.origin;

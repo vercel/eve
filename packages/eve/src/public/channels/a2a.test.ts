@@ -23,6 +23,16 @@ describe("a2aChannel", () => {
     ]) {
       expect(() => a2aChannel({ auth: none(), publicOrigin })).toThrow(message);
     }
+    for (const publicOrigin of [
+      "https://user:s3cret@agent.example.com",
+      "ftp://user:s3cret@agent.example.com",
+      "user:s3cret@agent.example.com",
+      "https://agent.example.com/?token=s3cret",
+    ]) {
+      expect(() => a2aChannel({ auth: none(), publicOrigin })).toThrow(
+        expect.objectContaining({ message: expect.not.stringContaining("s3cret") }),
+      );
+    }
   });
 
   it("hands its upload policy to the runtime, which enforces it on downloaded files", () => {
