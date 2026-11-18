@@ -62,7 +62,8 @@ const MAX_EVALS_PER_LEG = 16;
 const MAX_STARTUP_RUNS = 10;
 // Agents packages/eve/scripts/benchmark-startup.mjs generates, by registry name.
 const STARTUP_SCRIPT = "packages/eve/scripts/benchmark-startup.mjs";
-const STARTUP_SUBJECTS = { minimal: { tools: 0 } };
+// `large` is the project vercel/eve#6571 measured: tools sharing one ~4 MB module, with a sandbox.
+const STARTUP_SUBJECTS = { minimal: { tools: 0 }, large: { tools: 80, project: "large" } };
 // Packs and installs eve; its blob id is the package probe's digest.
 const PACKAGE_SCRIPT = "packages/eve/scripts/benchmark-package.mjs";
 const MAX_PACKAGE_RUNS = 10;

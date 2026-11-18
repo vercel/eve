@@ -627,11 +627,11 @@ jobs:
         run: |
           out="$RUNNER_TEMP/dev-startup"
           runs="$(jq -r '.runs' <<<"$DEV_STARTUP")"
-          while read -r name tools; do
-            if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-startup.mjs" packages/eve "$runs" "$tools" >"$out/$name.jsonl"; then
+          while read -r name tools project; do
+            if ! node "$GITHUB_WORKSPACE/.benchmark-harness/packages/eve/scripts/benchmark-startup.mjs" packages/eve "$runs" "$tools" "$project" >"$out/$name.jsonl"; then
               echo "::warning::Startup benchmark for $name failed; its runs are recorded as missing."
             fi
-          done < <(jq -r '.subjects[] | "\(.name) \(.tools)"' <<<"$DEV_STARTUP")
+          done < <(jq -r '.subjects[] | "\(.name) \(.tools) \(.project // "plain")"' <<<"$DEV_STARTUP")
 
       # After the startup benchmark, so its installs never share the runner
       # with a timed `eve dev`.

@@ -58,6 +58,8 @@ export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   // Sandbox preparation depends mostly on the runner and network, and
   // dominates cold builds; this is the rest of the build.
   "build.without_sandbox_prewarm_ms": framework("ms"),
+  // Peak resident set size of the `eve build` process (startup agents only).
+  "build.max_rss_bytes": framework("bytes"),
   "start.ready_ms": framework("ms"),
   "dev_startup.prompt_visible_ms": framework("ms"),
   "dev_startup.ready_ms": framework("ms"),
@@ -225,7 +227,10 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
                 ...base,
                 probe: "build",
                 path: DEV_STARTUP_ARTIFACT_PATH,
-                metrics: buildMetrics(build.profile),
+                metrics: {
+                  ...buildMetrics(build.profile),
+                  "build.max_rss_bytes": amount(build.maxRssBytes, "missing-rss"),
+                },
               }),
         );
         // `eve start` on the build above, to /eve/v1/health (same metric as
