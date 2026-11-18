@@ -11,7 +11,11 @@ import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState } from "#harness/session-machine/state.js";
 import { failTurn, type Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
-import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
+import {
+  isConnectionAuthorizationFailedError,
+  isConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
+import { isModelCredentialError } from "#harness/model-call/credential.js";
 import {
   handleAuthorizationError,
   isScopedAuthorizationRequiredError,
@@ -95,7 +99,10 @@ export async function stopForSignIn(
 export async function pauseForSignIn(step: Step, error: unknown): Promise<StepResult> {
   if (!isScopedAuthorizationRequiredError(error)) {
     return await failSignIn(step, error, {
-      scope: isConnectionAuthorizationFailedError(error) ? error.connectionName : "",
+      scope:
+        isConnectionAuthorizationFailedError(error) || isModelCredentialError(error)
+          ? error.connectionName
+          : "",
     });
   }
   try {
@@ -111,11 +118,22 @@ async function failSignIn(
   signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
 ): Promise<StepResult> {
   const name = providerName(step.view(), signIn);
+  if (
+    isConnectionAuthorizationFailedError(error) ||
+    isConnectionAuthorizationRequiredError(error)
+  ) {
+    return await failTurn(
+      step,
+      error,
+      "MODEL_AUTHORIZATION_FAILED",
+      signInFailureMessage(name, error),
+    );
+  }
   return await failTurn(
     step,
     error,
-    "MODEL_AUTHORIZATION_FAILED",
-    signInFailureMessage(name, error),
+    "MODEL_CREDENTIAL_FAILED",
+    `eve couldn't get the ${name} credential.`,
   );
 }
 

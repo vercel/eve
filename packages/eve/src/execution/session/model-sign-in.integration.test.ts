@@ -134,6 +134,38 @@ describe("a model that needs the caller's credential", () => {
     );
   });
 
+  it.each([
+    [
+      "auth fails before the model call",
+      { outage: "getToken" },
+      "MODEL_CREDENTIAL_FAILED",
+      "eve couldn't get the Oauth billing credential.",
+    ],
+    [
+      "auth fails while it replaces a rejected token",
+      { outage: "refresh", token: "stale-token" },
+      "MODEL_CREDENTIAL_FAILED",
+      "eve couldn't get the Oauth billing credential.",
+    ],
+    [
+      "create throws",
+      { outage: "create", token: "billing-token" },
+      "MODEL_CREATE_FAILED",
+      'Building the "billing/claude" model failed: Missing billing region.',
+    ],
+  ] as const)(
+    "%s: fails the turn with its own code and keeps the session",
+    async (_case, initial, code, message) => {
+      const billing = billingProvider(initial);
+      await withSession(billing, async (session) => {
+        const settled = await session.stream.nextUntil("failed turn", isTurnSettled);
+        expect(settled.filter(isSignInOpened)).toEqual([]);
+        expect(filterEventsByType(settled, "session.ended")).toEqual([]);
+        expect(turnSettled(settled)).toMatchObject({ error: { code, message }, outcome: "failed" });
+      });
+    },
+  );
+
   it("fails a scheduled turn without asking", async () => {
     const billing = billingProvider();
     await withSession(
@@ -426,6 +458,7 @@ function billingProvider(
     readonly refresh?: string;
     readonly failCompletion?: string;
     readonly rejectEveryToken?: boolean;
+    readonly outage?: "getToken" | "refresh" | "create";
   } = {},
 ): BillingProvider {
   let stored = initial.token;
@@ -435,6 +468,8 @@ function billingProvider(
     principalType: "user",
     vercelConnect: { connector: "oauth/billing" },
     async getToken(): Promise<TokenResult> {
+      if (initial.outage === "getToken" || (initial.outage === "refresh" && billing.evictions > 0))
+        throw new Error("The billing service is unavailable.");
       if (stored === undefined) throw new ConnectionAuthorizationRequiredError("billing");
       return { token: stored };
     },
@@ -469,7 +504,10 @@ function billingProvider(
     evictions: 0,
     model: defineModel({
       auth,
-      create: ({ token }) => billedModel(billing, token, initial.rejectEveryToken === true),
+      create: ({ token }) => {
+        if (initial.outage === "create") throw new Error("Missing billing region.");
+        return billedModel(billing, token, initial.rejectEveryToken === true);
+      },
       id: "billing/claude",
     }),
     options: {},

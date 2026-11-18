@@ -23,6 +23,7 @@ import { nextRunId } from "#protocol/session-projection.js";
 import {
   failBoundaryEvent,
   failModelSelection,
+  failTurn,
   isSignInError,
   prepareModelCall,
   type Step,
@@ -41,7 +42,7 @@ import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
-import { credentialedModel } from "./credential.js";
+import { credentialedModel, isModelCreateError, isModelCredentialError } from "./credential.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -73,7 +74,7 @@ export async function runModelStep(
 
   const resolved = await resolveModel(step);
   if ("failed" in resolved) return resolved.failed;
-  if ("signIn" in resolved) return await pauseForSignIn(step, resolved.signIn);
+  if ("credentialError" in resolved) return await failOrAsk(step, resolved.credentialError);
   const requested = await requestRun(step, prompt);
   if (requested !== undefined) return requested;
   const projectedMessages = projectPrompt(prompt);
@@ -100,12 +101,12 @@ export async function runModelStep(
   } catch (error) {
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
-    const signInError = signInErrorIn(error);
-    if (signInError !== undefined) {
+    const credentialError = credentialErrorIn(error);
+    if (credentialError !== undefined) {
       if (generation.interrupted) return caller.steered();
       const messages = await caller.abandonForSignIn();
       step.session = changeHistory(step.session, { extend: messages });
-      return await pauseForSignIn(step, signInError);
+      return await failOrAsk(step, credentialError);
     }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
@@ -142,7 +143,9 @@ export async function runModelStep(
 async function resolveModel(
   step: Step,
 ): Promise<
-  { readonly model: LanguageModel } | { readonly failed: StepResult } | { readonly signIn: unknown }
+  | { readonly model: LanguageModel }
+  | { readonly failed: StepResult }
+  | { readonly credentialError: unknown }
 > {
   let resolved: Awaited<ReturnType<typeof resolveEffectiveRuntimeModel>>;
   try {
@@ -160,8 +163,7 @@ async function resolveModel(
     return { model: await credentialedModel(resolved.model, resolved.choice.reference) };
   } catch (error) {
     if (isTurnCancellation(error)) throw error;
-    if (!isSignInError(error)) return { failed: await reportModelCallFailure(step, error) };
-    return { signIn: error };
+    return { credentialError: error };
   } finally {
     step.ctx.delete(SignInCompletedKey);
   }
@@ -186,8 +188,14 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   await step.apply(startRunFact({ attempt, modelId, runId }));
 }
 
-function signInErrorIn(error: unknown): unknown {
+async function failOrAsk(step: Step, error: unknown): Promise<StepResult> {
+  if (!isModelCreateError(error)) return await pauseForSignIn(step, error);
+  return await failTurn(step, error.cause, "MODEL_CREATE_FAILED", error.message);
+}
+
+function credentialErrorIn(error: unknown): unknown {
   for (let current = error; current instanceof Error; current = current.cause)
-    if (isSignInError(current)) return current;
+    if (isSignInError(current) || isModelCredentialError(current) || isModelCreateError(current))
+      return current;
   return undefined;
 }
