@@ -118,6 +118,64 @@ describe("inspectApplication cache", () => {
     await expect(stat(resolveInspectCachePath(app.appRoot))).rejects.toThrow();
   });
 
+  it("reuses and invalidates the cache for a large project", async () => {
+    const files: Record<string, string> = {};
+    for (let index = 0; index < 150; index += 1) {
+      files[`agent/tools/tool_${index}.ts`] = tool(`label + " ${index}"`);
+      files[`agent/skills/skill-${index}.md`] =
+        `---\nname: skill-${index}\ndescription: Skill ${index}.\n---\n\nDo ${index}.\n`;
+    }
+    for (let index = 0; index < 15; index += 1) {
+      files[`agent/subagents/helper-${index}/agent.ts`] = [
+        'import { defineAgent } from "eve";',
+        `export default defineAgent({ description: "Helper ${index}.", model: "openai/gpt-5.5", modelContextWindowTokens: 200000 });`,
+        "",
+      ].join("\n");
+      files[`agent/subagents/helper-${index}/instructions.md`] = `Help with ${index}.\n`;
+      files[`agent/subagents/helper-${index}/tools/lookup.ts`] = [
+        'import { label } from "../../../../lib/label.ts";',
+        `export default { description: label + " helper ${index}", execute: () => null };`,
+        "",
+      ].join("\n");
+    }
+    const app = await createAppRoot("eve-inspect-cache-large-", {
+      files: {
+        ".eve/cache/model-catalog.json": JSON.stringify({
+          fetchedAt: new Date(Date.now() + 3_600_000).toISOString(),
+          kind: "eve-model-catalog-cache",
+          models: [],
+          providerAliases: {},
+          version: 2,
+        }),
+        "agent/agent.ts": AGENT,
+        "agent/instructions.md": "Answer briefly.\n",
+        "lib/label.ts": 'export const label = "first";\n',
+        ...files,
+      },
+    });
+    await backdate(app.appRoot);
+
+    const { first, second, recompiled } = await inspectTwice(app.appRoot);
+    expect(recompiled).toBe(false);
+    expect(first.compiledState!.manifest.skills).toHaveLength(150);
+    expect(first.compiledState!.manifest.subagents).toHaveLength(15);
+    expect(second.compiledState).toEqual(JSON.parse(JSON.stringify(first.compiledState)));
+
+    await writeFile(
+      join(app.appRoot, "agent", "subagents", "helper-9", "tools", "lookup.ts"),
+      'export default { description: "changed", execute: () => null };\n',
+    );
+    await backdate(app.appRoot);
+    expect(await readCachedCompile(app.appRoot)).toBeNull();
+    const changed = await inspectApplication(app.appRoot, { cache: "read" });
+    const helper = changed.compiledState!.manifest.subagents.find(
+      (subagent) => subagent.name === "helper-9",
+    );
+    expect(helper?.agent.tools.find((entry) => entry.name === "lookup")?.description).toBe(
+      "changed",
+    );
+  }, 120_000);
+
   it("recompiles on refresh", async () => {
     const app = await createApp("eve-inspect-cache-refresh-", tool("label"));
     const first = await inspectApplication(app.appRoot, { cache: "read" });

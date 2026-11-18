@@ -286,6 +286,7 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
         wallMs: 600,
         probes: { attempts: 20, timedOut: 0, refused: 19 },
       },
+      { run: 1, mode: "info", wallMs: 700, cachedMs: 250 },
       { mode: "dev", medianMs: 900 },
     ]
       .map((line) => JSON.stringify(line))
@@ -307,10 +308,16 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     ["dev-startup", "minimal", "local", 1, true, null],
     ["build", "minimal", "local", 1, true, null],
     ["start", "minimal", "local", 1, true, null],
+    ["info", "minimal", "local", 1, true, null],
     ["dev-startup", "minimal", "local", 2, false, "run-missing"],
     ["build", "minimal", "local", 2, false, "run-missing"],
     ["start", "minimal", "local", 2, false, "run-missing"],
+    ["info", "minimal", "local", 2, false, "run-missing"],
   ]);
+  assert.deepEqual(records[5].metrics, {
+    "info.uncached_ms": { status: "measured", value: 700 },
+    "info.cached_ms": { status: "measured", value: 250 },
+  });
   assert.deepEqual(
     [records[0].subject_digest, records[2].subject_digest],
     ["f".repeat(64), "b".repeat(40)],

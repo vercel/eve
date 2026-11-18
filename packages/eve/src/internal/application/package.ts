@@ -274,7 +274,17 @@ export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): s
   return join(resolvePackageRoot(), relativeSourcePath);
 }
 
+const resolvedDependencyPaths = new Map<string, string>();
+
 export function resolvePackageDependencyPath(specifier: string): string {
+  const resolved = resolvedDependencyPaths.get(specifier);
+  if (resolved !== undefined) return resolved;
+  const path = resolveUncachedPackageDependencyPath(specifier);
+  resolvedDependencyPaths.set(specifier, path);
+  return path;
+}
+
+function resolveUncachedPackageDependencyPath(specifier: string): string {
   try {
     return packageRequire.resolve(specifier);
   } catch (error) {

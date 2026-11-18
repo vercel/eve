@@ -497,24 +497,28 @@ function createAuthoredDirectiveGuardPlugin(): Plugin {
   };
 }
 
+const WORKFLOW_SOURCE_HINT = /use step|use workflow|workflow|defineWorkflowTool|\\/;
+
 export function createAuthoredWorkflowDirectivePlugin(input: {
   readonly appRoot: string;
   readonly recorder?: AuthoredWorkflowSourceRecorder;
 }): Plugin {
+  const handler = async (source: string, id: string) => {
+    if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
+      return undefined;
+    }
+    if (!isAuthoredApplicationModule(id, input.appRoot)) {
+      return undefined;
+    }
+
+    const transformed = await applyWorkflowTransform(id, source, "client", id, input.appRoot);
+    input.recorder?.record(id, source, transformed.workflowManifest);
+    return transformed.code === source ? undefined : { code: transformed.code, map: null };
+  };
   return {
     name: "eve-authored-workflow-directives",
-    async transform(source: string, id: string) {
-      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
-        return undefined;
-      }
-      if (!isAuthoredApplicationModule(id, input.appRoot)) {
-        return undefined;
-      }
-
-      const transformed = await applyWorkflowTransform(id, source, "client", id, input.appRoot);
-      input.recorder?.record(id, source, transformed.workflowManifest);
-      return transformed.code === source ? undefined : { code: transformed.code, map: null };
-    },
+    transform:
+      input.recorder === undefined ? { filter: { code: WORKFLOW_SOURCE_HINT }, handler } : handler,
   };
 }
 
@@ -522,16 +526,14 @@ async function loadBundledAuthoredModule(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
 ): Promise<unknown> {
-  const graphEntryPath =
+  const graphLoader =
     options.extension === undefined
-      ? await options.graph?.entryPath(modulePath, options.externalDependencies ?? [])
+      ? await options.graph?.loader(modulePath, options.externalDependencies ?? [])
       : undefined;
   const specifier =
-    graphEntryPath === undefined
-      ? await writeAuthoredModuleBundle(modulePath, options)
-      : createFileImportSpecifier(graphEntryPath);
+    graphLoader === undefined ? await writeAuthoredModuleBundle(modulePath, options) : undefined;
   try {
-    return await import(specifier);
+    return specifier === undefined ? await graphLoader!() : await import(specifier);
   } catch (error) {
     throw createAuthoredModuleEvaluationError(modulePath, error);
   }

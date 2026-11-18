@@ -127,6 +127,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   readonly extensionSpecifiers?: ReadonlySet<string>;
 }): Plugin {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
+  const installedPackages = new Map<string, boolean>();
 
   return {
     name: "eve-runtime-loader-package-boundary",
@@ -182,20 +183,26 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         importerPath !== undefined &&
         isPathInsideOrEqual(toCanonicalPath(importerPath), canonicalPackageRoot)
       ) {
-        const resolved = await this.resolve(source, importer, {
-          kind: options.kind,
-          skipSelf: true,
-        });
+        const installedKey = `${dirname(importerPath)}\0${options.kind}\0${source}`;
+        let installed = installedPackages.get(installedKey);
+        if (installed === undefined) {
+          const resolved = await this.resolve(source, importer, {
+            kind: options.kind,
+            skipSelf: true,
+          });
 
-        if (resolved === null || typeof resolved.id !== "string") {
-          throw new Error(
-            `Cannot resolve package "${source}" imported from "${importerPath}". ` +
-              `Install it with your package manager (e.g. \`pnpm install\`); ` +
-              `a running \`eve dev\` retries on the next rebuild.`,
-          );
+          if (resolved === null || typeof resolved.id !== "string") {
+            throw new Error(
+              `Cannot resolve package "${source}" imported from "${importerPath}". ` +
+                `Install it with your package manager (e.g. \`pnpm install\`); ` +
+                `a running \`eve dev\` retries on the next rebuild.`,
+            );
+          }
+          installed = isNodeModulesPath(resolved.id);
+          installedPackages.set(installedKey, installed);
         }
 
-        if (isNodeModulesPath(resolved.id)) {
+        if (installed) {
           return {
             external: true,
             id: source,

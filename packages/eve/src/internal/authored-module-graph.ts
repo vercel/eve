@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
 import {
@@ -15,16 +16,20 @@ import {
   normalizeExternalDependencies,
   resolveAuthoredPackageRoot,
 } from "#internal/authored-package-boundary.js";
-import { buildWithRolldown } from "#internal/bundler/rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 import { toErrorMessage } from "#shared/errors.js";
 
+export type AuthoredModuleLoader = () => Promise<unknown>;
+
 export interface AuthoredModuleGraph {
-  entryPath(
+  loader(
     modulePath: string,
     externalDependencies: readonly string[],
-  ): Promise<string | undefined>;
+  ): Promise<AuthoredModuleLoader | undefined>;
   warnIfBundledPerModule(): void;
 }
+
+const GRAPH_ENTRY_ID = "\0eve-authored-module-graph";
 
 export function createAuthoredModuleGraph(
   modulePaths: readonly string[],
@@ -33,11 +38,11 @@ export function createAuthoredModuleGraph(
   const entries = [...new Set(modulePaths.map((modulePath) => resolve(modulePath)))].filter(
     (modulePath) => AUTHORED_BUNDLED_MODULE_EXTENSION.test(modulePath),
   );
-  const builds = new Map<string, Promise<ReadonlyMap<string, string> | undefined>>();
+  const builds = new Map<string, Promise<ReadonlyMap<string, AuthoredModuleLoader> | undefined>>();
   const failures = new Map<string, unknown>();
   let reportedFailure = false;
   return {
-    async entryPath(modulePath, externalDependencies) {
+    async loader(modulePath, externalDependencies) {
       const key = externalDependenciesKey(externalDependencies);
       let build = builds.get(key);
       if (build === undefined) {
@@ -72,45 +77,50 @@ async function writeAuthoredModuleGraph(
   modulePaths: readonly string[],
   externalDependencies: readonly string[],
   appRoot: string | undefined,
-): Promise<ReadonlyMap<string, string>> {
-  const entryPaths = new Map<string, string>();
-  if (modulePaths.length === 0) return entryPaths;
+): Promise<ReadonlyMap<string, AuthoredModuleLoader>> {
+  const loaders = new Map<string, AuthoredModuleLoader>();
+  if (modulePaths.length === 0) return loaders;
   const packageRoot = resolveAuthoredPackageRoot(modulePaths[0]!);
-  const inputs = new Map(
-    modulePaths
-      .filter((modulePath) => resolveAuthoredPackageRoot(modulePath) === packageRoot)
-      .map((modulePath, index) => [`entry-${index}`, modulePath]),
+  const entries = modulePaths.filter(
+    (modulePath) => resolveAuthoredPackageRoot(modulePath) === packageRoot,
   );
+  const graphSource = `export default [${entries
+    .map((modulePath) => `() => import(${JSON.stringify(modulePath)})`)
+    .join(",")}];`;
   const sourcemap = evaluatedBundleSourcemap();
-  const fileName = sourcemap === false ? "[name]-[hash].mjs" : "[name]-[hash]-mapped.mjs";
-  const result = await buildWithRolldown({
+  const chunk = await buildSingleRolldownChunk("authored module graph", {
     ...createAuthoredModuleBuildOptions({
       packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
         externalDependencies: [...externalDependencies],
         packageRoot,
       }),
       packageRoot,
-      plugins: [createAuthoredWorkflowDirectivePlugin({ appRoot: appRoot ?? packageRoot })],
+      plugins: [
+        {
+          name: "eve-authored-module-graph-entry",
+          resolveId: (id: string) => (id === GRAPH_ENTRY_ID ? id : undefined),
+          load: (id: string) => (id === GRAPH_ENTRY_ID ? graphSource : undefined),
+        },
+        createAuthoredWorkflowDirectivePlugin({ appRoot: appRoot ?? packageRoot }),
+      ],
     }),
-    input: Object.fromEntries(inputs),
-    preserveEntrySignatures: "strict",
-    write: false,
+    input: GRAPH_ENTRY_ID,
     output: {
-      chunkFileNames: fileName,
-      codeSplitting: true,
       comments: false,
-      entryFileNames: fileName,
+      entryFileNames: sourcemap === false ? "graph-[hash].mjs" : "graph-[hash]-mapped.mjs",
       format: "esm",
       sourcemap,
       strictExecutionOrder: true,
     },
   });
-  const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
-  for (const item of result.output) {
-    if (item.type !== "chunk") continue;
-    const filePath = writeAuthoredModuleCacheFile(directoryPath, item.fileName, item.code);
-    const modulePath = item.isEntry ? inputs.get(item.name) : undefined;
-    if (modulePath !== undefined) entryPaths.set(modulePath, filePath);
-  }
-  return entryPaths;
+  const filePath = writeAuthoredModuleCacheFile(
+    join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH),
+    chunk.fileName,
+    chunk.code,
+  );
+  const graph = (await import(pathToFileURL(filePath).href)) as {
+    readonly default: readonly AuthoredModuleLoader[];
+  };
+  entries.forEach((modulePath, index) => loaders.set(modulePath, graph.default[index]!));
+  return loaders;
 }

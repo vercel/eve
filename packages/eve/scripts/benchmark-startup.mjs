@@ -162,9 +162,18 @@ for (let run = 1; run <= runs; run++) {
       await writeFile(join(root, `${mode}-${run}.log`), log);
     }
   }
+  const uncached = await timeInfo(run, ["--fresh"]);
+  const cached = uncached === undefined ? undefined : await timeInfo(run, []);
+  results.push({
+    run,
+    mode: "info",
+    wallMs: uncached ?? (await timeInfo(run, [])),
+    cachedMs: cached,
+  });
+  console.log(JSON.stringify(results.at(-1)));
 }
 await writeFile(join(root, "results.json"), JSON.stringify(results, null, 2));
-for (const mode of ["dev", "dev-tui", "build", "start"]) {
+for (const mode of ["dev", "dev-tui", "build", "start", "info"]) {
   const times = results
     .filter((result) => result.mode === mode)
     .map((result) => result.wallMs)
@@ -178,6 +187,37 @@ for (const mode of ["dev", "dev-tui", "build", "start"]) {
       maxMs: times.at(-1),
     }),
   );
+}
+
+async function timeInfo(run, flags) {
+  const start = performance.now();
+  const child = spawn(
+    process.execPath,
+    [join(packageRoot, "bin", "eve.js"), "info", "--json", ...flags],
+    { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (data) => {
+    stdout += data;
+  });
+  child.stderr.on("data", (data) => {
+    stderr += data;
+  });
+  const code = await new Promise((resolveExit, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolveExit);
+  });
+  const wallMs = Math.round(performance.now() - start);
+  const name = flags.includes("--fresh") ? "info-fresh" : "info";
+  await writeFile(join(root, `${name}-${run}.log`), `${stdout}${stderr}`);
+  if (code !== 0 && flags.includes("--fresh") && stderr.includes("unknown option '--fresh'"))
+    return undefined;
+  if (code !== 0) throw new Error(`eve info ${flags.join(" ")} exited with ${code}: ${stderr}`);
+  const info = JSON.parse(stdout);
+  if (info.status !== "ready" || info.tools.length < toolCount)
+    throw new Error(`eve info reported ${info.status} with ${info.tools.length} tools.`);
+  return wallMs;
 }
 
 function waitReady(child, port, path, start, readLog) {

@@ -147,12 +147,19 @@ function findPackageRoot(directory: string): string | null {
   return packageRoot;
 }
 
+const realPathCache = new Map<string, string>();
+
 function toRealPath(path: string): string {
+  const cached = realPathCache.get(path);
+  if (cached !== undefined) return cached;
+  let realPath: string;
   try {
-    return realpathSync(path);
+    realPath = realpathSync(path);
   } catch {
     return resolve(path);
   }
+  realPathCache.set(path, realPath);
+  return realPath;
 }
 
 export async function findWorkflowPatterns(

@@ -10,10 +10,12 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
 import type { ResolvedDiscoveryProject } from "#discover/project.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 
 const INSPECT_CACHE_KIND = "eve-inspect-cache";
 const INSPECT_CACHE_VERSION = 1;
 const RECENT_EDIT_WINDOW_MS = 2_000;
+const SOURCE_READ_CONCURRENCY = 64;
 const SKIPPED_DIRECTORY_NAMES = new Set([
   ".cache",
   ".eve",
@@ -230,15 +232,12 @@ function projectFilePaths(appRoot: string): string[] {
 }
 
 async function collectEnvNames(sourcePaths: readonly string[]): Promise<string[] | null> {
+  const sources = await mapWithConcurrency(sourcePaths, SOURCE_READ_CONCURRENCY, (path) =>
+    readFile(path, "utf8").catch(() => null),
+  );
   const names = new Set<string>();
-  for (const path of sourcePaths) {
-    let source: string;
-    try {
-      source = await readFile(path, "utf8");
-    } catch {
-      return null;
-    }
-    if (ENV_MODULE_IMPORT.test(source)) return null;
+  for (const source of sources) {
+    if (source === null || ENV_MODULE_IMPORT.test(source)) return null;
     const references = source.match(ENV_REFERENCE)?.length ?? 0;
     const literals = [...source.matchAll(LITERAL_ENV_REFERENCE)];
     if (literals.length !== references) return null;
