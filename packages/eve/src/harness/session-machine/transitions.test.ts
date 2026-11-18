@@ -306,8 +306,6 @@ const GITHUB_CALLBACK = {
   name: "github",
 };
 
-const MODEL_CALLBACK = { ...GITHUB_CALLBACK, name: "eve__model__billing" };
-
 function waitingTurn(): HarnessSession {
   return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
     {
@@ -458,19 +456,10 @@ describe("controls and callbacks as deliveries", () => {
     });
   });
 
-  it("leaves a model call's completed sign-in to its completion", () => {
-    expect(
-      completeSignIn(viewOf(waitingTurn()), {
-        completions: [MODEL_CALLBACK],
-        declined: new Set(),
-      }).events,
-    ).toEqual([]);
-  });
-
-  it("settles a model call's sign-in declined from a refused callback", () => {
+  it("settles a sign-in that no call owns declined from a refused callback", () => {
     const { events } = completeSignIn(viewOf(waitingTurn()), {
-      completions: [MODEL_CALLBACK],
-      declined: new Set([MODEL_CALLBACK.attemptId]),
+      completions: [GITHUB_CALLBACK],
+      declined: new Set([GITHUB_CALLBACK.attemptId]),
     });
     expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
       outcome: "declined",

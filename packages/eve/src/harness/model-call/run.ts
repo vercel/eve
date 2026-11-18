@@ -11,9 +11,7 @@ import {
   humanInputContext,
   failModelCredential,
   pauseForModelSignIn,
-  signInReports,
 } from "#harness/hitl/index.js";
-import { SignInCompletedKey } from "#harness/authorization.js";
 import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import {
@@ -155,19 +153,12 @@ async function resolveModel(
   }
   step.model = resolved.choice;
   if (!isModelDefinition(resolved.model)) return { model: resolved.model };
-  const reports = signInReports({ publish: step.publish, view: () => step.view() });
-  step.ctx.setVirtualContext(
-    SignInCompletedKey,
-    reports.completed(step.config.signInCompletions ?? []),
-  );
   try {
     return { model: await credentialedModel(resolved.model) };
   } catch (error) {
     const credentialError = credentialErrorIn(error);
     if (credentialError === undefined) throw error;
     return { failed: await failOrAsk(step, credentialError) };
-  } finally {
-    step.ctx.delete(SignInCompletedKey);
   }
 }
 

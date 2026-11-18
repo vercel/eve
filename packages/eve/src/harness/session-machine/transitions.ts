@@ -2,7 +2,6 @@ import type { ModelMessage } from "ai";
 
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { isModelSignInName } from "#models/definition.js";
 import { callSettledFrom, callStarted } from "#harness/call-facts.js";
 import {
   contextStarted,
@@ -717,7 +716,7 @@ function signInCallbackFacts(
 
 export function callSignInsSettled(
   view: Pick<SessionView, "projection">,
-  call: Pick<ApprovedCall, "signIns">,
+  call: ApprovedCall,
   failure?: { readonly reason?: string; readonly retryable?: boolean },
 ): SessionEvent[] {
   const tables = view.projection.view;
@@ -747,18 +746,15 @@ export function completeSignIn(
     view,
     input.completions
       .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
-      .flatMap((challenge) => {
-        if (!isModelSignInName(challenge.name)) {
-          return signInCallbackFacts(tables, challenge, { outcome: "accepted" });
-        }
-        if (challenge.attemptId === undefined || !input.declined.has(challenge.attemptId))
-          return [];
-        return callSignInsSettled(
-          view,
-          { signIns: [challenge] },
-          { reason: SIGN_IN_DECLINED, retryable: false },
-        );
-      }),
+      .flatMap((challenge) =>
+        signInCallbackFacts(
+          tables,
+          challenge,
+          challenge.attemptId !== undefined && input.declined.has(challenge.attemptId)
+            ? { outcome: "declined", reason: SIGN_IN_DECLINED, retryable: false }
+            : { outcome: "accepted" },
+        ),
+      ),
   );
 }
 

@@ -291,7 +291,7 @@ describe("a model that needs the caller's credential", () => {
         switched = true;
         const answered = await session.callBack();
         expect(turnSettled(answered)).toMatchObject({ outcome: "completed" });
-        expect(cardOutcome(answered, asked)).toBe("interrupted");
+        expect(cardOutcome(answered, asked)).toBe("accepted");
         expect(billing.tokensSeen).toEqual([]);
       },
     );
@@ -410,7 +410,7 @@ describe("a model sign-in that ends without a credential", () => {
     });
   });
 
-  it("settles a declined callback declined and lets the dynamic model answer with another model", async () => {
+  it("settles a declined callback declined, answers with another model, and asks again on the next turn", async () => {
     const billing = billingProvider();
     await withAgent(
       "model-sign-in-fallback",
@@ -426,6 +426,13 @@ describe("a model sign-in that ends without a credential", () => {
         expect(cardOutcome(settled, asked)).toBe("declined");
         expect(turnSettled(settled)).toMatchObject({ outcome: "completed" });
         expect(billing.tokensSeen).toEqual([]);
+
+        await session.send("Try again.");
+        const next = await session.stream.nextUntil(
+          "next turn",
+          (event) => isSignInOpened(event) || isTurnSettled(event),
+        );
+        expect(next.filter(isSignInOpened)).toHaveLength(1);
       },
     );
   });
@@ -461,7 +468,7 @@ describe("a model sign-in that ends without a credential", () => {
     await withSession(billing, async (session) => {
       const asked = await session.asked();
       const settled = await session.callBack();
-      expect(cardOutcome(settled, asked)).toBe("failed");
+      expect(cardOutcome(settled, asked)).toBe("accepted");
       expect(turnSettled(settled)).toMatchObject(
         authorizationFailed("Billing: Save your API key first."),
       );

@@ -258,10 +258,7 @@ async function runApproved(
   );
   if (calls.length === 0) return undefined;
   const signIns = signInReports({ publish: step.publish, view: () => step.view() });
-  step.ctx.setVirtualContext(
-    SignInCompletedKey,
-    signIns.completed(calls.flatMap((call) => call.signIns ?? [])),
-  );
+  step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
   const groups = await Promise.allSettled(
     local.map(async ({ approvals, tools }) => {
       if (approvals.length === 0) return { settled: [], signIns: [] };

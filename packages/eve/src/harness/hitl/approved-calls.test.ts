@@ -142,7 +142,7 @@ it("reports each group's sign-in while its call holds, with one reporter for the
   const session = signInSession("attempt-a", "attempt-b");
   const reports = signInReports(session);
   const calls = [stoppedOn("call-a", "attempt-a"), stoppedOn("call-b", "attempt-b")];
-  const completed = reports.completed(calls.flatMap((call) => call.signIns ?? []));
+  const completed = reports.completed(calls);
   let release = () => {};
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -178,7 +178,7 @@ it("settles a sign-in once when two calls complete it at the same time", async (
   const session = signInSession("attempt-shared");
   const reports = signInReports(session);
   const calls = [stoppedOn("probe", "attempt-shared"), { ...approval("publish", "publish") }];
-  const completed = reports.completed(calls.flatMap((call) => call.signIns ?? []));
+  const completed = reports.completed(calls);
   const completing = (name: string) =>
     tool(name, async () => {
       await completed(completion("attempt-shared"));

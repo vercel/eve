@@ -32,15 +32,7 @@ export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
 
 export interface SignInReports {
   readonly report: (call: ApprovedCall, failure?: Error | string) => Promise<void>;
-  readonly completed: (signIns: readonly AuthorizationChallenge[]) => SignInCompleted;
-}
-
-function signInFailureOf(failure: unknown): {
-  readonly reason: string;
-  readonly retryable?: boolean;
-} {
-  if (!isConnectionAuthorizationFailedError(failure)) return { reason: toErrorMessage(failure) };
-  return { reason: failure.reason ?? failure.message, retryable: failure.retryable };
+  readonly completed: (calls: readonly ApprovedCall[]) => SignInCompleted;
 }
 
 export function signInReports(input: {
@@ -49,36 +41,49 @@ export function signInReports(input: {
 }): SignInReports {
   const reported = new Map<string, Promise<void>>();
   const settle = async (
+    call: ApprovedCall,
     challenge: AuthorizationChallenge,
     failure: Error | string | undefined,
   ): Promise<void> => {
+    const refused = isConnectionAuthorizationFailedError(failure) ? failure : undefined;
     const events = callSignInsSettled(
       input.view(),
-      { signIns: [challenge] },
-      failure === undefined ? undefined : signInFailureOf(failure),
+      { ...call, signIns: [challenge] },
+      failure === undefined
+        ? undefined
+        : {
+            reason:
+              refused === undefined ? toErrorMessage(failure) : (refused.reason ?? refused.message),
+            ...(refused !== undefined && { retryable: refused.retryable }),
+          },
     );
     if (events.length > 0) await input.publish(commitOf(events));
   };
   const reportOne = (
+    call: ApprovedCall,
     challenge: AuthorizationChallenge,
     failure: Error | string | undefined,
   ): Promise<void> => {
     const key = signInAttemptKey(challenge);
     let pending = reported.get(key);
     if (pending === undefined) {
-      pending = settle(challenge, failure);
+      pending = settle(call, challenge, failure);
       reported.set(key, pending);
     }
     return pending;
   };
   return {
     report: async (call, failure) => {
-      await Promise.all((call.signIns ?? []).map((challenge) => reportOne(challenge, failure)));
+      await Promise.all(
+        (call.signIns ?? []).map((challenge) => reportOne(call, challenge, failure)),
+      );
     },
-    completed: (signIns) => async (result, failure) => {
+    completed: (calls) => async (result, failure) => {
       if (result.attemptId === undefined) return;
-      const challenge = signIns.find(({ attemptId }) => attemptId === result.attemptId);
-      if (challenge !== undefined) await reportOne(challenge, failure);
+      for (const call of calls) {
+        const challenge = call.signIns?.find(({ attemptId }) => attemptId === result.attemptId);
+        if (challenge !== undefined) await reportOne(call, challenge, failure);
+      }
     },
   };
 }
