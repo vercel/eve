@@ -111,6 +111,8 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
         })),
       ...runs
         .filter((run) => run.probe.operation === operation && sendsProbeRequest(run))
+        // A tool whose schema takes both input forms is graded on the first one it accepts.
+        .filter((run, index, sent) => sent.findIndex(({ name }) => name === run.name) === index)
         .map(({ name, tool, nested }) => ({
           name,
           approval: tool.approval,
@@ -375,9 +377,7 @@ async function customNorthstarToolRuns(): Promise<NorthstarToolRun[]> {
         }
         await Promise.all(bodies);
         if (requests.length === 0) continue;
-        const run = { file, name, tool, nested, probe, requests, error };
-        runs.push(run);
-        if (sendsProbeRequest(run)) break;
+        runs.push({ file, name, tool, nested, probe, requests, error });
       }
     }
   }
