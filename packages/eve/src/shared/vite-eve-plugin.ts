@@ -79,6 +79,7 @@ export function createEveVitePlugin(input: {
 }): Plugin & { readonly nitro: EveNitroModule } {
   const { host, nitroOnly, options, vercelOutputAfterSsrBundle } = input;
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, host);
+  const isVercel = Boolean(process.env.VERCEL);
   let viteRoot: string;
   let projectRoot: string;
   let agents: readonly EveFrameworkAgent[];
@@ -142,7 +143,7 @@ export function createEveVitePlugin(input: {
         nitroServesPreview =
           isPreview &&
           flattenPlugins(config.plugins ?? []).some((plugin) => plugin.name === "nitro:preview");
-        isVercelBuild = env.command === "build" && Boolean(process.env.VERCEL);
+        isVercelBuild = env.command === "build" && isVercel;
         if (env.command !== "serve") {
           agents = isVercelBuild ? await resolveEveAgents(projectRoot) : [];
           return {};
@@ -202,12 +203,12 @@ export function createEveVitePlugin(input: {
         }
       }
     },
-    ...(process.env.VERCEL
+    ...(isVercel
       ? {
           buildApp: {
             order: "post",
             async handler(builder: ViteBuilder) {
-              if (!isVercelBuild || nitroModuleInstalled || vercelOutputAfterSsrBundle) {
+              if (nitroModuleInstalled || vercelOutputAfterSsrBundle) {
                 return;
               }
               for (const environment of Object.values(builder.environments)) {
