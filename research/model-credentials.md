@@ -185,8 +185,9 @@ credential again, and retries the call once, as MCP connections do. The retry co
 model call, including a `401` the provider's stream emits, and goes through the model call's own
 attempt bookkeeping. After a second `401`, eve opens
 a new sign-in. When the provider rejects the credential from a sign-in in the same step, the turn
-fails with `MODEL_AUTHORIZATION_FAILED`. Other statuses, such as `402` or `403`, fail the call as
-any provider error does. eve reads the `statusCode` on the model-call error, so the retry works for
+fails with `MODEL_AUTHORIZATION_FAILED`. Another `4xx` that refuses the credential, such as `403`,
+also fails the turn with `MODEL_AUTHORIZATION_FAILED` and keeps the session. Other statuses, such
+as `402` or `5xx`, fail the call as any provider error does. eve reads the `statusCode` on the model-call error, so the retry works for
 any provider whose errors carry an HTTP status. A `create` that rethrows a `401` without its
 `statusCode` hides it from the retry.
 
@@ -199,6 +200,7 @@ any provider whose errors carry an HTTP status. A `create` that rethrows a `401`
 | No signed-in user for `principalType: "user"`                             | `MODEL_AUTHORIZATION_FAILED` |
 | `auth` has no `startAuthorization`, or no callback URL exists for the run | `MODEL_AUTHORIZATION_FAILED` |
 | `auth` throws `ConnectionAuthorizationFailedError`                        | `MODEL_AUTHORIZATION_FAILED` |
+| The provider refuses the credential with a `4xx`, such as `403`           | `MODEL_AUTHORIZATION_FAILED` |
 | `auth` throws another error, such as an unreachable credential service    | `MODEL_CREDENTIAL_FAILED`    |
 | `create` throws or returns no language model                              | `MODEL_CREATE_FAILED`        |
 
