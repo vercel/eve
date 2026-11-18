@@ -119,7 +119,7 @@ function stripAnsi(text: string): string {
 }
 
 function parseServerUrl(stdout: string): string | undefined {
-  return /server listening at (https?:\/\/\S+)/.exec(stripAnsi(stdout))?.[1];
+  return /\[DEV\] ready at (https?:\/\/\S+)/.exec(stripAnsi(stdout))?.[1];
 }
 
 async function startEveDev(appRoot: string): Promise<RunningDevServer> {

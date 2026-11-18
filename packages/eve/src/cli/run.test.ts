@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1503,6 +1504,33 @@ describe("eve dev boot progress", () => {
     screen.write(writes.join(""));
     expect(screen.snapshot()).toBe("");
     expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("eve dev --no-ui ready signal", () => {
+  it("prints the ready line last, after the server finished starting", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    let started = false;
+    const startHost = vi.fn(() => ({
+      start: async () => {
+        expect(logger.log).not.toHaveBeenCalledWith(expect.stringContaining("ready at"));
+        started = true;
+        return {
+          kind: "started" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:2000",
+        };
+      },
+      close: async () => {},
+      wait: async () => {},
+    }));
+
+    await runCli(["dev"], logger, { startHost });
+
+    expect(started).toBe(true);
+    const lines = logger.log.mock.calls.map(([line]) => stripVTControlCharacters(String(line)));
+    expect(lines.at(-1)).toBe("[DEV] ready at http://127.0.0.1:2000");
+    expect(lines).toContainEqual(expect.stringContaining("not a TTY"));
   });
 });
 

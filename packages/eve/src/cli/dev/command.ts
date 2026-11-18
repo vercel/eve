@@ -412,16 +412,6 @@ export function registerDevelopmentCommand(input: {
         return;
       }
 
-      if (mode !== "tui") {
-        logger.log(
-          renderCliTaggedLine(theme, {
-            message: `server listening at ${handle.url}`,
-            tag: "dev",
-            tone: "success",
-          }),
-        );
-      }
-
       if (mode === "headless") {
         if (options.ui !== false && !interactive) {
           logger.log(
@@ -432,6 +422,13 @@ export function registerDevelopmentCommand(input: {
             }),
           );
         }
+        logger.log(
+          renderCliTaggedLine(theme, {
+            message: `ready at ${handle.url}`,
+            tag: "dev",
+            tone: "success",
+          }),
+        );
 
         await waitForServerOrStop(server, lifecycle);
         return;
