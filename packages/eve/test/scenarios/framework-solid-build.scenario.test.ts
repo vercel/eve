@@ -40,7 +40,7 @@ process.stdout.write(await response.text());`,
     await runPnpmCommand({
       args: ["exec", "vite", "build"],
       cwd: app.appRoot,
-      env: { ...process.env, VERCEL: "1" },
+      env: { ...process.env, NITRO_PRESET: "vercel", VERCEL: "1" },
     });
 
     const config = JSON.parse(
