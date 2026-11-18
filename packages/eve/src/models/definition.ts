@@ -10,7 +10,8 @@ const MODEL_DEFINITION: unique symbol = Symbol.for("eve.model-definition");
 const MODEL_SIGN_IN_PREFIX = "eve__model__";
 
 /**
- * A model that runs on the caller's own credential. eve resolves `auth` before each model call,
+ * A model with a connection-style `auth`. eve resolves `auth` before each model call, for the
+ * signed-in person unless `auth.principalType` is `"app"`,
  * opens the same sign-in as a connection when the caller has none, and passes the credential to
  * `create`. Every field that sets a session's turn model accepts it; `compaction.model`, the
  * decision model of `auto()`, `ctx.agent()`'s `model`, and a dynamic subagent's config reject it.
@@ -38,7 +39,7 @@ export interface ModelDefinition {
 }
 
 /**
- * Defines a model that runs on the caller's own credential, for an agent's `model`, a dynamic
+ * Defines a model with a connection-style `auth`, for an agent's `model`, a dynamic
  * model's result, or an `auto()` or `agent({ models })` option.
  *
  * ```ts

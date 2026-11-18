@@ -91,8 +91,7 @@ export interface EveLanguageModel {
 export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
 /**
- * A model for a session's turns: a static model, or a {@link ModelDefinition} that runs on the
- * caller's own credential.
+ * A model for a session's turns: a static model, or a {@link ModelDefinition} with its own `auth`.
  */
 export type PublicAgentTurnModelDefinition = PublicAgentStaticModelDefinition | ModelDefinition;
 
@@ -434,7 +433,7 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
         readonly modelOptions?: AgentModelOptionsDefinition;
       }
     | {
-        /** A model that runs on the caller's own credential; see `defineModel` in `eve/models`. */
+        /** A model with its own `auth`; see `defineModel` in `eve/models`. */
         readonly model: ModelDefinition;
         /** Optional context-window override for a model `id` outside the AI Gateway catalog. */
         readonly modelContextWindowTokens?: number;
