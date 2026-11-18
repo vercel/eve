@@ -203,9 +203,9 @@ A signed-in person's calls reach AI Gateway with their own Vercel access token, 
 | `authKey` | Keys the credential for the sign-in, the token cache, and the rule against asking twice in a turn. Required when `auth` has no Vercel Connect connector. Definitions with one key share one sign-in and one token.                     |
 | `create`  | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                                                      |
 
-A `ModelDefinition` goes wherever a session's turn model goes: `defineAgent({ model })`, a dynamic model's result, and `auto()` and `agent({ models })` options. `compaction.model`, `auto()`'s decision model, and a dynamic subagent's config take a model ID or instance, because their calls can't hold the turn for a sign-in.
+A `ModelDefinition` goes wherever a session's turn model goes: `defineAgent({ model })`, a dynamic model's result, and `auto()` and `agent({ models })` options. `compaction.model` and `auto()`'s decision model take a model ID or instance, because their calls can't hold the turn for a sign-in. A dynamic subagent's config takes a model ID, because eve saves it with the session.
 
-When the caller has no credential, eve opens the same sign-in as a connection, with the turn as its subject and before `model.requested`, and continues the turn after the callback under the same `turnId`. The sign-in's name is `eve__model__` followed by `authKey`, or by the cleaned connector, so `connect("vercel/myagent")` signs in as `eve__model__vercel_myagent`. The card shows `auth.displayName`, then the challenge's `displayName`.
+When the caller has no credential, eve opens the same sign-in as a connection, with the turn as its subject, and continues the turn after the callback under the same `turnId`. The sign-in's name is `eve__model__` followed by `authKey`, or by the cleaned connector, so `connect("vercel/myagent")` signs in as `eve__model__vercel_myagent`. The card shows `auth.displayName`, then the challenge's `displayName`.
 
 - A message during the sign-in withdraws it, and the step runs again with the message in the turn.
 - When the provider answers a model call with `401`, eve drops the token, calls `auth.evict`, resolves the credential again, and retries the call once. A second `401` asks the person to sign in again. When the provider rejects the credential right after that sign-in, the turn fails.
@@ -213,7 +213,7 @@ When the caller has no credential, eve opens the same sign-in as a connection, w
 - When `auth` throws another error, such as an unreachable credential service, the turn fails with `MODEL_CREDENTIAL_FAILED`. When `create` throws, it fails with `MODEL_CREATE_FAILED`. Provider errors keep `MODEL_CALL_FAILED`, so monitoring can tell the three apart. The session stays open in each case.
 - A declined sign-in settles its card before the dynamic functions run, so a dynamic `model` can read it from `ctx.view` with `interactions` from `eve/events` and answer with another model.
 
-Compaction's summary call runs on the turn's model, so it reuses the turn's resolved credential. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
+In a turn, compaction's summary call reuses the turn's model and credential. Compaction between turns resolves the credential itself and never opens a sign-in; without one, the compaction fails. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
 
 ## Reasoning effort
 

@@ -70,6 +70,7 @@ export type InternalAgentModelDefinition = {
   sourceModelOption?: string;
   providerOptions?: Record<string, JsonObject>;
   promptCache?: AgentPromptCacheDefinition;
+  credentialed?: true;
 };
 
 /**

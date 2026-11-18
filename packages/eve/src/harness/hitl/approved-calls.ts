@@ -35,7 +35,7 @@ export interface SignInReports {
   readonly completed: (signIns: readonly AuthorizationChallenge[]) => SignInCompleted;
 }
 
-export function signInFailureOf(failure: unknown): {
+function signInFailureOf(failure: unknown): {
   readonly reason: string;
   readonly retryable?: boolean;
 } {

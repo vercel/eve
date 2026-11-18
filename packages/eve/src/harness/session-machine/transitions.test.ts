@@ -427,7 +427,7 @@ describe("controls and callbacks as deliveries", () => {
     const session = waitingTurn();
     const { events } = completeSignIn(viewOf(session), {
       completions: [{ ...GITHUB_CALLBACK, candidateId: "answer-1" }],
-      refusals: new Map(),
+      declined: new Set(),
     });
 
     expect(events.map((event) => event.type)).toEqual([
@@ -451,7 +451,7 @@ describe("controls and callbacks as deliveries", () => {
   it("settles a sign-in that no call owns accepted from its callback", () => {
     const { events } = completeSignIn(viewOf(waitingTurn()), {
       completions: [GITHUB_CALLBACK],
-      refusals: new Map(),
+      declined: new Set(),
     });
     expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
       outcome: "accepted",
@@ -462,7 +462,7 @@ describe("controls and callbacks as deliveries", () => {
     expect(
       completeSignIn(viewOf(waitingTurn()), {
         completions: [MODEL_CALLBACK],
-        refusals: new Map(),
+        declined: new Set(),
       }).events,
     ).toEqual([]);
   });
@@ -470,7 +470,7 @@ describe("controls and callbacks as deliveries", () => {
   it("settles a model call's sign-in declined from a refused callback", () => {
     const { events } = completeSignIn(viewOf(waitingTurn()), {
       completions: [MODEL_CALLBACK],
-      refusals: new Map([[MODEL_CALLBACK.attemptId, "access_denied"]]),
+      declined: new Set([MODEL_CALLBACK.attemptId]),
     });
     expect(events.map((event) => event.type)).toContain("interaction.settled");
     expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
@@ -482,7 +482,7 @@ describe("controls and callbacks as deliveries", () => {
   it("ignores a callback for a sign-in that already ended", () => {
     const { events } = completeSignIn(viewOf(BASE), {
       completions: [GITHUB_CALLBACK],
-      refusals: new Map(),
+      declined: new Set(),
     });
     expect(events).toEqual([]);
   });
@@ -611,7 +611,7 @@ describe("calls a sign-in stopped", () => {
       signIns: matchSignIns(view, { attemptIds: ["google-1"] }).signIns!,
     };
     expect(
-      completeSignIn(matched, { completions: [signIn("google")], refusals: new Map() }).events,
+      completeSignIn(matched, { completions: [signIn("google")], declined: new Set() }).events,
     ).toEqual([]);
     expect(runnable(matched)).toEqual(["call-1"]);
 

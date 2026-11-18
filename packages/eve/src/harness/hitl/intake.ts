@@ -11,7 +11,7 @@ import {
   type SessionView,
   type SuspendedStep,
 } from "#harness/session-machine/view.js";
-import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { SIGN_IN_DECLINED, signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
@@ -68,12 +68,12 @@ export async function admitHumanInput(
   const { config } = step;
   const completions = config.signInCompletions ?? [];
   if (completions.length > 0) {
-    const refusals = new Map(
+    const declined = new Set(
       getAuthorizationResults().flatMap(({ attemptId, callback }) =>
-        callback.params.error === undefined ? [] : [[attemptId, callback.params.error] as const],
+        attemptId !== undefined && callback.params.error === SIGN_IN_DECLINED ? [attemptId] : [],
       ),
     );
-    await step.apply(completeSignIn(step.view(), { completions, refusals }));
+    await step.apply(completeSignIn(step.view(), { completions, declined }));
   }
   const weighed = await weighResponders(step.view(), {
     now: Date.now(),

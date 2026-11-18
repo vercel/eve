@@ -11,6 +11,7 @@ import {
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
 import type { TokenResult } from "#shared/connection-types.js";
+import { isRuntimeLanguageModel } from "#internal/runtime-model.js";
 import { rejectsCredential } from "./errors.js";
 
 export async function credentialedModel(model: RuntimeModel): Promise<LanguageModel> {
@@ -95,8 +96,9 @@ function createdModel(
   scoped: ScopedAuthorization,
 ): LanguageModelV4 {
   try {
-    const created = definition.create(credential) as Exclude<LanguageModel, string>;
-    return wrapLanguageModel({ middleware: {}, model: created });
+    const created: unknown = definition.create(credential);
+    if (!isRuntimeLanguageModel(created)) throw new Error("create returned no language model.");
+    return wrapLanguageModel({ middleware: {}, model: created as Exclude<LanguageModel, string> });
   } catch (error) {
     throw new ModelCredentialFailure("MODEL_CREATE_FAILED", scoped, error);
   }

@@ -738,7 +738,7 @@ export function completeSignIn(
   view: SessionView,
   input: {
     readonly completions: readonly AuthorizationChallenge[];
-    readonly refusals: ReadonlyMap<string | undefined, string>;
+    readonly declined: ReadonlySet<string>;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -751,15 +751,12 @@ export function completeSignIn(
         if (!isModelSignInName(challenge.name)) {
           return signInCallbackFacts(tables, challenge, { outcome: "accepted" });
         }
-        const refusal = input.refusals.get(challenge.attemptId);
-        if (refusal === undefined) return [];
+        if (challenge.attemptId === undefined || !input.declined.has(challenge.attemptId))
+          return [];
         return callSignInsSettled(
           view,
           { signIns: [challenge] },
-          {
-            reason: refusal,
-            retryable: refusal === SIGN_IN_DECLINED ? false : undefined,
-          },
+          { reason: SIGN_IN_DECLINED, retryable: false },
         );
       }),
   );

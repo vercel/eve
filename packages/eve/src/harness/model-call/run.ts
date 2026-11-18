@@ -9,8 +9,8 @@ import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness
 import {
   enforceBudget,
   humanInputContext,
-  failCredential,
-  pauseForSignIn,
+  failModelCredential,
+  pauseForModelSignIn,
   signInReports,
 } from "#harness/hitl/index.js";
 import { SignInCompletedKey } from "#harness/authorization.js";
@@ -110,9 +110,10 @@ export async function runModelStep(
     const credentialError = credentialErrorIn(error);
     if (credentialError !== undefined) {
       if (generation.interrupted) return caller.steered();
+      if (isModelCredentialFailure(credentialError)) return await failOrAsk(step, credentialError);
       const messages = await caller.abandon();
       step.session = changeHistory(step.session, { extend: messages });
-      return await failOrAsk(step, credentialError);
+      return await pauseForModelSignIn(step, credentialError);
     }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
@@ -194,8 +195,8 @@ async function startRun(step: Step, attempt: number): Promise<void> {
 type CredentialError = ScopedAuthorizationRequiredError | ModelCredentialFailure;
 
 async function failOrAsk(step: Step, error: CredentialError): Promise<StepResult> {
-  if (isScopedAuthorizationRequiredError(error)) return await pauseForSignIn(step, error);
-  return await failCredential(step, error.code, error.cause, error.scoped);
+  if (isScopedAuthorizationRequiredError(error)) return await pauseForModelSignIn(step, error);
+  return await failModelCredential(step, error.code, error.cause, error.scoped);
 }
 
 function credentialErrorIn(error: unknown): CredentialError | undefined {

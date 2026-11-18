@@ -185,6 +185,12 @@ describe("a model that needs the caller's credential", () => {
       "MODEL_CREATE_FAILED",
       "eve couldn't build the model from the Oauth billing credential.",
     ],
+    [
+      "create returns a promise",
+      { outage: "create-async", token: "billing-token" },
+      "MODEL_CREATE_FAILED",
+      "eve couldn't build the model from the Oauth billing credential.",
+    ],
   ] as const)(
     "%s: fails the turn with its own code and keeps the session",
     async (_case, initial, code, message) => {
@@ -193,6 +199,9 @@ describe("a model that needs the caller's credential", () => {
         const settled = await session.stream.nextUntil("failed turn", isTurnSettled);
         expect(settled.filter(isSignInOpened)).toEqual([]);
         expect(filterEventsByType(settled, "session.ended")).toEqual([]);
+        expect(
+          filterEventsByType(settled, "model.settled").map((event) => event.data.outcome),
+        ).not.toContain("abandoned");
         expect(turnSettled(settled)).toMatchObject({ error: { code, message }, outcome: "failed" });
       });
     },
@@ -354,15 +363,17 @@ describe("a model sign-in that ends without a credential", () => {
       "has none",
       "model-sign-in-no-flow",
       () => Promise.reject(new ConnectionAuthorizationRequiredError("docs")),
+      "The turn got no Docs API credential.",
     ],
     [
       "sees the provider reject it twice",
       "model-sign-in-no-flow-rejected",
       () => Promise.resolve({ token: "docs-token" }),
+      "Docs API rejected the credential.",
     ],
   ])(
     "fails the turn without a card when a credential without a sign-in flow %s",
-    async (_case, agentName, getToken: () => Promise<TokenResult>) => {
+    async (_case, agentName, getToken: () => Promise<TokenResult>, message) => {
       const docs = defineModel({
         auth: { displayName: "Docs API", getToken },
         authKey: "docs",
@@ -375,9 +386,7 @@ describe("a model sign-in that ends without a credential", () => {
         async (session) => {
           const settled = await session.stream.nextUntil("refusal", isTurnSettled);
           expect(settled.filter(isSignInOpened)).toEqual([]);
-          expect(turnSettled(settled)).toMatchObject(
-            authorizationFailed("The turn got no Docs API credential."),
-          );
+          expect(turnSettled(settled)).toMatchObject(authorizationFailed(message));
         },
       );
     },
@@ -499,7 +508,7 @@ function billingProvider(
     readonly refresh?: string;
     readonly failCompletion?: string;
     readonly rejectEveryToken?: boolean;
-    readonly outage?: "getToken" | "refresh" | "create" | "create-output";
+    readonly outage?: "getToken" | "refresh" | "create" | "create-output" | "create-async";
   } = {},
 ): BillingProvider {
   let stored = initial.token;
@@ -548,6 +557,8 @@ function billingProvider(
       create: ({ token }) => {
         if (initial.outage === "create") throw new Error("Missing billing region.");
         if (initial.outage === "create-output") return undefined as never;
+        if (initial.outage === "create-async")
+          return Promise.resolve(billedModel(billing, token, false)) as never;
         return billedModel(billing, token, initial.rejectEveryToken === true);
       },
       id: "billing/claude",

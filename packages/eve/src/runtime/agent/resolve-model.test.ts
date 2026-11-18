@@ -133,6 +133,14 @@ describe("dynamic runtime model resolution", () => {
     expect(model).toBe("eve-mock/dynamic-subagent");
   });
 
+  it("refuses a defineModel reference without its definition, so the project's credential never runs it", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    await expect(
+      resolveRuntimeModelReference({ credentialed: true, id: "anthropic/claude-sonnet-5" }),
+    ).rejects.toThrow('the "anthropic/claude-sonnet-5" model needs it');
+  });
+
   it("leaves a model id to a custom AI SDK default provider under eve dev", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_DEV", "1");

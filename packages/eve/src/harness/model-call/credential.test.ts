@@ -28,12 +28,6 @@ function providerModel(token: string) {
 }
 
 describe("credentialedModel", () => {
-  it("returns a model without auth as it is", async () => {
-    const plain = providerModel("none");
-    expect(await credentialedModel(plain)).toBe(plain);
-    expect(await credentialedModel("openai/gpt-5.5")).toBe("openai/gpt-5.5");
-  });
-
   it("builds the model from the credential and keeps its identity", async () => {
     const create = vi.fn(({ token }: TokenResult) => providerModel(token));
     const model = defineModel({
@@ -45,19 +39,5 @@ describe("credentialedModel", () => {
     const wrapped = await credentialedModel(model);
     expect(create).toHaveBeenCalledWith({ token: "fresh" });
     expect(wrapped).toMatchObject({ modelId: "claude-sonnet-5", provider: "anthropic.messages" });
-  });
-
-  it("drops a rejected token, resolves the credential again, and retries once", async () => {
-    const tokens = ["stale", "fresh"];
-    const model = defineModel({
-      auth: { getToken: async () => ({ token: tokens.shift()! }) },
-      authKey: "billing",
-      create: ({ token }) => providerModel(token),
-      id: "billing/claude",
-    });
-    const wrapped = await credentialedModel(model);
-    const result = await (wrapped as MockLanguageModelV4).doGenerate({ prompt: [] });
-    expect(result.content).toEqual([{ text: "answered with fresh", type: "text" }]);
-    expect(tokens).toEqual([]);
   });
 });

@@ -11,10 +11,8 @@ import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState } from "#harness/session-machine/state.js";
 import { failTurn, type Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
-import {
-  isConnectionAuthorizationFailedError,
-  isConnectionAuthorizationRequiredError,
-} from "#connections/errors.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { rejectsCredential } from "#harness/model-call/errors.js";
 import type { ModelCredentialFailureCode } from "#harness/model-call/credential.js";
 import {
   handleAuthorizationError,
@@ -96,23 +94,22 @@ export async function stopForSignIn(
   return park(step);
 }
 
-export async function pauseForSignIn(
+export async function pauseForModelSignIn(
   step: Step,
   required: ScopedAuthorizationRequiredError,
 ): Promise<StepResult> {
+  let signIn: Awaited<ReturnType<typeof handleAuthorizationError>>;
   try {
-    return await stopForSignIn(step, await handleAuthorizationError(required));
+    signIn = await handleAuthorizationError(required);
   } catch (refused) {
-    const asked =
-      isConnectionAuthorizationFailedError(refused) ||
-      isConnectionAuthorizationRequiredError(refused) ||
-      refused === required.cause;
+    const asked = isConnectionAuthorizationFailedError(refused) || refused === required.cause;
     const code = asked ? "MODEL_AUTHORIZATION_FAILED" : "MODEL_CREDENTIAL_FAILED";
-    return await failCredential(step, code, refused, required.scoped);
+    return await failModelCredential(step, code, refused, required.scoped);
   }
+  return await stopForSignIn(step, signIn);
 }
 
-export async function failCredential(
+export async function failModelCredential(
   step: Step,
   code: ModelCredentialFailureCode,
   error: unknown,
@@ -138,7 +135,11 @@ function credentialFailureMessage(
 }
 
 function signInFailureMessage(name: string, error: unknown): string {
-  if (!isConnectionAuthorizationFailedError(error)) return `The turn got no ${name} credential.`;
+  if (!isConnectionAuthorizationFailedError(error)) {
+    return rejectsCredential(error)
+      ? `${name} rejected the credential.`
+      : `The turn got no ${name} credential.`;
+  }
   switch (error.reason) {
     case SIGN_IN_DECLINED:
     case "sign_in_cancelled":
@@ -162,7 +163,7 @@ function providerName(view: SessionView, signIn: ScopedAuthorization): string {
     (row) => row.request.signIn ?? [],
   );
   const card = cards.findLast((asked) => asked.name === signIn.scope);
-  return signIn.authorization?.displayName ?? card?.displayName ?? displayProperName(signIn.scope);
+  return signIn.authorization.displayName ?? card?.displayName ?? displayProperName(signIn.scope);
 }
 
 export async function enforceBudget(
