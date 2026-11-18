@@ -7,6 +7,7 @@ import {
   type HistoryAction,
   type LiveDevice,
 } from "../../../../../agent/lib/live-config";
+import { isSameOrigin } from "../caller";
 import { findRelay, type Relay } from "./relay";
 
 export const dynamic = "force-dynamic";
@@ -27,9 +28,9 @@ export async function GET(request: Request) {
     return new Response("Expected ?session=<id>&device=browser|desktop", { status: 400 });
   }
 
-  let relay: Relay | null;
+  let relay: Relay | null = null;
   try {
-    relay = await findRelay(request, session, device);
+    if (isSameOrigin(request)) relay = await findRelay(request, session, device);
   } catch (error) {
     console.error("Finding the live view relay failed:", error);
     relay = null;

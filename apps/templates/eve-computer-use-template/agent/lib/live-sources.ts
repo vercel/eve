@@ -2,17 +2,21 @@
  * The relay on the sandbox's one public port. Only the web app's /api/live route connects to it,
  * with a token it reads from the sandbox; browsers never see the token or this address. It
  * checks the token, then forwards the WebSocket to a local stream without an Origin, which
- * agent-browser and screen-relay reject unless it is loopback. It is plain Node with no
- * dependencies, written without template interpolation so it embeds verbatim:
+ * agent-browser rejects unless it is loopback. It is plain Node with no dependencies, written
+ * without template interpolation so it embeds verbatim:
  *
  * - `/browser?token=`: agent-browser's stream for the browser session.
  * - `/desktop?token=`: screen-relay's `/stream` for the desktop, H.264 in its `nsl1` protocol.
+ *   screen-relay listens on another loopback address so it requires a token of its own, which
+ *   the relay reads from screen-relay's token file and offers as the `bearer.<token>` WebSocket
+ *   subprotocol, as screen-relay's own viewer does; a page open in the sandbox's browsers can't
+ *   reach the desktop without it.
  * - `POST /browser/navigate?token=&action=back|forward|reload`: the browser's history buttons,
  *   which agent-browser's stream has no message for.
  * - `POST /browser/open?token=&url=`: the address bar. Only http(s) URLs are opened.
  *
- * Arguments: <public port> <browser stream port> <desktop stream port> <token file> <version>
- * <browser session>.
+ * Arguments: <public port> <browser stream port> <desktop stream host> <desktop stream port>
+ * <desktop token file> <token file> <version> <browser session>.
  */
 export const RELAY_SOURCE = String.raw`
 const http = require("node:http");
@@ -21,12 +25,22 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 
-const [, , PUBLIC_PORT, BROWSER_PORT, DESKTOP_PORT, TOKEN_FILE, VERSION, BROWSER_SESSION] = process.argv;
+const [, , PUBLIC_PORT, BROWSER_PORT, DESKTOP_HOST, DESKTOP_PORT, DESKTOP_TOKEN_FILE, TOKEN_FILE, VERSION, BROWSER_SESSION] = process.argv;
 const token = crypto.randomBytes(24).toString("hex");
+// screen-relay rotates its token each time it starts, so it is read per connection.
+const desktopToken = () => fs.readFileSync(DESKTOP_TOKEN_FILE, "utf8").trim();
 const upstreams = {
-  "/browser": { port: Number(BROWSER_PORT), path: "/" },
-  "/desktop": { port: Number(DESKTOP_PORT), path: "/stream" },
+  "/browser": { host: "127.0.0.1", port: Number(BROWSER_PORT), path: "/" },
+  "/desktop": { host: DESKTOP_HOST, port: Number(DESKTOP_PORT), path: "/stream", token: desktopToken },
 };
+
+function parse(req) {
+  try {
+    return new URL(req.url, "http://relay");
+  } catch {
+    return null;
+  }
+}
 const NAVIGATION = new Set(["back", "forward", "reload"]);
 
 function authorized(url) {
@@ -36,7 +50,8 @@ function authorized(url) {
 }
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, "http://relay");
+  const url = parse(req);
+  if (url === null) { res.writeHead(400); res.end(); return; }
   if (url.pathname === "/health") { res.writeHead(200); res.end(); return; }
   if (req.method === "POST" && url.pathname === "/browser/navigate") {
     const action = url.searchParams.get("action");
@@ -65,15 +80,26 @@ const server = http.createServer((req, res) => {
 });
 
 server.on("upgrade", (req, socket, head) => {
-  const url = new URL(req.url, "http://relay");
-  const target = upstreams[url.pathname];
+  socket.on("error", () => socket.destroy());
+  const url = parse(req);
+  const target = url === null ? undefined : upstreams[url.pathname];
   if (target === undefined || !authorized(url)) {
     socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
+  let bearer = null;
+  try {
+    if (target.token) bearer = "bearer." + target.token();
+  } catch {
+    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    return;
+  }
   url.searchParams.delete("token");
-  const upstream = net.connect(target.port, "127.0.0.1", () => {
-    const headers = Object.entries(req.headers).filter(([key]) => key !== "origin" && key !== "host");
+  const upstream = net.connect(target.port, target.host, () => {
+    const headers = Object.entries(req.headers)
+      .filter(([key]) => key !== "origin" && key !== "host" && key !== "authorization")
+      .map(([key, value]) => (bearer !== null && key === "sec-websocket-protocol" ? [key, value + ", " + bearer] : [key, value]));
+    // screen-relay only answers a loopback Host, whichever loopback address it listens on.
     upstream.write("GET " + target.path + url.search + " HTTP/1.1\r\nhost: 127.0.0.1:" + target.port + "\r\n" + headers.map(([k, v]) => k + ": " + v).join("\r\n") + "\r\n\r\n");
     upstream.write(head);
     socket.pipe(upstream);
@@ -82,6 +108,8 @@ server.on("upgrade", (req, socket, head) => {
   upstream.on("error", () => socket.destroy());
   socket.on("error", () => upstream.destroy());
 });
+
+server.on("clientError", (error, socket) => socket.destroy());
 
 server.listen(Number(PUBLIC_PORT), "0.0.0.0", () => {
   fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token, version: VERSION }), { mode: 0o600 });

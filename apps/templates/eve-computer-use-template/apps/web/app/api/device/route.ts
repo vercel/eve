@@ -1,5 +1,7 @@
 import { experimental_decide as decide } from "ai";
 
+import { authorize, isSameOrigin } from "../caller";
+
 import {
   DEFAULT_DEVICE,
   DEVICES,
@@ -24,6 +26,16 @@ const DECISION_MODEL = "baseten/elephant-1";
  * times out, it answers the default device with `"fallback": true`, so a chat always starts.
  */
 export async function POST(request: Request) {
+  if (!isSameOrigin(request))
+    return Response.json({ error: "Cross-site requests are refused." }, { status: 403 });
+  if (!authorize(request))
+    return Response.json(
+      {
+        error:
+          "Auth is not configured. Replace authorize() in apps/web/app/api/caller.ts with your app's auth provider.",
+      },
+      { status: 401 },
+    );
   const length = Number(request.headers.get("content-length") ?? "0");
   if (!Number.isFinite(length) || length > MAX_BODY_BYTES)
     return Response.json({ error: "The task is too long." }, { status: 413 });

@@ -2,7 +2,7 @@
 
 import { activeTurn } from "eve/events";
 import { useEveAgent } from "eve/react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   DEFAULT_DEVICE,
@@ -58,6 +58,8 @@ export default function Page() {
   // The user stopped a running turn to take control, so handing back resumes the task.
   const [interrupted, setInterrupted] = useState(false);
   const [userDrove, setUserDrove] = useState(false);
+  // Bumped by New chat, so a device choice that returns after it is dropped instead of sent there.
+  const chat = useRef(0);
 
   const busy = agent.status === "busy" || activeTurn(agent.view) !== undefined;
   const activities = useMemo(
@@ -82,8 +84,10 @@ export default function Page() {
     if (!locked) {
       const wanted = picked ?? choice;
       if (wanted === "auto") {
+        const started = chat.current;
         setDeciding(true);
         target = await chooseDevice(text);
+        if (chat.current !== started) return;
         setDeciding(false);
       } else {
         target = wanted;
@@ -134,6 +138,8 @@ export default function Page() {
               setSelected(undefined);
               setControl("agent");
               setChoice("auto");
+              setDeciding(false);
+              chat.current += 1;
               agent.newSession();
             }}
             title="New chat"

@@ -22,13 +22,14 @@ The [directory mounts](https://eve.dev/docs/extensions#override-a-contribution) 
 
 ### Live view and Take Over
 
-The first action on a device starts its live stream in the sandbox (`agent/lib/live.ts`). agent-browser streams the browser's screencast as JPEG frames. [screen-relay](https://github.com/vercel-labs/screen-relay) attaches to the desktop's display and streams it as H.264, which the live view decodes with WebCodecs (`apps/web/app/screen-relay.ts`); watching the desktop needs a browser with H.264 WebCodecs, such as current Chrome, Edge, or Safari. A relay on the sandbox's port 3600 (`agent/lib/live-sources.ts`) sits in front of both and requires a random token it writes inside the sandbox.
+The first action on a device starts its live stream in the sandbox (`agent/lib/live.ts`). agent-browser streams the browser's screencast as JPEG frames. [screen-relay](https://github.com/vercel-labs/screen-relay) attaches to the desktop's display and streams it as H.264, which the live view decodes with WebCodecs (`apps/web/app/screen-relay.ts`); watching the desktop needs a browser with H.264 WebCodecs, such as current Chrome, Edge, or Safari. A relay on the sandbox's port 3600 (`agent/lib/live-sources.ts`) sits in front of both and requires a random token it writes inside the sandbox. screen-relay listens on `127.0.0.2`, so it requires a token of its own, which only the relay reads; a web page open in the sandbox's browsers can reach neither stream.
 
 The browser never connects to the sandbox. It opens `/api/live?session=…&device=…` on the app's own origin, so the app's auth, Deployment Protection, Firewall rules, and rate limits apply. The route (`apps/web/app/api/live/`):
 
-1. Reads the eve session with the caller's own credentials, over a [service binding](https://vercel.com/docs/services/bindings) to the agent (`EVE_URL` in `vercel.ts`). If eve's channel auth refuses the caller, so does the live view.
-2. Takes the sandbox's name from the results of that session's own browser or desktop tools, never from the request or any other tool. It reads back from the session's latest events, so a long session isn't replayed each time a viewer connects.
-3. Reads the relay's token from the sandbox with the project's credentials, connects to the relay, and passes frames out and input in.
+1. Refuses a connection from another site's page, by its `Origin`.
+2. Reads the eve session with the caller's own credentials, over a [service binding](https://vercel.com/docs/services/bindings) to the agent (`EVE_URL` in `vercel.ts`). If eve's channel auth refuses the caller, so does the live view.
+3. Takes the sandbox's name from the results of that session's own browser or desktop tools, never from the request or any other tool, and checks that the sandbox carries the `sessionId` tag eve gives each session's sandbox. Code in the sandbox can shape those results, but can't point the route at another session's sandbox. It reads back from the session's latest events, so a long session isn't replayed each time a viewer connects.
+4. Reads the relay's token from the sandbox with the project's credentials, connects to the relay, and passes frames out and input in.
 
 Neither the token nor the sandbox's address reaches the browser, the model, or session history. A refused connection is closed with code 1008 before anything is sent.
 
@@ -59,7 +60,7 @@ pnpm dev:all
 
 - `eve link` connects this directory to a Vercel project in your team, and pulls AI Gateway and Vercel Sandbox credentials into `.env.local`. Sandboxes run in that project, so pick the team and project you want them billed to.
 - `eve build` prepares the sandbox snapshot, which installs Chrome and the desktop and takes several minutes. Run it again after you change `agent/sandbox.ts`. Without it, the first message builds the snapshot instead, and tool calls that wait more than three minutes for it fail; send the message again once it finishes.
-- `pnpm dev:all` runs the web app and the agent together. Open the local URL it prints.
+- `pnpm dev:all` runs the web app and the agent together on `127.0.0.1:3000`, so other machines on your network can't reach it. Open the local URL it prints.
 
 `pnpm dev:eve` starts only the agent, with the eve terminal UI.
 
@@ -71,7 +72,7 @@ pnpm exec eve deploy
 
 `eve deploy` uses the project `eve link` connected. The deployment's build prepares its own snapshot.
 
-The channel in `agent/channels/eve.ts` uses `placeholderAuth()`, which rejects browser requests in production. Replace it with your app's auth provider before you share the deployment. The live view authorizes viewers through the same channel, so whoever can read a session can watch and drive its sandbox; `none()` makes every session public.
+The channel in `agent/channels/eve.ts` uses `placeholderAuth()`, which rejects browser requests in production. Replace it with your app's auth provider before you share the deployment. The live view authorizes viewers through the same channel, so whoever can read a session can watch and drive its sandbox; `none()` makes every session public. Auto's `/api/device` route doesn't read a session, so `authorize()` in `apps/web/app/api/caller.ts` stands in for it the same way: it refuses production requests until you replace it with the same provider.
 
 ## Customize
 
@@ -89,7 +90,7 @@ The channel in `agent/channels/eve.ts` uses `placeholderAuth()`, which rejects b
 
 - **Allowed sites**: pass `allowedDomains` to `browser({ ... })` in `agent/extensions/browser/extension.ts`.
 - **One device only**: delete the other mount directory and its entry in `agent/lib/devices.ts`.
-- **Auto mode**: change `DECISION_MODEL` in `apps/web/app/api/device/route.ts` to use another [decision model](https://vercel.com/ai-gateway/models?type=evaluation), or edit each device's `criteria` in `agent/lib/devices.ts`. The route is unauthenticated; protect it with your app's auth before you deploy, like the live view.
+- **Auto mode**: change `DECISION_MODEL` in `apps/web/app/api/device/route.ts` to use another [decision model](https://vercel.com/ai-gateway/models?type=evaluation), or edit each device's `criteria` in `agent/lib/devices.ts`.
 
 ## Checks
 

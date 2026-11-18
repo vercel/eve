@@ -13,8 +13,14 @@ import {
 } from "./live-config";
 import { RELAY_SOURCE } from "./live-sources";
 
-/** screen-relay's engine, on loopback without a token; only the relay reaches it. */
+/**
+ * screen-relay's engine. Any listen address other than 127.0.0.1 makes it require a token, so it
+ * listens on another loopback address: only the relay, which reads the token, reaches it.
+ */
+const DESKTOP_STREAM_HOST = "127.0.0.2";
 const DESKTOP_STREAM_PORT = 3601;
+/** Where screen-relay keeps the default session's token, in the sandbox user's state directory. */
+const DESKTOP_TOKEN_FILE = "$HOME/.local/state/screen-relay/default/token";
 /** The display eve's computer-use extension draws the desktop on. */
 const DESKTOP_DISPLAY = ":99";
 
@@ -79,7 +85,7 @@ async function ensureRelay(sandbox: LiveSandbox): Promise<void> {
   });
   await start(
     sandbox,
-    `setsid -f node ${RELAY_PATH} ${RELAY_PORT} ${BROWSER_STREAM_PORT} ${DESKTOP_STREAM_PORT} ${RELAY_TOKEN_FILE} ${RELAY_VERSION} ${BROWSER_SESSION} >/tmp/live-relay.log 2>&1`,
+    `setsid -f node ${RELAY_PATH} ${RELAY_PORT} ${BROWSER_STREAM_PORT} ${DESKTOP_STREAM_HOST} ${DESKTOP_STREAM_PORT} "${DESKTOP_TOKEN_FILE}" ${RELAY_TOKEN_FILE} ${RELAY_VERSION} ${BROWSER_SESSION} >/tmp/live-relay.log 2>&1`,
   );
   for (let attempt = 0; attempt < 50; attempt++) {
     if (await current()) return;
@@ -122,7 +128,11 @@ async function ensureBrowserStream(ctx: ToolContext): Promise<void> {
  */
 async function ensureDesktopStream(sandbox: LiveSandbox): Promise<void> {
   const up = await sandbox.run({
-    command: `curl -sf http://127.0.0.1:${DESKTOP_STREAM_PORT}/capabilities >/dev/null`,
+    command: [
+      `curl -sf --connect-to 127.0.0.1:${DESKTOP_STREAM_PORT}:${DESKTOP_STREAM_HOST}:${DESKTOP_STREAM_PORT}`,
+      `-H "Authorization: Bearer $(cat "${DESKTOP_TOKEN_FILE}")"`,
+      `http://127.0.0.1:${DESKTOP_STREAM_PORT}/capabilities >/dev/null`,
+    ].join(" "),
   });
   if (up.exitCode === 0) return;
   await startComputerUse(sandbox);
@@ -130,7 +140,7 @@ async function ensureDesktopStream(sandbox: LiveSandbox): Promise<void> {
     sandbox,
     [
       "screen-relay down >/dev/null 2>&1 || true",
-      `screen-relay up -d --backend x11 --display ${DESKTOP_DISPLAY} --desktop none --port ${DESKTOP_STREAM_PORT}`,
+      `screen-relay up -d --backend x11 --display ${DESKTOP_DISPLAY} --desktop none --bind ${DESKTOP_STREAM_HOST} --port ${DESKTOP_STREAM_PORT}`,
     ].join("\n"),
   );
 }

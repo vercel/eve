@@ -12,7 +12,7 @@
     "build:web": "next build --turbopack apps/web",
     "dev": "next dev apps/web",
     "dev:eve": "eve dev",
-    "dev:all": "vercel dev --local",
+    "dev:all": "vercel dev --local --listen 127.0.0.1:3000",
     "dev:web": "next dev apps/web",
     "typecheck": "tsc -p apps/web/tsconfig.json"
   },
@@ -25,7 +25,7 @@
     "ai": "7.0.137",
     "eve": "^1.0.0-rc.10",
     "geist": "1.7.2",
-    "next": "16.3.8",
+    "next": "16.4.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "ws": "8.22.0",

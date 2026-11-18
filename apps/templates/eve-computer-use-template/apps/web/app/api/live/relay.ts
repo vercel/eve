@@ -22,7 +22,11 @@ export interface Relay {
   readonly token: string;
 }
 
-/** Only the caller's own credentials, so eve's channel auth decides whether they may read the session. */
+/**
+ * Only the caller's own credentials, so eve's channel auth decides whether they may read the
+ * session. The route has already refused pages on other sites, whose `Origin` `localDev()` can't
+ * see through this server.
+ */
 function callerHeaders(request: Request): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const name of ["authorization", "cookie"]) {
@@ -34,9 +38,10 @@ function callerHeaders(request: Request): Record<string, string> {
 
 /**
  * The relay for a device's live stream in an eve session, if the caller may read that session.
- * The session is the authority: it must authorize the caller, and the results of its own device
- * tools name the sandbox, so a viewer can only reach the sandbox of a session they can already
- * read.
+ * The session is the authority: it must authorize the caller, and its device tools' results say
+ * which sandbox runs the stream. Code in a sandbox can shape those results, so the sandbox must
+ * also carry the `sessionId` tag eve gives each session's sandbox when it creates it: a viewer
+ * only ever reaches the sandbox of a session they can already read.
  */
 export async function findRelay(
   request: Request,
@@ -68,6 +73,7 @@ export async function findRelay(
   }
   if (name === undefined) return null;
   const sandbox = await Sandbox.get({ name });
+  if (sandbox.tags?.sessionId !== sessionId) return null;
   const file = await sandbox.readFileToBuffer({ path: RELAY_TOKEN_FILE });
   if (file === null) return null;
   const { token } = JSON.parse(file.toString("utf8")) as { token: string };
