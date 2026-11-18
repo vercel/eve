@@ -112,7 +112,7 @@ export async function runApprovedCalls(input: {
       if (changedSinceOffered(call, definition)) {
         const message = changedToolMessage(toolName);
         const failed = failedCall({ callId, message, toolName });
-        await reportSignIns(approval, message);
+        await reportSignIns(approval);
         await input.publish(settleCall(failed.result));
         return { settled: [{ part: failed.part }], toolResults: [] };
       }
@@ -124,7 +124,8 @@ export async function runApprovedCalls(input: {
             ...input,
             definition,
             ...(responder !== undefined && { responder }),
-            beforeResult: (failure) => reportSignIns(approval, failure),
+            beforeResult: ({ failure, invoked }) =>
+              reportSignIns(approval, invoked ? failure : undefined),
           },
           "recheck",
         );
@@ -132,7 +133,7 @@ export async function runApprovedCalls(input: {
       const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;
       const message = unavailableToolMessage(toolName, searchable);
       const failed = failedCall({ callId, message, toolName });
-      await reportSignIns(approval, message);
+      await reportSignIns(approval);
       await input.publish(settleCall(failed.result));
       return { settled: [{ part: failed.part }], toolResults: [] };
     }),
