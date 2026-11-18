@@ -147,6 +147,19 @@ describe("inspectApplication cache", () => {
         writeFile(join(appRoot, "jsconfig.json"), '{ "compilerOptions": { "paths": {} } }'),
     ],
     [
+      "a config that tsconfig.json extends",
+      {
+        "tsconfig.json": '{ "extends": "@acme/tsconfig/base.json" }',
+        "node_modules/@acme/tsconfig/package.json": '{ "name": "@acme/tsconfig" }',
+        "node_modules/@acme/tsconfig/base.json": "{}",
+      },
+      (appRoot) =>
+        writeFile(
+          join(appRoot, "node_modules/@acme/tsconfig/base.json"),
+          '{ "compilerOptions": { "paths": {} } }',
+        ),
+    ],
+    [
       "the Node.js conditions",
       {},
       async () => {

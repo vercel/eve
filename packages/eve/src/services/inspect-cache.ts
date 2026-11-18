@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
 import { authoredModuleConditions } from "#internal/authored-module-conditions.js";
 import {
   findAuthoredPackageRoot,
@@ -111,6 +112,7 @@ export async function writeCachedCompile(input: {
     ...sources,
     ...artifacts,
     ...(await projectFiles(project.appRoot)),
+    ...(await resolveTsConfigDependencyPaths(project.appRoot)),
     ...packageManifests([...roots, ...sources]),
   ];
   const stamps = await stampAll(
