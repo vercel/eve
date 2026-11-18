@@ -16,6 +16,7 @@ import { credentialFailureCode, ModelCredentialFailure } from "./errors.js";
 export interface CredentialedModel {
   readonly model: LanguageModel;
   readonly renew?: (rejection: unknown) => Promise<void>;
+  readonly scoped?: ScopedAuthorization;
 }
 
 export async function credentialedModel(model: RuntimeModel): Promise<CredentialedModel> {
@@ -33,6 +34,7 @@ export async function credentialedModel(model: RuntimeModel): Promise<Credential
       },
       model: current,
     }),
+    scoped,
     async renew(rejection) {
       await evictScopedToken(scoped);
       if (renewed) execution.requireAuth(scoped, rejection);

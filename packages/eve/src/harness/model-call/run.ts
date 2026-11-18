@@ -36,7 +36,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { type CredentialedModel, credentialedModel } from "./credential.js";
-import { credentialErrorIn, ModelCredentialFailure } from "./errors.js";
+import { credentialErrorIn, ModelCredentialFailure, refusesCredential } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -113,6 +113,8 @@ export async function runModelStep(
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
+    if (resolved.scoped !== undefined && refusesCredential(error))
+      return await failModelCredential(step, "MODEL_AUTHORIZATION_FAILED", error, resolved.scoped);
     return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 
