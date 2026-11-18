@@ -7,12 +7,12 @@ import { always } from "#tools/approval/policies.js";
 import { z } from "zod";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { contextStorage } from "#context/container.js";
-import { SandboxKey } from "#context/keys.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
-import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import { checkSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { SandboxRunning } from "#sandbox/state.js";
 import { applyValueDelta } from "#shared/value-delta.js";
 import {
   sessionCommandHookToken,
@@ -35,18 +35,18 @@ import {
 import { getWorld } from "#internal/workflow/runtime.js";
 import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 
-const stopStep = vi.hoisted(() => ({ calls: 0, rejects: false }));
+const checkStep = vi.hoisted(() => ({ calls: 0, rejects: false }));
 
 vi.mock("#execution/session/idle-sandbox-step.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#execution/session/idle-sandbox-step.js")>();
   return {
     ...actual,
-    stopIdleSessionSandboxStep: async (
-      input: Parameters<typeof actual.stopIdleSessionSandboxStep>[0],
+    checkSessionSandboxStep: async (
+      input: Parameters<typeof actual.checkSessionSandboxStep>[0],
     ) => {
-      stopStep.calls += 1;
-      if (stopStep.rejects) throw new Error("The idle stop step failed.");
-      return await actual.stopIdleSessionSandboxStep(input);
+      checkStep.calls += 1;
+      if (checkStep.rejects) throw new Error("The sandbox check step failed.");
+      return await actual.checkSessionSandboxStep(input);
     },
   };
 });
@@ -55,7 +55,7 @@ vi.setConfig({ testTimeout: 60_000 });
 
 afterEach(() => {
   vi.useRealTimers();
-  stopStep.rejects = false;
+  checkStep.rejects = false;
 });
 
 type TestAppDescriptor = NonNullable<Parameters<typeof createTestRuntime>[0]>;
@@ -95,6 +95,58 @@ function hookModule(slug: string, hook: HookDefinition) {
   return { logicalPath: `hooks/${slug}.ts`, loadNamespace: async () => ({ default: hook }) };
 }
 
+function toolModule(slug: string, tool: object) {
+  return { logicalPath: `tools/${slug}.ts`, loadNamespace: async () => ({ default: tool }) };
+}
+
+function keepRunningTool(forMs: number) {
+  return toolModule(
+    "keep_running",
+    defineTool({
+      description: "Keep the sandbox running for the export.",
+      execute: async (_input, ctx) => {
+        await (await ctx.getSandbox()).keepRunning({ forMs, while: "true" });
+        return { kept: true };
+      },
+      inputSchema: z.object({}).passthrough(),
+    }),
+  );
+}
+
+function deployTool() {
+  return toolModule(
+    "deploy",
+    defineTool({
+      approval: { request: always() },
+      description: "Deploy the service.",
+      execute: async () => ({ deployed: true }),
+      inputSchema: z.object({}).passthrough(),
+    }),
+  );
+}
+
+function calls(...toolNames: readonly string[]) {
+  return (prompt: string): StreamResult => {
+    const next = toolNames.find((name) => !prompt.includes(`"toolName":"${name}"`));
+    return next === undefined
+      ? textStreamResult("Done.")
+      : toolCallsStreamResult([{ input: "{}", toolCallId: `call_${next}`, toolName: next }]);
+  };
+}
+
+function keepRunningOnTurns(forMs: number) {
+  return hookModule(
+    "keep-running",
+    defineHook({
+      events: {
+        async "turn.started"(_event, ctx) {
+          await (await ctx.getSandbox()).keepRunning({ forMs, while: "true" });
+        },
+      },
+    }),
+  );
+}
+
 function sandboxOnTurns(opens: (turn: number) => boolean = () => true) {
   let turn = 0;
   return hookModule(
@@ -110,13 +162,17 @@ function sandboxOnTurns(opens: (turn: number) => boolean = () => true) {
   );
 }
 
-async function stopStepCount(
+async function checkStepCount(
   host: TestSessionHostKind,
   runId: string,
 ): Promise<number | undefined> {
   if (host !== "workflow") return undefined;
   const steps = await (await getWorld()).steps.list({ runId });
-  return steps.data.filter((step) => step.stepName.endsWith("//stopIdleSessionSandboxStep")).length;
+  return steps.data.filter((step) => step.stepName.endsWith("//checkSessionSandboxStep")).length;
+}
+
+async function checkStepsRun(host: TestSessionHostKind, runId: string): Promise<number> {
+  return (await checkStepCount(host, runId)) ?? checkStep.calls;
 }
 
 async function withSession(
@@ -241,7 +297,7 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
         await settle();
 
         expect(session.events()).toEqual([]);
-        expect(await stopStepCount(host, session.id)).toBe(host === "workflow" ? 0 : undefined);
+        expect(await checkStepCount(host, session.id)).toBe(host === "workflow" ? 0 : undefined);
       },
     );
   });
@@ -288,7 +344,7 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
         name: `idle-failed-stop-${host}`,
         sandboxIdle: {
           idleTimeoutMs: 0,
-          onSessionIdle: async () => {
+          onStop: async () => {
             throw new Error("The sandbox service is unavailable.");
           },
         },
@@ -302,7 +358,7 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
         await settle();
 
         expect(session.events()).toEqual(["definition", "start", "idle"]);
-        expect(await stopStepCount(host, session.id)).toBe(host === "workflow" ? 1 : undefined);
+        expect(await checkStepCount(host, session.id)).toBe(host === "workflow" ? 1 : undefined);
       },
     );
   });
@@ -535,69 +591,165 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
     );
   });
 
-  it("keeps the idle sandbox running while a background command runs, checking again after a growing wait, and stops it once the command exits", async () => {
-    let commandRunning = true;
+  it.each([
+    { check: "passes", exitCode: 0, stops: false },
+    { check: "fails", exitCode: 1, stops: true },
+  ])(
+    "decides from a keepRunning() check whether to stop the idle sandbox when the check $check",
+    async ({ exitCode, stops }) => {
+      await withSession(
+        host,
+        {
+          input: { message: "Alice starts the nightly export." },
+          modules: [keepRunningOnTurns(60 * 60_000)],
+          name: `idle-keep-running-${exitCode}-${host}`,
+          sandboxIdle: { idleTimeoutMs: 0 },
+          sandboxRun: () => ({ exitCode, stderr: "", stdout: "" }),
+        },
+        async (session) => {
+          const before = await checkStepsRun(host, session.id);
+          await session.nextTurn();
+          await vi.waitFor(
+            async () => expect(await checkStepsRun(host, session.id)).toBeGreaterThan(before),
+            { timeout: 10_000 },
+          );
+          await settle();
+
+          expect(session.events()).toEqual(
+            stops ? ["definition", "start", "idle"] : ["definition", "start"],
+          );
+        },
+      );
+    },
+  );
+
+  it("checks a kept sandbox while a turn waits for an approval, never stops it then, and stops it once the turn ends", async () => {
+    let attached = 0;
     await withSession(
       host,
       {
-        input: { message: "Alice starts the nightly export in the background." },
-        modules: [
-          hookModule(
-            "background",
-            defineHook({
-              events: {
-                async "turn.started"(_event, ctx) {
-                  await ctx.getSandbox();
-                  await contextStorage.getStore()?.get(SandboxKey)?.holdForBackgroundCommand?.();
-                },
-              },
-            }),
-          ),
-        ],
-        name: `idle-background-${host}`,
-        sandboxIdle: { idleTimeoutMs: 0 },
-        sandboxRun: () => ({ exitCode: commandRunning ? 0 : 1, stderr: "", stdout: "" }),
+        agent: scriptedAgent(calls("keep_running", "deploy")),
+        input: { message: "Alice asks to deploy the api service after the export." },
+        modules: [keepRunningTool(5_000), deployTool()],
+        name: `idle-keep-running-approval-${host}`,
+        sandboxIdle: {
+          idleTimeoutMs: 0,
+          onAttach: async () => {
+            attached += 1;
+          },
+        },
       },
       async (session) => {
-        await session.nextTurn();
-        const checks = () => session.events().filter((event) => event === "in-use").length;
-        await vi.waitFor(() => expect(checks()).toBeGreaterThan(1), { timeout: 10_000 });
-        expect(checks()).toBeLessThan(4);
-        expect(session.events()).not.toContain("idle");
+        const asked = await session.nextUntil((event) => event.type === "interaction.opened");
+        const opened = asked.at(-1);
+        if (opened?.type !== "interaction.opened") throw new Error("No approval was requested.");
+        await vi.waitFor(() => expect(attached).toBeGreaterThan(0), { timeout: 15_000 });
+        await settle();
+        expect(session.events()).toEqual(["definition", "start"]);
 
-        commandRunning = false;
-        await vi.waitFor(() => expect(session.events().at(-1)).toBe("idle"), { timeout: 15_000 });
-        expect(session.events()).not.toContain("resume");
+        await session.answer(opened.data.interactionId);
+        const resumed = await session.nextUntil((event) => event.type === "turn.settled");
+        expect(resumed.at(-1)).toMatchObject({ data: { outcome: "completed" } });
+        await vi.waitFor(() => expect(session.events()).toEqual(["definition", "start", "idle"]));
       },
     );
   });
 
-  it("stops the idle sandbox once backgroundTimeoutMs has passed, while the command still runs", async () => {
+  it("cancels a turn that waits for an approval while a keepRunning() call is in effect", async () => {
     await withSession(
       host,
       {
-        input: { message: "Alice starts a preview server in the background." },
-        modules: [
-          hookModule(
-            "background",
-            defineHook({
-              events: {
-                async "turn.started"(_event, ctx) {
-                  await ctx.getSandbox();
-                  await contextStorage.getStore()?.get(SandboxKey)?.holdForBackgroundCommand?.();
-                },
+        agent: scriptedAgent(calls("keep_running", "deploy")),
+        input: { message: "Alice asks to deploy the api service after the export." },
+        modules: [keepRunningTool(60_000), deployTool()],
+        name: `idle-keep-running-cancel-${host}`,
+        sandboxIdle: { idleTimeoutMs: 0 },
+      },
+      async (session) => {
+        await session.nextUntil((event) => event.type === "interaction.opened");
+        await settle();
+        await session.cancel();
+
+        const settled = await session.nextUntil((event) => event.type === "turn.settled");
+        expect(settled.at(-1)).toMatchObject({ data: { outcome: "cancelled" } });
+      },
+    );
+  });
+
+  it("times a task wait out on time while a keepRunning() call is in effect", async () => {
+    const release = Promise.withResolvers<void>();
+    const timedOut = Promise.withResolvers<"timed out">();
+    await withSession(
+      host,
+      {
+        agent: scriptedAgent((prompt, firstUser) => {
+          if (firstUser.includes("CHILD:")) return calls("slow_export")(prompt);
+          if (prompt.includes("Stopped waiting after 2s")) timedOut.resolve("timed out");
+          if (!prompt.includes('"toolName":"keep_running"')) return calls("keep_running")(prompt);
+          if (!prompt.includes('"toolName":"agent"'))
+            return toolCallsStreamResult([
+              {
+                input: JSON.stringify({ message: "CHILD: run the export" }),
+                toolCallId: "call_agent",
+                toolName: "agent",
               },
+            ]);
+          if (!prompt.includes('"toolName":"eve__task_wait"'))
+            return toolCallsStreamResult([
+              {
+                input: JSON.stringify({ timeoutSeconds: 2 }),
+                toolCallId: "call_wait",
+                toolName: "eve__task_wait",
+              },
+            ]);
+          return textStreamResult("The export is still running.");
+        }),
+        input: { message: "Alice starts the export and waits briefly for it." },
+        modules: [
+          keepRunningTool(60_000),
+          toolModule(
+            "slow_export",
+            defineTool({
+              description: "Run the export.",
+              execute: async () => {
+                await release.promise;
+                return { exported: true };
+              },
+              inputSchema: z.object({}).passthrough(),
             }),
           ),
         ],
-        name: `idle-background-expired-${host}`,
-        sandboxIdle: { backgroundTimeoutMs: 1_500, idleTimeoutMs: 0 },
+        name: `idle-keep-running-task-wait-${host}`,
+        sandboxIdle: { idleTimeoutMs: 0 },
+      },
+      async () => {
+        try {
+          const late = new Promise<"late">((resolve) => setTimeout(() => resolve("late"), 20_000));
+
+          await expect(Promise.race([timedOut.promise, late])).resolves.toBe("timed out");
+        } finally {
+          release.resolve();
+        }
+      },
+    );
+  });
+
+  it("stops the idle sandbox once forMs has passed, while its check still passes", async () => {
+    await withSession(
+      host,
+      {
+        input: { message: "Alice starts a preview server." },
+        modules: [keepRunningOnTurns(5_000)],
+        name: `idle-keep-running-expired-${host}`,
+        sandboxIdle: { idleTimeoutMs: 0 },
         sandboxRun: () => ({ exitCode: 0, stderr: "", stdout: "" }),
       },
       async (session) => {
         await session.nextTurn();
 
-        await vi.waitFor(() => expect(session.events().at(-1)).toBe("idle"), { timeout: 15_000 });
+        await vi.waitFor(() => expect(session.events()).toEqual(["definition", "start", "idle"]), {
+          timeout: 15_000,
+        });
       },
     );
   });
@@ -646,95 +798,150 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
   });
 });
 
-describe("idle sandbox stop step", () => {
-  it("aborts the provider call, returns, and clears the marker when the provider never finishes stopping", async () => {
-    const called = Promise.withResolvers<AbortSignal | undefined>();
+describe("idle sandbox check step", () => {
+  async function startedSession(sessionId: string, running: SandboxRunning) {
+    const serializedContext = {
+      ...buildSerializedContext({ channelKind: "http" }),
+      "eve.sessionId": sessionId,
+    };
+    const checkpoint: HarnessSession = {
+      compaction: {},
+      continuationToken: sessionId,
+      history: [],
+      sessionId,
+    };
+    await prewarmSessionStep({
+      serializedContext,
+      sessionState: createDurableSessionState({ session: checkpoint }),
+    });
+    const sessionState = createDurableSessionState({
+      session: { ...checkpoint, sandboxState: { running, session: null } },
+    });
+    return async (input: { readonly now: number; readonly stop: boolean }) => {
+      const { stateDelta } = await checkSessionSandboxStep({
+        ...input,
+        serializedContext,
+        sessionState,
+      });
+      const next =
+        stateDelta.sessionState === undefined
+          ? sessionState
+          : applyValueDelta(sessionState, stateDelta.sessionState);
+      return readDurableSession(next).sandboxState?.running;
+    };
+  }
+
+  it.each([
+    {
+      bound: 120_000,
+      name: "a step that may stop, and clears the marker",
+      running: { idleTimeoutMs: 60_000 },
+      stop: true,
+    },
+    {
+      bound: 30_000,
+      name: "a step that only checks, and leaves the state as it was",
+      running: { idleTimeoutMs: 60_000, keepRunning: [{ until: 2_000_000, while: "true" }] },
+      stop: false,
+    },
+  ])(
+    "aborts a provider that never finishes after its bound for $name",
+    async ({ bound, running, stop }) => {
+      const called = Promise.withResolvers<AbortSignal | undefined>();
+      const hang = async (_sessionId: string, signal: AbortSignal | undefined) => {
+        called.resolve(signal);
+        await new Promise<never>(() => {});
+      };
+      const sessionId = `idle-check-hung-${bound}`;
+      const runtime = await createTestRuntime({
+        sandboxIdle: {
+          idleTimeoutMs: 60_000,
+          onAttach: stop ? undefined : hang,
+          onStop: stop ? hang : undefined,
+        },
+      });
+      await runtime.run(async () => {
+        const check = await startedSession(sessionId, running);
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+        const step = check({ now: 1_000_000, stop });
+        const signal = await called.promise;
+        await vi.advanceTimersByTimeAsync(bound - 1);
+        expect(signal?.aborted).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+
+        await expect(step).resolves.toEqual(stop ? undefined : running);
+        expect(signal?.aborted).toBe(true);
+        expect(runtime.sandboxEvents).toEqual(
+          stop
+            ? [`definition:${sessionId}`, `start:${sessionId}`, `idle:${sessionId}`]
+            : [`definition:${sessionId}`, `start:${sessionId}`],
+        );
+      });
+    },
+  );
+
+  const now = 1_000_000;
+  const inEffect = { idleTimeoutMs: 60_000, keepRunning: [{ until: now + 60_000, while: "true" }] };
+  const ended = { idleTimeoutMs: 60_000, keepRunning: [{ until: now, while: "true" }] };
+  it.each([
+    {
+      name: "a failed check with a record in effect",
+      fails: "attach",
+      running: inEffect,
+      stop: true,
+      kept: true,
+    },
+    {
+      name: "a failed stop with a record whose check just failed",
+      fails: "stop",
+      running: inEffect,
+      stop: true,
+      kept: true,
+    },
+    {
+      name: "a failed check with nothing in effect",
+      fails: "attach",
+      running: ended,
+      stop: true,
+      kept: false,
+    },
+    {
+      name: "a failed stop with nothing in effect",
+      fails: "stop",
+      running: ended,
+      stop: true,
+      kept: false,
+    },
+    {
+      name: "a failed check during a turn with nothing in effect",
+      fails: "attach",
+      running: ended,
+      stop: false,
+      kept: true,
+    },
+  ])("follows the failure rule after $name", async ({ fails, kept, running, stop }) => {
+    const unavailable = async () => {
+      throw new Error("The sandbox service is unavailable.");
+    };
     const runtime = await createTestRuntime({
       sandboxIdle: {
-        idleTimeoutMs: 0,
-        onSessionIdle: async (_sessionId, signal) => {
-          called.resolve(signal);
-          await new Promise<never>(() => {});
-        },
-      },
-    });
-    await runtime.run(async () => {
-      const serializedContext = {
-        ...buildSerializedContext({ channelKind: "http" }),
-        "eve.sessionId": "idle-stop-hung-provider",
-      };
-      const checkpoint: HarnessSession = {
-        compaction: {},
-        continuationToken: "idle-stop-hung-provider",
-        history: [],
-        sandboxState: { running: { idleTimeoutMs: 0 }, session: null },
-        sessionId: serializedContext["eve.sessionId"],
-      };
-      const sessionState = createDurableSessionState({ session: checkpoint });
-      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-
-      const step = stopIdleSessionSandboxStep({ serializedContext, sessionState });
-      const signal = await called.promise;
-      expect(signal?.aborted).toBe(false);
-      await vi.advanceTimersByTimeAsync(120_000);
-      const { stateDelta } = await step;
-
-      expect(signal?.aborted).toBe(true);
-      const next = applyValueDelta(sessionState, stateDelta.sessionState);
-      expect(readDurableSession(next).sandboxState).not.toHaveProperty("running");
-      expect(runtime.sandboxEvents).toEqual([`idle:${checkpoint.sessionId}`]);
-    });
-  });
-
-  it("checks again when the stop fails while a background command may be running, and gives up once its time is up", async () => {
-    const runtime = await createTestRuntime({
-      sandboxIdle: {
-        idleTimeoutMs: 0,
-        onSessionIdle: async () => {
-          throw new Error("The sandbox service is unavailable.");
-        },
+        idleTimeoutMs: 60_000,
+        onAttach: fails === "attach" ? unavailable : undefined,
+        onStop: fails === "stop" ? unavailable : undefined,
       },
       sandboxRun: () => ({ exitCode: 1, stderr: "", stdout: "" }),
     });
     await runtime.run(async () => {
-      const serializedContext = {
-        ...buildSerializedContext({ channelKind: "http" }),
-        "eve.sessionId": "idle-stop-failed-while-held",
-      };
-      const stepWith = async (backgroundUntil: number) => {
-        const checkpoint: HarnessSession = {
-          compaction: {},
-          continuationToken: "idle-stop-failed-while-held",
-          history: [],
-          sandboxState: { running: { backgroundUntil, idleTimeoutMs: 0 }, session: null },
-          sessionId: serializedContext["eve.sessionId"],
-        };
-        const sessionState = createDurableSessionState({ session: checkpoint });
-        const { inUse, stateDelta } = await stopIdleSessionSandboxStep({
-          serializedContext,
-          sessionState,
-        });
-        const next =
-          stateDelta.sessionState === undefined
-            ? sessionState
-            : applyValueDelta(sessionState, stateDelta.sessionState);
-        return { inUse, running: readDurableSession(next).sandboxState?.running };
-      };
+      const check = await startedSession(`idle-check-failed-${fails}-${String(stop)}`, running);
 
-      await expect(stepWith(Date.now() + 60_000)).resolves.toEqual({
-        inUse: true,
-        running: { backgroundUntil: expect.any(Number), idleTimeoutMs: 0 },
-      });
-      await expect(stepWith(Date.now() - 1)).resolves.toEqual({
-        inUse: undefined,
-        running: undefined,
-      });
+      await expect(check({ now, stop })).resolves.toEqual(kept ? running : undefined);
     });
   });
 
   it("keeps the session running when the step rejects, and tries again only after the next turn", async () => {
-    stopStep.calls = 0;
-    stopStep.rejects = true;
+    checkStep.calls = 0;
+    checkStep.rejects = true;
     await withSession(
       "in-process",
       {
@@ -745,17 +952,17 @@ describe("idle sandbox stop step", () => {
       },
       async (session) => {
         await session.nextTurn();
-        await vi.waitFor(() => expect(stopStep.calls).toBe(1));
+        await vi.waitFor(() => expect(checkStep.calls).toBe(1));
 
         await session.cancel();
         await settle();
-        expect(stopStep.calls).toBe(1);
+        expect(checkStep.calls).toBe(1);
 
-        stopStep.rejects = false;
+        checkStep.rejects = false;
         await session.send("Alice asks for a short greeting.");
         await session.nextTurn();
         await vi.waitFor(() => expect(session.events()).toEqual(["definition", "start", "idle"]));
-        expect(stopStep.calls).toBe(2);
+        expect(checkStep.calls).toBe(2);
       },
     );
   });

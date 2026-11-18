@@ -181,6 +181,7 @@ export class ActiveTurn {
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
+      await this.input.whileWaiting?.(Promise.race(timers));
       const elapsed = await this.waitForInboxOrTimer(timers);
       if (elapsed !== undefined) return { callId: elapsed, kind: "timeout" };
       const payload = await this.input.inbox.next();

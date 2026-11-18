@@ -6,6 +6,7 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { ActiveTurn } from "#execution/session/active-turn.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
@@ -2036,6 +2037,61 @@ describe("SessionExecution checkpoints", () => {
 });
 
 const PUBLISHED = "test.published";
+
+describe("ActiveTurn.nextRuntimeEvent", () => {
+  function turnWith(
+    inbox: SessionInbox,
+    whileWaiting: (turnTimer: Promise<unknown>) => Promise<void>,
+  ): ActiveTurn {
+    const sessionState = state("");
+    return new ActiveTurn(
+      {
+        cursor: createCursor({ inbox, sessionState }),
+        host: WORKFLOW_TURN_HOST,
+        inbox,
+        queue: new SessionInputQueue([]),
+        sessionId: sessionState.sessionId,
+        whileWaiting,
+      },
+      { caller: undefined, principal: "alice" },
+    );
+  }
+
+  it("returns a queued runtime event without waiting on whileWaiting", async () => {
+    const result: SessionInboxPayload = { kind: "runtime-action-result", results: [] };
+    const whileWaiting = vi.fn(async () => {});
+    const turn = turnWith({ ...idleInbox(), drain: () => [result] }, whileWaiting);
+    await turn.admitBoundary();
+
+    await expect(turn.nextRuntimeEvent([])).resolves.toEqual(result);
+    expect(whileWaiting).not.toHaveBeenCalled();
+    turn.dispose();
+  });
+
+  it("hands whileWaiting a promise that settles when the turn's timer fires, and not before", async () => {
+    const timer = Promise.withResolvers<string>();
+    let handed: Promise<unknown> | undefined;
+    const whileWaiting = vi.fn(async (turnTimer: Promise<unknown>) => {
+      handed = turnTimer;
+      await turnTimer;
+    });
+    const turn = turnWith(idleInbox(), whileWaiting);
+    const next = turn.nextRuntimeEvent([timer.promise]);
+    await vi.waitFor(() => expect(whileWaiting).toHaveBeenCalledOnce());
+    let settled = false;
+    void handed?.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    timer.resolve("wait-call");
+
+    await expect(next).resolves.toEqual({ callId: "wait-call", kind: "timeout" });
+    expect(settled).toBe(true);
+    turn.dispose();
+  });
+});
 
 function publishIntoContext(): void {
   const append = (context: Record<string, unknown>, entry: string) => ({

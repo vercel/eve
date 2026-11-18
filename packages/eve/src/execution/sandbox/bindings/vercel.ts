@@ -120,23 +120,25 @@ export function createVercelSandbox(
         signal,
       });
     },
-    async onSessionIdle(context, state, { inUse, signal }) {
+    async attach(context, state, { signal }) {
       const sandbox = await getNamedVercelSandbox({
         createOptions: signal === undefined ? createOptions : { ...createOptions, signal },
         sandboxModule: await loadSandboxModule(),
         sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
       });
-      if (sandbox === null) return;
-      try {
-        if (
-          sandbox.status === "running" &&
-          (await inUse?.(createVercelConnection(sandbox, sandbox.currentSession())))
-        )
-          return;
-        await stopVercelSandbox(sandbox, signal);
-      } catch (error) {
-        if (!isVercelSandboxMissingError(error)) throw error;
-      }
+      if (sandbox === null || (sandbox.status !== "running" && sandbox.status !== "pending"))
+        return null;
+      const { spawn } = createVercelConnection(sandbox, sandbox.currentSession());
+      return {
+        spawn,
+        async stop(options) {
+          try {
+            await stopVercelSandbox(sandbox, options?.signal);
+          } catch (error) {
+            if (!isVercelSandboxMissingError(error)) throw error;
+          }
+        },
+      };
     },
     async prepare(context) {
       if (context.isEmpty && createOptions.source === undefined) return {};
@@ -516,9 +518,6 @@ function createVercelConnection(
     extensions: {
       name: sandbox.name,
       setNetworkPolicy: createVercelNetworkPolicySetter(sandbox),
-    },
-    async keepAlive({ durationMs }) {
-      await deadline.keepRunning(durationMs);
     },
     async readFile(options) {
       await deadline.renew();

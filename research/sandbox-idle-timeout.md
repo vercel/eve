@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/6553
 status: implemented
-last_updated: "2026-11-17"
+last_updated: "2026-11-18"
 ---
 
 # Sandbox idle timeout
@@ -92,7 +92,7 @@ Where the option goes:
 - The value is a non-negative finite number or `false`. Anything else throws from the environment
   constructor, for every provider.
 - eve owns the option, as it owns `prepare`: a provider's `environment()` never receives it. On a
-  provider without `onSessionIdle()`, eve does nothing with it.
+  provider without `attach()`, eve does nothing with it.
 - The public type is `SandboxIdleTimeoutOption` from `eve/sandbox/provider`. `WithPrepareOption`
   includes it, and `DockerSandboxEnvironmentOptions` and `DefaultSandboxEnvironmentOptions` extend it.
 
@@ -100,40 +100,46 @@ Where the option goes:
 
 ```ts
 // eve/sandbox/provider
-interface SandboxSessionIdleOptions {
+interface SandboxAttachOptions {
   /** Aborted when eve abandons the call. */
   readonly signal?: AbortSignal;
 }
 
 interface SandboxProviderImplementation {
   /**
-   * Stops compute for `ctx.session.id` if it is running, and keeps its files. Never starts or
-   * resumes it. `state` is `null` when the session never recorded it. Must succeed when the
-   * sandbox is already stopped or doesn't exist.
+   * Connects to the sandbox for `ctx.session.id` only when its compute is already running, and
+   * resolves `null` when it is stopped or doesn't exist. Never starts or resumes it, and neither may
+   * the `spawn()` and `stop()` it returns. `state` is `null` when the session never recorded it.
    */
-  onSessionIdle?(
+  attach?(
     ctx: SandboxSessionContext,
     state: Readonly<State> | null,
-    options: SandboxSessionIdleOptions,
-  ): Promise<void>;
+    options: SandboxAttachOptions,
+  ): Promise<Pick<SandboxConnection, "close" | "spawn" | "stop" | "workspaceRoot"> | null>;
+}
+
+interface SandboxConnection {
+  stop(options?: { readonly signal?: AbortSignal }): Promise<void>;
 }
 ```
 
-- The contract needs a new method because the only stop today is `connection.stop()`, and a
-  connection comes from `start()` or `resume()`, which start or resume the sandbox.
-- It has the shape of `onSessionEnd()`: no connection, it finds the sandbox from the session id
-  when `state` is `null`, as when only a subagent opened a shared sandbox, and its third argument
-  carries a `signal`. An implementation can leave that argument out.
-- It is optional. eve doesn't stop a provider without it, so a custom provider behaves as it does
-  today until it adds the method.
-- eve never calls it for a keyed `invokeTool` sandbox, where `ctx.kind` is `"tool-session"`.
+- The contract needs a new method because the only stop is `connection.stop()`, and a connection
+  comes from `start()` or `resume()`, which start or resume the sandbox. `attach()` returns a
+  connection only to compute that is already running, and eve stops the sandbox through it.
+- It finds the sandbox from the session id when `state` is `null`, as `onSessionEnd()` does, as
+  when only a subagent opened a shared sandbox. eve passes `signal` to `attach()` and to the `stop()`
+  it calls, and closes the connection afterwards.
+- It is optional. eve doesn't stop a provider without it, so a custom provider behaves as before
+  until it adds the method.
+- eve never calls it for an `invokeTool` call's sandbox.
+- [Keeping a sandbox running](./sandbox-keep-running.md) uses the same method to run its checks.
 
-| Provider         | `onSessionIdle()`                                                                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Vercel           | Looks the sandbox up by name without resuming it, and stops it if it is running. Both requests take the signal.          |
-| Docker           | Runs `docker stop -t 0` on the session's container, and passes the signal to the command.                                |
-| just-bash        | Not implemented. It has no compute to stop.                                                                              |
-| `DefaultSandbox` | Delegates to the provider it selected, named by its recorded state or, when `state` is `null`, by its prepared artifact. |
+| Provider         | `attach()`                                                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Vercel           | Looks the sandbox up by name without resuming it, with the signal, and connects only to a running or pending session. Its `stop()` ignores only a missing sandbox. |
+| Docker           | Connects only to a running container. Its `stop()` runs `docker stop -t 0` with the signal, and fails unless the container is gone.                                |
+| just-bash        | Not implemented. It has no compute to stop.                                                                                                                        |
+| `DefaultSandbox` | Delegates to the provider it selected, named by its recorded state or, when `state` is `null`, by its prepared artifact.                                           |
 
 ## How it runs
 
@@ -145,9 +151,10 @@ interface SandboxProviderImplementation {
 - **The wait.** When the session is idle and the marker is set, the session's workflow sleeps for
   the window, raced against its inbox. A turn starts the window again. It isn't the
   `sessionTimeoutMs` timer, which ends the session.
-- **The stop.** One awaited step calls `onSessionIdle()`, bounded at 120 seconds, after which eve
-  aborts its `signal`. The step clears the marker whatever the outcome. A failure is logged, and eve
-  doesn't try again before the next turn; the provider's own timeout remains the backstop.
+- **The stop.** One awaited step calls `attach()` and then `stop()` on the connection it returns,
+  bounded at 120 seconds, after which eve aborts its `signal`. When nothing keeps the sandbox
+  running, the step clears the marker whatever the outcome. A failure is logged, and eve doesn't
+  try again before the next turn; the provider's own timeout remains the backstop.
 - **Accepted limits.** A step still running after the stop, such as a cancelled task's, or a sharing
   child's `ctx.continue()` turn, can use the sandbox after the parent stopped it, and resumes it. A
   prewarm marker that isn't recorded yet is lost if the first message both beats the prewarm and
@@ -169,7 +176,7 @@ interface SandboxProviderImplementation {
   containers don't count toward it.
 - **Existing sandboxes** need no migration. A session gets the behavior once it runs on a deployment
   that has it.
-- **Custom providers** don't change until they implement `onSessionIdle()`.
+- **Custom providers** don't change until they implement `attach()`.
 - **Release.** `minor`: one new option and one new optional provider method. The changeset leads
   with the new default, names `idleTimeoutMs: false` as the way back, and says a `turn.settled`
   hook that stops the sandbox is no longer needed.
@@ -179,5 +186,6 @@ interface SandboxProviderImplementation {
 - **Compute during a turn.** eve doesn't stop a sandbox while a turn is open, so a long turn, or one
   waiting on a person, holds it until the provider's timeout. On Vercel that timeout also ends a
   session that is still busy at minute 30. Sizing it by actual use is a separate change.
+  [Keeping a sandbox running](./sandbox-keep-running.md) makes that change.
 - **Snapshot retention.** eve sets no retention on session sandboxes, so snapshots are kept until
   they expire. Keyed `invokeTool` sandboxes already keep only the latest.

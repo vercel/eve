@@ -51,21 +51,27 @@ describe("withRuntimeSandboxLifecycle", () => {
     }
     const target = Object.freeze(new CustomSession());
     const deleteSandbox = vi.fn(async () => {});
+    const keepRunning = vi.fn(async () => ({ until: new Date(60_000) }));
     const stop = vi.fn(async () => {});
 
-    const session = withRuntimeSandboxLifecycle(
-      target as never,
-      deleteSandbox,
+    const session = withRuntimeSandboxLifecycle(target as never, {
+      delete: deleteSandbox,
+      keepRunning,
       stop,
-    ) as CustomSession & {
+    }) as CustomSession & {
       delete(): Promise<void>;
+      keepRunning(options: { forMs: number }): Promise<{ until: Date | null }>;
       stop(): Promise<void>;
     };
 
     expect(session.probe()).toBe("custom-session-ok");
     await session.delete();
+    await expect(session.keepRunning({ forMs: 60_000 })).resolves.toEqual({
+      until: new Date(60_000),
+    });
     await session.stop();
     expect(deleteSandbox).toHaveBeenCalledTimes(1);
+    expect(keepRunning).toHaveBeenCalledExactlyOnceWith({ forMs: 60_000 });
     expect(stop).toHaveBeenCalledTimes(1);
   });
 });

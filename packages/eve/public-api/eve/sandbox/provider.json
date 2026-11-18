@@ -1,5 +1,6 @@
 [
   "SANDBOX_AGENT_ENV",
+  "SandboxAttachOptions",
   "SandboxConnection",
   "SandboxDeleteOptions",
   "SandboxIdentity",
@@ -14,7 +15,6 @@
   "SandboxSessionContext",
   "SandboxSessionEndOptions",
   "SandboxSessionGoneError",
-  "SandboxSessionIdleOptions",
   "SandboxTemplateNotProvisionedError",
   "WithPrepareOption",
   "defineSandboxProvider"

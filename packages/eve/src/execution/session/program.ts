@@ -34,13 +34,15 @@ import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import type { SessionHandoff } from "#execution/session/handoff.js";
 import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
-import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import { checkSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import {
+  planSandboxCheck,
+  sandboxCheckStarted,
+  sandboxTurnStarted,
+  type SandboxSchedule,
+} from "#execution/session/sandbox-schedule.js";
 import type { SandboxRunning } from "#sandbox/state.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
-
-const SANDBOX_IN_USE_RECHECK_MIN_MS = 1_000;
-
-const SANDBOX_IN_USE_RECHECK_MAX_MS = 5 * 60_000;
 
 function createSafeOuterWorkflowError(): Error {
   const error = new Error("Agent workflow failed. Inspect the private session trace for details.");
@@ -241,6 +243,7 @@ async function runSessionLoop(
     inbox,
     queue,
     sessionId: boot.sessionId,
+    whileWaiting: (turnTimer) => checkSandboxWhileWaiting(turnTimer),
   });
   const sessionTimeout = boot.sessionTimeoutControl;
   let prewarming: Promise<void> = Promise.resolve();
@@ -268,55 +271,62 @@ async function runSessionLoop(
   });
 
   let prewarmedSandbox: SandboxRunning | undefined;
-  let idleWindow: Promise<void> | "attempted" | undefined;
-  let inUseChecks = 0;
+  let schedule: SandboxSchedule = {};
+  let sandboxTimer: { readonly at: number; readonly elapsed: Promise<void> } | undefined;
   const sandboxMayBeRunning = (): SandboxRunning | undefined =>
     readDurableSession(cursor.sessionState).sandboxState?.running ?? prewarmedSandbox;
   const sessionBusy = (): boolean =>
     queue.pendingCount > 0 ||
     workingTasks(sessionTaskTable(cursor)).length > 0 ||
     !isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state));
-  const beforeInbox = async (other: Promise<unknown>): Promise<boolean> =>
-    await Promise.race([inbox.whenPending().then(() => false), other.then(() => true)]);
-  const stopSandboxOnceIdle = async (): Promise<void> => {
-    while (!inbox.hasPending()) {
+  const checkSandboxWhileWaiting = async (turnTimer?: Promise<unknown>): Promise<void> => {
+    let turnTimerElapsed = false;
+    const elapse = (): void => {
+      turnTimerElapsed = true;
+    };
+    void turnTimer?.then(elapse, elapse);
+    const interrupted = (): boolean => inbox.hasPending() || turnTimerElapsed;
+    const uninterrupted = async (other: Promise<unknown>): Promise<boolean> => {
+      const interruption =
+        turnTimer === undefined
+          ? inbox.whenPending()
+          : Promise.race([inbox.whenPending(), turnTimer.then(elapse, elapse)]);
+      const proceeds = await Promise.race([interruption.then(() => false), other.then(() => true)]);
+      return proceeds && !interrupted();
+    };
+    while (!interrupted()) {
       if (!prewarmSettled) {
-        if (!(await beforeInbox(prewarming))) return;
+        if (!(await uninterrupted(prewarming))) return;
         continue;
       }
-      const running = sandboxMayBeRunning();
-      if (running === undefined) {
-        idleWindow = undefined;
-        inUseChecks = 0;
+      const plan = planSandboxCheck(schedule, {
+        idle: turnTimer === undefined && !sessionBusy(),
+        now: Date.now(),
+        running: sandboxMayBeRunning(),
+      });
+      if (plan.check === undefined) {
+        schedule = plan.schedule;
+        return;
       }
-      if (running === undefined || idleWindow === "attempted" || sessionBusy()) return;
       if (inbox.awaitingHandover) {
-        if (!(await beforeInbox(inbox.whenHandoverSettled()))) return;
+        if (!(await uninterrupted(inbox.whenHandoverSettled()))) return;
         continue;
       }
-      if (idleWindow === undefined && running.idleTimeoutMs > 0)
-        idleWindow = host.until(Date.now() + running.idleTimeoutMs);
-      if (idleWindow !== undefined && (!(await beforeInbox(idleWindow)) || inbox.hasPending()))
-        return;
-      prewarmedSandbox = undefined;
-      const inUse = await cursor
-        .advance(({ serializedContext, sessionState }) =>
-          stopIdleSessionSandboxStep({ serializedContext, sessionState }),
-        )
-        .then(
-          (stopped) => stopped.inUse === true,
-          () => false,
-        );
-      if (!inUse) {
-        idleWindow = "attempted";
-        return;
+      schedule = plan.schedule;
+      const { at, stop } = plan.check;
+      let due: Promise<unknown> = Promise.resolve();
+      if (at > Date.now()) {
+        if (sandboxTimer?.at !== at) sandboxTimer = { at, elapsed: host.until(at) };
+        due = sandboxTimer.elapsed;
       }
-      const recheckMs = Math.min(
-        SANDBOX_IN_USE_RECHECK_MIN_MS * 2 ** inUseChecks,
-        SANDBOX_IN_USE_RECHECK_MAX_MS,
-      );
-      inUseChecks += 1;
-      idleWindow = host.until(Date.now() + Math.max(running.idleTimeoutMs, recheckMs));
+      if (!(await uninterrupted(due))) return;
+      schedule = sandboxCheckStarted(schedule, plan.check);
+      prewarmedSandbox = undefined;
+      await cursor
+        .advance(({ serializedContext, sessionState }) =>
+          checkSessionSandboxStep({ serializedContext, sessionState, stop, now: at }),
+        )
+        .catch(() => undefined);
     }
   };
 
@@ -331,7 +341,7 @@ async function runSessionLoop(
         ignore,
         inbox,
         queue,
-        whileWaiting: stopSandboxOnceIdle,
+        whileWaiting: checkSandboxWhileWaiting,
       });
       if (next.kind === "prewarm") {
         if (
@@ -383,8 +393,7 @@ async function runSessionLoop(
     const caller = progress.caller;
     const control = turnControl;
     turnControl = undefined;
-    idleWindow = undefined;
-    inUseChecks = 0;
+    schedule = sandboxTurnStarted(schedule);
     progress.turnId =
       payload?.control === undefined
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId

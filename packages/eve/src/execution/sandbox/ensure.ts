@@ -13,8 +13,8 @@ import {
   trackActiveSandboxConnection,
   untrackActiveSandboxConnection,
 } from "#execution/sandbox/active-connections.js";
-import { hasRunningBashCommand } from "#execution/sandbox/bash.js";
-import { createConnectionSession } from "#execution/sandbox/session.js";
+import { createConnectionSession, runConnectionCommand } from "#execution/sandbox/session.js";
+import { withinTimeout } from "#execution/sandbox/within-timeout.js";
 import { isToolSessionId } from "#execution/tool-session/id.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import {
@@ -34,6 +34,7 @@ import {
   resolvePersistedSandboxSessionState,
   resolveRecordedSandboxProvider,
   type SandboxAccess,
+  type SandboxKeepRunning,
   type SandboxSessionEndReason,
   type SandboxSessionState,
   type SandboxState,
@@ -43,13 +44,19 @@ import {
   runWithSandboxConstructorRuntime,
 } from "#shared/sandbox-environment.js";
 import { isSandboxPreparedArtifact, type SandboxDeleteOptions } from "#shared/sandbox-provider.js";
-import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
+import type {
+  RuntimeSandboxSession,
+  SandboxKeepRunningOptions,
+  SandboxKeepRunningResult,
+  SandboxSession,
+} from "#shared/sandbox-session.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
 
 interface EnsureSandboxAccessInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly endsWithCall?: true;
   readonly nodeId: string;
   readonly ownsSandbox?: boolean;
   readonly registry: RuntimeSandboxRegistry;
@@ -63,8 +70,17 @@ export interface EnsuredSandboxAccess extends SandboxAccess {
   end(reason: SandboxSessionEndReason): Promise<void>;
   release(): Promise<void>;
   settle(): Promise<void>;
-  stopIdle(options: { readonly signal: AbortSignal }): Promise<{ readonly inUse: boolean }>;
+  checkRunning(options: {
+    readonly now: number;
+    readonly signal: AbortSignal;
+    readonly stop: boolean;
+  }): Promise<SandboxCheck>;
 }
+
+export type SandboxCheck =
+  | { readonly kind: "not-running" }
+  | { readonly kind: "running"; readonly keepRunning: readonly SandboxKeepRunning[] }
+  | { readonly kind: "stop-failed"; readonly error: unknown };
 
 interface OpenedSandbox {
   readonly closable: boolean;
@@ -72,7 +88,6 @@ interface OpenedSandbox {
   readonly sandbox: RuntimeSandboxSession;
   close(): Promise<void>;
   delete(options?: SandboxDeleteOptions): Promise<void>;
-  keepAlive(durationMs: number): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -80,25 +95,49 @@ const pendingSandboxStarts = new Map<string, Promise<SandboxSessionState | null>
 
 const log = createLogger("execution.sandbox");
 
+const MAX_KEEP_RUNNING_MS = 86_400_000;
+
+const MAX_KEEP_RUNNING_CHECKS = 8;
+
+const MAX_KEEP_RUNNING_CHECK_LENGTH = 1_000;
+
+const KEEP_RUNNING_CHECK_TIMEOUT_MS = 10_000;
+
+function keepRunningCheck(options: SandboxKeepRunningOptions): string {
+  const { forMs, while: check } = options;
+  if (
+    typeof forMs !== "number" ||
+    !Number.isFinite(forMs) ||
+    forMs <= 0 ||
+    forMs > MAX_KEEP_RUNNING_MS
+  )
+    throw new Error(
+      `sandbox.keepRunning() received forMs ${String(forMs)}. Pass a number of milliseconds greater than 0 and at most 86400000 (24 hours), and call keepRunning() again to extend.`,
+    );
+  if (check === undefined) return "true";
+  if (
+    typeof check !== "string" ||
+    check.length === 0 ||
+    check.length > MAX_KEEP_RUNNING_CHECK_LENGTH
+  )
+    throw new Error(
+      `sandbox.keepRunning() received a \`while\` command ${typeof check === "string" ? `of ${check.length} characters` : "that is not a string"}. Pass a shell command of 1 to 1,000 characters, such as one that runs a script in the sandbox.`,
+    );
+  return check;
+}
+
 function idleStop(
   registry: RuntimeSandboxRegistry,
   sessionId: string,
-):
-  | {
-      readonly backgroundTimeoutMs: number;
-      readonly idleTimeoutMs: number;
-      readonly provider: SandboxProviderRuntime;
-    }
-  | undefined {
+): { readonly idleTimeoutMs: number; readonly provider: SandboxProviderRuntime } | undefined {
   const registered = registry.sandbox;
   if (registered === null || isToolSessionId(sessionId)) return undefined;
   const owner = owningSandboxDefinition(registered);
   if (owner.kind !== "independent") return undefined;
   const provider = getSandboxEnvironmentRuntime(owner.environment);
-  const { backgroundTimeoutMs, idleTimeoutMs } = provider;
-  if (provider.implementation.onSessionIdle === undefined || idleTimeoutMs === false)
-    return undefined;
-  return { backgroundTimeoutMs, idleTimeoutMs, provider };
+  const { idleTimeoutMs } = provider;
+  if (provider.implementation.attach === undefined || idleTimeoutMs === false) return undefined;
+  return { idleTimeoutMs, provider };
 }
 
 export function sandboxIdleTimeoutMs(
@@ -129,18 +168,21 @@ export async function ensureSandboxAccess(
   const tracking = input.shutdownTracking ?? "session";
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
-  const idle = input.ownsSandbox === false ? undefined : idleStop(input.registry, input.sessionId);
+  const idle =
+    input.ownsSandbox === false || input.endsWithCall === true
+      ? undefined
+      : idleStop(input.registry, input.sessionId);
   const idleTimeoutMs = idle?.idleTimeoutMs;
   let running = input.state?.running !== undefined;
-  let backgroundUntil = input.state?.running?.backgroundUntil;
+  let records: readonly SandboxKeepRunning[] = input.state?.running?.keepRunning ?? [];
   const captured = (): SandboxState =>
     running && idle !== undefined && recordedSandboxStopsIdle(idle.provider, persisted)
       ? {
           session: persisted,
-          running: {
-            idleTimeoutMs: idle.idleTimeoutMs,
-            ...(backgroundUntil !== undefined && { backgroundUntil }),
-          },
+          running:
+            records.length === 0
+              ? { idleTimeoutMs: idle.idleTimeoutMs }
+              : { idleTimeoutMs: idle.idleTimeoutMs, keepRunning: records },
         }
       : { session: persisted };
   if (registered === null) {
@@ -160,8 +202,8 @@ export async function ensureSandboxAccess(
       async release() {},
       async settle() {},
       async stop() {},
-      async stopIdle() {
-        return { inUse: false };
+      async checkRunning() {
+        return { kind: "not-running" };
       },
     };
   }
@@ -313,6 +355,7 @@ export async function ensureSandboxAccess(
           sessionId: input.sessionId,
         });
         persisted = null;
+        records = [];
       }
     }
 
@@ -418,7 +461,28 @@ export async function ensureSandboxAccess(
     untrackActiveSandboxConnection({ providerName, sessionId: input.sessionId });
     persisted = null;
     running = false;
-    backgroundUntil = undefined;
+    records = [];
+  }
+
+  async function keepRunning(
+    options: SandboxKeepRunningOptions,
+  ): Promise<SandboxKeepRunningResult> {
+    const check = keepRunningCheck(options);
+    if (idle === undefined || !recordedSandboxStopsIdle(idle.provider, persisted) || !running)
+      return { until: null };
+    const now = Date.now();
+    const live = records.filter((record) => record.until > now);
+    const existing = live.find((record) => record.while === check);
+    if (existing === undefined && live.length >= MAX_KEEP_RUNNING_CHECKS)
+      throw new Error(
+        `This sandbox is already kept running under ${MAX_KEEP_RUNNING_CHECKS} different \`while\` commands. Pass one of them again to extend it, or wait until one ends.`,
+      );
+    const kept = { until: Math.max(existing?.until ?? 0, now + options.forMs), while: check };
+    records =
+      existing === undefined
+        ? [...live, kept]
+        : live.map((record) => (record === existing ? kept : record));
+    return { until: new Date(kept.until) };
   }
 
   async function recordedProvider(provider: SandboxProviderRuntime) {
@@ -476,17 +540,7 @@ export async function ensureSandboxAccess(
       await preparations;
       return await openSession();
     },
-    async holdForBackgroundCommand() {
-      const current = opened;
-      if (idle === undefined || idle.backgroundTimeoutMs === 0 || current === undefined) return;
-      backgroundUntil = Math.max(backgroundUntil ?? 0, Date.now() + idle.backgroundTimeoutMs);
-      await current.keepAlive(idle.backgroundTimeoutMs).catch((error: unknown) => {
-        log.warn(
-          "failed to keep the sandbox running for a background command; the provider's own timeout applies",
-          { error, sessionId: input.sessionId },
-        );
-      });
-    },
+    keepRunning,
     open: openSession,
     prepare(work) {
       enqueue(work === undefined ? requireOpened : () => work(openSession));
@@ -519,7 +573,7 @@ export async function ensureSandboxAccess(
       const current = await requireOpened();
       await current.stop();
       running = false;
-      backgroundUntil = undefined;
+      records = [];
       forgetOpened();
       if (!current.closable) {
         stopped = current;
@@ -531,27 +585,63 @@ export async function ensureSandboxAccess(
         sessionId: input.sessionId,
       });
     },
-    async stopIdle({ signal }) {
-      if (idle === undefined) return { inUse: false };
+    async checkRunning({ now, signal, stop }) {
+      if (idle === undefined) return { kind: "not-running" };
       const recorded = await recordedProvider(idle.provider);
-      let inUse = false;
-      await recorded?.implementation.onSessionIdle?.(
-        providerContext("sandbox-idle"),
+      const connection = await recorded?.implementation.attach?.(
+        providerContext("sandbox-check"),
         recorded.state,
-        {
-          signal,
-          ...(backgroundUntil !== undefined &&
-            Date.now() < backgroundUntil && {
-              inUse: async (connection) => {
-                inUse = await hasRunningBashCommand(createConnectionSession(connection), signal);
-                return inUse;
-              },
-            }),
-        },
+        { signal },
       );
-      return { inUse };
+      if (connection === undefined || connection === null) return { kind: "not-running" };
+      try {
+        const live = records.filter((record) => record.until > now);
+        const passed = await Promise.all(
+          live.map((record) => keepRunningCheckPasses(connection, record.while, signal)),
+        );
+        const keepRunning = live.filter((_record, index) => passed[index]);
+        if (keepRunning.length > 0 || !stop) return { kind: "running", keepRunning };
+        try {
+          await connection.stop({ signal });
+          return { kind: "not-running" };
+        } catch (error) {
+          return { kind: "stop-failed", error };
+        }
+      } finally {
+        await connection.close?.().catch((error: unknown) => {
+          log.warn("failed to close a sandbox connection after a check", {
+            error,
+            sessionId: input.sessionId,
+          });
+        });
+      }
     },
   };
+
+  async function keepRunningCheckPasses(
+    connection: Pick<SandboxConnection, "spawn" | "workspaceRoot">,
+    command: string,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    try {
+      const { exitCode } = await withinTimeout(
+        KEEP_RUNNING_CHECK_TIMEOUT_MS,
+        `The sandbox keepRunning() check did not exit within ${KEEP_RUNNING_CHECK_TIMEOUT_MS / 1000} seconds.`,
+        (timeout) =>
+          runConnectionCommand(connection, { command, signal: AbortSignal.any([signal, timeout]) }),
+      );
+      return exitCode === 0;
+    } catch (error) {
+      log.warn(
+        "failed to run a sandbox keepRunning() check; eve counts it as passing and checks again",
+        {
+          error,
+          sessionId: input.sessionId,
+        },
+      );
+      return true;
+    }
+  }
 
   async function openSandbox(
     provider: SandboxProviderRuntime,
@@ -586,15 +676,12 @@ export async function ensureSandboxAccess(
           });
         }
       },
-      async keepAlive(durationMs) {
-        await connection.keepAlive?.({ durationMs });
-      },
       providerName: provider.providerName,
-      sandbox: withRuntimeSandboxLifecycle(
-        session,
-        (options) => current.delete(options),
-        () => current.stop(),
-      ),
+      sandbox: withRuntimeSandboxLifecycle(session, {
+        delete: (options) => current.delete(options),
+        keepRunning,
+        stop: () => current.stop(),
+      }),
       async stop() {
         try {
           await stopCompute();

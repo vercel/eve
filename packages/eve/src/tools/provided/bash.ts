@@ -1,16 +1,19 @@
 import {
+  BASH_COMMAND_RUNNING,
+  BASH_KEEP_RUNNING_MS,
   BASH_MAX_YIELD_SECONDS,
   BASH_YIELD_SECONDS,
   executeBashOnSandbox,
   type BashInput,
 } from "#execution/sandbox/bash.js";
-import { contextStorage } from "#context/container.js";
-import { SandboxKey } from "#context/keys.js";
+import { createLogger } from "#internal/logging.js";
 import { frameworkTool } from "./framework-tool.js";
 import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
+
+const log = createLogger("tools.bash");
 
 /** Input to the provided `bash` tool: the command to run and how long to wait for it. */
 export interface BashToolInput {
@@ -108,13 +111,21 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. The result is the command's stdout, then any stderr after a \`[stderr]\` line, or \`(no output)\`. A command that fails ends with \`[exit code: N]\` and is reported as an error. A command still running after the wait keeps running in the background, and a final note says how to check on or stop it. To keep a long job running after the turn ends, start it this way, in the foreground of its own call: a process detached with \`&\` or \`nohup\` can stop soon after the turn ends.`,
+    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. The result is the command's stdout, then any stderr after a \`[stderr]\` line, or \`(no output)\`. A command that fails ends with \`[exit code: N]\` and is reported as an error. A command still running after the wait keeps running in the background, and a final note says how to check on or stop it.`,
     async execute(input, ctx) {
-      const result = await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
+      const sandbox = await ctx.getSandbox();
+      const result = await executeBashOnSandbox(sandbox, input as BashInput, {
         abortSignal: ctx.abortSignal,
       });
-      if (result.status === "running")
-        await contextStorage.getStore()?.get(SandboxKey)?.holdForBackgroundCommand?.();
+      if (result.status !== "running") return result;
+      try {
+        await sandbox.keepRunning({ forMs: BASH_KEEP_RUNNING_MS, while: BASH_COMMAND_RUNNING });
+      } catch (error) {
+        log.warn(
+          "failed to keep the sandbox running for a command that bash left running; the idle stop can end the command",
+          { error },
+        );
+      }
       return result;
     },
     inputSchema: BASH_INPUT_SCHEMA,

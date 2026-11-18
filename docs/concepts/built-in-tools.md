@@ -53,7 +53,7 @@ cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 
-The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. A running command keeps the sandbox running after the session goes idle, for up to the sandbox's [`backgroundTimeoutMs`](../sandbox#background-commands), 30 minutes by default. A command that the stop ends leaves no `exit` file. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
+The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. A running command keeps the sandbox running after the session goes idle, for up to 30 minutes; see [Keep the sandbox running](../sandbox#keep-the-sandbox-running). A command that the stop ends leaves no `exit` file. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 
@@ -71,7 +71,7 @@ export default defineTool({
 });
 ```
 
-A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies its own `execute` or input schema, forward `timeout` to `bash.execute` or remove it from the schema.
+A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies its own `execute` or input schema, forward `timeout` to `bash.execute` or remove it from the schema. A wrapper that wants to keep the sandbox running for another length of time calls `sandbox.keepRunning()` itself, with its own `forMs` and a `while` check for the job; see [Keep the sandbox running](../sandbox#keep-the-sandbox-running).
 
 The wrapper also keeps the plain-text view through the spread `toModelOutput`. If your `execute` returns a string, the model sees that text. Any other shape, including a `bash` result with extra fields, reaches the model as JSON; set your own [`toModelOutput`](../tools#shape-what-the-model-sees-with-tomodeloutput) to change that.
 

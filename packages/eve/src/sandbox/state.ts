@@ -1,4 +1,8 @@
-import type { SandboxSession } from "#public/definitions/sandbox.js";
+import type {
+  SandboxKeepRunningOptions,
+  SandboxKeepRunningResult,
+  SandboxSession,
+} from "#public/definitions/sandbox.js";
 import type { SandboxProviderRuntime } from "#sandbox/provider.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
@@ -12,9 +16,14 @@ export interface SandboxSessionState {
   readonly stateProtocolVersion: number;
 }
 
+export interface SandboxKeepRunning {
+  readonly until: number;
+  readonly while: string;
+}
+
 export interface SandboxRunning {
   readonly idleTimeoutMs: number;
-  readonly backgroundUntil?: number;
+  readonly keepRunning?: readonly SandboxKeepRunning[];
 }
 
 export interface SandboxState {
@@ -31,13 +40,24 @@ export function markSandboxRunning<Session extends { readonly sandboxState?: San
   idleTimeoutMs: number | undefined,
 ): Session {
   if (idleTimeoutMs === undefined) return session;
+  const keepRunning = session.sandboxState?.running?.keepRunning;
   return {
     ...session,
     sandboxState: {
       session: session.sandboxState?.session ?? null,
-      running: { ...session.sandboxState?.running, idleTimeoutMs },
+      running: keepRunning === undefined ? { idleTimeoutMs } : { idleTimeoutMs, keepRunning },
     },
   };
+}
+
+export function keptRunningUntil(
+  running: SandboxRunning | undefined,
+  now: number,
+): number | undefined {
+  const live = (running?.keepRunning ?? [])
+    .map(({ until }) => until)
+    .filter((until) => until > now);
+  return live.length === 0 ? undefined : Math.max(...live);
 }
 
 export function isRetiredSandboxSessionState(state: SandboxSessionState): boolean {
@@ -112,7 +132,7 @@ export function recordedSandboxStopsIdle(
   if (recorded === null || recorded === undefined) return true;
   const lookup = recordedSandboxProviderLookups.get(provider.implementation);
   const resolved = lookup === undefined ? provider : lookup(recorded.state, undefined);
-  return resolved === undefined || resolved.implementation.onSessionIdle !== undefined;
+  return resolved === undefined || resolved.implementation.attach !== undefined;
 }
 
 export type SandboxPreparation = (open: () => Promise<SandboxSession>) => Promise<void>;
@@ -122,7 +142,7 @@ export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
   delete?(options?: SandboxDeleteOptions): Promise<void>;
   get(): Promise<SandboxSession | null>;
-  holdForBackgroundCommand?(): Promise<void>;
+  keepRunning?(options: SandboxKeepRunningOptions): Promise<SandboxKeepRunningResult>;
   open(): Promise<SandboxSession | null>;
   prepare(work?: SandboxPreparation): void;
   stop(): Promise<void>;

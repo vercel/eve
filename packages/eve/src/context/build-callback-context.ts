@@ -43,44 +43,48 @@ export function sandboxOf(ctx: Pick<ContextReader, "get">): SessionContext["getS
       if (sandbox === null) {
         throw new Error("The sandbox is not available in the current authored runtime context.");
       }
-      return withRuntimeSandboxLifecycle(
-        sandbox,
-        async (options) => {
+      return withRuntimeSandboxLifecycle(sandbox, {
+        async delete(options) {
           if (access.delete === undefined) {
             throw new Error("The active sandbox runtime does not support deletion.");
           }
           await access.delete(options);
         },
-        async () => await access.stop(),
-      );
+        keepRunning: async (options) => (await access.keepRunning?.(options)) ?? { until: null },
+        stop: async () => await access.stop(),
+      });
     });
   }) as SessionContext["getSandbox"];
 }
 
+type RuntimeSandboxLifecycle = Pick<RuntimeSandboxSession, "delete" | "keepRunning" | "stop">;
+
+function isLifecycleMember(property: PropertyKey): property is keyof RuntimeSandboxLifecycle {
+  return property === "delete" || property === "keepRunning" || property === "stop";
+}
+
 export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(
   sandbox: Session,
-  deleteSandbox: RuntimeSandboxSession["delete"],
-  stop: () => Promise<void>,
-): Session & Pick<RuntimeSandboxSession, "delete" | "stop"> {
+  lifecycle: RuntimeSandboxLifecycle,
+): Session & RuntimeSandboxLifecycle {
   return new Proxy(Object.create(null) as object, {
     get(_proxyTarget, property) {
-      if (property === "delete") return deleteSandbox;
-      if (property === "stop") return stop;
+      if (isLifecycleMember(property)) return lifecycle[property];
       const value = Reflect.get(sandbox, property, sandbox);
       return typeof value === "function" ? value.bind(sandbox) : value;
     },
     getOwnPropertyDescriptor(_proxyTarget, property) {
-      if (property === "delete" || property === "stop") {
+      if (isLifecycleMember(property)) {
         return { configurable: true, enumerable: true, writable: false };
       }
       const descriptor = Reflect.getOwnPropertyDescriptor(sandbox, property);
       return descriptor === undefined ? undefined : { ...descriptor, configurable: true };
     },
     has(_proxyTarget, property) {
-      return property === "delete" || property === "stop" || Reflect.has(sandbox, property);
+      return isLifecycleMember(property) || Reflect.has(sandbox, property);
     },
     ownKeys() {
-      return [...new Set([...Reflect.ownKeys(sandbox), "delete", "stop"])];
+      return [...new Set([...Reflect.ownKeys(sandbox), "delete", "keepRunning", "stop"])];
     },
-  }) as Session & Pick<RuntimeSandboxSession, "delete" | "stop">;
+  }) as Session & RuntimeSandboxLifecycle;
 }

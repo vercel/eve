@@ -4,9 +4,11 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
 // The export's path is split with quotes so the command that starts it, and
 // the `[b]` pattern that looks for it, never match their own command lines.
 // It runs in the foreground, so `bash` returns it as `running` after a second.
+// It ends itself after 4 minutes, so a failed run doesn't keep a sandbox for
+// all of `bash`'s 30 minutes.
 const START_EXPORT = [
   'script=/workspace/background-"export".sh',
-  "printf 'while :; do sleep 1; done\\n' > \"$script\"",
+  "printf 'for i in $(seq 1 240); do sleep 1; done\\n' > \"$script\"",
   'bash "$script"',
 ].join("\n");
 

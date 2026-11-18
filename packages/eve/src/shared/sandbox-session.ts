@@ -119,10 +119,51 @@ export interface SandboxSession {
   removePath(options: SandboxRemovePathOptions): Promise<void>;
 }
 
+/** Options for `sandbox.keepRunning()`. */
+export interface SandboxKeepRunningOptions {
+  /**
+   * How long to keep the sandbox running, in milliseconds from now. Greater
+   * than 0 and at most 86400000 (24 hours). Call again to extend.
+   */
+  readonly forMs: number;
+  /**
+   * A shell command that says whether the sandbox is still needed. eve runs
+   * it in the workspace root, without resuming the sandbox, about every 5
+   * minutes while the session is idle or its turn is waiting. The sandbox
+   * keeps running only while the command exits 0. The command has 10
+   * seconds: one that cannot run, or does not finish in time, counts as
+   * exiting 0. eve stores the command with the session, so keep secrets out
+   * of it. At most 1,000 characters. Without it, the sandbox keeps running
+   * for all of `forMs`.
+   */
+  readonly while?: string;
+}
+
+/** What `sandbox.keepRunning()` resolves to. */
+export interface SandboxKeepRunningResult {
+  /**
+   * When this call stops keeping the sandbox running, or `null` when the call
+   * has no effect: eve doesn't stop this sandbox when its session goes idle,
+   * the calling session doesn't own it, or the sandbox is stopped.
+   */
+  readonly until: Date | null;
+}
+
 /** A provider session plus the runtime's disposable-resource lifecycle. */
 export type RuntimeSandboxSession<Session extends SandboxSession = SandboxSession> = Session & {
   /** Permanently deletes the sandbox and its disposable provider state. */
   delete(options?: SandboxDeleteOptions): Promise<void>;
+  /**
+   * Keeps the sandbox running after the session goes idle, instead of
+   * stopping it after the environment's `idleTimeoutMs`. The sandbox keeps
+   * running until `forMs` has passed or `while` exits non-zero, whichever
+   * comes first, and then stops like any idle sandbox: files persist,
+   * processes end, and the next use resumes it. A call with the same `while`
+   * as an earlier one moves that call's time later, never earlier. One
+   * sandbox has at most 8 different `while` commands at a time. `stop()` and
+   * `delete()` end every call's effect.
+   */
+  keepRunning(options: SandboxKeepRunningOptions): Promise<SandboxKeepRunningResult>;
   /** Stops compute while retaining the durable session for a later reopen. */
   stop(): Promise<void>;
 };

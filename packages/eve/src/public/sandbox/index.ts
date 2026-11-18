@@ -10,6 +10,8 @@ export {
   type SandboxReadBinaryFileOptions,
   type SandboxReadFileOptions,
   type SandboxReadTextFileOptions,
+  type SandboxKeepRunningOptions,
+  type SandboxKeepRunningResult,
   type SandboxRunOptions,
   type SandboxSession,
   type RuntimeSandboxSession,

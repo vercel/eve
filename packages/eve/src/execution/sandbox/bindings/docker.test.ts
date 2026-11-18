@@ -143,8 +143,8 @@ describe("Docker sandbox session identity", () => {
   });
 });
 
-describe("Docker sandbox idle stop", () => {
-  it("stops the session container by name without starting it, and succeeds once it is gone", async () => {
+describe("Docker sandbox attach", () => {
+  it("attaches only to a running session container, never starts it, and reports a failed stop", async () => {
     const { dockerCli, run } = createContainerStoreCli();
     const provider = createDockerSandboxHarness({
       cli: dockerCli,
@@ -155,46 +155,29 @@ describe("Docker sandbox idle stop", () => {
     const { state } = await provider.start(session);
 
     vi.mocked(run).mockClear();
+    const attached = await provider.attachSession({ ...session, state });
+    if (attached === null) throw new Error("The running container did not attach.");
+    vi.mocked(run).mockResolvedValueOnce({
+      exitCode: 1,
+      stderr: "Error response from daemon: permission denied",
+      stdout: "",
+      stdoutBytes: Buffer.alloc(0),
+    });
+    await expect(attached.stop()).rejects.toThrow(
+      `Failed to stop idle sandbox session container "${state.containerName}": Error response from daemon: permission denied`,
+    );
     const { signal } = new AbortController();
-    await provider.idleSession({ ...session, signal, state });
-    expect(vi.mocked(run).mock.calls[0]?.[1]).toEqual(expect.objectContaining({ signal }));
-    await provider.idleSession({ ...session, state: null });
-    await provider.endSession({ ...session, state });
-    await expect(provider.idleSession({ ...session, state: null })).resolves.toBeUndefined();
-
-    expect(vi.mocked(run).mock.calls.map(([args]) => args)).toEqual([
+    await attached.stop({ signal });
+    expect(vi.mocked(run).mock.calls.at(-1)).toEqual([
       ["stop", "-t", "0", state.containerName],
-      ["stop", "-t", "0", state.containerName],
-      ["rm", "-f", state.containerName],
-      ["stop", "-t", "0", state.containerName],
+      expect.objectContaining({ signal }),
     ]);
-  });
+    await expect(provider.attachSession({ ...session, state })).resolves.toBeNull();
 
-  it("leaves a running container alone while eve reports it in use, stops it once it is not, and asks only about a running one", async () => {
-    const { dockerCli, run } = createContainerStoreCli();
-    const provider = createDockerSandboxHarness({
-      cli: dockerCli,
-      preparedArtifact: () => ({ imageReference: "image-a" }),
-      runtimeOptions: {},
-    });
-    const session = { appRoot: "/tmp/eve-app", sandboxName: "session-key" };
-    const { state } = await provider.start(session);
-    let commandRunning = true;
-    const inUse = vi.fn(async () => commandRunning);
-    const commands = () => vi.mocked(run).mock.calls.map(([args]) => args[0]);
-
-    vi.mocked(run).mockClear();
-    await provider.idleSession({ ...session, inUse, state });
-    expect(inUse).toHaveBeenCalledOnce();
-    expect(commands()).not.toContain("stop");
-    expect(commands()).not.toContain("start");
-
-    commandRunning = false;
-    await provider.idleSession({ ...session, inUse, state });
-    expect(vi.mocked(run).mock.calls.at(-1)?.[0]).toEqual(["stop", "-t", "0", state.containerName]);
-
-    await provider.idleSession({ ...session, inUse, state });
-    expect(inUse).toHaveBeenCalledTimes(2);
+    await provider.endSession({ ...session, state });
+    await expect(attached.stop()).resolves.toBeUndefined();
+    await expect(provider.attachSession({ ...session, state: null })).resolves.toBeNull();
+    expect(vi.mocked(run).mock.calls.map(([args]) => args[0])).not.toContain("start");
   });
 });
 

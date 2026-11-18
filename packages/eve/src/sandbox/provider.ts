@@ -15,7 +15,7 @@ import type {
 export type SandboxJson = SandboxPreparedArtifact;
 
 /** Members eve owns on every live sandbox, which a connection's extensions cannot replace. */
-type ReservedSessionMember = keyof SandboxSession | "delete" | "stop";
+type ReservedSessionMember = keyof SandboxSession | "delete" | "keepRunning" | "stop";
 
 /**
  * The byte-level connection to one sandbox that a provider implements. eve
@@ -23,6 +23,11 @@ type ReservedSessionMember = keyof SandboxSession | "delete" | "stop";
  *
  * Every path a connection receives is absolute, and `workingDirectory` is
  * always set: eve resolves relative paths from {@link workspaceRoot}.
+ *
+ * A backend that stops compute on its own timer counts every operation as use
+ * and restarts the timer; eve never extends it. While `sandbox.keepRunning()`
+ * keeps a sandbox running, eve runs a command on it about every 5 minutes, so
+ * give the timer at least 15 minutes.
  */
 export interface SandboxConnection<Extensions extends object = {}> {
   /**
@@ -56,16 +61,11 @@ export interface SandboxConnection<Extensions extends object = {}> {
   writeFiles(options: SandboxWriteFilesOptions): Promise<void>;
   /** `force` ignores a missing path; `recursive` removes a non-empty directory. */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
-  /** Releases compute and keeps the sandbox's files. */
-  stop(): Promise<void>;
   /**
-   * Keeps compute running for at least `durationMs` from now, on a backend
-   * that stops compute on a timer. eve calls it with the environment's
-   * `backgroundTimeoutMs` when `bash` leaves a command running in the
-   * background, and only where eve stops the idle sandbox. eve logs a failure
-   * and the command still returns.
+   * Releases compute and keeps the sandbox's files. eve passes `signal` when
+   * it stops an idle sandbox, and aborts it when it stops waiting.
    */
-  keepAlive?(options: { readonly durationMs: number }): Promise<void>;
+  stop(options?: { readonly signal?: AbortSignal }): Promise<void>;
   /** Releases what this process holds, such as a local interpreter, without touching the sandbox. */
   close?(): Promise<void>;
   /**
@@ -77,7 +77,7 @@ export interface SandboxConnection<Extensions extends object = {}> {
   readonly extensions?: Extensions & { readonly [Key in ReservedSessionMember]?: never };
 }
 
-/** What eve passes to `start()`, `resume()`, `onSessionIdle()`, and `onSessionEnd()`. */
+/** What eve passes to `start()`, `resume()`, `attach()`, and `onSessionEnd()`. */
 export interface SandboxSessionContext {
   /**
    * The session that owns the sandbox. Derive native names from `session.id`:
@@ -140,18 +140,10 @@ export interface SandboxSessionEndOptions {
   readonly reason: "completed" | "expired" | "failed" | "deleted";
 }
 
-/** What eve passes to `onSessionIdle()`: a signal eve aborts when it stops waiting for the call. */
-export interface SandboxSessionIdleOptions {
-  /** Aborted when eve abandons the call. Pass it to the requests and commands that stop compute. */
+/** What eve passes to `attach()`: a signal eve aborts when it stops waiting. */
+export interface SandboxAttachOptions {
+  /** Aborted when eve abandons the call. Pass it to the request that looks the sandbox up. */
   readonly signal?: AbortSignal;
-  /**
-   * Resolves `true` while a command that `bash` left running is still in
-   * progress. eve sets it only when one may be. Once compute is known to be
-   * running, call it with a connection to the sandbox, and leave compute
-   * running when it resolves `true`. Without the call, the stop ends the
-   * command. eve doesn't close the connection.
-   */
-  readonly inUse?: (connection: SandboxConnection<object>) => Promise<boolean>;
 }
 
 /** The lifecycle one sandbox environment implements. */
@@ -199,21 +191,24 @@ export interface SandboxProviderImplementation<
     options: SandboxSessionEndOptions,
   ): Promise<void>;
   /**
-   * Stops compute for `ctx.session.id` if it is running, and keeps its files.
-   * Never starts or resumes it. `state` is `null` when the session never
-   * recorded it. Must succeed when the sandbox is already stopped or doesn't
-   * exist. eve calls it once the session has been idle for the environment's
-   * `idleTimeoutMs`, and never for a keyed `invokeTool` sandbox. When
-   * `options.inUse` resolves `true`, leave compute running; eve calls again
-   * later. eve waits up to 120 seconds, then aborts `options.signal` and moves
-   * on. Without it, eve never stops the sandbox and the provider's own
+   * Connects to the sandbox for `ctx.session.id` only when its compute is
+   * already running, and resolves `null` when it is stopped or doesn't
+   * exist. Never starts or resumes it, and neither may the `spawn()` and
+   * `stop()` it returns. `state` is `null` when the session never recorded
+   * it. eve calls it for the session that owns the sandbox: to stop the
+   * sandbox once the session has been idle for the environment's
+   * `idleTimeoutMs`, and to run `sandbox.keepRunning()` checks. It never
+   * calls it for an `invokeTool` call's sandbox. eve waits up to 120 seconds
+   * for the call and the work that follows, or 30 seconds when it only runs
+   * checks, then aborts `options.signal`. Without it, eve never stops the
+   * sandbox, `sandbox.keepRunning()` has no effect, and the provider's own
    * timeout applies.
    */
-  onSessionIdle?(
+  attach?(
     ctx: SandboxSessionContext,
     state: Readonly<State> | null,
-    options: SandboxSessionIdleOptions,
-  ): Promise<void>;
+    options: SandboxAttachOptions,
+  ): Promise<Pick<SandboxConnection, "close" | "spawn" | "stop" | "workspaceRoot"> | null>;
   /**
    * Lets a keyed `invokeTool` call keep its sandbox between calls. eve never
    * ends a keyed sandbox, so the provider must bound its retention.
@@ -227,29 +222,20 @@ export interface SandboxPrepareOption<Session> {
   readonly prepare?: (sandbox: Session) => void | Promise<void>;
 }
 
-/** The standard `idleTimeoutMs` and `backgroundTimeoutMs` options every sandbox environment accepts. */
+/** The standard `idleTimeoutMs` option every sandbox environment accepts. */
 export interface SandboxIdleTimeoutOption {
   /**
    * How long, in milliseconds, the session's sandbox keeps running after the
    * session goes idle before eve stops its compute. Files persist, processes
    * end, and the next use resumes it. `0` stops it as soon as the session goes
    * idle; `false` never stops it, leaving the provider's own timeout. Applies
-   * only to providers that implement `onSessionIdle()`.
+   * only to providers that implement `attach()`.
    * @default 300000
    */
   readonly idleTimeoutMs?: number | false;
-  /**
-   * How long, in milliseconds, a command that `bash` left running in the
-   * background keeps the session's sandbox running, counted from when `bash`
-   * returns. Until the command exits or the time is up, eve doesn't stop the
-   * idle sandbox. `0` lets the idle stop end the command. Applies only when
-   * eve stops the idle sandbox.
-   * @default 1800000
-   */
-  readonly backgroundTimeoutMs?: number;
 }
 
-/** Environment options plus the standard `prepare`, `idleTimeoutMs`, and `backgroundTimeoutMs` options. */
+/** Environment options plus the standard `prepare` and `idleTimeoutMs` options. */
 export type WithPrepareOption<Options extends object, Session> = Options &
   SandboxPrepareOption<Session> &
   SandboxIdleTimeoutOption;
@@ -270,8 +256,8 @@ export interface SandboxProviderDefinition<
   readonly stateProtocolVersion?: number;
   /**
    * Receives the environment options without `prepare`, which eve runs in
-   * `ctx.populate()`, and without `idleTimeoutMs` and `backgroundTimeoutMs`,
-   * which eve applies. Always an object: `{}` when the caller passes none.
+   * `ctx.populate()`, and without `idleTimeoutMs`, which eve applies. Always an
+   * object: `{}` when the caller passes none.
    */
   environment(
     options: EnvironmentOptions,
@@ -306,7 +292,6 @@ export interface SandboxProviderRuntime {
     SandboxJson,
     object
   >;
-  readonly backgroundTimeoutMs: number;
   readonly idleTimeoutMs: number | false;
   readonly prepare: ((sandbox: SandboxSession) => void | Promise<void>) | undefined;
   readonly providerName: string;
@@ -315,31 +300,13 @@ export interface SandboxProviderRuntime {
 
 const DEFAULT_SANDBOX_IDLE_TIMEOUT_MS = 5 * 60_000;
 
-const DEFAULT_SANDBOX_BACKGROUND_TIMEOUT_MS = 30 * 60_000;
-
-function isDurationMs(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function received(value: unknown): string {
-  return typeof value === "string" ? JSON.stringify(value) : String(value);
-}
-
 function resolveIdleTimeoutMs(providerName: string, value: unknown): number | false {
   if (value === undefined) return DEFAULT_SANDBOX_IDLE_TIMEOUT_MS;
-  if (value === false || isDurationMs(value)) return value;
+  if (value === false || (typeof value === "number" && Number.isFinite(value) && value >= 0))
+    return value;
   throw new Error(
-    `Sandbox provider "${providerName}" received idleTimeoutMs ${received(value)}. ` +
+    `Sandbox provider "${providerName}" received idleTimeoutMs ${typeof value === "string" ? JSON.stringify(value) : String(value)}. ` +
       "Pass a non-negative number of milliseconds, 0 to stop the sandbox as soon as the session goes idle, or false to never stop it.",
-  );
-}
-
-function resolveBackgroundTimeoutMs(providerName: string, value: unknown): number {
-  if (value === undefined) return DEFAULT_SANDBOX_BACKGROUND_TIMEOUT_MS;
-  if (isDurationMs(value)) return value;
-  throw new Error(
-    `Sandbox provider "${providerName}" received backgroundTimeoutMs ${received(value)}. ` +
-      "Pass a non-negative number of milliseconds, or 0 so that a background command doesn't keep the idle sandbox running.",
   );
 }
 
@@ -367,9 +334,8 @@ export function defineSandboxProvider<
   return {
     name: definition.name,
     environment(options?: WithPrepareOption<EnvironmentOptions, Session>) {
-      const { backgroundTimeoutMs, idleTimeoutMs, prepare, ...environmentOptions } = options ?? {};
+      const { idleTimeoutMs, prepare, ...environmentOptions } = options ?? {};
       return createSandboxEnvironment<OpenOptions, Session>({
-        backgroundTimeoutMs: resolveBackgroundTimeoutMs(definition.name, backgroundTimeoutMs),
         idleTimeoutMs: resolveIdleTimeoutMs(definition.name, idleTimeoutMs),
         implementation: definition.environment(
           environmentOptions as EnvironmentOptions,

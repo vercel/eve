@@ -103,6 +103,7 @@ function sandboxes(
   const environment = defineSandboxProvider({
     name: "memory",
     environment: () => ({
+      attach: async () => null,
       onSessionEnd: async (context, _state, { reason }) => deleted(context.session.id, reason),
       prepare: async () => null,
       resume: async () => {
@@ -404,6 +405,19 @@ describe("invokeTool", () => {
     expect(deleted).toHaveBeenCalledTimes(2);
     await shutdownActiveSandboxConnections();
     expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it("does not report a one-off call's sandbox as kept running", async () => {
+    const { deleted, registry } = sandboxes();
+    const keep = tool("keep", async (_input: unknown, ctx) => {
+      const { until } = await (await ctx.getSandbox()).keepRunning({ forMs: 60_000 });
+      return { until: until?.toISOString() ?? null };
+    });
+
+    expect(
+      await invokeTool(runtimeWith([keep], registry), "keep", {}, { auth: alice }),
+    ).toMatchObject({ output: { until: null }, outcome: "completed" });
+    expect(deleted).toHaveBeenCalledOnce();
   });
 
   it("maps sandbox.stop() onto the connection and sandbox.delete() onto onSessionEnd", async () => {

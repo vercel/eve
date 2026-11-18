@@ -6,13 +6,16 @@ import { Readable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runWithActiveSessionContext } from "#internal/testing/active-session-context.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import type { SandboxAccess } from "#sandbox/state.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { bash, type BashToolOutput } from "#tools/provided/bash.js";
 
-import { BASH_YIELD_SECONDS, executeBashOnSandbox, hasRunningBashCommand } from "./bash.js";
+import {
+  BASH_COMMAND_RUNNING,
+  BASH_KEEP_RUNNING_MS,
+  BASH_YIELD_SECONDS,
+  executeBashOnSandbox,
+} from "./bash.js";
 import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -170,56 +173,58 @@ describe("executeBashOnSandbox with a real shell", () => {
       if (result.status !== "running")
         throw new Error(`expected running: ${JSON.stringify(result)}`);
 
-      await expect(hasRunningBashCommand(sandbox)).resolves.toBe(true);
+      const running = async () => (await sandbox.run({ command: BASH_COMMAND_RUNNING })).exitCode;
+      await expect(running()).resolves.toBe(0);
       await runHostBash(`kill -${signal} -- -${result.pid}`, home);
 
-      await vi.waitFor(async () => expect(await hasRunningBashCommand(sandbox)).toBe(false), {
-        timeout: 10_000,
-      });
+      await vi.waitFor(async () => expect(await running()).not.toBe(0), { timeout: 10_000 });
       await rm(result.outputDirectory, { force: true, recursive: true });
     },
   );
 
-  it("holds the sandbox for a command the bash tool leaves running, and not for one that finishes", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const { home, sandbox } = await createHostSandbox();
-    const pidFile = join(home, "child.pid");
-    const holdForBackgroundCommand = vi.fn(async () => {});
-    const access: SandboxAccess = {
-      captureState: async () => ({ session: null }),
-      get: async () => sandbox,
-      holdForBackgroundCommand,
-      open: async () => sandbox,
-      prepare() {},
-      stop: async () => {},
-    };
-    const toolContext = {
-      abortSignal: new AbortController().signal,
-      getSandbox: async () => sandbox,
-    } as never;
+  it.each([
+    { outcome: "is kept running", keepRunning: vi.fn(async () => ({ until: new Date() })) },
+    {
+      outcome: "cannot be kept running",
+      keepRunning: vi.fn(async () => {
+        throw new Error("The sandbox service is unavailable.");
+      }),
+    },
+    { outcome: "has no keepRunning()", keepRunning: undefined },
+  ])(
+    "keeps the sandbox running only for a command the bash tool leaves running, and returns its pid when the sandbox $outcome",
+    async ({ keepRunning }) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { home, sandbox } = await createHostSandbox();
+      const pidFile = join(home, "child.pid");
+      const toolContext = {
+        abortSignal: new AbortController().signal,
+        getSandbox: async () => (keepRunning === undefined ? sandbox : { ...sandbox, keepRunning }),
+      } as never;
 
-    await runWithActiveSessionContext(
-      { sandbox: access, sessionId: "session", turn: { id: "turn", sequence: 1 } },
-      async () => {
-        await bash.execute!({ command: "echo done" }, toolContext);
-        expect(holdForBackgroundCommand).not.toHaveBeenCalled();
+      await bash.execute!({ command: "echo done" }, toolContext);
+      if (keepRunning !== undefined) expect(keepRunning).not.toHaveBeenCalled();
 
-        const call = bash.execute!(
-          { command: `sleep 60 & echo $! > ${pidFile}; wait`, timeout: 1 },
-          toolContext,
-        );
-        await readPid(pidFile);
-        await vi.advanceTimersByTimeAsync(1_000);
-        const result = (await call) as BashToolOutput;
-        if (result.status !== "running")
-          throw new Error(`expected running: ${JSON.stringify(result)}`);
+      const call = bash.execute!(
+        { command: `sleep 60 & echo $! > ${pidFile}; wait`, timeout: 1 },
+        toolContext,
+      );
+      await readPid(pidFile);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = (await call) as BashToolOutput;
+      if (result.status !== "running")
+        throw new Error(`expected running: ${JSON.stringify(result)}`);
 
-        expect(holdForBackgroundCommand).toHaveBeenCalledOnce();
-        await runHostBash(`kill -KILL -- -${result.pid}`, home);
-        await rm(result.outputDirectory, { force: true, recursive: true });
-      },
-    );
-  });
+      expect(result.pid).toBeGreaterThan(0);
+      if (keepRunning !== undefined)
+        expect(keepRunning).toHaveBeenCalledExactlyOnceWith({
+          forMs: BASH_KEEP_RUNNING_MS,
+          while: BASH_COMMAND_RUNNING,
+        });
+      await runHostBash(`kill -KILL -- -${result.pid}`, home);
+      await rm(result.outputDirectory, { force: true, recursive: true });
+    },
+  );
 
   it("stops the command's process group when the call is aborted", async () => {
     const { home, sandbox } = await createHostSandbox();

@@ -97,6 +97,7 @@ export interface SessionExecutionInput {
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
+  readonly whileWaiting?: (turnTimer: Promise<unknown>) => Promise<void>;
 }
 
 export class SessionExecution {

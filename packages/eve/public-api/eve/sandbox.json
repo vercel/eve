@@ -6,6 +6,8 @@
   "RuntimeSandboxSession",
   "SandboxCommandResult",
   "SandboxEnvironment",
+  "SandboxKeepRunningOptions",
+  "SandboxKeepRunningResult",
   "SandboxNetworkMatch",
   "SandboxNetworkMatcher",
   "SandboxNetworkOptions",

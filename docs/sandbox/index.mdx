@@ -194,7 +194,7 @@ The model keeps seeing attachments from earlier turns. Each call sends the same 
 
 ## Custom providers
 
-To run sandboxes on a backend eve doesn't ship, define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. It implements a connection to one sandbox (`spawn`, `readFile`, `writeFiles`, `removePath`, and `stop`) and the methods `prepare`, `start`, `resume`, and `onSessionEnd`, and optionally `onSessionIdle` to stop idle sandboxes. See [Custom sandbox providers](/docs/sandbox/custom-providers) for a complete example.
+To run sandboxes on a backend eve doesn't ship, define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. It implements a connection to one sandbox (`spawn`, `readFile`, `writeFiles`, `removePath`, and `stop`) and the methods `prepare`, `start`, `resume`, and `onSessionEnd`, and optionally `attach` to stop idle sandboxes. See [Custom sandbox providers](/docs/sandbox/custom-providers) for a complete example.
 
 ## Stop an idle sandbox
 
@@ -227,30 +227,55 @@ export default defineSandbox(() => environment.open());
 - A [prewarmed session's](/docs/guides/frontend/use-eve-agent#prewarming) sandbox stops if no message arrives within the window. With `0`, prewarming doesn't start the sandbox.
 - The provider's own timeout still applies. On Vercel, eve [extends it while it uses the sandbox](/docs/sandbox/vercel#idle-stop-and-timeout).
 
-Vercel Sandbox and Docker stop idle sandboxes, and `DefaultSandbox.environment()` takes `idleTimeoutMs` and `backgroundTimeoutMs` at its top level. just-bash has no compute to stop. A [custom provider](/docs/sandbox/custom-providers#onsessionidle) stops idle sandboxes when it implements `onSessionIdle()`.
+Vercel Sandbox and Docker stop idle sandboxes, and `DefaultSandbox.environment()` takes `idleTimeoutMs` at its top level. just-bash has no compute to stop. A [custom provider](/docs/sandbox/custom-providers#attach) stops idle sandboxes when it implements `attach()`.
 
-### Background commands
+### Keep the sandbox running
 
-A command that [`bash`](/docs/concepts/built-in-tools#bash) left running in the background keeps the sandbox running after the session goes idle. eve stops the sandbox when the command exits, or when `backgroundTimeoutMs` has passed since `bash` returned. The default is 30 minutes.
+A tool can keep the sandbox running after the session goes idle by calling `sandbox.keepRunning()`, for a set time and, optionally, only while a command it names still succeeds. `bash` does this for a command it left running, for up to 30 minutes.
 
-```ts title="agent/sandbox.ts"
-import { defineSandbox } from "eve/sandbox";
-import { VercelSandbox } from "eve/sandbox/vercel";
+```ts title="agent/tools/keep_sandbox_running.ts"
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
 
-export const environment = VercelSandbox.environment({
-  // optional: how long a background command keeps the sandbox running
-  backgroundTimeoutMs: 6 * 60 * 60 * 1000,
+export default defineTool({
+  description:
+    "Keep the sandbox running for a long training run, when the person asks. The run must keep writing to /workspace/train.log.",
+  inputSchema: z.object({ hours: z.number().positive().max(12) }),
+  approval: always(),
+  async execute({ hours }, ctx) {
+    const sandbox = await ctx.getSandbox();
+    const { until } = await sandbox.keepRunning({
+      forMs: hours * 60 * 60 * 1000,
+      // exits 0 while the run wrote to its log in the last 10 minutes
+      while: "find /workspace/train.log -mmin -10 | grep -q .",
+    });
+    return until === null
+      ? { kept: false, reason: "eve doesn't stop this sandbox when the session goes idle." }
+      : { kept: true, until: until.toISOString() };
+  },
 });
-
-export default defineSandbox(() => environment.open());
 ```
 
-- Set `backgroundTimeoutMs` to `0` to let the idle stop end the command.
-- After the command exits, the sandbox stops within 5 minutes, or within `idleTimeoutMs` when that is longer.
-- Only a command that `bash` returned as `running` counts. A process that a finished command left behind, such as a job started with `&` or `nohup`, ends with the stop. To keep a long job running, run it in the foreground of its own `bash` call.
-- eve doesn't stop the sandbox during a turn. A turn that stays open after the command exits holds the sandbox until the turn ends, or until the provider's own timeout.
-- Only the session that owns the sandbox keeps it running. A command that a subagent left running in its parent's sandbox doesn't.
-- With `idleTimeoutMs: false`, eve never stops the sandbox, and `backgroundTimeoutMs` has no effect.
+The `while` check tests that the training run still writes to its log, so it fails once the run stops for any reason.
+
+- `forMs` is required, greater than 0, and at most 24 hours. Call `keepRunning()` again to extend it. `until` in the result says when the call's effect ends.
+- The sandbox keeps running until `forMs` has passed or the `while` command exits non-zero at a check, whichever comes first. It then stops like any idle sandbox, within 5 minutes of the moment the check starts to fail.
+- eve runs the `while` command in the workspace root about every 5 minutes, while the session is idle and while a turn waits for an approval, an answer, a call, or a task. The first check after the session goes idle runs no later than the end of the idle window. eve never starts or resumes the sandbox to check it.
+- Each check has 10 seconds. A check that can't run or doesn't finish in time counts as passing.
+- eve never stops the sandbox during a turn. A check that is running when a turn's wait ends can delay a cancel, an answer, or a call's timeout by up to 30 seconds.
+- Calls combine. A call with the same `while` as an earlier one moves that call's end later, never earlier. Up to 8 different `while` commands can be in effect, and the sandbox keeps running while any one is. A call without `while` keeps the sandbox running for all of `forMs`.
+- `sandbox.stop()`, `sandbox.delete()`, and the end of the session end every call's effect at once. A new turn doesn't.
+- A process started with `&` or `nohup` doesn't keep the sandbox running unless a tool's `while` command covers it.
+- A call has an effect only where eve stops the sandbox when its session goes idle, from the session that owns the sandbox, and while the sandbox runs. Elsewhere `until` is `null` and nothing changes: for example on just-bash or a custom provider without `attach()`, with `idleTimeoutMs: false`, from a subagent that shares its parent's sandbox, in a workflow tool's `"use step"` function, in an `invokeTool` call, and after `sandbox.stop()`.
+
+#### Write a check
+
+- Test something the job keeps doing, such as writing its log, so the check fails once the job is gone for any reason, including a restart of the sandbox. A check that only tests a process id can pass again after a restart, when another process gets that id.
+- Build the command from constants or validated values, because eve runs it as a shell script and stores it with the session. Keep secrets out of it.
+- With the example's check, the sandbox stops up to 15 minutes after the job ends: 10 for the log to go stale and 5 for the next check. A job that writes nothing for 10 minutes loses its sandbox.
+
+A kept sandbox runs, and is billed, until its check fails or its `forMs` passes, so cap `forMs` in the tool's input schema and put long runs behind an approval, as the example does. If eve can't stop the sandbox, the provider's own timeout ends it: on Vercel, `timeout` after eve last used the sandbox.
 
 ## Lifecycle
 
@@ -259,7 +284,7 @@ Each session's sandbox persists across turns and deployments while the provider 
 | Event                                                                                                          | Result                                                                                                          |
 | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `sandbox.stop()`                                                                                               | Compute stops and files persist. The next access resumes it.                                                    |
-| The session stays idle for `idleTimeoutMs`, with no [background command](#background-commands) still running   | Compute stops and files persist, as with `sandbox.stop()`. See [Stop an idle sandbox](#stop-an-idle-sandbox).   |
+| The session stays idle for `idleTimeoutMs`, and nothing [keeps the sandbox running](#keep-the-sandbox-running) | Compute stops and files persist, as with `sandbox.stop()`. See [Stop an idle sandbox](#stop-an-idle-sandbox).   |
 | `sandbox.delete()`                                                                                             | The sandbox and its files are deleted. The next `ctx.getSandbox()` runs the selector again for a fresh sandbox. |
 | The native sandbox is gone on resume, such as after a removed container or deleted just-bash session directory | The session continues in a fresh sandbox, without the lost files.                                               |
 | The session's sandbox came from another provider or state version, such as after you change providers          | The session continues in a fresh sandbox. eve doesn't delete the old one.                                       |

@@ -14,7 +14,7 @@ import {
   type VercelSandboxSessionState,
 } from "#execution/sandbox/bindings/vercel.js";
 import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
-import { defineSandboxProvider, type SandboxConnection } from "#public/sandbox/provider.js";
+import { defineSandboxProvider } from "#public/sandbox/provider.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
@@ -854,8 +854,15 @@ describe("createVercelSandbox", () => {
       const [sandbox] = fake.sandboxes.values();
 
       const { signal } = new AbortController();
-      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state });
-      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state: null });
+      for (const recorded of [state, null]) {
+        const attached = await provider.attachSession({
+          appRoot,
+          sandboxName: "session_golden",
+          signal,
+          state: recorded,
+        });
+        await attached?.stop({ signal });
+      }
 
       expect(sandbox?.stop).toHaveBeenCalledTimes(2);
       expect(sandbox?.stop).toHaveBeenNthCalledWith(1, { signal });
@@ -958,19 +965,17 @@ describe("createVercelSandbox", () => {
         });
       const end = (state: { readonly sandboxName: string; readonly version: 3 } | null) =>
         provider.endSession({ appRoot: "/tmp/test-app-root", sandboxName: "session-key", state });
-      const idle = (
+      const attach = (
         state: { readonly sandboxName: string; readonly version: 3 } | null,
         signal?: AbortSignal,
-        inUse?: (connection: SandboxConnection<object>) => Promise<boolean>,
       ) =>
-        provider.idleSession({
+        provider.attachSession({
           appRoot: "/tmp/test-app-root",
-          inUse,
           sandboxName: "session-key",
           signal,
           state,
         });
-      return { end, fake, idle, start };
+      return { attach, end, fake, start };
     }
 
     it("keeps one sandbox per session key across concurrent starts, open options, and deployments", async () => {
@@ -984,53 +989,40 @@ describe("createVercelSandbox", () => {
       expect(later.state).toEqual(first.state);
     });
 
-    it("stops a running session sandbox on idle without resuming it, and leaves a stopped or missing one alone", async () => {
-      const { fake, idle, start } = session();
+    it("attaches to a running session sandbox without resuming it, stops it through the connection, and resolves null for a stopped or missing one", async () => {
+      const { attach, fake, start } = session();
       const { state } = await start();
-      const sandbox = fake.sandboxes.get(state.sandboxName)!;
+      const sandbox = fake.sandboxes.get(state.sandboxName);
 
       const { signal } = new AbortController();
-      await idle(state, signal);
-      expect(sandbox.stop).toHaveBeenCalledExactlyOnceWith({ signal });
+      const attached = await attach(state, signal);
       expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
         expect.objectContaining({ name: state.sandboxName, resume: false, signal }),
       );
+      await attached?.stop({ signal });
+      expect(sandbox?.stop).toHaveBeenCalledExactlyOnceWith({ signal });
 
-      sandbox.status = "stopped";
-      await idle(null);
-      expect(sandbox.stop).toHaveBeenCalledOnce();
+      if (sandbox !== undefined) sandbox.status = "stopped";
+      await expect(attach(null)).resolves.toBeNull();
 
       fake.sandboxes.clear();
-      await expect(idle(null)).resolves.toBeUndefined();
+      await expect(attach(null)).resolves.toBeNull();
       expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledOnce();
     });
 
-    it("leaves a running sandbox alone on idle while eve reports it in use, and asks only about a running one", async () => {
-      const { fake, idle, start } = session();
+    it("runs an attached command on the running session, never through the resuming sandbox, and offers nothing that reads or writes files", async () => {
+      const { attach, fake, start } = session();
       const { state } = await start();
-      const sandbox = fake.sandboxes.get(state.sandboxName)!;
-      let commandRunning = true;
-      const inUse = vi.fn(async (connection: SandboxConnection<object>) => {
-        await connection.spawn({ command: "true", env: {}, workingDirectory: "/workspace" });
-        return commandRunning;
-      });
-      sandbox.runCommand.mockClear();
+      const sandbox = fake.sandboxes.get(state.sandboxName);
+      sandbox?.runCommand.mockClear();
 
-      await idle(state, undefined, inUse);
-      expect(sandbox.currentSession().runCommand).toHaveBeenCalledOnce();
-      expect(sandbox.runCommand).not.toHaveBeenCalled();
-      expect(sandbox.stop).not.toHaveBeenCalled();
+      const attached = await attach(state);
+      await attached?.spawn({ command: "true", env: {}, workingDirectory: "/workspace" });
 
-      commandRunning = false;
-      await idle(state, undefined, inUse);
-      expect(sandbox.stop).toHaveBeenCalledOnce();
-
-      sandbox.status = "stopped";
-      await idle(state, undefined, inUse);
-      expect(inUse).toHaveBeenCalledTimes(2);
-      expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
-        expect.objectContaining({ resume: false }),
-      );
+      expect(sandbox?.currentSession().runCommand).toHaveBeenCalledOnce();
+      expect(sandbox?.runCommand).not.toHaveBeenCalled();
+      for (const member of ["readFile", "removePath", "writeFiles"])
+        expect(attached).not.toHaveProperty(member);
     });
 
     it("deletes the session's sandbox by key when no state was recorded, and succeeds once it is gone", async () => {
@@ -1045,7 +1037,6 @@ describe("createVercelSandbox", () => {
 
   describe("timeout", () => {
     const MINUTE = 60_000;
-    const rejected = () => Object.assign(new Error("Bad Request"), { response: { status: 400 } });
 
     async function runningSession(expiresInMs: number) {
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -1099,54 +1090,26 @@ describe("createVercelSandbox", () => {
       expect(extensions(stopped.vercel)).toEqual([]);
     });
 
-    it("asks for half as long each time Vercel rejects an extension", async () => {
+    it("runs the command when an extension fails, and stops asking on that connection", async () => {
       const { sandbox, vercel } = await runningSession(10 * MINUTE);
-      vercel.currentSession().extendTimeout.mockImplementation(async (extension: number) => {
-        if (extension > 5 * MINUTE) throw rejected();
-      });
-
-      await sandbox.run({ command: "true" });
-
-      expect(extensions(vercel)).toEqual([20 * MINUTE, 10 * MINUTE, 5 * MINUTE]);
-    });
-
-    it.each([
-      { failure: "rejects every extension", error: rejected, attempts: 5 },
-      {
-        failure: "fails for another reason",
-        error: () => Object.assign(new Error("Unavailable"), { response: { status: 503 } }),
-        attempts: 1,
-      },
-    ])("runs the command when Vercel $failure, and stops asking", async ({ attempts, error }) => {
-      const { sandbox, vercel } = await runningSession(10 * MINUTE);
-      vercel.currentSession().extendTimeout.mockImplementation(async () => {
-        throw error();
-      });
+      vercel
+        .currentSession()
+        .extendTimeout.mockRejectedValue(
+          Object.assign(new Error("Bad Request"), { response: { status: 400 } }),
+        );
 
       await expect(sandbox.run({ command: "true" })).resolves.toMatchObject({ exitCode: 0 });
       await sandbox.run({ command: "true" });
 
-      expect(extensions(vercel)).toHaveLength(attempts);
+      expect(extensions(vercel)).toHaveLength(1);
     });
 
-    it("keeps the sandbox running for as long as keepAlive asks, once for calls made together", async () => {
-      const { connection, vercel } = await runningSession(20 * MINUTE);
+    it("sends one extension for operations started together", async () => {
+      const { sandbox, vercel } = await runningSession(20 * MINUTE);
 
-      await Promise.all([
-        connection.keepAlive?.({ durationMs: 120 * MINUTE }),
-        connection.keepAlive?.({ durationMs: 120 * MINUTE }),
-      ]);
+      await Promise.all([sandbox.run({ command: "true" }), sandbox.run({ command: "true" })]);
 
-      expect(extensions(vercel)).toEqual([100 * MINUTE]);
-    });
-
-    it("says that the plan's limit is the usual cause when Vercel rejects every extension", async () => {
-      const { connection, vercel } = await runningSession(20 * MINUTE);
-      vercel.currentSession().extendTimeout.mockRejectedValue(rejected());
-
-      await expect(connection.keepAlive?.({ durationMs: 240 * MINUTE })).rejects.toThrow(
-        /Vercel rejected every extension of sandbox ".+"'s timeout\. The usual cause is that the session reached the plan's maximum duration\./u,
-      );
+      expect(extensions(vercel)).toEqual([10 * MINUTE]);
     });
   });
 

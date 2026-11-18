@@ -7,6 +7,8 @@ export type {
   SandboxReadFileOptions,
   SandboxRemovePathOptions,
   SandboxReadTextFileOptions,
+  SandboxKeepRunningOptions,
+  SandboxKeepRunningResult,
   SandboxRunOptions,
   SandboxSession,
   RuntimeSandboxSession,

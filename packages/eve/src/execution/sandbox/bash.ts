@@ -24,6 +24,15 @@ export const BASH_MAX_YIELD_SECONDS = 120;
 
 const JOB_ROOT = "/tmp/.eve/jobs";
 
+export const BASH_COMMAND_RUNNING = [
+  `for d in ${JOB_ROOT}/*/; do`,
+  `  [ -d "$d/claimed" ] && [ ! -e "$d/exit" ] && kill -0 -- -"$(cat "$d/pid" 2>/dev/null)" 2>/dev/null && exit 0`,
+  `done`,
+  `exit 1`,
+].join("\n");
+
+export const BASH_KEEP_RUNNING_MS = 30 * 60_000;
+
 const MAX_LOG_COMMAND_LENGTH = 240;
 
 const KEEP_OUTPUT_BYTES = MAX_OUTPUT_BYTES - 1;
@@ -86,22 +95,6 @@ type StreamTail =
 interface StreamTails {
   readonly stderr: StreamTail;
   readonly stdout: StreamTail;
-}
-
-export async function hasRunningBashCommand(
-  sandbox: SandboxSession,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  const result = await sandbox.run({
-    command: [
-      `for d in ${JOB_ROOT}/*/; do`,
-      `  [ -d "$d/claimed" ] && [ ! -e "$d/exit" ] && kill -0 -- -"$(cat "$d/pid" 2>/dev/null)" 2>/dev/null && exit 0`,
-      `done`,
-      `exit 1`,
-    ].join("\n"),
-    signal,
-  });
-  return result.exitCode === 0;
 }
 
 export async function executeBashOnSandbox(

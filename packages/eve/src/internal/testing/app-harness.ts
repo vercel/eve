@@ -22,8 +22,8 @@ import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import {
   defineSandboxProvider,
+  type SandboxAttachOptions,
   type SandboxSessionContext,
-  type SandboxSessionIdleOptions,
 } from "#sandbox/provider.js";
 import {
   buildActiveSessionContext,
@@ -43,9 +43,9 @@ interface TestAppDescriptor {
   readonly modules?: readonly ProgrammaticAgentModule[];
   readonly beforeSandboxStart?: (sessionId: string) => Promise<void>;
   readonly sandboxIdle?: {
-    readonly backgroundTimeoutMs?: number;
     readonly idleTimeoutMs?: number | false;
-    readonly onSessionIdle?: (sessionId: string, signal: AbortSignal | undefined) => Promise<void>;
+    readonly onAttach?: (sessionId: string, signal: AbortSignal | undefined) => Promise<void>;
+    readonly onStop?: (sessionId: string, signal: AbortSignal | undefined) => Promise<void>;
   };
   readonly sandboxRun?: MockSandboxRun;
 }
@@ -125,17 +125,23 @@ function createTestSandboxProvider(
         return connect(context.session.id);
       },
       ...(idle !== undefined && {
-        async onSessionIdle(
+        async attach(
           context: SandboxSessionContext,
           _state: unknown,
-          options: SandboxSessionIdleOptions,
+          options: SandboxAttachOptions,
         ) {
-          if (await options.inUse?.(connect(context.session.id))) {
-            events.push(`in-use:${context.session.id}`);
-            return;
-          }
-          events.push(`idle:${context.session.id}`);
-          await idle.onSessionIdle?.(context.session.id, options.signal);
+          const sessionId = context.session.id;
+          await idle.onAttach?.(sessionId, options.signal);
+          const sandbox = sessionSandboxes.get(sessionId);
+          if (sandbox === undefined) return null;
+          return {
+            spawn: sandbox.connection.spawn,
+            workspaceRoot: sandbox.connection.workspaceRoot,
+            async stop(options?: { readonly signal?: AbortSignal }) {
+              events.push(`idle:${sessionId}`);
+              await idle.onStop?.(sessionId, options?.signal);
+            },
+          };
         },
       }),
     }),
@@ -166,11 +172,11 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     modules: [
       {
         loadNamespace: async () => {
-          const { backgroundTimeoutMs, idleTimeoutMs } = descriptor.sandboxIdle ?? {};
-          const environment = sandboxes.provider.environment({
-            ...(backgroundTimeoutMs !== undefined && { backgroundTimeoutMs }),
-            ...(idleTimeoutMs !== undefined && { idleTimeoutMs }),
-          });
+          const environment = sandboxes.provider.environment(
+            descriptor.sandboxIdle?.idleTimeoutMs === undefined
+              ? undefined
+              : { idleTimeoutMs: descriptor.sandboxIdle.idleTimeoutMs },
+          );
           return {
             environment,
             default: defineSandbox(({ session }) => {

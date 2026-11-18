@@ -3,6 +3,8 @@ import { posix } from "node:path";
 import type { SandboxConnection } from "#sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type {
+  SandboxCommandResult,
+  SandboxProcess,
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,
   SandboxReadTextFileOptions,
@@ -71,13 +73,7 @@ export function createConnectionSession<Extensions extends object>(
   const session: SandboxSession = {
     resolvePath: resolveSandboxPath,
     async run(options: SandboxRunOptions) {
-      const process = await spawn(options);
-      const [stdout, stderr, { exitCode }] = await Promise.all([
-        collectStreamToString(process.stdout),
-        collectStreamToString(process.stderr),
-        process.wait(),
-      ]);
-      return { exitCode, stderr, stdout };
+      return await collectCommandResult(await spawn(options));
     },
     spawn,
     async readFile(options: SandboxReadFileOptions) {
@@ -122,7 +118,8 @@ export function createConnectionSession<Extensions extends object>(
   };
   const extensions: object = connection.extensions ?? {};
   const collisions = Object.keys(extensions).filter(
-    (key) => Object.hasOwn(session, key) || key === "delete" || key === "stop",
+    (key) =>
+      Object.hasOwn(session, key) || key === "delete" || key === "keepRunning" || key === "stop",
   );
   if (collisions.length > 0) {
     throw new Error(
@@ -130,6 +127,28 @@ export function createConnectionSession<Extensions extends object>(
     );
   }
   return { ...extensions, ...session } as SandboxSession & Extensions;
+}
+
+export async function runConnectionCommand(
+  connection: Pick<SandboxConnection, "spawn" | "workspaceRoot">,
+  options: { readonly command: string; readonly signal?: AbortSignal },
+): Promise<SandboxCommandResult> {
+  const process = await connection.spawn({
+    signal: options.signal,
+    command: options.command,
+    env: {},
+    workingDirectory: connection.workspaceRoot ?? WORKSPACE_ROOT,
+  });
+  return await collectCommandResult(process);
+}
+
+async function collectCommandResult(process: SandboxProcess): Promise<SandboxCommandResult> {
+  const [stdout, stderr, { exitCode }] = await Promise.all([
+    collectStreamToString(process.stdout),
+    collectStreamToString(process.stderr),
+    process.wait(),
+  ]);
+  return { exitCode, stderr, stdout };
 }
 
 async function collectStreamToString(stream: ReadableStream<Uint8Array>): Promise<string> {

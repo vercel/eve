@@ -12,7 +12,6 @@ import type {
   SandboxProviderImplementation,
   SandboxSessionContext,
   SandboxSessionEndOptions,
-  SandboxSessionIdleOptions,
 } from "#sandbox/provider.js";
 import {
   getSandboxEnvironmentRuntime,
@@ -86,22 +85,23 @@ export function createSandboxEnvironmentHarness<
         },
       );
     },
-    async idleSession(input: {
+    async attachSession(input: {
       readonly appRoot: string;
-      readonly inUse?: SandboxSessionIdleOptions["inUse"];
       readonly sandboxName: string;
       readonly signal?: AbortSignal;
       readonly state: State | null;
-    }): Promise<void> {
+    }) {
       const recorded = await resolveRecordedSandboxProvider(
         runtime,
         input.state,
         async () => preparedArtifact,
       );
-      await recorded?.implementation.onSessionIdle?.(
-        sessionContext(input.appRoot, input.sandboxName),
-        recorded.state,
-        { signal: input.signal, ...(input.inUse !== undefined && { inUse: input.inUse }) },
+      return (
+        (await recorded?.implementation.attach?.(
+          sessionContext(input.appRoot, input.sandboxName),
+          recorded.state,
+          { signal: input.signal },
+        )) ?? null
       );
     },
     async prepare(input: {

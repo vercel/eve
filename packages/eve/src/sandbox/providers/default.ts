@@ -25,12 +25,12 @@ import type {
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
 
 /**
- * Options for a `DefaultSandbox` environment: a shared `prepare`, `idleTimeoutMs`, and
- * `backgroundTimeoutMs`, plus per-provider options for Vercel Sandbox, Docker, and just-bash,
- * applied to whichever provider is selected.
+ * Options for a `DefaultSandbox` environment: a shared `prepare` and `idleTimeoutMs`, plus
+ * per-provider options for Vercel Sandbox, Docker, and just-bash, applied to whichever provider
+ * is selected.
  */
 export interface DefaultSandboxEnvironmentOptions extends SandboxIdleTimeoutOption {
-  readonly docker?: Omit<DockerSandboxEnvironmentOptions, keyof SandboxIdleTimeoutOption>;
+  readonly docker?: Omit<DockerSandboxEnvironmentOptions, "idleTimeoutMs">;
   readonly justBash?: {
     readonly autoInstall?: boolean;
     readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
@@ -138,9 +138,9 @@ export const DefaultSandbox: SandboxProvider<
         const inner = recordedProvider(state, undefined);
         await inner?.implementation.onSessionEnd(context, inner.state, endOptions);
       },
-      async onSessionIdle(context, state, idleOptions) {
+      async attach(context, state, attachOptions) {
         const inner = recordedProvider(state, undefined);
-        await inner?.implementation.onSessionIdle?.(context, inner.state, idleOptions);
+        return (await inner?.implementation.attach?.(context, inner.state, attachOptions)) ?? null;
       },
       async prepare(context) {
         const name = selectProvider();

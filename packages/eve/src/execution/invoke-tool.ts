@@ -212,6 +212,7 @@ async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Prom
 async function callSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const access = await ensureSandboxAccess({
     compiledArtifactsSource: runtime.compiledArtifactsSource,
+    endsWithCall: true,
     nodeId: runtime.nodeId,
     ownsSandbox: true,
     registry: runtime.sandboxRegistry,

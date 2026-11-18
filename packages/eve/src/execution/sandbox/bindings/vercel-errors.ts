@@ -42,16 +42,6 @@ export function isVercelSandboxMissingError(error: unknown): boolean {
   return errorChainContainsStatus(error, 404);
 }
 
-const REJECTED_REQUEST_STATUSES = new Set([400, 402, 403, 422]);
-
-export function isVercelRequestRejectedError(error: unknown): boolean {
-  for (const candidate of walkErrorChain(error)) {
-    const status = readErrorStatus(candidate);
-    if (status !== undefined && REJECTED_REQUEST_STATUSES.has(status)) return true;
-  }
-  return false;
-}
-
 function errorChainContainsStatus(error: unknown, expectedStatus: number): boolean {
   for (const candidate of walkErrorChain(error)) {
     if (readErrorStatus(candidate) === expectedStatus) return true;
