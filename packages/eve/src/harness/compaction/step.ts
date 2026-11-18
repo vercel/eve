@@ -117,6 +117,7 @@ interface HistoryBeforeCallInput {
   readonly messages: readonly HarnessModelMessage[];
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly model: LanguageModel;
+  readonly renew?: (rejection: unknown) => Promise<void>;
   readonly requestEnvelopeTokens: number;
 }
 
@@ -182,7 +183,7 @@ async function compactUnder(
     change,
     compaction: config,
     messages: input.messages,
-    turnModel: async () => ({ model: input.model }),
+    turnModel: async () => ({ model: input.model, renew: input.renew }),
     promptMessages: prompt,
     requestEnvelopeTokens: input.requestEnvelopeTokens,
     telemetryTurnId: activeTurnId(step.position()),
@@ -407,12 +408,13 @@ async function summaryExecutor(
   return {
     modelId: gatewayModelId(model) ?? "unknown",
     async summarize(prompt) {
-      try {
-        return await summarize(prompt);
-      } catch (error) {
-        if (renew === undefined || !rejectsCredential(error)) throw error;
-        await renew(error);
-        return await summarize(prompt);
+      for (;;) {
+        try {
+          return await summarize(prompt);
+        } catch (error) {
+          if (renew === undefined || !rejectsCredential(error)) throw error;
+          await renew(error);
+        }
       }
     },
   };

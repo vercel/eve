@@ -162,17 +162,15 @@ export class ModelCaller {
         );
       } catch (error) {
         throwIfSessionStreamDead(error);
+        if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
-        const failure = this.compactionFailure?.error ?? error;
         const { renewCredential } = this.input;
-        if (renewCredential !== undefined && rejectsCredential(failure)) {
-          await renewCredential(failure);
-          this.compactionFailure = undefined;
-          await this.prepareRetry(failure);
+        if (renewCredential !== undefined && rejectsCredential(error)) {
+          await renewCredential(error);
+          await this.prepareRetry(error);
           continue;
         }
-        if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         const recovery = recoverModelCall(error, options, diagnostics);
         if (recovery === undefined) throw error;
         await this.prepareRetry(error);
@@ -298,6 +296,7 @@ export class ModelCaller {
       compacted = await historyBeforeCall(step, {
         messages: prompt.messages,
         model: this.input.model,
+        renew: this.input.renewCredential,
         promptMessages: withClientContext(prompt),
         requestEnvelopeTokens: this.requestEnvelopeTokens,
       });

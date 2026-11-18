@@ -145,6 +145,42 @@ describe("a model that needs the caller's credential", () => {
     );
   });
 
+  it("leaves the person's credential alone when compaction.model rejects its own", async () => {
+    const billing = billingProvider({ token: "billing-token" });
+    billing.options = { bigFirstAnswer: true };
+    let summaries = 0;
+    const summaryModel = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async () => {
+          summaries += 1;
+          throw Object.assign(new Error("Unauthorized"), { statusCode: 401 });
+        },
+      }),
+    );
+    await withAgent(
+      "model-sign-in-compaction-model-rejected",
+      defineAgent({
+        compaction: { model: summaryModel, modelContextWindowTokens: 200_000 },
+        model: billing.model,
+        modelContextWindowTokens: 200_000,
+      }),
+      async (session) => {
+        await session.stream.nextUntil("first answer", isTurnSettled);
+        await session.send("And yesterday's?");
+        const settled = await session.stream.nextUntil(
+          "second turn",
+          (event) => isSignInOpened(event) || event.type === "session.ended",
+        );
+        expect(settled.filter(isSignInOpened)).toEqual([]);
+        expect(billing.evictions).toBe(0);
+        expect(summaries).toBe(1);
+        expect(filterEventsByType(settled, "session.ended").at(-1)?.data).toMatchObject({
+          error: { code: "MODEL_CALL_FAILED" },
+        });
+      },
+    );
+  });
+
   describe("after the process drops the dynamic model's value", () => {
     const dropLiveValues = () =>
       (Reflect.get(globalThis, Symbol.for("eve.reactions.live")) as Map<string, unknown>).clear();
