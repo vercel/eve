@@ -125,12 +125,11 @@ export function createCompiledRuntimeModelCatalogLoader(
 }
 
 async function fetchModelCatalog(): Promise<unknown> {
+  const signal = AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS);
   for (let attempt = 0; ; attempt++) {
     let retryableStatus = false;
     try {
-      const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, {
-        signal: AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS),
-      });
+      const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, { signal });
       if (response.ok) return await response.json();
       retryableStatus = MODEL_CATALOG_RETRY_STATUSES.has(response.status);
       await response.body?.cancel().catch(() => {});
@@ -141,10 +140,9 @@ async function fetchModelCatalog(): Promise<unknown> {
       const delayMs = MODEL_CATALOG_RETRY_DELAYS_MS[attempt];
       const transient =
         retryableStatus ||
-        (error instanceof Error && error.name === "TimeoutError") ||
         (error instanceof TypeError &&
           (error.message === "fetch failed" || error.message === "terminated"));
-      if (delayMs === undefined || !transient) throw error;
+      if (delayMs === undefined || !transient || signal.aborted) throw error;
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }

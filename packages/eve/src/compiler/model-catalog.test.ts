@@ -343,7 +343,7 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
             cause: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }),
           }),
         )
-        .mockRejectedValueOnce(new DOMException("The operation timed out", "TimeoutError"));
+        .mockRejectedValueOnce(new TypeError("terminated"));
       const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
       const result = Promise.all([
         loader.loadModelMetadata(),
@@ -361,7 +361,17 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
       expect(fetch).toHaveBeenCalledTimes(3);
       const signals = vi.mocked(fetch).mock.calls.map(([, init]) => init?.signal);
       expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
-      expect(new Set(signals).size).toBe(3);
+      expect(new Set(signals).size).toBe(1);
+    });
+
+    it("does not retry a request that ran out of time", async () => {
+      const error = new DOMException("The operation timed out", "TimeoutError");
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(error);
+      const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
+      const assertion = expect(loader.getModelLimits("openai/gpt-5.4")).rejects.toBe(error);
+
+      await Promise.all([vi.runAllTimersAsync(), assertion]);
+      expect(fetch).toHaveBeenCalledOnce();
     });
 
     it.each([429, 503])(
