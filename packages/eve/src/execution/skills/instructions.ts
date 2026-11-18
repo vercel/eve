@@ -60,7 +60,6 @@ export function changedSkillAnnouncements(
     [...loadedSkills(record)].flatMap(([name, loaded]) => {
       const skill = skills.get(name);
       if (skill === undefined) return [];
-      const text = `Skill \`${name}\` changed since you loaded it. Load it again with ${SKILL_TOOL_NAME}({ name: "${name}" }) before relying on it.`;
       const changed = loaded !== skill.markdown;
       return [
         [
@@ -68,7 +67,10 @@ export function changedSkillAnnouncements(
           {
             initial: "",
             kind: "context.instruction",
-            render: () => (changed ? text : undefined),
+            render: () =>
+              changed
+                ? `Skill \`${name}\` changed since you loaded it. Load it again with ${SKILL_TOOL_NAME}({ name: "${name}" }) before relying on it.`
+                : undefined,
             value: changed ? announcementDigest("skill", skill.markdown) : "",
           },
         ],
