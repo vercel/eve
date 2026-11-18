@@ -142,6 +142,14 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
   await checkApproval("createPurchaseOrder", order(100, 49.99), false);
   await checkApproval("getStock", { sku: "NS-1042" }, false);
   await checkApproval("listLowStock", {}, false);
+
+  // An approval decision covers one order, so a tool places only the order it was asked for.
+  for (const { file, probe, requests } of runs) {
+    const orders = requests.filter((request) => operationOf(request) === "createPurchaseOrder");
+    if (orders.length === 0) continue;
+    expect(probe.operation, `${file} placed an order`).toBe("createPurchaseOrder");
+    expect(orders, `${file} placed more than one order`).toHaveLength(1);
+  }
 });
 
 test("rejects low-stock alerts with a bad signature", async () => {
@@ -243,7 +251,7 @@ interface NorthstarRequest {
   readonly method: string;
   readonly url: URL;
   readonly authorization: string | null;
-  readonly body: unknown;
+  body: unknown;
 }
 
 /** One run of an authored tool with a probe's input, and the Northstar requests it made. */
@@ -322,22 +330,30 @@ async function customNorthstarToolRuns(): Promise<NorthstarToolRun[]> {
         const parsed = schema ? await schema["~standard"].validate(input) : { value: input };
         if (parsed.issues) continue;
         const requests: NorthstarRequest[] = [];
+        const bodies: Promise<void>[] = [];
         vi.stubGlobal("fetch", async (resource: RequestInfo | URL, init?: RequestInit) => {
           const request = new Request(resource, init);
           const url = new URL(request.url);
           if (url.origin === apiBaseUrl) {
-            requests.push({
+            // Record the request before any await, so a tool that doesn't wait for it is graded too.
+            const recorded: NorthstarRequest = {
               method: request.method,
               url,
               authorization: request.headers.get("authorization"),
-              body:
-                request.method === "POST"
-                  ? await request
-                      .clone()
-                      .json()
-                      .catch(() => undefined)
-                  : undefined,
-            });
+              body: undefined,
+            };
+            requests.push(recorded);
+            if (request.method === "POST") {
+              const body = request
+                .clone()
+                .json()
+                .then(
+                  (value: unknown) => void (recorded.body = value),
+                  () => {},
+                );
+              bodies.push(body);
+              await body;
+            }
           }
           const stock = { sku: "NS-1042", onHand: 3, reserved: 1, parLevel: 40 };
           if (url.pathname === "/purchase-orders") {
@@ -357,6 +373,7 @@ async function customNorthstarToolRuns(): Promise<NorthstarToolRun[]> {
         } catch (caught) {
           error = caught;
         }
+        await Promise.all(bodies);
         if (requests.length === 0) continue;
         const run = { file, name, tool, nested, probe, requests, error };
         runs.push(run);
