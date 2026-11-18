@@ -1,6 +1,11 @@
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
-import { isModelConnection, type ModelConnectionSelection } from "#shared/model-connection.js";
-import { readFileSync } from "node:fs";
+import type { ModelConnectionSelection } from "#shared/model-connection.js";
+import {
+  isProviderSelection,
+  providerSettingsPath,
+  readProviderSettingsSync,
+  type ProviderSettings,
+} from "#shared/provider-settings.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -11,10 +16,6 @@ import { findEnvFileWithKey } from "#setup/boxes/detect-ai-gateway.js";
 import { readProjectLink } from "#setup/project-resolution.js";
 
 export type ProviderSelection = ModelConnectionSelection;
-
-export function providerSettingsPath(appRoot: string): string {
-  return join(appRoot, ".eve", "provider.json");
-}
 
 export async function resolveAvailableProviders(
   appRoot: string,
@@ -56,30 +57,6 @@ export async function readProviderSelection(
   }
 }
 
-export function readProviderSettingsSync(appRoot: string): ProviderSettings | undefined {
-  try {
-    const value: unknown = JSON.parse(readFileSync(providerSettingsPath(appRoot), "utf8"));
-    if (!isObject(value) || !isProviderSelection(value.selected)) return undefined;
-    return {
-      selected: value.selected,
-      ...(typeof value.teamId === "string" &&
-        typeof value.teamName === "string" && { teamId: value.teamId, teamName: value.teamName }),
-      ...((value.keySource === "environment" || value.keySource === "secret") && {
-        keySource: value.keySource,
-      }),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-export interface ProviderSettings {
-  selected: ProviderSelection;
-  teamId?: string;
-  teamName?: string;
-  keySource?: "environment" | "secret";
-}
-
 export async function providerSettingsMatch(
   appRoot: string,
   settings: ProviderSettings,
@@ -113,10 +90,6 @@ export async function writeProviderSelection(
 
 function parseProviderSelection(value: unknown): ProviderSelection | undefined {
   return isObject(value) && isProviderSelection(value.selected) ? value.selected : undefined;
-}
-
-function isProviderSelection(value: unknown): value is ProviderSelection {
-  return isModelConnection(value) || value === "vercel-cli" || value === "ai-gateway-project";
 }
 
 export function readProviderTeamSync(

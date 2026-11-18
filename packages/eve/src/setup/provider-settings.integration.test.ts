@@ -3,11 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { providerSettingsPath, readProviderSettingsSync } from "#shared/provider-settings.js";
 import {
-  providerSettingsPath,
   providerSettingsMatch,
   readProviderSelection,
-  readProviderSettingsSync,
   resolveAvailableProviders,
   writeProviderSelection,
 } from "./provider-settings.js";
