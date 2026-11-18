@@ -8,7 +8,7 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 }));
 
 describe("readOwnedInvocationRun", () => {
-  it.fails("treats an invocation id the world rejects as malformed as not found", async () => {
+  it("treats an invocation id the world rejects as malformed as not found", async () => {
     mocks.get.mockRejectedValueOnce(
       new WorkflowWorldError("GET /v2/runs/timing-test-0000 -> HTTP 400: Bad Request", {
         status: 400,
