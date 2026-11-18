@@ -2,7 +2,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { ModelDefinition } from "#models/definition.js";
+import type { DefinedModel } from "#models/definition.js";
 import {
   isDynamicSentinel,
   type DynamicModelContext,
@@ -91,9 +91,9 @@ export interface EveLanguageModel {
 export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
 /**
- * A model for a session's turns: a static model, or a {@link ModelDefinition} with its own `auth`.
+ * A model for a session's turns: a static model, or a {@link DefinedModel} with its own `auth`.
  */
-export type PublicAgentTurnModelDefinition = PublicAgentStaticModelDefinition | ModelDefinition;
+export type PublicAgentTurnModelDefinition = PublicAgentStaticModelDefinition | DefinedModel;
 
 /**
  * A model together with settings that apply only when it is selected, such as reasoning effort
@@ -112,7 +112,7 @@ export interface PublicAgentModelSelectionDefinition<
 }
 
 /**
- * What a dynamic model function returns: a model ID, instance, or {@link ModelDefinition}, or a
+ * What a dynamic model function returns: a model ID, instance, or {@link DefinedModel}, or a
  * {@link PublicAgentModelSelectionDefinition} holding one.
  */
 export type PublicAgentDynamicModelResult =
@@ -434,7 +434,7 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
       }
     | {
         /** A model with its own `auth`; see `defineModel` in `eve/models`. */
-        readonly model: ModelDefinition;
+        readonly model: DefinedModel;
         /** Optional context-window override for a model `id` outside the AI Gateway catalog. */
         readonly modelContextWindowTokens?: number;
         readonly modelOptions?: AgentModelOptionsDefinition;

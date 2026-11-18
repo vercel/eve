@@ -1,5 +1,5 @@
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
-import { isModelDefinition } from "#models/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 import type {
   PublicAgentDynamicModelResult,
   PublicAgentModelSelectionDefinition,
@@ -36,7 +36,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isTurnModel(value: unknown): value is PublicAgentTurnModelDefinition {
   return typeof value === "string"
     ? value.trim().length > 0
-    : isRuntimeLanguageModel(value) || isModelDefinition(value);
+    : isRuntimeLanguageModel(value) || isDefinedModel(value);
 }
 
 export function isModelSelection(value: unknown): value is ModelOptionSelection {
@@ -91,12 +91,12 @@ function isSelectionObject(
   return (
     typeof selection !== "string" &&
     !isRuntimeLanguageModel(selection) &&
-    !isModelDefinition(selection)
+    !isDefinedModel(selection)
   );
 }
 
 export function selectionLogIdentity(selection: ModelOptionSelection): string {
   const model = selectionModel(selection);
   if (typeof model === "string") return model;
-  return isModelDefinition(model) ? model.id : `${model.provider}/${model.modelId}`;
+  return isDefinedModel(model) ? model.id : `${model.provider}/${model.modelId}`;
 }

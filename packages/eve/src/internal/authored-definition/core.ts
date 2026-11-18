@@ -28,7 +28,7 @@ import {
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
-import { isModelDefinition } from "#models/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -333,7 +333,7 @@ function normalizeAgentCompactionDefinition(
         `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
       );
     }
-    if (isModelDefinition(record.model)) {
+    if (isDefinedModel(record.model)) {
       throw new Error(
         `${message} "compaction.model" takes a model ID or a model instance. A defineModel value needs a credential, and the summary call can't hold the turn for a sign-in.`,
       );

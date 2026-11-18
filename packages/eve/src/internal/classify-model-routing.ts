@@ -1,4 +1,4 @@
-import { isModelDefinition } from "#models/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 import type { ModelRouting, PublicAgentTurnModelDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -8,7 +8,7 @@ export function classifyModelRouting(
   model: PublicAgentTurnModelDefinition,
   providerOptions?: Record<string, JsonObject>,
 ): ModelRouting {
-  if (isModelDefinition(model)) {
+  if (isDefinedModel(model)) {
     return { kind: "external", provider: gatewayTarget(model.id) };
   }
   if (typeof model === "string") {

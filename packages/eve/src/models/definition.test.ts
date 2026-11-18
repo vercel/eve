@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { createModelMetadata } from "#internal/model-catalog.js";
 import { auto } from "#models/auto.js";
-import { defineModel, isModelDefinition, modelSignInName } from "#models/definition.js";
+import { defineModel, isDefinedModel, modelSignInName } from "#models/definition.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
+import type { AgentDefinition } from "#public/definitions/agent.js";
 import type { EveLanguageModel } from "#shared/agent-definition.js";
 import type { TokenResult } from "#shared/connection-types.js";
 
@@ -21,9 +22,17 @@ const connectAuth = { getToken, vercelConnect: { connector: "anthropic/myagent" 
 describe("defineModel", () => {
   it("brands the definition and keys its sign-in by the connector", () => {
     const model = defineModel({ auth: connectAuth, create, id: "anthropic/claude-sonnet-5" });
-    expect(isModelDefinition(model)).toBe(true);
-    expect(isModelDefinition({ ...model })).toBe(false);
+    expect(isDefinedModel(model)).toBe(true);
+    expect(isDefinedModel({ ...model })).toBe(false);
     expect(modelSignInName(model)).toBe("eve__model__anthropic_myagent");
+  });
+
+  it("takes only its own result as a turn model", () => {
+    const plain = { auth: connectAuth, create, id: "anthropic/claude-sonnet-5" };
+    // @ts-expect-error A plain object with ModelDefinition's fields carries no brand.
+    const agent: AgentDefinition = { model: plain };
+    expect(isDefinedModel(agent.model)).toBe(false);
+    expect(isDefinedModel(defineModel(plain))).toBe(true);
   });
 
   it("keys the sign-in by authKey when given", () => {

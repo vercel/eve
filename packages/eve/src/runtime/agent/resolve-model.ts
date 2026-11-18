@@ -21,7 +21,7 @@ import {
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
-import { isModelDefinition, type ModelDefinition } from "#models/definition.js";
+import { type DefinedModel, isDefinedModel } from "#models/definition.js";
 import { selectionModel } from "#models/options.js";
 import { readAgentToolModels } from "#tools/agent-models.js";
 import {
@@ -54,7 +54,7 @@ export interface RuntimeModelResolutionScope {
   readonly nodeId: string | undefined;
 }
 
-export type RuntimeModel = LanguageModel | ModelDefinition;
+export type RuntimeModel = LanguageModel | DefinedModel;
 
 class CredentialedModelUnavailableError extends Error {
   constructor(modelId: string) {
@@ -137,7 +137,7 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  return isModelDefinition(model) ? model : toAiSdkLanguageModel(model);
+  return isDefinedModel(model) ? model : toAiSdkLanguageModel(model);
 }
 
 function agentToolOptionModel(
@@ -157,7 +157,7 @@ function agentToolOptionModel(
       `Expected the agent({ models }) option "${key}" in "${source.logicalPath}" to hold a provider model.`,
     );
   }
-  return isModelDefinition(model) ? model : toAiSdkLanguageModel(model);
+  return isDefinedModel(model) ? model : toAiSdkLanguageModel(model);
 }
 
 function isSourceBackedRuntimeModelReference(
@@ -247,14 +247,14 @@ export async function resolveRuntimeModelSelection(input: {
     };
   }
 
-  if (!isModelDefinition(selectedModel)) validateRuntimeLanguageModel(selectedModel);
+  if (!isDefinedModel(selectedModel)) validateRuntimeLanguageModel(selectedModel);
   if (input.durability === "durable") {
     throw new InvalidRuntimeModelSelectionError(
       "Dynamic model selection returned a model object, but durable model selections must be serializable. Return a model id string.",
     );
   }
 
-  if (isModelDefinition(selectedModel)) {
+  if (isDefinedModel(selectedModel)) {
     const contextWindowTokens =
       selection.modelContextWindowTokens ??
       (

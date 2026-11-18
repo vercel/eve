@@ -35,7 +35,7 @@ import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
-import { isModelDefinition } from "#models/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 import { type CredentialedModel, credentialedModel } from "./credential.js";
 import { credentialErrorIn, ModelCredentialFailure } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
@@ -148,7 +148,7 @@ async function resolveModel(
     return { failed: await failModelSelection(step, error) };
   }
   step.model = resolved.choice;
-  if (!isModelDefinition(resolved.model)) return { model: resolved.model };
+  if (!isDefinedModel(resolved.model)) return { model: resolved.model };
   try {
     return await credentialedModel(resolved.model);
   } catch (error) {

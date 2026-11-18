@@ -8,7 +8,7 @@ import { isDynamicSentinel } from "#dynamic/definition.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
-import { isModelDefinition } from "#models/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -244,7 +244,7 @@ async function normalizeAuthoredModelReference(input: {
     sourceId: source.sourceId,
   };
 
-  if (isModelDefinition(input.value)) {
+  if (isDefinedModel(input.value)) {
     const reference: CompiledRuntimeModelReference = {
       id: input.value.id,
       source: sourceRef,

@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { isModelDefinition } from "#models/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 import type {
   AgentReasoningDefinition,
   EveLanguageModel,
@@ -10,7 +10,7 @@ export function formatLanguageModelGatewayId(model: PublicAgentTurnModelDefiniti
   if (typeof model === "string") {
     return model;
   }
-  if (isModelDefinition(model)) {
+  if (isDefinedModel(model)) {
     return model.id;
   }
   const provider = model.provider.split(".")[0];

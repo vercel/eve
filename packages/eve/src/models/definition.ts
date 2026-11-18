@@ -38,6 +38,12 @@ export interface ModelDefinition {
 }
 
 /**
+ * The model {@link defineModel} returns. Every model field that accepts a model with `auth` takes
+ * this value; a plain object with the same fields does not.
+ */
+export type DefinedModel = ModelDefinition & { readonly [MODEL_DEFINITION]: true };
+
+/**
  * Defines a model with a connection-style `auth`, for an agent's `model`, a dynamic
  * model's result, or an `auto()` or `agent({ models })` option.
  *
@@ -54,7 +60,7 @@ export interface ModelDefinition {
  * });
  * ```
  */
-export function defineModel(definition: ModelDefinition): ModelDefinition {
+export function defineModel(definition: ModelDefinition): DefinedModel {
   if (typeof definition.id !== "string" || definition.id.trim() === "") {
     throw new Error('defineModel: The "id" field must be a non-empty string.');
   }
@@ -78,10 +84,10 @@ export function defineModel(definition: ModelDefinition): ModelDefinition {
     id: definition.id,
   };
   Object.defineProperty(model, MODEL_DEFINITION, { value: true });
-  return model;
+  return model as DefinedModel;
 }
 
-export function isModelDefinition(value: unknown): value is ModelDefinition {
+export function isDefinedModel(value: unknown): value is DefinedModel {
   return (
     typeof value === "object" && value !== null && Reflect.get(value, MODEL_DEFINITION) === true
   );

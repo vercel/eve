@@ -1,7 +1,7 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { type LanguageModel, wrapLanguageModel } from "ai";
 
-import { isModelDefinition, type ModelDefinition, modelSignInName } from "#models/definition.js";
+import { isDefinedModel, type ModelDefinition, modelSignInName } from "#models/definition.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import {
   createAuthorizationExecution,
@@ -19,7 +19,7 @@ export interface CredentialedModel {
 }
 
 export async function credentialedModel(model: RuntimeModel): Promise<CredentialedModel> {
-  if (!isModelDefinition(model)) return { model };
+  if (!isDefinedModel(model)) return { model };
   const execution = createAuthorizationExecution();
   const scoped = scopedAuthorization(model);
   const create = async () => createdModel(model, await credentialFor(execution, scoped), scoped);

@@ -24,7 +24,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
-import { defineModel, type ModelDefinition } from "#models/definition.js";
+import { type DefinedModel, defineModel } from "#models/definition.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { interactions } from "#protocol/session-projection/public-view.js";
 import { defineAgent, type AgentDefinition } from "#public/definitions/agent.js";
@@ -702,7 +702,7 @@ async function withSession(
 
 interface BillingProvider {
   evictions: number;
-  readonly model: ModelDefinition;
+  readonly model: DefinedModel;
   onStart?: () => Promise<void>;
   options: SessionOptions;
   readonly prompts: unknown[];

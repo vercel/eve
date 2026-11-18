@@ -8,7 +8,7 @@ import {
   type DynamicTurn,
 } from "#dynamic/definition.js";
 import { turnInputText } from "#definitions/turn.js";
-import { isModelDefinition } from "#models/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import {
   isModelOptions,
@@ -120,7 +120,7 @@ export function auto<const T extends ModelOptions>(
     );
   }
 
-  if (isModelDefinition(config.model)) {
+  if (isDefinedModel(config.model)) {
     throw new Error(
       "auto's decision model takes a model ID or a decision model instance. A defineModel value can only be an option or the fallback: the decision call can't hold the turn for a sign-in.",
     );

@@ -1,5 +1,6 @@
 [
   "AutoConfig",
+  "DefinedModel",
   "DynamicKey",
   "DynamicModelContext",
   "DynamicModelResult",
