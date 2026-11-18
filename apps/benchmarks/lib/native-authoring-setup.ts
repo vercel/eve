@@ -82,7 +82,7 @@ export function createNativeAuthoringSetup(options: {
       "fixture cleanup",
     );
     await sandbox.writeFiles({ "/usr/local/bin/eve": eveWrapper(options.packageSpec) });
-    await run(sandbox, "chmod +x /usr/local/bin/eve", "eve canary wrapper");
+    await run(sandbox, "chmod +x /usr/local/bin/eve", "eve wrapper");
 
     if (bootstrap.startingPoint === "scaffolded") {
       await run(
