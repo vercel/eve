@@ -3,13 +3,48 @@ import {
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
+import {
+  type BundledCompiledArtifacts,
+  readBundledCompiledArtifacts,
+} from "#runtime/loaders/bundled-artifacts.js";
 import { loadCompileMetadata } from "#runtime/loaders/compile-metadata.js";
+
+const bundledKeys = new WeakMap<BundledCompiledArtifacts, string>();
+const diskKeys = new Map<string, { readonly key: string; readonly mtimeMs: number }>();
 
 export async function resolveRuntimeCompiledArtifactsVersionedCacheKey(
   source: RuntimeCompiledArtifactsSource,
 ): Promise<string> {
   const baseKey = getRuntimeCompiledArtifactsCacheKey(source);
-  const compileMetadataMtimeMs = await resolveCompileMetadataMtimeMs(source);
+
+  if (source.kind !== "disk") {
+    const artifacts = readBundledCompiledArtifacts();
+    if (artifacts === null) return baseKey;
+    const known = bundledKeys.get(artifacts);
+    if (known !== undefined) return known;
+    const { key } = await resolveVersionedKey(source, baseKey, undefined);
+    bundledKeys.set(artifacts, key);
+    return key;
+  }
+
+  const mtimeMs = await resolveCompileMetadataMtimeMs(source);
+  if (mtimeMs === undefined) return (await resolveVersionedKey(source, baseKey, undefined)).key;
+  const known = diskKeys.get(baseKey);
+  if (known?.mtimeMs === mtimeMs) return known.key;
+  const { key, loaded } = await resolveVersionedKey(source, baseKey, mtimeMs);
+  if (loaded) diskKeys.set(baseKey, { key, mtimeMs });
+  return key;
+}
+
+async function resolveVersionedKey(
+  source: RuntimeCompiledArtifactsSource,
+  baseKey: string,
+  compileMetadataMtimeMs: number | undefined,
+): Promise<{ readonly key: string; readonly loaded: boolean }> {
+  const mtimeSuffix =
+    compileMetadataMtimeMs === undefined
+      ? ""
+      : `:mtime-${formatMtimeMsForCacheKey(compileMetadataMtimeMs)}`;
 
   try {
     const metadata = await loadCompileMetadata({
@@ -17,25 +52,15 @@ export async function resolveRuntimeCompiledArtifactsVersionedCacheKey(
     });
     const sourceGraphHash = metadata?.discovery.sourceGraphHash;
 
-    if (sourceGraphHash === undefined || sourceGraphHash.length === 0) {
-      if (compileMetadataMtimeMs === undefined) {
-        return baseKey;
-      }
-
-      return `${baseKey}:mtime-${formatMtimeMsForCacheKey(compileMetadataMtimeMs)}`;
-    }
-
-    if (compileMetadataMtimeMs === undefined) {
-      return `${baseKey}:${sourceGraphHash}`;
-    }
-
-    return `${baseKey}:${sourceGraphHash}:mtime-${formatMtimeMsForCacheKey(compileMetadataMtimeMs)}`;
+    return {
+      key:
+        sourceGraphHash === undefined || sourceGraphHash.length === 0
+          ? `${baseKey}${mtimeSuffix}`
+          : `${baseKey}:${sourceGraphHash}${mtimeSuffix}`,
+      loaded: true,
+    };
   } catch {
-    if (compileMetadataMtimeMs === undefined) {
-      return baseKey;
-    }
-
-    return `${baseKey}:mtime-${formatMtimeMsForCacheKey(compileMetadataMtimeMs)}`;
+    return { key: `${baseKey}${mtimeSuffix}`, loaded: false };
   }
 }
 
