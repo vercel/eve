@@ -1,4 +1,5 @@
 import { isObject } from "#shared/guards.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toError, walkCauseChain } from "#shared/errors.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
@@ -226,6 +227,12 @@ export class ModelCredentialFailure extends Error {
     this.code = code;
     this.scoped = scoped;
   }
+}
+
+export function credentialFailureCode(error: unknown): ModelCredentialFailureCode {
+  return isConnectionAuthorizationFailedError(error)
+    ? "MODEL_AUTHORIZATION_FAILED"
+    : "MODEL_CREDENTIAL_FAILED";
 }
 
 export function credentialErrorIn(

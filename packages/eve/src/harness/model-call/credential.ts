@@ -3,7 +3,6 @@ import { type LanguageModel, wrapLanguageModel } from "ai";
 
 import { isModelDefinition, type ModelDefinition, modelSignInName } from "#models/definition.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
-import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   createAuthorizationExecution,
   evictScopedToken,
@@ -12,7 +11,7 @@ import {
 } from "#runtime/connections/scoped-authorization.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import { isRuntimeLanguageModel } from "#internal/runtime-model.js";
-import { ModelCredentialFailure, rejectsCredential } from "./errors.js";
+import { credentialFailureCode, ModelCredentialFailure, rejectsCredential } from "./errors.js";
 
 export async function credentialedModel(model: RuntimeModel): Promise<LanguageModel> {
   if (!isModelDefinition(model)) return model;
@@ -61,10 +60,7 @@ async function credentialFor(
     return await execution.getToken(scoped);
   } catch (error) {
     if (isScopedAuthorizationRequiredError(error)) throw error;
-    const code = isConnectionAuthorizationFailedError(error)
-      ? "MODEL_AUTHORIZATION_FAILED"
-      : "MODEL_CREDENTIAL_FAILED";
-    throw new ModelCredentialFailure(code, scoped, error);
+    throw new ModelCredentialFailure(credentialFailureCode(error), scoped, error);
   }
 }
 

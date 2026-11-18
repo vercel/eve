@@ -12,7 +12,12 @@ import { readTurnState } from "#harness/session-machine/state.js";
 import { failTurn, type Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import { type ModelCredentialFailureCode, rejectsCredential } from "#harness/model-call/errors.js";
+import {
+  credentialFailureCode,
+  type ModelCredentialFailureCode,
+  rejectsCredential,
+} from "#harness/model-call/errors.js";
+import { supportsInteractiveAuthorization } from "#shared/connection-types.js";
 import {
   handleAuthorizationError,
   type ScopedAuthorization,
@@ -98,13 +103,19 @@ export async function pauseForModelSignIn(
   required: ScopedAuthorizationRequiredError,
   beforePause?: () => Promise<void>,
 ): Promise<StepResult> {
+  if (!supportsInteractiveAuthorization(required.scoped.authorization)) {
+    return await failModelCredential(
+      step,
+      "MODEL_AUTHORIZATION_FAILED",
+      required.cause,
+      required.scoped,
+    );
+  }
   let signIn: Awaited<ReturnType<typeof handleAuthorizationError>>;
   try {
     signIn = await handleAuthorizationError(required, { evictToken: false });
-  } catch (refused) {
-    const asked = isConnectionAuthorizationFailedError(refused) || refused === required.cause;
-    const code = asked ? "MODEL_AUTHORIZATION_FAILED" : "MODEL_CREDENTIAL_FAILED";
-    return await failModelCredential(step, code, refused, required.scoped);
+  } catch (error) {
+    return await failModelCredential(step, credentialFailureCode(error), error, required.scoped);
   }
   await beforePause?.();
   return await stopForSignIn(step, signIn);

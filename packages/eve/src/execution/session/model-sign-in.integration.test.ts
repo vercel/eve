@@ -170,6 +170,12 @@ describe("a model that needs the caller's credential", () => {
       "eve couldn't get the Oauth billing credential.",
     ],
     [
+      "auth fails while it opens the sign-in",
+      { outage: "start" },
+      "MODEL_CREDENTIAL_FAILED",
+      "eve couldn't get the Oauth billing credential.",
+    ],
+    [
       "auth fails while it replaces a rejected token",
       { outage: "refresh", token: "stale-token" },
       "MODEL_CREDENTIAL_FAILED",
@@ -514,7 +520,13 @@ function billingProvider(
     readonly refresh?: string;
     readonly failCompletion?: string;
     readonly rejectEveryToken?: boolean;
-    readonly outage?: "getToken" | "refresh" | "create" | "create-output" | "create-async";
+    readonly outage?:
+      | "getToken"
+      | "refresh"
+      | "start"
+      | "create"
+      | "create-output"
+      | "create-async";
   } = {},
 ): BillingProvider {
   let stored = initial.token;
@@ -535,6 +547,8 @@ function billingProvider(
     },
     async startAuthorization({ callbackUrl }) {
       starts += 1;
+      if (initial.outage === "start")
+        throw Object.assign(new Error("fetch failed"), { code: "ECONNREFUSED" });
       await billing.onStart?.();
       return {
         challenge: {
