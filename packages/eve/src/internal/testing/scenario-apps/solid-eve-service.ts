@@ -4,8 +4,8 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
 const require = createRequire(import.meta.url);
 const NITRO_VERSION = (require("nitro/package.json") as { version: string }).version;
-const SOLID_VERSION = "^2.0.1";
-const SOLID_VITE_PLUGIN_VERSION = "^3.0.1";
+const SOLID_VERSION = "2.0.1";
+const SOLID_VITE_PLUGIN_VERSION = "3.0.1";
 const VITE_VERSION = "^8.3.8";
 
 interface SolidEveServiceDescriptorOptions {
