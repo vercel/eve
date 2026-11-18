@@ -62,7 +62,7 @@ async function loadCompiledApplicationState(
       compileAgent({ startPath: appRoot }),
     );
     if (cache !== "off") {
-      await writeCachedCompile({ moduleIds, result, startPath: appRoot, startedAtMs });
+      await writeCachedCompile({ appRoot, moduleIds, result, startedAtMs });
     }
     return result;
   } catch (error) {

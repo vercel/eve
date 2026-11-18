@@ -1,24 +1,22 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, rename, stat, writeFile, mkdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import type { CompilerArtifactPaths } from "#compiler/artifacts.js";
-import type { CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
-import type { ResolvedDiscoveryProject } from "#discover/project.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { authoredModuleConditions } from "#internal/authored-module-conditions.js";
-import { isAuthoredSourcePath } from "#internal/authored-package-boundary.js";
+import {
+  findAuthoredPackageRoot,
+  isAuthoredSourcePath,
+} from "#internal/authored-package-boundary.js";
 import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
-const INSPECT_CACHE_KIND = "eve-inspect-cache";
-const INSPECT_CACHE_VERSION = 2;
+const RECORD_KIND = "eve-inspect-cache-v2";
 const RECENT_EDIT_WINDOW_MS = 2_000;
-const SOURCE_READ_CONCURRENCY = 64;
-const SKIPPED_DIRECTORY_NAMES = new Set([
+const SKIPPED_DIRECTORIES = new Set([
   ".cache",
   ".eve",
   ".git",
@@ -30,7 +28,7 @@ const SKIPPED_DIRECTORY_NAMES = new Set([
   ".vercel",
   "node_modules",
 ]);
-const PROJECT_FILE_NAMES = [
+const PROJECT_FILES = [
   "bun.lock",
   "bun.lockb",
   "jsconfig.json",
@@ -42,139 +40,101 @@ const PROJECT_FILE_NAMES = [
   "tsconfig.json",
   "yarn.lock",
 ];
-const TRACKED_ENV_PREFIXES = ["EVE_", "VERCEL"];
-const TRACKED_ENV_NAMES = new Set(["NODE_ENV", "NODE_OPTIONS"]);
-const CONFIG_FILE_NAME = /^[jt]sconfig\..+\.json$/;
-const ENV_REFERENCE = /\bprocess\.env\b/g;
-const LITERAL_ENV_REFERENCE =
-  /\bprocess\.env(?:\.([A-Za-z_$][\w$]*)|\[\s*(["'])([^"'\\]+)\2\s*\])/g;
-const ENV_MODULE_IMPORT =
-  /\bfrom\s*["'](?:node:)?process["']|\brequire\(\s*["'](?:node:)?process["']\s*\)/;
+const CONFIG_VARIANT = /^[jt]sconfig\..+\.json$/;
+const TRACKED_ENV = /^(?:EVE_|VERCEL|NODE_ENV$|NODE_OPTIONS$)/;
+const ENV_ACCESS = /\bprocess\.env\b/g;
+const LITERAL_ENV_ACCESS = /\bprocess\.env(?:\.([A-Za-z_$][\w$]*)|\[\s*(["'])([^"'\\]+)\2\s*\])/g;
 const INDIRECT_ENV_ACCESS =
-  /\bprocess\s*(?:\?\.|\[)|\{[^}]*\benv\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/;
-const MODEL_METADATA_UNAVAILABLE = "compile/model-metadata-unavailable";
+  /\bprocess\s*(?:\?\.|\[)|\{[^}]*\benv\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b|\b(?:from|require\()\s*["'](?:node:)?process["']/;
 
-type FileStamp = string | null;
+type Stamps = Record<string, string | null>;
 
 interface InspectCacheRecord {
-  readonly kind: typeof INSPECT_CACHE_KIND;
-  readonly version: typeof INSPECT_CACHE_VERSION;
+  readonly kind: typeof RECORD_KIND;
   readonly generator: string;
-  readonly startPath: string;
-  readonly project: ResolvedDiscoveryProject;
-  readonly paths: CompilerArtifactPaths;
-  readonly trees: Readonly<Record<string, Readonly<Record<string, string>>>>;
-  readonly files: Readonly<Record<string, FileStamp>>;
-  readonly artifacts: Readonly<Record<string, FileStamp>>;
-  readonly envNames: readonly string[];
-  readonly env: Readonly<Record<string, string | null>>;
-}
-
-interface CompilerDiagnosticsArtifact {
-  readonly diagnostics: CompilerDiagnostic[];
+  readonly result: Pick<CompileAgentResult, "paths" | "project">;
+  readonly roots: readonly string[];
+  readonly stamps: Stamps;
+  readonly env: Stamps;
 }
 
 export function resolveInspectCachePath(appRoot: string): string {
   return join(appRoot, ".eve", "cache", "inspect.json");
 }
 
-export async function readCachedCompile(startPath: string): Promise<CompileAgentResult | null> {
-  const record = await readRecord(startPath);
-  if (record === null || record.startPath !== startPath) return null;
-  if (record.generator !== (await resolveGenerator())) return null;
-  if (!sameStamps(record.artifacts, await stampFiles(Object.keys(record.artifacts)))) return null;
-  if (!sameStamps(record.files, await stampFiles(Object.keys(record.files)))) return null;
-  if (!sameStamps(record.env, hashEnv(trackedEnvNames(record.envNames, record.env)))) return null;
-  for (const [root, recorded] of Object.entries(record.trees)) {
-    const tree = await stampTree(root);
-    if (tree === null || !sameStamps(recorded, tree)) return null;
-  }
-
+export async function readCachedCompile(appRoot: string): Promise<CompileAgentResult | null> {
   try {
-    const [manifest, metadata, diagnostics] = await Promise.all([
-      readJson<CompiledAgentManifest>(record.paths.compiledManifestPath),
-      readJson<CompileMetadata>(record.paths.compileMetadataPath),
-      readJson<CompilerDiagnosticsArtifact>(record.paths.diagnosticsPath),
+    const record = await readJson<InspectCacheRecord>(resolveInspectCachePath(appRoot));
+    if (record.kind !== RECORD_KIND || record.generator !== (await generator())) return null;
+    if (!same(record.env, hashEnv(Object.keys(record.env)))) return null;
+    const files = Object.keys(record.stamps).filter((path) => !insideAny(path, record.roots));
+    if (!same(record.stamps, await stampAll(record.roots, files))) return null;
+    const { paths, project } = record.result;
+    const [manifest, metadata, { diagnostics }] = await Promise.all([
+      readJson<CompileAgentResult["manifest"]>(paths.compiledManifestPath),
+      readJson<CompileAgentResult["metadata"]>(paths.compileMetadataPath),
+      readJson<Pick<CompileAgentResult, "diagnostics">>(paths.diagnosticsPath),
     ]);
-    return {
-      diagnostics: diagnostics.diagnostics,
-      manifest,
-      metadata,
-      paths: record.paths,
-      project: record.project,
-    };
+    return { diagnostics, manifest, metadata, paths, project };
   } catch {
     return null;
   }
 }
 
 export async function writeCachedCompile(input: {
-  readonly startPath: string;
+  readonly appRoot: string;
   readonly result: CompileAgentResult;
   readonly moduleIds: ReadonlySet<string>;
   readonly startedAtMs: number;
 }): Promise<void> {
-  const { project, paths } = input.result;
-  if (input.result.metadata.status !== "ready") return;
-  if (
-    input.result.diagnostics.some((diagnostic) => diagnostic.code === MODEL_METADATA_UNAVAILABLE)
-  ) {
-    return;
-  }
+  const { diagnostics, manifest, metadata, paths, project } = input.result;
+  if (metadata.status !== "ready") return;
+  if (diagnostics.some(({ code }) => code === "compile/model-metadata-unavailable")) return;
 
-  const sourcePaths = [...input.moduleIds].flatMap((moduleId) => {
-    const path = moduleId.split("?")[0]!;
-    return isAuthoredSourcePath(path) ? [path] : [];
-  });
-  const envNames = await collectEnvNames(sourcePaths);
+  const sources = [...input.moduleIds]
+    .map((moduleId) => moduleId.split("?")[0]!)
+    .filter(isAuthoredSourcePath);
+  const envNames = await literalEnvNames(sources);
   if (envNames === null) return;
 
-  const roots = treeRoots(input.result.manifest);
-  const trees: Record<string, Record<string, string>> = {};
-  for (const root of roots) {
-    const tree = await stampTree(root);
-    if (tree === null) return;
-    trees[root] = tree;
-  }
-  const outsideTrees = sourcePaths.filter((path) => !roots.some((root) => isInside(path, root)));
-  const sources = await stampFiles(outsideTrees);
-  const files = {
-    ...(await stampFiles([
-      ...(await projectFilePaths(project.appRoot)),
-      ...(await packageManifestPaths([...roots, ...outsideTrees])),
-    ])),
-    ...sources,
-  };
-  const artifacts = await stampFiles([
+  const roots = [
+    ...new Set([manifest, ...manifest.subagents.map(({ agent }) => agent)].flatMap(mountRoots)),
+  ];
+  const artifacts = [
     paths.compiledManifestPath,
     paths.compileMetadataPath,
     paths.diagnosticsPath,
     paths.discoveryManifestPath,
     paths.moduleMapPath,
-  ]);
-  if (Object.values(sources).includes(null) || Object.values(artifacts).includes(null)) return;
-  const editedAfterStart = [
-    ...Object.values(trees).flatMap((tree) => Object.values(tree)),
-    ...Object.values(files),
-  ].some(
-    (stamp) => stamp !== null && modifiedAtMs(stamp) >= input.startedAtMs - RECENT_EDIT_WINDOW_MS,
+  ];
+  const files = [
+    ...sources,
+    ...artifacts,
+    ...(await projectFiles(project.appRoot)),
+    ...packageManifests([...roots, ...sources]),
+  ];
+  const stamps = await stampAll(
+    roots,
+    files.filter((path) => !insideAny(path, roots)),
   );
-  if (editedAfterStart) return;
+  if ([...sources, ...artifacts].some((path) => stamps[path] === null)) return;
+  const editedDuringCompile = Object.entries(stamps).some(
+    ([path, stamp]) =>
+      stamp !== null &&
+      !artifacts.includes(path) &&
+      Number(stamp.split(":")[1]) >= input.startedAtMs - RECENT_EDIT_WINDOW_MS,
+  );
+  if (editedDuringCompile) return;
 
   const record: InspectCacheRecord = {
-    kind: INSPECT_CACHE_KIND,
-    version: INSPECT_CACHE_VERSION,
-    generator: await resolveGenerator(),
-    startPath: input.startPath,
-    project,
-    paths,
-    trees,
-    files,
-    artifacts,
-    envNames,
-    env: hashEnv(trackedEnvNames(envNames, {})),
+    kind: RECORD_KIND,
+    generator: await generator(),
+    result: { paths, project },
+    roots,
+    stamps,
+    env: hashEnv(envNames),
   };
-  const recordPath = resolveInspectCachePath(input.startPath);
+  const recordPath = resolveInspectCachePath(input.appRoot);
   const temporaryPath = `${recordPath}.${process.pid}.tmp`;
   try {
     await mkdir(dirname(recordPath), { recursive: true });
@@ -183,161 +143,96 @@ export async function writeCachedCompile(input: {
   } catch {}
 }
 
-async function readRecord(startPath: string): Promise<InspectCacheRecord | null> {
-  try {
-    const record = await readJson<InspectCacheRecord>(resolveInspectCachePath(startPath));
-    return record.kind === INSPECT_CACHE_KIND && record.version === INSPECT_CACHE_VERSION
-      ? record
-      : null;
-  } catch {
-    return null;
-  }
+function mountRoots(node: Pick<CompiledAgentManifest, "agentRoot" | "extensionMounts">): string[] {
+  return [node.agentRoot, ...node.extensionMounts.map(({ sourceRoot }) => sourceRoot)];
+}
+
+async function generator(): Promise<string> {
+  const ownPath = fileURLToPath(import.meta.url);
+  return [
+    resolveInstalledPackageInfo().version,
+    await stamp(ownPath),
+    ...authoredModuleConditions(),
+  ].join("\0");
 }
 
 async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
-async function resolveGenerator(): Promise<string> {
-  const ownPath = fileURLToPath(import.meta.url);
-  const ownStamp = (await stampFiles([ownPath]))[ownPath];
-  return `${resolveInstalledPackageInfo().version}:${ownStamp}:${authoredModuleConditions().join(",")}`;
+async function stamp(path: string): Promise<string | null> {
+  const stats = await stat(path).catch(() => null);
+  return stats?.isFile() === true ? `${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}` : null;
 }
 
-async function stampFile(path: string): Promise<FileStamp> {
-  try {
-    const stats = await stat(path);
-    return stats.isFile() ? `${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}` : null;
-  } catch {
-    return null;
-  }
-}
-
-async function stampFiles(paths: readonly string[]): Promise<Record<string, FileStamp>> {
-  const unique = [...new Set(paths)];
-  const stamps = await Promise.all(unique.map(stampFile));
-  return Object.fromEntries(unique.map((path, index) => [path, stamps[index]!]));
-}
-
-async function stampTree(root: string): Promise<Record<string, string> | null> {
-  const stamps: Record<string, string> = {};
+async function stampAll(roots: readonly string[], files: readonly string[]): Promise<Stamps> {
+  const stamps: Stamps = {};
+  const record = async (path: string) => {
+    stamps[path] = await stamp(path);
+  };
   const walk = async (directory: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true });
+    const entries = await readdir(directory).catch(() => []);
     await Promise.all(
       entries.map(async (entry) => {
-        const path = join(directory, entry.name);
-        const isDirectory =
-          entry.isDirectory() ||
-          (entry.isSymbolicLink() && (await stat(path).catch(() => null))?.isDirectory() === true);
-        if (isDirectory) {
-          if (!SKIPPED_DIRECTORY_NAMES.has(entry.name)) await walk(path);
-          return;
-        }
-        stamps[relative(root, path)] = (await stampFile(path)) ?? "unreadable";
+        const path = join(directory, entry);
+        if ((await stat(path).catch(() => null))?.isDirectory() !== true) return record(path);
+        if (!SKIPPED_DIRECTORIES.has(entry)) await walk(path);
       }),
     );
   };
-  try {
-    await walk(root);
-    return stamps;
-  } catch {
-    return null;
-  }
+  await Promise.all([...roots.map(walk), ...[...new Set(files)].map(record)]);
+  return stamps;
 }
 
-function treeRoots(manifest: CompiledAgentManifest): string[] {
-  const mounts = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].flatMap(
-    (node) => node.extensionMounts.map((mount) => mount.sourceRoot),
-  );
-  return [...new Set([manifest.agentRoot, ...mounts])];
-}
-
-async function projectFilePaths(appRoot: string): Promise<string[]> {
-  const paths: string[] = [];
+async function projectFiles(appRoot: string): Promise<string[]> {
+  const files: string[] = [];
   for (let directory = appRoot; ; directory = dirname(directory)) {
-    for (const name of PROJECT_FILE_NAMES) paths.push(join(directory, name));
     const entries = await readdir(directory).catch(() => []);
-    for (const name of entries) if (CONFIG_FILE_NAME.test(name)) paths.push(join(directory, name));
-    if (dirname(directory) === directory) return paths;
+    const names = [...PROJECT_FILES, ...entries.filter((name) => CONFIG_VARIANT.test(name))];
+    files.push(...names.map((name) => join(directory, name)));
+    if (dirname(directory) === directory) return files;
   }
 }
 
-async function packageManifestPaths(paths: readonly string[]): Promise<string[]> {
-  const manifests = new Map<string, string | null>();
-  const nearest = async (directory: string): Promise<string | null> => {
-    const known = manifests.get(directory);
-    if (known !== undefined) return known;
-    const candidate = join(directory, "package.json");
-    const parent = dirname(directory);
-    const found =
-      (await stampFile(candidate)) !== null
-        ? candidate
-        : parent === directory
-          ? null
-          : await nearest(parent);
-    manifests.set(directory, found);
-    return found;
-  };
-  const found = await Promise.all(paths.map((path) => nearest(dirname(path))));
-  return found.filter((path): path is string => path !== null);
+function packageManifests(paths: readonly string[]): string[] {
+  return [...new Set(paths.map(dirname))].flatMap((directory) => {
+    const packageRoot = findAuthoredPackageRoot(directory);
+    return packageRoot === undefined ? [] : [join(packageRoot, "package.json")];
+  });
 }
 
-async function collectEnvNames(sourcePaths: readonly string[]): Promise<string[] | null> {
-  const sources = await mapWithConcurrency(sourcePaths, SOURCE_READ_CONCURRENCY, (path) =>
+async function literalEnvNames(sources: readonly string[]): Promise<string[] | null> {
+  const texts = await mapWithConcurrency(sources, 64, (path) =>
     readFile(path, "utf8").catch(() => null),
   );
   const names = new Set<string>();
-  for (const source of sources) {
-    if (source === null || ENV_MODULE_IMPORT.test(source) || INDIRECT_ENV_ACCESS.test(source)) {
-      return null;
-    }
-    const references = source.match(ENV_REFERENCE)?.length ?? 0;
-    const literals = [...source.matchAll(LITERAL_ENV_REFERENCE)];
-    if (literals.length !== references) return null;
+  for (const text of texts) {
+    if (text === null || INDIRECT_ENV_ACCESS.test(text)) return null;
+    const literals = [...text.matchAll(LITERAL_ENV_ACCESS)];
+    if (literals.length !== (text.match(ENV_ACCESS)?.length ?? 0)) return null;
     for (const literal of literals) names.add(literal[1] ?? literal[3]!);
   }
-  return [...names].sort();
+  return [...names];
 }
 
-function trackedEnvNames(
-  envNames: readonly string[],
-  recordedEnv: Readonly<Record<string, string | null>>,
-): string[] {
-  const names = new Set([...envNames, ...Object.keys(recordedEnv)]);
-  for (const name of Object.keys(process.env)) {
-    if (
-      TRACKED_ENV_NAMES.has(name) ||
-      TRACKED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
-    ) {
-      names.add(name);
-    }
-  }
-  return [...names].sort();
-}
-
-function hashEnv(names: readonly string[]): Record<string, string | null> {
+function hashEnv(names: readonly string[]): Stamps {
+  const tracked = Object.keys(process.env).filter((name) => TRACKED_ENV.test(name));
   return Object.fromEntries(
-    names.map((name) => {
+    [...new Set([...names, ...tracked])].map((name) => {
       const value = process.env[name];
       return [name, value === undefined ? null : createHash("sha256").update(value).digest("hex")];
     }),
   );
 }
 
-function sameStamps(
-  expected: Readonly<Record<string, string | null>>,
-  actual: Readonly<Record<string, string | null>>,
-): boolean {
-  const expectedKeys = Object.keys(expected);
-  if (expectedKeys.length !== Object.keys(actual).length) return false;
-  return expectedKeys.every((key) => Object.hasOwn(actual, key) && actual[key] === expected[key]);
+function same(expected: Stamps, actual: Stamps): boolean {
+  const keys = Object.keys(expected);
+  return (
+    keys.length === Object.keys(actual).length &&
+    keys.every((key) => Object.hasOwn(actual, key) && actual[key] === expected[key])
+  );
 }
 
-function isInside(path: string, root: string): boolean {
-  const relativePath = relative(root, path);
-  return relativePath !== "" && !relativePath.startsWith("..") && !isAbsolute(relativePath);
-}
-
-function modifiedAtMs(stamp: string): number {
-  return Number(stamp.split(":")[1] ?? Number.POSITIVE_INFINITY);
+function insideAny(path: string, roots: readonly string[]): boolean {
+  return roots.some((root) => isPathInsideOrEqual(path, root));
 }
