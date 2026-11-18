@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,6 +15,7 @@ const {
   OPENCODE_GLOBAL_CONFIG,
   VITEST_VERSION,
   createNativeAuthoringSetup,
+  eveWrapper,
   setupsFor,
 } = await jiti.import(new URL("./native-authoring-setup.ts", import.meta.url).pathname);
 const { loadAuthoringCase } = await jiti.import(
@@ -77,6 +78,36 @@ test("bootstraps the selected source before a native agent starts", async () => 
   assert.match(commands[8].args[1], /git add \. && git commit --amend --no-edit --quiet/u);
   assert.deepEqual(Object.keys(writes[1]), ["/workspace/agent/lib/inventory-openapi.ts"]);
   assert.match(writes[1]["/workspace/agent/lib/inventory-openapi.ts"], /getStock/u);
+});
+
+test("runs a project's installed eve and falls back to the selected source outside one", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "eve-wrapper-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const executable = (path, body) => {
+    writeFileSync(path, `#!/bin/sh\n${body}\n`);
+    chmodSync(path, 0o755);
+  };
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  executable(join(bin, "eve"), eveWrapper("https://pkg.eve.dev/commit/eve.tgz"));
+  executable(join(bin, "npx"), 'echo "npx $*"');
+  const project = join(root, "workspace", "wayfinder");
+  mkdirSync(join(project, "node_modules", ".bin"), { recursive: true });
+  mkdirSync(join(project, "agent"));
+  executable(join(project, "node_modules", ".bin", "eve"), 'echo "local $*"');
+  const eve = (cwd) =>
+    execFileSync(join(bin, "eve"), ["build", "--help"], {
+      cwd,
+      env: { PATH: `${bin}:/usr/bin:/bin` },
+      encoding: "utf8",
+    }).trim();
+
+  assert.equal(eve(project), "local build --help");
+  assert.equal(eve(join(project, "agent")), "local build --help");
+  assert.equal(
+    eve(join(root, "workspace")),
+    "npx --yes --allow-remote=all --package=https://pkg.eve.dev/commit/eve.tgz eve build --help",
+  );
 });
 
 test("builds an empty-workspace case without sandbox preparation when it opts out", async () => {

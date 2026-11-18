@@ -45,6 +45,24 @@ export const OPENCODE_GLOBAL_CONFIG = `${JSON.stringify({
   permission: { external_directory: "allow", read: "allow", doom_loop: "allow" },
 })}\n`;
 
+/**
+ * The `eve` on PATH. Inside a project it runs that project's installed binary, the way a
+ * user's `eve` resolves; npx re-resolves the remote tarball on every call, which made direct
+ * calls several seconds slower than `npm run` (7.8 s vs 0.6 s for `--help` at p50) and charged
+ * that overhead to the model. Only `eve init`, before any project exists, still needs npx.
+ */
+export function eveWrapper(packageSpec: string): string {
+  return `#!/bin/sh
+dir=$PWD
+while :; do
+  if [ -x "$dir/node_modules/.bin/eve" ]; then exec "$dir/node_modules/.bin/eve" "$@"; fi
+  [ "$dir" = / ] && break
+  dir=$(dirname "$dir")
+done
+exec npx --yes --allow-remote=all --package=${shellQuote(packageSpec)} eve "$@"
+`;
+}
+
 export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
   readonly revision: string;
@@ -63,9 +81,7 @@ export function createNativeAuthoringSetup(options: {
       "rm -f .eve-authoring-bootstrap.json CASE.ts package.json package-lock.json PROMPT.md",
       "fixture cleanup",
     );
-    await sandbox.writeFiles({
-      "/usr/local/bin/eve": `#!/bin/sh\nexec npx --yes --allow-remote=all --package=${shellQuote(options.packageSpec)} eve "$@"\n`,
-    });
+    await sandbox.writeFiles({ "/usr/local/bin/eve": eveWrapper(options.packageSpec) });
     await run(sandbox, "chmod +x /usr/local/bin/eve", "eve canary wrapper");
 
     if (bootstrap.startingPoint === "scaffolded") {
