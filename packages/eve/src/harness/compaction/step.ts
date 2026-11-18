@@ -21,6 +21,7 @@ import {
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
 import { credentialedModel } from "#harness/model-call/credential.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -97,7 +98,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change,
       compact: true,
       messages,
-      model: await credentialedModel(resolvedModel.model),
+      turnModel: () => credentialedModel(resolvedModel.model),
       promptMessages: messages,
       requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
@@ -181,7 +182,7 @@ async function compactUnder(
     change,
     compaction: config,
     messages: input.messages,
-    model: input.model,
+    turnModel: async () => input.model,
     promptMessages: prompt,
     requestEnvelopeTokens: input.requestEnvelopeTokens,
     telemetryTurnId: activeTurnId(step.position()),
@@ -229,7 +230,7 @@ async function summarizeHistory(
     readonly compact?: true;
     readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<LanguageModel>;
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
     readonly telemetryTurnId?: string;
@@ -350,11 +351,19 @@ function historyConfig(
   };
 }
 
+async function compactionModel(
+  step: Step,
+  reference: RuntimeModelReference,
+): Promise<LanguageModel> {
+  const resolved = await step.config.resolveModel(reference);
+  return await credentialedModel(resolved);
+}
+
 async function summaryExecutor(
   step: Step,
   input: {
     readonly change: { readonly runId: string };
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<LanguageModel>;
     readonly telemetryTurnId?: string;
   },
 ): Promise<{
@@ -364,11 +373,8 @@ async function summaryExecutor(
   const { config, session } = step;
   const turnReference = stepReference(step);
   const reference = agentSettings(step).compactionModel ?? turnReference;
-  let model = input.model;
-  if (reference !== turnReference) {
-    const resolved = await config.resolveModel(reference);
-    model = await credentialedModel(resolved);
-  }
+  const model =
+    reference === turnReference ? await input.turnModel() : await compactionModel(step, reference);
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,

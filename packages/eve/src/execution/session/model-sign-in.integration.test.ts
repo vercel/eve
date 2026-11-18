@@ -222,6 +222,59 @@ describe("a model that needs the caller's credential", () => {
     });
   });
 
+  it.each(["has no credential", "fails to build"] as const)(
+    "compacts with compaction.model when the turn model %s",
+    async (breakage) => {
+      let broken = false;
+      const summaries: number[] = [];
+      const turnModel = defineModel({
+        auth: {
+          getToken: async () => {
+            if (broken && breakage === "has no credential")
+              throw new ConnectionAuthorizationRequiredError("own");
+            return { token: "alice-token" };
+          },
+        },
+        authKey: "own",
+        create: () => {
+          if (broken && breakage === "fails to build") throw new Error("Missing billing region.");
+          return plainModel();
+        },
+        id: "own/model",
+      });
+      const summaryModel = markMockModel(
+        new MockLanguageModelV4({
+          doStream: async () => {
+            summaries.push(1);
+            return textStreamResult("Checkpoint: Alice asked for today's issues.");
+          },
+        }),
+      );
+      await withAgent(
+        `model-sign-in-compaction-${breakage.replaceAll(" ", "-")}`,
+        defineAgent({
+          compaction: { model: summaryModel, modelContextWindowTokens: 200_000 },
+          model: turnModel,
+          modelContextWindowTokens: 200_000,
+        }),
+        async (session) => {
+          await session.stream.nextUntil("first turn", isTurnSettled);
+          broken = true;
+          await session.compact();
+          const compacted = await session.stream.nextUntil(
+            "compaction",
+            (event) =>
+              event.type === "delivery.settled" && event.data.deliveryId === "control_compact",
+          );
+          expect(filterEventsByType(compacted, "delivery.settled").at(-1)?.data).toMatchObject({
+            outcome: "applied",
+          });
+          expect(summaries).toEqual([1]);
+        },
+      );
+    },
+  );
+
   it("answers with the new selection when it changes before the callback", async () => {
     const billing = billingProvider();
     let switched = false;
@@ -557,6 +610,13 @@ function openSession(run: Awaited<ReturnType<typeof startTestSession>>, continua
         ],
       });
       return await stream.nextUntil("settled turn", isTurnSettled);
+    },
+    async compact() {
+      await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        auth: alice,
+        deliveryId: "control_compact",
+        kind: "compact",
+      });
     },
     async send(message: string) {
       await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
