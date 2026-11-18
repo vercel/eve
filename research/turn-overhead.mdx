@@ -14,15 +14,28 @@ The case that matters most is a follow-up that arrives after the previous turn's
 
 ## A follow-up after 15s idle
 
-The client sends a message to a session whose previous turn ended 15s earlier. Fig. 1 shows every span on the critical path, from the client's POST to the first streamed text, and which process is waiting on which.
+The client sends a message to a session whose previous turn ended 15s earlier. Fig. 1a shows every span on the critical path on eve main, from the client's POST to the first streamed text, beside the requests between processes. Fig. 1b is the same follow-up with [workflow #5467](https://github.com/vercel/workflow/pull/5467) and [#5470](https://github.com/vercel/workflow/pull/5470), which park the orchestrator's VM between turns. Both are drawn at the same scale, from the same round.
 
-![Every span on the critical path of a follow-up after 15s idle on eve main, beside the requests between the client, the edge, eve's functions, the World API and Queues](./turn-overhead/follow-up-anatomy.svg)
+<p>
+  <img
+    src="./turn-overhead/follow-up-anatomy.svg"
+    width="49%"
+    alt="Every span on the critical path of a follow-up after 15s idle on eve main, beside the requests between the client, the edge, eve's functions, the World API and Queues"
+  />
+  <img
+    src="./turn-overhead/follow-up-anatomy-parked.svg"
+    width="49%"
+    alt="The same follow-up with workflow #5467 and #5470: the log read is shorter and the replay is gone"
+  />
+</p>
 
 The POST records the message and wakes the orchestrator through the queue, then returns. The client doesn't wait for that response, because it opens the stream alongside the send ([eve #6431](https://github.com/vercel/eve/pull/6431)). The orchestrator starts in a fresh VM in the flow function. It reads the run's log, replays it, commits `step_started`, and only then runs eve's turn step, whose first stream write reaches the client through the open stream.
 
+With the parked VM, the orchestrator reads only the events since it parked (164 → 86ms) and resumes without replaying (35 → 5ms). That is ~110ms less server time; the client saw ~60ms of it, because the untraced network spans were slower in that arm.
+
 Of the ~590ms that the trace attributes, about 445ms is the Workflow runtime: World writes and reads, the queue, and replay. The turn step to the first stream `PUT` takes 78ms: ~34ms of eve's work before the model call, then the mock model and the stream write. The two network spans at either end aren't traced; together they are the remaining ~200ms.
 
-The totals vary between runs on the same build. eve main measured 787ms in the run in Fig. 1, and 860–940ms in later rounds. Compare builds within a round.
+The totals vary between runs on the same build. eve main measured 787ms in the round in Fig. 1, and 860–940ms in later rounds. Compare builds within a round.
 
 ### What the open Workflow work removes
 
