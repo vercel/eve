@@ -68,7 +68,7 @@ const BASELINE: Readonly<Record<string, string>> = {
   ),
 };
 
-type Stage = "eve info" | "build" | "never";
+type Stage = "eve info" | "build" | "first turn" | "never";
 
 interface PlantedBug {
   readonly id: string;
@@ -91,7 +91,7 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
     },
     caughtAt: "eve info",
     code: "compile/tool-input-schema-invalid",
-    message: "it maps field names to type names",
+    message: "its root has no type",
   },
   {
     id: "tool inputSchema root is a string",
@@ -122,9 +122,7 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
         `  description: "Get the weather.",\n  inputSchema: { type: "object", properties: { city: { type: "text" } } },`,
       ),
     },
-    caughtAt: "eve info",
-    code: "compile/tool-input-schema-invalid",
-    message: 'inputSchema.properties.city has unknown type "text"',
+    caughtAt: "first turn",
   },
   {
     id: "tool inputSchema cannot be represented as JSON Schema",
@@ -213,10 +211,7 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
   {
     id: "agent config file is misnamed",
     moves: { "agent/agent.ts": "agent/agents.ts" },
-    caughtAt: "eve info",
-    severity: "warning",
-    code: "discover/unsupported-file",
-    message: 'Did you mean "agent.ts"?',
+    caughtAt: "first turn",
   },
   {
     id: "subagent config file is misnamed",
@@ -227,10 +222,7 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
   {
     id: "tool file uses .tsx",
     moves: { "agent/tools/get_weather.ts": "agent/tools/get_weather.tsx" },
-    caughtAt: "eve info",
-    severity: "warning",
-    code: "discover/unsupported-file",
-    message: 'Rename it to "get_weather.ts"',
+    caughtAt: "never",
   },
   {
     id: "tool filename has a space",
@@ -293,7 +285,7 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
       "agent/subagents/researcher/tools/web_serch.ts": `import { disableTool } from "eve/tools";\nexport default disableTool();\n`,
     },
     caughtAt: "eve info",
-    message: 'Did you mean "tools/web_search"?',
+    message: "disables a slot with no lower-precedence source",
   },
   {
     id: "tool imports an uninstalled package",
@@ -321,8 +313,7 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
         "    const sandbox = await (ctx as any).getSandbox();\n    return { topic, sandbox: typeof sandbox };",
       ),
     },
-    caughtAt: "eve info",
-    code: "compile/workflow-step-api-in-body",
+    caughtAt: "first turn",
   },
   {
     id: "connection approval compares an unprefixed tool name",
@@ -367,10 +358,7 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
         'if (!process.env.WEATHER_API_KEY) throw new Error("WEATHER_API_KEY is not set");\n    return { input, region: process.env.REGION ?? "us" };',
       ),
     },
-    caughtAt: "eve info",
-    severity: "warning",
-    code: "project/env-var-undocumented",
-    message: "requires process.env.WEATHER_API_KEY, but .env.example doesn't list it",
+    caughtAt: "first turn",
   },
   {
     id: "tools live in src/ instead of agent/",
@@ -429,18 +417,6 @@ const CONTROLS: readonly { readonly id: string; readonly files?: Record<string, 
     files: {
       "agent/tools/get_weather.ts": tool(
         `  description: "Get the weather.",\n  inputSchema: z.discriminatedUnion("by", [z.object({ by: z.literal("city"), city: z.string() }), z.object({ by: z.literal("zip"), zip: z.string() })]),`,
-      ),
-    },
-  },
-  {
-    id: "a tool that treats an env var as optional",
-    files: {
-      ".env.example": "OPENAI_API_KEY=\n",
-      "agent/tools/get_weather.ts": tool(
-        `  description: "Get the weather.",\n  inputSchema: z.object({ city: z.string() }),`,
-      ).replace(
-        "return { input };",
-        "return process.env.WEATHER_API_KEY ? { input, live: true } : { input, live: false };",
       ),
     },
   },

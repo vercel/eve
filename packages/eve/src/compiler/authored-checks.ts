@@ -29,15 +29,6 @@ export const COMPILE_TOOL_INPUT_SCHEMA_INVALID = "compile/tool-input-schema-inva
 
 export const COMPILE_WORKFLOW_AGENT_TARGET_UNKNOWN = "compile/workflow-agent-target-unknown";
 
-export const COMPILE_WORKFLOW_STEP_API_IN_BODY = "compile/workflow-step-api-in-body";
-
-const STEP_ONLY_CONTEXT_MEMBERS = new Set(["getSandbox", "getToken", "requireAuth", "to"]);
-
-interface WorkflowBodyScan {
-  readonly agentTargets: readonly string[];
-  readonly stepOnlyCalls: readonly string[];
-}
-
 interface AgentNodeScope {
   readonly agentNames: readonly string[];
   readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
@@ -82,9 +73,8 @@ export async function diagnoseAuthoredSources(
       const binding = scope.bindings[tool.sourceId];
       if (binding?.owner.kind !== "application" || binding.backing.kind !== "filesystem") continue;
       const sourcePath = binding.backing.sourcePath;
-      const scan = await scanWorkflowBodies(sourcePath);
       const sources = [{ logicalPath: tool.logicalPath, nodeId: scope.nodeId, sourcePath }];
-      for (const target of scan.agentTargets) {
+      for (const target of await readWorkflowAgentTargets(sourcePath)) {
         if (scope.agentNames.includes(target)) continue;
         const match = closestName(target, scope.agentNames);
         diagnostics.push({
@@ -93,14 +83,6 @@ export async function diagnoseAuthoredSources(
             `Tool "${tool.logicalPath}" calls ctx.agent(${JSON.stringify(target)}), but no agent by that name is available to it.` +
             (match === undefined ? "" : ` Did you mean ${JSON.stringify(match)}?`) +
             ` Available: ${scope.agentNames.map((name) => JSON.stringify(name)).join(", ")}.`,
-          severity: "error",
-          sources,
-        });
-      }
-      for (const member of scan.stepOnlyCalls) {
-        diagnostics.push({
-          code: COMPILE_WORKFLOW_STEP_API_IN_BODY,
-          message: `Tool "${tool.logicalPath}" calls ctx.${member}() in its "use workflow" body, where it always throws. Pass ctx to a "use step" helper and call ctx.${member}() there.`,
           severity: "error",
           sources,
         });
@@ -274,20 +256,17 @@ function agentNodeScopes(manifest: CompiledAgentManifest): AgentNodeScope[] {
   ];
 }
 
-async function scanWorkflowBodies(sourcePath: string): Promise<WorkflowBodyScan> {
-  const agentTargets = new Set<string>();
-  const stepOnlyCalls = new Set<string>();
+async function readWorkflowAgentTargets(sourcePath: string): Promise<string[]> {
+  const targets = new Set<string>();
   visitAst(await readAuthoredAst(sourcePath, "use workflow"), (node) => {
     const contextName = workflowContextName(node);
     if (contextName === undefined) return;
     visitAst(node.body, (inner) => {
-      const call = contextCall(inner, contextName);
-      if (call === undefined) return;
-      if (call.member === "agent" && call.literal !== undefined) agentTargets.add(call.literal);
-      if (STEP_ONLY_CONTEXT_MEMBERS.has(call.member)) stepOnlyCalls.add(call.member);
+      const target = literalAgentTarget(inner, contextName);
+      if (target !== undefined) targets.add(target);
     });
   });
-  return { agentTargets: [...agentTargets], stepOnlyCalls: [...stepOnlyCalls] };
+  return [...targets];
 }
 
 function workflowContextName(node: AstNode): string | undefined {
@@ -298,23 +277,18 @@ function workflowContextName(node: AstNode): string | undefined {
   return context?.type === "Identifier" ? (context.name as string) : undefined;
 }
 
-function contextCall(
-  node: AstNode,
-  contextName: string,
-): { readonly literal?: string; readonly member: string } | undefined {
+function literalAgentTarget(node: AstNode, contextName: string): string | undefined {
   if (node.type !== "CallExpression") return undefined;
   const callee = unwrapExpression(node.callee);
   const object = unwrapExpression(callee?.object);
-  const property = callee?.property as AstNode | undefined;
   if (
     callee?.type !== "MemberExpression" ||
     callee.computed === true ||
     object?.type !== "Identifier" ||
     object.name !== contextName ||
-    typeof property?.name !== "string"
+    (callee.property as AstNode | undefined)?.name !== "agent"
   ) {
     return undefined;
   }
-  const literal = stringLiteral((node.arguments as readonly unknown[] | undefined)?.[0]);
-  return { member: property.name, ...(literal !== undefined && { literal }) };
+  return stringLiteral((node.arguments as readonly unknown[] | undefined)?.[0]);
 }

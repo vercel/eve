@@ -143,10 +143,10 @@ Run `eve info` first when something behaves unexpectedly. It shows which files e
 
 Besides discovery problems, the compile reports:
 
-- tool `inputSchema` values that model providers reject, such as a root that isn't `type: "object"` or a field with an unknown JSON Schema type
-- a workflow tool that calls `ctx.agent("name")` for an agent it can't reach, or calls `ctx.getSandbox()`, `ctx.getToken()`, `ctx.requireAuth()`, or `ctx.to()` in its `"use workflow"` body
+- tool `inputSchema` values whose root isn't `type: "object"`, which model providers reject
+- a workflow tool that calls `ctx.agent("name")` for an agent it can't reach
 - a connection `approval` that compares `toolName` to a name the connection never produces, such as one missing the `<connection>__` prefix or an operation outside `operations.allow`
-- warnings for likely mistakes that eve would otherwise ignore: misspelled directories and files such as `tool/` or `agents.ts`, `.tsx` or `.jsx` tool and hook files, agent files under `src/`, a `build` script that runs only `tsc`, a `next.config` without `withEve()`, and an env var the code requires that `.env.example` doesn't list
+- warnings for likely setup mistakes: a misspelled agent directory such as `tool/`, agent files under `src/`, a `build` script that runs only `tsc`, and a `next.config` without `withEve()`
 
 ### JSON output
 

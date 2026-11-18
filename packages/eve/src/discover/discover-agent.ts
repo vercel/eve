@@ -29,7 +29,7 @@ import {
   createExtensionNameDiagnostic,
   createHookNameDiagnostic,
   createToolNameDiagnostic,
-  createUnsupportedRootEntryDiagnostics,
+  createUnsupportedRootDirectoryDiagnostics,
   DISCOVER_CHANNELS_DIRECTORY_INVALID,
   DISCOVER_EXTENSIONS_DIRECTORY_INVALID,
   DISCOVER_HOOKS_DIRECTORY_INVALID,
@@ -117,10 +117,11 @@ export async function discoverAgentRoot(input: {
   const subagent = role === "subagent";
 
   diagnostics.push(
-    ...createUnsupportedRootEntryDiagnostics({
+    ...createUnsupportedRootDirectoryDiagnostics({
       classifyEntry: subagent ? classifyLocalSubagentEntry : classifyAgentRootEntry,
+      createUnsupportedDirectoryMessage: (directoryName) =>
+        `Ignoring unsupported directory "${directoryName}/" in the ${subagent ? "local subagent" : "agent"} root.`,
       rootEntries,
-      rootLabel: subagent ? "local subagent" : "agent",
       rootPath,
     }),
   );
@@ -174,7 +175,6 @@ export async function discoverAgentRoot(input: {
       rootPath,
       source,
       validateSegment: createToolNameDiagnostic,
-      warnOnJsxModules: true,
     }),
   ).sources;
   const hooks = found(
@@ -187,7 +187,6 @@ export async function discoverAgentRoot(input: {
       rootPath,
       source,
       validateSegment: createHookNameDiagnostic,
-      warnOnJsxModules: true,
     }),
   ).sources;
   const { skills } = found(await discoverSkills({ agentRoot: rootPath, source }));

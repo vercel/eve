@@ -26,7 +26,6 @@ import {
   DISCOVER_SLOT_COLLISION,
   DISCOVER_TOOL_NAME_INVALID,
   DISCOVER_UNSUPPORTED_DIRECTORY,
-  DISCOVER_UNSUPPORTED_FILE,
 } from "#discover/grammar.js";
 import { DISCOVER_LIB_DIRECTORY_INVALID } from "#discover/lib.js";
 import { DISCOVER_MEMORY_NAME_INVALID, DISCOVER_MEMORY_SLOT_AMBIGUOUS } from "#discover/memory.js";
@@ -590,16 +589,12 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
-  it("suggests the intended name for misspelled agent directories and files", async () => {
+  it("suggests the intended name for misspelled agent directories", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
-        "agents.ts": "export default {};",
         "instructions.md": "You are a precise assistant.",
-        "README.md": "Notes for Alice.",
         "tool/get_weather.ts": "export default {};",
-        "tools/forecast.tsx": "export default {};",
         "subagents/researcher/agent.ts": "export default {};",
-        "subagents/researcher/instruction.md": "Research carefully.",
         "subagents/researcher/schedule/daily.md": "Run daily.",
       },
     });
@@ -610,41 +605,16 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(
-      result.diagnostics.map(({ code, message, severity }) => ({ code, message, severity })),
-    ).toEqual(
-      expect.arrayContaining([
-        {
-          code: DISCOVER_UNSUPPORTED_FILE,
-          message:
-            'Ignoring unsupported file "agents.ts" in the agent root. Did you mean "agent.ts"?',
-          severity: "warning",
-        },
-        {
-          code: DISCOVER_UNSUPPORTED_DIRECTORY,
-          message:
-            'Ignoring unsupported directory "tool/" in the agent root. Did you mean "tools/"?',
-          severity: "warning",
-        },
-        {
-          code: DISCOVER_UNSUPPORTED_FILE,
-          message: expect.stringContaining('Rename it to "forecast.ts"'),
-          severity: "warning",
-        },
-        {
-          code: DISCOVER_UNSUPPORTED_FILE,
-          message:
-            'Ignoring unsupported file "instruction.md" in the local subagent root. Did you mean "instructions.md"?',
-          severity: "warning",
-        },
-        {
-          code: DISCOVER_UNSUPPORTED_DIRECTORY,
-          message: 'Ignoring unsupported directory "schedule/" in the local subagent root.',
-          severity: "warning",
-        },
-      ]),
-    );
-    expect(result.diagnostics).toHaveLength(5);
+    expect(result.diagnostics.map(({ code, message }) => ({ code, message }))).toEqual([
+      {
+        code: DISCOVER_UNSUPPORTED_DIRECTORY,
+        message: 'Ignoring unsupported directory "tool/" in the agent root. Did you mean "tools/"?',
+      },
+      {
+        code: DISCOVER_UNSUPPORTED_DIRECTORY,
+        message: 'Ignoring unsupported directory "schedule/" in the local subagent root.',
+      },
+    ]);
   });
 
   it("silently ignores generated runtime directories", async () => {

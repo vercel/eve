@@ -11,7 +11,6 @@ import {
 import {
   createModuleSlotCollisionDiagnostic,
   createSlotCollisionDiagnostic,
-  createUnsupportedModuleExtensionDiagnostic,
   readSortedDirectoryEntries,
 } from "#discover/grammar.js";
 import { createModuleSourceRef } from "#discover/manifest.js";
@@ -32,7 +31,6 @@ interface DiscoverNamedSourceDirectoryBaseInput {
   unsupportedFileMessage?: (sourcePath: string, directoryName: string) => string;
   unsupportedEntryCode?: string;
   unsupportedEntryMessage?: (sourcePath: string, directoryName: string) => string;
-  warnOnJsxModules?: boolean;
 }
 
 export interface DiscoverNamedSourceDirectoryModuleInput extends DiscoverNamedSourceDirectoryBaseInput {
@@ -107,7 +105,6 @@ export async function discoverNamedSourceDirectory<TDefinition>(
     unsupportedFileCode: input.unsupportedFileCode,
     unsupportedFileMessage: input.unsupportedFileMessage,
     validateSegment: input.validateSegment,
-    warnOnJsxModules: input.warnOnJsxModules === true,
   });
 
   return { diagnostics, sources };
@@ -128,7 +125,6 @@ interface WalkNamedSourceDirectoryInput<TDefinition> {
   unsupportedFileCode?: string;
   unsupportedFileMessage?: (sourcePath: string, directoryName: string) => string;
   validateSegment?: (segment: string, sourcePath: string) => DiscoverDiagnostic | null;
-  warnOnJsxModules: boolean;
 }
 
 async function walkNamedSourceDirectory<TDefinition>(
@@ -146,17 +142,6 @@ async function walkNamedSourceDirectory<TDefinition>(
 
   if (input.unsupportedFileCode !== undefined || input.unsupportedEntryCode !== undefined) {
     emitUnsupportedLeafDiagnostics(input, directoryEntries, absoluteDirectory);
-  }
-
-  if (input.warnOnJsxModules) {
-    for (const entry of directoryEntries) {
-      if (!entry.isFile()) continue;
-      const diagnostic = createUnsupportedModuleExtensionDiagnostic(
-        join(absoluteDirectory, entry.name),
-        entry.name,
-      );
-      if (diagnostic !== null) input.diagnostics.push(diagnostic);
-    }
   }
 
   await collectLeafSources(input, directoryEntries, absoluteDirectory);
@@ -200,7 +185,6 @@ async function walkSubdirectories<TDefinition>(
       unsupportedFileCode: input.unsupportedFileCode,
       unsupportedFileMessage: input.unsupportedFileMessage,
       validateSegment: input.validateSegment,
-      warnOnJsxModules: input.warnOnJsxModules,
     });
   }
 }
