@@ -58,7 +58,7 @@ export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   // Sandbox preparation depends mostly on the runner and network, and
   // dominates cold builds; this is the rest of the build.
   "build.without_sandbox_prewarm_ms": framework("ms"),
-  // Peak resident set size of the `eve build` process (startup agents only).
+  // Peak resident set size of the `eve build` process; only startup agents measure it.
   "build.max_rss_bytes": framework("bytes"),
   "start.ready_ms": framework("ms"),
   "dev_startup.prompt_visible_ms": framework("ms"),
