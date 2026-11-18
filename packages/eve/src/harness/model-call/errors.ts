@@ -3,6 +3,11 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toError, walkCauseChain } from "#shared/errors.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
+import {
+  isScopedAuthorizationRequiredError,
+  type ScopedAuthorization,
+  type ScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
 const API_ERROR_SUMMARY_LIMIT = 800;
@@ -206,12 +211,39 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
   return false;
 }
 
+export type ModelCredentialFailureCode =
+  | "MODEL_AUTHORIZATION_FAILED"
+  | "MODEL_CREATE_FAILED"
+  | "MODEL_CREDENTIAL_FAILED";
+
+export class ModelCredentialFailure extends Error {
+  readonly code: ModelCredentialFailureCode;
+  readonly scoped: ScopedAuthorization;
+
+  constructor(code: ModelCredentialFailureCode, scoped: ScopedAuthorization, cause: unknown) {
+    super(`${code}: ${scoped.scope}`, { cause });
+    this.name = "ModelCredentialFailure";
+    this.code = code;
+    this.scoped = scoped;
+  }
+}
+
+export function credentialErrorIn(
+  error: unknown,
+): ModelCredentialFailure | ScopedAuthorizationRequiredError | undefined {
+  for (const current of walkCauseChain(error)) {
+    if (current instanceof ModelCredentialFailure) return current;
+    if (isScopedAuthorizationRequiredError(current)) return current;
+  }
+  return undefined;
+}
+
 export function rejectsCredential(error: unknown): boolean {
   return readModelCallErrorSignals(error).statusCode === 401;
 }
 
 export function classifyModelCallError(error: unknown): "retry" | "recoverable" | "terminal" {
-  if (isTurnCancellation(error)) {
+  if (isTurnCancellation(error) || credentialErrorIn(error) !== undefined) {
     return "terminal";
   }
 

@@ -12,7 +12,7 @@ import {
 } from "#runtime/connections/scoped-authorization.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import { isRuntimeLanguageModel } from "#internal/runtime-model.js";
-import { rejectsCredential } from "./errors.js";
+import { ModelCredentialFailure, rejectsCredential } from "./errors.js";
 
 export async function credentialedModel(model: RuntimeModel): Promise<LanguageModel> {
   if (!isModelDefinition(model)) return model;
@@ -31,6 +31,7 @@ export async function credentialedModel(model: RuntimeModel): Promise<LanguageMo
         return await run(current);
       } catch (again) {
         if (!rejectsCredential(again)) throw again;
+        await evictScopedToken(scoped);
         return execution.requireAuth(scoped, again);
       }
     }
@@ -50,29 +51,6 @@ function scopedAuthorization(definition: ModelDefinition): ScopedAuthorization {
     connection: { url: "" },
     scope: modelSignInName(definition),
   };
-}
-
-export type ModelCredentialFailureCode =
-  | "MODEL_AUTHORIZATION_FAILED"
-  | "MODEL_CREATE_FAILED"
-  | "MODEL_CREDENTIAL_FAILED";
-
-class ModelCredentialFailure extends Error {
-  readonly code: ModelCredentialFailureCode;
-  readonly scoped: ScopedAuthorization;
-
-  constructor(code: ModelCredentialFailureCode, scoped: ScopedAuthorization, cause: unknown) {
-    super(`${code}: ${scoped.scope}`, { cause });
-    this.name = "ModelCredentialFailure";
-    this.code = code;
-    this.scoped = scoped;
-  }
-}
-
-export type { ModelCredentialFailure };
-
-export function isModelCredentialFailure(error: unknown): error is ModelCredentialFailure {
-  return error instanceof Error && error.name === "ModelCredentialFailure";
 }
 
 async function credentialFor(

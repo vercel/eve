@@ -14,10 +14,7 @@ import {
   signInReports,
 } from "#harness/hitl/index.js";
 import { SignInCompletedKey } from "#harness/authorization.js";
-import {
-  isScopedAuthorizationRequiredError,
-  type ScopedAuthorizationRequiredError,
-} from "#runtime/connections/scoped-authorization.js";
+import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import {
   requestRun as requestRunFact,
@@ -45,11 +42,8 @@ import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
-import {
-  credentialedModel,
-  isModelCredentialFailure,
-  type ModelCredentialFailure,
-} from "./credential.js";
+import { credentialedModel } from "./credential.js";
+import { credentialErrorIn, ModelCredentialFailure } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -110,10 +104,12 @@ export async function runModelStep(
     const credentialError = credentialErrorIn(error);
     if (credentialError !== undefined) {
       if (generation.interrupted) return caller.steered();
-      if (isModelCredentialFailure(credentialError)) return await failOrAsk(step, credentialError);
-      const messages = await caller.abandon();
-      step.session = changeHistory(step.session, { extend: messages });
-      return await pauseForModelSignIn(step, credentialError);
+      if (credentialError instanceof ModelCredentialFailure)
+        return await failOrAsk(step, credentialError);
+      return await pauseForModelSignIn(step, credentialError, async () => {
+        const messages = await caller.abandon();
+        step.session = changeHistory(step.session, { extend: messages });
+      });
     }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
@@ -192,16 +188,10 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   await step.apply(startRunFact({ attempt, modelId, runId }));
 }
 
-type CredentialError = ScopedAuthorizationRequiredError | ModelCredentialFailure;
-
-async function failOrAsk(step: Step, error: CredentialError): Promise<StepResult> {
+async function failOrAsk(
+  step: Step,
+  error: NonNullable<ReturnType<typeof credentialErrorIn>>,
+): Promise<StepResult> {
   if (isScopedAuthorizationRequiredError(error)) return await pauseForModelSignIn(step, error);
   return await failModelCredential(step, error.code, error.cause, error.scoped);
-}
-
-function credentialErrorIn(error: unknown): CredentialError | undefined {
-  for (let current = error; current instanceof Error; current = current.cause)
-    if (isScopedAuthorizationRequiredError(current) || isModelCredentialFailure(current))
-      return current;
-  return undefined;
 }

@@ -12,8 +12,8 @@ const MODEL_SIGN_IN_PREFIX = "eve__model__";
 /**
  * A model that runs on the caller's own credential. eve resolves `auth` before each model call,
  * opens the same sign-in as a connection when the caller has none, and passes the credential to
- * `create`. Every field that sets a session's turn model accepts it; `compaction.model` and the
- * decision model of `auto()` reject it.
+ * `create`. Every field that sets a session's turn model accepts it; `compaction.model`, the
+ * decision model of `auto()`, `ctx.agent()`'s `model`, and a dynamic subagent's config reject it.
  */
 export interface ModelDefinition {
   /**

@@ -83,6 +83,7 @@ describe("a model that needs the caller's credential", () => {
       expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
       expect(turnSettled(answered)).toMatchObject({ outcome: "completed" });
       expect(billing.tokensSeen).toEqual(["billing-token-1"]);
+      expect(billing.evictions).toBe(0);
       expect(userMessages(billing.prompts.at(-1))).toEqual([FIRST]);
     });
   });
@@ -120,6 +121,7 @@ describe("a model that needs the caller's credential", () => {
       ]);
       expect(turnSettled(await session.callBack())).toMatchObject({ outcome: "completed" });
       expect(billing.tokensSeen).toEqual(["stale-token", "stale-token", "billing-token-1"]);
+      expect(billing.evictions).toBe(2);
     });
   });
 
@@ -199,6 +201,7 @@ describe("a model that needs the caller's credential", () => {
         const settled = await session.stream.nextUntil("failed turn", isTurnSettled);
         expect(settled.filter(isSignInOpened)).toEqual([]);
         expect(filterEventsByType(settled, "session.ended")).toEqual([]);
+        expect(billing.evictions).toBeLessThanOrEqual(1);
         expect(
           filterEventsByType(settled, "model.settled").map((event) => event.data.outcome),
         ).not.toContain("abandoned");
@@ -236,6 +239,9 @@ describe("a model that needs the caller's credential", () => {
         const settled = await session.callBack();
         expect(settled.filter(isSignInOpened)).toEqual([]);
         expect(billing.starts()).toBe(1);
+        expect(
+          filterEventsByType(settled, "model.settled").map((event) => event.data.outcome),
+        ).toEqual(["failed"]);
         expect(turnSettled(settled)).toMatchObject(
           authorizationFailed("Billing rejected the credential from the sign-in."),
         );
@@ -519,7 +525,7 @@ function billingProvider(
     vercelConnect: { connector: "oauth/billing" },
     async getToken(): Promise<TokenResult> {
       if (initial.outage === "getToken" || (initial.outage === "refresh" && billing.evictions > 0))
-        throw new Error("The billing service is unavailable.");
+        throw Object.assign(new Error("fetch failed"), { code: "ECONNREFUSED" });
       if (stored === undefined) throw new ConnectionAuthorizationRequiredError("billing");
       return { token: stored };
     },
