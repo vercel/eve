@@ -7,6 +7,7 @@ import {
   formatAvailableSkillsSection,
 } from "#execution/skills/instructions.js";
 import { announce } from "#definitions/messages.js";
+import { CAPPED_RESULT_PREFIX } from "#harness/compaction/engine.js";
 import type { CallRecord } from "#definitions/definition.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 
@@ -136,6 +137,15 @@ describe("changedSkillAnnouncements", () => {
       'Skill `deploy` changed since you loaded it. Load it again with eve__skill({ name: "deploy" }) before relying on it.',
     ]);
     expect(added(changed, step(changed, "v2"))).toEqual([]);
+  });
+
+  it("says nothing for a copy that compaction truncated", () => {
+    const draft: CallRecord = {
+      historyState: {},
+      record: load("call_1", `${CAPPED_RESULT_PREFIX}v1 clipped`),
+    };
+
+    expect(added(draft, step(draft, "v1"))).toEqual([]);
   });
 
   it("goes quiet after a reload and speaks again on the next change", () => {

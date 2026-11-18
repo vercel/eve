@@ -1,5 +1,6 @@
 import type { CatalogSkill } from "#execution/catalog/skills.js";
 import { type Announcement, announcementDigest } from "#harness/announcements.js";
+import { CAPPED_RESULT_PREFIX } from "#harness/compaction/engine.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { skillTarget } from "#shared/action-request-name.js";
@@ -91,7 +92,13 @@ function loadedSkills(record: readonly HarnessModelMessage[]): ReadonlyMap<strin
       }
       if (part.type === "tool-result" && part.toolName === SKILL_TOOL_NAME) {
         const name = names.get(part.toolCallId);
-        if (name !== undefined && part.output.type === "text") loaded.set(name, part.output.value);
+        if (name === undefined) continue;
+        const { output } = part;
+        if (output.type === "text" && !output.value.startsWith(CAPPED_RESULT_PREFIX)) {
+          loaded.set(name, output.value);
+        } else {
+          loaded.delete(name);
+        }
       }
     }
   }

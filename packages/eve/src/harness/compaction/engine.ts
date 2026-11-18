@@ -383,7 +383,7 @@ function overLimitError(config: CompactionConfig): CompactionOverLimitError {
 
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
-const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
+export const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
 
 function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
