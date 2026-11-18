@@ -270,6 +270,7 @@ export const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModel
       .strict()
       .optional(),
     providerOptions: z.record(z.string(), jsonObjectSchema).optional(),
+    gatewayAgentTag: z.boolean().optional(),
     routing: modelRoutingSchema,
   })
   .strict();

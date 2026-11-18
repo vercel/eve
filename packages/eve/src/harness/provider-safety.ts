@@ -28,6 +28,7 @@ export function mergeProviderSafetyIdentifier(
 }
 
 export function resolveCallProviderOptions(input: {
+  readonly agentTag?: string;
   readonly auth: SessionAuthContext | null;
   readonly profile: ModelProfile;
   readonly providerOptions: Readonly<Record<string, unknown>> | undefined;
@@ -41,7 +42,9 @@ export function resolveCallProviderOptions(input: {
   );
   if (input.profile.gateway) {
     return mergeGatewaySessionId(
-      providerOptions,
+      input.agentTag === undefined
+        ? providerOptions
+        : mergeGatewayTag(providerOptions, input.agentTag),
       resolveConversationId(session.rootSessionId ?? session.sessionId),
     );
   }
@@ -60,15 +63,32 @@ function mergeOpenAIPromptCacheKey(
   return mergeObjects({ openai: { promptCacheKey } }, providerOptions);
 }
 
+const MAX_GATEWAY_TAGS = 10;
+
+function mergeGatewayTag(
+  providerOptions: Readonly<Record<string, unknown>> | undefined,
+  tag: string,
+): Record<string, unknown> | undefined {
+  const gateway = gatewayOptionsOf(providerOptions);
+  const tags: readonly unknown[] = Array.isArray(gateway?.tags) ? gateway.tags : [];
+  if (tags.includes(tag) || tags.length >= MAX_GATEWAY_TAGS) return providerOptions;
+  return { ...providerOptions, gateway: { ...gateway, tags: [...tags, tag] } };
+}
+
+function gatewayOptionsOf(
+  providerOptions: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined {
+  const gateway = providerOptions?.gateway;
+  return gateway !== null && typeof gateway === "object" && !Array.isArray(gateway)
+    ? (gateway as Record<string, unknown>)
+    : undefined;
+}
+
 function mergeGatewaySessionId(
   providerOptions: Readonly<Record<string, unknown>> | undefined,
   conversationId: string,
 ): Record<string, unknown> | undefined {
-  const gateway = providerOptions?.gateway;
-  const gatewayOptions =
-    gateway !== null && typeof gateway === "object" && !Array.isArray(gateway)
-      ? (gateway as Record<string, unknown>)
-      : undefined;
+  const gatewayOptions = gatewayOptionsOf(providerOptions);
   if (typeof gatewayOptions?.sessionId === "string" && gatewayOptions.sessionId.trim()) {
     return providerOptions;
   }

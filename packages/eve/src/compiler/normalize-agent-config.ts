@@ -73,6 +73,7 @@ export async function compileAgentConfig(
           contextWindowTokens: definition.modelContextWindowTokens,
           promptCache: definition.modelOptions?.promptCache,
           providerOptions: definition.modelOptions?.providerOptions,
+          gatewayAgentTag: definition.modelOptions?.gatewayAgentTag,
           source: configModule,
           sourcePath: configModulePath,
           value: definition.model as PublicAgentTurnModelDefinition,
@@ -164,6 +165,7 @@ export async function compileAgentConfig(
       purpose: "the compaction summary model",
       contextWindowTokens: definition.compaction.modelContextWindowTokens,
       providerOptions: definition.modelOptions?.providerOptions,
+      gatewayAgentTag: definition.modelOptions?.gatewayAgentTag,
       source: configModule,
       sourceField: "compaction.model",
       sourcePath: configModulePath,
@@ -212,6 +214,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly contextWindowTokens?: number;
   readonly promptCache?: AgentPromptCacheDefinition;
   readonly providerOptions?: Record<string, JsonObject>;
+  readonly gatewayAgentTag?: boolean;
   readonly source?: ModuleSourceRef;
   readonly sourceField?: CompiledRuntimeModelReference["sourceField"];
   readonly sourcePath?: string;
@@ -226,6 +229,7 @@ async function normalizeAuthoredModelReference(input: {
       routing,
     };
     if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    if (input.gatewayAgentTag !== undefined) reference.gatewayAgentTag = input.gatewayAgentTag;
     return await withCompiledRuntimeModelLimits(reference, input);
   }
 
@@ -290,6 +294,9 @@ async function normalizeAuthoredModelReference(input: {
   };
   if (input.sourceField !== undefined) sourceBackedModel.sourceField = input.sourceField;
   if (input.promptCache !== undefined) sourceBackedModel.promptCache = input.promptCache;
+  if (input.gatewayAgentTag !== undefined) {
+    sourceBackedModel.gatewayAgentTag = input.gatewayAgentTag;
+  }
 
   if (input.contextWindowTokens === undefined) {
     if (isChatGptModelRouting(sourceBackedModel.routing)) {

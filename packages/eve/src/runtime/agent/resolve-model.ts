@@ -237,6 +237,7 @@ export async function resolveRuntimeModelSelection(input: {
         contextWindowTokens,
         promptCache,
         providerOptions,
+        gatewayAgentTag: selection.modelOptions?.gatewayAgentTag,
         reasoning: selection.reasoning,
       },
     };
@@ -302,6 +303,7 @@ export async function resolveRuntimeModelSelection(input: {
       contextWindowTokens,
       promptCache,
       providerOptions,
+      gatewayAgentTag: selection.modelOptions?.gatewayAgentTag,
       reasoning: selection.reasoning,
     },
   };
