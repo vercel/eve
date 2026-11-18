@@ -1,0 +1,246 @@
+{"cmd":"eve --version","side":"before","run":0,"ms":192.015046}
+{"cmd":"eve --version","side":"after","run":0,"ms":131.856143}
+{"cmd":"eve --version","side":"after","run":1,"ms":222.125803}
+{"cmd":"eve --version","side":"before","run":1,"ms":172.973819}
+{"cmd":"eve --version","side":"before","run":2,"ms":176.817377}
+{"cmd":"eve --version","side":"after","run":2,"ms":140.430624}
+{"cmd":"eve --version","side":"after","run":3,"ms":181.716271}
+{"cmd":"eve --version","side":"before","run":3,"ms":187.036455}
+{"cmd":"eve --version","side":"before","run":4,"ms":186.884157}
+{"cmd":"eve --version","side":"after","run":4,"ms":181.197278}
+{"cmd":"eve --version","side":"after","run":5,"ms":116.118461}
+{"cmd":"eve --version","side":"before","run":5,"ms":195.353568}
+{"cmd":"eve --version","side":"before","run":6,"ms":146.513932}
+{"cmd":"eve --version","side":"after","run":6,"ms":148.75244}
+{"cmd":"eve --version","side":"after","run":7,"ms":214.652766}
+{"cmd":"eve --version","side":"before","run":7,"ms":148.377865}
+{"cmd":"eve --version","side":"before","run":8,"ms":166.319378}
+{"cmd":"eve --version","side":"after","run":8,"ms":168.513839}
+{"cmd":"eve --version","side":"after","run":9,"ms":128.136721}
+{"cmd":"eve --version","side":"before","run":9,"ms":212.389836}
+{"cmd":"eve --version","side":"before","run":10,"ms":160.371102}
+{"cmd":"eve --version","side":"after","run":10,"ms":159.96631}
+{"cmd":"eve --version","side":"after","run":11,"ms":139.298046}
+{"cmd":"eve --version","side":"before","run":11,"ms":182.509088}
+{"cmd":"eve --version","side":"before","run":12,"ms":180.407014}
+{"cmd":"eve --version","side":"after","run":12,"ms":125.568857}
+{"cmd":"eve --version","side":"after","run":13,"ms":203.622697}
+{"cmd":"eve --version","side":"before","run":13,"ms":161.663649}
+{"cmd":"eve --version","side":"before","run":14,"ms":162.561699}
+{"cmd":"eve --version","side":"after","run":14,"ms":175.227786}
+{"cmd":"eve --version","side":"after","run":15,"ms":160.677649}
+{"cmd":"eve --version","side":"before","run":15,"ms":159.970522}
+{"cmd":"eve --version","side":"before","run":16,"ms":182.39198}
+{"cmd":"eve --version","side":"after","run":16,"ms":137.612982}
+{"cmd":"eve --version","side":"after","run":17,"ms":163.555809}
+{"cmd":"eve --version","side":"before","run":17,"ms":126.183505}
+{"cmd":"eve --version","side":"before","run":18,"ms":191.85944}
+{"cmd":"eve --version","side":"after","run":18,"ms":178.118012}
+{"cmd":"eve --version","side":"after","run":19,"ms":155.983962}
+{"cmd":"eve --version","side":"before","run":19,"ms":207.891133}
+{"cmd":"eve --version","side":"before","run":20,"ms":163.054945}
+{"cmd":"eve --version","side":"after","run":20,"ms":168.607182}
+{"cmd":"eve --version","side":"after","run":21,"ms":148.85937}
+{"cmd":"eve --version","side":"before","run":21,"ms":178.185716}
+{"cmd":"eve --version","side":"before","run":22,"ms":144.754652}
+{"cmd":"eve --version","side":"after","run":22,"ms":164.68275}
+{"cmd":"eve --version","side":"after","run":23,"ms":208.841988}
+{"cmd":"eve --version","side":"before","run":23,"ms":161.340315}
+{"cmd":"eve --version","side":"before","run":24,"ms":138.676885}
+{"cmd":"eve --version","side":"after","run":24,"ms":202.510513}
+{"cmd":"eve --version","side":"after","run":25,"ms":123.946758}
+{"cmd":"eve --version","side":"before","run":25,"ms":213.981509}
+{"cmd":"eve --version","side":"before","run":26,"ms":190.61295}
+{"cmd":"eve --version","side":"after","run":26,"ms":169.51853}
+{"cmd":"eve --version","side":"after","run":27,"ms":167.660956}
+{"cmd":"eve --version","side":"before","run":27,"ms":173.71201}
+{"cmd":"eve --version","side":"before","run":28,"ms":176.294368}
+{"cmd":"eve --version","side":"after","run":28,"ms":160.121617}
+{"cmd":"eve --version","side":"after","run":29,"ms":141.520922}
+{"cmd":"eve --version","side":"before","run":29,"ms":228.565435}
+{"cmd":"eve --version","side":"before","run":30,"ms":165.943845}
+{"cmd":"eve --version","side":"after","run":30,"ms":175.551593}
+{"cmd":"eve --version","side":"after","run":31,"ms":155.878975}
+{"cmd":"eve --version","side":"before","run":31,"ms":210.971779}
+{"cmd":"eve --version","side":"before","run":32,"ms":160.864497}
+{"cmd":"eve --version","side":"after","run":32,"ms":187.973361}
+{"cmd":"eve --version","side":"after","run":33,"ms":144.485819}
+{"cmd":"eve --version","side":"before","run":33,"ms":155.510504}
+{"cmd":"eve --version","side":"before","run":34,"ms":160.536981}
+{"cmd":"eve --version","side":"after","run":34,"ms":159.309771}
+{"cmd":"eve --version","side":"after","run":35,"ms":188.233666}
+{"cmd":"eve --version","side":"before","run":35,"ms":140.821328}
+{"cmd":"eve --version","side":"before","run":36,"ms":198.776253}
+{"cmd":"eve --version","side":"after","run":36,"ms":153.826305}
+{"cmd":"eve --version","side":"after","run":37,"ms":162.104905}
+{"cmd":"eve --version","side":"before","run":37,"ms":180.133914}
+{"cmd":"eve --version","side":"before","run":38,"ms":205.075412}
+{"cmd":"eve --version","side":"after","run":38,"ms":130.567982}
+{"cmd":"eve --version","side":"after","run":39,"ms":151.977242}
+{"cmd":"eve --version","side":"before","run":39,"ms":209.939823}
+{"cmd":"eve --version","side":"before","run":40,"ms":161.959749}
+{"cmd":"eve --version","side":"after","run":40,"ms":139.693374}
+{"cmd":"eve --help","side":"before","run":0,"ms":235.406045}
+{"cmd":"eve --help","side":"after","run":0,"ms":164.554095}
+{"cmd":"eve --help","side":"after","run":1,"ms":155.945265}
+{"cmd":"eve --help","side":"before","run":1,"ms":166.333635}
+{"cmd":"eve --help","side":"before","run":2,"ms":184.148482}
+{"cmd":"eve --help","side":"after","run":2,"ms":152.83581}
+{"cmd":"eve --help","side":"after","run":3,"ms":144.504344}
+{"cmd":"eve --help","side":"before","run":3,"ms":179.994384}
+{"cmd":"eve --help","side":"before","run":4,"ms":211.486548}
+{"cmd":"eve --help","side":"after","run":4,"ms":148.556929}
+{"cmd":"eve --help","side":"after","run":5,"ms":145.973601}
+{"cmd":"eve --help","side":"before","run":5,"ms":232.855378}
+{"cmd":"eve --help","side":"before","run":6,"ms":134.758553}
+{"cmd":"eve --help","side":"after","run":6,"ms":170.669002}
+{"cmd":"eve --help","side":"after","run":7,"ms":207.217312}
+{"cmd":"eve --help","side":"before","run":7,"ms":144.106548}
+{"cmd":"eve --help","side":"before","run":8,"ms":200.226633}
+{"cmd":"eve --help","side":"after","run":8,"ms":132.341685}
+{"cmd":"eve --help","side":"after","run":9,"ms":141.912086}
+{"cmd":"eve --help","side":"before","run":9,"ms":244.375975}
+{"cmd":"eve --help","side":"before","run":10,"ms":154.927851}
+{"cmd":"eve --help","side":"after","run":10,"ms":139.901155}
+{"cmd":"eve --help","side":"after","run":11,"ms":206.441222}
+{"cmd":"eve --help","side":"before","run":11,"ms":147.432106}
+{"cmd":"eve --help","side":"before","run":12,"ms":176.068814}
+{"cmd":"eve --help","side":"after","run":12,"ms":151.875675}
+{"cmd":"eve --help","side":"after","run":13,"ms":199.935935}
+{"cmd":"eve --help","side":"before","run":13,"ms":171.043491}
+{"cmd":"eve --help","side":"before","run":14,"ms":176.87066}
+{"cmd":"eve --help","side":"after","run":14,"ms":164.142619}
+{"cmd":"eve --help","side":"after","run":15,"ms":170.457228}
+{"cmd":"eve --help","side":"before","run":15,"ms":153.238773}
+{"cmd":"eve --help","side":"before","run":16,"ms":185.336815}
+{"cmd":"eve --help","side":"after","run":16,"ms":143.610221}
+{"cmd":"eve --help","side":"after","run":17,"ms":162.936882}
+{"cmd":"eve --help","side":"before","run":17,"ms":197.325671}
+{"cmd":"eve --help","side":"before","run":18,"ms":147.137438}
+{"cmd":"eve --help","side":"after","run":18,"ms":195.378494}
+{"cmd":"eve --help","side":"after","run":19,"ms":185.748811}
+{"cmd":"eve --help","side":"before","run":19,"ms":138.165878}
+{"cmd":"eve --help","side":"before","run":20,"ms":153.823226}
+{"cmd":"eve --help","side":"after","run":20,"ms":159.016957}
+{"cmd":"eve --help","side":"after","run":21,"ms":213.245174}
+{"cmd":"eve --help","side":"before","run":21,"ms":150.90246}
+{"cmd":"eve --help","side":"before","run":22,"ms":162.864341}
+{"cmd":"eve --help","side":"after","run":22,"ms":151.946272}
+{"cmd":"eve --help","side":"after","run":23,"ms":235.751808}
+{"cmd":"eve --help","side":"before","run":23,"ms":183.558418}
+{"cmd":"eve --help","side":"before","run":24,"ms":170.617511}
+{"cmd":"eve --help","side":"after","run":24,"ms":172.184383}
+{"cmd":"eve --help","side":"after","run":25,"ms":189.70949}
+{"cmd":"eve --help","side":"before","run":25,"ms":158.579244}
+{"cmd":"eve --help","side":"before","run":26,"ms":171.854972}
+{"cmd":"eve --help","side":"after","run":26,"ms":142.939135}
+{"cmd":"eve --help","side":"after","run":27,"ms":164.925329}
+{"cmd":"eve --help","side":"before","run":27,"ms":205.733964}
+{"cmd":"eve --help","side":"before","run":28,"ms":169.410632}
+{"cmd":"eve --help","side":"after","run":28,"ms":177.291991}
+{"cmd":"eve --help","side":"after","run":29,"ms":157.632501}
+{"cmd":"eve --help","side":"before","run":29,"ms":156.312407}
+{"cmd":"eve --help","side":"before","run":30,"ms":146.641141}
+{"cmd":"eve --help","side":"after","run":30,"ms":173.664432}
+{"cmd":"eve --help","side":"after","run":31,"ms":189.817701}
+{"cmd":"eve --help","side":"before","run":31,"ms":177.779967}
+{"cmd":"eve --help","side":"before","run":32,"ms":175.746406}
+{"cmd":"eve --help","side":"after","run":32,"ms":151.618629}
+{"cmd":"eve --help","side":"after","run":33,"ms":131.172632}
+{"cmd":"eve --help","side":"before","run":33,"ms":206.999462}
+{"cmd":"eve --help","side":"before","run":34,"ms":164.869649}
+{"cmd":"eve --help","side":"after","run":34,"ms":136.986702}
+{"cmd":"eve --help","side":"after","run":35,"ms":186.894902}
+{"cmd":"eve --help","side":"before","run":35,"ms":163.088545}
+{"cmd":"eve --help","side":"before","run":36,"ms":178.311398}
+{"cmd":"eve --help","side":"after","run":36,"ms":150.48795}
+{"cmd":"eve --help","side":"after","run":37,"ms":164.058831}
+{"cmd":"eve --help","side":"before","run":37,"ms":163.84708}
+{"cmd":"eve --help","side":"before","run":38,"ms":159.935823}
+{"cmd":"eve --help","side":"after","run":38,"ms":147.967684}
+{"cmd":"eve --help","side":"after","run":39,"ms":183.958605}
+{"cmd":"eve --help","side":"before","run":39,"ms":170.891003}
+{"cmd":"eve --help","side":"before","run":40,"ms":136.670125}
+{"cmd":"eve --help","side":"after","run":40,"ms":215.135476}
+{"cmd":"eve info --help","side":"before","run":0,"ms":137.501518}
+{"cmd":"eve info --help","side":"after","run":0,"ms":184.715463}
+{"cmd":"eve info --help","side":"after","run":1,"ms":189.384399}
+{"cmd":"eve info --help","side":"before","run":1,"ms":177.367773}
+{"cmd":"eve info --help","side":"before","run":2,"ms":158.582715}
+{"cmd":"eve info --help","side":"after","run":2,"ms":172.200681}
+{"cmd":"eve info --help","side":"after","run":3,"ms":180.861854}
+{"cmd":"eve info --help","side":"before","run":3,"ms":168.065825}
+{"cmd":"eve info --help","side":"before","run":4,"ms":138.64548}
+{"cmd":"eve info --help","side":"after","run":4,"ms":191.93959}
+{"cmd":"eve info --help","side":"after","run":5,"ms":155.93362}
+{"cmd":"eve info --help","side":"before","run":5,"ms":177.450649}
+{"cmd":"eve info --help","side":"before","run":6,"ms":134.216602}
+{"cmd":"eve info --help","side":"after","run":6,"ms":152.717965}
+{"cmd":"eve info --help","side":"after","run":7,"ms":224.573818}
+{"cmd":"eve info --help","side":"before","run":7,"ms":150.812029}
+{"cmd":"eve info --help","side":"before","run":8,"ms":146.087084}
+{"cmd":"eve info --help","side":"after","run":8,"ms":197.828079}
+{"cmd":"eve info --help","side":"after","run":9,"ms":159.911543}
+{"cmd":"eve info --help","side":"before","run":9,"ms":181.41412}
+{"cmd":"eve info --help","side":"before","run":10,"ms":157.721105}
+{"cmd":"eve info --help","side":"after","run":10,"ms":184.152688}
+{"cmd":"eve info --help","side":"after","run":11,"ms":144.595873}
+{"cmd":"eve info --help","side":"before","run":11,"ms":179.19711}
+{"cmd":"eve info --help","side":"before","run":12,"ms":161.831104}
+{"cmd":"eve info --help","side":"after","run":12,"ms":235.684952}
+{"cmd":"eve info --help","side":"after","run":13,"ms":135.071789}
+{"cmd":"eve info --help","side":"before","run":13,"ms":206.495583}
+{"cmd":"eve info --help","side":"before","run":14,"ms":161.450993}
+{"cmd":"eve info --help","side":"after","run":14,"ms":183.781817}
+{"cmd":"eve info --help","side":"after","run":15,"ms":175.53524}
+{"cmd":"eve info --help","side":"before","run":15,"ms":164.258139}
+{"cmd":"eve info --help","side":"before","run":16,"ms":140.04597}
+{"cmd":"eve info --help","side":"after","run":16,"ms":214.790286}
+{"cmd":"eve info --help","side":"after","run":17,"ms":118.938044}
+{"cmd":"eve info --help","side":"before","run":17,"ms":211.562937}
+{"cmd":"eve info --help","side":"before","run":18,"ms":165.385902}
+{"cmd":"eve info --help","side":"after","run":18,"ms":135.352446}
+{"cmd":"eve info --help","side":"after","run":19,"ms":191.141187}
+{"cmd":"eve info --help","side":"before","run":19,"ms":213.803416}
+{"cmd":"eve info --help","side":"before","run":20,"ms":142.598386}
+{"cmd":"eve info --help","side":"after","run":20,"ms":133.959984}
+{"cmd":"eve info --help","side":"after","run":21,"ms":210.162963}
+{"cmd":"eve info --help","side":"before","run":21,"ms":165.346919}
+{"cmd":"eve info --help","side":"before","run":22,"ms":144.328808}
+{"cmd":"eve info --help","side":"after","run":22,"ms":172.891912}
+{"cmd":"eve info --help","side":"after","run":23,"ms":163.085991}
+{"cmd":"eve info --help","side":"before","run":23,"ms":179.840833}
+{"cmd":"eve info --help","side":"before","run":24,"ms":210.526693}
+{"cmd":"eve info --help","side":"after","run":24,"ms":129.371552}
+{"cmd":"eve info --help","side":"after","run":25,"ms":177.629278}
+{"cmd":"eve info --help","side":"before","run":25,"ms":175.560467}
+{"cmd":"eve info --help","side":"before","run":26,"ms":159.621613}
+{"cmd":"eve info --help","side":"after","run":26,"ms":174.985281}
+{"cmd":"eve info --help","side":"after","run":27,"ms":163.447179}
+{"cmd":"eve info --help","side":"before","run":27,"ms":148.450186}
+{"cmd":"eve info --help","side":"before","run":28,"ms":166.545862}
+{"cmd":"eve info --help","side":"after","run":28,"ms":185.37829}
+{"cmd":"eve info --help","side":"after","run":29,"ms":131.941739}
+{"cmd":"eve info --help","side":"before","run":29,"ms":195.918288}
+{"cmd":"eve info --help","side":"before","run":30,"ms":167.995639}
+{"cmd":"eve info --help","side":"after","run":30,"ms":147.823013}
+{"cmd":"eve info --help","side":"after","run":31,"ms":148.069012}
+{"cmd":"eve info --help","side":"before","run":31,"ms":199.138836}
+{"cmd":"eve info --help","side":"before","run":32,"ms":163.69217}
+{"cmd":"eve info --help","side":"after","run":32,"ms":161.735562}
+{"cmd":"eve info --help","side":"after","run":33,"ms":146.638726}
+{"cmd":"eve info --help","side":"before","run":33,"ms":184.526143}
+{"cmd":"eve info --help","side":"before","run":34,"ms":200.496207}
+{"cmd":"eve info --help","side":"after","run":34,"ms":146.540502}
+{"cmd":"eve info --help","side":"after","run":35,"ms":177.835223}
+{"cmd":"eve info --help","side":"before","run":35,"ms":164.060881}
+{"cmd":"eve info --help","side":"before","run":36,"ms":170.780562}
+{"cmd":"eve info --help","side":"after","run":36,"ms":160.4256}
+{"cmd":"eve info --help","side":"after","run":37,"ms":151.485472}
+{"cmd":"eve info --help","side":"before","run":37,"ms":166.16824}
+{"cmd":"eve info --help","side":"before","run":38,"ms":153.722068}
+{"cmd":"eve info --help","side":"after","run":38,"ms":152.037244}
+{"cmd":"eve info --help","side":"after","run":39,"ms":195.904206}
+{"cmd":"eve info --help","side":"before","run":39,"ms":163.616926}
+{"cmd":"eve info --help","side":"before","run":40,"ms":148.255988}
+{"cmd":"eve info --help","side":"after","run":40,"ms":153.710764}
