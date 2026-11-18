@@ -1,6 +1,12 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { createLogger } from "#internal/logging.js";
-import { AuthKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ChannelInstrumentationKey,
+  SandboxKey,
+  TurnDeliveryIdsKey,
+} from "#context/keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { DefinitionsStateKey } from "#definitions/state.js";
 import { withContextScope } from "#context/run-step.js";
 import { serializeContext } from "#context/serialize.js";
@@ -12,6 +18,7 @@ import { appliedSession, saveSessionProjection } from "#harness/session-machine/
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/eve/agent-trace-context-store.js";
+import { markSandboxRunning } from "#sandbox/state.js";
 
 const log = createLogger("execution.cancelled-turn");
 
@@ -65,6 +72,7 @@ export async function createCancelledModelCallBatchResult(input: {
   readonly checkpoint: CompletedModelCallCheckpoint | undefined;
   readonly ctx: ContextContainer;
   readonly initialSession: HarnessSession;
+  readonly sandboxIdleTimeoutMs: number | undefined;
   readonly stepInput: HarnessStepInput | undefined;
 }): Promise<DurableStepResult> {
   const interruptedContext = serializeContext(input.ctx);
@@ -76,6 +84,10 @@ export async function createCancelledModelCallBatchResult(input: {
     [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
     [DefinitionsStateKey.name]: interruptedContext[DefinitionsStateKey.name],
+    [ChannelKey.name]: interruptedContext[ChannelKey.name],
+    ...(ChannelInstrumentationKey.name in interruptedContext && {
+      [ChannelInstrumentationKey.name]: interruptedContext[ChannelInstrumentationKey.name],
+    }),
   };
 
   return {
@@ -84,6 +96,11 @@ export async function createCancelledModelCallBatchResult(input: {
       preserveSerializedAgentTraceState(checkpointContext, interruptedContext),
       interruptedContext,
     ),
-    ...createDurableSessionValues(saveSessionProjection(cancelledSession, input.ctx)),
+    ...createDurableSessionValues(
+      saveSessionProjection(
+        markSandboxRunning(cancelledSession, input.sandboxIdleTimeoutMs),
+        input.ctx,
+      ),
+    ),
   };
 }

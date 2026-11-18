@@ -1692,6 +1692,55 @@ The directory name supplies the \`nimble\` namespace. The extension adds \`nimbl
 
 \`nimble__agent_start\` creates a billable, non-idempotent Agent API run. The registry requires approval for every call. Retain the returned identifiers for \`nimble__agent_result\` instead of starting a replacement run. See the [Nimble eve guide](https://docs.nimbleway.com/integrations/connectors/vercel-eve) for built-in tool overrides, configuration, data handling, and the complete tool reference.`,
   },
+  "sanity-context": {
+    logo: "sanity",
+    docsHref: "https://www.sanity.io/docs/context/connect-vercel-eve",
+    keywords: ["sanity", "context", "knowledge base", "dataset", "groq", "cms", "content", "mcp"],
+    install: `Install the Sanity Context extension for eve:
+
+\`\`\`bash
+eve add extension/sanity-context
+\`\`\`
+
+The extension requires Node.js 24 or later and eve 1.0.0 or later. It connects the agent to a read-only Sanity Context MCP endpoint so it can answer from your Knowledge Bases and datasets. To query and edit a Sanity project instead, use the [Sanity connection](/integrations/sanity).`,
+    quickStart: `Create a Context MCP endpoint in the Sanity Dashboard, then create an organization API token with the Context permission at the Viewer role. Project tokens are refused. Add both to the agent's environment:
+
+\`\`\`bash title=".env.local"
+SANITY_CONTEXT_MCP_URL=your_mcp_endpoint_url
+SANITY_ORGANIZATION_TOKEN=your_organization_token
+\`\`\`
+
+eve reads the extension's configuration when it builds the agent, so set these variables in the build environment too.
+
+The registry mounts the extension under \`agent/extensions/sanity-context.ts\`:
+
+\`\`\`ts title="agent/extensions/sanity-context.ts"
+import sanityContext from "@sanity/context-eve";
+
+export default sanityContext({
+  url: process.env.SANITY_CONTEXT_MCP_URL!,
+  token: process.env.SANITY_ORGANIZATION_TOKEN!,
+  description: "Describe what this endpoint's content covers.",
+});
+\`\`\`
+
+Replace \`description\` with what the endpoint's content covers. The model reads it to decide when to use the connection. The filename supplies the \`sanity-context\` namespace, so tools are named \`sanity-context__sanity__initial_context\`, \`sanity-context__sanity__groq_query\`, and so on. The extension's instructions tell the agent to load the endpoint's initial context before its first lookup.`,
+    configure: `The tools depend on the endpoint's sources. The agent gets the endpoint's current tools on every run, so source changes in the Context app reach it without a redeploy:
+
+- Knowledge Base sources: \`knowledge_base_search\` and \`knowledge_base_read\`
+- Dataset sources: \`groq_query\`, \`schema_explorer\`, and \`array_field_reader\`
+- Every endpoint: \`initial_context\`, which returns the Knowledge Base outline or dataset schema
+
+All tools are read-only. If Sanity Context rejects the token, the connection's tools fail to load and the run continues without Sanity content. A missing or invalid token returns \`401\`, which eve reports as a connection that requires authorization. A project token, or an organization token without the Context grant, returns \`403\`, which eve reports with the server's error. Keep the token server-side, out of prompts and source control. Tool results contain your content, so anyone who can edit that content can influence what the agent does. See the [Sanity Context guide for eve](https://www.sanity.io/docs/context/connect-vercel-eve) for creating an endpoint and token, inlining the initial context into instructions, and troubleshooting.`,
+    relatedResources: [
+      {
+        title: "Sanity connection",
+        description:
+          "Connect the Sanity MCP server to query and edit documents, inspect schemas, and manage releases in a Sanity project.",
+        href: "/integrations/sanity",
+      },
+    ],
+  },
 };
 
 const memoryPresentations: Record<string, MemoryPresentation> = {
@@ -2864,6 +2913,14 @@ vercel env pull
 The MCP method registers the OAuth client automatically. Sign in with a Sanity account that has access to the projects and datasets your agent needs, and copy the returned connector UID into \`connect()\`.
 
 The MCP server can edit and publish content; use [tool filters and approval gates](/docs/connections/mcp#tool-filters) to control these actions.`,
+    relatedResources: [
+      {
+        title: "Sanity Context extension",
+        description:
+          "Answer from your Sanity Knowledge Bases and datasets through a read-only Sanity Context MCP endpoint.",
+        href: "/integrations/sanity-context",
+      },
+    ],
   },
   sentry: {
     logo: "sentry",

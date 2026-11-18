@@ -13,6 +13,7 @@ import {
   trackActiveSandboxConnection,
   untrackActiveSandboxConnection,
 } from "#execution/sandbox/active-connections.js";
+import { sandboxConnectionDisposal } from "#execution/sandbox/connection-disposal.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { isToolSessionId } from "#execution/tool-session/id.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
@@ -29,8 +30,9 @@ import type {
   SandboxSessionContext,
 } from "#sandbox/provider.js";
 import {
-  getSessionEndWithArtifact,
+  recordedSandboxStopsIdle,
   resolvePersistedSandboxSessionState,
+  resolveRecordedSandboxProvider,
   type SandboxAccess,
   type SandboxSessionEndReason,
   type SandboxSessionState,
@@ -57,9 +59,11 @@ interface EnsureSandboxAccessInput {
 }
 
 export interface EnsuredSandboxAccess extends SandboxAccess {
+  readonly idleTimeoutMs: number | undefined;
   end(reason: SandboxSessionEndReason): Promise<void>;
   release(): Promise<void>;
   settle(): Promise<void>;
+  stopIdle(options: { readonly signal: AbortSignal }): Promise<void>;
 }
 
 interface OpenedSandbox {
@@ -75,6 +79,31 @@ const pendingSandboxStarts = new Map<string, Promise<SandboxSessionState | null>
 
 const log = createLogger("execution.sandbox");
 
+function idleStop(
+  registry: RuntimeSandboxRegistry,
+  sessionId: string,
+): { readonly idleTimeoutMs: number; readonly provider: SandboxProviderRuntime } | undefined {
+  const registered = registry.sandbox;
+  if (registered === null || isToolSessionId(sessionId)) return undefined;
+  const owner = owningSandboxDefinition(registered);
+  if (owner.kind !== "independent") return undefined;
+  const provider = getSandboxEnvironmentRuntime(owner.environment);
+  const { idleTimeoutMs } = provider;
+  if (provider.implementation.onSessionIdle === undefined || idleTimeoutMs === false)
+    return undefined;
+  return { idleTimeoutMs, provider };
+}
+
+export function sandboxIdleTimeoutMs(
+  registry: RuntimeSandboxRegistry,
+  sessionId: string,
+  recorded?: SandboxSessionState | null,
+): number | undefined {
+  const stop = idleStop(registry, sessionId);
+  if (stop === undefined || !recordedSandboxStopsIdle(stop.provider, recorded)) return undefined;
+  return stop.idleTimeoutMs;
+}
+
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
 ): Promise<EnsuredSandboxAccess> {
@@ -86,6 +115,7 @@ export async function ensureSandboxAccess(
       ? getSandboxEnvironmentRuntime(persistedOwner.environment)
       : undefined,
   );
+  const disposals = new Set<() => Promise<void>>();
   let opened: OpenedSandbox | undefined;
   let stopped: OpenedSandbox | undefined;
   let opening: Promise<OpenedSandbox> | undefined;
@@ -93,13 +123,20 @@ export async function ensureSandboxAccess(
   const tracking = input.shutdownTracking ?? "session";
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
-  const captured = (): SandboxState => ({ session: persisted });
+  const idle = input.ownsSandbox === false ? undefined : idleStop(input.registry, input.sessionId);
+  const idleTimeoutMs = idle?.idleTimeoutMs;
+  let running = input.state?.running !== undefined;
+  const captured = (): SandboxState =>
+    running && idle !== undefined && recordedSandboxStopsIdle(idle.provider, persisted)
+      ? { session: persisted, running: { idleTimeoutMs: idle.idleTimeoutMs } }
+      : { session: persisted };
   if (registered === null) {
     return {
       async captureState() {
         return captured();
       },
       async end() {},
+      idleTimeoutMs,
       async get() {
         return null;
       },
@@ -110,10 +147,17 @@ export async function ensureSandboxAccess(
       async release() {},
       async settle() {},
       async stop() {},
+      async stopIdle() {},
     };
   }
   const ownerDefinition = owningSandboxDefinition(registered);
   const ownerNodeId = registered.inheritance?.nodeId ?? input.nodeId;
+
+  async function disposeConnections(): Promise<void> {
+    const pending = [...disposals];
+    disposals.clear();
+    await Promise.all(pending.map((dispose) => dispose()));
+  }
 
   function providerContext(turnId: string): SandboxSessionContext {
     const activeSession =
@@ -300,6 +344,7 @@ export async function ensureSandboxAccess(
         throw new Error(`Sandbox "${definition.logicalPath}" must return the sandbox it opens.`);
       }
     } catch (error) {
+      await disposeConnections().catch(() => undefined);
       await opened?.close().catch(() => undefined);
       opened = undefined;
       opening = undefined;
@@ -312,6 +357,7 @@ export async function ensureSandboxAccess(
 
   function requireOpened(): Promise<OpenedSandbox> {
     if (requiring !== undefined) return requiring;
+    running = true;
     requiring = resolveOpened().catch((error: unknown) => {
       requiring = undefined;
       throw error;
@@ -363,10 +409,27 @@ export async function ensureSandboxAccess(
     stopped = undefined;
     untrackActiveSandboxConnection({ providerName, sessionId: input.sessionId });
     persisted = null;
+    running = false;
+  }
+
+  async function recordedProvider(provider: SandboxProviderRuntime) {
+    const state =
+      persisted?.providerName === provider.providerName &&
+      persisted.stateProtocolVersion === provider.stateProtocolVersion
+        ? persisted.state
+        : null;
+    return await resolveRecordedSandboxProvider(provider, state, () =>
+      loadSandboxPreparedArtifact({
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId: ownerNodeId,
+        providerName: provider.providerName,
+      }),
+    );
   }
 
   return {
     environment: ownerDefinition.kind === "independent" ? ownerDefinition.environment : undefined,
+    idleTimeoutMs,
     async captureState() {
       if (opening !== undefined) await opening;
       return captured();
@@ -376,6 +439,7 @@ export async function ensureSandboxAccess(
         throw new Error("Only the owning session can delete this sandbox.");
       await preparations;
       const current = await requireOpened();
+      await disposeConnections();
       await current.delete(deleteOptions);
       forgetSandbox(current.providerName);
     },
@@ -383,6 +447,7 @@ export async function ensureSandboxAccess(
       if (input.ownsSandbox === false) return;
       await preparations;
       if (requiring !== undefined) await requiring.catch(() => undefined);
+      await disposeConnections();
       await opened?.close().catch((error: unknown) => {
         log.warn("failed to close a sandbox connection at session end", {
           error,
@@ -390,23 +455,14 @@ export async function ensureSandboxAccess(
         });
       });
       const provider = getSandboxEnvironmentRuntime(activeDefinition().environment);
-      const state =
-        persisted?.providerName === provider.providerName &&
-        persisted.stateProtocolVersion === provider.stateProtocolVersion
-          ? persisted.state
-          : null;
-      const context = providerContext("sandbox-cleanup");
-      const endWithArtifact = getSessionEndWithArtifact(provider.implementation);
-      if (endWithArtifact === undefined) {
-        await provider.implementation.onSessionEnd(context, state, { reason });
-      } else {
-        const artifact = await loadSandboxPreparedArtifact({
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          nodeId: ownerNodeId,
-          providerName: provider.providerName,
-        });
-        await endWithArtifact(context, state, { artifact, reason });
-      }
+      const recorded = await recordedProvider(provider);
+      await recorded?.implementation.onSessionEnd(
+        providerContext("sandbox-cleanup"),
+        recorded.state,
+        {
+          reason,
+        },
+      );
       forgetSandbox(provider.providerName);
     },
     async get() {
@@ -423,6 +479,7 @@ export async function ensureSandboxAccess(
     async release() {
       await preparations;
       if (requiring !== undefined) await requiring.catch(() => undefined);
+      await disposeConnections();
       const current = forgetOpened();
       if (stopped !== undefined && tracking !== "session") {
         untrackActiveSandboxConnection({
@@ -444,6 +501,7 @@ export async function ensureSandboxAccess(
       await preparations;
       const current = await requireOpened();
       await current.stop();
+      running = false;
       forgetOpened();
       if (!current.closable) {
         stopped = current;
@@ -455,6 +513,17 @@ export async function ensureSandboxAccess(
         sessionId: input.sessionId,
       });
     },
+    async stopIdle({ signal }) {
+      if (idle === undefined) return;
+      const recorded = await recordedProvider(idle.provider);
+      await recorded?.implementation.onSessionIdle?.(
+        providerContext("sandbox-idle"),
+        recorded.state,
+        {
+          signal,
+        },
+      );
+    },
   };
 
   async function openSandbox(
@@ -463,10 +532,12 @@ export async function ensureSandboxAccess(
     connection: SandboxConnection<object>,
     state: SandboxJson,
   ): Promise<OpenedSandbox> {
+    const dispose = sandboxConnectionDisposal(connection);
     let session: SandboxSession;
     try {
       session = createConnectionSession(connection);
     } catch (error) {
+      await dispose?.().catch(() => undefined);
       await connection.close?.().catch((closeError: unknown) => {
         log.warn("failed to close a sandbox connection eve could not use", {
           error: closeError,
@@ -475,6 +546,7 @@ export async function ensureSandboxAccess(
       });
       throw error;
     }
+    if (dispose !== undefined) disposals.add(dispose);
     const stopCompute = shared(() => connection.stop());
     const close = once(async () => await connection.close?.());
     const current: OpenedSandbox = {
@@ -482,6 +554,7 @@ export async function ensureSandboxAccess(
       close,
       async delete(options) {
         try {
+          await dispose?.();
           await close();
         } finally {
           await provider.implementation.onSessionEnd(context, state, {

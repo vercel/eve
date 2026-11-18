@@ -305,6 +305,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "sanity-context",
+    name: "Sanity Context",
+    kind: "extension",
+    tagline: "Answer from your Sanity content.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "file",
     name: "File memory",
     kind: "memory",

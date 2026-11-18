@@ -47,9 +47,12 @@ export async function deleteUnusableVercelSandbox(input: {
   await sandbox.delete({ deleteOrphanSnapshots: true });
 }
 
-export async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {
+export async function stopVercelSandbox(
+  sandbox: VercelSandbox,
+  signal?: AbortSignal,
+): Promise<void> {
   if (sandbox.status !== "running" && sandbox.status !== "pending") {
     return;
   }
-  await sandbox.stop();
+  await sandbox.stop(signal === undefined ? undefined : { signal });
 }

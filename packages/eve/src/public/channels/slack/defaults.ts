@@ -33,7 +33,10 @@ import { refusedAnswerOf, requestBatchOf } from "#channel/interaction-prompts.js
 import { signInOf, type SignIn } from "#channel/sign-in.js";
 import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
-import { truncateTypingStatus } from "#public/channels/slack/limits.js";
+import {
+  SLACK_TYPING_STATUS_MAX_LENGTH,
+  truncateTypingStatus,
+} from "#public/channels/slack/limits.js";
 import type {
   SlackApprovalChannelResolver,
   SlackChannelConfig,
@@ -47,9 +50,11 @@ import type {
 import {
   clearStatus,
   hideStatus,
-  reasoningStatus,
   showStatus,
+  showStatusBehindTurn,
+  statusWritesSettled,
 } from "#public/channels/slack/thread-status.js";
+import { reasoningStatus } from "#channel/reasoning-status.js";
 
 const log = createLogger("slack.defaults");
 const STATUS_HOLD_MS = 3_000;
@@ -64,6 +69,7 @@ interface StepStream {
   readonly partKinds: Map<string, string>;
 }
 const streamByState = new WeakMap<SlackChannelState, StepStream>();
+const turnsJustStarted = new WeakSet<SlackChannelState>();
 
 function stepStream(state: SlackChannelState, runId: string): StepStream {
   const current = streamByState.get(state);
@@ -104,7 +110,10 @@ async function showReasoning(
   stream: StepStream,
   options?: { readonly complete?: boolean },
 ): Promise<void> {
-  const piece = reasoningStatus(stream.reasoning, options);
+  const piece = reasoningStatus(stream.reasoning, {
+    complete: options?.complete,
+    maxLength: SLACK_TYPING_STATUS_MAX_LENGTH,
+  });
   if (piece === undefined) return;
   if (truncateTypingStatus(piece) === channel.state.threadStatus?.text) return;
   const now = Date.now();
@@ -469,24 +478,27 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (working.length > 0) await showStatus(ctx.channel, waitingOnTasks(working));
   },
 
-  async "model.started"(event, ctx) {
+  "model.started"(event, ctx) {
     const { channel } = ctx;
     const turnId = event.scope?.turnId;
     if (turnId === undefined) return;
+    const firstRun = turnsJustStarted.delete(channel.state);
     const pending = channel.state.pendingTaskResults;
     channel.state.pendingTaskResults = null;
-    const status =
-      pending?.turnId === turnId
-        ? reviewingResults(pending.names)
-        : (channel.state.threadStatus?.text ?? "Thinking...");
-    await showStatus(channel, status, { force: true });
+    const results = pending?.turnId === turnId ? reviewingResults(pending.names) : undefined;
+    showStatusBehindTurn(ctx, () => {
+      const text = results ?? channel.state.threadStatus?.text ?? "Thinking...";
+      return { text, force: !firstRun || text !== "Thinking..." };
+    });
   },
 
-  async "turn.started"(_event, { channel }) {
+  "turn.started"(_event, ctx) {
+    const { channel } = ctx;
     channel.state.pendingTaskResults = null;
     channel.state.pendingToolCallMessage = null;
     streamByState.delete(channel.state);
-    await showStatus(channel, "Thinking...", { force: true });
+    turnsJustStarted.add(channel.state);
+    showStatusBehindTurn(ctx, () => ({ text: "Thinking...", force: true }));
   },
 
   async "content.delta"(event, ctx) {
@@ -575,11 +587,13 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await clearStatus(channel);
       return;
     }
+    await statusWritesSettled(channel);
     channel.state.threadStatus = null;
     await deliverCompletedSlackReply(channel, text, { turnId: ctx.session.turn.id });
   },
 
   async "turn.settled"({ data }, { channel }) {
+    await statusWritesSettled(channel);
     if (data.outcome !== "failed") {
       await clearStatus(channel);
       return;

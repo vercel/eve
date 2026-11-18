@@ -1,3 +1,7 @@
+import {
+  sandboxConnectionDisposal,
+  withSandboxConnectionDisposal,
+} from "#execution/sandbox/connection-disposal.js";
 import { randomBytes } from "node:crypto";
 
 import type {
@@ -57,6 +61,7 @@ import {
   ensureVercelSandboxTags,
   resolveVercelSandboxTags,
 } from "#execution/sandbox/bindings/vercel-options.js";
+import { createVercelTimeout } from "#execution/sandbox/bindings/vercel-timeout.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
 import type {
   VercelCreateOptions,
@@ -118,6 +123,19 @@ export function createVercelSandbox(
         sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
         signal,
       });
+    },
+    async onSessionIdle(context, state, { signal }) {
+      const sandbox = await getNamedVercelSandbox({
+        createOptions: signal === undefined ? createOptions : { ...createOptions, signal },
+        sandboxModule: await loadSandboxModule(),
+        sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
+      });
+      if (sandbox === null) return;
+      try {
+        await stopVercelSandbox(sandbox, signal);
+      } catch (error) {
+        if (!isVercelSandboxMissingError(error)) throw error;
+      }
     },
     async prepare(context) {
       if (context.isEmpty && createOptions.source === undefined) return {};
@@ -330,7 +348,12 @@ async function prepareTemplateSnapshot(
     input.context.log("preparing base runtime inside sandbox");
     await ensureVercelSandboxBaseRuntime(sandbox);
     await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
-    await input.context.populate(createVercelConnection(sandbox));
+    const connection = createVercelConnection(sandbox);
+    try {
+      await input.context.populate(connection);
+    } finally {
+      await sandboxConnectionDisposal(connection)?.();
+    }
     await ensureVercelSandboxBaseRuntime(sandbox);
     return (await sandbox.snapshot()).snapshotId;
   } finally {
@@ -491,51 +514,113 @@ function createSessionCreateParams(
 function createVercelConnection(
   sandbox: VercelSandbox,
 ): SandboxConnection<VercelSandboxExtensions> {
-  return {
+  let timeout: ReturnType<typeof createVercelTimeout> | undefined;
+  let disposed = false;
+  let closing: Promise<void> | undefined;
+  const activeTimeout = async () => {
+    while (closing !== undefined) await closing;
+    if (disposed)
+      throw new Error(
+        "This sandbox handle belongs to a finished execution scope. Call ctx.getSandbox() in the current scope.",
+      );
+    return (timeout ??= createVercelTimeout(sandbox));
+  };
+  const close = (stop = false): Promise<void> => {
+    const next = Promise.resolve(closing)
+      .catch(() => undefined)
+      .then(async () => {
+        const current = timeout;
+        timeout = undefined;
+        await current?.close();
+        if (stop) await stopVercelSandbox(sandbox);
+      })
+      .finally(() => {
+        if (closing === next) closing = undefined;
+      });
+    closing = next;
+    return next;
+  };
+  const setNetworkPolicy = createVercelNetworkPolicySetter(sandbox);
+  const connection: SandboxConnection<VercelSandboxExtensions> = {
     extensions: {
       name: sandbox.name,
-      setNetworkPolicy: createVercelNetworkPolicySetter(sandbox),
+      setNetworkPolicy: async (policy) =>
+        (await activeTimeout()).run(() => setNetworkPolicy(policy)),
     },
     async readFile(options) {
-      return normalizeVercelReadStream(await sandbox.readFile({ path: options.path }));
+      const release = await (await activeTimeout()).acquire(options.signal);
+      try {
+        return normalizeVercelReadStream(
+          await sandbox.readFile({ path: options.path }, { signal: options.signal }),
+          release,
+        );
+      } catch (error) {
+        release();
+        throw error;
+      }
     },
     async removePath(options: SandboxRemovePathOptions) {
-      await sandbox.fs.rm(options.path, {
-        force: options.force,
-        recursive: options.recursive,
-        signal: options.signal,
-      });
-    },
-    async spawn(options): Promise<SandboxProcess> {
-      const command = await sandbox.runCommand({
-        args: ["-lc", options.command],
-        cmd: "bash",
-        cwd: options.workingDirectory,
-        detached: true,
-        env: options.env,
-        signal: options.signal,
-        stdin: options.stdin,
-      });
-      return adaptMultiplexedCommandToSandboxProcess({
-        abortSignal: options.signal,
-        command,
-        getOutput: (log) => log.stream,
-        stdin: options.stdin === true ? command : undefined,
-      });
-    },
-    async stop() {
-      await stopVercelSandbox(sandbox);
-    },
-    async writeFiles(options: SandboxWriteFilesOptions) {
-      if (options.files.length === 0) return;
-      await sandbox.writeFiles(
-        await resolveVercelWriteFiles(sandbox, options.files, options.signal),
-        {
-          signal: options.signal,
-        },
+      await (
+        await activeTimeout()
+      ).run(
+        () =>
+          sandbox.fs.rm(options.path, {
+            force: options.force,
+            recursive: options.recursive,
+            signal: options.signal,
+          }),
+        options.signal,
       );
     },
+    async spawn(options): Promise<SandboxProcess> {
+      const release = await (await activeTimeout()).acquire(options.signal);
+      try {
+        const command = await sandbox.runCommand({
+          args: ["-lc", options.command],
+          cmd: "bash",
+          cwd: options.workingDirectory,
+          detached: true,
+          env: options.env,
+          signal: options.signal,
+          stdin: options.stdin,
+        });
+        const finished = command.wait({ signal: options.signal });
+        void finished.then(release, release);
+        return adaptMultiplexedCommandToSandboxProcess({
+          abortSignal: options.signal,
+          command: {
+            async kill() {
+              await command.kill();
+              release();
+            },
+            logs: (opts) => command.logs(opts),
+            wait: () => finished,
+          },
+          getOutput: (log) => log.stream,
+          stdin: options.stdin === true ? command : undefined,
+        });
+      } catch (error) {
+        release();
+        throw error;
+      }
+    },
+    stop: () => close(true),
+    async writeFiles(options: SandboxWriteFilesOptions) {
+      if (options.files.length === 0) return;
+      await (
+        await activeTimeout()
+      ).run(async () => {
+        await sandbox.writeFiles(
+          await resolveVercelWriteFiles(sandbox, options.files, options.signal),
+          { signal: options.signal },
+        );
+      }, options.signal);
+    },
   };
+  return withSandboxConnectionDisposal(connection, async () => {
+    disposed = true;
+    await close();
+  });
 }
 
 const REALPATH_ARGUMENT_BYTES = 64 * 1024;

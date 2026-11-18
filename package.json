@@ -25,6 +25,7 @@
     "fmt": "oxfmt",
     "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
     "guard:invariants": "node ./scripts/guard-invariants.mjs",
+    "guard:docs-budget": "node ./scripts/check-docs-budget.mjs",
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",

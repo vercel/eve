@@ -400,7 +400,7 @@ function stripAnsi(text: string): string {
 }
 
 function parseServerUrl(stdout: string): string | undefined {
-  const match = /server listening at (https?:\/\/\S+)/.exec(stripAnsi(stdout));
+  const match = /\[DEV\] ready at (https?:\/\/\S+)/.exec(stripAnsi(stdout));
 
   return match?.[1];
 }

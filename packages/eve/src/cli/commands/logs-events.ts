@@ -1,5 +1,3 @@
-import { access } from "node:fs/promises";
-
 import { createLogger } from "#internal/logging.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import { isStoredLine } from "#protocol/session-events/envelope.js";
@@ -26,32 +24,32 @@ export async function readDevSessionEvents(
   appRoot: string,
   window: DevSessionEventWindow,
 ): Promise<DevSessionEventLine[]> {
-  const dataDir = resolveLocalWorkflowWorldDataDirectory(appRoot);
-  try {
-    await access(dataDir);
-  } catch {
-    return [];
-  }
-
   const { createWorld } = await import("#compiled/@workflow/world-local/index.js");
   const runtime = await import("#internal/workflow/runtime.js");
-  const world = createWorld({ dataDir });
+  const world = createWorld({
+    dataDir: resolveLocalWorkflowWorldDataDirectory(appRoot),
+    queueAuthKey: "read",
+  });
   runtime.setWorld(world);
 
   const lines: DevSessionEventLine[] = [];
-  for (const run of await listRunsOverlappingWindow(world, window)) {
-    const text = await drainRunStream(runtime, world, run.runId);
-    const runLines = parseSessionEventLines(text, run, window);
-    if (runLines === undefined) {
-      log.warn(
-        `Skipped run ${run.runId} in the local workflow store: it was recorded by eve < 27, ` +
-          "whose session events this version cannot read. Inspect this run with the eve " +
-          "version that recorded it.",
-        { runId: run.runId },
-      );
-      continue;
+  try {
+    for (const run of await listRunsOverlappingWindow(world, window)) {
+      const text = await drainRunStream(runtime, world, run.runId);
+      const runLines = parseSessionEventLines(text, run, window);
+      if (runLines === undefined) {
+        log.warn(
+          `Skipped run ${run.runId} in the local workflow store: it was recorded by eve < 27, ` +
+            "whose session events this version cannot read. Inspect this run with the eve " +
+            "version that recorded it.",
+          { runId: run.runId },
+        );
+        continue;
+      }
+      lines.push(...runLines);
     }
-    lines.push(...runLines);
+  } finally {
+    await world.close?.();
   }
   return lines.sort((a, b) => a.at.localeCompare(b.at));
 }

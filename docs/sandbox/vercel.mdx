@@ -63,6 +63,10 @@ Set `image`, `source`, `tags`, project credentials, and `fetch` on the environme
 
 If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, or it stopped and its snapshot expired, eve runs the selector again to start a fresh sandbox. Files from the old sandbox are not kept.
 
+## Idle stop and timeout
+
+eve stops idle sandboxes as described in [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox). Vercel's `timeout` defaults to 30 minutes; eve extends it during sandbox operations, within Vercel's session limits. Renewal ends when an operation finishes or eve releases its connection. Background processes do not prevent idle stop. A stopped sandbox resumes from its files, not its processes.
+
 ## The eve-git image
 
 eve's [default image](/docs/sandbox/docker#eves-default-image) doesn't include the GitHub CLI (`gh`). To start sandboxes from the default image plus `gh`, set `image` to `VERCEL_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/vercel` and from `eve/extensions/git/sandbox`. Each eve release pins its tag, and `installCodeTooling` from `eve/extensions/code/sandbox` then finds `gh` instead of installing it with `apt-get`.

@@ -180,7 +180,28 @@ export async function getCompiledRuntimeAgentBundle(input: {
     return fullBundle;
   }
 
-  const node = getResolvedRuntimeAgentNode(fullBundle.graph, input.nodeId);
+  let nodeBundles = nodeBundlesByFullBundle.get(fullBundle);
+  if (nodeBundles === undefined) {
+    nodeBundles = new Map();
+    nodeBundlesByFullBundle.set(fullBundle, nodeBundles);
+  }
+  const known = nodeBundles.get(input.nodeId);
+  if (known !== undefined) return known;
+  const nodeBundle = createNodeBundle(fullBundle, input.nodeId);
+  nodeBundles.set(input.nodeId, nodeBundle);
+  return nodeBundle;
+}
+
+const nodeBundlesByFullBundle = new WeakMap<
+  CompiledRuntimeAgentBundle,
+  Map<string, CompiledRuntimeAgentBundle>
+>();
+
+function createNodeBundle(
+  fullBundle: CompiledRuntimeAgentBundle,
+  nodeId: string,
+): CompiledRuntimeAgentBundle {
+  const node = getResolvedRuntimeAgentNode(fullBundle.graph, nodeId);
   return {
     adapterRegistry: fullBundle.adapterRegistry,
     compiledArtifactsSource: fullBundle.compiledArtifactsSource,
@@ -190,7 +211,7 @@ export async function getCompiledRuntimeAgentBundle(input: {
     },
     modelMetadata: fullBundle.modelMetadata,
     moduleMap: fullBundle.moduleMap,
-    nodeId: input.nodeId,
+    nodeId,
     resolvedAgent: node.agent,
     subagentRegistry: node.subagentRegistry,
     toolRegistry: node.toolRegistry,

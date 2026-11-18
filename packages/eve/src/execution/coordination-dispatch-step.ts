@@ -3,7 +3,9 @@ import {
   type CoordinationDispatchInput,
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
+import { sessionSandboxIdleTimeoutMs } from "#context/providers/sandbox.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { markSandboxRunning } from "#sandbox/state.js";
 import { commitSessionStep, type SessionStepInput } from "#execution/publish-session-events.js";
 import {
   type SessionStateTransition,
@@ -156,6 +158,18 @@ async function dispatchCoordination(
     }
     if (dispatched.refusal !== undefined && dispatched.result !== undefined)
       refused.push({ policy: dispatched.refusal, result: dispatched.result });
+  }
+
+  if (executing.length > 0 || started.length > 0) {
+    nextSession = markSandboxRunning(
+      nextSession,
+      await sessionSandboxIdleTimeoutMs({
+        agent: prepared.owner,
+        channelState: prepared.adapter.state,
+        sandboxState: nextSession.sandboxState,
+        sessionId: session.sessionId,
+      }),
+    );
   }
 
   return {

@@ -11,7 +11,8 @@ import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { sessionProvider } from "#context/providers/session.js";
 import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
-import { sandboxProvider } from "#context/providers/sandbox.js";
+import { sandboxProvider, sessionSandboxIdleTimeoutMs } from "#context/providers/sandbox.js";
+import { markSandboxRunning } from "#sandbox/state.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -271,6 +272,13 @@ async function runSessionStepBody(
     ...hydrateDurableSession(durableSession),
     history: validateHarnessModelMessages(input.history),
   };
+  const sandboxIdleTimeoutMs = (session: HarnessSession) =>
+    sessionSandboxIdleTimeoutMs({
+      agent,
+      channelState: ctx.get(ChannelKey)?.state,
+      sandboxState: session.sandboxState,
+      sessionId: durableSession.sessionId,
+    });
   const instrumentation = bindSessionInstrumentation({
     agentName: agent.id,
     ctx,
@@ -467,6 +475,7 @@ async function runSessionStepBody(
       try {
         await contextStorage.run(ctx, () => publish(facts));
       } finally {
+        await publisher.drain();
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
           if (
@@ -534,6 +543,10 @@ async function runSessionStepBody(
       })());
     };
     if (interrupted !== undefined) {
+      initialSession = markSandboxRunning(
+        initialSession,
+        await sandboxIdleTimeoutMs(initialSession),
+      );
       const recovered = await recoverInterruptedStep({
         admission: admissionFacts(runtimeIdentity),
         attempt: interrupted,
@@ -544,19 +557,24 @@ async function runSessionStepBody(
         ctx,
         failed: input.recover,
         publish: async (events, session) => {
-          const scoped = await withContextScope(ctx, session, async (current) => {
-            await prepareDefinitions(current);
-            const emit = createTurnEventHandler({
-              abortSignal,
-              canCancelTurn: false,
-              conversation: current.history,
-              hookCancellation: new AbortController(),
-              publisher,
-            });
-            const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
-            await publish(events);
-            return { result: undefined, session: current };
-          });
+          const scoped = await withContextScope(
+            ctx,
+            session,
+            async (current) => {
+              await prepareDefinitions(current);
+              const emit = createTurnEventHandler({
+                abortSignal,
+                canCancelTurn: false,
+                conversation: current.history,
+                hookCancellation: new AbortController(),
+                publisher,
+              });
+              const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
+              await publish(events);
+              return { result: undefined, session: current };
+            },
+            { drain: publisher.drain },
+          );
           return scoped.session;
         },
         session: initialSession,
@@ -633,37 +651,42 @@ async function runSessionStepBody(
         initialSession,
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
-          const result = await runStep(ctx, session, async (enrichedSession) => {
-            if (firstCall && input.input?.control === undefined) {
-              startSessionPrewarmers(ctx, "turn");
-            }
-            ctx.setVirtualContext(HandleEventKey, handleEvent);
-            if (host.deliver !== undefined)
-              ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
-            const stubs = ctx.get(ToolStubsKey);
-            if (stubs !== undefined)
-              ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(host.toolStubs, stubs));
-            ctx.setVirtualContext(ToolChannelKey, {
-              channel: channelOf(ctx),
-              to: createToolChannelTo({
-                createRuntime: host.createRuntime,
-                delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadAgent: () => agent,
-              }),
-            });
-            const schemaSession =
-              firstCall && resolved?.outputSchema !== undefined
-                ? { ...enrichedSession, outputSchema: resolved.outputSchema }
-                : enrichedSession;
-            await installDefinitions(ctx);
-            const completions =
-              firstCall && completedAuths !== undefined
-                ? completedAuths.map(({ challenge }) => challenge)
-                : undefined;
-            const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
-            await publisher.finish({ announce: stoppedForPerson(harnessResult) });
-            return harnessResult;
-          });
+          const result = await runStep(
+            ctx,
+            session,
+            async (enrichedSession) => {
+              if (firstCall && input.input?.control === undefined) {
+                startSessionPrewarmers(ctx, "turn");
+              }
+              ctx.setVirtualContext(HandleEventKey, handleEvent);
+              if (host.deliver !== undefined)
+                ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
+              const stubs = ctx.get(ToolStubsKey);
+              if (stubs !== undefined)
+                ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(host.toolStubs, stubs));
+              ctx.setVirtualContext(ToolChannelKey, {
+                channel: channelOf(ctx),
+                to: createToolChannelTo({
+                  createRuntime: host.createRuntime,
+                  delegated: hasDelegatedSessionContext(input.serializedContext),
+                  loadAgent: () => agent,
+                }),
+              });
+              const schemaSession =
+                firstCall && resolved?.outputSchema !== undefined
+                  ? { ...enrichedSession, outputSchema: resolved.outputSchema }
+                  : enrichedSession;
+              await installDefinitions(ctx);
+              const completions =
+                firstCall && completedAuths !== undefined
+                  ? completedAuths.map(({ challenge }) => challenge)
+                  : undefined;
+              const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
+              await publisher.finish({ announce: stoppedForPerson(harnessResult) });
+              return harnessResult;
+            },
+            { drain: publisher.drain },
+          );
           if (result.settledTurn === undefined) throwIfTurnAborted(abortSignal);
           const saved = { ...result, session: saveSessionProjection(result.session, ctx) };
           recordAppliedSession(ctx, saved.session);
@@ -677,15 +700,20 @@ async function runSessionStepBody(
         throw error;
       }
       if (completedModelCall === undefined) await consumeCancelledInput();
+      await publisher.drain();
       return createCancelledModelCallBatchResult({
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
         ctx,
         initialSession,
+        sandboxIdleTimeoutMs: await sandboxIdleTimeoutMs(
+          completedModelCall?.result.session ?? initialSession,
+        ),
         stepInput: resolved,
       });
     }
 
+    await publisher.drain();
     const aliased = saveSessionProjection(
       dropClosedRecords(
         reconcileSessionContinuationToken(ctx, stepResult.session),
@@ -707,7 +735,7 @@ async function runSessionStepBody(
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
-    publisher.writer.release();
+    await publisher.release();
   }
 }
 

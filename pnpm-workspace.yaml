@@ -50,7 +50,7 @@ catalog:
   "@vercel/connect": "2.9.2"
   "@vercel/otel": "2.3.0"
   "@vercel/sandbox": "4.0.0"
-  "@workflow/world-postgres": "5.2.0"
+  "@workflow/world-postgres": "5.3.0"
   ai: "^7.0.172"
   better-auth: "1.7.21"
   marked: "18.2.0"
@@ -93,6 +93,7 @@ minimumReleaseAgeExclude:
   - nitro
   - "@memco/eve@0.2.0"
   - "@memco/memcoai@0.4.0"
+  - "@sanity/context-eve@0.1.0"
   - "@stripe/link-integrations-eve@0.5.0"
   - "@stripe/link-sdk@3.1.0"
   - "claude-mem@15.18.1"

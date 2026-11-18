@@ -382,6 +382,7 @@ async function withCompiledRuntimeModelLimits(
   const limits = await input.modelCatalog.getModelLimits(model.id).catch((error: unknown) => {
     throw new Error(
       `Failed to load AI Gateway model metadata for ${input.purpose} "${model.id}". ${toErrorMessage(error)}`,
+      { cause: error },
     );
   });
 

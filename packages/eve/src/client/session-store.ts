@@ -14,7 +14,7 @@ import type {
 } from "#client/session-event-stream.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import { ConversationClient } from "#client/conversation-client.js";
-import type { ClientSession } from "#client/session.js";
+import { sendFollowedClientSession, type ClientSession } from "#client/session.js";
 import {
   assertAnswerable,
   assertExclusiveTurnInput,
@@ -380,6 +380,7 @@ export class SessionStore {
     this.#attached = false;
     this.#streamingWhenDetached = this.#conversationClient.streaming;
     this.#stop();
+    this.#publish();
   }
 
   newSession(): void {
@@ -481,9 +482,7 @@ export class SessionStore {
       return delivery;
     }
     this.#ensureStream(input);
-    return input.answers === undefined
-      ? await this.#session.send(input.message, input)
-      : await this.#session.respond(input.answers, input);
+    return await sendFollowedClientSession(this.#session, input);
   }
 
   #ensureStream(
@@ -493,7 +492,8 @@ export class SessionStore {
       throw new Error("A session is required before opening its stream.");
     this.#followAgents();
     const lifetime = this.#controller;
-    return this.#conversationClient.stream(this.#session, {
+    const opening = !this.#conversationClient.streaming;
+    const stream = this.#conversationClient.stream(this.#session, {
       startIndex: this.#conversationClient.view.position,
       ...options,
       onEvent: (event, historical) => {
@@ -505,6 +505,15 @@ export class SessionStore {
         this.#fail(error);
       },
     });
+    if (opening) {
+      const publishCaughtUp = () => {
+        if (lifetime !== this.#controller) return;
+        this.#publish();
+        if (lifetime === this.#controller) this.#conversationClient.reconcileFollowing();
+      };
+      void stream.caughtUp.then(publishCaughtUp, publishCaughtUp);
+    }
+    return stream;
   }
 
   #followAgents(): void {
@@ -548,10 +557,12 @@ export class SessionStore {
     for (const check of this.#turnWaiters) check();
     this.#callbacks.onSessionChange?.(this.#sessionState);
     if (lifetime !== this.#controller) return;
-    this.#publish();
-    if (lifetime !== this.#controller) return;
-    this.#conversationClient.reconcileFollowing();
-    if (lifetime !== this.#controller) return;
+    if (!historical) {
+      this.#publish();
+      if (lifetime !== this.#controller) return;
+      this.#conversationClient.reconcileFollowing();
+      if (lifetime !== this.#controller) return;
+    }
     this.#closeStreamWhenIdle();
   }
 

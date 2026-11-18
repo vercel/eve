@@ -883,8 +883,7 @@ describe("slackChannel message status and guidance", () => {
       name: "immediate reply",
       request: threadReply,
       status: "immediate",
-      trace:
-        "post:Thinking... turn:Thinking... model:Thinking... tool:Get weather model:Get weather",
+      trace: "post:Thinking... turn:Thinking... model tool:Get weather model:Get weather",
     },
     {
       name: "deferred mention",
@@ -911,7 +910,7 @@ describe("slackChannel message status and guidance", () => {
       request: threadReply,
       status: "immediate",
       steps: ["turn", "model", "hidden", "model"],
-      trace: "post:Thinking... turn:Thinking... model:Thinking... hidden model:Thinking...",
+      trace: "post:Thinking... turn:Thinking... model hidden model:Thinking...",
     },
   ])("$name", async ({ request, status, steps = ["turn", "model", "tool", "model"], trace }) => {
     const edits: unknown[] = [];
@@ -946,6 +945,44 @@ describe("slackChannel message status and guidance", () => {
     expect("message" in input && input.message).toEqual(
       expect.stringContaining(`<guidance>\n${guidance}\n</guidance>`),
     );
+  });
+
+  it("writes a turn's status without holding the turn, and posts the reply after it", async () => {
+    const slack = Promise.withResolvers<void>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
+      if (String(request).endsWith("assistant.threads.setStatus")) await slack.promise;
+      return answer(request, init);
+    });
+    const background: Promise<unknown>[] = [];
+    const harness = slackRenderingHarness(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      { channelId: "C01", teamId: "T01", threadTs: "1700000000.000001" },
+      { waitUntil: (promise) => void background.push(promise) },
+    );
+    const operations = () =>
+      fetchMock.mock.calls
+        .map(([request]) => String(request).replace("https://slack.com/api/", ""))
+        .filter((operation) => operation !== "chat.getPermalink");
+
+    await harness.step("turn");
+    await harness.step("model");
+    expect(background).toHaveLength(2);
+    const replied = harness.event({
+      type: "content.completed",
+      data: { kind: "text", phase: "reply", value: "Sunny.", runId: "r1", partId: "p1" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(operations()).toEqual(["assistant.threads.setStatus"]);
+    slack.resolve();
+    await replied;
+    await Promise.all(background);
+
+    expect(operations()).toEqual(["assistant.threads.setStatus", "chat.postMessage"]);
   });
 });
 

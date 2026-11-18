@@ -31,6 +31,8 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> extends
   readonly position?: FactPosition;
   readonly scope?: Scope;
   readonly view?: SessionView;
+  /** @internal */
+  readonly waitUntil?: (task: Promise<unknown>) => void;
 }
 
 type StateOf<TCtx> = TCtx extends ChannelAdapterContext<infer S> ? S : Record<string, unknown>;

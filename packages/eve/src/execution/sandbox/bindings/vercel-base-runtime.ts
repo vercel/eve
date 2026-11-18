@@ -1,3 +1,4 @@
+import { createVercelTimeout } from "#execution/sandbox/bindings/vercel-timeout.js";
 import { buildDockerBaseSetupScript } from "#execution/sandbox/bindings/docker-base-setup.js";
 import type { VercelSandboxCreateParams } from "#execution/sandbox/bindings/vercel-create-sdk.js";
 import type {
@@ -7,10 +8,17 @@ import type {
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 export async function ensureVercelSandboxBaseRuntime(sandbox: VercelSandbox): Promise<void> {
-  await runSandboxInitializationStep(sandbox, {
-    failureMessage: "Failed to initialize Vercel sandbox base runtime.",
-    script: buildDockerBaseSetupScript(),
-  });
+  const timeout = createVercelTimeout(sandbox);
+  try {
+    await timeout.run(() =>
+      runSandboxInitializationStep(sandbox, {
+        failureMessage: "Failed to initialize Vercel sandbox base runtime.",
+        script: buildDockerBaseSetupScript(),
+      }),
+    );
+  } finally {
+    await timeout.close();
+  }
 }
 
 export async function applyInitialVercelNetworkPolicy(

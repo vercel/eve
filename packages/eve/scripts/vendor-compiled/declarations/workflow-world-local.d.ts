@@ -9,6 +9,7 @@ export type LocalWorld = World & {
 export function createWorld(options?: {
   readonly baseUrl?: string;
   readonly dataDir?: string;
+  readonly queueAuthKey?: "regenerate" | "read";
   readonly recoverActiveRuns?: boolean;
   readonly streamFlushIntervalMs?: number;
   readonly tag?: string;

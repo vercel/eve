@@ -7,11 +7,11 @@ A Workflow world is the backend that stores eve sessions so they survive restart
 
 ## Compare worlds
 
-| World                               | Storage                           | Processes              | After an eve version upgrade                                                                       |
-| ----------------------------------- | --------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------- |
-| [Local](#use-the-local-world)       | Files under `.eve/.workflow-data` | One                    | Existing sessions cannot resume                                                                    |
-| [Postgres](#use-the-postgres-world) | A PostgreSQL database             | Any number of replicas | Existing sessions cannot resume                                                                    |
-| [Vercel Workflow](./vercel)         | Managed by Vercel                 | Managed by Vercel      | Runs continue on their original deployments; eligible idle sessions can move to the new deployment |
+| World                               | Storage                            | Processes              | After an eve version upgrade                                                                       |
+| ----------------------------------- | ---------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------- |
+| [Local](#use-the-local-world)       | SQLite under `.eve/.workflow-data` | One                    | Existing sessions cannot resume                                                                    |
+| [Postgres](#use-the-postgres-world) | A PostgreSQL database              | Any number of replicas | Existing sessions cannot resume                                                                    |
+| [Vercel Workflow](./vercel)         | Managed by Vercel                  | Managed by Vercel      | Runs continue on their original deployments; eligible idle sessions can move to the new deployment |
 
 On the local and Postgres worlds, a new build on the same eve version resumes existing sessions. See [Upgrade a self-hosted agent](./self-hosted-operations#upgrade-a-self-hosted-agent) for what happens when the eve version changes.
 
@@ -23,7 +23,7 @@ eve needs a world with atomic start hooks, so a new session takes its channel ad
 
 The local world is the default for `eve start` and needs no configuration. It stores run state under `.eve/.workflow-data` in the app directory. Mount that directory on persistent storage so runs survive process and container replacement.
 
-Each `eve start` process accepts queue messages only from its own queue. Don't point `WORKFLOW_LOCAL_BASE_URL` at a load balancer, because another replica rejects forwarded messages with HTTP 401. To serve an agent from several replicas, use the [Postgres world](#use-the-postgres-world).
+Each `eve start` process accepts queue messages only from its own queue. Don't point `WORKFLOW_LOCAL_BASE_URL` at a load balancer, because another replica rejects forwarded messages with HTTP 401. `eve start` refuses to start with `WORKFLOW_QUEUE_AUTH=off`, which would turn that check off. To serve an agent from several replicas, use the [Postgres world](#use-the-postgres-world).
 
 On startup, `eve start` queues pending and running local workflow runs again. Runs that were active when the previous process stopped continue when the eve version is unchanged. A step that was running when the previous process stopped, such as a model call, runs again right away. In a [spec 8 run](#set-the-workflow-spec-version), that interrupted attempt counts toward the step's retries, so a step that allows no retries fails instead. `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` doesn't disable this recovery.
 
