@@ -16,7 +16,6 @@ import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const RECORD_KIND = "eve-inspect-cache-v2";
-const RECENT_EDIT_WINDOW_MS = 2_000;
 const SKIPPED_DIRECTORIES = new Set([
   ".cache",
   ".eve",
@@ -27,6 +26,7 @@ const SKIPPED_DIRECTORIES = new Set([
   ".svelte-kit",
   ".turbo",
   ".vercel",
+  "dist",
   "node_modules",
 ]);
 const PROJECT_FILES = [
@@ -124,7 +124,7 @@ export async function writeCachedCompile(input: {
     ([path, stamp]) =>
       stamp !== null &&
       !artifacts.includes(path) &&
-      Number(stamp.split(":")[1]) >= input.startedAtMs - RECENT_EDIT_WINDOW_MS,
+      Number(stamp.split(":")[1]) >= input.startedAtMs,
   );
   if (editedDuringCompile) return;
 
@@ -173,12 +173,12 @@ async function stampAll(roots: readonly string[], files: readonly string[]): Pro
     stamps[path] = await stamp(path);
   };
   const walk = async (directory: string): Promise<void> => {
-    const entries = await readdir(directory).catch(() => []);
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
     await Promise.all(
       entries.map(async (entry) => {
-        const path = join(directory, entry);
-        if ((await stat(path).catch(() => null))?.isDirectory() !== true) return record(path);
-        if (!SKIPPED_DIRECTORIES.has(entry)) await walk(path);
+        const path = join(directory, entry.name);
+        if (!entry.isDirectory()) return record(path);
+        if (!SKIPPED_DIRECTORIES.has(entry.name)) await walk(path);
       }),
     );
   };

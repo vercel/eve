@@ -56,7 +56,7 @@ async function loadCompiledApplicationState(
   const [{ CompileAgentError, compileAgent }, { DiscoveryProjectResolutionError }] =
     await Promise.all([import("#compiler/compile-agent.js"), import("#discover/project.js")]);
   const moduleIds = new Set<string>();
-  const startedAtMs = Date.now();
+  const startedAtMs = performance.timeOrigin + performance.now();
   try {
     const result = await recordBundledModules(moduleIds, () =>
       compileAgent({ startPath: appRoot }),

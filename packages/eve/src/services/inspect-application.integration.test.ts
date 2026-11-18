@@ -99,6 +99,15 @@ describe("inspectApplication cache", () => {
     expect(helper?.agent.tools.find(({ name }) => name === "lookup")?.description).toBe("changed");
   }, 120_000);
 
+  it("caches a compile that runs right after an edit", async () => {
+    const appRoot = await createApp();
+    await writeFile(join(appRoot, "lib/label.ts"), 'export const label = "edited";\n');
+
+    await inspect(appRoot);
+
+    expect(await readCachedCompile(appRoot)).not.toBeNull();
+  });
+
   const extension = {
     "agent/extensions/crm.mjs": 'import ext from "@acme/crm"; export default ext;\n',
     "node_modules/@acme/crm/package.json": JSON.stringify({

@@ -10,13 +10,11 @@ import type {
 } from "#compiler/manifest.js";
 import { deriveResourceRootEntries, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
-import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import { normalizeSkillPackage, writeSkillPackageDirectory } from "#shared/skill-package.js";
 
 const RESOURCES_DIRECTORY = "workspace-resources";
 const RESOURCE_WORKSPACE_DIRECTORY = "workspace";
 const RESOURCE_SKILLS_DIRECTORY = "skills";
-const SKILL_WRITE_CONCURRENCY = 32;
 
 export async function materializeWorkspaceResources(input: {
   readonly compileDirectoryPath: string;
@@ -99,9 +97,9 @@ async function materializeNode<TManifest extends CompiledAgentResources>(input: 
     });
   }
 
-  await mapWithConcurrency(input.manifest.skills, SKILL_WRITE_CONCURRENCY, (skill) =>
-    materializeSkill({ nodeRoot, skill }),
-  );
+  for (const skill of input.manifest.skills) {
+    await materializeSkill({ nodeRoot, skill });
+  }
 
   const contentHash = await hashWorkspaceResourceRoot(nodeRoot);
 

@@ -18,20 +18,13 @@ export function serializeOutputSchema<T extends ToolSchemaSource | null | undefi
   return emitJsonSchema(source, "output") as SchemaResult<T, JsonObject>;
 }
 
-const emittedSchemas = new WeakMap<object, Partial<Record<SchemaDirection, string>>>();
-
 export function emitJsonSchema(source: ToolSchemaSource, direction: SchemaDirection): JsonObject {
   const standard = getStandardSchemaProperties(source);
   if (standard === undefined) return withoutSchemaVersion(parseJsonObject(source));
 
-  const emitted = emittedSchemas.get(source as object);
-  const cached = emitted?.[direction];
-  if (cached !== undefined) return JSON.parse(cached) as JsonObject;
   const emit = readJsonSchemaEmitter(standard, direction);
   if (emit === undefined) throw new Error(describeMissingEmitter(standard));
-  const schema = withoutSchemaVersion(parseJsonObject(emit({ target: JSON_SCHEMA_TARGET })));
-  emittedSchemas.set(source as object, { ...emitted, [direction]: JSON.stringify(schema) });
-  return schema;
+  return withoutSchemaVersion(parseJsonObject(emit({ target: JSON_SCHEMA_TARGET })));
 }
 
 export function readJsonSchemaEmitter(
