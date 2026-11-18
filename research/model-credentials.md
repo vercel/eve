@@ -8,44 +8,69 @@ last_updated: "2026-11-18"
 
 > **AI status:** Written entirely by AI; human review pending.
 
-## Summary
+## Context
 
-The leading case is a per-user AI Gateway model. A person signs in with Vercel, and a dynamic
-`model` function selects a model that calls AI Gateway with that person's access token instead of
-the project's credential.
+A connection can act with a person's own account. It declares `auth`, and when the person has no
+credential yet, eve opens a sign-in, holds the turn, and continues it after the person connects.
+Some agents need the same for the model call itself, for example to send each person's AI Gateway
+requests with that person's own Vercel access token.
 
-An agent can already call a model with a credential that belongs to the person using it. A dynamic
-`model` function reads the caller from `ctx.session.auth`, fetches that person's token, and returns
-a provider model built with it. This works only while the credential exists. When it doesn't, the
-turn fails, and nothing asks the person to connect:
+## Problem
 
-- `REACTION_FAILED` when the function throws.
-- `MODEL_SELECTION_FAILED` when resolving the model the function selected throws. This failure
-  also ends the session.
-- `MODEL_CALL_FAILED` when the provider rejects the request.
+The model call has no way to ask the person to sign in. A dynamic `model` function can build a
+provider model from a person's token, but when the token doesn't exist yet, the turn fails, and
+the person never sees a sign-in.
 
-Connections already handle a missing credential for tool calls. eve opens a sign-in, holds the
-turn, and continues it after the person connects. This doc proposes the same behavior for the
-model call, through one new definition, `defineModel`. It puts an auth definition on a model the
-way `auth` sits on a connection. eve resolves the credential when it calls the model, and the
-dynamic `model` function keeps one job: choosing the model.
+## Root cause
+
+eve resolves credentials only for connections and tools. A model is a model ID or a provider
+instance, and neither can declare `auth`, so eve has nothing to resolve or ask for before the
+model call.
+
+## Solution
+
+A new definition, `defineModel`, puts a connection-style `auth` on a model. eve resolves that
+credential before each model call and opens the connection sign-in when it is missing.
+
+## Flow
+
+1. The agent's `model` is a `defineModel` value, directly or from a dynamic `model` function.
+2. Before each model call, eve calls `auth.getToken` for the current person.
+3. When the person has no credential, eve opens the sign-in and holds the turn.
+4. After the person connects, the same turn continues. eve passes the token to `create` and calls
+   the model it returns.
+
+It costs one new definition in `eve/models`. In return, the model call gets the sign-in that tool
+calls already have.
 
 ## Authoring API
 
-`defineModel` is a stable export of `eve/models`:
+`defineModel` is new, a stable export of `eve/models`:
 
 ```ts
 import { connect } from "@vercel/connect/eve";
 import { createGateway } from "ai";
 import { defineAgent } from "eve";
-import { defineDynamic, defineModel } from "eve/models";
+import { defineModel } from "eve/models";
 
+// New: a model with auth.
 const ownGateway = defineModel({
   id: "anthropic/claude-sonnet-5",
-  auth: connect("vercel/myagent"), // your connector for Sign in with Vercel
+  auth: connect("vercel/myagent"), // your Vercel Connect connector for Sign in with Vercel
   create: ({ token }) =>
     createGateway({ apiKey: token, teamIdOrSlug: "acme" })("anthropic/claude-sonnet-5"),
 });
+
+export default defineAgent({ model: ownGateway });
+```
+
+Each person signs in with Vercel, and eve sends their model calls to AI Gateway with their own
+Vercel access token. `teamIdOrSlug` scopes the calls to the `acme` team.
+
+To ask only signed-in people, choose the model per session with `defineDynamic`:
+
+```ts
+import { defineDynamic } from "eve/models";
 
 export default defineAgent({
   model: defineDynamic((ctx) =>
@@ -54,29 +79,18 @@ export default defineAgent({
 });
 ```
 
-Both branches name the same model. A signed-in person's calls reach AI Gateway with their own
-Vercel access token, and every other session uses the project's credential, as a string ID does
-today.
-
-`vercel/myagent` stands for the UID of a Vercel Connect connector the author creates for a Vercel
-app that asks only for the AI Gateway `Use` permission. Vercel lists that permission as private
-beta. `createGateway` takes a Vercel access token as its `apiKey`, and `teamIdOrSlug` scopes the
-call to the team that pays for it. The person grants the app access to that team when they sign
-in.
-
-The example bills one team for everyone. `create` receives only the credential, so to bill each
-person's own team, build the definition inside the dynamic function, where `create` can close over
-a value read from `ctx`.
+A signed-in person gets `ownGateway`. Every other session gets the plain model ID, which runs on
+the project's AI Gateway credential, as it does today.
 
 `defineModel` takes and returns a `ModelDefinition`, also exported from `eve/models`. `id`, `auth`,
 and `create` are always required:
 
-| Field     | Type                                            | Purpose                                                                                                                                                                                                  |
-| --------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`      | `string`                                        | The model ID eve reports on `model.started` and as `ctx.model.id`, and looks up in the AI Gateway model catalog for the context window. eve needs it during model selection, before a credential exists. |
-| `auth`    | `AuthorizationDefinition`                       | The credential strategy, in the shapes a connection's `auth` accepts: `connect(...)` from `@vercel/connect/eve`, `defineInteractiveAuthorization(...)`, or `{ getToken }`.                               |
-| `create`  | `(credential: TokenResult) => EveLanguageModel` | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                        |
-| `authKey` | `string`                                        | Names the credential for the sign-in. Required when `auth` has no Vercel Connect connector, and optional otherwise. See [Sign-in name and label](#sign-in-name-and-label).                               |
+| Field     | Type                                            | Purpose                                                                                                                                                                                                                 |
+| --------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`      | `string`                                        | Identifies the model. eve reports it on `model.started` and as `ctx.model.id`, and looks it up in the AI Gateway model catalog for the context window. eve needs it during model selection, before a credential exists. |
+| `auth`    | `AuthorizationDefinition`                       | The credential strategy: `connect(...)` from `@vercel/connect/eve`, `defineInteractiveAuthorization(...)`, or `{ getToken }`, as on a connection.                                                                       |
+| `create`  | `(credential: TokenResult) => EveLanguageModel` | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                                       |
+| `authKey` | `string`                                        | Keys the credential for the sign-in. Required when `auth` has no Vercel Connect connector, and optional otherwise. See [Sign-in name and label](#sign-in-name-and-label).                                               |
 
 eve accepts a `ModelDefinition` wherever it takes the model for a session's turns:
 
@@ -300,51 +314,50 @@ Invariants:
 
 ## Decisions and alternatives considered
 
-- **`defineModel` is stable.** It ships in `eve/models` under eve's semantic-versioning promise,
-  not under `eve/experimental`. Connection definitions name their protocol because eve has
-  several. A model has one target, `EveLanguageModel`, so `defineModel` takes no qualifier.
-- **`defineDynamic` stays the only way to vary behavior.** `defineModel` varies nothing. It is
-  the definition a dynamic `model` function returns, as `defineTool` and
-  `defineMcpClientConnection` are for tools and connections. Models were the one dynamic kind
-  with no eve definition: the function returns a model ID or an SDK instance, and neither can
-  declare auth. Dynamic connections already work this way. Their function returns a definition
-  that carries `auth`, and eve runs `auth` when it makes the call.
-- **The sign-in name comes from the credential, not the model.** The name keys the token cache,
-  the callback match, and the rule against asking twice. All three belong to a credential, so two
-  definitions with one `id` and different `auth` must not share it. eve can't detect that clash
-  at runtime: the callback resumes in a fresh step, where the earlier `auth` object no longer
-  exists to compare. So an `auth` without a connector names itself with `authKey`, as a tool's
-  inline auth does.
-- **A message withdraws the sign-in.** This is the connection behavior, and it gives every channel
-  a way out, including text-only channels that have no cancel control. The cost: an agent with no
+- **`defineModel` is stable.** It ships in `eve/models` under eve's semantic-versioning promise, not
+  under `eve/experimental`. Connection definitions carry their protocol in their names because eve
+  has several. A model has one target, `EveLanguageModel`, so `defineModel` takes no qualifier.
+- **`defineDynamic` stays the only way to vary behavior.** `defineModel` varies nothing. It is the
+  definition a dynamic `model` function returns, as `defineTool` and `defineMcpClientConnection` are
+  for tools and connections. Models were the one dynamic kind with no eve definition: the function
+  returns a model ID or an SDK instance, and neither can declare auth. Dynamic connections already
+  work this way. Their function returns a definition that carries `auth`, and eve runs `auth` when
+  it makes the call.
+- **The sign-in name comes from the credential, not the model.** The name keys the token cache, the
+  callback match, and the rule against asking twice. All three belong to a credential, so two
+  definitions with one `id` and different `auth` must not share it. eve can't detect that clash at
+  runtime: the callback resumes in a fresh step, where the earlier `auth` object no longer exists to
+  compare. So an `auth` without a connector identifies itself with `authKey`, as a tool's inline
+  auth does.
+- **A message withdraws the sign-in.** This is the connection behavior, and it gives every channel a
+  way out, including text-only channels that have no cancel control. The cost: an agent with no
   fallback fails the turn, and that message is not replayed.
 - **A `401` retries once before eve asks.** MCP connections do the same, and so do eve's
   local-development AI Gateway transport and `chatgpt()` inside their own clients. Asking on the
   first `401` would prompt for a token that only needed a refresh.
-- **Only the model that asked completes a sign-in.** When the selection changes before the
-  callback, completing anyway would need the `auth` that started the authorization, and after a
-  restart eve holds no definition but the one the function returns now. So the selected model
-  answers, and the open sign-in settles `interrupted` when the turn ends. That needs no new reason
-  code.
-- **One failure code per cause, and no reason field.** `MODEL_AUTHORIZATION_FAILED` covers a
-  decline and a setup problem, `MODEL_CREDENTIAL_FAILED` an outage at the credential service,
+- **Only the model that asked completes a sign-in.** When the selection changes before the callback,
+  completing anyway would need the `auth` that started the authorization, and after a restart eve
+  holds no definition but the one the function returns now. So the selected model answers, and the
+  open sign-in settles `interrupted` when the turn ends. That needs no new reason code.
+- **One failure code per cause, and no reason field.** `MODEL_AUTHORIZATION_FAILED` covers a decline
+  and a setup problem, `MODEL_CREDENTIAL_FAILED` an outage at the credential service,
   `MODEL_CREATE_FAILED` a bug in `create`, and `MODEL_CALL_FAILED` a provider error. Monitoring
-  tells them apart by code. The turn error carries only `name`, `code`, `message`, `id`, and
-  `hint`, so a reason field adds a field to every error event.
+  tells them apart by code. The turn error carries only `name`, `code`, `message`, `id`, and `hint`,
+  so a reason field adds a field to every error event.
 - **A throwing `create` keeps the session.** `create` is author code, like a dynamic `model`
   function, and a throwing dynamic function fails only its turn. `MODEL_SELECTION_FAILED` ends the
   session over a bug that a redeploy fixes.
-- **Every turn model accepts it.** `auto()` and `agent({ models })` validate their options with
-  one function, and each option becomes a session's turn model, which can hold for a sign-in.
-  Compaction and decision calls can't hold a turn, so they reject it.
-- **Not an `auth` option on `anthropic()` and `openai()`.** That adds provider-specific surface
-  for something one definition expresses for every provider.
-- **Not a provider connection file**, such as `agent/connections/anthropic.ts`, with `model` left
-  as a string ID. A connection is defined as the tools of an external server, eve would need a
-  rule that maps model IDs to connections, and an arbitrary provider still needs a factory.
+- **Every turn model accepts it.** `auto()` and `agent({ models })` validate their options with one
+  function, and each option becomes a session's turn model, which can hold for a sign-in. Compaction
+  and decision calls can't hold a turn, so they reject it.
+- **Not an `auth` option on `anthropic()` and `openai()`.** That adds provider-specific surface for
+  something one definition expresses for every provider.
+- **Not a provider connection file**, such as `agent/connections/anthropic.ts`, with `model` left as
+  a string ID. A connection is defined as the tools of an external server, eve would need a rule
+  that maps model IDs to connections, and an arbitrary provider still needs a factory.
 - **Not a turn gate from a hook**, where a `turn.started` handler requests the sign-in and the
-  dynamic function reads the token itself. It checks once per turn, so a credential revoked
-  mid-turn is unhandled, and it splits one provider across two files.
+  dynamic function reads the token itself. It checks once per turn, so a credential revoked mid-turn
+  is unhandled, and it splits one provider across two files.
 
 ### `ctx.getToken()` in the dynamic `model` function
 
