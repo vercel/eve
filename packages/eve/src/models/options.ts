@@ -33,7 +33,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStaticModel(value: unknown): value is PublicAgentTurnModelDefinition {
+function isTurnModel(value: unknown): value is PublicAgentTurnModelDefinition {
   return typeof value === "string"
     ? value.trim().length > 0
     : isRuntimeLanguageModel(value) || isModelDefinition(value);
@@ -41,9 +41,9 @@ function isStaticModel(value: unknown): value is PublicAgentTurnModelDefinition 
 
 export function isModelSelection(value: unknown): value is ModelOptionSelection {
   return (
-    isStaticModel(value) ||
+    isTurnModel(value) ||
     (isRecord(value) &&
-      isStaticModel(value.model) &&
+      isTurnModel(value.model) &&
       (value.reasoning === undefined || isAgentReasoningDefinition(value.reasoning)) &&
       (value.modelContextWindowTokens === undefined ||
         (Number.isInteger(value.modelContextWindowTokens) &&

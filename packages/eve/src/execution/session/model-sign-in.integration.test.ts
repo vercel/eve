@@ -357,7 +357,7 @@ describe("a model sign-in that ends without a credential", () => {
       expect(turnSettled(await session.callBack())).toMatchObject({ outcome: "completed" });
       expect(userMessages(billing.prompts.at(-1))).toEqual([
         FIRST,
-        expect.stringContaining("Sign-in to eve__model__oauth_billing was cancelled"),
+        expect.stringContaining("Sign-in to Billing was cancelled"),
         "Only the open ones.",
         "Try again.",
       ]);

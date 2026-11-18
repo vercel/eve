@@ -472,7 +472,6 @@ describe("controls and callbacks as deliveries", () => {
       completions: [MODEL_CALLBACK],
       declined: new Set([MODEL_CALLBACK.attemptId]),
     });
-    expect(events.map((event) => event.type)).toContain("interaction.settled");
     expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
       outcome: "declined",
       reason: "access_denied",

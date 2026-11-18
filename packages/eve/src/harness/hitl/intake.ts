@@ -12,6 +12,7 @@ import {
   type SuspendedStep,
 } from "#harness/session-machine/view.js";
 import { SIGN_IN_DECLINED, signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { isModelSignInName } from "#models/definition.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
@@ -349,7 +350,17 @@ async function withdrawSteeredSignIns(
   step: Step,
   input: HarnessStepInput | undefined,
 ): Promise<HarnessStepInput | undefined> {
-  const names = [...new Set(step.view().signIns.map((challenge) => challenge.name))];
+  const names = [
+    ...new Set(
+      step
+        .view()
+        .signIns.map((challenge) =>
+          isModelSignInName(challenge.name)
+            ? (challenge.challenge.displayName ?? challenge.name)
+            : challenge.name,
+        ),
+    ),
+  ];
   if (names.length === 0) return input;
   await applyEndingSignIns(step, withdrawSignIns(step.view(), STEERED_SIGN_IN_REASON));
   return {

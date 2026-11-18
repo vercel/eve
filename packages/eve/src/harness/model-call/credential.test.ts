@@ -10,7 +10,6 @@ function providerModel(token: string) {
   return markMockModel(
     new MockLanguageModelV4({
       doGenerate: async () => {
-        if (token === "stale") throw Object.assign(new Error("Unauthorized"), { statusCode: 401 });
         return {
           content: [{ text: `answered with ${token}`, type: "text" as const }],
           finishReason: { raw: undefined, unified: "stop" as const },
