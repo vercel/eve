@@ -10,10 +10,9 @@ const MODEL_DEFINITION: unique symbol = Symbol.for("eve.model-definition");
 const MODEL_SIGN_IN_PREFIX = "eve__model__";
 
 /**
- * A model with a connection-style `auth`. eve resolves `auth` before each model call, for the
- * signed-in person unless `auth.principalType` is `"app"`,
- * opens the same sign-in as a connection when the caller has none, and passes the credential to
- * `create`. Every field that sets a session's turn model accepts it; `compaction.model`, the
+ * A model with a connection-style `auth`. eve resolves `auth` before each model call with a
+ * connection's principal rules, opens the same sign-in as a connection when the caller has none,
+ * and passes the credential to `create`. Every field that sets a session's turn model accepts it; `compaction.model`, the
  * decision model of `auto()`, `ctx.agent()`'s `model`, and a dynamic subagent's config reject it.
  */
 export interface ModelDefinition {
