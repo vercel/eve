@@ -98,4 +98,4 @@ minimumReleaseAgeExclude:
   - "@stripe/link-sdk@3.1.0"
   - "claude-mem@15.18.1"
 patchedDependencies:
-  "@vercel/geistdocs@2.14.2": patches/@vercel__geistdocs@2.14.2.patch
+  "@vercel/geistdocs@2.16.0": patches/@vercel__geistdocs@2.16.0.patch
