@@ -22,17 +22,17 @@ export async function resolveRuntimeCompiledArtifactsVersionedCacheKey(
     if (artifacts === null) return baseKey;
     const known = bundledKeys.get(artifacts);
     if (known !== undefined) return known;
-    const key = await resolveVersionedKey(source, baseKey, undefined);
+    const { key } = await resolveVersionedKey(source, baseKey, undefined);
     bundledKeys.set(artifacts, key);
     return key;
   }
 
   const mtimeMs = await resolveCompileMetadataMtimeMs(source);
-  if (mtimeMs === undefined) return await resolveVersionedKey(source, baseKey, undefined);
+  if (mtimeMs === undefined) return (await resolveVersionedKey(source, baseKey, undefined)).key;
   const known = diskKeys.get(baseKey);
   if (known?.mtimeMs === mtimeMs) return known.key;
-  const key = await resolveVersionedKey(source, baseKey, mtimeMs);
-  diskKeys.set(baseKey, { key, mtimeMs });
+  const { key, loaded } = await resolveVersionedKey(source, baseKey, mtimeMs);
+  if (loaded) diskKeys.set(baseKey, { key, mtimeMs });
   return key;
 }
 
@@ -40,7 +40,7 @@ async function resolveVersionedKey(
   source: RuntimeCompiledArtifactsSource,
   baseKey: string,
   compileMetadataMtimeMs: number | undefined,
-): Promise<string> {
+): Promise<{ readonly key: string; readonly loaded: boolean }> {
   const mtimeSuffix =
     compileMetadataMtimeMs === undefined
       ? ""
@@ -52,11 +52,15 @@ async function resolveVersionedKey(
     });
     const sourceGraphHash = metadata?.discovery.sourceGraphHash;
 
-    return sourceGraphHash === undefined || sourceGraphHash.length === 0
-      ? `${baseKey}${mtimeSuffix}`
-      : `${baseKey}:${sourceGraphHash}${mtimeSuffix}`;
+    return {
+      key:
+        sourceGraphHash === undefined || sourceGraphHash.length === 0
+          ? `${baseKey}${mtimeSuffix}`
+          : `${baseKey}:${sourceGraphHash}${mtimeSuffix}`,
+      loaded: true,
+    };
   } catch {
-    return `${baseKey}${mtimeSuffix}`;
+    return { key: `${baseKey}${mtimeSuffix}`, loaded: false };
   }
 }
 
