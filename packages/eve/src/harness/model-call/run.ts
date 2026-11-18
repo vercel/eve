@@ -5,12 +5,8 @@ import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import {
-  enforceBudget,
-  humanInputContext,
-  failModelCredential,
-  pauseForModelSignIn,
-} from "#harness/hitl/index.js";
+import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
+import { failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
 import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import {
