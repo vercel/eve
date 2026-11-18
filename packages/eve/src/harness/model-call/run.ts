@@ -1,4 +1,3 @@
-import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
@@ -41,7 +40,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { isModelDefinition } from "#models/definition.js";
-import { credentialedModel } from "./credential.js";
+import { type CredentialedModel, credentialedModel } from "./credential.js";
 import { credentialErrorIn, ModelCredentialFailure } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
@@ -85,6 +84,7 @@ export async function runModelStep(
     catalog,
     generation,
     model: resolved.model,
+    renewCredential: resolved.renew,
     newRun: async () => {
       const next = await requestRun(step, prompt);
       if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
@@ -144,7 +144,7 @@ export async function runModelStep(
 
 async function resolveModel(
   step: Step,
-): Promise<{ readonly model: LanguageModel } | { readonly failed: StepResult }> {
+): Promise<CredentialedModel | { readonly failed: StepResult }> {
   let resolved: Awaited<ReturnType<typeof resolveEffectiveRuntimeModel>>;
   try {
     resolved = await resolveEffectiveRuntimeModel(step);
@@ -154,7 +154,7 @@ async function resolveModel(
   step.model = resolved.choice;
   if (!isModelDefinition(resolved.model)) return { model: resolved.model };
   try {
-    return { model: await credentialedModel(resolved.model) };
+    return await credentialedModel(resolved.model);
   } catch (error) {
     const credentialError = credentialErrorIn(error);
     if (credentialError === undefined) throw error;

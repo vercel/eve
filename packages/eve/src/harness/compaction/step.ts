@@ -22,6 +22,7 @@ import {
 } from "#harness/model-call/model.js";
 import { credentialedModel } from "#harness/model-call/credential.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -98,7 +99,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change,
       compact: true,
       messages,
-      turnModel: () => credentialedModel(resolvedModel.model),
+      turnModel: () => languageModel(resolvedModel.model),
       promptMessages: messages,
       requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
@@ -356,7 +357,12 @@ async function compactionModel(
   reference: RuntimeModelReference,
 ): Promise<LanguageModel> {
   const resolved = await step.config.resolveModel(reference);
-  return await credentialedModel(resolved);
+  return await languageModel(resolved);
+}
+
+async function languageModel(model: RuntimeModel): Promise<LanguageModel> {
+  const credentialed = await credentialedModel(model);
+  return credentialed.model;
 }
 
 async function summaryExecutor(

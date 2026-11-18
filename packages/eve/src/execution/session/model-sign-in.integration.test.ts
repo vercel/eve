@@ -275,6 +275,53 @@ describe("a model that needs the caller's credential", () => {
     },
   );
 
+  it("replaces a token the provider's stream rejects, and answers", async () => {
+    let stored = "stale-token";
+    let evictions = 0;
+    const tokens: string[] = [];
+    const streamed = defineModel({
+      auth: {
+        evict: async () => {
+          evictions += 1;
+          stored = "fresh-token";
+        },
+        getToken: async () => ({ token: stored }),
+      },
+      authKey: "streamed",
+      create: ({ token }) =>
+        markMockModel(
+          new MockLanguageModelV4({
+            doStream: async () => {
+              tokens.push(token);
+              if (token === "fresh-token") return textStreamResult("Here is the answer.");
+              return {
+                stream: simulateReadableStream({
+                  chunks: [
+                    { type: "stream-start" as const, warnings: [] },
+                    {
+                      error: Object.assign(new Error("Unauthorized"), { statusCode: 401 }),
+                      type: "error" as const,
+                    },
+                  ],
+                }),
+              };
+            },
+          }),
+        ),
+      id: "streamed/model",
+    });
+    await withAgent(
+      "model-sign-in-stream-rejection",
+      defineAgent({ model: streamed, modelContextWindowTokens: 200_000 }),
+      async (session) => {
+        const settled = await session.stream.nextUntil("answer", isTurnSettled);
+        expect(turnSettled(settled)).toMatchObject({ outcome: "completed" });
+        expect(evictions).toBe(1);
+        expect(tokens).toEqual(["stale-token", "fresh-token"]);
+      },
+    );
+  });
+
   it("answers with the new selection when it changes before the callback", async () => {
     const billing = billingProvider();
     let switched = false;

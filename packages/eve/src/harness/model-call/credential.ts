@@ -11,37 +11,35 @@ import {
 } from "#runtime/connections/scoped-authorization.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import { isRuntimeLanguageModel } from "#internal/runtime-model.js";
-import { credentialFailureCode, ModelCredentialFailure, rejectsCredential } from "./errors.js";
+import { credentialFailureCode, ModelCredentialFailure } from "./errors.js";
 
-export async function credentialedModel(model: RuntimeModel): Promise<LanguageModel> {
-  if (!isModelDefinition(model)) return model;
+export interface CredentialedModel {
+  readonly model: LanguageModel;
+  readonly renew?: (rejection: unknown) => Promise<void>;
+}
+
+export async function credentialedModel(model: RuntimeModel): Promise<CredentialedModel> {
+  if (!isModelDefinition(model)) return { model };
   const execution = createAuthorizationExecution();
   const scoped = scopedAuthorization(model);
   const create = async () => createdModel(model, await credentialFor(execution, scoped), scoped);
   let current = await create();
-  const withCredential = async <T>(run: (model: LanguageModelV4) => PromiseLike<T>): Promise<T> => {
-    try {
-      return await run(current);
-    } catch (error) {
-      if (!rejectsCredential(error)) throw error;
+  let renewed = false;
+  return {
+    model: wrapLanguageModel({
+      middleware: {
+        wrapGenerate: ({ params }) => current.doGenerate(params),
+        wrapStream: ({ params }) => current.doStream(params),
+      },
+      model: current,
+    }),
+    async renew(rejection) {
       await evictScopedToken(scoped);
+      if (renewed) execution.requireAuth(scoped, rejection);
+      renewed = true;
       current = await create();
-      try {
-        return await run(current);
-      } catch (again) {
-        if (!rejectsCredential(again)) throw again;
-        await evictScopedToken(scoped);
-        return execution.requireAuth(scoped, again);
-      }
-    }
-  };
-  return wrapLanguageModel({
-    middleware: {
-      wrapGenerate: ({ params }) => withCredential((model) => model.doGenerate(params)),
-      wrapStream: ({ params }) => withCredential((model) => model.doStream(params)),
     },
-    model: current,
-  });
+  };
 }
 
 function scopedAuthorization(definition: ModelDefinition): ScopedAuthorization {

@@ -28,6 +28,7 @@ import {
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
   ModelStreamStalledError,
+  rejectsCredential,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
@@ -102,6 +103,7 @@ interface ModelCallerInput {
   readonly approvalMemory: ApprovalMemory;
   readonly projectedMessages: HarnessModelMessage[];
   readonly newRun: () => Promise<void>;
+  readonly renewCredential?: (rejection: unknown) => Promise<void>;
   readonly startRun: (attempt: number) => Promise<void>;
 }
 
@@ -160,9 +162,17 @@ export class ModelCaller {
         );
       } catch (error) {
         throwIfSessionStreamDead(error);
-        if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
+        const failure = this.compactionFailure?.error ?? error;
+        const { renewCredential } = this.input;
+        if (renewCredential !== undefined && rejectsCredential(failure)) {
+          await renewCredential(failure);
+          this.compactionFailure = undefined;
+          await this.prepareRetry(failure);
+          continue;
+        }
+        if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         const recovery = recoverModelCall(error, options, diagnostics);
         if (recovery === undefined) throw error;
         await this.prepareRetry(error);

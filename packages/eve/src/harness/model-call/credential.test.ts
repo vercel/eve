@@ -35,8 +35,11 @@ describe("credentialedModel", () => {
       create,
       id: "billing/claude",
     });
-    const wrapped = await credentialedModel(model);
+    const credentialed = await credentialedModel(model);
     expect(create).toHaveBeenCalledWith({ token: "fresh" });
-    expect(wrapped).toMatchObject({ modelId: "claude-sonnet-5", provider: "anthropic.messages" });
+    expect(credentialed.model).toMatchObject({
+      modelId: "claude-sonnet-5",
+      provider: "anthropic.messages",
+    });
   });
 });
