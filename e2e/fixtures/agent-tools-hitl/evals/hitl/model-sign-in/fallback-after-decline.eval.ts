@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 
 import { authorizationFrom, completeAuthorization, expectHeld, follow } from "../helpers.ts";
-import { asAliceWithFallback, declined, FALLBACK_REPLY } from "./shared.ts";
+import { asAliceWithFallback, declined, PROJECT_MODEL_REPLY } from "./shared.ts";
 
 /**
  * Alice declines the model sign-in, and the agent's dynamic model reads the decline from the
@@ -25,6 +25,6 @@ export default defineEval({
       count: 1,
       data: { interactionId: authorization.attemptId, outcome: "declined" },
     });
-    answered.event("content.completed", { data: { phase: "reply", value: FALLBACK_REPLY } });
+    answered.event("content.completed", { data: { phase: "reply", value: PROJECT_MODEL_REPLY } });
   },
 });

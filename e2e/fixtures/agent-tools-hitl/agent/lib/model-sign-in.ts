@@ -9,11 +9,14 @@ import { defineModel, type DynamicModelContext } from "eve/models";
 
 export const MODEL_SIGN_IN = "eve__model__fixture-model";
 export const MODEL_TOKEN = "fixture-model-token-K2Q8";
-export const FALLBACK_REPLY = "Answered on the project's credential.";
+/** `projectModel`'s reply. The `fallback-after-decline` eval checks it to tell which model replied. */
+export const PROJECT_MODEL_REPLY = "Answered on the project's credential.";
 
 /**
- * Every turn starts without a credential, so every turn asks. The sign-in URL is the callback
- * itself with `code=fixture-ok`; an eval declines by swapping in `error=access_denied`.
+ * The fixture stores no token, so `getToken` throws and eve opens a sign-in on every turn: each
+ * eval starts from a missing credential. The sign-in URL is the callback URL with
+ * `code=fixture-ok`, so an eval completes the sign-in with one GET, and declines it by swapping in
+ * `error=access_denied`.
  */
 const auth = defineInteractiveAuthorization<{ marker: string }>({
   async getToken() {
@@ -43,8 +46,8 @@ export const ownCredentialModel = defineModel({
   id: "fixture/own-credential",
 });
 
-/** The fallback after a decline: a model on the project's own credential. */
-export const projectModel = mockModel(FALLBACK_REPLY);
+/** The model a dynamic `model` falls back to after a decline, on the project's own credential. */
+export const projectModel = mockModel(PROJECT_MODEL_REPLY);
 
 /** Delegates to `own-credential-child`, waits for it, and reports its answer. */
 export const delegatingModel = mockModel((request) =>

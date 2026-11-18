@@ -364,10 +364,11 @@ async function summaryExecutor(
   const { config, session } = step;
   const turnReference = stepReference(step);
   const reference = agentSettings(step).compactionModel ?? turnReference;
-  const model =
-    reference === turnReference
-      ? input.model
-      : await credentialedModel(await config.resolveModel(reference));
+  let model = input.model;
+  if (reference !== turnReference) {
+    const resolved = await config.resolveModel(reference);
+    model = await credentialedModel(resolved);
+  }
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,

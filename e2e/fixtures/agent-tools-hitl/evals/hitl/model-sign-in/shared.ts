@@ -1,6 +1,10 @@
 import type { EveEvalAssertions } from "eve/evals";
 
-export { FALLBACK_REPLY, MODEL_SIGN_IN, MODEL_TOKEN } from "../../../agent/lib/model-sign-in.ts";
+export {
+  PROJECT_MODEL_REPLY,
+  MODEL_SIGN_IN,
+  MODEL_TOKEN,
+} from "../../../agent/lib/model-sign-in.ts";
 
 /** Alice, on the fixture model that needs her own credential. */
 export const asAliceOnOwnCredential = {
