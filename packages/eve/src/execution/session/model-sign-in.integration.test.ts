@@ -14,7 +14,12 @@ import {
 } from "#execution/session-inbox/address.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
-import { textStreamResult, usage } from "#internal/testing/approval-resume.js";
+import {
+  textStreamResult,
+  toolCallStreamResult,
+  usage,
+} from "#internal/testing/approval-resume.js";
+import { mockTool } from "#internal/testing/mocks/mock-tool.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
@@ -138,6 +143,83 @@ describe("a model that needs the caller's credential", () => {
       },
       { bigFirstAnswer: true, rejectStaleOnlyInSummary: true },
     );
+  });
+
+  describe("after the process drops the dynamic model's value", () => {
+    const dropLiveValues = () =>
+      (Reflect.get(globalThis, Symbol.for("eve.reactions.live")) as Map<string, unknown>).clear();
+
+    it("fails the turn on the sign-in callback when the dynamic model throws", async () => {
+      const billing = billingProvider();
+      let throws = false;
+      await withAgent(
+        "model-sign-in-dropped-at-callback",
+        defineAgent({
+          model: defineDynamic(() => {
+            if (throws) throw new Error("Selection service down.");
+            return { model: billing.model, modelContextWindowTokens: 200_000 };
+          }),
+        }),
+        async (session) => {
+          await session.asked();
+          throws = true;
+          dropLiveValues();
+          const answered = await session.callBack();
+          expect(turnSettled(answered)).toMatchObject({
+            error: { code: "REACTION_FAILED", message: "Selection service down." },
+            outcome: "failed",
+          });
+          expect(filterEventsByType(answered, "session.ended")).toEqual([]);
+          expect(billing.tokensSeen).toEqual([]);
+        },
+      );
+    });
+
+    it("fails the turn before the next model step when the dynamic model throws", async () => {
+      let throws = false;
+      const tokens: string[] = [];
+      const own = defineModel({
+        auth: { getToken: async () => ({ token: "alice-token" }) },
+        authKey: "own",
+        create: ({ token }) =>
+          markMockModel(
+            new MockLanguageModelV4({
+              doStream: async () => {
+                tokens.push(token);
+                return toolCallStreamResult({ input: "{}", toolCallId: "c1", toolName: "lookup" });
+              },
+            }),
+          ),
+        id: "own/model",
+      });
+      const lookup = mockTool({
+        name: "lookup",
+        execute() {
+          throws = true;
+          dropLiveValues();
+          return { found: true };
+        },
+      });
+      await withAgent(
+        "model-sign-in-dropped-between-steps",
+        defineAgent({
+          model: defineDynamic(() => {
+            if (throws) throw new Error("Selection service down.");
+            return { model: own, modelContextWindowTokens: 200_000 };
+          }),
+        }),
+        async (session) => {
+          const settled = await session.stream.nextUntil("failed turn", isTurnSettled);
+          expect(turnSettled(settled)).toMatchObject({
+            error: { code: "REACTION_FAILED", message: "Selection service down." },
+            outcome: "failed",
+          });
+          expect(filterEventsByType(settled, "session.ended")).toEqual([]);
+          expect(tokens).toEqual(["alice-token"]);
+        },
+        { tools: [lookup] },
+      );
+    });
   });
 
   it("answers with the new selection when it changes before the callback", async () => {
@@ -407,6 +489,7 @@ describe("a model sign-in that ends without a credential", () => {
 
 interface SessionOptions {
   readonly bigFirstAnswer?: boolean;
+  readonly tools?: readonly ReturnType<typeof mockTool>[];
   readonly rejectStaleOnlyInSummary?: boolean;
   readonly scheduled?: boolean;
 }
@@ -419,7 +502,7 @@ async function withAgent(
   body: (session: ReturnType<typeof openSession>) => Promise<void>,
   options: SessionOptions = {},
 ) {
-  const runtime = await createTestRuntime({ agent: { definition, name } });
+  const runtime = await createTestRuntime({ agent: { definition, name }, tools: options.tools });
   await runtime.run(async () => {
     const continuationToken = `http:${name}`;
     const run = await startTestSession("in-process", {
