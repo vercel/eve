@@ -3,7 +3,12 @@ import { z } from "zod";
 
 const fileInfo = z.object({
   ok: z.literal(true),
-  file: z.object({ id: z.string(), url_private: z.string() }),
+  file: z.object({
+    id: z.string(),
+    url_private: z.string(),
+    filetype: z.string().optional(),
+    canvas_creator_id: z.string().min(1).optional(),
+  }),
 });
 const maxResponseBytes = 256 * 1024;
 const maxInstructionChars = 8_000;
@@ -33,11 +38,15 @@ export async function loadSlackCanvas(id: string, token: string): Promise<string
     } satisfies RequestInit;
     const info = fileInfo.safeParse(JSON.parse(await fetchText(infoUrl, request)));
     if (!info.success || info.data.file.id !== id) return null;
-    const downloadUrl = URL.parse(info.data.file.url_private);
+    const file = info.data.file;
+    if (file.filetype !== "canvas" && !file.canvas_creator_id) return null;
+    const downloadUrl = URL.parse(file.url_private);
     if (!downloadUrl || !isSlackDownloadUrl(downloadUrl)) return null;
 
-    const html = await fetchText(downloadUrl, request);
-    return canvasText(parseFragment(html)).trim().slice(0, maxInstructionChars).trimEnd() || null;
+    const html = await fetchText(downloadUrl, request, ["text/html", "application/octet-stream"]);
+    const canvas = parseFragment(html);
+    if (!canvas.childNodes.some((node) => "tagName" in node)) return null;
+    return canvasText(canvas).trim().slice(0, maxInstructionChars).trimEnd() || null;
   } catch {
     return null;
   }
@@ -52,9 +61,14 @@ function isSlackDownloadUrl(url: URL): boolean {
   );
 }
 
-async function fetchText(url: URL, request: RequestInit): Promise<string> {
+async function fetchText(
+  url: URL,
+  request: RequestInit,
+  mediaTypes?: readonly string[],
+): Promise<string> {
   const response = await fetch(url, request);
-  if (!response.ok || !response.body) {
+  const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (!response.ok || !response.body || (mediaTypes && !mediaTypes.includes(mediaType ?? ""))) {
     await response.body?.cancel();
     throw new Error("Slack did not return a readable response.");
   }
