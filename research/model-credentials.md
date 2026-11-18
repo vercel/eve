@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/pull/6551
 status: proposed
-last_updated: "2026-11-17"
+last_updated: "2026-11-18"
 ---
 
 # Per-user model credentials
@@ -114,11 +114,12 @@ eve resolves `auth` before each model call that uses the model: after dynamic fu
 therefore has no model run open.
 
 That order is a change. Today eve applies `model.requested` first and resolves the model after it,
-and a failure there ends the session with `MODEL_SELECTION_FAILED`. Model resolution moves ahead
-of `model.requested` for every model, and the credential step is part of it. A missing credential
-never takes the `MODEL_SELECTION_FAILED` path: it opens a sign-in or fails the turn, as the next
-sections describe. A `create` that throws is still `MODEL_SELECTION_FAILED`. Existing agents see
-one difference: a model that fails to resolve no longer leaves a requested run on the stream.
+and a failure there ends the session with `MODEL_SELECTION_FAILED`. Model resolution moves ahead of
+`model.requested` for every model, and the credential step is part of it. A missing credential never
+takes the `MODEL_SELECTION_FAILED` path: it opens a sign-in or fails the turn, as the next sections
+describe. A `create` that throws fails the turn with `MODEL_CREATE_FAILED` and leaves the session
+open. Existing agents see one difference: a model that fails to resolve no longer leaves a requested
+run on the stream.
 
 Resolution follows the connection rules. `principalType: "user"` reads the session's current user
 and keeps each user's token separate. `principalType: "app"` never asks anyone to sign in. A model
@@ -145,9 +146,8 @@ provider's reason otherwise. Today that mapping applies only to a sign-in that a
 eve matches the callback to the selected model by sign-in name. The dynamic function may now
 select a model with a different sign-in name, or one without `auth`. eve can't complete the
 authorization then: only the `auth` that started it can, and eve holds no definition but the one
-the function returned. It settles the sign-in as `failed` with reason `model_selection_changed`
-and continues with the selected model, which resolves its own credential. That outcome stays
-retryable, so if the function selects the first model again later in the turn, eve can ask again.
+the function returned. eve continues with the selected model, which resolves its own credential,
+and settles the open sign-in `interrupted` with reason `turn-ended` when the turn ends.
 A Vercel Connect grant is not lost: `connect(...)` completes by reading the token again, so the
 next `getToken` returns it. An `auth` that redeems a one-time code in `completeAuthorization` does
 lose that consent, and asks again.
@@ -177,27 +177,28 @@ turn: the sign-in ends as `withdrawn`, and the step runs again with the message 
 ### When no credential arrives
 
 A sign-in can end without a credential: the person declines, the provider fails it, or a new
-message withdraws it. eve settles the sign-in and runs the dynamic functions once more, so a
+message withdraws it. eve settles the sign-in before the dynamic functions run, so a
 dynamic `model` function can read the outcome from `ctx.view` and return a different model, which
 then answers. If the selected model needs the same credential for the same user, eve follows the
 connection rule and doesn't ask again in that turn.
 
 Some turns never ask:
 
-| Case                                                                           | `details.reason`                     |
-| ------------------------------------------------------------------------------ | ------------------------------------ |
-| A scheduled turn                                                               | `sign_in_unavailable`                |
-| No signed-in user for `principalType: "user"`                                  | `principal_required`                 |
-| No callback URL for the run                                                    | `authorization_callback_unavailable` |
-| `auth` has no `startAuthorization`                                             | `authorization_required`             |
-| `getToken` or `startAuthorization` throws `ConnectionAuthorizationFailedError` | That error's `reason`                |
-| Either throws another error, such as an unreachable credential service         | None                                 |
+| Case                                                                           | Turn error code              |
+| ------------------------------------------------------------------------------ | ---------------------------- |
+| A scheduled turn                                                               | `MODEL_AUTHORIZATION_FAILED` |
+| No signed-in user for `principalType: "user"`                                  | `MODEL_AUTHORIZATION_FAILED` |
+| No callback URL for the run                                                    | `MODEL_AUTHORIZATION_FAILED` |
+| `auth` has no `startAuthorization`                                             | `MODEL_AUTHORIZATION_FAILED` |
+| `getToken` or `startAuthorization` throws `ConnectionAuthorizationFailedError` | `MODEL_AUTHORIZATION_FAILED` |
+| Either throws another error, such as an unreachable credential service         | `MODEL_CREDENTIAL_FAILED`    |
 
 A turn left without the credential fails with a new code, `MODEL_AUTHORIZATION_FAILED`, whether
-its sign-in ended without one or was never asked. Its `details.reason` is the reason code
-connection sign-ins use, such as `sign_in_cancelled`. One code is new, `authorization_required`:
-`ConnectionAuthorizationRequiredError` carries no reason, and a connection reports that case only
-as a message. The session stays open, and the next turn asks again. A failed turn's input is not
+its sign-in ended without one or was never asked. Its `message` states why, and a settled sign-in
+card carries the reason code connection sign-ins use, such as `access_denied`. An unexpected error
+from `auth` fails the turn with a second new code, `MODEL_CREDENTIAL_FAILED`, and a provider error
+stays `MODEL_CALL_FAILED`, so monitoring can tell a credential service outage from a provider
+outage. The session stays open, and the next turn asks again. A failed turn's input is not
 replayed, and that includes a message that withdrew the sign-in.
 
 Falling back needs no new API. The settled sign-in is in `ctx.view`:
@@ -223,7 +224,7 @@ When the provider answers a `ModelDefinition`'s call with `401`, eve does what a
 does. It drops the token, calls `auth.evict`, resolves the credential again, and retries the call
 once. If resolving now requires a sign-in, or the provider rejects the retried call too, eve asks
 the person to sign in again. A credential the provider rejects right after that sign-in fails the
-turn with `token_rejected_after_authorization`.
+turn with `MODEL_AUTHORIZATION_FAILED`.
 
 This retry is new for model calls. Today the harness treats a `401` as terminal, and the only
 retries are inside clients: MCP connections, eve's local-development AI Gateway transport, and
@@ -231,7 +232,7 @@ retries are inside clients: MCP connections, eve's local-development AI Gateway 
 so it needs nothing specific to a provider.
 
 Only a `401` takes this path. Any other status, such as `402` or `403`, fails the call as it does
-today. A turn that can't ask, such as a scheduled one, fails with the reason listed under
+today. A turn that can't ask, such as a scheduled one, fails with the code listed under
 [When no credential arrives](#when-no-credential-arrives).
 
 `create` can return a wrapped model, such as one with AI SDK middleware. A wrapper that replaces a
@@ -286,14 +287,16 @@ Invariants:
   restoring or re-reading the selection works without one.
 - A `ModelDefinition` reaches a provider only through the credential step, whichever field
   supplied it.
-- The stream gains no event types. The new values are the `MODEL_AUTHORIZATION_FAILED` failure
-  code and two reason codes, `authorization_required` and `model_selection_changed`.
+- The stream gains no event types and no fields. The new values are three turn failure codes:
+  `MODEL_AUTHORIZATION_FAILED`, `MODEL_CREDENTIAL_FAILED`, and `MODEL_CREATE_FAILED`.
 - The definitions kernel doesn't change. The harness changes are in the model-call stage: model
   resolution moves ahead of `model.requested` and gains the credential step, a `401` on a
   `ModelDefinition`'s call retries once, and a sign-in that no call or response owns settles with
   the outcomes a call's sign-in has.
-- With mock models (`EVE_E2E_MODEL=mock`), eve still resolves `auth` and skips `create`, so evals
-  cover sign-in without a provider.
+- When eve mocks authored models (`NODE_ENV=test` or `EVE_MOCK_AUTHORED_MODELS=1`), it replaces a
+  `defineModel` with its mock before `auth` runs, so tests stay offline. E2E fixtures author their
+  own mock: a scripted `defineInteractiveAuthorization` and a `create` that returns a mock model,
+  so evals cover the sign-in without a provider.
 
 ## Decisions and alternatives considered
 
@@ -320,8 +323,17 @@ Invariants:
   first `401` would prompt for a token that only needed a refresh.
 - **Only the model that asked completes a sign-in.** When the selection changes before the
   callback, completing anyway would need the `auth` that started the authorization, and after a
-  restart eve holds no definition but the one the function returns now. So the sign-in settles
-  `failed` and retryable. `abandoned` would stop the turn from asking again.
+  restart eve holds no definition but the one the function returns now. So the selected model
+  answers, and the open sign-in settles `interrupted` when the turn ends. That needs no new reason
+  code.
+- **One failure code per cause, and no reason field.** `MODEL_AUTHORIZATION_FAILED` covers a
+  decline and a setup problem, `MODEL_CREDENTIAL_FAILED` an outage at the credential service,
+  `MODEL_CREATE_FAILED` a bug in `create`, and `MODEL_CALL_FAILED` a provider error. Monitoring
+  tells them apart by code. The turn error carries only `name`, `code`, `message`, `id`, and
+  `hint`, so a reason field adds a field to every error event.
+- **A throwing `create` keeps the session.** `create` is author code, like a dynamic `model`
+  function, and a throwing dynamic function fails only its turn. `MODEL_SELECTION_FAILED` ends the
+  session over a bug that a redeploy fixes.
 - **Every turn model accepts it.** `auto()` and `agent({ models })` validate their options with
   one function, and each option becomes a session's turn model, which can hold for a sign-in.
   Compaction and decision calls can't hold a turn, so they reject it.
@@ -375,14 +387,12 @@ E2E evals run on a fixture whose `model` is a `defineModel` value over a determi
 - A declined sign-in fails the turn with `MODEL_AUTHORIZATION_FAILED`, and the next turn asks
   again.
 - A dynamic function falls back to another model after a decline.
-- A scheduled turn fails without asking.
-- An `auth` that throws an unexpected error fails the turn and leaves the session open.
-- A message sent during the sign-in withdraws it. The fallback model answers, or the turn fails
-  when there is no fallback.
-- A declared subagent's sign-in, and a copy's, reach the root session.
+- A declared subagent's sign-in reaches the root session, and the child answers after the
+  callback.
 
-Integration tests cover the two paths an eval can't stage: the `401` retry, which needs a provider
-response, and a selection that changes before the callback. Docs change in
+Integration tests cover the rest: the `401` retry, which needs a provider response, a selection
+that changes before the callback, a scheduled turn, `auth` and `create` errors, a message during
+the sign-in with and without a fallback, and the mock that replaces a `defineModel`. Docs change in
 `docs/agent-config.md`, `docs/dynamic-configuration/index.md`, the sign-in sections of
 `docs/connections/index.mdx`, and the export table in `docs/reference/typescript-api.md`. The
 changeset is `minor`.
