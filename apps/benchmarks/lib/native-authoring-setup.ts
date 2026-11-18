@@ -67,6 +67,14 @@ export function createNativeAuthoringSetup(options: {
       "/usr/local/bin/eve": `#!/bin/sh\nexec npx --yes --allow-remote=all --package=${shellQuote(options.packageSpec)} eve "$@"\n`,
     });
     await run(sandbox, "chmod +x /usr/local/bin/eve", "eve canary wrapper");
+    // `npx eve init` skips the wrapper above: npx looks for the package in the project, then in
+    // npm's global packages, and otherwise fetches npm's release. A global canary keeps it on
+    // the subject. `npx eve@<version>` still fetches that release; publishing flags those runs.
+    await run(
+      sandbox,
+      `npm install --global --no-audit --no-fund ${shellQuote(options.packageSpec)}`,
+      "global eve canary",
+    );
 
     if (bootstrap.startingPoint === "scaffolded") {
       await run(

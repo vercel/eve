@@ -216,3 +216,55 @@ test("records carry their case's category from CASE.ts", async (t) => {
   // Missing runs (claude-fable-5-1 uploaded nothing) carry it too.
   assert.deepEqual(new Set(records.map((record) => record.category)), new Set(["features/tools"]));
 });
+
+test("counts a run whose project installed another eve as missing", async (t) => {
+  const root = artifactsDirectory(t, {}, "run-2");
+  const runs = join(root, `authoring-benchmark-kimi-k3-${plan.sha}`, "current");
+  const run2 = join(runs, "2026-10-26T00-00-00.000Z/author-001-weather-tool/run-2");
+  const run1 = join(runs, "2026-10-26T00-00-00.000Z/author-001-weather-tool/run-1");
+  cpSync(run2, run1, { recursive: true });
+  const lockfile = (eve) => JSON.stringify({ packages: { "": {}, "node_modules/eve": eve } });
+  // run-1 scaffolded with `npx eve@0.86.0 init`; run-2 reinstalled the subject.
+  mkdirSync(join(run1, "project/atlas"), { recursive: true });
+  writeFileSync(
+    join(run1, "project/atlas/package-lock.json"),
+    lockfile({ version: "0.86.0", resolved: "https://registry.npmjs.org/eve/-/eve-0.86.0.tgz" }),
+  );
+  mkdirSync(join(run2, "project"), { recursive: true });
+  writeFileSync(
+    join(run2, "project/package-lock.json"),
+    lockfile({
+      version: "0.86.1+git.bbbbbbbbbbbbbbbb",
+      resolved: `https://pkg.eve.dev/${plan.eve_revision}/eve.tgz`,
+    }),
+  );
+  const store = memoryStore();
+  await publishResults({
+    plan: { ...plan, models: ["kimi-k3"] },
+    artifactsDir: root,
+    githubRunId: "124",
+    runAttempt: 1,
+    publishedAt: "2026-10-27T07:00:00.000Z",
+    store,
+  });
+
+  const records = store.objects
+    .get("authoring/runs/124/1/records.jsonl")
+    .toString()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    records.map(({ run, outcome, missing_reason }) => ({ run, outcome, missing_reason })),
+    [
+      {
+        run: 1,
+        outcome: "missing",
+        missing_reason:
+          "atlas/package-lock.json installed eve https://registry.npmjs.org/eve/-/eve-0.86.0.tgz, not the subject bbbbbbbbbbbb",
+      },
+      { run: 2, outcome: "passed", missing_reason: undefined },
+    ],
+  );
+  assert.equal(records[0].duration_s, 12, "a run on another eve keeps its metrics");
+});
