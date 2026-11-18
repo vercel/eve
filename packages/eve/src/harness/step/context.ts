@@ -14,8 +14,6 @@ import { takeTurnFailure } from "#definitions/intents.js";
 import { isDynamicModelSelectionError } from "#definitions/model.js";
 import { DefinitionFailedError } from "#definitions/kernel.js";
 import { evaluateStepValues } from "#definitions/step.js";
-import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -159,10 +157,6 @@ export async function prepareModelCall(
     return failTurn(step, error, "REACTION_FAILED");
   }
   return undefined;
-}
-
-export function isSignInError(error: unknown): boolean {
-  return isScopedAuthorizationRequiredError(error) || isConnectionAuthorizationFailedError(error);
 }
 
 export async function failTurnForEffect(step: Step): Promise<StepResult | undefined> {

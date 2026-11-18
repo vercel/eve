@@ -306,6 +306,8 @@ const GITHUB_CALLBACK = {
   name: "github",
 };
 
+const MODEL_CALLBACK = { ...GITHUB_CALLBACK, name: "eve__model__billing" };
+
 function waitingTurn(): HarnessSession {
   return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
     {
@@ -446,10 +448,20 @@ describe("controls and callbacks as deliveries", () => {
     expect(accepted(session, events)).toEqual([]);
   });
 
+  it("settles a sign-in that no call owns accepted from its callback", () => {
+    const { events } = completeSignIn(viewOf(waitingTurn()), {
+      completions: [GITHUB_CALLBACK],
+      refusals: new Map(),
+    });
+    expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
+      outcome: "accepted",
+    });
+  });
+
   it("leaves a model call's completed sign-in to its completion", () => {
     expect(
       completeSignIn(viewOf(waitingTurn()), {
-        completions: [GITHUB_CALLBACK],
+        completions: [MODEL_CALLBACK],
         refusals: new Map(),
       }).events,
     ).toEqual([]);
@@ -457,8 +469,8 @@ describe("controls and callbacks as deliveries", () => {
 
   it("settles a model call's sign-in declined from a refused callback", () => {
     const { events } = completeSignIn(viewOf(waitingTurn()), {
-      completions: [GITHUB_CALLBACK],
-      refusals: new Map([[GITHUB_CALLBACK.attemptId, "access_denied"]]),
+      completions: [MODEL_CALLBACK],
+      refusals: new Map([[MODEL_CALLBACK.attemptId, "access_denied"]]),
     });
     expect(events.map((event) => event.type)).toContain("interaction.settled");
     expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({

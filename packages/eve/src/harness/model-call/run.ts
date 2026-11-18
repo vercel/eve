@@ -9,10 +9,15 @@ import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness
 import {
   enforceBudget,
   humanInputContext,
+  failCredential,
   pauseForSignIn,
   signInReports,
 } from "#harness/hitl/index.js";
 import { SignInCompletedKey } from "#harness/authorization.js";
+import {
+  isScopedAuthorizationRequiredError,
+  type ScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import {
   requestRun as requestRunFact,
@@ -23,8 +28,6 @@ import { nextRunId } from "#protocol/session-projection.js";
 import {
   failBoundaryEvent,
   failModelSelection,
-  failTurn,
-  isSignInError,
   prepareModelCall,
   type Step,
 } from "#harness/step/context.js";
@@ -37,12 +40,16 @@ import {
   withClientContext,
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
-import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
-import { credentialedModel, isModelCreateError, isModelCredentialError } from "./credential.js";
+import {
+  credentialedModel,
+  isModelCredentialFailure,
+  type ModelCredentialFailure,
+} from "./credential.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -74,7 +81,6 @@ export async function runModelStep(
 
   const resolved = await resolveModel(step);
   if ("failed" in resolved) return resolved.failed;
-  if ("credentialError" in resolved) return await failOrAsk(step, resolved.credentialError);
   const requested = await requestRun(step, prompt);
   if (requested !== undefined) return requested;
   const projectedMessages = projectPrompt(prompt);
@@ -88,7 +94,7 @@ export async function runModelStep(
     model: resolved.model,
     newRun: async () => {
       const next = await requestRun(step, prompt);
-      if (next !== undefined) throw new Error("The model run's replacement found no model.");
+      if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
     },
     startRun: async (attempt) => await startRun(step, attempt),
     projectedMessages,
@@ -104,7 +110,7 @@ export async function runModelStep(
     const credentialError = credentialErrorIn(error);
     if (credentialError !== undefined) {
       if (generation.interrupted) return caller.steered();
-      const messages = await caller.abandonForSignIn();
+      const messages = await caller.abandon();
       step.session = changeHistory(step.session, { extend: messages });
       return await failOrAsk(step, credentialError);
     }
@@ -142,11 +148,7 @@ export async function runModelStep(
 
 async function resolveModel(
   step: Step,
-): Promise<
-  | { readonly model: LanguageModel }
-  | { readonly failed: StepResult }
-  | { readonly credentialError: unknown }
-> {
+): Promise<{ readonly model: LanguageModel } | { readonly failed: StepResult }> {
   let resolved: Awaited<ReturnType<typeof resolveEffectiveRuntimeModel>>;
   try {
     resolved = await resolveEffectiveRuntimeModel(step);
@@ -162,8 +164,9 @@ async function resolveModel(
   try {
     return { model: await credentialedModel(resolved.model) };
   } catch (error) {
-    if (isTurnCancellation(error)) throw error;
-    return { credentialError: error };
+    const credentialError = credentialErrorIn(error);
+    if (credentialError === undefined) throw error;
+    return { failed: await failOrAsk(step, credentialError) };
   } finally {
     step.ctx.delete(SignInCompletedKey);
   }
@@ -188,14 +191,16 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   await step.apply(startRunFact({ attempt, modelId, runId }));
 }
 
-async function failOrAsk(step: Step, error: unknown): Promise<StepResult> {
-  if (!isModelCreateError(error)) return await pauseForSignIn(step, error);
-  return await failTurn(step, error.cause, "MODEL_CREATE_FAILED", error.message);
+type CredentialError = ScopedAuthorizationRequiredError | ModelCredentialFailure;
+
+async function failOrAsk(step: Step, error: CredentialError): Promise<StepResult> {
+  if (isScopedAuthorizationRequiredError(error)) return await pauseForSignIn(step, error);
+  return await failCredential(step, error.code, error.cause, error.scoped);
 }
 
-function credentialErrorIn(error: unknown): unknown {
+function credentialErrorIn(error: unknown): CredentialError | undefined {
   for (let current = error; current instanceof Error; current = current.cause)
-    if (isSignInError(current) || isModelCredentialError(current) || isModelCreateError(current))
+    if (isScopedAuthorizationRequiredError(current) || isModelCredentialFailure(current))
       return current;
   return undefined;
 }

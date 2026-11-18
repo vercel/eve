@@ -17,14 +17,14 @@ const MODEL_SIGN_IN_PREFIX = "eve__model__";
  */
 export interface ModelDefinition {
   /**
-   * The model ID eve reports on `model.started` and as `ctx.model.id`, and looks up in the AI
-   * Gateway model catalog for the context window. For an ID outside the catalog, set
-   * `modelContextWindowTokens` where you select the model.
+   * Identifies the model. eve reports it on `model.started` and as `ctx.model.id`, and looks it up
+   * in the AI Gateway model catalog for the context window. For an ID outside the catalog, set
+   * `modelContextWindowTokens` in the selection.
    */
   readonly id: string;
   /**
-   * The credential strategy, in the shapes a connection's `auth` accepts: `connect(...)` from
-   * `@vercel/connect/eve`, `defineInteractiveAuthorization(...)`, or `{ getToken }`.
+   * The credential strategy: `connect(...)` from `@vercel/connect/eve`,
+   * `defineInteractiveAuthorization(...)`, or `{ getToken }`, as on a connection.
    */
   readonly auth: AuthorizationDefinition;
   /**
@@ -85,6 +85,10 @@ export function isModelDefinition(value: unknown): value is ModelDefinition {
   return (
     typeof value === "object" && value !== null && Reflect.get(value, MODEL_DEFINITION) === true
   );
+}
+
+export function isModelSignInName(name: string): boolean {
+  return name.startsWith(MODEL_SIGN_IN_PREFIX);
 }
 
 export function modelSignInName(definition: ModelDefinition): string {

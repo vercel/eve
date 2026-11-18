@@ -10,16 +10,14 @@ import {
   isScopedAuthorizationRequiredError,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
-import type { EveLanguageModel } from "#shared/agent-definition.js";
 import type { TokenResult } from "#shared/connection-types.js";
-import { toErrorMessage } from "#shared/errors.js";
 import { rejectsCredential } from "./errors.js";
 
 export async function credentialedModel(model: RuntimeModel): Promise<LanguageModel> {
   if (!isModelDefinition(model)) return model;
   const execution = createAuthorizationExecution();
   const scoped = scopedAuthorization(model);
-  const create = async () => createdModel(model, await credentialFor(execution, scoped));
+  const create = async () => createdModel(model, await credentialFor(execution, scoped), scoped);
   let current = await create();
   const withCredential = async <T>(run: (model: LanguageModelV4) => PromiseLike<T>): Promise<T> => {
     try {
@@ -32,7 +30,6 @@ export async function credentialedModel(model: RuntimeModel): Promise<LanguageMo
         return await run(current);
       } catch (again) {
         if (!rejectsCredential(again)) throw again;
-        await evictScopedToken(scoped);
         return execution.requireAuth(scoped, again);
       }
     }
@@ -54,32 +51,27 @@ function scopedAuthorization(definition: ModelDefinition): ScopedAuthorization {
   };
 }
 
-class ModelCredentialError extends Error {
-  readonly connectionName: string;
+export type ModelCredentialFailureCode =
+  | "MODEL_AUTHORIZATION_FAILED"
+  | "MODEL_CREATE_FAILED"
+  | "MODEL_CREDENTIAL_FAILED";
 
-  constructor(connectionName: string, cause: unknown) {
-    super(`Resolving the "${connectionName}" credential failed.`, { cause });
-    this.name = "ModelCredentialError";
-    this.connectionName = connectionName;
+class ModelCredentialFailure extends Error {
+  readonly code: ModelCredentialFailureCode;
+  readonly scoped: ScopedAuthorization;
+
+  constructor(code: ModelCredentialFailureCode, scoped: ScopedAuthorization, cause: unknown) {
+    super(`${code}: ${scoped.scope}`, { cause });
+    this.name = "ModelCredentialFailure";
+    this.code = code;
+    this.scoped = scoped;
   }
 }
 
-class ModelCreateError extends Error {
-  readonly modelId: string;
+export type { ModelCredentialFailure };
 
-  constructor(modelId: string, cause: unknown) {
-    super(`Building the "${modelId}" model failed: ${toErrorMessage(cause)}`, { cause });
-    this.name = "ModelCreateError";
-    this.modelId = modelId;
-  }
-}
-
-export function isModelCredentialError(error: unknown): error is ModelCredentialError {
-  return error instanceof Error && error.name === "ModelCredentialError";
-}
-
-export function isModelCreateError(error: unknown): error is ModelCreateError {
-  return error instanceof Error && error.name === "ModelCreateError";
+export function isModelCredentialFailure(error: unknown): error is ModelCredentialFailure {
+  return error instanceof Error && error.name === "ModelCredentialFailure";
 }
 
 async function credentialFor(
@@ -89,18 +81,23 @@ async function credentialFor(
   try {
     return await execution.getToken(scoped);
   } catch (error) {
-    if (isScopedAuthorizationRequiredError(error) || isConnectionAuthorizationFailedError(error))
-      throw error;
-    throw new ModelCredentialError(scoped.scope, error);
+    if (isScopedAuthorizationRequiredError(error)) throw error;
+    const code = isConnectionAuthorizationFailedError(error)
+      ? "MODEL_AUTHORIZATION_FAILED"
+      : "MODEL_CREDENTIAL_FAILED";
+    throw new ModelCredentialFailure(code, scoped, error);
   }
 }
 
-function createdModel(definition: ModelDefinition, credential: TokenResult): LanguageModelV4 {
-  let created: EveLanguageModel;
+function createdModel(
+  definition: ModelDefinition,
+  credential: TokenResult,
+  scoped: ScopedAuthorization,
+): LanguageModelV4 {
   try {
-    created = definition.create(credential);
+    const created = definition.create(credential) as Exclude<LanguageModel, string>;
+    return wrapLanguageModel({ middleware: {}, model: created });
   } catch (error) {
-    throw new ModelCreateError(definition.id, error);
+    throw new ModelCredentialFailure("MODEL_CREATE_FAILED", scoped, error);
   }
-  return wrapLanguageModel({ middleware: {}, model: created as Exclude<LanguageModel, string> });
 }

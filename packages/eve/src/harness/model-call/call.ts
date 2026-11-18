@@ -197,7 +197,7 @@ export class ModelCaller {
     return reportModelCallFailure(this.step, error);
   }
 
-  async abandonForSignIn(): Promise<readonly ModelMessage[]> {
+  async abandon(): Promise<readonly ModelMessage[]> {
     this.input.generation.end();
     return await this.discard("retried");
   }

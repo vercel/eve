@@ -35,7 +35,7 @@ const auth = defineInteractiveAuthorization<{ marker: string }>({
   },
 });
 
-/** Replies with the token `create` received, so an eval sees the credential reach the model. */
+/** Replies with its credential's token, so an eval sees the credential reach the model. */
 export const ownCredentialModel = defineModel({
   auth,
   authKey: "fixture-model",

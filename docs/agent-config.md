@@ -196,12 +196,12 @@ export default defineAgent({
 
 A signed-in person's calls reach AI Gateway with their own Vercel access token, and `teamIdOrSlug` scopes the call to the `acme` team. Every other session uses the project's credential.
 
-| Field     | Purpose                                                                                                                                                                                                                           |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`      | The model ID eve reports on `model.started` and as `ctx.model.id`, and looks up in the AI Gateway model catalog for the context window. For an ID outside the catalog, set `modelContextWindowTokens` where you select the model. |
-| `auth`    | The credential strategy, in the shapes a connection's `auth` accepts: `connect(...)`, `defineInteractiveAuthorization(...)`, or `{ getToken }`. It takes no per-caller function; choose per caller in `defineDynamic`.            |
-| `authKey` | Keys the credential for the sign-in, the token cache, and the rule against asking twice in a turn. Required when `auth` has no Vercel Connect connector. Definitions with one key share one sign-in and one token.                |
-| `create`  | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                                                 |
+| Field     | Purpose                                                                                                                                                                                                                                |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`      | Identifies the model. eve reports it on `model.started` and as `ctx.model.id`, and looks it up in the AI Gateway model catalog for the context window. For an ID outside the catalog, set `modelContextWindowTokens` in the selection. |
+| `auth`    | The credential strategy: `connect(...)`, `defineInteractiveAuthorization(...)`, or `{ getToken }`, as on a connection. To vary it per caller, return a different `defineModel` value from `defineDynamic`.                             |
+| `authKey` | Keys the credential for the sign-in, the token cache, and the rule against asking twice in a turn. Required when `auth` has no Vercel Connect connector. Definitions with one key share one sign-in and one token.                     |
+| `create`  | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                                                      |
 
 A `ModelDefinition` goes wherever a session's turn model goes: `defineAgent({ model })`, a dynamic model's result, and `auto()` and `agent({ models })` options. `compaction.model`, `auto()`'s decision model, and a dynamic subagent's config take a model ID or instance, because their calls can't hold the turn for a sign-in.
 
@@ -213,7 +213,7 @@ When the caller has no credential, eve opens the same sign-in as a connection, w
 - When `auth` throws another error, such as an unreachable credential service, the turn fails with `MODEL_CREDENTIAL_FAILED`. When `create` throws, it fails with `MODEL_CREATE_FAILED`. Provider errors keep `MODEL_CALL_FAILED`, so monitoring can tell the three apart. The session stays open in each case.
 - A declined sign-in settles its card before the dynamic functions run, so a dynamic `model` can read it from `ctx.view` with `interactions` from `eve/events` and answer with another model.
 
-Compaction's summary call runs on the turn's model, so it reuses the credential the turn resolved. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
+Compaction's summary call runs on the turn's model, so it reuses the turn's resolved credential. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
 
 ## Reasoning effort
 

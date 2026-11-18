@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { isModelSignInName } from "#models/definition.js";
 import { callSettledFrom, callStarted } from "#harness/call-facts.js";
 import {
   contextStarted,
@@ -747,10 +748,10 @@ export function completeSignIn(
     input.completions
       .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
       .flatMap((challenge) => {
-        const refusal = input.refusals.get(challenge.attemptId);
-        if (challenge.candidateId !== undefined) {
+        if (!isModelSignInName(challenge.name)) {
           return signInCallbackFacts(tables, challenge, { outcome: "accepted" });
         }
+        const refusal = input.refusals.get(challenge.attemptId);
         if (refusal === undefined) return [];
         return callSignInsSettled(
           view,

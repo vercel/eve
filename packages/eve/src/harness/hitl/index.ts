@@ -15,14 +15,14 @@ import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
-import { isModelCredentialError } from "#harness/model-call/credential.js";
+import type { ModelCredentialFailureCode } from "#harness/model-call/credential.js";
 import {
   handleAuthorizationError,
-  isScopedAuthorizationRequiredError,
+  type ScopedAuthorization,
+  type ScopedAuthorizationRequiredError,
 } from "#runtime/connections/scoped-authorization.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
 import { displayProperName } from "#protocol/session-projection/display-name.js";
-import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type {
   HarnessSessionBase,
@@ -96,45 +96,45 @@ export async function stopForSignIn(
   return park(step);
 }
 
-export async function pauseForSignIn(step: Step, error: unknown): Promise<StepResult> {
-  if (!isScopedAuthorizationRequiredError(error)) {
-    return await failSignIn(step, error, {
-      scope:
-        isConnectionAuthorizationFailedError(error) || isModelCredentialError(error)
-          ? error.connectionName
-          : "",
-    });
-  }
+export async function pauseForSignIn(
+  step: Step,
+  required: ScopedAuthorizationRequiredError,
+): Promise<StepResult> {
   try {
-    return await stopForSignIn(step, await handleAuthorizationError(error));
+    return await stopForSignIn(step, await handleAuthorizationError(required));
   } catch (refused) {
-    return await failSignIn(step, refused, error.scoped);
+    const asked =
+      isConnectionAuthorizationFailedError(refused) ||
+      isConnectionAuthorizationRequiredError(refused) ||
+      refused === required.cause;
+    const code = asked ? "MODEL_AUTHORIZATION_FAILED" : "MODEL_CREDENTIAL_FAILED";
+    return await failCredential(step, code, refused, required.scoped);
   }
 }
 
-async function failSignIn(
+export async function failCredential(
   step: Step,
+  code: ModelCredentialFailureCode,
   error: unknown,
-  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
+  scoped: ScopedAuthorization,
 ): Promise<StepResult> {
-  const name = providerName(step.view(), signIn);
-  if (
-    isConnectionAuthorizationFailedError(error) ||
-    isConnectionAuthorizationRequiredError(error)
-  ) {
-    return await failTurn(
-      step,
-      error,
-      "MODEL_AUTHORIZATION_FAILED",
-      signInFailureMessage(name, error),
-    );
+  const name = providerName(step.view(), scoped);
+  return await failTurn(step, error, code, credentialFailureMessage(code, name, error));
+}
+
+function credentialFailureMessage(
+  code: ModelCredentialFailureCode,
+  name: string,
+  error: unknown,
+): string {
+  switch (code) {
+    case "MODEL_AUTHORIZATION_FAILED":
+      return signInFailureMessage(name, error);
+    case "MODEL_CREATE_FAILED":
+      return `eve couldn't build the model from the ${name} credential.`;
+    case "MODEL_CREDENTIAL_FAILED":
+      return `eve couldn't get the ${name} credential.`;
   }
-  return await failTurn(
-    step,
-    error,
-    "MODEL_CREDENTIAL_FAILED",
-    `eve couldn't get the ${name} credential.`,
-  );
 }
 
 function signInFailureMessage(name: string, error: unknown): string {
@@ -157,10 +157,7 @@ function signInFailureMessage(name: string, error: unknown): string {
   }
 }
 
-function providerName(
-  view: SessionView,
-  signIn: { readonly scope: string; readonly authorization?: Readonly<AuthorizationDefinition> },
-): string {
+function providerName(view: SessionView, signIn: ScopedAuthorization): string {
   const cards = Object.values(view.projection.view.interactions).flatMap(
     (row) => row.request.signIn ?? [],
   );

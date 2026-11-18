@@ -177,7 +177,13 @@ describe("a model that needs the caller's credential", () => {
       "create throws",
       { outage: "create", token: "billing-token" },
       "MODEL_CREATE_FAILED",
-      'Building the "billing/claude" model failed: Missing billing region.',
+      "eve couldn't build the model from the Oauth billing credential.",
+    ],
+    [
+      "create returns no model",
+      { outage: "create-output", token: "billing-token" },
+      "MODEL_CREATE_FAILED",
+      "eve couldn't build the model from the Oauth billing credential.",
     ],
   ] as const)(
     "%s: fails the turn with its own code and keeps the session",
@@ -343,30 +349,39 @@ describe("a model sign-in that ends without a credential", () => {
     });
   });
 
-  it("fails the turn without a card when the credential has no sign-in flow", async () => {
-    const docs = defineModel({
-      auth: {
-        displayName: "Docs API",
-        getToken: async (): Promise<TokenResult> => {
-          throw new ConnectionAuthorizationRequiredError("docs");
-        },
-      },
-      authKey: "docs",
-      create: () => plainModel(),
-      id: "docs/reader",
-    });
-    await withAgent(
+  it.each([
+    [
+      "has none",
       "model-sign-in-no-flow",
-      defineAgent({ model: docs, modelContextWindowTokens: 200_000 }),
-      async (session) => {
-        const settled = await session.stream.nextUntil("refusal", isTurnSettled);
-        expect(settled.filter(isSignInOpened)).toEqual([]);
-        expect(turnSettled(settled)).toMatchObject(
-          authorizationFailed("The turn got no Docs API credential."),
-        );
-      },
-    );
-  });
+      () => Promise.reject(new ConnectionAuthorizationRequiredError("docs")),
+    ],
+    [
+      "sees the provider reject it twice",
+      "model-sign-in-no-flow-rejected",
+      () => Promise.resolve({ token: "docs-token" }),
+    ],
+  ])(
+    "fails the turn without a card when a credential without a sign-in flow %s",
+    async (_case, agentName, getToken: () => Promise<TokenResult>) => {
+      const docs = defineModel({
+        auth: { displayName: "Docs API", getToken },
+        authKey: "docs",
+        create: () => rejectingModel(),
+        id: "docs/reader",
+      });
+      await withAgent(
+        agentName,
+        defineAgent({ model: docs, modelContextWindowTokens: 200_000 }),
+        async (session) => {
+          const settled = await session.stream.nextUntil("refusal", isTurnSettled);
+          expect(settled.filter(isSignInOpened)).toEqual([]);
+          expect(turnSettled(settled)).toMatchObject(
+            authorizationFailed("The turn got no Docs API credential."),
+          );
+        },
+      );
+    },
+  );
 });
 
 interface SessionOptions {
@@ -484,7 +499,7 @@ function billingProvider(
     readonly refresh?: string;
     readonly failCompletion?: string;
     readonly rejectEveryToken?: boolean;
-    readonly outage?: "getToken" | "refresh" | "create";
+    readonly outage?: "getToken" | "refresh" | "create" | "create-output";
   } = {},
 ): BillingProvider {
   let stored = initial.token;
@@ -532,6 +547,7 @@ function billingProvider(
       auth,
       create: ({ token }) => {
         if (initial.outage === "create") throw new Error("Missing billing region.");
+        if (initial.outage === "create-output") return undefined as never;
         return billedModel(billing, token, initial.rejectEveryToken === true);
       },
       id: "billing/claude",
@@ -643,6 +659,18 @@ function bigStreamResult(text: string): ReturnType<typeof textStreamResult> {
       ],
     }),
   };
+}
+
+function rejectingModel() {
+  return markMockModel(
+    new MockLanguageModelV4({
+      doStream: async () => {
+        throw Object.assign(new Error("Unauthorized"), { statusCode: 401 });
+      },
+      modelId: "docs-model",
+      provider: "eve-test",
+    }),
+  );
 }
 
 function plainModel() {
