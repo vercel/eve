@@ -55,7 +55,9 @@ export default defineAgent({ model: ownGateway });
 Each person signs in with Vercel, and eve sends their model calls to AI Gateway with their own
 Vercel access token. `teamIdOrSlug` scopes the calls to the `acme` team.
 
-To ask only signed-in people, choose the model per session with `defineDynamic`:
+Some sessions have no signed-in person, such as a scheduled run or a service that calls the API.
+To use a person's own credential only when one is signed in, choose the model per session with
+`defineDynamic`:
 
 ```ts
 import { defineDynamic } from "eve/models";
