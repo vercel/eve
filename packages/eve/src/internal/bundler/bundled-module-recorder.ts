@@ -12,7 +12,9 @@ export async function recordBundledModules<T>(
   }
 }
 
-export function noteBundledModules(moduleIds: readonly string[]): void {
+export function noteBundledModules(listModuleIds: () => readonly string[]): void {
+  if (recorders.size === 0) return;
+  const moduleIds = listModuleIds();
   for (const recorder of recorders) {
     for (const moduleId of moduleIds) recorder.add(moduleId);
   }

@@ -68,7 +68,7 @@ export async function buildWithRolldown(options: BuildOptions): Promise<Rolldown
     plugins: [createPseudoPackagePlugin(), options.plugins],
     experimental: { ...options.experimental, attachDebugInfo: "none" },
   });
-  noteBundledModules(
+  noteBundledModules(() =>
     output.output.flatMap((item) => (item.type === "chunk" ? item.moduleIds : [])),
   );
   return output;
