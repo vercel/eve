@@ -1,10 +1,7 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { type LanguageModel, wrapLanguageModel } from "ai";
 
-import { isMockModel } from "#internal/mock-model-identity.js";
 import { isModelDefinition, type ModelDefinition, modelSignInName } from "#models/definition.js";
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { resolveMockAuthoredRuntimeModel } from "#runtime/agent/mock-model-adapter.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
@@ -18,14 +15,11 @@ import type { TokenResult } from "#shared/connection-types.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { rejectsCredential } from "./errors.js";
 
-export async function credentialedModel(
-  model: RuntimeModel,
-  reference: RuntimeModelReference,
-): Promise<LanguageModel> {
+export async function credentialedModel(model: RuntimeModel): Promise<LanguageModel> {
   if (!isModelDefinition(model)) return model;
   const execution = createAuthorizationExecution();
   const scoped = scopedAuthorization(model);
-  const create = async () => createdModel(model, await credentialFor(execution, scoped), reference);
+  const create = async () => createdModel(model, await credentialFor(execution, scoped));
   let current = await create();
   const withCredential = async <T>(run: (model: LanguageModelV4) => PromiseLike<T>): Promise<T> => {
     try {
@@ -101,19 +95,12 @@ async function credentialFor(
   }
 }
 
-function createdModel(
-  definition: ModelDefinition,
-  credential: TokenResult,
-  reference: RuntimeModelReference,
-): LanguageModelV4 {
+function createdModel(definition: ModelDefinition, credential: TokenResult): LanguageModelV4 {
   let created: EveLanguageModel;
   try {
     created = definition.create(credential);
   } catch (error) {
     throw new ModelCreateError(definition.id, error);
   }
-  const model = isMockModel(created)
-    ? created
-    : (resolveMockAuthoredRuntimeModel(reference) ?? created);
-  return wrapLanguageModel({ middleware: {}, model: model as Exclude<LanguageModel, string> });
+  return wrapLanguageModel({ middleware: {}, model: created as Exclude<LanguageModel, string> });
 }

@@ -97,7 +97,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change,
       compact: true,
       messages,
-      model: await credentialedModel(resolvedModel.model, resolvedModel.choice.reference),
+      model: await credentialedModel(resolvedModel.model),
       promptMessages: messages,
       requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
@@ -367,7 +367,7 @@ async function summaryExecutor(
   const model =
     reference === turnReference
       ? input.model
-      : await credentialedModel(await config.resolveModel(reference), reference);
+      : await credentialedModel(await config.resolveModel(reference));
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,

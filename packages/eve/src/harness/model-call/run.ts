@@ -160,7 +160,7 @@ async function resolveModel(
     reports.completed(step.config.signInCompletions ?? []),
   );
   try {
-    return { model: await credentialedModel(resolved.model, resolved.choice.reference) };
+    return { model: await credentialedModel(resolved.model) };
   } catch (error) {
     if (isTurnCancellation(error)) throw error;
     return { credentialError: error };

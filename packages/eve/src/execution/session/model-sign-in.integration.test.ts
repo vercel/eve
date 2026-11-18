@@ -1,6 +1,6 @@
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import {
@@ -35,8 +35,34 @@ const alice = {
 const FIRST = "Summarize today's issues.";
 const BILLING_SIGN_IN = "eve__model__oauth_billing";
 
+beforeEach(() => {
+  vi.stubEnv("NODE_ENV", "development");
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+it("replaces a model definition with eve's mock model before auth or create runs", async () => {
+  vi.stubEnv("NODE_ENV", "test");
+  const getToken = vi.fn(async (): Promise<TokenResult> => ({ token: "billing-token" }));
+  const create = vi.fn(() => plainModel());
+  const billing = defineModel({
+    auth: { getToken },
+    authKey: "billing",
+    create,
+    id: "billing/claude",
+  });
+  await withAgent(
+    "model-sign-in-mocked",
+    defineAgent({ model: billing, modelContextWindowTokens: 200_000 }),
+    async (session) => {
+      const settled = await session.stream.nextUntil("answer", isTurnSettled);
+      expect(turnSettled(settled)).toMatchObject({ outcome: "completed" });
+      expect(getToken).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("a model that needs the caller's credential", () => {

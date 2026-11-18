@@ -7,7 +7,6 @@ import {
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
-import { isModelDefinition } from "#models/definition.js";
 import {
   loadDynamicRuntimeModelDefinition,
   resolveRuntimeModelSelection,
@@ -112,9 +111,7 @@ async function keptModel(
   });
   const live =
     selection.model === undefined ||
-    (!isModelDefinition(selection.model) &&
-      !isMockModel(selection.model) &&
-      shouldMockAuthoredRuntimeModels())
+    (!isMockModel(selection.model) && shouldMockAuthoredRuntimeModels())
       ? undefined
       : selection;
   const value: ModelSlotValue = { reference: selection.reference };

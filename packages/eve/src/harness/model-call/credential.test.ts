@@ -6,8 +6,6 @@ import { markMockModel } from "#internal/mock-model-identity.js";
 import { defineModel } from "#models/definition.js";
 import type { TokenResult } from "#shared/connection-types.js";
 
-const reference = { id: "billing/claude" };
-
 function providerModel(token: string) {
   return markMockModel(
     new MockLanguageModelV4({
@@ -32,8 +30,8 @@ function providerModel(token: string) {
 describe("credentialedModel", () => {
   it("returns a model without auth as it is", async () => {
     const plain = providerModel("none");
-    expect(await credentialedModel(plain, reference)).toBe(plain);
-    expect(await credentialedModel("openai/gpt-5.5", reference)).toBe("openai/gpt-5.5");
+    expect(await credentialedModel(plain)).toBe(plain);
+    expect(await credentialedModel("openai/gpt-5.5")).toBe("openai/gpt-5.5");
   });
 
   it("builds the model from the credential and keeps its identity", async () => {
@@ -42,9 +40,9 @@ describe("credentialedModel", () => {
       auth: { getToken: async () => ({ token: "fresh" }) },
       authKey: "billing",
       create,
-      id: reference.id,
+      id: "billing/claude",
     });
-    const wrapped = await credentialedModel(model, reference);
+    const wrapped = await credentialedModel(model);
     expect(create).toHaveBeenCalledWith({ token: "fresh" });
     expect(wrapped).toMatchObject({ modelId: "claude-sonnet-5", provider: "anthropic.messages" });
   });
@@ -55,9 +53,9 @@ describe("credentialedModel", () => {
       auth: { getToken: async () => ({ token: tokens.shift()! }) },
       authKey: "billing",
       create: ({ token }) => providerModel(token),
-      id: reference.id,
+      id: "billing/claude",
     });
-    const wrapped = await credentialedModel(model, reference);
+    const wrapped = await credentialedModel(model);
     const result = await (wrapped as MockLanguageModelV4).doGenerate({ prompt: [] });
     expect(result.content).toEqual([{ text: "answered with fresh", type: "text" }]);
     expect(tokens).toEqual([]);
