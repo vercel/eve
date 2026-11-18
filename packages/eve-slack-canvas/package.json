@@ -1,0 +1,33 @@
+{
+  "name": "@eve/slack-canvas",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Opt-in channel instructions from trusted Slack canvases.",
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "pnpm run test:unit",
+    "test:unit": "node --test test/*.test.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "parse5": "7.3.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}
