@@ -141,6 +141,13 @@ Run `eve info` first when something behaves unexpectedly. It shows which files e
 
 `eve info` loads every authored module and exits with code 1 when the agent fails to compile, so a CI step or a coding agent can run it as a check before `eve build`. The same compile runs in `eve build` and `eve dev`, so anything `eve info` reports as an error stops them too.
 
+Besides discovery problems, the compile reports:
+
+- tool `inputSchema` values that model providers reject, such as a root that isn't `type: "object"` or a field with an unknown JSON Schema type
+- a workflow tool that calls `ctx.agent("name")` for an agent it can't reach, or calls `ctx.getSandbox()`, `ctx.getToken()`, `ctx.requireAuth()`, or `ctx.to()` in its `"use workflow"` body
+- a connection `approval` that compares `toolName` to a name the connection never produces, such as one missing the `<connection>__` prefix or an operation outside `operations.allow`
+- warnings for likely mistakes that eve would otherwise ignore: misspelled directories and files such as `tool/` or `agents.ts`, `.tsx` or `.jsx` tool and hook files, agent files under `src/`, a `build` script that runs only `tsc`, a `next.config` without `withEve()`, and an env var the code requires that `.env.example` doesn't list
+
 ### JSON output
 
 `eve info --json` prints one JSON object, so scripts and CI checks don't need to read files under `.eve/`:
@@ -169,7 +176,7 @@ Each `diagnostics.items` entry is `{ severity, code, message, source }`. `severi
 
 Each schema is the form eve sends to the model:
 
-- Validation-library schemas such as Zod set `additionalProperties: false` on closed objects.
+- Validation-library schemas such as Zod set `additionalProperties: false` on closed objects, and `type: "object"` on a root union of objects.
 - Plain JSON Schema stays as written.
 - Tools that run as `serve` tasks, including agent tools, include the optional `taskId` input.
 

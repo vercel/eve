@@ -12,8 +12,11 @@ import {
 import {
   type DirectoryEntryType,
   getDirectoryEntryType,
+  getSupportedModuleBaseName,
   isAuthoredTestPath,
+  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
 } from "#discover/filesystem.js";
+import { closestName } from "#shared/closest-name.js";
 import { type InstructionsSourceRef, createModuleSourceRef } from "#discover/manifest.js";
 import { discoverMarkdownSource } from "#discover/markdown.js";
 import { discoverNamedSourceDirectory } from "#discover/named-source-directory.js";
@@ -69,6 +72,8 @@ const HOOK_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const EXTENSION_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
 export const DISCOVER_UNSUPPORTED_DIRECTORY = "discover/unsupported-directory";
+
+export const DISCOVER_UNSUPPORTED_FILE = "discover/unsupported-file";
 
 export async function readSortedDirectoryEntries(
   source: ProjectSource,
@@ -403,28 +408,95 @@ export {
   type DiscoverNamedSourceDirectoryWithMarkdownInput,
 } from "#discover/named-source-directory.js";
 
-export function createUnsupportedRootDirectoryDiagnostics(input: {
+const AGENT_DIRECTORY_NAMES = [
+  "channels",
+  "connections",
+  "extensions",
+  "hooks",
+  "instructions",
+  "instrumentation",
+  "lib",
+  "memory",
+  "sandbox",
+  "schedules",
+  "skills",
+  "subagents",
+  "tools",
+] as const;
+
+const AGENT_SLOT_FILE_BASE_NAMES = ["agent", "instructions", "memory", "system"] as const;
+
+const UNSUPPORTED_MODULE_FILE_EXTENSION_PATTERN = /\.[jt]sx$/;
+
+export function createUnsupportedRootEntryDiagnostics(input: {
   classifyEntry: (name: string, entryType: DirectoryEntryType) => string;
-  createUnsupportedDirectoryMessage: (directoryName: string) => string;
   rootEntries: readonly ProjectSourceEntry[];
+  rootLabel: string;
   rootPath: string;
 }): DiscoverDiagnostic[] {
+  const supportedDirectories = AGENT_DIRECTORY_NAMES.filter((name) => {
+    const kind = input.classifyEntry(name, "directory");
+    return kind !== "unknown" && !kind.startsWith("invalid-");
+  });
   return input.rootEntries.flatMap((entry) => {
-    if (!entry.isDirectory()) {
+    const entryType = getDirectoryEntryType(entry);
+    if (input.classifyEntry(entry.name, entryType) !== "unknown") {
       return [];
     }
-
-    if (input.classifyEntry(entry.name, getDirectoryEntryType(entry)) !== "unknown") {
+    if (entryType === "directory") {
+      const match = closestName(entry.name, supportedDirectories);
+      return [
+        createDiscoverWarningDiagnostic({
+          code: DISCOVER_UNSUPPORTED_DIRECTORY,
+          message: `Ignoring unsupported directory "${entry.name}/" in the ${input.rootLabel} root.${match === undefined ? "" : ` Did you mean "${match}/"?`}`,
+          sourcePath: join(input.rootPath, entry.name),
+        }),
+      ];
+    }
+    const suggestion = entryType === "file" ? suggestSlotFileName(entry.name) : undefined;
+    if (suggestion === undefined) {
       return [];
     }
-
     return [
       createDiscoverWarningDiagnostic({
-        code: DISCOVER_UNSUPPORTED_DIRECTORY,
-        message: input.createUnsupportedDirectoryMessage(entry.name),
+        code: DISCOVER_UNSUPPORTED_FILE,
+        message: `Ignoring unsupported file "${entry.name}" in the ${input.rootLabel} root. Did you mean "${suggestion}"?`,
         sourcePath: join(input.rootPath, entry.name),
       }),
     ];
+  });
+}
+
+function suggestSlotFileName(fileName: string): string | undefined {
+  const extensionIndex = fileName.lastIndexOf(".");
+  if (extensionIndex <= 0) return undefined;
+  const baseName = fileName.slice(0, extensionIndex);
+  const extension = fileName.slice(extensionIndex);
+  if (extension === ".md") {
+    const match = closestName(baseName, ["instructions", "system"]);
+    return match === undefined ? undefined : `${match}.md`;
+  }
+  const moduleExtension = UNSUPPORTED_MODULE_FILE_EXTENSION_PATTERN.test(extension)
+    ? extension.slice(0, -1)
+    : getSupportedModuleBaseName(fileName) === null
+      ? undefined
+      : extension;
+  if (moduleExtension === undefined) return undefined;
+  const match = AGENT_SLOT_FILE_BASE_NAMES.find((name) => name === baseName.toLowerCase())
+    ? baseName.toLowerCase()
+    : closestName(baseName, AGENT_SLOT_FILE_BASE_NAMES);
+  return match === undefined ? undefined : `${match}${moduleExtension}`;
+}
+
+export function createUnsupportedModuleExtensionDiagnostic(
+  sourcePath: string,
+  fileName: string,
+): DiscoverDiagnostic | null {
+  if (!UNSUPPORTED_MODULE_FILE_EXTENSION_PATTERN.test(fileName)) return null;
+  return createDiscoverWarningDiagnostic({
+    code: DISCOVER_UNSUPPORTED_FILE,
+    message: `Ignoring "${fileName}": eve loads authored modules with ${SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS.map((extension) => `"${extension}"`).join(", ")} extensions only. Rename it to "${fileName.slice(0, -1)}".`,
+    sourcePath,
   });
 }
 
