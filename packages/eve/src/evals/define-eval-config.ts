@@ -70,7 +70,7 @@ function isTargetAuth(auth: unknown): boolean {
     readonly basic?: { readonly username?: unknown; readonly password?: unknown } | null;
     readonly vercelOidc?: { readonly token?: unknown } | null;
   };
-  if ([bearer, basic, vercelOidc].filter((scheme) => scheme !== undefined).length !== 1) {
+  if (["bearer", "basic", "vercelOidc"].filter((scheme) => scheme in auth).length !== 1) {
     return false;
   }
   if (basic !== undefined && typeof basic?.username !== "string") return false;

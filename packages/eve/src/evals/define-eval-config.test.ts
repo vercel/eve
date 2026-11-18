@@ -102,6 +102,7 @@ describe("defineEvalConfig", () => {
       null,
       {},
       { bearer: "a", vercelOidc: { token: "b" } },
+      { bearer: "a", vercelOidc: undefined },
       { bearer: undefined },
       { basic: { password: "secret" } },
       { vercelOidc: null },
