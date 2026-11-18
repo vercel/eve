@@ -5,7 +5,15 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { embed, generateText, streamText, registerTelemetry, ToolLoopAgent, tool } from "ai";
+import {
+  APICallError,
+  embed,
+  generateText,
+  streamText,
+  registerTelemetry,
+  ToolLoopAgent,
+  tool,
+} from "ai";
 import { MockEmbeddingModelV3, MockLanguageModelV3 } from "ai/test";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -188,6 +196,108 @@ describe("AI SDK adapter registration", () => {
       await run.shutdown();
     }
   });
+
+  it.each(["generate", "stream"] as const)(
+    "preserves %s model-call outcomes after a provider retry succeeds",
+    async (method) => {
+      const { exporter, run } = recording();
+      registerTelemetry(aiSdkTelemetry(run));
+      const error = new APICallError({
+        message: "Private provider failure",
+        url: "https://example.com",
+        requestBodyValues: {},
+        statusCode: 503,
+        responseHeaders: { "retry-after-ms": "0" },
+      });
+      const attempts: (string | undefined)[] = [];
+      let completedBeforeRetry: string[] = [];
+      function startCall() {
+        attempts.push(trace.getActiveSpan()?.spanContext().spanId);
+        if (attempts.length === 1) throw error;
+        completedBeforeRetry = exporter.getFinishedSpans().map((span) => span.spanContext().spanId);
+      }
+      const retrying = new MockLanguageModelV3({
+        modelId: "retrying",
+        doGenerate: async () => {
+          startCall();
+          return {
+            content: [{ type: "text", text: "Recovered" }],
+            finishReason: { unified: "stop", raw: undefined },
+            usage,
+            warnings: [],
+          };
+        },
+        doStream: async () => {
+          startCall();
+          return {
+            stream: new ReadableStream({
+              start(controller) {
+                controller.enqueue({ type: "stream-start", warnings: [] });
+                controller.enqueue({ type: "text-start", id: "answer" });
+                controller.enqueue({ type: "text-delta", id: "answer", delta: "Recovered" });
+                controller.enqueue({ type: "text-end", id: "answer" });
+                controller.enqueue({
+                  type: "finish",
+                  finishReason: { unified: "stop", raw: undefined },
+                  usage,
+                });
+                controller.close();
+              },
+            }),
+          };
+        },
+      });
+      try {
+        let text = "";
+        if (method === "generate") {
+          text = (await generateText({ model: retrying, prompt: "Hello", maxRetries: 1 })).text;
+        } else {
+          const result = streamText({ model: retrying, prompt: "Hello", maxRetries: 1 });
+          for await (const chunk of result.textStream) text += chunk;
+        }
+        expect(text).toBe("Recovered");
+        expect(attempts).toHaveLength(2);
+        const spans = exporter.getFinishedSpans();
+        const models = spans.filter((span) => span.name === "chat retrying");
+        const successful = models.find((span) => span.spanContext().spanId === attempts[1])!;
+        const turn = spans.find((span) => span.name.startsWith("invoke_agent"))!;
+        const step = spans.find((span) => span.name === "agent.step")!;
+        expect(successful.status.code).toBe(0);
+        expect(successful.attributes["error.type"]).toBeUndefined();
+        expect(successful.attributes["gen_ai.usage.input_tokens"]).toBe(3);
+        expect(turn.attributes["agent.turn.outcome"]).toBe("completed");
+        expect(turn.status.code).toBe(0);
+        expect(step.status.code).toBe(0);
+        expect(
+          models.every((span) => span.parentSpanContext?.spanId === step.spanContext().spanId),
+        ).toBe(true);
+        expect(
+          spans.every((span) => span.spanContext().traceId === turn.spanContext().traceId),
+        ).toBe(true);
+        if (method === "stream") {
+          expect(spans).toHaveLength(4);
+          const failed = models.find((span) => span.spanContext().spanId === attempts[0])!;
+          expect(failed.status.code).toBe(2);
+          expect(failed.attributes["error.type"]).toBe(error.name);
+          expect(completedBeforeRetry).toContain(attempts[0]);
+        } else {
+          expect(spans).toHaveLength(3);
+          expect(attempts[0]).toBe(attempts[1]);
+        }
+        expect(
+          JSON.stringify(
+            spans.map((span) => ({
+              attributes: span.attributes,
+              events: span.events,
+              status: span.status,
+            })),
+          ),
+        ).not.toContain("Private provider failure");
+      } finally {
+        await run.shutdown();
+      }
+    },
+  );
 
   it("preserves explicit conversation identity across calls without joining unrelated trace trees", async () => {
     const { exporter, run } = recording();

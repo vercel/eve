@@ -41,6 +41,7 @@ interface Generation {
   readonly turn: Promise<TurnOperation>;
   attempt?: Promise<AttemptOperation>;
   model?: Promise<ModelOperation>;
+  modelFailure?: { readonly error: unknown };
   readonly tools: Map<string, Promise<ToolOperation>>;
 }
 
@@ -74,9 +75,12 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
   async function closeStep(state: Generation, failure?: unknown) {
     const result =
       failure === undefined ? ABANDONED : { outcome: "abandoned", failed: true, error: failure };
-    await (await state.model)?.complete(result);
+    const model = await state.model;
+    if (state.modelFailure === undefined) await model?.complete(result);
+    else await model?.fail(state.modelFailure.error);
     for (const tool of state.tools.values()) await (await tool).complete(result);
     state.model = undefined;
+    state.modelFailure = undefined;
     state.tools.clear();
     const attempt = await state.attempt;
     state.attempt = undefined;
@@ -186,6 +190,8 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
       const attempt = await generations.get(event.callId)?.attempt;
       if (attempt === undefined) return;
       const state = generations.get(event.callId)!;
+      await (await state.model)?.fail(state.modelFailure?.error);
+      state.modelFailure = undefined;
       state.model = attempt.modelCall({
         provider: event.provider,
         modelId: event.modelId,
@@ -199,10 +205,15 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
       const state = generations.get(event.callId);
       const model = await state?.model;
       if (state === undefined || model === undefined || model.finished) return event.execute();
-      return native.telemetry.executeLanguageModelCall({
-        ...event,
-        execute: () => executeInGeneration(state, model, event.execute),
-      });
+      try {
+        return await native.telemetry.executeLanguageModelCall({
+          ...event,
+          execute: () => executeInGeneration(state, model, event.execute),
+        });
+      } catch (error) {
+        state.modelFailure = { error };
+        throw error;
+      }
     },
     async onLanguageModelCallEnd(event: Event<"onLanguageModelCallEnd">) {
       const state = generations.get(event.callId);
@@ -210,6 +221,7 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
       if (state === undefined || model === undefined) return;
       native.withoutNewSpans(() => native.telemetry.onLanguageModelCallEnd(event));
       state.model = undefined;
+      state.modelFailure = undefined;
       await model.complete({
         outcome: "completed",
         result: {
