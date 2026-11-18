@@ -64,15 +64,17 @@ export async function askStepApprovals(
   await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 
-export async function stopForToolSignIn(
+type SignInInterrupt = NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>;
+
+export async function stopForSignIn(
   step: Step,
-  interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
+  signIn: Pick<SignInInterrupt, "challenges"> & Partial<Pick<SignInInterrupt, "calls">>,
 ): Promise<StepResult> {
   await applyEndingSignIns(
     step,
     requireSignIn(step.view(), {
-      calls: interrupt.calls,
-      challenges: interrupt.challenges,
+      calls: signIn.calls,
+      challenges: signIn.challenges,
       callsBack: stepCallsBack(step),
     }),
     step.session.history,

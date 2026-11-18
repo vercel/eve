@@ -28,6 +28,7 @@ import {
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
   ModelStreamStalledError,
+  rejectsCredential,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
@@ -102,6 +103,7 @@ interface ModelCallerInput {
   readonly approvalMemory: ApprovalMemory;
   readonly projectedMessages: HarnessModelMessage[];
   readonly newRun: () => Promise<void>;
+  readonly renewCredential?: (rejection: unknown) => Promise<void>;
   readonly startRun: (attempt: number) => Promise<void>;
 }
 
@@ -163,6 +165,12 @@ export class ModelCaller {
         if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
+        const { renewCredential } = this.input;
+        if (renewCredential !== undefined && rejectsCredential(error)) {
+          await renewCredential(error);
+          await this.prepareRetry(error);
+          continue;
+        }
         const recovery = recoverModelCall(error, options, diagnostics);
         if (recovery === undefined) throw error;
         await this.prepareRetry(error);
@@ -197,22 +205,31 @@ export class ModelCaller {
     return reportModelCallFailure(this.step, error);
   }
 
-  async steered(): Promise<StepResult> {
-    const { step } = this;
-    throwIfTurnAborted(step.config.abortSignal);
+  async abandon(): Promise<readonly ModelMessage[]> {
     this.input.generation.end();
+    return await this.discard("retried");
+  }
+
+  async steered(): Promise<StepResult> {
+    throwIfTurnAborted(this.step.config.abortSignal);
+    this.input.generation.end();
+    return {
+      next: this.step.runStep,
+      session: changeHistory(this.step.session, { extend: await this.discard("steered") }),
+      steered: true,
+    };
+  }
+
+  private async discard(ending: "retried" | "steered"): Promise<readonly ModelMessage[]> {
+    const { step } = this;
     step.ctx.set(HistoryStateKey, this.request.historyState);
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
-        discardAttempt(step.view(), { ending: "steered", runId, usage: this.takeUnkeptUsage() }),
+        discardAttempt(step.view(), { ending, runId, usage: this.takeUnkeptUsage() }),
       );
     }
-    return {
-      next: step.runStep,
-      session: changeHistory(step.session, { extend: this.request.history }),
-      steered: true,
-    };
+    return this.request.history;
   }
 
   takeUnkeptUsage(): Usage | undefined {
@@ -279,6 +296,7 @@ export class ModelCaller {
       compacted = await historyBeforeCall(step, {
         messages: prompt.messages,
         model: this.input.model,
+        renew: this.input.renewCredential,
         promptMessages: withClientContext(prompt),
         requestEnvelopeTokens: this.requestEnvelopeTokens,
       });

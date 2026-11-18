@@ -170,6 +170,53 @@ The function returns a Gateway model ID, a model instance such as an AI SDK lang
 The `session.started` runtime identity does not include a model ID for a dynamic agent. Each public
 `model.started` event reports the concrete model selected for that model call.
 
+### Run the model on each person's credential
+
+Some agents call the model with a credential that belongs to the person using them, such as their own Vercel access token for AI Gateway. `defineModel` from `eve/models` puts a connection-style `auth` on a model. eve resolves the credential before each model call and passes it to `create`, which builds the provider model.
+
+```ts title="agent/agent.ts"
+import { connect } from "@vercel/connect/eve";
+import { createGateway } from "ai";
+import { defineAgent } from "eve";
+import { defineDynamic, defineModel } from "eve/models";
+
+const ownGateway = defineModel({
+  id: "anthropic/claude-sonnet-5",
+  auth: connect("vercel/myagent"), // your Vercel Connect connector for Sign in with Vercel
+  create: ({ token }) =>
+    createGateway({ apiKey: token, teamIdOrSlug: "acme" })("anthropic/claude-sonnet-5"),
+});
+
+export default defineAgent({
+  model: defineDynamic((ctx) =>
+    ctx.session.auth.current?.principalType === "user" ? ownGateway : "anthropic/claude-sonnet-5",
+  ),
+});
+```
+
+A signed-in person's calls reach AI Gateway with their own Vercel access token, and `teamIdOrSlug` scopes the call to the `acme` team. Every other session uses the project's credential.
+
+| Field     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`      | Identifies the model. eve reports it on `model.started` and as `ctx.model.id`, and looks it up in the AI Gateway model catalog for the context window. For an ID outside the catalog, set `modelContextWindowTokens` in the selection.                                                                                                                                                                                                                                                                                |
+| `auth`    | The credential strategy: `connect(...)`, `defineInteractiveAuthorization(...)`, or `{ getToken }`, as on a connection. `connect(...)` and `defineInteractiveAuthorization(...)` resolve the credential of the person who sent the turn's message, so in a shared thread each person's turns run on their own credential. As on a connection, `{ getToken }` resolves the app's credential unless it sets `principalType: "user"`. To vary it per caller, return a different `defineModel` value from `defineDynamic`. |
+| `authKey` | Keys the credential for the sign-in, the token cache, and the rule against asking twice in a turn. Required when `auth` has no Vercel Connect connector. Definitions with one key share one sign-in and one token.                                                                                                                                                                                                                                                                                                    |
+| `create`  | Builds the provider model from the credential. It is synchronous; I/O belongs in `auth.getToken`.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+A `defineModel` value goes wherever a session's turn model goes: `defineAgent({ model })`, a dynamic model's result, and `auto()` and `agent({ models })` options. `compaction.model` and `auto()`'s decision model take a model ID or instance, because their calls can't hold the turn for a sign-in. A dynamic subagent's config takes a model ID, because eve saves it with the session.
+
+When the caller has no credential, eve opens the same sign-in as a connection, with the turn as its subject, and continues the turn after the callback under the same `turnId`. The sign-in's name is `eve__model__` followed by `authKey`, or by the cleaned connector, so `connect("vercel/myagent")` signs in as `eve__model__vercel_myagent`. The card shows `auth.displayName`, then the challenge's `displayName`.
+
+- A message during the sign-in withdraws it, and the step runs again with the message in the turn.
+- When the provider answers a model call with `401`, eve drops the token, calls `auth.evict`, resolves the credential again, and retries the call once. After a second `401`, eve opens a new sign-in when `auth` has one, and fails the turn otherwise. When the provider rejects the credential right after that sign-in, the turn fails.
+- A turn without a credential fails with `MODEL_AUTHORIZATION_FAILED`, and its `message` says why: the person declined, a message withdrew the sign-in, a scheduled turn can't ask, the session has no signed-in user, or the provider rejected the credential right after the sign-in. The sign-in card settles with the connection reason, such as `access_denied`. The session stays open, and the next turn asks again.
+- When `auth` throws another error, such as an unreachable credential service, the turn fails with `MODEL_CREDENTIAL_FAILED`. That includes a `completeAuthorization` that throws anything but `ConnectionAuthorizationFailedError`, so throw that error to report a refused sign-in. When `create` throws or returns no language model, the turn fails with `MODEL_CREATE_FAILED`. The session stays open after both. A provider that refuses the credential with another `4xx`, such as `403`, fails the turn with `MODEL_AUTHORIZATION_FAILED`, so one person without access never ends a shared session. Other provider errors keep `MODEL_CALL_FAILED` and end the turn or the session as they do for any model, so monitoring can tell the causes apart.
+- A declined sign-in settles its card before the dynamic functions run, so a dynamic `model` can read it from `ctx.view` with `interactions` from `eve/events` and answer with another model.
+
+In a turn, compaction's summary call reuses the turn's model and credential. Compaction between turns resolves the credential itself and never opens a sign-in; without one, the compaction fails. The token passes from `auth` to `create` and lives in the step's token cache; the session records the model's `id`.
+
+eve calls `auth.getToken` before each model call. `connect(...)` serves the token from Vercel Connect's in-process cache, so a warm process makes no network request until the token nears expiry; a custom `getToken` should cache its token the same way.
+
 ## Reasoning effort
 
 `reasoning` sets the model's reasoning effort through AI SDK's provider-agnostic

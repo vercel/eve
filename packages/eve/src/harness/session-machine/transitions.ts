@@ -735,7 +735,10 @@ export function callSignInsSettled(
 
 export function completeSignIn(
   view: SessionView,
-  input: { readonly completions: readonly AuthorizationChallenge[] },
+  input: {
+    readonly completions: readonly AuthorizationChallenge[];
+    readonly declined: ReadonlySet<string>;
+  },
 ): Transition {
   const tables = view.projection.view;
   const reportedByCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
@@ -743,7 +746,15 @@ export function completeSignIn(
     view,
     input.completions
       .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
-      .flatMap((challenge) => signInCallbackFacts(tables, challenge, { outcome: "accepted" })),
+      .flatMap((challenge) =>
+        signInCallbackFacts(
+          tables,
+          challenge,
+          challenge.attemptId !== undefined && input.declined.has(challenge.attemptId)
+            ? { outcome: "declined", reason: SIGN_IN_DECLINED, retryable: false }
+            : { outcome: "accepted" },
+        ),
+      ),
   );
 }
 

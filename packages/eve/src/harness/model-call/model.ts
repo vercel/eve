@@ -2,6 +2,7 @@ import { gateway, type LanguageModel, type LanguageModelMiddleware, wrapLanguage
 
 import type { KernelConfig } from "#harness/types.js";
 import type { ModelChoice } from "#definitions/model.js";
+import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import { stepModel } from "#definitions/step.js";
 import type { Step } from "#harness/step/context.js";
 import type { ModelProfile } from "#harness/model-profile.js";
@@ -46,7 +47,7 @@ export function withGatewayTraceContext(
 
 export async function resolveEffectiveRuntimeModel(step: Step): Promise<{
   readonly choice: ModelChoice;
-  readonly model: LanguageModel;
+  readonly model: RuntimeModel;
 }> {
   const choice = await stepModel(step);
   if (choice === undefined) {

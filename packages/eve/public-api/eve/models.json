@@ -1,5 +1,6 @@
 [
   "AutoConfig",
+  "DefinedModel",
   "DynamicKey",
   "DynamicModelContext",
   "DynamicModelResult",
@@ -7,9 +8,11 @@
   "DynamicTurn",
   "EveLanguageModel",
   "Memo",
+  "ModelDefinition",
   "ModelSelection",
   "Occurrence",
   "SessionFrame",
   "auto",
-  "defineDynamic"
+  "defineDynamic",
+  "defineModel"
 ]
