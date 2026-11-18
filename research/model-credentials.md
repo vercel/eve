@@ -135,7 +135,9 @@ and the turn pauses under the same `turnId`.
 - **The person connects.** eve settles the sign-in `accepted` when the callback arrives, as it does
   for any sign-in no tool call owns. The step runs again from the start: the dynamic functions run,
   eve completes the authorization with the selected model's `auth`, and calls the model. If
-  completing the authorization fails, the turn fails with `MODEL_AUTHORIZATION_FAILED`.
+  `completeAuthorization` throws `ConnectionAuthorizationFailedError`, the turn fails with
+  `MODEL_AUTHORIZATION_FAILED`; any other error from it fails the turn with
+  `MODEL_CREDENTIAL_FAILED`.
 - **The person declines.** eve settles the sign-in `declined` before the dynamic functions run, so
   a dynamic `model` can read the decline from `ctx.view` and return another model.
 - **The person sends a message.** The sign-in ends `withdrawn`, and the step runs again. Unless a
@@ -202,9 +204,11 @@ any provider whose errors carry an HTTP status. A `create` that rethrows a `401`
 
 The turn failure's `message` states the cause, and the settled sign-in card carries the failure
 reason, such as `access_denied`. Provider errors stay `MODEL_CALL_FAILED`, so monitoring can tell a
-credential service outage, a provider outage, and a bug in `create` apart. The session stays open
-in every case, and the next turn opens a new sign-in. The next turn starts from the person's next
-message; eve drops the failed turn's input, including a message that withdrew the sign-in.
+credential service outage, a provider outage, and a bug in `create` apart. After a credential or
+`create` failure, the session stays open, and the next turn opens a new sign-in. A provider error
+ends the turn or the session as it does for any model. The next turn's prompt keeps the failed
+turn's messages, including a message that withdrew the sign-in, and the note eve adds when a
+message withdraws one.
 
 ### Subagents, compaction, and tests
 
