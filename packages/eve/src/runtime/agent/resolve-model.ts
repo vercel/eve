@@ -264,6 +264,7 @@ export async function resolveRuntimeModelSelection(input: {
         id: selectedModel.id,
         contextWindowTokens,
         credentialed: true,
+        gatewayAgentTag: selection.modelOptions?.gatewayAgentTag,
         promptCache,
         providerOptions,
         reasoning: selection.reasoning,

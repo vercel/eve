@@ -257,6 +257,7 @@ async function normalizeAuthoredModelReference(input: {
     };
     if (input.sourceField !== undefined) reference.sourceField = input.sourceField;
     if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    if (input.gatewayAgentTag !== undefined) reference.gatewayAgentTag = input.gatewayAgentTag;
     return await withCompiledRuntimeModelLimits(reference, input);
   }
 

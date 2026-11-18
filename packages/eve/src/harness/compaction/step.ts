@@ -387,7 +387,10 @@ async function summaryExecutor(
       step.instrumentation?.gatewayTraceContextHeaders,
     ),
     providerOptions: resolveCallProviderOptions({
-      agentTag: gatewayAgentTag(reference, config.runtimeIdentity),
+      agentTag: gatewayAgentTag(
+        { gatewayAgentTag: reference.gatewayAgentTag ?? turnReference.gatewayAgentTag },
+        config.runtimeIdentity,
+      ),
       auth: step.ctx.get(AuthKey) ?? null,
       profile,
       providerOptions: reference.providerOptions,
