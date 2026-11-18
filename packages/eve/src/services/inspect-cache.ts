@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, rename, stat, writeFile, mkdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
@@ -10,10 +10,12 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
 import type { ResolvedDiscoveryProject } from "#discover/project.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { authoredModuleConditions } from "#internal/authored-module-conditions.js";
+import { isAuthoredSourcePath } from "#internal/authored-package-boundary.js";
 import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 
 const INSPECT_CACHE_KIND = "eve-inspect-cache";
-const INSPECT_CACHE_VERSION = 1;
+const INSPECT_CACHE_VERSION = 2;
 const RECENT_EDIT_WINDOW_MS = 2_000;
 const SOURCE_READ_CONCURRENCY = 64;
 const SKIPPED_DIRECTORY_NAMES = new Set([
@@ -31,6 +33,7 @@ const SKIPPED_DIRECTORY_NAMES = new Set([
 const PROJECT_FILE_NAMES = [
   "bun.lock",
   "bun.lockb",
+  "jsconfig.json",
   "npm-shrinkwrap.json",
   "package-lock.json",
   "package.json",
@@ -40,12 +43,15 @@ const PROJECT_FILE_NAMES = [
   "yarn.lock",
 ];
 const TRACKED_ENV_PREFIXES = ["EVE_", "VERCEL"];
-const TRACKED_ENV_NAMES = new Set(["NODE_ENV"]);
+const TRACKED_ENV_NAMES = new Set(["NODE_ENV", "NODE_OPTIONS"]);
+const CONFIG_FILE_NAME = /^[jt]sconfig\..+\.json$/;
 const ENV_REFERENCE = /\bprocess\.env\b/g;
 const LITERAL_ENV_REFERENCE =
   /\bprocess\.env(?:\.([A-Za-z_$][\w$]*)|\[\s*(["'])([^"'\\]+)\2\s*\])/g;
 const ENV_MODULE_IMPORT =
   /\bfrom\s*["'](?:node:)?process["']|\brequire\(\s*["'](?:node:)?process["']\s*\)/;
+const INDIRECT_ENV_ACCESS =
+  /\bprocess\s*(?:\?\.|\[)|\{[^}]*\benv\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/;
 const MODEL_METADATA_UNAVAILABLE = "compile/model-metadata-unavailable";
 
 type FileStamp = string | null;
@@ -57,7 +63,7 @@ interface InspectCacheRecord {
   readonly startPath: string;
   readonly project: ResolvedDiscoveryProject;
   readonly paths: CompilerArtifactPaths;
-  readonly tree: Readonly<Record<string, string>>;
+  readonly trees: Readonly<Record<string, Readonly<Record<string, string>>>>;
   readonly files: Readonly<Record<string, FileStamp>>;
   readonly artifacts: Readonly<Record<string, FileStamp>>;
   readonly envNames: readonly string[];
@@ -79,8 +85,10 @@ export async function readCachedCompile(startPath: string): Promise<CompileAgent
   if (!sameStamps(record.artifacts, await stampFiles(Object.keys(record.artifacts)))) return null;
   if (!sameStamps(record.files, await stampFiles(Object.keys(record.files)))) return null;
   if (!sameStamps(record.env, hashEnv(trackedEnvNames(record.envNames, record.env)))) return null;
-  const tree = await stampTree(record.project.agentRoot);
-  if (tree === null || !sameStamps(record.tree, tree)) return null;
+  for (const [root, recorded] of Object.entries(record.trees)) {
+    const tree = await stampTree(root);
+    if (tree === null || !sameStamps(recorded, tree)) return null;
+  }
 
   try {
     const [manifest, metadata, diagnostics] = await Promise.all([
@@ -116,16 +124,27 @@ export async function writeCachedCompile(input: {
 
   const sourcePaths = [...input.moduleIds].flatMap((moduleId) => {
     const path = moduleId.split("?")[0]!;
-    return isAbsolute(path) && !path.split(sep).includes("node_modules") ? [path] : [];
+    return isAuthoredSourcePath(path) ? [path] : [];
   });
   const envNames = await collectEnvNames(sourcePaths);
   if (envNames === null) return;
 
-  const tree = await stampTree(project.agentRoot);
-  const sources = await stampFiles(
-    sourcePaths.filter((path) => !isInside(path, project.agentRoot)),
-  );
-  const files = { ...(await stampFiles(projectFilePaths(project.appRoot))), ...sources };
+  const roots = treeRoots(input.result.manifest);
+  const trees: Record<string, Record<string, string>> = {};
+  for (const root of roots) {
+    const tree = await stampTree(root);
+    if (tree === null) return;
+    trees[root] = tree;
+  }
+  const outsideTrees = sourcePaths.filter((path) => !roots.some((root) => isInside(path, root)));
+  const sources = await stampFiles(outsideTrees);
+  const files = {
+    ...(await stampFiles([
+      ...(await projectFilePaths(project.appRoot)),
+      ...(await packageManifestPaths([...roots, ...outsideTrees])),
+    ])),
+    ...sources,
+  };
   const artifacts = await stampFiles([
     paths.compiledManifestPath,
     paths.compileMetadataPath,
@@ -133,9 +152,11 @@ export async function writeCachedCompile(input: {
     paths.discoveryManifestPath,
     paths.moduleMapPath,
   ]);
-  if (tree === null || Object.values(sources).includes(null)) return;
-  if (Object.values(artifacts).includes(null)) return;
-  const editedAfterStart = [...Object.values(tree), ...Object.values(files)].some(
+  if (Object.values(sources).includes(null) || Object.values(artifacts).includes(null)) return;
+  const editedAfterStart = [
+    ...Object.values(trees).flatMap((tree) => Object.values(tree)),
+    ...Object.values(files),
+  ].some(
     (stamp) => stamp !== null && modifiedAtMs(stamp) >= input.startedAtMs - RECENT_EDIT_WINDOW_MS,
   );
   if (editedAfterStart) return;
@@ -147,7 +168,7 @@ export async function writeCachedCompile(input: {
     startPath: input.startPath,
     project,
     paths,
-    tree,
+    trees,
     files,
     artifacts,
     envNames,
@@ -179,7 +200,8 @@ async function readJson<T>(path: string): Promise<T> {
 
 async function resolveGenerator(): Promise<string> {
   const ownPath = fileURLToPath(import.meta.url);
-  return `${resolveInstalledPackageInfo().version}:${(await stampFiles([ownPath]))[ownPath]}`;
+  const ownStamp = (await stampFiles([ownPath]))[ownPath];
+  return `${resolveInstalledPackageInfo().version}:${ownStamp}:${authoredModuleConditions().join(",")}`;
 }
 
 async function stampFile(path: string): Promise<FileStamp> {
@@ -223,12 +245,41 @@ async function stampTree(root: string): Promise<Record<string, string> | null> {
   }
 }
 
-function projectFilePaths(appRoot: string): string[] {
+function treeRoots(manifest: CompiledAgentManifest): string[] {
+  const mounts = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+    (node) => node.extensionMounts.map((mount) => mount.sourceRoot),
+  );
+  return [...new Set([manifest.agentRoot, ...mounts])];
+}
+
+async function projectFilePaths(appRoot: string): Promise<string[]> {
   const paths: string[] = [];
   for (let directory = appRoot; ; directory = dirname(directory)) {
     for (const name of PROJECT_FILE_NAMES) paths.push(join(directory, name));
+    const entries = await readdir(directory).catch(() => []);
+    for (const name of entries) if (CONFIG_FILE_NAME.test(name)) paths.push(join(directory, name));
     if (dirname(directory) === directory) return paths;
   }
+}
+
+async function packageManifestPaths(paths: readonly string[]): Promise<string[]> {
+  const manifests = new Map<string, string | null>();
+  const nearest = async (directory: string): Promise<string | null> => {
+    const known = manifests.get(directory);
+    if (known !== undefined) return known;
+    const candidate = join(directory, "package.json");
+    const parent = dirname(directory);
+    const found =
+      (await stampFile(candidate)) !== null
+        ? candidate
+        : parent === directory
+          ? null
+          : await nearest(parent);
+    manifests.set(directory, found);
+    return found;
+  };
+  const found = await Promise.all(paths.map((path) => nearest(dirname(path))));
+  return found.filter((path): path is string => path !== null);
 }
 
 async function collectEnvNames(sourcePaths: readonly string[]): Promise<string[] | null> {
@@ -237,7 +288,9 @@ async function collectEnvNames(sourcePaths: readonly string[]): Promise<string[]
   );
   const names = new Set<string>();
   for (const source of sources) {
-    if (source === null || ENV_MODULE_IMPORT.test(source)) return null;
+    if (source === null || ENV_MODULE_IMPORT.test(source) || INDIRECT_ENV_ACCESS.test(source)) {
+      return null;
+    }
     const references = source.match(ENV_REFERENCE)?.length ?? 0;
     const literals = [...source.matchAll(LITERAL_ENV_REFERENCE)];
     if (literals.length !== references) return null;

@@ -140,7 +140,7 @@ eve info [--json] [--fresh]
 
 Run `eve info` first when something behaves unexpectedly. It shows which files eve found and what the agent includes, and reports discovery diagnostics without starting the dev server. Static instructions appear in source order with their `system` or `user` role; dynamic instructions are runtime-only and don't appear.
 
-`eve info` reuses its last successful compile while the agent directory, the modules it imports, package manifests and lockfiles, the eve version, and the environment variables those modules read by name are unchanged. Pass `--fresh` after changing anything else the agent reads at load time, such as a file it reads from disk.
+`eve info` reuses its last successful compile while the agent directory, its mounted extensions, the modules it imports, package manifests, lockfiles, `tsconfig` and `jsconfig` files, the eve version, Node.js `--conditions`, and the environment variables those modules read by name are unchanged. Pass `--fresh` after changing anything else the agent reads at load time, such as a file it reads from disk.
 
 ### JSON output
 
