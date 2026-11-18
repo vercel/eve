@@ -12,8 +12,8 @@
 <rect x="0.5" y="0.5" width="1039" height="445" fill="none" stroke="#0a0a0a"/>
 <rect x="0.5" y="0.5" width="1039" height="32" fill="#ffffff" stroke="#0a0a0a"/>
 <rect x="0.5" y="0.5" width="64" height="32" fill="#0a0a0a"/>
-<text x="32.5" y="21.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#ffffff" text-anchor="middle" font-weight="400" letter-spacing="0.06em">FIG. 1</text>
-<text x="80.0" y="21.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0a0a0a" text-anchor="start" font-weight="400" letter-spacing="0.06em">FOLLOW-UP AFTER 15S IDLE (W4): CRITICAL PATH, CLIENT P50</text>
+<text x="32.5" y="21.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#ffffff" text-anchor="middle" font-weight="400" letter-spacing="0.06em">FIG. 2</text>
+<text x="80.0" y="21.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0a0a0a" text-anchor="start" font-weight="400" letter-spacing="0.06em">FOLLOW-UP AFTER 15S IDLE: WHAT THE OPEN WORKFLOW WORK REMOVES, CLIENT P50</text>
 <line x1="250.0" y1="56" x2="250.0" y2="210" stroke="#d4d4d4" stroke-dasharray="2 3"/>
 <text x="250.0" y="50.0" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#6f6f6f" text-anchor="middle" font-weight="400">0</text>
 <line x1="337.5" y1="56" x2="337.5" y2="210" stroke="#d4d4d4" stroke-dasharray="2 3"/>

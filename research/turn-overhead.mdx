@@ -10,80 +10,33 @@ last_updated: "2026-11-18"
 
 This is an analysis of the time between a message reaching a hosted eve agent and eve's first visible output: the first streamed text on web chat, or the model call on Slack. Every measurement uses a mock model that answers with no delay unless noted, so the numbers are overhead: network, eve, Workflow, Vercel Queues, and the platform.
 
-The case that matters most is a follow-up that arrives after the previous turn's orchestrator has stopped. The hook lingers for 5s, and real replies almost always come later than that. On eve main, such a follow-up still spends about 450ms in the Workflow runtime before eve's turn step starts. Most of the remaining room is there, followed by cold starts.
+The case that matters most is a follow-up that arrives after the previous turn's orchestrator has stopped. The hook lingers for 5s, and real replies almost always come later than that. On eve main, such a follow-up spends about 450ms in the Workflow runtime before eve's turn step starts. Most of the remaining room is there, followed by cold starts.
 
-## Method
+## A follow-up after 15s idle
 
-- **Deployments.** Scratch Vercel projects in `vercel-internal-playground`, region iad1. The later runs are built on Vercel, so they run on the Lambda substrate like customer deploys.
-- **Client.** A laptop in San Francisco. The round trip to iad1 is about 115–130ms.
-- **Model and channels.** A mock model, with a 0ms time to first token unless noted. In the first-output probe deployments, Slack API calls are stubbed at 20ms. The Vercel Connect measurements use real Slack apps.
-- **Tracing.** A patch logs route marks, every World call and every undici request, each with its duration. A script merges the Vercel runtime logs with client timestamps. For Slack new threads, a critical-path sweep counts overlapping writes once.
-- **Workloads.**
-  - W1: back-to-back web chat turns.
-  - W4: 19 web chat follow-ups, each after 15s idle.
-  - Cold follow-up: web chat follow-ups after 35s idle in a 20-turn session.
-  - Slack new thread, on warm instances and after ~16 minutes idle.
-  - Slack follow-up, 2s after the previous reply.
-- **Statistics.** All figures are medians in ms. Segment medians don't sum exactly to the total median.
+The client sends a message to a session whose previous turn ended 15s earlier. Fig. 1 shows every span on the critical path, from the client's POST to the first streamed text, and which process is waiting on which.
 
-The probe scripts and raw logs are kept outside this repository.
+![Every span on the critical path of a follow-up after 15s idle on eve main, beside the requests between the client, the edge, eve's functions, the World API and Queues](./turn-overhead/follow-up-anatomy.svg)
 
-## Where a follow-up turn's time goes
+The POST records the message and wakes the orchestrator through the queue, then returns. The client doesn't wait for that response, because it opens the stream alongside the send ([eve #6431](https://github.com/vercel/eve/pull/6431)). The orchestrator starts in a fresh VM in the flow function. It reads the run's log, replays it, commits `step_started`, and only then runs eve's turn step, whose first stream write reaches the client through the open stream.
 
-![Follow-up after 15s idle: critical path on eve main, with the parked VM, and with inline delivery](./turn-overhead/follow-up-critical-path.svg)
+Of the ~590ms that the trace attributes, about 445ms is the Workflow runtime: World writes and reads, the queue, and replay. The turn step to the first stream `PUT` takes 78ms: ~34ms of eve's work before the model call, then the mock model and the stream write. The two network spans at either end aren't traced; together they are the remaining ~200ms.
 
-![Queued follow-up on eve main: the hops between the client, the edge, eve's functions, the World API and Queues](./turn-overhead/follow-up-sequence.svg)
+The totals vary between runs on the same build. eve main measured 787ms in the run in Fig. 1, and 860–940ms in later rounds. Compare builds within a round.
 
-On eve main, a follow-up after the hook linger takes this path:
+### What the open Workflow work removes
 
-1. The POST writes `hook_received` (A in Fig. 2).
-2. It publishes a wake to the queue. The queue delivers it to the flow function (B).
-3. The orchestrator reads the run's event log and replays it (C).
-4. It writes `step_started` (D), and only then runs eve's turn step.
-5. The turn step writes the first stream chunk, and the stream relays it to the client.
+![The same follow-up on eve main, with workflow #5467 and #5470, and with inline delivery](./turn-overhead/follow-up-critical-path.svg)
 
-Of the ~590ms that the trace attributes, about 445ms is the Workflow runtime: World writes and reads, the queue, and replay. The turn step to the first stream `PUT` takes 78ms: ~34ms of eve's work before the model call, then the stream write. The rest is network, plus whatever the medians leave unattributed.
+Fig. 2 is one round, with all three builds measured concurrently. The inline arm is a spike: [#5365](https://github.com/vercel/workflow/pull/5365) plus a held wake sent beside `hook_received`. Measured later with the real PRs on Workflow main:
 
-The totals vary between runs on the same build. eve main measured 787ms in the run in Fig. 1, and 860–940ms in later rounds. Compare arms within a round.
+| Build                                                                                                                                               | Client p50 |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------: |
+| eve main (Workflow 5.6.1)                                                                                                                           |   ~860–940 |
+| + [workflow #5467](https://github.com/vercel/workflow/pull/5467)/[#5470](https://github.com/vercel/workflow/pull/5470) (parked VM)                  |   ~670–720 |
+| + [workflow #5365](https://github.com/vercel/workflow/pull/5365) + [#5573](https://github.com/vercel/workflow/pull/5573) (inline delivery, handoff) |       ~670 |
 
-## Numbers by flow
-
-Measured on 2026-11-12 (main at the start of this work), on 2026-11-16 (main), and on 2026-11-16 with the open work applied. The open-work build had the open eve PRs plus a Workflow spike: [#5365](https://github.com/vercel/workflow/pull/5365) inline delivery, start Hook inline, [#5448](https://github.com/vercel/workflow/pull/5448)/#5450, [#5467](https://github.com/vercel/workflow/pull/5467)/#5470/#5468, and a held wake sent beside `hook_received`.
-
-| Flow                                    | Metric               | Nov 12 | Nov 16 | Nov 16, open work | Merged since Nov 16                                                                                                                                                                                                    |
-| --------------------------------------- | -------------------- | -----: | -----: | ----------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Web chat, right after a turn (W1, n=20) | send → first text    |    651 |    467 |               399 | [#6431](https://github.com/vercel/eve/pull/6431), [#6506](https://github.com/vercel/eve/pull/6506). These were the open-work build's main changes on this path, so main is probably close to 399 now; not re-measured. |
-| Web chat, 35s after a turn (n=8)        | send → first text    |    947 |    978 |               537 | [#6506](https://github.com/vercel/eve/pull/6506), [#6508](https://github.com/vercel/eve/pull/6508) (~215ms off the Nov 16 number, estimated)                                                                           |
-| Slack new thread, warm (n=8)            | edge → model call    |  1,048 |    812 |               565 | [#6529](https://github.com/vercel/eve/pull/6529) (~40ms)                                                                                                                                                               |
-| Slack follow-up, 2s later (n=32)        | webhook → model call |    322 |    307 |               244 | [#6506](https://github.com/vercel/eve/pull/6506), [#6529](https://github.com/vercel/eve/pull/6529) (~90ms)                                                                                                             |
-| Slack new thread, ~16 min idle (n=3)    | edge → model call    |  4,370 |  3,995 |             2,303 | [#6529](https://github.com/vercel/eve/pull/6529) (~100ms)                                                                                                                                                              |
-
-W4 was measured on 2026-11-17 and 2026-11-18 against current main, using the real Workflow PRs rather than the spike:
-
-| Build                                                                                                                                               | W4 client p50 |
-| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------: |
-| eve main (Workflow 5.6.1)                                                                                                                           |      ~860–940 |
-| + [workflow #5467](https://github.com/vercel/workflow/pull/5467)/#5470 (parked VM)                                                                  |      ~670–720 |
-| + [workflow #5365](https://github.com/vercel/workflow/pull/5365) + [#5573](https://github.com/vercel/workflow/pull/5573) (inline delivery, handoff) |          ~670 |
-
-## What has been removed
-
-| Change                                                                                                                                                                       | Effect                                                                                                                       | Ships in       |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| [eve #6417](https://github.com/vercel/eve/pull/6417), [#6418](https://github.com/vercel/eve/pull/6418)                                                                       | Known sessions skip the stream version check, and the stream opens while the session check runs. Stream open −100 to −150ms. | eve 1.0.0      |
-| [eve #6419](https://github.com/vercel/eve/pull/6419)                                                                                                                         | Usage tags are written behind the turn. −50ms per model call.                                                                | eve 1.0.0      |
-| [eve #6420](https://github.com/vercel/eve/pull/6420)                                                                                                                         | Turns reuse unaborted turn controls. Two fewer Workflow writes per turn.                                                     | eve 1.0.0      |
-| [eve #6421](https://github.com/vercel/eve/pull/6421)                                                                                                                         | Root sessions are created without a durable step. New session → first turn step 600 → 325ms.                                 | eve 1.0.0      |
-| [eve #6473](https://github.com/vercel/eve/pull/6473), [#6474](https://github.com/vercel/eve/pull/6474)                                                                       | A new Slack thread starts its session without lookups, and before Slack's API calls. −120 to −170ms.                         | eve 1.0.2      |
-| [eve #6506](https://github.com/vercel/eve/pull/6506)                                                                                                                         | The session inbox's owner is cached in process. −45 to −90ms per follow-up.                                                  | eve 1.0.2      |
-| [eve #6507](https://github.com/vercel/eve/pull/6507)                                                                                                                         | The stream version check skips its tail lookup. Up to −290ms on an instance new to the session.                              | eve 1.0.2      |
-| [eve #6508](https://github.com/vercel/eve/pull/6508)                                                                                                                         | `oidc()` refuses another issuer's token before fetching its keys. −130ms per request after 30s idle with two issuers.        | eve 1.0.2      |
-| [eve #6431](https://github.com/vercel/eve/pull/6431)                                                                                                                         | The client opens the stream alongside the send, so one round trip leaves the critical path.                                  | main           |
-| [eve #6529](https://github.com/vercel/eve/pull/6529) (re-land of [#6476](https://github.com/vercel/eve/pull/6476))                                                           | `ctx.waitUntil` for channel handlers. Slack's status updates no longer block the model call (−40 to −100ms).                 | main           |
-| [eve #6561](https://github.com/vercel/eve/pull/6561)                                                                                                                         | Updates the vendored Workflow to 5.6.1.                                                                                      | main           |
-| [workflow #5410](https://github.com/vercel/workflow/pull/5410), [#5386](https://github.com/vercel/workflow/pull/5386), [#5159](https://github.com/vercel/workflow/pull/5159) | Replay copies state once per op; startup retries a missing event history; send-and-hold on the queue.                        | Workflow 5.6.x |
-
-## What remains, by cost
+The sections below take the spans in order of size.
 
 ### Orchestrator log read and replay: ~200ms per follow-up
 
@@ -94,13 +47,13 @@ W4 was measured on 2026-11-17 and 2026-11-18 against current main, using the rea
 **Candidates, all drafts in Workflow:**
 
 - **[#5468](https://github.com/vercel/workflow/pull/5468)** puts the `hook_received` event ID in the wake. A delivery that has already consumed the log skips the no-op tail read (40–104ms when it isn't resuming a parked VM). It is rebased onto main and can merge on its own.
-- **[#5467](https://github.com/vercel/workflow/pull/5467)** parks a cleanly suspended VM per process. The next delivery reads only the new events and resumes it. On W4 the log read dropped from 164 to 86ms and replay from 35 to 5ms. It resumed on all 19 turns. A resumed VM keeps the run's event ceiling (`maxEvents`), which landed on Workflow main since.
+- **[#5467](https://github.com/vercel/workflow/pull/5467)** parks a cleanly suspended VM per process. The next delivery reads only the new events and resumes it. On a follow-up after 15s idle, the log read dropped from 164 to 86ms and replay from 35 to 5ms. It resumed on all 19 turns. A resumed VM keeps the run's event ceiling (`maxEvents`), which landed on Workflow main since.
 - **[#5470](https://github.com/vercel/workflow/pull/5470)** lets a stale parked VM catch up on events another orchestrator wrote, instead of falling back to a full replay.
 - **[#5573](https://github.com/vercel/workflow/pull/5573)** resumes on the `hook_received` that this process just wrote, with no log read and no `runs.get`.
   - It only applies when the orchestrator runs in the process that wrote the event, so it needs inline delivery.
   - It also needs consecutive turns on the same Lambda instance. That held for 50–60% of turns. Every miss was an instance change.
 
-[#5467](https://github.com/vercel/workflow/pull/5467)/#5470 don't depend on inline delivery, and are worth ~200ms on W4 with today's queued path.
+[#5467](https://github.com/vercel/workflow/pull/5467)/[#5470](https://github.com/vercel/workflow/pull/5470) don't depend on inline delivery, and are worth ~200ms on a follow-up after 15s idle with today's queued path.
 
 ### The queue hop: ~115ms
 
@@ -139,7 +92,7 @@ The `@vercel/queue` version is no longer a blocker: Workflow 5.6.1's `world-verc
 **Spike.** The spike allows the early start on resumes, and gates the body's stream and attribute writes on its own start committing. With a 400ms model time to first token:
 
 - `hook_received` committed → model call went from 158 to 52ms;
-- W4 p50 went from 876 to 783ms;
+- the client p50 of a follow-up after 15s idle went from 876 to 783ms;
 - with 0ms to first token, the gain doesn't show, because the run waits on the gated first output anyway.
 
 **What a real version needs: one early-start rule for both paths.**
@@ -161,6 +114,18 @@ Stream and attribute writes are gated today. Tool calls and channel deliveries a
 - `requestRun`: ~3ms.
 
 The first stream `PUT` takes ~45ms. About 15–20ms between the step's first line and that `PUT` is unexplained. It isn't the WebSocket fallback: forcing HTTP changed nothing. A real model's time to first token hides it.
+
+## Other flows
+
+Measured on 2026-11-12 (main at the start of this work), on 2026-11-16 (main), and on 2026-11-16 with the open work applied. The open-work build had the open eve PRs plus a Workflow spike: [#5365](https://github.com/vercel/workflow/pull/5365) inline delivery, start Hook inline, [#5448](https://github.com/vercel/workflow/pull/5448)/[#5450](https://github.com/vercel/workflow/pull/5450), [#5467](https://github.com/vercel/workflow/pull/5467)/[#5470](https://github.com/vercel/workflow/pull/5470)/[#5468](https://github.com/vercel/workflow/pull/5468), and a held wake sent beside `hook_received`.
+
+| Flow                                 | Metric               | Nov 12 | Nov 16 | Nov 16, open work | Merged since Nov 16                                                                                                                                                                                                    |
+| ------------------------------------ | -------------------- | -----: | -----: | ----------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web chat, right after a turn (n=20)  | send → first text    |    651 |    467 |               399 | [#6431](https://github.com/vercel/eve/pull/6431), [#6506](https://github.com/vercel/eve/pull/6506). These were the open-work build's main changes on this path, so main is probably close to 399 now; not re-measured. |
+| Web chat, 35s after a turn (n=8)     | send → first text    |    947 |    978 |               537 | [#6506](https://github.com/vercel/eve/pull/6506), [#6508](https://github.com/vercel/eve/pull/6508) (~215ms off the Nov 16 number, estimated)                                                                           |
+| Slack new thread, warm (n=8)         | edge → model call    |  1,048 |    812 |               565 | [#6529](https://github.com/vercel/eve/pull/6529) (~40ms)                                                                                                                                                               |
+| Slack follow-up, 2s later (n=32)     | webhook → model call |    322 |    307 |               244 | [#6506](https://github.com/vercel/eve/pull/6506), [#6529](https://github.com/vercel/eve/pull/6529) (~90ms)                                                                                                             |
+| Slack new thread, ~16 min idle (n=3) | edge → model call    |  4,370 |  3,995 |             2,303 | [#6529](https://github.com/vercel/eve/pull/6529) (~100ms)                                                                                                                                                              |
 
 ### New-session boot
 
@@ -222,6 +187,23 @@ With inline delivery the server function runs turns, so deferring turn code out 
 - **The first queue publish after a deploy** took 1.3–2.9s, against 80–160ms normally. The first new conversations after every production deploy pay this.
 - **A Slack thread dormant for 16 minutes** took ~3.0s from message to model call. Its next message started a new workflow run, with a queue hop and a full boot. eve's session timeout is the likely cause, but it isn't confirmed.
 
+## What has been removed
+
+| Change                                                                                                                                                                       | Effect                                                                                                                       | Ships in       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| [eve #6417](https://github.com/vercel/eve/pull/6417), [#6418](https://github.com/vercel/eve/pull/6418)                                                                       | Known sessions skip the stream version check, and the stream opens while the session check runs. Stream open −100 to −150ms. | eve 1.0.0      |
+| [eve #6419](https://github.com/vercel/eve/pull/6419)                                                                                                                         | Usage tags are written behind the turn. −50ms per model call.                                                                | eve 1.0.0      |
+| [eve #6420](https://github.com/vercel/eve/pull/6420)                                                                                                                         | Turns reuse unaborted turn controls. Two fewer Workflow writes per turn.                                                     | eve 1.0.0      |
+| [eve #6421](https://github.com/vercel/eve/pull/6421)                                                                                                                         | Root sessions are created without a durable step. New session → first turn step 600 → 325ms.                                 | eve 1.0.0      |
+| [eve #6473](https://github.com/vercel/eve/pull/6473), [#6474](https://github.com/vercel/eve/pull/6474)                                                                       | A new Slack thread starts its session without lookups, and before Slack's API calls. −120 to −170ms.                         | eve 1.0.2      |
+| [eve #6506](https://github.com/vercel/eve/pull/6506)                                                                                                                         | The session inbox's owner is cached in process. −45 to −90ms per follow-up.                                                  | eve 1.0.2      |
+| [eve #6507](https://github.com/vercel/eve/pull/6507)                                                                                                                         | The stream version check skips its tail lookup. Up to −290ms on an instance new to the session.                              | eve 1.0.2      |
+| [eve #6508](https://github.com/vercel/eve/pull/6508)                                                                                                                         | `oidc()` refuses another issuer's token before fetching its keys. −130ms per request after 30s idle with two issuers.        | eve 1.0.2      |
+| [eve #6431](https://github.com/vercel/eve/pull/6431)                                                                                                                         | The client opens the stream alongside the send, so one round trip leaves the critical path.                                  | main           |
+| [eve #6529](https://github.com/vercel/eve/pull/6529) (re-land of [#6476](https://github.com/vercel/eve/pull/6476))                                                           | `ctx.waitUntil` for channel handlers. Slack's status updates no longer block the model call (−40 to −100ms).                 | main           |
+| [eve #6561](https://github.com/vercel/eve/pull/6561)                                                                                                                         | Updates the vendored Workflow to 5.6.1.                                                                                      | main           |
+| [workflow #5410](https://github.com/vercel/workflow/pull/5410), [#5386](https://github.com/vercel/workflow/pull/5386), [#5159](https://github.com/vercel/workflow/pull/5159) | Replay copies state once per op; startup retries a missing event history; send-and-hold on the queue.                        | Workflow 5.6.x |
+
 ## Open work, in merge order
 
 | Order | Change                                                                                                                 | What it removes                                                 | State                                                                           |
@@ -248,6 +230,22 @@ After these land, two design steps remain:
 - **One function for routes and the queue trigger.** Every route returned 404. A function with `experimentalTriggers` doesn't appear to be routable.
 - **Lazy route loading** made the first message slower.
 - **Minifying the server output** cut it from 9.9MB to 8.4MB, but changed import time by ~3ms.
+
+## Method
+
+- **Deployments.** Scratch Vercel projects in `vercel-internal-playground`, region iad1. The later runs are built on Vercel, so they run on the Lambda substrate like customer deploys.
+- **Client.** A laptop in San Francisco. The round trip to iad1 is about 115–130ms.
+- **Model and channels.** A mock model, with a 0ms time to first token unless noted. In the first-output probe deployments, Slack API calls are stubbed at 20ms. The Vercel Connect measurements use real Slack apps.
+- **Tracing.** A patch logs route marks, every World call and every undici request, each with its duration. A script merges the Vercel runtime logs with client timestamps. For Slack new threads, a critical-path sweep counts overlapping writes once.
+- **Workloads.**
+  - Web chat follow-ups after 15s idle: 19 per build, after two warm turns.
+  - Web chat follow-ups right after the previous turn: back-to-back turns.
+  - Web chat follow-ups after 35s idle, in a 20-turn session.
+  - Slack new thread, on warm instances and after ~16 minutes idle.
+  - Slack follow-up, 2s after the previous reply.
+- **Statistics.** All figures are medians in ms. Segment medians don't sum exactly to the total median.
+
+The probe scripts and raw logs are kept outside this repository.
 
 ## Measurement notes
 
