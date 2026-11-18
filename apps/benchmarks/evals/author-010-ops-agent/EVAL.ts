@@ -111,13 +111,14 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
         })),
       ...runs
         .filter((run) => run.probe.operation === operation && sendsProbeRequest(run))
-        // Grade every input form that places the requested order. A tool with no such form
-        // is graded on the first form it accepts, so a malformed order fails only exposure.
+        // Grade every input form that sends an order of the contract's shape, whatever its
+        // values. A tool with no such form is graded on the first form it accepts, so a
+        // malformed order fails only exposure.
         .filter(
           (run, index, sent) =>
-            sendsExpectedRequest(run) ||
+            sendsContractRequest(run) ||
             (sent.findIndex(({ file }) => file === run.file) === index &&
-              !sent.some((other) => other.file === run.file && sendsExpectedRequest(other))),
+              !sent.some((other) => other.file === run.file && sendsContractRequest(other))),
         )
         .map(({ name, tool, nested }) => ({
           name,
@@ -278,12 +279,20 @@ function sendsProbeRequest({ probe, requests }: NorthstarToolRun): boolean {
   return requests.some(({ method, url }) => method === probe.method && url.pathname === probe.path);
 }
 
-function implementsProbe(run: NorthstarToolRun): boolean {
-  return run.error === undefined && sendsExpectedRequest(run);
+/** Whether the run sent the probe's request with a body of the contract's shape, whatever its values. */
+function sendsContractRequest({ probe, requests }: NorthstarToolRun): boolean {
+  return requests.some(({ method, url, body }) => {
+    if (method !== probe.method || url.pathname !== probe.path) return false;
+    const sent = body as Record<string, unknown> | null | undefined;
+    return (
+      probe.method !== "POST" ||
+      Object.entries(probe.input).every(([key, value]) => typeof sent?.[key] === typeof value)
+    );
+  });
 }
 
-/** Whether the run sent the probe's request as the contract describes, even if it then threw. */
-function sendsExpectedRequest({ probe, requests }: NorthstarToolRun): boolean {
+function implementsProbe({ error, probe, requests }: NorthstarToolRun): boolean {
+  if (error !== undefined) return false;
   return requests.some(({ method, url, body }) => {
     if (method !== probe.method || url.pathname !== probe.path) return false;
     // `warehouse` is optional, so a tool may leave it out, but it must not change it.
