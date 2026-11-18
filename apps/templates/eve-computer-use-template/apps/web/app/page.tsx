@@ -6,15 +6,17 @@ import { useMemo, useState } from "react";
 
 import {
   DEFAULT_DEVICE,
-  DEVICES,
   deviceContext,
+  isDeviceName,
+  type DeviceChoice,
   type DeviceName,
 } from "../../../agent/lib/devices";
 import { hasLiveStream, latestScreen, toActivity, toolParts, type ToolActivity } from "./activity";
 import { ApprovalBanner } from "./approval";
 import { Chat } from "./chat";
-import { AgentIndicator, ChevronDown, Monitor, Plus } from "./icons";
+import { Plus } from "./icons";
 import { LiveView, type Control } from "./live-view";
+import { Button } from "@ui-sdk/react/button";
 
 const TAKEOVER_CONTEXT =
   "The user just operated the screen by hand. Look at the screen before acting; earlier observations may be stale.";
@@ -29,9 +31,27 @@ function liveStreamUrl(sessionId: string | undefined, device: DeviceName): strin
   return url.toString();
 }
 
+/** Auto mode's pick for a task, from app/api/device/route.ts; the default device if it fails. */
+async function chooseDevice(task: string): Promise<DeviceName> {
+  try {
+    const response = await fetch("/api/device", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task }),
+    });
+    const { device } = (await response.json()) as { device?: unknown };
+    return isDeviceName(device) ? device : DEFAULT_DEVICE;
+  } catch {
+    return DEFAULT_DEVICE;
+  }
+}
+
 export default function Page() {
   const agent = useEveAgent();
+  // What the composer's picker shows, and the device the chat runs on once it starts.
+  const [choice, setChoice] = useState<DeviceChoice>("auto");
   const [device, setDevice] = useState<DeviceName>(DEFAULT_DEVICE);
+  const [deciding, setDeciding] = useState(false);
   const [selected, setSelected] = useState<ToolActivity | undefined>();
   const [expanded, setExpanded] = useState(false);
   const [control, setControl] = useState<Control>("agent");
@@ -56,14 +76,23 @@ export default function Page() {
   // A chat keeps the device it started on; switching starts a new chat.
   const locked = agent.messages.length > 0;
 
-  const send = (text: string, target: DeviceName = device) => {
+  const send = async (text: string, picked?: DeviceName) => {
     setSelected(undefined);
-    if (!locked) setDevice(target);
+    let target = device;
+    if (!locked) {
+      const wanted = picked ?? choice;
+      if (wanted === "auto") {
+        setDeciding(true);
+        target = await chooseDevice(text);
+        setDeciding(false);
+      } else {
+        target = wanted;
+      }
+      setDevice(target);
+      setChoice(target);
+    }
     setControl("agent");
-    const clientContext = [
-      deviceContext(locked ? device : target),
-      ...(userDrove ? [TAKEOVER_CONTEXT] : []),
-    ];
+    const clientContext = [deviceContext(target), ...(userDrove ? [TAKEOVER_CONTEXT] : [])];
     setUserDrove(false);
     setInterrupted(false);
     void agent.send(text, { clientContext }).catch(() => undefined);
@@ -81,7 +110,9 @@ export default function Page() {
 
   const handBack = () => {
     if (interrupted)
-      send("I took over the screen and I'm done. Continue the task from where things are now.");
+      void send(
+        "I took over the screen and I'm done. Continue the task from where things are now.",
+      );
     else setControl("agent");
   };
 
@@ -89,49 +120,36 @@ export default function Page() {
     <main className={`app ${expanded ? "app-expanded" : ""}`}>
       <header className="topbar">
         <div className="brand">
-          <AgentIndicator active={busy} size={18} />
+          <span className="brand-mark">eve</span>
+          <span aria-hidden="true" className="brand-slash">
+            /
+          </span>
           <span className="brand-name">Computer use</span>
-          <span className="badge badge-gray badge-sm">eve</span>
         </div>
         <div className="topbar-actions">
-          <label
-            className="select"
-            title={locked ? "Start a new chat to use another device" : DEVICES[device].description}
-          >
-            <Monitor size={14} />
-            <select
-              disabled={locked}
-              onChange={(event) => setDevice(event.currentTarget.value as DeviceName)}
-              value={device}
-            >
-              {Object.entries(DEVICES).map(([name, option]) => (
-                <option key={name} value={name}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="select-chevron" size={14} />
-          </label>
-          <button
+          <Button
             aria-label="New chat"
             className="icon-button icon-button-tertiary"
             onClick={() => {
               setSelected(undefined);
               setControl("agent");
+              setChoice("auto");
               agent.newSession();
             }}
             title="New chat"
-            type="button"
           >
             <Plus size={16} />
-          </button>
+          </Button>
         </div>
       </header>
       <section className="main">
         <Chat
           busy={busy}
-          device={device}
-          disabled={agent.status === "resuming"}
+          choice={locked ? device : choice}
+          deciding={deciding}
+          disabled={agent.status === "resuming" || deciding}
+          locked={locked}
+          onChoiceChange={setChoice}
           error={agent.error ? agent.error.message : null}
           messages={agent.messages}
           notice={
@@ -140,7 +158,7 @@ export default function Page() {
           onSelect={(activity) =>
             setSelected((previous) => (previous?.id === activity.id ? undefined : activity))
           }
-          onSend={send}
+          onSend={(text, picked) => void send(text, picked)}
           onStop={() => void agent.cancel().catch(() => undefined)}
           selectedId={selected?.id}
           view={agent.view}

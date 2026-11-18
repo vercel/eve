@@ -13,7 +13,7 @@ export const BROWSER_STREAM_PORT = 3602;
 export const RELAY_TOKEN_FILE = "/tmp/live-relay.json";
 
 /** Bump when RELAY_SOURCE changes, so sandboxes running an older relay restart it. */
-export const RELAY_VERSION = "4";
+export const RELAY_VERSION = "5";
 
 export type LiveDevice = "browser" | "desktop";
 

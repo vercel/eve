@@ -1,4 +1,5 @@
 import { runAgentBrowser } from "@agent-browser/eve/sandbox";
+import { startComputerUse } from "eve/extensions/computer-use/sandbox";
 import type { ToolContext } from "eve/tools";
 
 import { environment } from "../sandbox";
@@ -10,13 +11,14 @@ import {
   RELAY_VERSION,
   type LiveDevice,
 } from "./live-config";
-import { DESKTOP_STREAM_SOURCE, RELAY_SOURCE } from "./live-sources";
+import { RELAY_SOURCE } from "./live-sources";
 
+/** screen-relay's engine, on loopback without a token; only the relay reaches it. */
 const DESKTOP_STREAM_PORT = 3601;
+/** The display eve's computer-use extension draws the desktop on. */
 const DESKTOP_DISPLAY = ":99";
 
 const RELAY_PATH = "/tmp/live-relay.cjs";
-const DESKTOP_STREAM_PATH = "/tmp/live-desktop.cjs";
 
 /** A stopped sandbox resumes without its processes, so recheck the streams this often. */
 const RECHECK_MS = 30_000;
@@ -113,15 +115,23 @@ async function ensureBrowserStream(ctx: ToolContext): Promise<void> {
     throw new Error(`Starting the browser stream failed: ${enabled.stderr.slice(-500)}`);
 }
 
+/**
+ * screen-relay attached to the computer-use display. It stops when that display does, as after
+ * the sandbox resumes, so a session that isn't answering is replaced. The display starts here if
+ * it isn't running yet, so the live view can show the desktop before the first action finishes.
+ */
 async function ensureDesktopStream(sandbox: LiveSandbox): Promise<void> {
   const up = await sandbox.run({
-    command: `curl -sf http://127.0.0.1:${DESKTOP_STREAM_PORT}/health`,
+    command: `curl -sf http://127.0.0.1:${DESKTOP_STREAM_PORT}/capabilities >/dev/null`,
   });
   if (up.exitCode === 0) return;
-  await sandbox.writeTextFile({ path: DESKTOP_STREAM_PATH, content: DESKTOP_STREAM_SOURCE });
+  await startComputerUse(sandbox);
   await start(
     sandbox,
-    `setsid -f node ${DESKTOP_STREAM_PATH} ${DESKTOP_STREAM_PORT} ${DESKTOP_DISPLAY} >/tmp/live-desktop.log 2>&1`,
+    [
+      "screen-relay down >/dev/null 2>&1 || true",
+      `screen-relay up -d --backend x11 --display ${DESKTOP_DISPLAY} --desktop none --port ${DESKTOP_STREAM_PORT}`,
+    ].join("\n"),
   );
 }
 

@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@agent-browser/eve": "0.40.0",
+    "@ui-sdk/core": "0.1.0-beta.10",
+    "@ui-sdk/react": "0.1.0-beta.10",
     "@vercel/functions": "3.10.5",
     "@vercel/sandbox": "3.9.0",
     "ai": "7.0.137",

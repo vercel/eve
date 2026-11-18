@@ -4,11 +4,18 @@ import type { SessionView } from "eve/events";
 import type { EveMessage, EveToolPart } from "eve/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { DEVICES, type DeviceName } from "../../../agent/lib/devices";
+import { DEVICES, type DeviceChoice, type DeviceName } from "../../../agent/lib/devices";
 import { explainError, formatDuration, toActivity, type ToolActivity } from "./activity";
-import { AgentIndicator, ArrowUp, ChevronRight, Clock, Monitor, Wrench } from "./icons";
+import { ArrowUp, ChevronRight, Monitor } from "./icons";
 import { Markdown } from "./markdown";
 import { activityStatus, Code, Row, TimelineBar } from "./run-ui";
+import { Button } from "@ui-sdk/react/button";
+import {
+  SegmentedControl,
+  SegmentedControlIndicator,
+  SegmentedControlItem,
+} from "@ui-sdk/react/segmented-control";
+import { Textarea } from "@ui-sdk/react/textarea";
 
 interface ChatProps {
   readonly messages: readonly EveMessage[];
@@ -16,7 +23,13 @@ interface ChatProps {
   readonly busy: boolean;
   readonly disabled: boolean;
   readonly error: string | null;
-  readonly device: DeviceName;
+  /** The picker's value: Auto, or the device the chat runs on. */
+  readonly choice: DeviceChoice;
+  readonly onChoiceChange: (choice: DeviceChoice) => void;
+  /** A chat keeps the device it started on, so the picker is fixed once it has messages. */
+  readonly locked: boolean;
+  /** Auto mode is choosing a device for the first message. */
+  readonly deciding: boolean;
   readonly selectedId: string | undefined;
   readonly onSelect: (activity: ToolActivity) => void;
   /** `device` switches to that device first, for suggestions that need one. */
@@ -37,7 +50,7 @@ const SUGGESTIONS: readonly Suggestion[] = [
     device: "browser",
   },
   { text: "Open news.ycombinator.com and open the comments for the top story.", device: "browser" },
-  { text: "Open Firefox, go to example.com, and tell me what the page says.", device: "desktop" },
+  { text: "Open the calculator and work out 2 × 2.", device: "desktop" },
 ];
 
 /** Mac or not, known only after hydration, so the server and first client render agree. */
@@ -53,7 +66,10 @@ export function Chat({
   busy,
   disabled,
   error,
-  device,
+  choice,
+  onChoiceChange,
+  locked,
+  deciding,
   selectedId,
   onSelect,
   onSend,
@@ -61,6 +77,12 @@ export function Chat({
   notice,
 }: ChatProps) {
   const [draft, setDraft] = useState("");
+  // While Auto picks a device the message isn't sent yet; show it in the thread meanwhile.
+  const [sent, setSent] = useState<string | null>(null);
+  const placeholderShown = useRef(false);
+  const waiting = deciding && messages.length === 0 ? sent : null;
+  if (waiting !== null) placeholderShown.current = true;
+  if (messages.length === 0 && !deciding) placeholderShown.current = false;
   const log = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
 
@@ -72,6 +94,7 @@ export function Chat({
     const value = text.trim();
     if (value.length === 0 || disabled) return;
     onSend(value, target);
+    setSent(value);
     setDraft("");
   };
 
@@ -92,13 +115,26 @@ export function Chat({
   return (
     <div className="chat-body">
       <div className="log" ref={log}>
-        {messages.length === 0 ? (
+        {waiting !== null ? (
+          <div className="thread">
+            <div className="message-user">
+              <div className="bubble">{waiting}</div>
+            </div>
+            <div className="pending">
+              <span className="pending-title shimmer">Choosing browser or desktop</span>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
           <EmptyState onPick={submit} />
         ) : (
           <div className="thread">
             {messages.map((message, index) =>
               message.role === "user" ? (
-                <UserMessage key={message.id} message={message} />
+                <UserMessage
+                  key={message.id}
+                  message={message}
+                  settled={index === 0 && placeholderShown.current}
+                />
               ) : (
                 <AssistantMessage
                   key={message.id}
@@ -110,11 +146,9 @@ export function Chat({
                 />
               ),
             )}
-            {busy && messages.at(-1)?.role === "user" ? (
+            {busy && !showsProgress(messages.at(-1)) ? (
               <div className="pending">
-                <AgentIndicator active size={18} />
-                <span className="shimmer">Thinking</span>
-                <Ellipsis />
+                <span className="pending-title shimmer">Thinking</span>
               </div>
             ) : null}
             {error ? <p className="chat-error">{error}</p> : null}
@@ -132,7 +166,9 @@ export function Chat({
             submit(draft);
           }}
         >
-          <textarea
+          <Textarea
+            autoResize
+            className="composer-input"
             disabled={disabled}
             onChange={(event) => setDraft(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -144,28 +180,30 @@ export function Chat({
             placeholder={
               busy
                 ? "Steer the agent…"
-                : `Ask the agent to do something on the ${DEVICES[device].label.toLowerCase()}…`
+                : choice === "auto"
+                  ? "Describe a task; Auto picks the browser or the desktop…"
+                  : `Ask the agent to do something on the ${DEVICES[choice].label.toLowerCase()}…`
             }
             ref={input}
             rows={2}
             value={draft}
           />
           <div className="composer-bar">
+            <DevicePicker choice={choice} locked={locked} onChange={onChoiceChange} />
             <span className="composer-hint">
               <kbd>⏎</kbd> send <kbd>⇧⏎</kbd> new line
             </span>
             {busy && draft.trim().length === 0 ? (
-              <button
+              <Button
                 aria-label="Stop"
                 className="icon-button icon-button-secondary"
                 onClick={onStop}
                 title="Stop the agent"
-                type="button"
               >
                 <span className="stop-square" />
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 aria-label={busy ? "Steer" : "Send"}
                 className="icon-button icon-button-primary"
                 disabled={disabled || draft.trim().length === 0}
@@ -173,7 +211,7 @@ export function Chat({
                 type="submit"
               >
                 <ArrowUp size={14} />
-              </button>
+              </Button>
             )}
           </div>
         </form>
@@ -182,28 +220,73 @@ export function Chat({
   );
 }
 
+const CHOICES: readonly {
+  readonly value: DeviceChoice;
+  readonly label: string;
+  readonly title: string;
+}[] = [
+  { value: "auto", label: "Auto", title: "Pick the browser or the desktop from the task" },
+  ...(Object.entries(DEVICES) as [DeviceName, (typeof DEVICES)[DeviceName]][]).map(
+    ([value, device]) => ({ value, label: device.label, title: device.description }),
+  ),
+];
+
+/** Auto, Browser, or Desktop. Fixed once the chat starts. */
+function DevicePicker({
+  choice,
+  locked,
+  onChange,
+}: {
+  choice: DeviceChoice;
+  locked: boolean;
+  onChange: (choice: DeviceChoice) => void;
+}) {
+  return (
+    <SegmentedControl
+      aria-label="Device"
+      className="device-picker"
+      onClick={(event) => event.stopPropagation()}
+      onValueChange={(value) => {
+        if (value !== null) onChange(value);
+      }}
+      title={locked ? "Start a new chat to use another device" : undefined}
+      value={choice}
+    >
+      <SegmentedControlIndicator className="device-indicator" />
+      {CHOICES.map((option) => (
+        <SegmentedControlItem
+          className="device-option"
+          disabled={locked && choice !== option.value}
+          key={option.value}
+          title={locked ? undefined : option.title}
+          value={option.value}
+        >
+          {option.label}
+        </SegmentedControlItem>
+      ))}
+    </SegmentedControl>
+  );
+}
+
 function EmptyState({ onPick }: { onPick: (text: string, device?: DeviceName) => void }) {
   const mac = useIsMac();
   return (
     <div className="empty">
-      <div className="empty-mark">
-        <AgentIndicator size={28} />
-      </div>
       <div className="empty-title">
         <h2>Computer use</h2>
       </div>
       <p className="empty-blurb">
         Describe a task and watch the agent work in a sandbox of its own: a headless Chrome, or a
-        Linux desktop with Firefox and terminals. Pick the device at the top right; each chat keeps
-        the one it started with.
+        Linux desktop with Firefox, terminals, a calculator, and a text editor. Pick one below the
+        prompt, or leave it on Auto to choose from the task; each chat keeps the one it started
+        with.
       </p>
       <div className="suggestions">
         {SUGGESTIONS.map((suggestion, index) => (
-          <button
+          <Button
             className="suggestion"
             key={suggestion.text}
             onClick={() => onPick(suggestion.text, suggestion.device)}
-            type="button"
           >
             <span className="suggestion-text">
               <span className="suggestion-chip">
@@ -216,19 +299,19 @@ function EmptyState({ onPick }: { onPick: (text: string, device?: DeviceName) =>
               <kbd>{mac ? "⌘" : "Ctrl"}</kbd>
               <kbd>{index + 1}</kbd>
             </span>
-          </button>
+          </Button>
         ))}
       </div>
     </div>
   );
 }
 
-function UserMessage({ message }: { message: EveMessage }) {
+function UserMessage({ message, settled }: { message: EveMessage; settled: boolean }) {
   const text = message.parts
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("\n");
   return (
-    <div className="message-user">
+    <div className={`message-user ${settled ? "message-settled" : ""}`}>
       <div className="bubble">{text}</div>
     </div>
   );
@@ -237,6 +320,15 @@ function UserMessage({ message }: { message: EveMessage }) {
 type Block =
   | { kind: "text"; key: string; text: string }
   | { kind: "tools"; key: string; parts: EveToolPart[] };
+
+/**
+ * Whether the latest message already shows the agent at work: its text, or its steps, whose
+ * title says Thinking between steps. Until it shows either, the chat shows its own Thinking line,
+ * so the indicator doesn't drop out while the agent decides on its first step.
+ */
+function showsProgress(message: EveMessage | undefined): boolean {
+  return message !== undefined && message.role !== "user" && blocksOf(message).length > 0;
+}
 
 function blocksOf(message: EveMessage): Block[] {
   const blocks: Block[] = [];
@@ -266,6 +358,8 @@ function AssistantMessage({
   onSelect: (activity: ToolActivity) => void;
 }) {
   const blocks = blocksOf(message);
+  // A reply arrives before it has text or steps; an empty one would push Thinking down a gap.
+  if (blocks.length === 0) return null;
   return (
     <div className="message-assistant">
       {blocks.map((block, index) =>
@@ -283,6 +377,30 @@ function AssistantMessage({
       )}
     </div>
   );
+}
+
+/** The steps' time axis: a minute, which covers most turns, doubling for longer ones. */
+const AXIS_MS = 60_000;
+
+function axisLength(elapsedMs: number): number {
+  let length = AXIS_MS;
+  while (length < elapsedMs) length *= 2;
+  return length;
+}
+
+/** How often running durations update. */
+const TICK_MS = 100;
+
+/** The current time, updated every TICK_MS while `ticking`, and left as it was otherwise. */
+function useNow(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  return now;
 }
 
 function WorkGroup({
@@ -304,9 +422,15 @@ function WorkGroup({
   );
   const [open, setOpen] = useState<boolean | null>(null);
   const expanded = open ?? (last || needsAttention);
+  // The turn's latest steps, between one step and the next: the agent is deciding what to do.
+  const thinking = last && running === undefined;
 
   const failed = activities.filter((activity) => activity.state === "error").length;
-  const now = Date.now();
+  // Running steps have no end yet, so their durations and bars follow a clock that ticks
+  // while any step is still open, instead of jumping each time the session sends an update.
+  // `last` is the group the agent is still working in, between steps too.
+  const inProgress = last || activities.some((activity) => activity.endedAt === undefined);
+  const now = useNow(inProgress);
   const started = activities.flatMap((activity) =>
     activity.startedAt === undefined ? [] : [activity.startedAt],
   );
@@ -317,39 +441,38 @@ function WorkGroup({
           endMs: Math.max(...activities.map((activity) => activity.endedAt ?? now)),
         }
       : null;
+  // The bars share a fixed axis, so a bar never moves once drawn: a new step appears at its place
+  // and only the running one grows. It doubles only when a turn outlasts it.
+  const axis =
+    scale === null
+      ? null
+      : { startMs: scale.startMs, endMs: scale.startMs + axisLength(scale.endMs - scale.startMs) };
 
   return (
     <div className={`work ${expanded ? "work-open" : ""}`}>
-      <button
-        aria-expanded={expanded}
-        className="work-trigger"
-        onClick={() => setOpen(!expanded)}
-        type="button"
-      >
-        <span className={`work-title ${running && running.state !== "awaiting" ? "shimmer" : ""}`}>
+      <Button aria-expanded={expanded} className="work-trigger" onClick={() => setOpen(!expanded)}>
+        <span
+          className={`work-title ${(running && running.state !== "awaiting") || thinking ? "shimmer" : ""}`}
+        >
           {running
             ? running.state === "awaiting"
               ? "Waiting for your approval"
               : running.label
-            : failed === activities.length
-              ? "Failed"
-              : "Worked"}
+            : thinking
+              ? "Thinking"
+              : failed === activities.length
+                ? "Failed"
+                : "Worked"}
         </span>
         <span className="work-meta">
           <span>
-            <Wrench size={12} />
-            {activities.length}
+            {activities.length} {activities.length === 1 ? "step" : "steps"}
           </span>
-          {scale ? (
-            <span>
-              <Clock size={12} />
-              {formatDuration(scale.endMs - scale.startMs)}
-            </span>
-          ) : null}
-          {failed > 0 ? <span className="tone-red">{failed} Failed</span> : null}
+          {scale ? <span>{formatDuration(scale.endMs - scale.startMs)}</span> : null}
+          {failed > 0 ? <span className="tone-red">{failed} failed</span> : null}
         </span>
         <ChevronRight className="work-chevron" size={14} />
-      </button>
+      </Button>
       {expanded ? (
         <div className="rows work-rows">
           {activities.map((activity) => (
@@ -357,7 +480,8 @@ function WorkGroup({
               activity={activity}
               key={activity.id}
               onSelect={onSelect}
-              scale={scale}
+              now={now}
+              scale={axis}
               selected={selectedId === activity.id}
             />
           ))}
@@ -370,31 +494,32 @@ function WorkGroup({
 function Step({
   activity,
   selected,
+  now,
   scale,
   onSelect,
 }: {
   activity: ToolActivity;
   selected: boolean;
+  now: number;
   scale: { startMs: number; endMs: number } | null;
   onSelect: (activity: ToolActivity) => void;
 }) {
   const status = activityStatus(activity);
   const note =
     activity.state === "awaiting" ? (
-      <span className="tone-amber">Needs your approval</span>
+      <span className="row-tag row-tag-waiting">Waiting · needs your approval</span>
     ) : activity.error ? (
-      <span className="tone-red">{explainError(activity.error)}</span>
+      <span className="row-tag row-tag-failed">Failed · {explainError(activity.error)}</span>
     ) : undefined;
   const duration =
-    activity.startedAt === undefined
-      ? undefined
-      : (activity.endedAt ?? Date.now()) - activity.startedAt;
+    activity.startedAt === undefined ? undefined : (activity.endedAt ?? now) - activity.startedAt;
 
   return (
     <Row
       bar={
         <TimelineBar
           endedAt={activity.endedAt}
+          now={now}
           scale={scale}
           startedAt={activity.startedAt}
           status={status}
@@ -417,14 +542,4 @@ function Step({
 
 function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
-}
-
-function Ellipsis() {
-  return (
-    <span aria-hidden="true" className="ellipsis">
-      <span>.</span>
-      <span>.</span>
-      <span>.</span>
-    </span>
-  );
 }

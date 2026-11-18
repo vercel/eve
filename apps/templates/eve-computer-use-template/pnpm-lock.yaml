@@ -11,6 +11,12 @@ importers:
       '@agent-browser/eve':
         specifier: 0.40.0
         version: 0.40.0(@vercel/sandbox@3.9.0)(eve@1.0.0-rc.10(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(next@16.3.8(@types/node@26.2.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))
+      '@ui-sdk/core':
+        specifier: 0.1.0-beta.10
+        version: 0.1.0-beta.10
+      '@ui-sdk/react':
+        specifier: 0.1.0-beta.10
+        version: 0.1.0-beta.10(@types/react@19.2.18)(@ui-sdk/core@0.1.0-beta.10)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@vercel/functions':
         specifier: 3.10.5
         version: 3.10.5(ws@8.22.0)
@@ -570,6 +576,20 @@ packages:
     engines: {node: '>=16.20.0'}
     cpu: [x64]
     os: [win32]
+
+  '@ui-sdk/core@0.1.0-beta.10':
+    resolution: {integrity: sha512-Rtm3QtuRT9U5nAlhIwKf2TzNIDZeOq3VmPzIiy55K3nFGeZokpPmHdF5ryaZmsByImNhOdRv5P7TOMro48NB+Q==}
+
+  '@ui-sdk/react@0.1.0-beta.10':
+    resolution: {integrity: sha512-iObTzV2owJmF6GNVIiudpunoPlQ7mnDezdXc7XVajkmBpAzwq6gMuT0xLesWH71ct9wKcWRPkxbWC+E3ahOUPA==}
+    peerDependencies:
+      '@types/react': '>=19.2.10'
+      '@ui-sdk/core': ^0.1.0-beta.10
+      react: '>=19'
+      react-dom: '>=19'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   '@vercel/cli-config@0.3.1':
     resolution: {integrity: sha512-sISbygqlFXYb8qfPu/+2Cf/A8IjrlAuZePdag3EDQr2PRA455s7UZtl9Ro674CWsB/saBRmz3jEkw0YsQs8OoQ==}
@@ -1443,6 +1463,16 @@ snapshots:
 
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
+
+  '@ui-sdk/core@0.1.0-beta.10': {}
+
+  '@ui-sdk/react@0.1.0-beta.10(@types/react@19.2.18)(@ui-sdk/core@0.1.0-beta.10)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@ui-sdk/core': 0.1.0-beta.10
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+    optionalDependencies:
+      '@types/react': 19.2.18
 
   '@vercel/cli-config@0.3.1':
     dependencies:

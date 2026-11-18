@@ -1,14 +1,19 @@
 import { call, type SessionView } from "eve/events";
 import type { EveMessage, EveToolPart, Interaction } from "eve/react";
 
-import type { Screen } from "../../../agent/lib/screen";
+import { DEVICE_TOOL_PREFIX, type LiveDevice } from "../../../agent/lib/live-config";
+import type { LiveStart, Screen } from "../../../agent/lib/screen";
 
 export interface ToolActivity {
   readonly id: string;
   readonly label: string;
   readonly state: "running" | "awaiting" | "done" | "error";
+  /** The device the call operates, from its tool's name; undefined for other tools. */
+  readonly device?: LiveDevice;
   /** The screen after the call, from the browser and desktop tools. */
   readonly screen?: Screen;
+  /** Where the device's live stream runs, reported while the call is still running. */
+  readonly live?: LiveStart;
   readonly error?: string;
   readonly input?: unknown;
   readonly startedAt?: number;
@@ -37,7 +42,9 @@ export function toActivity(part: EveToolPart, view: SessionView): ToolActivity {
           : part.state === "failed" || part.state === "rejected" || part.state === "cancelled"
             ? "error"
             : "running",
+    device: deviceOf(part.name),
     screen: screenOf(part.output),
+    live: liveOf(part.output),
     error:
       part.state === "failed"
         ? (part.error?.message ?? "Failed")
@@ -64,8 +71,24 @@ export function hasLiveStream(
   device: "browser" | "desktop",
 ): boolean {
   return activities.some(
-    (activity) => activity.screen?.device === device && activity.screen.sandbox !== undefined,
+    (activity) =>
+      activity.live?.device === device ||
+      (activity.screen?.device === device && activity.screen.sandbox !== undefined),
   );
+}
+
+function deviceOf(name: string): LiveDevice | undefined {
+  return (Object.keys(DEVICE_TOOL_PREFIX) as LiveDevice[]).find((device) =>
+    name.startsWith(DEVICE_TOOL_PREFIX[device]),
+  );
+}
+
+function liveOf(output: unknown): LiveStart | undefined {
+  if (typeof output !== "object" || output === null) return undefined;
+  const { live } = output as { live?: Partial<LiveStart> };
+  return typeof live?.device === "string" && typeof live.sandbox === "string"
+    ? (live as LiveStart)
+    : undefined;
 }
 
 function screenOf(output: unknown): Screen | undefined {

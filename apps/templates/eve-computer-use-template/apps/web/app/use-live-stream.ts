@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { canDecodeDesktop, DesktopStream } from "./screen-relay";
+
 interface Size {
   readonly width: number;
   readonly height: number;
@@ -30,8 +32,9 @@ const INITIAL: LiveStreamState = {
 };
 
 /**
- * Draw a sandbox device's live stream on `canvas`, and send it input. Both the browser and the
- * desktop speak agent-browser's stream protocol; see agent/lib/live-sources.ts.
+ * Draw a sandbox device's live stream on `canvas`, and send it input. The browser speaks
+ * agent-browser's JSON stream protocol; the desktop is screen-relay's H.264 stream, which
+ * `DesktopStream` decodes and sends input to in the same message shapes.
  */
 export function useLiveStream(
   canvas: React.RefObject<HTMLCanvasElement | null>,
@@ -39,6 +42,7 @@ export function useLiveStream(
 ) {
   const [state, setState] = useState<LiveStreamState>(INITIAL);
   const socket = useRef<WebSocket | null>(null);
+  const desktopRef = useRef<DesktopStream | null>(null);
 
   useEffect(() => {
     setState(url === undefined ? INITIAL : { ...INITIAL, connection: "connecting" });
@@ -51,21 +55,52 @@ export function useLiveStream(
       if (!disposed) setState((current) => ({ ...current, ...patch }));
     };
 
+    const desktop = new URL(url).searchParams.get("device") === "desktop";
+    // Without WebCodecs the desktop shows its latest screenshot instead.
+    if (desktop && !canDecodeDesktop()) {
+      setState({ ...INITIAL, connection: "offline" });
+      return;
+    }
+
     function connect() {
       if (disposed) return;
       const ws = new WebSocket(url!);
       socket.current = ws;
+      const desktopStream = desktop
+        ? new DesktopStream(
+            ws,
+            () => canvas.current,
+            (frame) => {
+              if (disposed) return;
+              // The desktop's input is measured in its own pixels, the frame's size.
+              setState((current) =>
+                current.frame?.width === frame.width && current.frame.height === frame.height
+                  ? current
+                  : { ...current, frame, viewport: frame },
+              );
+            },
+          )
+        : null;
+      desktopRef.current = desktopStream;
       ws.onopen = () => {
         attempt = 0;
         update({ connection: "live" });
       };
       ws.onclose = () => {
-        if (socket.current === ws) socket.current = null;
+        desktopStream?.close();
+        if (socket.current === ws) {
+          socket.current = null;
+          desktopRef.current = null;
+        }
         if (disposed) return;
         update({ connection: "offline" });
         retry = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 8000));
       };
       ws.onmessage = (event) => {
+        if (desktopStream !== null) {
+          desktopStream.receive(event.data);
+          return;
+        }
         const message = JSON.parse(String(event.data)) as ServerMessage;
         if (message.type === "frame") {
           const { data, metadata } = message as Extract<ServerMessage, { type: "frame" }>;
@@ -98,12 +133,16 @@ export function useLiveStream(
       clearTimeout(retry);
       socket.current?.close();
       socket.current = null;
+      desktopRef.current?.close();
+      desktopRef.current = null;
     };
   }, [canvas, url]);
 
   const send = useCallback((message: Record<string, unknown>) => {
     const ws = socket.current;
-    if (ws !== null && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+    if (desktopRef.current !== null) desktopRef.current.send(message);
+    else ws.send(JSON.stringify(message));
   }, []);
 
   return { ...state, send };

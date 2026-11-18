@@ -43,32 +43,39 @@ export async function GET(request: Request) {
 
   return upgradeWebSocket(
     (client) => {
-      const upstream = new WebSocket(
-        `${origin}/${device}?token=${encodeURIComponent(token)}&maxFps=24`,
-      );
-      const pending: string[] = [];
+      const query = `token=${encodeURIComponent(token)}`;
+      // The desktop is screen-relay's binary `nsl1` stream; the browser's is agent-browser's JSON.
+      const upstream =
+        device === "desktop"
+          ? new WebSocket(`${origin}/desktop?${query}`, ["nsl1"])
+          : new WebSocket(`${origin}/browser?${query}&maxFps=24`);
+      const pending: { data: Buffer; binary: boolean }[] = [];
       const closeBoth = () => {
         client.close();
         upstream.close();
       };
 
       upstream.on("open", () => {
-        for (const message of pending.splice(0)) upstream.send(message);
+        for (const { data, binary } of pending.splice(0)) upstream.send(data, { binary });
       });
       upstream.on("message", (data, isBinary) => client.send(data, { binary: isBinary }));
       upstream.on("close", closeBoth);
       upstream.on("error", closeBoth);
 
-      client.on("message", (data) => {
-        const text = data.toString();
-        const control = controlMessage(text);
-        if (control !== null) {
-          if (device === "browser") void runControl(relay, control);
-          return;
+      client.on("message", (raw, isBinary) => {
+        const data = Buffer.isBuffer(raw)
+          ? raw
+          : Buffer.concat(Array.isArray(raw) ? raw : [Buffer.from(raw)]);
+        if (!isBinary) {
+          const control = controlMessage(data.toString());
+          if (control !== null) {
+            if (device === "browser") void runControl(relay, control);
+            return;
+          }
         }
-        if (upstream.readyState === WebSocket.OPEN) upstream.send(text);
+        if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary });
         else if (upstream.readyState === WebSocket.CONNECTING && pending.length < MAX_PENDING)
-          pending.push(text);
+          pending.push({ data, binary: isBinary });
       });
       client.on("close", closeBoth);
       client.on("error", closeBoth);

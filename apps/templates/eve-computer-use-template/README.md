@@ -1,9 +1,13 @@
 # Computer Use
 
-An [eve](https://eve.dev) and Next.js app where you watch an agent operate a computer in its own sandbox. Pick a device, describe a task, and follow along in a floating window over the chat that you can drag anywhere or expand.
+An [eve](https://eve.dev) and Next.js app where you watch an agent operate a computer in its own sandbox. Describe a task, pick a device in the composer or leave it on **Auto**, and follow along in a floating window over the chat that you can drag anywhere or expand.
 
 - **Browser**: a headless Chrome, driven with the [agent-browser](https://agent-browser.dev) extension (`@agent-browser/eve`). The agent reads the page's accessibility tree and acts on element refs.
-- **Desktop**: a Linux desktop with Firefox and terminals, driven with eve's built-in computer-use extension (`eve/extensions/computer-use`). The agent sees screenshots and acts on screen coordinates.
+- **Desktop**: a Linux desktop with Firefox, terminals, a calculator, and a text editor, driven with eve's built-in computer-use extension (`eve/extensions/computer-use`). The agent sees screenshots and acts on screen coordinates. computer_use launches Firefox and the terminal; `computer__launch_app` in `agent/extensions/computer/tools/` opens the other apps, which `agent/lib/desktop-apps.ts` lists and `agent/sandbox.ts` installs.
+
+In Auto, the web app's `/api/device` route asks a decision model which device suits the first message, with the AI SDK's `decide` and Baseten's `baseten/elephant-1` through AI Gateway, and the chat keeps that device. If the decision fails, the chat starts on the browser.
+
+The interface is built from [ui-sdk](https://ui-sdk.dev) components (`@ui-sdk/react`), styled in `apps/web/app/globals.css` after ui-sdk.dev's own look.
 
 ## Architecture
 
@@ -18,7 +22,7 @@ The [directory mounts](https://eve.dev/docs/extensions#override-a-contribution) 
 
 ### Live view and Take Over
 
-The first action on a device starts its live stream in the sandbox (`agent/lib/live.ts`). agent-browser streams the browser's screencast, and `agent/lib/live-sources.ts` streams the desktop with ffmpeg and takes input through xdotool. Both speak agent-browser's stream protocol: JPEG frames out, mouse and keyboard events in. A relay on the sandbox's port 3600 sits in front of them and requires a random token it writes inside the sandbox.
+The first action on a device starts its live stream in the sandbox (`agent/lib/live.ts`). agent-browser streams the browser's screencast as JPEG frames. [screen-relay](https://github.com/vercel-labs/screen-relay) attaches to the desktop's display and streams it as H.264, which the live view decodes with WebCodecs (`apps/web/app/screen-relay.ts`); watching the desktop needs a browser with H.264 WebCodecs, such as current Chrome, Edge, or Safari. A relay on the sandbox's port 3600 (`agent/lib/live-sources.ts`) sits in front of both and requires a random token it writes inside the sandbox.
 
 The browser never connects to the sandbox. It opens `/api/live?session=…&device=…` on the app's own origin, so the app's auth, Deployment Protection, Firewall rules, and rate limits apply. The route (`apps/web/app/api/live/`):
 
@@ -40,7 +44,8 @@ The main pieces are:
 - `agent/lib/screen.ts`: the wrapper that adds a screen to a tool's result
 - `agent/lib/live.ts` and `agent/lib/live-sources.ts`: the live streams and the relay in the sandbox
 - `apps/web/app/api/live/`: the WebSocket route that authorizes viewers and proxies the stream
-- `agent/lib/devices.ts`: the devices the picker offers, and the note each message carries
+- `agent/lib/devices.ts`: the devices the picker offers, what Auto weighs for each, and the note each message carries
+- `apps/web/app/api/device/`: the route that picks a device in Auto
 - `apps/web/app/`: the chat, the live view with Take Over, and approvals
 
 ## Run locally
@@ -84,6 +89,7 @@ The channel in `agent/channels/eve.ts` uses `placeholderAuth()`, which rejects b
 
 - **Allowed sites**: pass `allowedDomains` to `browser({ ... })` in `agent/extensions/browser/extension.ts`.
 - **One device only**: delete the other mount directory and its entry in `agent/lib/devices.ts`.
+- **Auto mode**: change `DECISION_MODEL` in `apps/web/app/api/device/route.ts` to use another [decision model](https://vercel.com/ai-gateway/models?type=evaluation), or edit each device's `criteria` in `agent/lib/devices.ts`. The route is unauthenticated; protect it with your app's auth before you deploy, like the live view.
 
 ## Checks
 

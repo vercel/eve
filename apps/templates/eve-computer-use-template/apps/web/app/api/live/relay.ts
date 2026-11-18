@@ -75,9 +75,9 @@ export async function findRelay(
 }
 
 /**
- * The sandbox the session's latest live stream for `device` runs in, from the results of that
- * device's own tools. A result whose call was requested before `events` began is skipped; a
- * wider window finds it.
+ * The sandbox the session's latest live stream for `device` runs in, from that device's own
+ * tools: the `screen` of a completed call, or the `live` a running call reports before it acts.
+ * A call requested before `events` began is skipped; a wider window finds it.
  */
 function latestSandbox(
   events: readonly SessionStreamEvent[],
@@ -92,16 +92,22 @@ function latestSandbox(
   }
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]!;
-    if (event.type !== "call.settled" || event.data.outcome !== "completed") continue;
-    if (!deviceCalls.has(event.data.callId)) continue;
-    const output = event.data.output;
-    const screen =
-      typeof output === "object" && output !== null
-        ? (output as { screen?: unknown }).screen
-        : undefined;
-    if (typeof screen !== "object" || screen === null) continue;
-    const { device: screenDevice, sandbox } = screen as { device?: unknown; sandbox?: unknown };
-    if (screenDevice === device && typeof sandbox === "string") return sandbox;
+    let reported: unknown;
+    if (event.type === "call.progress") {
+      if (deviceCalls.has(event.data.callId)) reported = field(event.data.output, "live");
+    } else if (event.type === "call.settled" && event.data.outcome === "completed") {
+      if (deviceCalls.has(event.data.callId)) reported = field(event.data.output, "screen");
+    }
+    if (reported === undefined) continue;
+    const reportedDevice = field(reported, "device");
+    const sandbox = field(reported, "sandbox");
+    if (reportedDevice === device && typeof sandbox === "string") return sandbox;
   }
   return undefined;
+}
+
+function field(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
 }

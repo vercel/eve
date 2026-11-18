@@ -1,13 +1,22 @@
 /*
- * Geist, dark theme. Values come from vercel/front packages/geistcn (tokens, typography,
- * materials) and the dashboard agent panel, written as plain CSS.
+ * Geist, dark, in the brutalist look of ui-sdk.dev: square corners, hairline borders instead of
+ * soft shadows, solid inverted controls, a blue accent, and small uppercase mono labels.
+ * ui-sdk's own behavior CSS goes in the `ui-sdk` layer, so every rule here wins over it.
  */
+
+@layer ui-sdk;
 
 :root {
   color-scheme: dark;
 
-  --bg-100: hsl(0 0% 4%);
-  --bg-200: hsl(0 0% 0%);
+  --bg-100: hsl(0 0% 7%);
+  --bg-200: hsl(0 0% 4%);
+
+  /* Hairlines: the panel and control borders, and the stronger edge of a focused field. */
+  --line: rgb(255 255 255 / 0.18);
+  --line-strong: rgb(255 255 255 / 0.6);
+  --accent: hsl(217 66% 50%);
+  --accent-hover: hsl(217 66% 58%);
 
   --gray-100: hsl(0 0% 10%);
   --gray-200: hsl(0 0% 12%);
@@ -70,25 +79,18 @@
 
   --teal-900: hsl(174 90% 41%);
 
-  --shadow-border-base: 0 0 0 1px rgb(255 255 255 / 0.145);
-  --shadow-bg-border: 0 0 0 1px var(--bg-200);
-  --shadow-border: var(--shadow-border-base), var(--shadow-bg-border);
-  --shadow-small: var(--shadow-border-base), 0 1px 2px rgb(0 0 0 / 0.16), var(--shadow-bg-border);
-  --shadow-medium:
-    var(--shadow-border-base), 0 2px 2px rgb(0 0 0 / 0.32), 0 8px 8px -8px rgb(0 0 0 / 0.16),
-    var(--shadow-bg-border);
-  --shadow-menu:
-    var(--shadow-border-base), 0 1px 1px rgb(0 0 0 / 0.02), 0 4px 8px -4px rgb(0 0 0 / 0.04),
-    0 16px 24px -8px rgb(0 0 0 / 0.06), var(--shadow-bg-border);
-  /* Floating over a live page needs more separation than Geist's menu shadow gives on a flat surface. */
-  --shadow-float:
-    var(--shadow-border-base), 0 4px 8px -2px rgb(0 0 0 / 0.4), 0 16px 32px -8px rgb(0 0 0 / 0.6);
-  --shadow-modal:
-    var(--shadow-border-base), 0 1px 1px rgb(0 0 0 / 0.02), 0 8px 16px -4px rgb(0 0 0 / 0.5),
-    0 24px 48px -8px rgb(0 0 0 / 0.7), var(--shadow-bg-border);
+  /* Every surface is drawn with a hairline, never a blurred shadow. A floating card adds a hard
+     offset block, so it still separates from the live page under it. */
+  --shadow-border-base: 0 0 0 1px var(--line);
+  --shadow-border: var(--shadow-border-base);
+  --shadow-small: var(--shadow-border-base);
+  --shadow-medium: var(--shadow-border-base);
+  --shadow-menu: var(--shadow-border-base);
+  --shadow-float: var(--shadow-border-base), 6px 6px 0 0 rgb(0 0 0 / 0.85);
+  --shadow-modal: var(--shadow-border-base), 8px 8px 0 0 rgb(0 0 0 / 0.85);
 
-  --focus-ring: 0 0 0 2px var(--bg-100), 0 0 0 4px var(--blue-900);
-  --input-focus: 0 0 0 1px var(--gray-alpha-600), 0 0 0 4px rgb(255 255 255 / 0.24);
+  --focus-ring: 0 0 0 2px var(--bg-200), 0 0 0 3px var(--accent);
+  --input-focus: 0 0 0 1px var(--line-strong);
 
   --ease-swift: cubic-bezier(0.175, 0.885, 0.32, 1.1);
   --ease-out: cubic-bezier(0.215, 0.61, 0.355, 1);
@@ -153,7 +155,7 @@ kbd {
   min-width: 20px;
   height: 20px;
   padding: 0 5px;
-  border-radius: 5px;
+  border-radius: 0;
   background: var(--gray-100);
   color: var(--gray-900);
   font-family: var(--font-sans);
@@ -193,7 +195,7 @@ kbd {
   gap: 6px;
   height: 36px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -204,9 +206,6 @@ kbd {
     box-shadow 150ms ease-in-out,
     transform 150ms ease-in-out;
 }
-.button:active {
-  transform: scale(0.98);
-}
 .button-sm {
   height: 32px;
   padding: 0 10px;
@@ -216,15 +215,17 @@ kbd {
   color: var(--bg-100);
 }
 .button-primary:hover {
-  background: hsl(0 0% 80%);
+  background: var(--accent);
+  color: var(--gray-1000);
 }
 .button-secondary {
-  background: var(--bg-100);
+  background: transparent;
   color: var(--gray-1000);
-  box-shadow: 0 0 0 1px var(--gray-400);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .button-secondary:hover {
-  background: var(--gray-200);
+  background: var(--gray-1000);
+  color: var(--bg-200);
 }
 .button-tertiary {
   color: var(--gray-900);
@@ -240,22 +241,20 @@ kbd {
   width: 32px;
   height: 32px;
   flex: none;
-  border-radius: 9999px;
+  border-radius: 0;
   transition:
     background 150ms ease-in-out,
     color 150ms ease-in-out,
     opacity 150ms ease-in-out,
     transform 150ms ease-in-out;
 }
-.icon-button:active:not(:disabled) {
-  transform: scale(0.94);
-}
 .icon-button-primary {
   background: var(--gray-1000);
   color: var(--bg-100);
 }
 .icon-button-primary:hover:not(:disabled) {
-  background: hsl(0 0% 80%);
+  background: var(--accent);
+  color: var(--gray-1000);
 }
 .icon-button-primary:disabled {
   background: var(--gray-200);
@@ -263,15 +262,16 @@ kbd {
   cursor: default;
 }
 .icon-button-secondary {
-  background: var(--bg-100);
-  box-shadow: 0 0 0 1px var(--gray-400);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .icon-button-secondary:hover {
-  background: var(--gray-200);
+  background: var(--gray-1000);
+  color: var(--bg-200);
 }
 .icon-button-tertiary {
   color: var(--gray-900);
-  border-radius: 6px;
+  border-radius: 0;
 }
 .icon-button-tertiary:hover {
   background: var(--gray-alpha-200);
@@ -284,7 +284,7 @@ kbd {
   gap: 3px;
   height: 20px;
   padding: 0 7px;
-  border-radius: 9999px;
+  border-radius: 0;
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
@@ -328,7 +328,7 @@ kbd {
   gap: 6px;
   height: 32px;
   padding: 0 30px 0 10px;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--bg-100);
   box-shadow: 0 0 0 1px var(--gray-alpha-400);
   color: var(--gray-900);
@@ -436,49 +436,6 @@ kbd {
   }
 }
 
-.ellipsis span {
-  animation: ellipsis 1.5s ease infinite;
-  color: var(--gray-900);
-}
-.ellipsis span:nth-child(2) {
-  animation-name: ellipsis-2;
-}
-.ellipsis span:nth-child(3) {
-  animation-name: ellipsis-3;
-}
-@keyframes ellipsis {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  10%,
-  75% {
-    opacity: 1;
-  }
-}
-@keyframes ellipsis-2 {
-  0%,
-  15%,
-  100% {
-    opacity: 0;
-  }
-  25%,
-  75% {
-    opacity: 1;
-  }
-}
-@keyframes ellipsis-3 {
-  0%,
-  30%,
-  100% {
-    opacity: 0;
-  }
-  40%,
-  75% {
-    opacity: 1;
-  }
-}
-
 /* ---------------------------------------------------------------- Shell */
 
 .brand {
@@ -486,10 +443,29 @@ kbd {
   align-items: center;
   gap: 10px;
 }
+/* The framework's name, always lowercase, as a solid block like ui-sdk.dev's mark. */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 7px 1px;
+  background: var(--gray-1000);
+  color: var(--bg-200);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-transform: none;
+}
+.brand-slash {
+  color: var(--gray-600);
+  font-size: 18px;
+  font-weight: 300;
+}
 .brand-name {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.28px;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
 /* ---------------------------------------------------------------- Browser */
@@ -504,30 +480,27 @@ kbd {
   flex-direction: column;
   max-width: 100%;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--bg-100);
   box-shadow: var(--shadow-medium);
   transition: box-shadow 250ms ease-in-out;
 }
 .browser-agent {
   box-shadow:
-    0 0 0 1px var(--blue-700),
-    0 0 0 4px rgb(0 112 243 / 0.18),
-    0 16px 48px -16px rgb(0 112 243 / 0.35);
+    0 0 0 2px var(--accent),
+    6px 6px 0 2px rgb(43 108 214 / 0.35);
 }
 .browser-waiting {
   box-shadow:
-    0 0 0 1px var(--amber-800),
-    0 0 0 4px rgb(255 166 0 / 0.18),
-    0 16px 48px -16px rgb(255 166 0 / 0.3);
-  animation: waiting-glow 2s ease-in-out infinite;
+    0 0 0 2px var(--amber-800),
+    6px 6px 0 2px rgb(255 166 0 / 0.3);
+  animation: waiting-blink 1.2s steps(1) infinite;
 }
-@keyframes waiting-glow {
+@keyframes waiting-blink {
   50% {
     box-shadow:
-      0 0 0 1px var(--amber-700),
-      0 0 0 6px rgb(255 166 0 / 0.12),
-      0 16px 56px -16px rgb(255 166 0 / 0.4);
+      0 0 0 2px var(--amber-600),
+      6px 6px 0 2px rgb(255 166 0 / 0.15);
   }
 }
 
@@ -574,7 +547,7 @@ kbd {
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: 0;
 }
 .nav-button:hover:not(:disabled) {
   background: var(--gray-alpha-200);
@@ -598,7 +571,7 @@ kbd {
   height: 26px;
   padding: 0 14px;
   border: 1px solid var(--gray-400);
-  border-radius: 9999px;
+  border-radius: 0;
   background: var(--bg-200);
   color: var(--gray-1000);
   font-size: 13px;
@@ -670,6 +643,14 @@ kbd {
   outline: none;
   user-select: none;
 }
+.frame-starting {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgb(255 255 255 / 0.6);
+  font-size: 13px;
+}
 .frame {
   display: block;
   width: 100%;
@@ -692,7 +673,7 @@ kbd {
   gap: 8px;
   max-width: 420px;
   padding: 20px 24px;
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--bg-100);
   box-shadow: var(--shadow-modal);
   text-align: center;
@@ -715,7 +696,7 @@ kbd {
   gap: 6px;
   height: 26px;
   padding: 0 10px 0 8px;
-  border-radius: 9999px;
+  border-radius: 0;
   font-size: 12px;
   font-weight: 500;
   pointer-events: none;
@@ -765,7 +746,7 @@ kbd {
   max-width: 100%;
   min-height: 34px;
   padding: 7px 12px;
-  border-radius: 10px;
+  border-radius: 0;
   background: rgb(10 10 10 / 0.9);
   box-shadow: var(--shadow-float);
   color: var(--gray-1000);
@@ -815,7 +796,7 @@ kbd {
 }
 .approval {
   padding: 20px;
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--bg-100);
   box-shadow: var(--shadow-modal);
   animation: modal-in 300ms var(--ease-swift);
@@ -830,7 +811,7 @@ kbd {
   width: 32px;
   height: 32px;
   flex: none;
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--amber-200);
   color: var(--amber-700);
 }
@@ -848,7 +829,7 @@ kbd {
 .approval-prompt {
   margin: 16px 0 20px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--gray-alpha-100);
   box-shadow: inset 0 0 0 1px var(--gray-alpha-200);
   font-size: 14px;
@@ -897,10 +878,13 @@ kbd {
   justify-content: flex-end;
   animation: bubble-in 300ms var(--ease-swift);
 }
+.message-settled {
+  animation: none;
+}
 .bubble {
   max-width: 85%;
   padding: 8px 14px;
-  border-radius: 20px;
+  border-radius: 0;
   background: var(--gray-200);
   font-size: 14px;
   line-height: 1.625;
@@ -946,7 +930,7 @@ kbd {
 }
 .markdown code {
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 0;
   background: var(--gray-alpha-200);
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -959,17 +943,19 @@ kbd {
   text-decoration: underline;
 }
 
+/* Laid out like a step group's title row, which takes its place once the first step starts. */
 .pending {
   display: flex;
   align-items: center;
-  gap: 8px;
+  min-height: 28px;
   padding: 0 4px;
+  color: var(--gray-900);
   font-size: 14px;
 }
 
 .chat-error {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--red-100);
   color: var(--red-900);
   font-size: 13px;
@@ -986,7 +972,7 @@ kbd {
   gap: 8px;
   min-height: 104px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--bg-100);
   box-shadow: var(--shadow-medium);
   cursor: text;
@@ -1006,15 +992,65 @@ kbd {
   font-size: 14px;
   line-height: 20px;
 }
+.composer-input {
+  min-height: 40px;
+  max-height: 240px;
+}
 .composer textarea::placeholder {
   color: var(--gray-700);
 }
 .composer-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
+}
+.device-picker {
+  position: relative;
+  display: inline-flex;
+  isolation: isolate;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.device-indicator {
+  position: absolute;
+  z-index: -1;
+  top: var(--segmented-control-indicator-top);
+  left: var(--segmented-control-indicator-left);
+  width: var(--segmented-control-indicator-width);
+  height: var(--segmented-control-indicator-height);
+  background: var(--gray-1000);
+  transition-property: left, width;
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease-out);
+}
+.device-indicator[data-activation-direction="none"] {
+  transition: none;
+}
+.device-option {
+  height: 26px;
+  padding: 0 10px;
+  color: var(--gray-900);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: color 150ms;
+}
+.device-option:hover:not([data-checked], [data-disabled]) {
+  color: var(--gray-1000);
+}
+.device-option[data-checked] {
+  color: var(--bg-200);
+}
+.device-option[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.device-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .composer-hint {
+  margin-right: auto;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1032,42 +1068,29 @@ kbd {
 .stop-square {
   width: 9px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--gray-1000);
 }
 
 .empty {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 40px 20px 24px;
-  animation: hud-in 300ms var(--ease-out);
-}
-.empty-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  margin-bottom: 4px;
-  border-radius: 12px;
-  background: var(--gray-100);
-  box-shadow: var(--shadow-border);
-}
-.empty-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 20px;
+  padding: 48px 20px 24px;
 }
 .empty-title h2 {
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 26px;
-  letter-spacing: -0.4px;
+  font-size: 80px;
+  font-weight: 450;
+  line-height: 0.95;
+  letter-spacing: -0.05em;
 }
 .empty-blurb {
+  max-width: 62ch;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
   color: var(--gray-900);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 17px;
+  line-height: 26px;
 }
 .empty-blurb strong {
   color: var(--gray-1000);
@@ -1086,8 +1109,8 @@ kbd {
   gap: 12px;
   min-height: 36px;
   padding: 8px 8px 8px 14px;
-  border: 1px solid var(--gray-400);
-  border-radius: 20px 8px 8px 20px;
+  border: 1px solid var(--line);
+  border-radius: 0;
   color: var(--gray-1000);
   font-size: 13px;
   line-height: 18px;
@@ -1097,7 +1120,7 @@ kbd {
     background 150ms;
 }
 .suggestion:hover {
-  border-color: var(--gray-500);
+  border-color: var(--line-strong);
   background: var(--gray-alpha-100);
 }
 .suggestion-keys {
@@ -1139,15 +1162,40 @@ kbd {
   width: 100%;
   min-height: 24px;
   padding: 2px 4px 2px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   text-align: left;
   transition: background 150ms;
 }
 .row-trigger:hover {
-  background: var(--gray-100);
+  background: var(--gray-alpha-100);
 }
 .row-selected > .row-trigger {
   background: var(--gray-alpha-200);
+}
+.row + .row {
+  border-top: 1px solid var(--gray-alpha-200);
+}
+.row-running .row-name {
+  color: var(--gray-900);
+  animation: blink 1.2s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    color: var(--gray-1000);
+  }
+}
+/* A step's problem, as a small mono tag after its name. */
+.row-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.row-tag-failed {
+  color: var(--red-900);
+}
+.row-tag-waiting {
+  color: var(--amber-700);
 }
 .row-main {
   display: flex;
@@ -1192,119 +1240,82 @@ kbd {
 .row-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  margin-bottom: 4px;
-  padding: 8px 4px 12px 8px;
-  border-bottom: 1px solid var(--gray-200);
-}
-.rows > .row:last-child .row-detail {
-  border-bottom: none;
+  gap: 12px;
+  padding: 0 4px 10px 8px;
 }
 
-/* Status cell: a glyph that becomes a chevron on hover when the row expands. */
+/* The cell before a step: a chevron that turns down when the step is open. */
 .glyph {
-  position: relative;
   display: grid;
   place-items: center;
   width: 16px;
   height: 16px;
   flex: none;
+  color: var(--gray-700);
+  transition: transform 150ms var(--ease-out);
 }
-.glyph > span {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  transition: opacity 100ms;
+.glyph-open {
+  transform: rotate(90deg);
 }
-.glyph-chevron {
-  opacity: 0;
-  color: var(--gray-900);
-}
-.row-trigger:hover .glyph:has(.glyph-chevron) .glyph-status,
-.row-trigger:focus-visible .glyph:has(.glyph-chevron) .glyph-status {
-  opacity: 0;
-}
-.row-trigger:hover .glyph-chevron,
-.row-trigger:focus-visible .glyph-chevron {
-  opacity: 1;
-}
-.glyph-done {
-  color: var(--green-900);
-}
-.glyph-failed {
-  color: var(--red-900);
-}
-.glyph-waiting {
-  color: var(--amber-700);
-}
-.glyph-running,
-.glyph-skipped {
-  color: var(--gray-900);
-}
-.glyph .spinner {
-  color: var(--gray-900);
+.row-trigger:hover .glyph {
+  color: var(--gray-1000);
 }
 
-/* Waterfall bar: a baseline with end ticks, and the step's segment on it. */
+/*
+ * A step's span in the turn, drawn like a trace: faint quarter lines, and the step as a white
+ * hatched block when done, a dashed outline while it runs or waits, and red hatching if it failed.
+ */
 .tbar {
   position: relative;
   flex: none;
-  width: 64px;
+  width: 120px;
   height: 12px;
-  overflow: hidden;
-}
-.tbar::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 1px;
-  right: 1px;
-  height: 1px;
-  background: var(--gray-alpha-300);
-}
-.tbar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-left: 1px solid var(--gray-alpha-300);
-  border-right: 1px solid var(--gray-alpha-300);
+  background: repeating-linear-gradient(to right, var(--gray-alpha-200) 0 1px, transparent 1px 25%);
+  box-shadow: inset -1px 0 0 var(--gray-alpha-200);
 }
 .tbar-seg {
   position: absolute;
-  top: 0;
-  height: 100%;
-  min-width: 2px;
-  border: 0.5px solid;
-  border-radius: 2px;
+  top: 1px;
+  bottom: 1px;
+  min-width: 3px;
+  transition:
+    left 300ms var(--ease-out),
+    width 300ms var(--ease-out);
 }
 .tbar-done {
-  background: var(--green-300);
-  border-color: var(--green-600);
+  background: repeating-linear-gradient(-45deg, var(--gray-1000) 0 1.5px, transparent 1.5px 4px);
+  box-shadow: inset 0 0 0 1px var(--gray-1000);
+}
+.tbar-running {
+  background: repeating-linear-gradient(90deg, var(--gray-1000) 0 1px, transparent 1px 3px);
+  box-shadow: inset 0 0 0 1px var(--gray-1000);
+  animation: tbar-march 450ms linear infinite;
+}
+@keyframes tbar-march {
+  to {
+    background-position: 3px 0;
+  }
+}
+.tbar-skipped {
+  border: 1px dashed var(--gray-1000);
 }
 .tbar-warning,
 .tbar-waiting {
-  background: var(--amber-200);
-  border-color: var(--amber-500);
+  border: 1px dashed var(--amber-700);
 }
 .tbar-failed {
-  background: var(--red-200);
-  border-color: var(--red-500);
-}
-.tbar-running,
-.tbar-skipped {
-  background: var(--gray-200);
-  border-color: var(--gray-500);
+  background: repeating-linear-gradient(-45deg, var(--red-900) 0 1.5px, transparent 1.5px 4px);
+  box-shadow: inset 0 0 0 1px var(--red-900);
 }
 
 /* Expanded detail blocks. */
 .code {
   margin: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--gray-alpha-400);
-  border-radius: 6px;
-  background: var(--bg-200);
-  color: var(--gray-1000);
+  max-height: 180px;
+  overflow: auto;
+  padding: 2px 0 2px 10px;
+  border-left: 1px solid var(--line);
+  color: var(--gray-900);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 18px;
@@ -1323,7 +1334,7 @@ kbd {
   gap: 10px;
   min-height: 28px;
   padding: 0 4px;
-  border-radius: 6px;
+  border-radius: 0;
   color: var(--gray-900);
   text-align: left;
   transition: color 150ms;
@@ -1347,10 +1358,14 @@ kbd {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.work-meta > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.work-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.work-meta > span + span::before {
+  content: "·";
+  margin-right: 10px;
+  color: var(--gray-600);
 }
 .work-chevron {
   flex: none;
@@ -1362,9 +1377,8 @@ kbd {
 }
 .work-rows {
   margin-top: 4px;
-  padding: 4px;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px var(--gray-alpha-200);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 .row-stacked .row-trigger {
   align-items: flex-start;
@@ -1396,7 +1410,7 @@ kbd {
   line-height: 20px;
 }
 .work-rows .row-detail {
-  padding-left: 26px;
+  padding-left: 28px;
 }
 
 /* ---------------------------------------------------------------- Shell: chat first, browser docked at the side */
@@ -1417,7 +1431,7 @@ kbd {
   align-items: center;
   gap: 16px;
   padding: 0 12px 0 20px;
-  border-bottom: 1px solid var(--gray-100);
+  border-bottom: 1px solid var(--line);
 }
 
 .topbar-actions {
@@ -1464,11 +1478,11 @@ kbd {
 }
 /* The drop shadow is on the frame, so the window's own agent and driving glows still show. */
 .browser-docked {
-  border-radius: 10px;
+  border-radius: 0;
   box-shadow: var(--shadow-float);
 }
 .browser-docked .browser {
-  border-radius: 10px;
+  border-radius: 0;
 }
 .browser-docked .browser-chrome {
   cursor: grab;
@@ -1491,9 +1505,33 @@ kbd {
 .browser-docked .viewport {
   cursor: zoom-in;
 }
+/* The badge sits top left when expanded and top right when docked, so it doesn't slide between
+   them: it fades out while the window shrinks, and fades in wherever the window settles. Each
+   size has its own keyframes, so switching sizes starts the fade again. */
+.browser-expanded .mode {
+  animation: mode-in-expanded 200ms var(--ease-out) 120ms backwards;
+}
+.browser-closing .mode {
+  opacity: 0;
+  transition: opacity 100ms;
+}
+@keyframes mode-in-expanded {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes mode-in-docked {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Docked, the badge sits in the top right corner, clear of the screen's own top left content. */
 .browser-docked .mode {
+  animation: mode-in-docked 200ms var(--ease-out) backwards;
   top: 8px;
-  left: 8px;
+  right: 8px;
+  left: auto;
   height: 22px;
   font-size: 11px;
 }
@@ -1516,7 +1554,7 @@ kbd {
   gap: 6px;
   height: 24px;
   padding: 0 10px;
-  border-radius: 9999px;
+  border-radius: 0;
   background: rgb(10 10 10 / 0.88);
   box-shadow: var(--shadow-float);
   color: var(--gray-1000);
@@ -1537,19 +1575,17 @@ kbd {
   opacity: 0;
 }
 
-/* Expanded, the window sits on a dimmed backdrop, where the small glows above disappear. */
+/* Expanded, the window sits on a dimmed backdrop, so its edge and offset block grow. */
 .browser-expanded .browser-agent {
   box-shadow:
-    0 0 0 2px var(--blue-700),
-    0 0 0 8px rgb(0 112 243 / 0.22),
-    0 24px 96px -12px rgb(0 112 243 / 0.55);
+    0 0 0 3px var(--accent),
+    10px 10px 0 3px rgb(43 108 214 / 0.4);
 }
 .browser-expanded .browser-waiting,
 .browser-expanded .browser-user {
   box-shadow:
-    0 0 0 2px var(--amber-800),
-    0 0 0 8px rgb(255 166 0 / 0.22),
-    0 24px 96px -12px rgb(255 166 0 / 0.5);
+    0 0 0 3px var(--amber-800),
+    10px 10px 0 3px rgb(255 166 0 / 0.35);
 }
 
 /* Expanded: the same element, popped out over the whole app. */
@@ -1597,11 +1633,9 @@ kbd {
   gap: 4px;
   height: 20px;
   padding: 0 7px;
-  border-radius: 9999px;
-  background: var(--blue-200, var(--gray-200));
-  color: var(--blue-900);
-  font-size: 12px;
-  font-weight: 500;
+  border-radius: 0;
+  background: var(--accent);
+  color: var(--gray-1000);
 }
 
 /* Taking control: the screen is outlined in amber while the person drives it. */
@@ -1614,9 +1648,8 @@ kbd {
 }
 .browser-user {
   box-shadow:
-    0 0 0 1px var(--amber-800),
-    0 0 0 4px rgb(255 166 0 / 0.18),
-    0 16px 48px -16px rgb(255 166 0 / 0.3);
+    0 0 0 2px var(--amber-800),
+    6px 6px 0 2px rgb(255 166 0 / 0.3);
 }
 .browser-user .viewport {
   cursor: crosshair;
@@ -1624,4 +1657,27 @@ kbd {
 .mode-user {
   background: var(--amber-800);
   color: hsl(0 0% 4%);
+}
+
+/* ---------------------------------------------------------------- Labels */
+
+/* Small uppercase mono labels, as ui-sdk.dev marks its sections and diagrams. */
+.composer-hint,
+.badge,
+.mode,
+.screen-label,
+.suggestion-chip,
+.dock-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Durations read as measurements, so their units stay lowercase. */
+.row-duration {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
 }

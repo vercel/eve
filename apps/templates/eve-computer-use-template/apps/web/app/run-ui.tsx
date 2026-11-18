@@ -1,9 +1,10 @@
 "use client";
 
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { useState, type ReactNode } from "react";
 
 import type { ToolActivity } from "./activity";
-import { Check, ChevronDown, ChevronRight, Cross, Shield, Spinner } from "./icons";
+import { ChevronRight } from "./icons";
 
 export type GlyphStatus = "running" | "done" | "failed" | "waiting";
 
@@ -14,34 +15,11 @@ export function activityStatus(activity: ToolActivity): GlyphStatus {
   return "done";
 }
 
-/** The 16px status cell; it turns into a chevron on hover when the row can expand. */
-export function StatusGlyph({
-  status,
-  expandable,
-  open,
-}: {
-  status: GlyphStatus;
-  expandable: boolean;
-  open: boolean;
-}) {
+/** The 16px cell before a step: a chevron when the step opens to its details, else empty. */
+export function StatusGlyph({ expandable, open }: { expandable: boolean; open: boolean }) {
   return (
-    <span className={`glyph glyph-${status}`}>
-      <span className="glyph-status">
-        {status === "running" ? (
-          <Spinner size={12} />
-        ) : status === "waiting" ? (
-          <Shield size={11} />
-        ) : status === "failed" ? (
-          <Cross size={11} />
-        ) : (
-          <Check size={11} />
-        )}
-      </span>
-      {expandable ? (
-        <span className="glyph-chevron">
-          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </span>
-      ) : null}
+    <span aria-hidden="true" className={`glyph ${open ? "glyph-open" : ""}`}>
+      {expandable ? <ChevronRight size={14} /> : null}
     </span>
   );
 }
@@ -56,17 +34,20 @@ export function TimelineBar({
   scale,
   startedAt,
   endedAt,
+  now,
   status,
 }: {
   scale: TimelineScale | null;
   startedAt: number | undefined;
   endedAt: number | undefined;
+  /** Where a step that hasn't ended reaches to. */
+  now: number;
   status: GlyphStatus;
 }) {
   let segment: { left: number; width: number } | null = null;
   if (scale !== null && startedAt !== undefined) {
     const span = Math.max(scale.endMs - scale.startMs, 1);
-    const end = endedAt ?? scale.endMs;
+    const end = Math.min(endedAt ?? now, scale.endMs);
     const left = Math.min(Math.max(((startedAt - scale.startMs) / span) * 100, 0), 99);
     const width = Math.max(Math.min(((end - startedAt) / span) * 100, 100 - left), 1);
     segment = { left, width };
@@ -108,17 +89,14 @@ export function Row({
   const [open, setOpen] = useState(false);
   const expandable = children !== undefined && children !== null && children !== false;
   return (
-    <div className={`row row-stacked ${open ? "row-open" : ""} ${selected ? "row-selected" : ""}`}>
-      <button
-        aria-expanded={expandable ? open : undefined}
-        className="row-trigger"
-        onClick={() => {
-          if (expandable) setOpen(!open);
-          onSelect?.();
-        }}
-        type="button"
-      >
-        <StatusGlyph expandable={expandable} open={open} status={status} />
+    <Collapsible
+      className={`row row-stacked row-${status} ${open ? "row-open" : ""} ${selected ? "row-selected" : ""}`}
+      disabled={!expandable}
+      onOpenChange={setOpen}
+      open={open}
+    >
+      <CollapsibleTrigger className="row-trigger" onClick={() => onSelect?.()}>
+        <StatusGlyph expandable={expandable} open={open} />
         <span className="row-main">
           <span className="row-name">{name}</span>
           {note ? (
@@ -129,9 +107,9 @@ export function Row({
         </span>
         {bar}
         {duration !== undefined ? <span className="row-duration">{duration}</span> : null}
-      </button>
-      {open && expandable ? <div className="row-detail">{children}</div> : null}
-    </div>
+      </CollapsibleTrigger>
+      {expandable ? <CollapsiblePanel className="row-detail">{children}</CollapsiblePanel> : null}
+    </Collapsible>
   );
 }
 

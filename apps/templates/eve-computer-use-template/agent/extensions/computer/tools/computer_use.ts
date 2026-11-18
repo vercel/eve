@@ -1,16 +1,18 @@
 import { computer_use } from "eve/extensions/computer-use/tools";
-import { defineTool, toolOutput, toolOutputPart } from "eve/tools";
+import { defineTool } from "eve/tools";
 
 import { startLiveIfAvailable } from "../../../lib/live";
-import type { Screen } from "../../../lib/screen";
+import { captureDesktop, desktopModelOutput, type DeviceOutput } from "../../../lib/screen";
 
+type ComputerUseInput = Parameters<typeof computer_use.execute>[0];
 type ComputerUseOutput = { readonly screenshot: string } & Record<string, unknown>;
 
 /**
  * computer_use returns the sandbox path of a fresh screenshot. Read it once, so the model sees
- * the desktop without a separate read_file call and the live view can draw it.
+ * the desktop without a separate read_file call and the live view can draw it. The desktop's
+ * live stream starts first, and is reported as progress before the action runs.
  */
-export default defineTool({
+export default defineTool<ComputerUseInput, DeviceOutput & Record<string, unknown>>({
   description: computer_use.description,
   inputSchema: computer_use.inputSchema,
   approval: computer_use.approval,
@@ -26,27 +28,12 @@ export default defineTool({
       return `${action.charAt(0).toUpperCase()}${action.slice(1)}${subject}`;
     },
   },
-  async execute(input, ctx) {
+  async *execute(input, ctx) {
+    const early = await startLiveIfAvailable(ctx, "desktop");
+    if (early !== undefined) yield { live: { device: "desktop", sandbox: early } };
     const output = (await computer_use.execute(input, ctx)) as ComputerUseOutput;
-    const sandbox = await ctx.getSandbox();
-    const bytes = await Promise.resolve(sandbox.readBinaryFile({ path: output.screenshot })).catch(
-      () => null,
-    );
-    const liveSandbox = await startLiveIfAvailable(ctx, "desktop");
-    const screen: Screen | undefined =
-      bytes && bytes.length > 0
-        ? {
-            device: "desktop",
-            imageDataUrl: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`,
-            sandbox: liveSandbox,
-          }
-        : undefined;
-    return { ...output, screen };
+    const liveSandbox = early ?? (await startLiveIfAvailable(ctx, "desktop"));
+    yield { ...output, screen: await captureDesktop(ctx, output.screenshot, liveSandbox) };
   },
-  toModelOutput({ screen, ...rest }) {
-    const summary = toolOutputPart.text(JSON.stringify(rest));
-    if (screen === undefined) return toolOutput.content([summary]);
-    const base64 = screen.imageDataUrl.slice(screen.imageDataUrl.indexOf(",") + 1);
-    return toolOutput.content([summary, toolOutputPart.file(base64, { mediaType: "image/png" })]);
-  },
+  toModelOutput: desktopModelOutput,
 });

@@ -24,6 +24,8 @@ import {
   Sparkle,
 } from "./icons";
 import { useLiveStream } from "./use-live-stream";
+import { Button } from "@ui-sdk/react/button";
+import { Input } from "@ui-sdk/react/input";
 
 export type Control = "agent" | "user";
 
@@ -276,8 +278,11 @@ export function LiveView({
   };
 
   const ratio = size ? size.width / size.height : 16 / 9;
-  // Nothing shows until there is a screen to show; then the card pops into its corner.
-  const visible = shown !== undefined || streaming;
+  // The card pops into its corner as soon as the agent starts operating the picked device, and
+  // shows that it is starting until the live stream or a screenshot has something to draw.
+  const starting =
+    pinned === undefined && !streaming && shown === undefined && current?.device === device;
+  const visible = shown !== undefined || streaming || starting;
   // Expanded, take about 80% of the window; the browser chrome is about 52px tall.
   const style = expanded
     ? { width: `min(80vw, calc((80svh - 52px) * ${ratio}))` }
@@ -298,7 +303,7 @@ export function LiveView({
   return (
     <>
       <div
-        className={`browser-wrap ${expanded ? "browser-expanded" : `browser-docked ${visible ? "pip-visible" : ""}`}`}
+        className={`browser-wrap ${expanded ? `browser-expanded ${closing ? "browser-closing" : ""}` : `browser-docked ${visible ? "pip-visible" : ""}`}`}
         ref={card}
         style={style}
       >
@@ -326,36 +331,33 @@ export function LiveView({
                     <span />
                   </span>
                   <span className="chrome-nav">
-                    <button
+                    <Button
                       aria-label="Back"
                       className="nav-button"
                       disabled={!driving}
                       onClick={() => navigate("back")}
                       title="Back"
-                      type="button"
                     >
                       <ArrowLeft size={14} />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       aria-label="Forward"
                       className="nav-button"
                       disabled={!driving}
                       onClick={() => navigate("forward")}
                       title="Forward"
-                      type="button"
                     >
                       <ArrowRight size={14} />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       aria-label="Reload"
                       className="nav-button"
                       disabled={!driving}
                       onClick={() => navigate("reload")}
                       title="Reload"
-                      type="button"
                     >
                       <Refresh size={14} />
-                    </button>
+                    </Button>
                   </span>
                 </div>
                 {driving ? (
@@ -375,46 +377,39 @@ export function LiveView({
             )}
             <div className="chrome-right">
               {expanded ? (
-                <button
+                <Button
                   aria-label="Collapse"
                   className="icon-button icon-button-tertiary"
                   onClick={() => setExpanded(false)}
                   title="Back to the corner (Esc)"
-                  type="button"
                 >
                   <Collapse size={14} />
-                </button>
+                </Button>
               ) : null}
               {pinned ? (
-                <button
+                <Button
                   aria-label="Back to Live"
                   className="button button-sm button-secondary"
                   onClick={onExitReplay}
                   title="Back to Live"
-                  type="button"
                 >
                   <Refresh size={14} />
                   <span className="button-label">Back to Live</span>
-                </button>
+                </Button>
               ) : driving ? (
-                <button
-                  className="button button-sm button-warning"
-                  onClick={onHandBack}
-                  type="button"
-                >
+                <Button className="button button-sm button-warning" onClick={onHandBack}>
                   <Sparkle size={14} />
                   Hand Back
-                </button>
+                </Button>
               ) : drivable && expanded ? (
-                <button
+                <Button
                   className="button button-sm button-secondary"
                   onClick={onTakeControl}
                   title={agentBusy ? "Stop the agent and take over" : undefined}
-                  type="button"
                 >
                   <Pointer size={14} />
                   Take Over
-                </button>
+                </Button>
               ) : null}
             </div>
           </div>
@@ -444,6 +439,11 @@ export function LiveView({
               // eslint-disable-next-line @next/next/no-img-element
               <img alt="The agent's screen" className="frame" src={shown.imageDataUrl} />
             ) : null}
+            {starting ? (
+              <div className="frame-starting">
+                Starting the {DEVICES[device].label.toLowerCase()}…
+              </div>
+            ) : null}
             {expanded ? null : (
               <span className="dock-hint">
                 <Expand size={14} />
@@ -456,7 +456,7 @@ export function LiveView({
                 <Clock size={13} />
                 After this step
               </div>
-            ) : mode !== "idle" && (streaming || shown) ? (
+            ) : mode !== "idle" && (streaming || shown || starting) ? (
               <div className={`mode mode-${mode}`}>
                 {mode === "agent" ? (
                   <AgentIndicator active size={14} />
@@ -473,11 +473,12 @@ export function LiveView({
               </div>
             ) : null}
 
-            {current && (streaming || shown) ? (
+            {/* Between steps the agent is deciding what to do next, so the card stays up. */}
+            {mode === "agent" && (streaming || shown || starting) ? (
               <div className="hud">
                 <div className="hud-card hud-now">
                   <AgentIndicator active size={16} />
-                  <span className="shimmer hud-now-label">{current.label}</span>
+                  <span className="shimmer hud-now-label">{current?.label ?? "Thinking"}</span>
                 </div>
               </div>
             ) : null}
@@ -529,7 +530,7 @@ function AddressBar({ url, onOpen }: { url: string | null; onOpen: (url: string)
       }}
     >
       {url?.startsWith("https:") && draft === null ? <Lock className="url-lock" size={12} /> : null}
-      <input
+      <Input
         aria-label="Address"
         autoCapitalize="off"
         autoComplete="off"

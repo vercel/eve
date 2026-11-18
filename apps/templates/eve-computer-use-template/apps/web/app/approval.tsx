@@ -3,6 +3,7 @@
 import type { Interaction } from "eve/react";
 
 import { Shield } from "./icons";
+import { Button } from "@ui-sdk/react/button";
 
 interface ApprovalBannerProps {
   readonly approvals: readonly Interaction[];
@@ -40,15 +41,14 @@ export function ApprovalBanner({ approvals, onRespond, inline = false }: Approva
             <p className="approval-prompt">{request.request.prompt}</p>
             <div className="approval-actions">
               {options.map((option) => (
-                <button
+                <Button
                   className={`button button-sm ${isApprove(option) ? "button-primary" : "button-secondary"}`}
                   key={option.id}
                   onClick={() => onRespond(request.interactionId, option.id)}
                   title={option.description}
-                  type="button"
                 >
                   {option.label}
-                </button>
+                </Button>
               ))}
             </div>
           </div>

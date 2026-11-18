@@ -5,6 +5,7 @@ allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
   - "@ai-sdk/*"
+  - "@ui-sdk/*"
   - "@vercel/*"
   - "@workflow/*"
   - ai

@@ -1,7 +1,14 @@
 import { get, screenshot, wait_for } from "@agent-browser/eve/tools";
-import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
+import {
+  defineTool,
+  toolOutput,
+  toolOutputPart,
+  type ToolContext,
+  type ToolDefinition,
+} from "eve/tools";
 
 import { startLiveIfAvailable } from "./live";
+import type { LiveDevice } from "./live-config";
 
 /**
  * What the live view shows after a call: an image of the screen, the page's URL for a browser,
@@ -19,26 +26,44 @@ export interface Screen {
   readonly sandbox?: string;
 }
 
+/**
+ * Where a device's live stream runs, yielded as progress before the device acts, so the live
+ * view connects while the first action is still running. Like `Screen.sandbox`, not a credential.
+ */
+export interface LiveStart {
+  readonly device: LiveDevice;
+  readonly sandbox: string;
+}
+
+/** What a device tool reports: `live` while it works, then its output with a `screen`. */
+export interface DeviceOutput {
+  readonly screen?: Screen;
+  readonly live?: LiveStart;
+}
+
 type ToolWithExecute<TInput> = ToolDefinition<TInput, unknown> & {
-  execute(input: TInput, ctx: ToolContext): Promise<unknown>;
+  execute(input: TInput, ctx: ToolContext): unknown;
 };
 
 /**
- * The same tool, with a `screen` the web app's live view draws after every call. eve keeps
- * session sandboxes private to the agent, so the screen travels to the UI in tool output.
+ * The same browser tool, with a `screen` the web app's live view draws after every call. eve
+ * keeps session sandboxes private to the agent, so the screen travels to the UI in tool output.
+ * The browser's live stream starts first, and is reported as progress before the action runs.
  */
 export function withScreen<TInput>(
   tool: ToolWithExecute<TInput>,
   capture: (ctx: ToolContext, output: unknown) => Promise<Screen | undefined>,
 ) {
-  return defineTool<TInput, { readonly screen?: Screen }>({
+  return defineTool<TInput, DeviceOutput>({
     ...tool,
     // The wrapped output adds `screen`, so the tool's own output schema no longer describes it.
     outputSchema: undefined,
-    async execute(input, ctx) {
+    async *execute(input, ctx) {
+      const sandbox = await startLiveIfAvailable(ctx, "browser");
+      if (sandbox !== undefined) yield { live: { device: "browser", sandbox } };
       const output = await tool.execute(input, ctx);
       const screen = await capture(ctx, output).catch(() => undefined);
-      return { ...(isObject(output) ? output : { result: output }), screen };
+      yield { ...(isObject(output) ? output : { result: output }), screen };
     },
     toModelOutput(output) {
       const { screen: _screen, ...rest } = output as { screen?: Screen } & Record<string, unknown>;
@@ -62,6 +87,35 @@ export async function captureBrowser(ctx: ToolContext): Promise<Screen | undefin
   } | null;
   const sandbox = await startLiveIfAvailable(ctx, "browser");
   return { device: "browser", imageDataUrl: shot.imageDataUrl, url: page?.url, sandbox };
+}
+
+/** The desktop after an action, from the PNG computer_use saved in the sandbox. */
+export async function captureDesktop(
+  ctx: ToolContext,
+  screenshotPath: string,
+  sandbox: string | undefined,
+): Promise<Screen | undefined> {
+  const session = await ctx.getSandbox();
+  const bytes = await Promise.resolve(session.readBinaryFile({ path: screenshotPath })).catch(
+    () => null,
+  );
+  if (!bytes || bytes.length === 0) return undefined;
+  return {
+    device: "desktop",
+    imageDataUrl: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`,
+    sandbox,
+  };
+}
+
+/** A tool result for the model: its JSON, plus the desktop's screenshot when there is one. */
+export function desktopModelOutput({
+  screen,
+  ...rest
+}: { screen?: Screen } & Record<string, unknown>) {
+  const summary = toolOutputPart.text(JSON.stringify(rest));
+  if (screen === undefined) return toolOutput.content([summary]);
+  const base64 = screen.imageDataUrl.slice(screen.imageDataUrl.indexOf(",") + 1);
+  return toolOutput.content([summary, toolOutputPart.file(base64, { mediaType: "image/png" })]);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
