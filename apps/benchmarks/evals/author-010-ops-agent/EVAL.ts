@@ -110,16 +110,9 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
           toolInput: input,
         })),
       ...runs
+        // Every input form the schema accepts that sends the request is graded, even one the
+        // tool mishandles, because one probe can't show which values it would send correctly.
         .filter((run) => run.probe.operation === operation && sendsProbeRequest(run))
-        // Grade every input form that sends an order of the contract's shape, whatever its
-        // values. A tool with no such form is graded on the first form it accepts, so a
-        // malformed order fails only exposure.
-        .filter(
-          (run, index, sent) =>
-            sendsContractRequest(run) ||
-            (sent.findIndex(({ file }) => file === run.file) === index &&
-              !sent.some((other) => other.file === run.file && sendsContractRequest(other))),
-        )
         .map(({ name, tool, nested }) => ({
           name,
           approval: tool.approval,
@@ -277,18 +270,6 @@ interface NorthstarToolRun {
 
 function sendsProbeRequest({ probe, requests }: NorthstarToolRun): boolean {
   return requests.some(({ method, url }) => method === probe.method && url.pathname === probe.path);
-}
-
-/** Whether the run sent the probe's request with a body of the contract's shape, whatever its values. */
-function sendsContractRequest({ probe, requests }: NorthstarToolRun): boolean {
-  return requests.some(({ method, url, body }) => {
-    if (method !== probe.method || url.pathname !== probe.path) return false;
-    const sent = body as Record<string, unknown> | null | undefined;
-    return (
-      probe.method !== "POST" ||
-      Object.entries(probe.input).every(([key, value]) => typeof sent?.[key] === typeof value)
-    );
-  });
 }
 
 function implementsProbe({ error, probe, requests }: NorthstarToolRun): boolean {
