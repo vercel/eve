@@ -1,9 +1,10 @@
 import { ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConfigEnv, Plugin, UserConfig } from "vite";
+import type { ConfigEnv, Plugin, UserConfig, ViteBuilder } from "vite";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { VercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
@@ -51,6 +52,19 @@ async function runConfig(
 async function runConfigResolved(plugin: Plugin): Promise<void> {
   (plugin.configResolved as (config: { build: { ssr: boolean } }) => void)({
     build: { ssr: false },
+  });
+}
+
+async function runBuildAppWithBuiltClient(plugin: Plugin): Promise<void> {
+  const buildApp = plugin.buildApp as {
+    handler: (builder: {
+      config: Pick<ViteBuilder["config"], "appType">;
+      environments: Record<string, { config: { build: { outDir: string } }; isBuilt: boolean }>;
+    }) => Promise<void>;
+  };
+  await buildApp.handler({
+    config: { appType: "spa" },
+    environments: { client: { config: { build: { outDir: "dist" } }, isBuilt: true } },
   });
 }
 
@@ -191,6 +205,37 @@ describe("createEveVitePlugin", () => {
 
     vi.stubEnv("VERCEL", "1");
     expect(createEveVitePlugin({ host, options: {} })).toHaveProperty("buildApp.order", "post");
+  });
+
+  it("asks a server-rendered app for an adapter when the build writes no Build Output", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const root = await createAgentProject();
+    await mkdir(join(root, "dist", "assets"), { recursive: true });
+    const plugin = createEveVitePlugin({ host, options: {} });
+    await runConfig(plugin, root, buildEnv);
+
+    await expect(runBuildAppWithBuiltClient(plugin)).rejects.toThrow(
+      /no index\.html in .*dist.*Add nitro\(\) from "nitro\/vite"/,
+    );
+    expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
+  });
+
+  it("names the vercel.json routing fields a static Build Output would drop", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const root = await createAgentProject();
+    await mkdir(join(root, "dist"), { recursive: true });
+    await writeFile(join(root, "dist", "index.html"), "<!doctype html>\n");
+    await writeFile(
+      join(root, "vercel.json"),
+      JSON.stringify({ cleanUrls: true, rewrites: [{ source: "/a", destination: "/b" }] }),
+    );
+    const plugin = createEveVitePlugin({ host, options: {} });
+    await runConfig(plugin, root, buildEnv);
+
+    await expect(runBuildAppWithBuiltClient(plugin)).rejects.toThrow(
+      /vercel\.json defines rewrites, cleanUrls, .*withEve from "eve\/vercel"/,
+    );
+    expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
   });
 
   it("merges the generated eve service into the user's Nitro Vercel config", async () => {
