@@ -65,7 +65,7 @@ If initialization fails, eve keeps the sandbox and runs the selector against it 
 
 ## Idle stop and timeout
 
-eve stops an idle session's Vercel Sandbox as described in [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox). The sandbox's `timeout`, 30 minutes after each resume by default, still applies, including while a turn is running. Each stop writes a snapshot that the next resume starts from.
+eve stops idle sandboxes as described in [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox). Vercel's `timeout` defaults to 30 minutes; eve extends it during sandbox operations, within Vercel's session limits. Renewal ends when an operation finishes or eve releases its connection. Background processes do not prevent idle stop. A stopped sandbox resumes from its files, not its processes.
 
 ## The eve-git image
 
