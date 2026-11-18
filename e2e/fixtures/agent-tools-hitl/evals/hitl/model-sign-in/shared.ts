@@ -12,6 +12,11 @@ export const asAliceWithFallback = {
   headers: { "x-eve-fixture-model": "own-credential-fallback", "x-eve-fixture-user": "alice" },
 };
 
+/** Alice, on a parent that delegates to a subagent on her own model credential. */
+export const asAliceWithSubagent = {
+  headers: { "x-eve-fixture-model": "own-credential-relay", "x-eve-fixture-user": "alice" },
+};
+
 /** The sign-in URL as the provider sends it back when the person refuses. */
 export function declined(url: URL): URL {
   const refused = new URL(url);

@@ -2,6 +2,7 @@ import {
   ConnectionAuthorizationRequiredError,
   defineInteractiveAuthorization,
 } from "eve/connections";
+import { latestTaskResult, playScript } from "@eve-e2e/config/mock-script";
 import { mockModel } from "eve/evals";
 import { interactions } from "eve/events";
 import { defineModel, type DynamicModelContext } from "eve/models";
@@ -44,6 +45,23 @@ export const ownCredentialModel = defineModel({
 
 /** The fallback after a decline: a model on the project's own credential. */
 export const projectModel = mockModel(FALLBACK_REPLY);
+
+/** Delegates to `own-credential-child`, waits for it, and reports its answer. */
+export const delegatingModel = mockModel((request) =>
+  playScript(
+    request,
+    [
+      {
+        id: "delegate",
+        input: () => ({ message: "Answer Alice's question." }),
+        name: "own-credential-child",
+      },
+      { id: "wait", name: "eve__task_wait" },
+    ],
+    (finished) =>
+      `Child answered: ${latestTaskResult(finished, "own-credential-child") ?? "nothing"}`,
+  ),
+);
 
 /** Whether the person declined this turn's model sign-in. */
 export function declinedModelSignIn(ctx: DynamicModelContext): boolean {
