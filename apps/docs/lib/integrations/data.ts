@@ -414,6 +414,7 @@ export default linearChannel({
       "nuxt",
       "vue",
       "react",
+      "solid",
     ],
     install: `The eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
 
@@ -421,7 +422,7 @@ export default linearChannel({
 eve add channel/web
 \`\`\`
 
-To wire it up by hand instead — including into a Svelte, Nuxt, or TanStack Start app you already have — install the framework:
+To wire it up by hand instead — including into a Svelte, Nuxt, Solid, or TanStack Start app you already have — install the framework:
 
 \`\`\`bash
 npm install eve@latest
@@ -444,10 +445,11 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 - **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
 - **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
 - **TanStack Start.** Add the \`eveTanStack()\` Vite plugin to \`vite.config.ts\` next to \`nitro()\`, then call \`useEveAgent()\` from \`eve/react\`. See the [TanStack Start guide](/docs/guides/frontend/tanstack).
+- **Solid.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/solid\`. A server-rendered Solid 2 app also adds \`nitro()\` from \`nitro/vite\` to deploy to Vercel. See the [Solid guide](/docs/guides/frontend/use-eve-agent-solid).
 - **Other Vite apps.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`. See the [Vite guide](/docs/guides/frontend/vite).
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`baseUrl\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
-    configure: `The eve channel needs no third-party provisioning. Its default auth policy permits local development and verified Vercel OIDC callers, and rejects other production requests. Configure your app's authentication before accepting browser requests in production. Enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
+    configure: `The eve channel needs no third-party provisioning. Its default auth policy permits local development and verified Vercel OIDC callers, and rejects other production requests. Configure your app's authentication before accepting browser requests in production. Enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), [Solid](/docs/guides/frontend/use-eve-agent-solid), and [TanStack Start](/docs/guides/frontend/tanstack).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
