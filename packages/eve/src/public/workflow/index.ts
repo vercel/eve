@@ -49,6 +49,16 @@ export interface WorkflowMetadata {
   readonly url: string;
 }
 
+/** The current step attempt, from {@link getStepMetadata}. */
+export interface StepMetadata {
+  /** Stable across retries of the same step, so it can key idempotent side effects. */
+  readonly stepId: string;
+  /** The attempt number, starting at 1 and increasing with each retry. */
+  readonly attempt: number;
+  /** The most attempts the step gets; the attempt is the last one when `attempt >= maxAttempts`. */
+  readonly maxAttempts: number;
+}
+
 /** An error that fails a step or workflow without retrying. */
 export interface FatalError extends Error {
   readonly fatal: boolean;
@@ -77,6 +87,9 @@ export const sleep = sdk.sleep as (duration: string | number | Date) => Promise<
 
 /** Returns metadata for the current workflow run. */
 export const getWorkflowMetadata: () => WorkflowMetadata = sdk.getWorkflowMetadata;
+
+/** Returns the current step's id and attempt. Call it inside a `"use step"` function; it throws elsewhere. */
+export const getStepMetadata: () => StepMetadata = sdk.getStepMetadata;
 
 export const FatalError: {
   new (message: string): FatalError;
