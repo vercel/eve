@@ -145,7 +145,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const workflowProgram = readWorkflowProgramOptions(value);
   const hasExecute = workflow !== undefined || record.execute !== undefined;
   if (!hasExecute && behavior?.handling?.kind !== "dispatch") {
-    expectFunction(record.execute, message);
+    expectFunction(record.execute, `${message} Expected an "execute" function.`);
   }
   const definition: MutableNormalizedAuthoredTool = {
     availableInSubagents:
@@ -153,7 +153,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
         ? undefined
         : expectBoolean(record.availableInSubagents, message),
     deferred: record.deferred === undefined ? undefined : expectBoolean(record.deferred, message),
-    description: expectString(record.description, message),
+    description: expectString(
+      record.description,
+      `${message} Expected "description" to be a string; the model reads it to decide when to call the tool.`,
+    ),
     endsTurn:
       record.endsTurn === undefined || typeof record.endsTurn === "boolean"
         ? record.endsTurn

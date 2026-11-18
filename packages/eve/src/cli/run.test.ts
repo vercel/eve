@@ -328,6 +328,7 @@ describe("CLI command registration", () => {
     const output: string[] = [];
     const printApplicationInfo = vi.fn(async (logger: { log(message: string): void }) => {
       logger.log(JSON.stringify({ status: "ready" }));
+      return true;
     });
 
     await runCli(

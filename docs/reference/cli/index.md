@@ -137,7 +137,15 @@ eve info [--json]
 | -------- | ---- | ------- | ------------ |
 | `--json` | flag | off     | Emit as JSON |
 
-Run `eve info` first when something behaves unexpectedly. It shows which files eve found and what the agent includes, and reports discovery diagnostics without starting the dev server. Static instructions appear in source order with their `system` or `user` role; dynamic instructions are runtime-only and don't appear.
+Run `eve info` first when something behaves unexpectedly. It shows which files eve found and what the agent includes, and lists every compile error and warning with its source without starting the dev server. Static instructions appear in source order with their `system` or `user` role; dynamic instructions are runtime-only and don't appear.
+
+`eve info` loads every authored module and exits with code 1 when the agent fails to compile, so a CI step or a coding agent can run it as a check before `eve build`. Besides discovery problems, it reports:
+
+- tool `inputSchema` values that model providers reject, such as a root that isn't `type: "object"` or a field with an unknown JSON Schema type
+- missing default exports and definitions that don't match their file's kind
+- a workflow tool that calls `ctx.agent("name")` for an agent it can't reach, or calls `ctx.getSandbox()`, `ctx.getToken()`, `ctx.requireAuth()`, or `ctx.to()` in its `"use workflow"` body
+- a model id missing from the AI Gateway catalog
+- likely misspelled directories and files, such as `tool/` or `agents.ts`, and `.tsx` or `.jsx` tool and hook files, which eve ignores (warnings)
 
 ### JSON output
 
@@ -149,7 +157,7 @@ Run `eve info` first when something behaves unexpectedly. It shows which files e
 | `agentRoot`        | string or `null` | Agent directory, or `null` when the project could not be compiled                         |
 | `layout`           | string or `null` | Project layout                                                                            |
 | `status`           | string           | Compile status, such as `ready` or `failed`; `unavailable` when nothing compiled          |
-| `diagnostics`      | object or `null` | Discovery diagnostic counts: `{ errors, warnings }`                                       |
+| `diagnostics`      | object or `null` | Compile diagnostics: `{ errors, warnings, items }` (see below)                            |
 | `model`            | string or `null` | Root agent model id                                                                       |
 | `instructions`     | string or `null` | Static instruction files with their roles                                                 |
 | `skills`           | string[]         | Static skill names                                                                        |
@@ -160,6 +168,8 @@ Run `eve info` first when something behaves unexpectedly. It shows which files e
 | `channels`         | object[]         | Effective channel routes: `{ name, kind, method, urlPath }`                               |
 | `messaging`        | object           | Session route patterns: `{ create, messages, stream }`                                    |
 | `artifacts`        | object or `null` | Paths to the compiled manifest, discovery manifest, diagnostics, module map, and metadata |
+
+Each `diagnostics.items` entry is `{ severity, code, message, source }`. `severity` is `error` or `warning`, `code` is a stable identifier such as `discover/unsupported-directory`, and `source` is the file or directory it points at, or `null`. A definition that fails to load reports one error with code `compile/failed`. `status` is `failed` whenever an error is present.
 
 `toolInputSchemas.root` maps each root agent tool name, including namespaced extension tools, to its JSON Schema. `toolInputSchemas.subagents` holds the same map for each declared subagent, keyed by its path from the root. For example, a `reviewer` that `forecaster` declares is `forecaster/reviewer`.
 

@@ -78,6 +78,12 @@ export function summarizeCompilerDiagnostics(
   return { errors, warnings };
 }
 
+export function formatDiagnosticSources(diagnostic: CompilerDiagnostic): string {
+  return diagnostic.sources
+    .map((source) => source.sourcePath ?? source.logicalPath ?? source.sourceId ?? source.nodeId)
+    .join(", ");
+}
+
 function toDiagnosticSource(
   nodeId: string,
   source: AgentSourceDescriptor,

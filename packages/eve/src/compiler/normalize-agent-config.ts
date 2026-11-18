@@ -355,6 +355,7 @@ async function withCompiledRuntimeModelLimits(
     readonly purpose: string;
     readonly contextWindowTokens?: number;
     readonly source?: ModuleSourceRef;
+    readonly sourcePath?: string;
   },
 ): Promise<CompiledRuntimeModelReference> {
   if (input.contextWindowTokens !== undefined) {
@@ -372,7 +373,7 @@ async function withCompiledRuntimeModelLimits(
 
   if (limits === null) {
     throw new Error(
-      `Cannot compile agent compaction because ${input.purpose} "${model.id}" does not have known AI Gateway context window metadata.`,
+      `Model "${model.id}"${input.sourcePath === undefined ? "" : ` in "${input.sourcePath}"`} is not in the AI Gateway model catalog, so eve can't size compaction for ${input.purpose}. Check the model id for typos, or set modelContextWindowTokens for an unlisted or custom model.`,
     );
   }
 

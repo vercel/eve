@@ -2,6 +2,7 @@ import { posix } from "node:path";
 
 import { normalizeLogicalPath, stripLogicalPathExtension } from "#discover/filesystem.js";
 import { validateProgrammaticLogicalPathInternal } from "#compiler/source-graph-paths.js";
+import { closestName } from "#shared/closest-name.js";
 export { validateProgrammaticLogicalPath } from "#compiler/source-graph-paths.js";
 
 export type ProgrammaticModuleNamespace = Readonly<Record<string, unknown>>;
@@ -416,8 +417,16 @@ export function disableComposedCandidate(input: {
     (entry) => entry.kind === "shadowed" && entry.winnerSourceId === input.candidate.sourceId,
   );
   if (!replaced && input.allowUnmatched !== true) {
+    const directory = slot.slice(0, slot.lastIndexOf("/") + 1);
+    const siblings = [...selected.keys()]
+      .filter(
+        (key) =>
+          key !== slot && key.startsWith(directory) && !key.slice(directory.length).includes("/"),
+      )
+      .map((key) => key.slice(directory.length));
+    const match = closestName(slot.slice(directory.length), siblings);
     throw new Error(
-      `Source "${input.candidate.logicalPath}" disables a slot with no lower-precedence source.`,
+      `Source "${input.candidate.logicalPath}" disables a slot with no lower-precedence source.${match === undefined ? "" : ` Did you mean "${directory}${match}"?`}`,
     );
   }
   selected.delete(slot);
