@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { cp, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { Plugin, PluginOption, ProxyOptions, UserConfig, ViteBuilder } from "vite";
 
@@ -66,6 +66,15 @@ interface EveNitroModule {
   setup(nitro: {
     readonly options: { vercel?: { config?: VercelServicesConfig; [key: string]: unknown } };
   }): Promise<void>;
+}
+
+function isWithin(path: string, directory: string): boolean {
+  const pathFromDirectory = relative(directory, path);
+  return (
+    pathFromDirectory !== ".." &&
+    !pathFromDirectory.startsWith(`..${sep}`) &&
+    !isAbsolute(pathFromDirectory)
+  );
 }
 
 function flattenPlugins(options: readonly PluginOption[]): Plugin[] {
@@ -139,9 +148,18 @@ export function createEveVitePlugin(input: {
       );
     }
     const base = builder.config.base.startsWith("/") ? builder.config.base : "/";
-    const staticRoot = join(viteRoot, ".vercel", "output", "static");
-    await rm(staticRoot, { force: true, recursive: true });
-    await cp(clientOutDir, join(staticRoot, base), { recursive: true });
+    const outputRoot = join(viteRoot, ".vercel", "output");
+    const staticRoot = join(outputRoot, "static");
+    const staticTarget = join(staticRoot, base);
+    if (relative(staticTarget, clientOutDir) !== "") {
+      if (isWithin(clientOutDir, outputRoot) || isWithin(outputRoot, clientOutDir)) {
+        throw new Error(
+          `The eve ${host.label} plugin cannot write a static Vercel Build Output because the client build.outDir ${clientOutDir} overlaps ${outputRoot}. Set build.outDir outside .vercel/output, or to exactly ${staticTarget}.`,
+        );
+      }
+      await rm(staticRoot, { force: true, recursive: true });
+      await cp(clientOutDir, staticTarget, { recursive: true });
+    }
     return {
       routes: [
         { handle: "filesystem" },

@@ -55,17 +55,21 @@ async function runConfigResolved(plugin: Plugin): Promise<void> {
   });
 }
 
-async function writeClientBuild(root: string, files: Record<string, string>): Promise<void> {
-  await rm(join(root, "dist"), { force: true, recursive: true });
+async function writeClientBuild(
+  root: string,
+  files: Record<string, string>,
+  outDir = "dist",
+): Promise<void> {
+  await rm(join(root, outDir), { force: true, recursive: true });
   for (const [path, contents] of Object.entries(files)) {
-    await mkdir(dirname(join(root, "dist", path)), { recursive: true });
-    await writeFile(join(root, "dist", path), contents);
+    await mkdir(dirname(join(root, outDir, path)), { recursive: true });
+    await writeFile(join(root, outDir, path), contents);
   }
 }
 
 async function buildForVercel(
   root: string,
-  build: { appType?: AppType; base?: string; ssr?: boolean } = {},
+  build: { appType?: AppType; base?: string; outDir?: string; ssr?: boolean } = {},
 ): Promise<void> {
   vi.stubEnv("VERCEL", "1");
   const plugin = createEveVitePlugin({ host, options: {} });
@@ -76,13 +80,14 @@ async function buildForVercel(
       environments: Record<string, { config: { build: { outDir: string } }; isBuilt: boolean }>;
     }) => Promise<void>;
   };
+  const outDir = build.outDir ?? "dist";
   await buildApp.handler({
     config: {
       appType: build.appType ?? "spa",
       base: build.base ?? "/",
-      build: { outDir: "dist", ssr: build.ssr ?? false },
+      build: { outDir, ssr: build.ssr ?? false },
     },
-    environments: { client: { config: { build: { outDir: "dist" } }, isBuilt: true } },
+    environments: { client: { config: { build: { outDir } }, isBuilt: true } },
   });
 }
 
@@ -267,6 +272,34 @@ describe("createEveVitePlugin", () => {
       { handle: "filesystem" },
       { dest: "/app/index.html", src: "/app/(.*)" },
     ]);
+  });
+
+  it("keeps a client build that already lives in the static output", async () => {
+    const root = await createAgentProject();
+    const outDir = join(".vercel", "output", "static");
+    await writeClientBuild(
+      root,
+      { "assets/app.js": "", "index.html": "<!doctype html>\n" },
+      outDir,
+    );
+
+    await buildForVercel(root, { outDir });
+
+    expect(await readdir(join(root, outDir, "assets"))).toEqual(["app.js"]);
+    expect((await readOutputRoutes(root)).slice(-1)).toEqual([
+      { dest: "/index.html", src: "/(.*)" },
+    ]);
+  });
+
+  it("refuses a client build nested in the static output", async () => {
+    const root = await createAgentProject();
+    const outDir = join(".vercel", "output", "static", "client");
+    await writeClientBuild(root, { "index.html": "<!doctype html>\n" }, outDir);
+
+    await expect(buildForVercel(root, { outDir })).rejects.toThrow(
+      /client build\.outDir .*client overlaps .*Set build\.outDir outside \.vercel\/output/,
+    );
+    expect(existsSync(join(root, outDir, "index.html"))).toBe(true);
   });
 
   it("regenerates the static output it wrote and leaves adapter output alone", async () => {
