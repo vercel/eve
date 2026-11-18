@@ -136,7 +136,7 @@ describe("AI SDK HarnessAgent consumer", () => {
       if (method === "global") registerTelemetry(integration);
       const agent = new HarnessAgent({
         harness: scriptedHarness(method === "stream"),
-        ...(method === "global" ? {} : { telemetry: { integrations: [integration] } }),
+        telemetry: method === "global" ? undefined : { integrations: [integration] },
       });
       const session = await agent.createSession({ sandboxSession: sandbox });
       try {

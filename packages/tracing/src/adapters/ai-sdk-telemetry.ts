@@ -1,5 +1,4 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-import { context, trace, ProxyTracerProvider } from "@opentelemetry/api";
+import { context, trace, ProxyTracerProvider, createContextKey } from "@opentelemetry/api";
 import { registerOTel } from "@vercel/otel";
 import { intersectCapture } from "../core/activation.js";
 import { runTelemetry } from "../core/run-telemetry.js";
@@ -29,11 +28,12 @@ export type AiSdkTurnInput = Partial<Omit<TurnInput, "identity">> & {
   readonly identity?: Partial<RunIdentity>;
 };
 
-const activeGeneration = new AsyncLocalStorage<{
-  identity: RunIdentity;
-  operation: Operation;
-  toolCallId?: string;
-}>();
+interface ActiveGeneration {
+  readonly identity: RunIdentity;
+  readonly operation: Operation;
+  readonly toolCallId?: string;
+}
+const ACTIVE_GENERATION = createContextKey("agent.tracing.ai-sdk.generation");
 const METADATA_ONLY = { emit: true, recordInputs: false, recordOutputs: false };
 
 interface Generation {
@@ -46,7 +46,7 @@ interface Generation {
 
 const ABANDONED = { outcome: "abandoned" } as const;
 
-/** Records SDK turns with native OTel and initializes the default provider when needed. */
+/** Reuses the run's telemetry for SDK turns and initializes the default OTel provider when needed. */
 export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {}): Telemetry {
   const backend = runTelemetry.get(run);
   const provider = trace.getTracerProvider();
@@ -65,8 +65,9 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
     execute: () => T,
     toolCallId?: string,
   ): T {
-    return activeGeneration.run({ identity: state.identity, operation, toolCallId }, () =>
-      operation.run(execute),
+    const active: ActiveGeneration = { identity: state.identity, operation, toolCallId };
+    return operation.run(() =>
+      context.with(context.active().setValue(ACTIVE_GENERATION, active), execute),
     );
   }
 
@@ -118,7 +119,9 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
         native.telemetry.onStart({ ...event, recordInputs: false, recordOutputs: false });
         return;
       }
-      const inherited = activeGeneration.getStore();
+      const inherited = context.active().getValue(ACTIVE_GENERATION) as
+        | ActiveGeneration
+        | undefined;
       const active = backend?.telemetry.active();
       const overrides =
         typeof options.turn === "function" ? options.turn({ callId: event.callId }) : options.turn;
