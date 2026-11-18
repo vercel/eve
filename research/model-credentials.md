@@ -10,10 +10,10 @@ last_updated: "2026-11-18"
 
 ## Summary
 
-A connection can act with a person's own account. It declares `auth`, and when the person has no
-credential yet, eve opens a sign-in, holds the turn, and continues it after the person connects.
-Some agents need the same for the model call itself, for example to send each person's AI Gateway
-requests with that person's own Vercel access token.
+A tool call can already run on a person's own account. The tool's connection declares `auth`, and
+when the person has no credential yet, eve opens a sign-in, holds the turn, and runs the tool call
+after the person connects. Some agents need the same for the model call itself, for example to
+send each person's AI Gateway requests with that person's own Vercel access token.
 
 The model call has no way to ask the person to sign in. A dynamic `model` function can build a
 provider model from a person's token, but when the token doesn't exist yet, the turn fails, and the
