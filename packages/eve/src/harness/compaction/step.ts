@@ -21,7 +21,6 @@ import {
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
 import { type CredentialedModel, credentialedModel } from "#harness/model-call/credential.js";
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -30,6 +29,8 @@ import {
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { takeBlockingFailure } from "#definitions/kernel.js";
+import { compactionModel } from "#definitions/step.js";
+import type { ContextContainer } from "#context/container.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
@@ -352,18 +353,11 @@ function historyConfig(
   };
 }
 
-async function compactionModel(
-  step: Step,
-  reference: RuntimeModelReference,
-): Promise<CredentialedModel> {
-  const resolved = await step.config.resolveModel(reference);
-  return await credentialedModel(resolved);
-}
-
 async function summaryExecutor(
   step: Step,
   input: {
     readonly change: { readonly runId: string };
+    readonly messages: readonly HarnessModelMessage[];
     readonly turnModel: () => Promise<CredentialedModel>;
     readonly telemetryTurnId?: string;
   },
@@ -373,9 +367,15 @@ async function summaryExecutor(
 }> {
   const { config, session } = step;
   const turnReference = stepReference(step);
-  const reference = agentSettings(step).compactionModel ?? turnReference;
+  const chosen = await compactionModel(step.ctx as ContextContainer, {
+    abortSignal: config.abortSignal,
+    conversation: input.messages,
+  });
+  const reference = chosen?.reference ?? agentSettings(step).compactionModel ?? turnReference;
   const { model, renew } =
-    reference === turnReference ? await input.turnModel() : await compactionModel(step, reference);
+    reference === turnReference
+      ? await input.turnModel()
+      : await credentialedModel(chosen?.model ?? (await config.resolveModel(reference)));
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,

@@ -37,9 +37,10 @@ export function draftOf(contributions: readonly Contribution[]): Draft {
 
 export async function decideModel(
   contributions: readonly Contribution[],
+  field: "compactionModel" | "model" = "model",
 ): Promise<ContributionValues["model"] | undefined> {
   for (let index = contributions.length - 1; index >= 0; index -= 1) {
-    const answer = await force(contributions[index]!.model);
+    const answer = await force(contributions[index]![field]);
     if (answer !== undefined) return answer;
   }
   return undefined;

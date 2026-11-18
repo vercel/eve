@@ -5,6 +5,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { currentModel } from "#definitions/model.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
+import { isDynamicSentinel } from "#dynamic/definition.js";
 import {
   isDynamicModelDefinition,
   type AgentLimitsDefinition,
@@ -55,6 +56,10 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (isDynamicModelDefinition(definition.model)) {
     throw new Error(`${message} The returned "model" must be static.`);
   }
+  const compactionModel = definition.compaction?.model;
+  if (isDynamicSentinel(compactionModel)) {
+    throw new Error(`${message} The returned "compaction.model" must be static.`);
+  }
   if (definition.limits?.sessionUsage !== undefined) {
     throw new Error(
       `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's \`sessionUsage\` applies.`,
@@ -91,11 +96,11 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
       model?: DynamicSubagentModelReference;
       thresholdPercent?: number;
     } = {};
-    if (definition.compaction.model !== undefined) {
+    if (compactionModel !== undefined) {
       compaction.model = await normalizeDurableModelSelection({
         modelMetadata: input.modelMetadata,
         selection: {
-          model: definition.compaction.model,
+          model: compactionModel,
           modelContextWindowTokens: definition.compaction.modelContextWindowTokens,
           modelOptions: definition.modelOptions,
         },

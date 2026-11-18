@@ -28,6 +28,7 @@ import {
 import type { ModelMetadata } from "#internal/model-catalog.js";
 
 const MODEL_REACTION_ID = "model:agent";
+const COMPACTION_MODEL_ID = "model:compaction";
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
 
 export class DynamicModelSelectionError extends Error {
@@ -63,8 +64,21 @@ export async function loadModelDefinition(bundle: CompiledBundle): Promise<Defin
   });
   return modelDefinition(bundle.modelMetadata, {
     choose: authoredEvaluate(dynamicEvaluate(definition)),
+    field: "model",
     id: MODEL_REACTION_ID,
     label: `${dynamicModel.logicalPath}#model`,
+  });
+}
+
+export function compactionModelDefinition(bundle: CompiledBundle): Definition | undefined {
+  const config = bundle.resolvedAgent.config;
+  const dynamicModel = config?.compaction?.dynamicModel;
+  if (dynamicModel === undefined) return undefined;
+  return modelDefinition(bundle.modelMetadata, {
+    choose: authoredEvaluate(dynamicEvaluate(dynamicModel)),
+    field: "compactionModel",
+    id: COMPACTION_MODEL_ID,
+    label: `${config?.source?.logicalPath ?? "agent.ts"}#compaction.model`,
   });
 }
 
@@ -73,22 +87,25 @@ function modelDefinition(
   input: {
     readonly id: string;
     readonly label: string;
+    readonly field: "compactionModel" | "model";
     readonly choose: (ctx: InternalContext) => unknown;
   },
 ): Definition {
+  const choosesModel = input.field === "model";
   return {
     contribute: (ctx) => ({
-      model: async () => {
+      [input.field]: async () => {
         const kept = await ctx.keep(
           async (evaluation) => {
             const result = await input.choose(evaluation);
+            if (!choosesModel && (result === null || result === undefined)) return null;
             try {
-              return await keptModel(result, modelMetadata);
+              return await keptModel(result, modelMetadata, choosesModel);
             } catch (error) {
               throw new DynamicModelSelectionError(error);
             }
           },
-          { choosesModel: true },
+          choosesModel ? { choosesModel: true } : undefined,
         );
         const value = kept?.value as ModelSlotValue | null | undefined;
         if (value === null || value === undefined) return undefined;
@@ -103,12 +120,18 @@ function modelDefinition(
 async function keptModel(
   result: unknown,
   modelMetadata: () => Promise<ModelMetadata>,
+  choosesModel: boolean,
 ): Promise<Kept> {
   const selection = await resolveRuntimeModelSelection({
     durability: "live",
     modelMetadata,
     selection: result as PublicAgentDynamicModelResult,
   });
+  if (!choosesModel && selection.reference.credentialed === true) {
+    throw new Error(
+      'A dynamic "compaction.model" cannot return a defineModel value because the summary call cannot open a sign-in.',
+    );
+  }
   const live =
     selection.model === undefined ||
     (!isMockModel(selection.model) && shouldMockAuthoredRuntimeModels())

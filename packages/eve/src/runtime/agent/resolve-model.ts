@@ -21,6 +21,7 @@ import {
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import { isDynamicSentinel } from "#dynamic/definition.js";
 import { type DefinedModel, isDefinedModel } from "#models/definition.js";
 import { selectionModel } from "#models/options.js";
 import { readAgentToolModels } from "#tools/agent-models.js";
@@ -126,7 +127,7 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  if (isDynamicModelDefinition(model)) {
+  if (isDynamicSentinel(model)) {
     throw new Error(
       `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a static runtime model.`,
     );

@@ -289,6 +289,30 @@ export default defineAgent({
 });
 ```
 
+`compaction.model` sets the model that writes the summary. Omit it to summarize with the turn
+model. To choose it per session, such as to keep each tenant's summaries with the provider its
+turns use, pass `defineDynamic(fn)` from `eve`. eve runs the function only when it compacts. It
+reads the session and `ctx.model`, the turn's model, and returns a model, a selection object, or
+`null` to summarize with the turn model:
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  compaction: {
+    model: defineDynamic((ctx) =>
+      ctx.session.auth.current?.attributes.region === "eu" ? null : "anthropic/claude-haiku-4.5",
+    ),
+  },
+});
+```
+
+The function follows the [dynamic model](#choose-the-model-dynamically) rules, except that `null`
+falls back to the turn model. Return per-model `modelContextWindowTokens` and `modelOptions` in a
+selection object; a dynamic `compaction.model` can't have a sibling `compaction.modelContextWindowTokens`.
+A dynamic subagent's returned config can't set a dynamic `compaction.model`.
+
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
 ## Runtime limits

@@ -14,7 +14,7 @@ import { connectionDefinition } from "./connections.js";
 import type { Definition } from "./definition.js";
 import { hookDefinition } from "./hooks.js";
 import { instructionsDefinition } from "./instructions.js";
-import { agentModel, loadModelDefinition } from "./model.js";
+import { agentModel, compactionModelDefinition, loadModelDefinition } from "./model.js";
 import { skillDefinition } from "./skills.js";
 import { subagentDefinition } from "./subagents.js";
 import { toolDefinition, toolsDefinition } from "./tools.js";
@@ -93,7 +93,9 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
       ),
     },
     instructions: declared(agent, "instructions").map(instructionsDefinition),
-    model: [staticModel, model].filter((definition) => definition !== undefined),
+    model: [staticModel, model, compactionModelDefinition(bundle)].filter(
+      (definition) => definition !== undefined,
+    ),
     skills: declared(agent, "skill").map(skillDefinition),
     tools: declared(agent, "tool").map(toolDefinition),
   };
