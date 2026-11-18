@@ -173,9 +173,16 @@ export function createDockerSandboxProvider(
         expectDockerSuccess(removed, `delete sandbox session container "${containerName}"`);
       }
     },
-    async onSessionIdle(context, state, { signal }) {
+    async onSessionIdle(context, state, { inUse, signal }) {
       await ensureDaemon();
       const containerName = state?.containerName ?? dockerSessionName(context);
+      if (inUse !== undefined && (await inspectContainerRunning(containerName)) === true) {
+        const connection = createDockerConnection({
+          cli,
+          containerIdentity: await resolveDockerHandleIdentity(cli, containerName),
+        });
+        if (await inUse(connection)) return;
+      }
       const stopped = await cli.run(["stop", "-t", "0", containerName], { signal });
       if (stopped.exitCode !== 0 && !/no such container/iu.test(stopped.stderr)) {
         expectDockerSuccess(stopped, `stop idle sandbox session container "${containerName}"`);

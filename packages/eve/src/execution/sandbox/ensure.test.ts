@@ -7,13 +7,17 @@ import { importConversation, readLegacySnapshot } from "#execution/legacy-sessio
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.js";
-import { defineSandboxProvider, type SandboxSessionContext } from "#sandbox/provider.js";
+import {
+  defineSandboxProvider,
+  type SandboxSessionContext,
+  type SandboxSessionIdleOptions,
+} from "#sandbox/provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
-import type { SandboxState } from "#sandbox/state.js";
+import { markSandboxRunning, type SandboxState } from "#sandbox/state.js";
 
 vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
@@ -21,6 +25,8 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
 
 function fixture(
   options: {
+    readonly backgroundCommandRunning?: () => boolean;
+    readonly backgroundTimeoutMs?: number;
     readonly closable?: boolean;
     readonly idleTimeoutMs?: number | false;
     readonly returnCopy?: boolean;
@@ -30,13 +36,31 @@ function fixture(
 ) {
   const { returnCopy = false, setup } = options;
   const onSessionEnd = vi.fn(async () => {});
-  const onSessionIdle = vi.fn(async (_context: SandboxSessionContext, _state: unknown) => {});
   const stopSandbox = vi.fn(async () => {});
   const closeSandbox = vi.fn(async () => {});
-  const create = vi.fn(async () => {
-    const { connection } = mockSandbox({ stop: stopSandbox });
-    return options.closable === true ? { ...connection, close: closeSandbox } : connection;
-  });
+  const keepAlive = vi.fn(async (_options: { readonly durationMs: number }) => {});
+  const stopIdleSandbox = vi.fn();
+  const connect = (): ReturnType<typeof mockSandbox>["connection"] => {
+    const { connection } = mockSandbox({
+      run: () => ({
+        exitCode: options.backgroundCommandRunning?.() === true ? 0 : 1,
+        stderr: "",
+        stdout: "",
+      }),
+      stop: stopSandbox,
+    });
+    return {
+      ...connection,
+      keepAlive,
+      ...(options.closable === true && { close: closeSandbox }),
+    };
+  };
+  const create = vi.fn(async () => connect());
+  const onSessionIdle = vi.fn(
+    async (_context: SandboxSessionContext, _state: unknown, idle: SandboxSessionIdleOptions) => {
+      if (!(await idle.inUse?.(connect()))) stopIdleSandbox();
+    },
+  );
   const resume = vi.fn(async () => await create());
   const start = vi.fn(async (context: SandboxSessionContext) => ({
     connection: await create(),
@@ -52,9 +76,12 @@ function fixture(
       resume,
     }),
   });
-  const environment = provider.environment(
-    options.idleTimeoutMs === undefined ? undefined : { idleTimeoutMs: options.idleTimeoutMs },
-  );
+  const environment = provider.environment({
+    ...(options.backgroundTimeoutMs !== undefined && {
+      backgroundTimeoutMs: options.backgroundTimeoutMs,
+    }),
+    ...(options.idleTimeoutMs !== undefined && { idleTimeoutMs: options.idleTimeoutMs }),
+  });
   const selector = defineSandbox(async () => {
     const sandbox = await environment.open();
     setup?.();
@@ -77,11 +104,13 @@ function fixture(
   return {
     closeSandbox,
     create,
+    keepAlive,
     onSessionEnd,
     onSessionIdle,
     registry,
     resume,
     start,
+    stopIdleSandbox,
     stopSandbox,
   };
 }
@@ -168,7 +197,10 @@ function inheritingChildRegistry(rootRegistry: RuntimeSandboxRegistry): RuntimeS
     },
   };
 }
-afterEach(() => shutdownActiveSandboxConnections());
+afterEach(async () => {
+  vi.useRealTimers();
+  await shutdownActiveSandboxConnections();
+});
 
 describe("ensureSandboxAccess", () => {
   it("does not prepare or start anything until the sandbox is requested", async () => {
@@ -770,6 +802,93 @@ describe("idle stop marker", () => {
     );
     expect(value.start).not.toHaveBeenCalled();
     expect(value.resume).not.toHaveBeenCalled();
+  });
+
+  it("records how long a background command keeps the sandbox running, and asks the provider for that long", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    const value = fixture({ backgroundTimeoutMs: 3_600_000, idleTimeoutMs: 0, stopsIdle: true });
+    const { access } = await open(value.registry);
+
+    await access.holdForBackgroundCommand?.();
+    vi.setSystemTime(1_060_000);
+    value.keepAlive.mockRejectedValueOnce(new Error("The plan's maximum duration is reached."));
+    await access.holdForBackgroundCommand?.();
+
+    expect(value.keepAlive.mock.calls).toEqual([
+      [{ durationMs: 3_600_000 }],
+      [{ durationMs: 3_600_000 }],
+    ]);
+    await expect(access.captureState()).resolves.toMatchObject({
+      running: { backgroundUntil: 4_660_000, idleTimeoutMs: 0 },
+    });
+  });
+
+  it.each([
+    { name: "backgroundTimeoutMs is 0", options: { backgroundTimeoutMs: 0, idleTimeoutMs: 0 } },
+    { name: "the idle stop is off", options: { idleTimeoutMs: false as const } },
+    { name: "another session owns the sandbox", options: { idleTimeoutMs: 0 }, shared: true },
+  ])("holds nothing for a background command when $name", async ({ options, shared }) => {
+    const value = fixture({ ...options, stopsIdle: true });
+    const owner = await open(value.registry);
+    const { access } =
+      shared === true
+        ? await open(
+            value.registry,
+            "session-1",
+            await owner.access.captureState(),
+            "__root__",
+            false,
+          )
+        : owner;
+
+    await access.holdForBackgroundCommand?.();
+
+    expect(value.keepAlive).not.toHaveBeenCalled();
+    expect((await access.captureState()).running?.backgroundUntil).toBeUndefined();
+  });
+
+  it("leaves the idle sandbox running while a background command runs, until its time is up", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    let commandRunning = true;
+    const value = fixture({
+      backgroundCommandRunning: () => commandRunning,
+      backgroundTimeoutMs: 60_000,
+      idleTimeoutMs: 0,
+      stopsIdle: true,
+    });
+    const { access } = await open(value.registry);
+    await access.holdForBackgroundCommand?.();
+    const recorded = await access.captureState();
+    await access.release();
+    value.resume.mockClear();
+    const { signal } = new AbortController();
+    const idle = async () => await (await unopened(value.registry, recorded)).stopIdle({ signal });
+
+    await expect(idle()).resolves.toEqual({ inUse: true });
+    expect(value.stopIdleSandbox).not.toHaveBeenCalled();
+
+    commandRunning = false;
+    await expect(idle()).resolves.toEqual({ inUse: false });
+    expect(value.stopIdleSandbox).toHaveBeenCalledOnce();
+
+    commandRunning = true;
+    vi.setSystemTime(1_060_000);
+    await expect(idle()).resolves.toEqual({ inUse: false });
+    expect(value.stopIdleSandbox).toHaveBeenCalledTimes(2);
+    expect(value.resume).not.toHaveBeenCalled();
+  });
+
+  it("keeps a background command's hold when a cancelled or interrupted step marks the sandbox as running", () => {
+    const session = {
+      sandboxState: { running: { backgroundUntil: 4_660_000, idleTimeoutMs: 0 }, session: null },
+    };
+
+    expect(markSandboxRunning(session, 60_000).sandboxState.running).toEqual({
+      backgroundUntil: 4_660_000,
+      idleTimeoutMs: 60_000,
+    });
   });
 
   it("leaves the sandbox alone when this deployment turned the idle stop off", async () => {

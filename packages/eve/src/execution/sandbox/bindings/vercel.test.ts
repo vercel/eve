@@ -14,7 +14,7 @@ import {
   type VercelSandboxSessionState,
 } from "#execution/sandbox/bindings/vercel.js";
 import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
-import { defineSandboxProvider } from "#public/sandbox/provider.js";
+import { defineSandboxProvider, type SandboxConnection } from "#public/sandbox/provider.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
@@ -67,17 +67,33 @@ function createMockDetachedCommand(
 }
 
 function createMockSandbox(input: {
+  expiresInMs?: number;
   name: string;
   snapshotId?: string;
   sourceSnapshotId?: string;
   status?: string;
   tags?: Record<string, string>;
+  timeout?: number;
 }) {
   const files = new Map<string, Buffer>();
   let tags = input.tags;
+  const session = {
+    createdAt: new Date(),
+    extendTimeout: vi.fn(async (extension: number, _options?: { signal?: AbortSignal }) => {
+      session.timeout += extension;
+    }),
+    runCommand: vi.fn(async () => createMockDetachedCommand()),
+    startedAt: undefined as Date | undefined,
+    get status() {
+      return sandbox.status;
+    },
+    timeout: input.expiresInMs ?? 0,
+  };
   const sandbox = {
     currentSnapshotId: input.snapshotId ?? "",
     delete: vi.fn().mockResolvedValue(undefined),
+    currentSession: () => session,
+    timeout: input.timeout,
     fs: {
       rm: vi.fn().mockResolvedValue(undefined),
       unlink: vi.fn().mockResolvedValue(undefined),
@@ -945,9 +961,11 @@ describe("createVercelSandbox", () => {
       const idle = (
         state: { readonly sandboxName: string; readonly version: 3 } | null,
         signal?: AbortSignal,
+        inUse?: (connection: SandboxConnection<object>) => Promise<boolean>,
       ) =>
         provider.idleSession({
           appRoot: "/tmp/test-app-root",
+          inUse,
           sandboxName: "session-key",
           signal,
           state,
@@ -987,6 +1005,34 @@ describe("createVercelSandbox", () => {
       expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledOnce();
     });
 
+    it("leaves a running sandbox alone on idle while eve reports it in use, and asks only about a running one", async () => {
+      const { fake, idle, start } = session();
+      const { state } = await start();
+      const sandbox = fake.sandboxes.get(state.sandboxName)!;
+      let commandRunning = true;
+      const inUse = vi.fn(async (connection: SandboxConnection<object>) => {
+        await connection.spawn({ command: "true", env: {}, workingDirectory: "/workspace" });
+        return commandRunning;
+      });
+      sandbox.runCommand.mockClear();
+
+      await idle(state, undefined, inUse);
+      expect(sandbox.currentSession().runCommand).toHaveBeenCalledOnce();
+      expect(sandbox.runCommand).not.toHaveBeenCalled();
+      expect(sandbox.stop).not.toHaveBeenCalled();
+
+      commandRunning = false;
+      await idle(state, undefined, inUse);
+      expect(sandbox.stop).toHaveBeenCalledOnce();
+
+      sandbox.status = "stopped";
+      await idle(state, undefined, inUse);
+      expect(inUse).toHaveBeenCalledTimes(2);
+      expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
+        expect.objectContaining({ resume: false }),
+      );
+    });
+
     it("deletes the session's sandbox by key when no state was recorded, and succeeds once it is gone", async () => {
       const { end, fake, start } = session();
       await start();
@@ -994,6 +1040,113 @@ describe("createVercelSandbox", () => {
       await end(null);
       expect(fake.sandboxes.size).toBe(0);
       await expect(end(null)).resolves.toBeUndefined();
+    });
+  });
+
+  describe("timeout", () => {
+    const MINUTE = 60_000;
+    const rejected = () => Object.assign(new Error("Bad Request"), { response: { status: 400 } });
+
+    async function runningSession(expiresInMs: number) {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const vercel = createMockSandbox({ expiresInMs, name: "session", timeout: 30 * MINUTE });
+      const fake = createFakeVercelProvider(vercel);
+      const { connection, sandbox } = await createTestVercelSandbox({
+        loadSandboxModule: async () => fake.sandboxModule as never,
+      }).start({
+        appRoot: "/tmp/test-app-root",
+        prepared: { snapshotId: "snapshot-a" },
+        sandboxName: "session-key",
+      });
+      vercel.runCommand.mockResolvedValue(createMockDetachedCommand() as never);
+      return { connection, sandbox, vercel };
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const extensions = (vercel: ReturnType<typeof createMockSandbox>) =>
+      vercel.currentSession().extendTimeout.mock.calls.map(([extension]) => extension);
+
+    it("extends the timeout back to its full length when eve uses the sandbox", async () => {
+      const { sandbox, vercel } = await runningSession(10 * MINUTE);
+
+      await sandbox.run({ command: "true" });
+      await sandbox.run({ command: "true" });
+
+      expect(extensions(vercel)).toEqual([20 * MINUTE]);
+    });
+
+    it("extends a session that Vercel last reported as pending, counting from its creation", async () => {
+      const { sandbox, vercel } = await runningSession(30 * MINUTE);
+      vercel.status = "pending";
+      vi.setSystemTime(Date.now() + 12 * MINUTE);
+
+      await sandbox.run({ command: "true" });
+
+      expect(extensions(vercel)).toEqual([12 * MINUTE]);
+    });
+
+    it("leaves the timeout alone within a minute of its full length, and on a sandbox that is not running", async () => {
+      const ample = await runningSession(30 * MINUTE - 30_000);
+      await ample.sandbox.run({ command: "true" });
+      expect(extensions(ample.vercel)).toEqual([]);
+
+      const stopped = await runningSession(MINUTE);
+      stopped.vercel.status = "stopped";
+      await stopped.sandbox.run({ command: "true" });
+      expect(extensions(stopped.vercel)).toEqual([]);
+    });
+
+    it("asks for half as long each time Vercel rejects an extension", async () => {
+      const { sandbox, vercel } = await runningSession(10 * MINUTE);
+      vercel.currentSession().extendTimeout.mockImplementation(async (extension: number) => {
+        if (extension > 5 * MINUTE) throw rejected();
+      });
+
+      await sandbox.run({ command: "true" });
+
+      expect(extensions(vercel)).toEqual([20 * MINUTE, 10 * MINUTE, 5 * MINUTE]);
+    });
+
+    it.each([
+      { failure: "rejects every extension", error: rejected, attempts: 5 },
+      {
+        failure: "fails for another reason",
+        error: () => Object.assign(new Error("Unavailable"), { response: { status: 503 } }),
+        attempts: 1,
+      },
+    ])("runs the command when Vercel $failure, and stops asking", async ({ attempts, error }) => {
+      const { sandbox, vercel } = await runningSession(10 * MINUTE);
+      vercel.currentSession().extendTimeout.mockImplementation(async () => {
+        throw error();
+      });
+
+      await expect(sandbox.run({ command: "true" })).resolves.toMatchObject({ exitCode: 0 });
+      await sandbox.run({ command: "true" });
+
+      expect(extensions(vercel)).toHaveLength(attempts);
+    });
+
+    it("keeps the sandbox running for as long as keepAlive asks, once for calls made together", async () => {
+      const { connection, vercel } = await runningSession(20 * MINUTE);
+
+      await Promise.all([
+        connection.keepAlive?.({ durationMs: 120 * MINUTE }),
+        connection.keepAlive?.({ durationMs: 120 * MINUTE }),
+      ]);
+
+      expect(extensions(vercel)).toEqual([100 * MINUTE]);
+    });
+
+    it("says that the plan's limit is the usual cause when Vercel rejects every extension", async () => {
+      const { connection, vercel } = await runningSession(20 * MINUTE);
+      vercel.currentSession().extendTimeout.mockRejectedValue(rejected());
+
+      await expect(connection.keepAlive?.({ durationMs: 240 * MINUTE })).rejects.toThrow(
+        /Vercel rejected every extension of sandbox ".+"'s timeout\. The usual cause is that the session reached the plan's maximum duration\./u,
+      );
     });
   });
 

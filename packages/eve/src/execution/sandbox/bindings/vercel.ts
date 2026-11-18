@@ -37,6 +37,7 @@ import {
   type CreateVercelSandbox,
   type VercelSandboxCreateParams,
 } from "#execution/sandbox/bindings/vercel-create-sdk.js";
+import { createVercelDeadline } from "#execution/sandbox/bindings/vercel-deadline.js";
 import {
   isVercelSandboxMissingError,
   isVercelSandboxNameConflictError,
@@ -119,7 +120,7 @@ export function createVercelSandbox(
         signal,
       });
     },
-    async onSessionIdle(context, state, { signal }) {
+    async onSessionIdle(context, state, { inUse, signal }) {
       const sandbox = await getNamedVercelSandbox({
         createOptions: signal === undefined ? createOptions : { ...createOptions, signal },
         sandboxModule: await loadSandboxModule(),
@@ -127,6 +128,11 @@ export function createVercelSandbox(
       });
       if (sandbox === null) return;
       try {
+        if (
+          sandbox.status === "running" &&
+          (await inUse?.(createVercelConnection(sandbox, sandbox.currentSession())))
+        )
+          return;
         await stopVercelSandbox(sandbox, signal);
       } catch (error) {
         if (!isVercelSandboxMissingError(error)) throw error;
@@ -503,16 +509,23 @@ function createSessionCreateParams(
 
 function createVercelConnection(
   sandbox: VercelSandbox,
+  commands: Pick<VercelSandbox, "runCommand"> = sandbox,
 ): SandboxConnection<VercelSandboxExtensions> {
+  const deadline = createVercelDeadline(sandbox);
   return {
     extensions: {
       name: sandbox.name,
       setNetworkPolicy: createVercelNetworkPolicySetter(sandbox),
     },
+    async keepAlive({ durationMs }) {
+      await deadline.keepRunning(durationMs);
+    },
     async readFile(options) {
+      await deadline.renew();
       return normalizeVercelReadStream(await sandbox.readFile({ path: options.path }));
     },
     async removePath(options: SandboxRemovePathOptions) {
+      await deadline.renew();
       await sandbox.fs.rm(options.path, {
         force: options.force,
         recursive: options.recursive,
@@ -520,7 +533,8 @@ function createVercelConnection(
       });
     },
     async spawn(options): Promise<SandboxProcess> {
-      const command = await sandbox.runCommand({
+      await deadline.renew();
+      const command = await commands.runCommand({
         args: ["-lc", options.command],
         cmd: "bash",
         cwd: options.workingDirectory,
@@ -541,6 +555,7 @@ function createVercelConnection(
     },
     async writeFiles(options: SandboxWriteFilesOptions) {
       if (options.files.length === 0) return;
+      await deadline.renew();
       await sandbox.writeFiles(
         await resolveVercelWriteFiles(sandbox, options.files, options.signal),
         {

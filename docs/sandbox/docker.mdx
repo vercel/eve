@@ -90,7 +90,7 @@ The default image doesn't include `gh`, so `installCodeTooling` from `eve/extens
 
 ## Environment options
 
-Pass `image`, `pullPolicy`, `env`, `prepare`, and `idleTimeoutMs` to the environment. During preparation, eve copies workspace and skill files into a temporary container and runs your `prepare`. It saves the result as the template image.
+Pass `image`, `pullPolicy`, `env`, `prepare`, `idleTimeoutMs`, and `backgroundTimeoutMs` to the environment. During preparation, eve copies workspace and skill files into a temporary container and runs your `prepare`. It saves the result as the template image.
 
 ## Live container options
 
@@ -98,6 +98,6 @@ Pass `networkPolicy` to `open()` to set the live container's policy: `"allow-all
 
 Each session's container keeps `/workspace` in its filesystem, and a stopped container restarts with those files. `sandbox.delete()` removes the container and succeeds when it's already gone.
 
-Docker sets no timeout of its own, so a container runs until eve stops it. eve runs `docker stop` on the session's container once the session has been idle for `idleTimeoutMs`, 5 minutes by default, and when the eve server shuts down. Processes in the container end, and the next turn that uses the sandbox restarts it. See [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox).
+Docker sets no timeout of its own, so a container runs until eve stops it. eve runs `docker stop` on the session's container once the session has been idle for `idleTimeoutMs`, 5 minutes by default, and when the eve server shuts down. Processes in the container end, and the next turn that uses the sandbox restarts it. A [background command](/docs/sandbox#background-commands) keeps the container running until it exits, for up to `backgroundTimeoutMs`. See [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox).
 
 See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

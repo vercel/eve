@@ -7,6 +7,8 @@ import { always } from "#tools/approval/policies.js";
 import { z } from "zod";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { contextStorage } from "#context/container.js";
+import { SandboxKey } from "#context/keys.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
@@ -126,6 +128,7 @@ async function withSession(
     readonly input: { readonly message?: string };
     readonly modules: TestAppDescriptor["modules"];
     readonly sandboxIdle: TestAppDescriptor["sandboxIdle"];
+    readonly sandboxRun?: TestAppDescriptor["sandboxRun"];
     readonly stepFaults?: StepFaults;
   },
   body: (session: {
@@ -143,6 +146,7 @@ async function withSession(
     beforeSandboxStart: options.beforeSandboxStart,
     modules: options.modules,
     sandboxIdle: options.sandboxIdle,
+    sandboxRun: options.sandboxRun,
   });
   await runtime.run(async () => {
     const run = await startTestSession(
@@ -531,6 +535,73 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
     );
   });
 
+  it("keeps the idle sandbox running while a background command runs, checking again after a growing wait, and stops it once the command exits", async () => {
+    let commandRunning = true;
+    await withSession(
+      host,
+      {
+        input: { message: "Alice starts the nightly export in the background." },
+        modules: [
+          hookModule(
+            "background",
+            defineHook({
+              events: {
+                async "turn.started"(_event, ctx) {
+                  await ctx.getSandbox();
+                  await contextStorage.getStore()?.get(SandboxKey)?.holdForBackgroundCommand?.();
+                },
+              },
+            }),
+          ),
+        ],
+        name: `idle-background-${host}`,
+        sandboxIdle: { idleTimeoutMs: 0 },
+        sandboxRun: () => ({ exitCode: commandRunning ? 0 : 1, stderr: "", stdout: "" }),
+      },
+      async (session) => {
+        await session.nextTurn();
+        const checks = () => session.events().filter((event) => event === "in-use").length;
+        await vi.waitFor(() => expect(checks()).toBeGreaterThan(1), { timeout: 10_000 });
+        expect(checks()).toBeLessThan(4);
+        expect(session.events()).not.toContain("idle");
+
+        commandRunning = false;
+        await vi.waitFor(() => expect(session.events().at(-1)).toBe("idle"), { timeout: 15_000 });
+        expect(session.events()).not.toContain("resume");
+      },
+    );
+  });
+
+  it("stops the idle sandbox once backgroundTimeoutMs has passed, while the command still runs", async () => {
+    await withSession(
+      host,
+      {
+        input: { message: "Alice starts a preview server in the background." },
+        modules: [
+          hookModule(
+            "background",
+            defineHook({
+              events: {
+                async "turn.started"(_event, ctx) {
+                  await ctx.getSandbox();
+                  await contextStorage.getStore()?.get(SandboxKey)?.holdForBackgroundCommand?.();
+                },
+              },
+            }),
+          ),
+        ],
+        name: `idle-background-expired-${host}`,
+        sandboxIdle: { backgroundTimeoutMs: 1_500, idleTimeoutMs: 0 },
+        sandboxRun: () => ({ exitCode: 0, stderr: "", stdout: "" }),
+      },
+      async (session) => {
+        await session.nextTurn();
+
+        await vi.waitFor(() => expect(session.events().at(-1)).toBe("idle"), { timeout: 15_000 });
+      },
+    );
+  });
+
   it("keeps the sandbox running while a turn waits for an approval", async () => {
     await withSession(
       host,
@@ -612,6 +683,52 @@ describe("idle sandbox stop step", () => {
       const next = applyValueDelta(sessionState, stateDelta.sessionState);
       expect(readDurableSession(next).sandboxState).not.toHaveProperty("running");
       expect(runtime.sandboxEvents).toEqual([`idle:${checkpoint.sessionId}`]);
+    });
+  });
+
+  it("checks again when the stop fails while a background command may be running, and gives up once its time is up", async () => {
+    const runtime = await createTestRuntime({
+      sandboxIdle: {
+        idleTimeoutMs: 0,
+        onSessionIdle: async () => {
+          throw new Error("The sandbox service is unavailable.");
+        },
+      },
+      sandboxRun: () => ({ exitCode: 1, stderr: "", stdout: "" }),
+    });
+    await runtime.run(async () => {
+      const serializedContext = {
+        ...buildSerializedContext({ channelKind: "http" }),
+        "eve.sessionId": "idle-stop-failed-while-held",
+      };
+      const stepWith = async (backgroundUntil: number) => {
+        const checkpoint: HarnessSession = {
+          compaction: {},
+          continuationToken: "idle-stop-failed-while-held",
+          history: [],
+          sandboxState: { running: { backgroundUntil, idleTimeoutMs: 0 }, session: null },
+          sessionId: serializedContext["eve.sessionId"],
+        };
+        const sessionState = createDurableSessionState({ session: checkpoint });
+        const { inUse, stateDelta } = await stopIdleSessionSandboxStep({
+          serializedContext,
+          sessionState,
+        });
+        const next =
+          stateDelta.sessionState === undefined
+            ? sessionState
+            : applyValueDelta(sessionState, stateDelta.sessionState);
+        return { inUse, running: readDurableSession(next).sandboxState?.running };
+      };
+
+      await expect(stepWith(Date.now() + 60_000)).resolves.toEqual({
+        inUse: true,
+        running: { backgroundUntil: expect.any(Number), idleTimeoutMs: 0 },
+      });
+      await expect(stepWith(Date.now() - 1)).resolves.toEqual({
+        inUse: undefined,
+        running: undefined,
+      });
     });
   });
 

@@ -38,6 +38,10 @@ import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step
 import type { SandboxRunning } from "#sandbox/state.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
+const SANDBOX_IN_USE_RECHECK_MIN_MS = 1_000;
+
+const SANDBOX_IN_USE_RECHECK_MAX_MS = 5 * 60_000;
+
 function createSafeOuterWorkflowError(): Error {
   const error = new Error("Agent workflow failed. Inspect the private session trace for details.");
   error.name = "EveWorkflowFailure";
@@ -265,6 +269,7 @@ async function runSessionLoop(
 
   let prewarmedSandbox: SandboxRunning | undefined;
   let idleWindow: Promise<void> | "attempted" | undefined;
+  let inUseChecks = 0;
   const sandboxMayBeRunning = (): SandboxRunning | undefined =>
     readDurableSession(cursor.sessionState).sandboxState?.running ?? prewarmedSandbox;
   const sessionBusy = (): boolean =>
@@ -280,24 +285,38 @@ async function runSessionLoop(
         continue;
       }
       const running = sandboxMayBeRunning();
-      if (running === undefined) idleWindow = undefined;
+      if (running === undefined) {
+        idleWindow = undefined;
+        inUseChecks = 0;
+      }
       if (running === undefined || idleWindow === "attempted" || sessionBusy()) return;
       if (inbox.awaitingHandover) {
         if (!(await beforeInbox(inbox.whenHandoverSettled()))) return;
         continue;
       }
-      if (running.idleTimeoutMs > 0) {
-        idleWindow ??= host.until(Date.now() + running.idleTimeoutMs);
-        if (!(await beforeInbox(idleWindow)) || inbox.hasPending()) return;
-      }
-      idleWindow = "attempted";
+      if (idleWindow === undefined && running.idleTimeoutMs > 0)
+        idleWindow = host.until(Date.now() + running.idleTimeoutMs);
+      if (idleWindow !== undefined && (!(await beforeInbox(idleWindow)) || inbox.hasPending()))
+        return;
       prewarmedSandbox = undefined;
-      await cursor
+      const inUse = await cursor
         .advance(({ serializedContext, sessionState }) =>
           stopIdleSessionSandboxStep({ serializedContext, sessionState }),
         )
-        .catch(() => undefined);
-      return;
+        .then(
+          (stopped) => stopped.inUse === true,
+          () => false,
+        );
+      if (!inUse) {
+        idleWindow = "attempted";
+        return;
+      }
+      const recheckMs = Math.min(
+        SANDBOX_IN_USE_RECHECK_MIN_MS * 2 ** inUseChecks,
+        SANDBOX_IN_USE_RECHECK_MAX_MS,
+      );
+      inUseChecks += 1;
+      idleWindow = host.until(Date.now() + Math.max(running.idleTimeoutMs, recheckMs));
     }
   };
 
@@ -365,6 +384,7 @@ async function runSessionLoop(
     const control = turnControl;
     turnControl = undefined;
     idleWindow = undefined;
+    inUseChecks = 0;
     progress.turnId =
       payload?.control === undefined
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId

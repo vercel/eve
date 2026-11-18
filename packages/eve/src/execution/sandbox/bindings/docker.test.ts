@@ -5,7 +5,10 @@ import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 
 function createContainerStoreCli() {
   let exists = false;
+  let running = false;
   const run: DockerCli["run"] = vi.fn(async (args: readonly string[]) => {
+    if (args[0] === "run" || args[0] === "start") running = true;
+    if (args[0] === "stop") running = false;
     if (args[0] === "rm") {
       const gone = !exists;
       exists = false;
@@ -30,7 +33,7 @@ function createContainerStoreCli() {
       stderr: "",
       stdout:
         args[0] === "container" && args[3] === "{{.State.Running}}"
-          ? "true\n"
+          ? `${running}\n`
           : args[0] === "container" && args[3] === "{{.Id}}"
             ? "container-id-1\n"
             : "",
@@ -165,6 +168,33 @@ describe("Docker sandbox idle stop", () => {
       ["rm", "-f", state.containerName],
       ["stop", "-t", "0", state.containerName],
     ]);
+  });
+
+  it("leaves a running container alone while eve reports it in use, stops it once it is not, and asks only about a running one", async () => {
+    const { dockerCli, run } = createContainerStoreCli();
+    const provider = createDockerSandboxHarness({
+      cli: dockerCli,
+      preparedArtifact: () => ({ imageReference: "image-a" }),
+      runtimeOptions: {},
+    });
+    const session = { appRoot: "/tmp/eve-app", sandboxName: "session-key" };
+    const { state } = await provider.start(session);
+    let commandRunning = true;
+    const inUse = vi.fn(async () => commandRunning);
+    const commands = () => vi.mocked(run).mock.calls.map(([args]) => args[0]);
+
+    vi.mocked(run).mockClear();
+    await provider.idleSession({ ...session, inUse, state });
+    expect(inUse).toHaveBeenCalledOnce();
+    expect(commands()).not.toContain("stop");
+    expect(commands()).not.toContain("start");
+
+    commandRunning = false;
+    await provider.idleSession({ ...session, inUse, state });
+    expect(vi.mocked(run).mock.calls.at(-1)?.[0]).toEqual(["stop", "-t", "0", state.containerName]);
+
+    await provider.idleSession({ ...session, inUse, state });
+    expect(inUse).toHaveBeenCalledTimes(2);
   });
 });
 

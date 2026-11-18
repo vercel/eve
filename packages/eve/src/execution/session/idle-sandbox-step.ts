@@ -17,7 +17,9 @@ const log = createLogger("execution.session.idle-sandbox");
 
 const IDLE_STOP_TIMEOUT_MS = 120_000;
 
-async function withinIdleStopTimeout(stop: (signal: AbortSignal) => Promise<void>): Promise<void> {
+async function withinIdleStopTimeout<Result>(
+  stop: (signal: AbortSignal) => Promise<Result>,
+): Promise<Result> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<never>((_resolve, reject) => {
@@ -30,7 +32,7 @@ async function withinIdleStopTimeout(stop: (signal: AbortSignal) => Promise<void
     }, IDLE_STOP_TIMEOUT_MS);
   });
   try {
-    await Promise.race([stop(controller.signal), timedOut]);
+    return await Promise.race([stop(controller.signal), timedOut]);
   } finally {
     clearTimeout(timer);
   }
@@ -43,29 +45,34 @@ interface IdleSandboxInput {
 
 export async function stopIdleSessionSandboxStep(
   input: IdleSandboxInput,
-): Promise<SessionStateTransition> {
+): Promise<SessionStateTransition & { readonly inUse?: boolean }> {
   "use step";
   return await withSessionStateDelta(input, stopIdleSessionSandbox);
 }
 
 async function stopIdleSessionSandbox(
   input: IdleSandboxInput,
-): Promise<{ readonly sessionState: DurableSessionState }> {
+): Promise<{ readonly inUse?: boolean; readonly sessionState: DurableSessionState }> {
   const durable = readDurableSession(input.sessionState);
+  let inUse = false;
   try {
     const ctx = await deserializeContext(input.serializedContext);
     await withContextScope(ctx, hydrateDurableSession(durable), async (session) => {
       const access = ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined;
       if (access !== undefined)
-        await withinIdleStopTimeout((signal) => access.stopIdle({ signal }));
+        ({ inUse } = await withinIdleStopTimeout((signal) => access.stopIdle({ signal })));
       return { result: undefined, session };
     });
   } catch (error) {
-    log.warn("failed to stop an idle session sandbox; the provider's own timeout still applies", {
-      error,
-      sessionId: input.sessionState.sessionId,
-    });
+    inUse = (durable.sandboxState?.running?.backgroundUntil ?? 0) > Date.now();
+    log.warn(
+      inUse
+        ? "failed to check an idle session sandbox that a background command may be using; eve checks again"
+        : "failed to stop an idle session sandbox; the provider's own timeout still applies",
+      { error, sessionId: input.sessionState.sessionId },
+    );
   }
+  if (inUse) return { inUse, sessionState: input.sessionState };
   return {
     sessionState: replaceDurableSessionSnapshot({
       session: { ...durable, sandboxState: clearSandboxRunning(durable.sandboxState) },

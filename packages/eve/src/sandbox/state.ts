@@ -14,6 +14,7 @@ export interface SandboxSessionState {
 
 export interface SandboxRunning {
   readonly idleTimeoutMs: number;
+  readonly backgroundUntil?: number;
 }
 
 export interface SandboxState {
@@ -32,7 +33,10 @@ export function markSandboxRunning<Session extends { readonly sandboxState?: San
   if (idleTimeoutMs === undefined) return session;
   return {
     ...session,
-    sandboxState: { session: session.sandboxState?.session ?? null, running: { idleTimeoutMs } },
+    sandboxState: {
+      session: session.sandboxState?.session ?? null,
+      running: { ...session.sandboxState?.running, idleTimeoutMs },
+    },
   };
 }
 
@@ -118,6 +122,7 @@ export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
   delete?(options?: SandboxDeleteOptions): Promise<void>;
   get(): Promise<SandboxSession | null>;
+  holdForBackgroundCommand?(): Promise<void>;
   open(): Promise<SandboxSession | null>;
   prepare(work?: SandboxPreparation): void;
   stop(): Promise<void>;

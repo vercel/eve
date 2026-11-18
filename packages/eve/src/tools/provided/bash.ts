@@ -4,6 +4,8 @@ import {
   executeBashOnSandbox,
   type BashInput,
 } from "#execution/sandbox/bash.js";
+import { contextStorage } from "#context/container.js";
+import { SandboxKey } from "#context/keys.js";
 import { frameworkTool } from "./framework-tool.js";
 import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
@@ -106,11 +108,14 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. The result is the command's stdout, then any stderr after a \`[stderr]\` line, or \`(no output)\`. A command that fails ends with \`[exit code: N]\` and is reported as an error. A command still running after the wait keeps running in the background, and a final note says how to check on or stop it.`,
+    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. The result is the command's stdout, then any stderr after a \`[stderr]\` line, or \`(no output)\`. A command that fails ends with \`[exit code: N]\` and is reported as an error. A command still running after the wait keeps running in the background, and a final note says how to check on or stop it. To keep a long job running after the turn ends, start it this way, in the foreground of its own call: a process detached with \`&\` or \`nohup\` can stop soon after the turn ends.`,
     async execute(input, ctx) {
-      return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
+      const result = await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
         abortSignal: ctx.abortSignal,
       });
+      if (result.status === "running")
+        await contextStorage.getStore()?.get(SandboxKey)?.holdForBackgroundCommand?.();
+      return result;
     },
     inputSchema: BASH_INPUT_SCHEMA,
     outputSchema: BASH_OUTPUT_SCHEMA,

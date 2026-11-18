@@ -105,7 +105,7 @@ describe("defineSandboxProvider", () => {
     expect(received).toEqual([{}, {}, { region: "iad1" }]);
   });
 
-  it("keeps idleTimeoutMs from the provider's environment(), defaults it to five minutes, and rejects invalid values", () => {
+  it("keeps idleTimeoutMs and backgroundTimeoutMs from the provider's environment(), defaults them, and rejects invalid values", () => {
     const received: object[] = [];
     const provider = defineSandboxProvider({
       name: "keeping",
@@ -119,18 +119,31 @@ describe("defineSandboxProvider", () => {
         };
       },
     });
-    const windowOf = (environment: SandboxEnvironmentIdentity) =>
-      getSandboxEnvironmentRuntime(environment).idleTimeoutMs;
+    const timeoutsOf = (environment: SandboxEnvironmentIdentity) => {
+      const { backgroundTimeoutMs, idleTimeoutMs } = getSandboxEnvironmentRuntime(environment);
+      return { backgroundTimeoutMs, idleTimeoutMs };
+    };
 
     expect([
-      windowOf(provider.environment()),
-      windowOf(provider.environment({ idleTimeoutMs: 0 })),
-      windowOf(provider.environment({ idleTimeoutMs: false, region: "iad1" })),
-    ]).toEqual([300_000, 0, false]);
+      timeoutsOf(provider.environment()),
+      timeoutsOf(provider.environment({ backgroundTimeoutMs: 0, idleTimeoutMs: 0 })),
+      timeoutsOf(
+        provider.environment({ backgroundTimeoutMs: 60_000, idleTimeoutMs: false, region: "iad1" }),
+      ),
+    ]).toEqual([
+      { backgroundTimeoutMs: 1_800_000, idleTimeoutMs: 300_000 },
+      { backgroundTimeoutMs: 0, idleTimeoutMs: 0 },
+      { backgroundTimeoutMs: 60_000, idleTimeoutMs: false },
+    ]);
     expect(received).toEqual([{}, {}, { region: "iad1" }]);
     for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, "5m", true, null]) {
       expect(() => provider.environment({ idleTimeoutMs: invalid as never })).toThrow(
         'Sandbox provider "keeping" received idleTimeoutMs',
+      );
+    }
+    for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, "30m", false, null]) {
+      expect(() => provider.environment({ backgroundTimeoutMs: invalid as never })).toThrow(
+        'Sandbox provider "keeping" received backgroundTimeoutMs',
       );
     }
   });
@@ -254,8 +267,13 @@ describe("public sandbox types", () => {
     void colliding;
   });
 
-  it("accepts idleTimeoutMs on every built-in environment constructor, and only at DefaultSandbox's top level", () => {
+  it("accepts idleTimeoutMs and backgroundTimeoutMs on every built-in environment constructor, and only at DefaultSandbox's top level", () => {
     expectTypeOf(DefaultSandbox.environment).toBeCallableWith({ idleTimeoutMs: 0 });
+    expectTypeOf(DefaultSandbox.environment).toBeCallableWith({ backgroundTimeoutMs: 0 });
+    expectTypeOf(VercelSandbox.environment).toBeCallableWith({ backgroundTimeoutMs: 3_600_000 });
+    expectTypeOf(DockerSandbox.environment).toBeCallableWith({ backgroundTimeoutMs: 0 });
+    // @ts-expect-error DefaultSandbox takes backgroundTimeoutMs at the top level.
+    void (() => DefaultSandbox.environment({ docker: { backgroundTimeoutMs: 0 } }));
     expectTypeOf(VercelSandbox.environment).toBeCallableWith({ idleTimeoutMs: false });
     expectTypeOf(JustBashSandbox.environment).toBeCallableWith({ idleTimeoutMs: 60_000 });
     expectTypeOf(DockerSandbox.environment).toBeCallableWith({ idleTimeoutMs: 0 });

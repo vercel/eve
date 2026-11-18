@@ -88,6 +88,22 @@ interface StreamTails {
   readonly stdout: StreamTail;
 }
 
+export async function hasRunningBashCommand(
+  sandbox: SandboxSession,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const result = await sandbox.run({
+    command: [
+      `for d in ${JOB_ROOT}/*/; do`,
+      `  [ -d "$d/claimed" ] && [ ! -e "$d/exit" ] && kill -0 -- -"$(cat "$d/pid" 2>/dev/null)" 2>/dev/null && exit 0`,
+      `done`,
+      `exit 1`,
+    ].join("\n"),
+    signal,
+  });
+  return result.exitCode === 0;
+}
+
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,

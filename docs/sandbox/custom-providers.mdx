@@ -88,7 +88,7 @@ function connect(machine: AcmeMachine): SandboxConnection {
 }
 ```
 
-Use the provider from a sandbox file like any built-in environment. Every provider accepts the standard `prepare` and `idleTimeoutMs` options:
+Use the provider from a sandbox file like any built-in environment. Every provider accepts the standard `prepare`, `idleTimeoutMs`, and `backgroundTimeoutMs` options:
 
 ```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
@@ -104,7 +104,7 @@ export const environment = AcmeSandbox.environment({
 export default defineSandbox(() => environment.open({ egress: "deny-all" }));
 ```
 
-`environment(options)` receives the caller's options without `prepare` and `idleTimeoutMs`, which eve handles, or `{}` when the sandbox file passes none. Make every field optional, or require the caller to pass it. An `idleTimeoutMs` other than a non-negative number or `false` throws from `environment()`, and eve uses the value only when the provider implements [`onSessionIdle()`](#onsessionidle).
+`environment(options)` receives the caller's options without `prepare`, `idleTimeoutMs`, and `backgroundTimeoutMs`, which eve handles, or `{}` when the sandbox file passes none. Make every field optional, or require the caller to pass it. An `idleTimeoutMs` other than a non-negative number or `false` throws from `environment()`, as does a `backgroundTimeoutMs` other than a non-negative number. eve uses both values only when the provider implements [`onSessionIdle()`](#onsessionidle).
 
 TypeScript infers the option, artifact, state, and extension types from the implementation. Write `start()` before `resume()` so the state type comes from `start()`'s return value, or annotate `resume()`'s `state` parameter.
 
@@ -117,6 +117,7 @@ A `SandboxConnection` runs commands and reads and writes file bytes in one sandb
 - `writeFiles({ files, signal })` writes every file, creating missing parent directories and overwriting existing files. It is the only write primitive.
 - `removePath({ path, force, recursive, signal })` removes a file or directory. `force` ignores a missing path, and `recursive` removes a non-empty directory.
 - `stop()` releases compute and keeps the sandbox's files.
+- `keepAlive({ durationMs })`, optional, keeps compute running for at least `durationMs` from now. Define it when the backend stops compute on a timer. eve calls it when `bash` leaves a command running in the background, with the environment's [`backgroundTimeoutMs`](/docs/sandbox#background-commands). eve calls it only for a provider that implements [`onSessionIdle()`](#onsessionidle), and not with `idleTimeoutMs: false` or `backgroundTimeoutMs: 0`. eve logs a failure, and the command still returns.
 - `close()`, optional, releases what this process holds for the connection, such as a local interpreter or child processes, without touching the sandbox. eve calls it when the step that opened the connection ends, after `stop()`, and before deletion. A connection lasts at most one step, and the next step resumes the sandbox through a new connection.
 - `extensions`, optional, is a plain object whose own properties eve adds to the sandbox, such as `setNetworkPolicy()`. Use closures rather than class methods, because eve doesn't copy inherited members.
 - `workspaceRoot`, optional, is the absolute sandbox directory where commands start and relative paths resolve. Omit it to use `/workspace`, as every built-in provider does. The directory must exist before eve runs a command in it.
@@ -148,7 +149,7 @@ eve calls the provider's methods at these points:
 | `sandbox.stop()`                                                 | `connection.stop()`, then `connection.close()`                                                                                                               |
 | `sandbox.delete()`                                               | `connection.close()`, then `onSessionEnd(ctx, state, { reason: "deleted" })`                                                                                 |
 | The eve server shuts down                                        | `connection.stop()`, then `connection.close()`, on every connection eve still holds                                                                          |
-| The session that owns the sandbox stays idle for `idleTimeoutMs` | `onSessionIdle(ctx, state, { signal })`, when the provider implements it                                                                                     |
+| The session that owns the sandbox stays idle for `idleTimeoutMs` | `onSessionIdle(ctx, state, { signal, inUse })`, when the provider implements it                                                                              |
 | The session that owns the sandbox ends                           | `connection.close()` on a connection the ending step still holds, then `onSessionEnd(ctx, state, { reason })` with `"completed"`, `"expired"`, or `"failed"` |
 
 - A prewarmed session calls `start()` before its first message, and its first turn can call it again at the same time.
@@ -198,15 +199,21 @@ eve retries cleanup, so `onSessionEnd()` must be safe to repeat and must succeed
 `onSessionIdle()`, optional, stops compute for `ctx.session.id` if it is running, and keeps its files. eve calls it once the owning session has been idle for the environment's `idleTimeoutMs`. Without it, eve never stops the sandbox, and the backend's own limits apply.
 
 ```ts
-async onSessionIdle(ctx, state, { signal }) {
-  // looks the machine up without waking it, and suspends it only if it is running
-  await acme.machines.suspendIfRunning(state?.name ?? nameFor(ctx.session.id), { signal });
+async onSessionIdle(ctx, state, { inUse, signal }) {
+  // looks the machine up without waking it
+  const machine = await acme.machines.find(state?.name ?? nameFor(ctx.session.id), { signal });
+  if (machine?.status !== "running") return;
+  // a command that bash left running is still in progress: leave the machine running
+  if (await inUse?.(connect(machine))) return;
+  await machine.suspend({ signal });
 },
 ```
 
 - Never start or resume the sandbox. Succeed when it is already stopped or doesn't exist.
+- `inUse` is set when `bash` may have left a command running. Call it with a connection to the running sandbox, and leave compute running when it resolves `true`. eve then calls `onSessionIdle()` again later, until the command exits or `backgroundTimeoutMs` passes. A provider that never calls `inUse` stops the command with the sandbox.
+- eve doesn't close the connection you pass to `inUse`, so close it yourself if it holds anything.
 - `state` is `null` when the session never saved it, so find the sandbox from the session id, as in `onSessionEnd()`.
-- eve calls it once per idle period and doesn't retry it. eve logs a failure, and the backend's own limits still apply.
+- eve logs a failed call. It calls again later only while a background command may still be running, and otherwise not until the next idle period, so the backend's own limits still apply.
 - eve waits up to 120 seconds for the call, then aborts `signal` and moves on. Pass `signal` to the requests and commands that stop compute, so an abandoned call doesn't keep running.
 - eve never calls it for a keyed `invokeTool` sandbox, or from a subagent that shares its parent's sandbox.
 

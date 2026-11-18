@@ -43,10 +43,14 @@ interface TestAppDescriptor {
   readonly modules?: readonly ProgrammaticAgentModule[];
   readonly beforeSandboxStart?: (sessionId: string) => Promise<void>;
   readonly sandboxIdle?: {
+    readonly backgroundTimeoutMs?: number;
     readonly idleTimeoutMs?: number | false;
     readonly onSessionIdle?: (sessionId: string, signal: AbortSignal | undefined) => Promise<void>;
   };
+  readonly sandboxRun?: MockSandboxRun;
 }
+
+type MockSandboxRun = NonNullable<NonNullable<Parameters<typeof mockSandbox>[0]>["run"]>;
 
 export interface RunAsSessionInit {
   readonly sessionId?: string;
@@ -82,6 +86,7 @@ const TEST_SANDBOX_PROVIDER_NAME = "eve-test-memory";
 function createTestSandboxProvider(
   beforeStart?: (sessionId: string) => Promise<void>,
   idle?: TestAppDescriptor["sandboxIdle"],
+  run?: MockSandboxRun,
 ) {
   const sessionSandboxes = new Map<string, MockSandbox>();
   const endedSessionIds: string[] = [];
@@ -90,7 +95,7 @@ function createTestSandboxProvider(
   function connect(sessionId: string) {
     let sandbox = sessionSandboxes.get(sessionId);
     if (sandbox === undefined) {
-      sandbox = mockSandbox({ id: sessionId });
+      sandbox = mockSandbox({ id: sessionId, run });
       sessionSandboxes.set(sessionId, sandbox);
     }
     return sandbox.connection;
@@ -125,6 +130,10 @@ function createTestSandboxProvider(
           _state: unknown,
           options: SandboxSessionIdleOptions,
         ) {
+          if (await options.inUse?.(connect(context.session.id))) {
+            events.push(`in-use:${context.session.id}`);
+            return;
+          }
           events.push(`idle:${context.session.id}`);
           await idle.onSessionIdle?.(context.session.id, options.signal);
         },
@@ -147,6 +156,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   const sandboxes = createTestSandboxProvider(
     descriptor.beforeSandboxStart,
     descriptor.sandboxIdle,
+    descriptor.sandboxRun,
   );
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
@@ -156,11 +166,11 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     modules: [
       {
         loadNamespace: async () => {
-          const environment = sandboxes.provider.environment(
-            descriptor.sandboxIdle?.idleTimeoutMs === undefined
-              ? undefined
-              : { idleTimeoutMs: descriptor.sandboxIdle.idleTimeoutMs },
-          );
+          const { backgroundTimeoutMs, idleTimeoutMs } = descriptor.sandboxIdle ?? {};
+          const environment = sandboxes.provider.environment({
+            ...(backgroundTimeoutMs !== undefined && { backgroundTimeoutMs }),
+            ...(idleTimeoutMs !== undefined && { idleTimeoutMs }),
+          });
           return {
             environment,
             default: defineSandbox(({ session }) => {

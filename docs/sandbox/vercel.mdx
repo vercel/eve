@@ -65,7 +65,19 @@ If initialization fails, eve keeps the sandbox and runs the selector against it 
 
 ## Idle stop and timeout
 
-eve stops an idle session's Vercel Sandbox as described in [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox). The sandbox's `timeout`, 30 minutes after each resume by default, still applies, including while a turn is running. Each stop writes a snapshot that the next resume starts from.
+eve stops an idle session's Vercel Sandbox as described in [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox). Each stop writes a snapshot that the next resume starts from.
+
+Vercel also stops the sandbox when its `timeout` runs out, 30 minutes by default. eve extends the timeout while it uses the sandbox, so a turn that keeps using the sandbox keeps it running:
+
+| When                                                    | eve extends the timeout                                                                     |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| eve runs a command, or reads, writes, or removes a file | Back to the full `timeout`, so it counts from eve's last use of the sandbox.                |
+| `bash` leaves a command running in the background       | To cover [`backgroundTimeoutMs`](/docs/sandbox#background-commands), 30 minutes by default. |
+
+- Vercel limits how long one sandbox session runs: 45 minutes on Hobby, and 24 hours on Pro and Enterprise. At the limit Vercel stops the sandbox, its processes end, and the next use resumes it from its files.
+- A sandbox that eve doesn't use for the length of `timeout` stops, even during a turn. The next use resumes it.
+- A single command that runs longer than `timeout` is cut off when the timeout runs out, because eve extends the timeout only when it starts an operation. Raise `timeout` for a tool that runs such a command.
+- The extension for a background command applies only where eve stops the idle sandbox: not with `idleTimeoutMs: false` or `backgroundTimeoutMs: 0`, and not from a subagent that shares its parent's sandbox.
 
 ## The eve-git image
 

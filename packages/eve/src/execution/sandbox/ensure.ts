@@ -13,6 +13,7 @@ import {
   trackActiveSandboxConnection,
   untrackActiveSandboxConnection,
 } from "#execution/sandbox/active-connections.js";
+import { hasRunningBashCommand } from "#execution/sandbox/bash.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { isToolSessionId } from "#execution/tool-session/id.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
@@ -62,7 +63,7 @@ export interface EnsuredSandboxAccess extends SandboxAccess {
   end(reason: SandboxSessionEndReason): Promise<void>;
   release(): Promise<void>;
   settle(): Promise<void>;
-  stopIdle(options: { readonly signal: AbortSignal }): Promise<void>;
+  stopIdle(options: { readonly signal: AbortSignal }): Promise<{ readonly inUse: boolean }>;
 }
 
 interface OpenedSandbox {
@@ -71,6 +72,7 @@ interface OpenedSandbox {
   readonly sandbox: RuntimeSandboxSession;
   close(): Promise<void>;
   delete(options?: SandboxDeleteOptions): Promise<void>;
+  keepAlive(durationMs: number): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -81,16 +83,22 @@ const log = createLogger("execution.sandbox");
 function idleStop(
   registry: RuntimeSandboxRegistry,
   sessionId: string,
-): { readonly idleTimeoutMs: number; readonly provider: SandboxProviderRuntime } | undefined {
+):
+  | {
+      readonly backgroundTimeoutMs: number;
+      readonly idleTimeoutMs: number;
+      readonly provider: SandboxProviderRuntime;
+    }
+  | undefined {
   const registered = registry.sandbox;
   if (registered === null || isToolSessionId(sessionId)) return undefined;
   const owner = owningSandboxDefinition(registered);
   if (owner.kind !== "independent") return undefined;
   const provider = getSandboxEnvironmentRuntime(owner.environment);
-  const { idleTimeoutMs } = provider;
+  const { backgroundTimeoutMs, idleTimeoutMs } = provider;
   if (provider.implementation.onSessionIdle === undefined || idleTimeoutMs === false)
     return undefined;
-  return { idleTimeoutMs, provider };
+  return { backgroundTimeoutMs, idleTimeoutMs, provider };
 }
 
 export function sandboxIdleTimeoutMs(
@@ -124,9 +132,16 @@ export async function ensureSandboxAccess(
   const idle = input.ownsSandbox === false ? undefined : idleStop(input.registry, input.sessionId);
   const idleTimeoutMs = idle?.idleTimeoutMs;
   let running = input.state?.running !== undefined;
+  let backgroundUntil = input.state?.running?.backgroundUntil;
   const captured = (): SandboxState =>
     running && idle !== undefined && recordedSandboxStopsIdle(idle.provider, persisted)
-      ? { session: persisted, running: { idleTimeoutMs: idle.idleTimeoutMs } }
+      ? {
+          session: persisted,
+          running: {
+            idleTimeoutMs: idle.idleTimeoutMs,
+            ...(backgroundUntil !== undefined && { backgroundUntil }),
+          },
+        }
       : { session: persisted };
   if (registered === null) {
     return {
@@ -145,7 +160,9 @@ export async function ensureSandboxAccess(
       async release() {},
       async settle() {},
       async stop() {},
-      async stopIdle() {},
+      async stopIdle() {
+        return { inUse: false };
+      },
     };
   }
   const ownerDefinition = owningSandboxDefinition(registered);
@@ -401,6 +418,7 @@ export async function ensureSandboxAccess(
     untrackActiveSandboxConnection({ providerName, sessionId: input.sessionId });
     persisted = null;
     running = false;
+    backgroundUntil = undefined;
   }
 
   async function recordedProvider(provider: SandboxProviderRuntime) {
@@ -458,6 +476,17 @@ export async function ensureSandboxAccess(
       await preparations;
       return await openSession();
     },
+    async holdForBackgroundCommand() {
+      const current = opened;
+      if (idle === undefined || idle.backgroundTimeoutMs === 0 || current === undefined) return;
+      backgroundUntil = Math.max(backgroundUntil ?? 0, Date.now() + idle.backgroundTimeoutMs);
+      await current.keepAlive(idle.backgroundTimeoutMs).catch((error: unknown) => {
+        log.warn(
+          "failed to keep the sandbox running for a background command; the provider's own timeout applies",
+          { error, sessionId: input.sessionId },
+        );
+      });
+    },
     open: openSession,
     prepare(work) {
       enqueue(work === undefined ? requireOpened : () => work(openSession));
@@ -490,6 +519,7 @@ export async function ensureSandboxAccess(
       const current = await requireOpened();
       await current.stop();
       running = false;
+      backgroundUntil = undefined;
       forgetOpened();
       if (!current.closable) {
         stopped = current;
@@ -502,15 +532,24 @@ export async function ensureSandboxAccess(
       });
     },
     async stopIdle({ signal }) {
-      if (idle === undefined) return;
+      if (idle === undefined) return { inUse: false };
       const recorded = await recordedProvider(idle.provider);
+      let inUse = false;
       await recorded?.implementation.onSessionIdle?.(
         providerContext("sandbox-idle"),
         recorded.state,
         {
           signal,
+          ...(backgroundUntil !== undefined &&
+            Date.now() < backgroundUntil && {
+              inUse: async (connection) => {
+                inUse = await hasRunningBashCommand(createConnectionSession(connection), signal);
+                return inUse;
+              },
+            }),
         },
       );
+      return { inUse };
     },
   };
 
@@ -546,6 +585,9 @@ export async function ensureSandboxAccess(
             reason: "deleted",
           });
         }
+      },
+      async keepAlive(durationMs) {
+        await connection.keepAlive?.({ durationMs });
       },
       providerName: provider.providerName,
       sandbox: withRuntimeSandboxLifecycle(
