@@ -202,20 +202,24 @@ export function createEveVitePlugin(input: {
         }
       }
     },
-    buildApp: {
-      order: "post",
-      async handler(builder: ViteBuilder) {
-        if (!isVercelBuild || nitroModuleInstalled || vercelOutputAfterSsrBundle) {
-          return;
+    ...(process.env.VERCEL
+      ? {
+          buildApp: {
+            order: "post",
+            async handler(builder: ViteBuilder) {
+              if (!isVercelBuild || nitroModuleInstalled || vercelOutputAfterSsrBundle) {
+                return;
+              }
+              for (const environment of Object.values(builder.environments)) {
+                if (!environment.isBuilt) {
+                  await builder.build(environment);
+                }
+              }
+              await addEveVercelServicesToOutput();
+            },
+          },
         }
-        for (const environment of Object.values(builder.environments)) {
-          if (!environment.isBuilt) {
-            await builder.build(environment);
-          }
-        }
-        await addEveVercelServicesToOutput();
-      },
-    },
+      : {}),
     closeBundle: {
       sequential: true,
       async handler() {
