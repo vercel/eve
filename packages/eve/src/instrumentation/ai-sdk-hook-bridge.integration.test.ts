@@ -118,7 +118,7 @@ describe("AI SDK model-call retry telemetry", () => {
 });
 
 describe("AI SDK provider metadata under a content-free trace policy", () => {
-  it("keeps the gateway's cost, generation id and routing when the SDK filters them out", async () => {
+  it("keeps the gateway's cost, generation id, and routing when the AI SDK filters provider metadata", async () => {
     const published: InstrumentationEvent[] = [];
     const ctx = new ContextContainer();
     ctx.set(ChannelInstrumentationKey, { kind: "channel:test", metadata: {} });
