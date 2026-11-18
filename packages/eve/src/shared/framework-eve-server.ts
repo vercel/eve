@@ -267,7 +267,7 @@ function formatEveDevOutputLine(line: string, logLabel: string | undefined): str
   }
 
   const tag = logLabel === undefined ? "[eve:dev]" : `[eve:dev:${logLabel}]`;
-  const serverMatch = /(?:server listening|ready) at\s+(https?:\/\/[^\s]+)/i.exec(normalizedLine);
+  const serverMatch = /^\[DEV\] (?:server listening|ready) at\s+(https?:\/\/\S+)/.exec(trimmedLine);
   if (serverMatch !== null) {
     return `${tag} ready at ${serverMatch[1]}`;
   }

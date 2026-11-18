@@ -301,7 +301,7 @@ It is the last startup line. Wait for it instead of sleeping for a fixed time. I
 ```bash
 eve dev --no-ui > eve-dev.log 2>&1 &
 pid=$!
-until grep -q "ready at" eve-dev.log; do
+until grep -q '^\[DEV\] ready at ' eve-dev.log; do
   kill -0 "$pid" 2>/dev/null || { cat eve-dev.log; exit 1; }
   sleep 0.5
 done

@@ -94,7 +94,7 @@ describe("resolveEveDestinationPrefix", () => {
       Buffer.from('dependency metadata: "homepage": "https://rolldown.rs/"\n'),
     );
     child.stdout.emit("data", Buffer.from("docs: open http://localhost for details\n"));
-    child.stderr.emit("data", Buffer.from("dev server listening at http://127.0.0.1:33449\n"));
+    child.stderr.emit("data", Buffer.from("[DEV] ready at http://127.0.0.1:33449\n"));
 
     await expect(destination).resolves.toBe("http://127.0.0.1:33449");
     await expect(readRegisteredOrigin(appRoot)).resolves.toBe("http://127.0.0.1:33449");
@@ -151,12 +151,15 @@ describe("resolveEveDestinationPrefix", () => {
     child.stdout.emit(
       "data",
       Buffer.from(
-        "☰eve  v0.0.0\nCONFIGURATION_FIELD_CONFLICT\n\u001b[33m[CONFIGURATION_FIELD_CONFLICT] \u001b[0mnoisy\n[DEV] ready at http://127.0.0.1:33450\n",
+        "☰eve  v0.0.0\nCONFIGURATION_FIELD_CONFLICT\n\u001b[33m[CONFIGURATION_FIELD_CONFLICT] \u001b[0mnoisy\n[DEV] ready at http://127.0.0.1:33450\nMCP fixture server is ready at http://localhost:7777/mcp\n",
       ),
     );
 
     await expect(destination).resolves.toBe("http://127.0.0.1:33450");
-    expect(stdoutWrites).toEqual(["[eve:dev:billing] ready at http://127.0.0.1:33450\n"]);
+    expect(stdoutWrites).toEqual([
+      "[eve:dev:billing] ready at http://127.0.0.1:33450\n",
+      "[eve:dev:billing] MCP fixture server is ready at http://localhost:7777/mcp\n",
+    ]);
   });
 });
 
