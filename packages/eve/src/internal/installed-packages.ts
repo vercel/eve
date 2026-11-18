@@ -9,8 +9,13 @@ export interface InstalledPackage {
   readonly root: string;
 }
 
+const ALL_DEPENDENCY_FIELDS = ["dependencies", "optionalDependencies", "peerDependencies"] as const;
+
+export type DependencyField = (typeof ALL_DEPENDENCY_FIELDS)[number];
+
 export function installedDependencyClosure(
   packageRoots: readonly string[],
+  dependencyFields: readonly DependencyField[] = ALL_DEPENDENCY_FIELDS,
 ): readonly InstalledPackage[] {
   const closure: InstalledPackage[] = [];
   const visitedRoots = new Set<string>();
@@ -18,7 +23,7 @@ export function installedDependencyClosure(
   for (let root = pendingRoots.pop(); root !== undefined; root = pendingRoots.pop()) {
     if (visitedRoots.has(root)) continue;
     visitedRoots.add(root);
-    const manifest = readPackageManifest(root);
+    const manifest = readPackageManifest(root, dependencyFields);
     closure.push({ name: manifest.name, root });
     for (const dependency of manifest.dependencies) {
       const dependencyRoot = findInstalledDependencyRoot(dependency, root);
@@ -88,7 +93,10 @@ export function installedPackageRoot(filePath: string): string | undefined {
   }
 }
 
-function readPackageManifest(packageRoot: string): {
+function readPackageManifest(
+  packageRoot: string,
+  dependencyFields: readonly DependencyField[] = ALL_DEPENDENCY_FIELDS,
+): {
   readonly name: string | undefined;
   readonly dependencies: readonly string[];
 } {
@@ -97,11 +105,10 @@ function readPackageManifest(packageRoot: string): {
       string,
       unknown
     >;
-    const dependencyNames = ["dependencies", "optionalDependencies", "peerDependencies"].flatMap(
-      (field) =>
-        pkg[field] !== null && typeof pkg[field] === "object"
-          ? Object.keys(pkg[field] as Record<string, unknown>)
-          : [],
+    const dependencyNames = dependencyFields.flatMap((field) =>
+      pkg[field] !== null && typeof pkg[field] === "object"
+        ? Object.keys(pkg[field] as Record<string, unknown>)
+        : [],
     );
     return {
       name: typeof pkg.name === "string" ? pkg.name : undefined,

@@ -352,7 +352,7 @@ function canHostBundleInstalledPackage(
   if (tracedDependencies.length === 0) return true;
   let closure = dependencyClosures.get(packageRoot);
   if (closure === undefined) {
-    closure = installedDependencyClosure([packageRoot]);
+    closure = installedDependencyClosure([packageRoot], ["dependencies", "peerDependencies"]);
     dependencyClosures.set(packageRoot, closure);
   }
   return closure.every(
