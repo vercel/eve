@@ -126,6 +126,7 @@ export function createCompiledRuntimeModelCatalogLoader(
 
 async function fetchModelCatalog(): Promise<unknown> {
   const signal = AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS);
+  let retriedError: unknown;
   for (let attempt = 0; ; attempt++) {
     let retryableStatus = false;
     try {
@@ -137,12 +138,14 @@ async function fetchModelCatalog(): Promise<unknown> {
         `AI Gateway model catalog request failed with HTTP ${response.status} ${response.statusText}.`,
       );
     } catch (error) {
+      if (signal.aborted) throw retriedError ?? error;
       const delayMs = MODEL_CATALOG_RETRY_DELAYS_MS[attempt];
       const transient =
         retryableStatus ||
         (error instanceof TypeError &&
           (error.message === "fetch failed" || error.message === "terminated"));
-      if (delayMs === undefined || !transient || signal.aborted) throw error;
+      if (delayMs === undefined || !transient) throw error;
+      retriedError = error;
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }

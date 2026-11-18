@@ -104,6 +104,16 @@ function unusedAppRoot(): string {
   return join(tmpdir(), `eve-model-catalog-${randomUUID()}`);
 }
 
+function stubRequestDeadline(): AbortController {
+  const deadline = new AbortController();
+  vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+  return deadline;
+}
+
+function timeoutError(): DOMException {
+  return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+}
+
 function mockCatalogFetch(): void {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     async () =>
@@ -359,19 +369,43 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
         contextWindowTokens: 400_000,
       });
       expect(fetch).toHaveBeenCalledTimes(3);
-      const signals = vi.mocked(fetch).mock.calls.map(([, init]) => init?.signal);
-      expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
-      expect(new Set(signals).size).toBe(1);
     });
 
-    it("does not retry a request that ran out of time", async () => {
-      const error = new DOMException("The operation timed out", "TimeoutError");
-      vi.spyOn(globalThis, "fetch").mockRejectedValue(error);
+    it("does not retry once the 15 second request deadline passes", async () => {
+      const deadline = stubRequestDeadline();
+      const error = timeoutError();
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        deadline.abort(error);
+        throw error;
+      });
       const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
       const assertion = expect(loader.getModelLimits("openai/gpt-5.4")).rejects.toBe(error);
 
       await Promise.all([vi.runAllTimersAsync(), assertion]);
+      expect(AbortSignal.timeout).toHaveBeenCalledOnce();
+      expect(AbortSignal.timeout).toHaveBeenCalledWith(15_000);
       expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it("reports the failure a retry was recovering from when the deadline ends it", async () => {
+      const deadline = stubRequestDeadline();
+      const failure = new TypeError("fetch failed", {
+        cause: Object.assign(new Error("connection timed out"), {
+          code: "UND_ERR_CONNECT_TIMEOUT",
+        }),
+      });
+      vi.spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(failure)
+        .mockImplementationOnce(async () => {
+          const error = timeoutError();
+          deadline.abort(error);
+          throw error;
+        });
+      const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
+      const assertion = expect(loader.getModelLimits("openai/gpt-5.4")).rejects.toBe(failure);
+
+      await Promise.all([vi.runAllTimersAsync(), assertion]);
+      expect(fetch).toHaveBeenCalledTimes(2);
     });
 
     it.each([429, 503])(
