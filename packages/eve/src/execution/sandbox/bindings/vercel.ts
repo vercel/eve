@@ -57,6 +57,7 @@ import {
   ensureVercelSandboxTags,
   resolveVercelSandboxTags,
 } from "#execution/sandbox/bindings/vercel-options.js";
+import { createVercelTimeout } from "#execution/sandbox/bindings/vercel-timeout.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
 import type {
   VercelCreateOptions,
@@ -343,7 +344,12 @@ async function prepareTemplateSnapshot(
     input.context.log("preparing base runtime inside sandbox");
     await ensureVercelSandboxBaseRuntime(sandbox);
     await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
-    await input.context.populate(createVercelConnection(sandbox));
+    const connection = createVercelConnection(sandbox);
+    try {
+      await input.context.populate(connection);
+    } finally {
+      await connection.close?.();
+    }
     await ensureVercelSandboxBaseRuntime(sandbox);
     return (await sandbox.snapshot()).snapshotId;
   } finally {
@@ -504,49 +510,102 @@ function createSessionCreateParams(
 function createVercelConnection(
   sandbox: VercelSandbox,
 ): SandboxConnection<VercelSandboxExtensions> {
+  let timeout: ReturnType<typeof createVercelTimeout> | undefined;
+  let closing: Promise<void> | undefined;
+  const activeTimeout = async () => {
+    while (closing !== undefined) await closing;
+    return (timeout ??= createVercelTimeout(sandbox));
+  };
+  const close = (stop = false): Promise<void> => {
+    const next = Promise.resolve(closing)
+      .then(async () => {
+        const current = timeout;
+        timeout = undefined;
+        await current?.close();
+        if (stop) await stopVercelSandbox(sandbox);
+      })
+      .finally(() => {
+        if (closing === next) closing = undefined;
+      });
+    closing = next;
+    return next;
+  };
+  const setNetworkPolicy = createVercelNetworkPolicySetter(sandbox);
   return {
+    close: () => close(),
     extensions: {
       name: sandbox.name,
-      setNetworkPolicy: createVercelNetworkPolicySetter(sandbox),
+      setNetworkPolicy: async (policy) =>
+        (await activeTimeout()).run(() => setNetworkPolicy(policy)),
     },
     async readFile(options) {
-      return normalizeVercelReadStream(await sandbox.readFile({ path: options.path }));
+      const release = await (await activeTimeout()).acquire(options.signal);
+      try {
+        return normalizeVercelReadStream(
+          await sandbox.readFile({ path: options.path }, { signal: options.signal }),
+          release,
+        );
+      } catch (error) {
+        release();
+        throw error;
+      }
     },
     async removePath(options: SandboxRemovePathOptions) {
-      await sandbox.fs.rm(options.path, {
-        force: options.force,
-        recursive: options.recursive,
-        signal: options.signal,
-      });
+      await (
+        await activeTimeout()
+      ).run(
+        () =>
+          sandbox.fs.rm(options.path, {
+            force: options.force,
+            recursive: options.recursive,
+            signal: options.signal,
+          }),
+        options.signal,
+      );
     },
     async spawn(options): Promise<SandboxProcess> {
-      const command = await sandbox.runCommand({
-        args: ["-lc", options.command],
-        cmd: "bash",
-        cwd: options.workingDirectory,
-        detached: true,
-        env: options.env,
-        signal: options.signal,
-        stdin: options.stdin,
-      });
-      return adaptMultiplexedCommandToSandboxProcess({
-        abortSignal: options.signal,
-        command,
-        getOutput: (log) => log.stream,
-        stdin: options.stdin === true ? command : undefined,
-      });
+      const release = await (await activeTimeout()).acquire(options.signal);
+      try {
+        const command = await sandbox.runCommand({
+          args: ["-lc", options.command],
+          cmd: "bash",
+          cwd: options.workingDirectory,
+          detached: true,
+          env: options.env,
+          signal: options.signal,
+          stdin: options.stdin,
+        });
+        const finished = command.wait({ signal: options.signal });
+        void finished.then(release, release);
+        return adaptMultiplexedCommandToSandboxProcess({
+          abortSignal: options.signal,
+          command: {
+            async kill() {
+              await command.kill();
+              release();
+            },
+            logs: (opts) => command.logs(opts),
+            wait: () => finished,
+          },
+          getOutput: (log) => log.stream,
+          stdin: options.stdin === true ? command : undefined,
+        });
+      } catch (error) {
+        release();
+        throw error;
+      }
     },
-    async stop() {
-      await stopVercelSandbox(sandbox);
-    },
+    stop: () => close(true),
     async writeFiles(options: SandboxWriteFilesOptions) {
       if (options.files.length === 0) return;
-      await sandbox.writeFiles(
-        await resolveVercelWriteFiles(sandbox, options.files, options.signal),
-        {
-          signal: options.signal,
-        },
-      );
+      await (
+        await activeTimeout()
+      ).run(async () => {
+        await sandbox.writeFiles(
+          await resolveVercelWriteFiles(sandbox, options.files, options.signal),
+          { signal: options.signal },
+        );
+      }, options.signal);
     },
   };
 }

@@ -74,9 +74,22 @@ function createMockSandbox(input: {
   tags?: Record<string, string>;
 }) {
   const files = new Map<string, Buffer>();
+  const session = {
+    createdAt: new Date(),
+    startedAt: new Date(),
+    status: input.status ?? "running",
+    timeout: 30 * 60_000,
+    extendTimeout: vi.fn(
+      async (duration: number, _options?: { signal?: AbortSignal }): Promise<void> => {
+        session.timeout += duration;
+      },
+    ),
+  };
   let tags = input.tags;
   const sandbox = {
     currentSnapshotId: input.snapshotId ?? "",
+    currentSession: () => session,
+    timeout: 30 * 60_000,
     delete: vi.fn().mockResolvedValue(undefined),
     fs: {
       rm: vi.fn().mockResolvedValue(undefined),
@@ -1856,10 +1869,13 @@ describe("createVercelSandbox", () => {
 
     expect(stream).not.toBeNull();
     expect(await consumeWebStream(stream!)).toBe("hello sandbox");
-    expect(sessionSandbox.readFile).toHaveBeenCalledWith({ path: "/workspace/message.txt" });
+    expect(sessionSandbox.readFile).toHaveBeenCalledWith(
+      { path: "/workspace/message.txt" },
+      { signal: undefined },
+    );
   });
 
-  it("passes existing Web file streams through unchanged", async () => {
+  it("reads existing Web file streams", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     const providerStream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -1871,7 +1887,7 @@ describe("createVercelSandbox", () => {
 
     const stream = await handle.sandbox.readFile({ path: "/workspace/message.txt" });
 
-    expect(stream).toBe(providerStream);
+    expect(stream).toBeInstanceOf(ReadableStream);
     expect(await consumeWebStream(stream!)).toBe("web stream");
   });
 
@@ -2232,5 +2248,173 @@ describe("createVercelSandbox", () => {
 
     await expect(prewarm).rejects.toThrow(/Failed to initialize Vercel sandbox base runtime/);
     await expect(prewarm).rejects.not.toThrow(/Vercel OIDC can authenticate/);
+  });
+});
+
+describe("Vercel active timeout", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  async function runningCommand() {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    const finished = Promise.withResolvers<{ exitCode: number }>();
+    const command = createMockDetachedCommand();
+    command.wait.mockReturnValue(finished.promise);
+    sessionSandbox.runCommand.mockResolvedValue(command);
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    const abort = new AbortController();
+    const process = await handle.sandbox.spawn({ command: "train", signal: abort.signal });
+    return { handle, sessionSandbox, finished, command, process, abort };
+  }
+
+  it("renews before use and throughout a long command without concurrent operations adding time twice", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    const session = sessionSandbox.currentSession();
+    const extension = Promise.withResolvers<void>();
+    session.extendTimeout.mockImplementationOnce(async (duration) => {
+      await extension.promise;
+      session.timeout += duration;
+    });
+    const finished = Promise.withResolvers<{ exitCode: number }>();
+    const command = createMockDetachedCommand();
+    command.wait.mockReturnValue(finished.promise);
+    sessionSandbox.runCommand.mockResolvedValue(command);
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    const spawning = handle.sandbox.spawn({ command: "train" });
+    const files = Promise.all([
+      handle.sandbox.readTextFile({ path: "missing" }),
+      handle.sandbox.removePath({ path: "old", force: true }),
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.extendTimeout).toHaveBeenCalledTimes(1);
+    extension.resolve();
+    const process = await spawning;
+    await files;
+    await vi.advanceTimersByTimeAsync(65 * 60_000);
+    expect(session.extendTimeout.mock.calls.length).toBeGreaterThan(1);
+    expect(session.startedAt.getTime() + session.timeout).toBeGreaterThan(Date.now());
+    finished.resolve({ exitCode: 0 });
+    expect(await process.wait()).toEqual({ exitCode: 0 });
+    const calls = session.extendTimeout.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(session.extendTimeout).toHaveBeenCalledTimes(calls);
+    await handle.connection.close?.();
+  });
+
+  it.each(["close", "stop", "abort", "kill"] as const)(
+    "stops renewing on %s even if command completion has not arrived",
+    async (ending) => {
+      const { handle, sessionSandbox, finished, process, abort } = await runningCommand();
+      const extend = sessionSandbox.currentSession().extendTimeout;
+      if (ending === "close") await handle.connection.close?.();
+      if (ending === "stop") await handle.connection.stop();
+      if (ending === "abort") abort.abort();
+      if (ending === "kill") await process.kill();
+      const calls = extend.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(extend).toHaveBeenCalledTimes(calls);
+      finished.resolve({ exitCode: 0 });
+      await process.wait();
+      await handle.connection.close?.();
+    },
+  );
+
+  it("retries a failed extension without failing the command, and never resumes a stopped session to renew", async () => {
+    const { handle, sessionSandbox, finished, process } = await runningCommand();
+    const session = sessionSandbox.currentSession();
+    session.extendTimeout.mockRejectedValueOnce(new Error("temporary failure"));
+    await vi.advanceTimersByTimeAsync(16 * 60_000);
+    expect(session.extendTimeout).toHaveBeenCalledTimes(3);
+    expect(session.startedAt.getTime() + session.timeout).toBeGreaterThan(Date.now());
+    session.status = "stopped";
+    const calls = session.extendTimeout.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(session.extendTimeout).toHaveBeenCalledTimes(calls);
+    finished.resolve({ exitCode: 0 });
+    expect(await process.wait()).toEqual({ exitCode: 0 });
+    await handle.connection.close?.();
+  });
+
+  it("renews for a new operation immediately after the last operation cancels an extension", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    const session = sessionSandbox.currentSession();
+    session.extendTimeout.mockImplementationOnce(
+      (_duration, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(29 * 60_000 + 50_000);
+    const controller = new AbortController();
+    const first = expect(
+      handle.sandbox.readTextFile({ path: "missing", signal: controller.signal }),
+    ).rejects.toThrow("cancelled");
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort(new Error("cancelled"));
+    await handle.sandbox.removePath({ path: "old", force: true });
+    await first;
+    expect(session.extendTimeout).toHaveBeenCalledTimes(2);
+    expect(session.startedAt.getTime() + session.timeout).toBeGreaterThan(Date.now() + 60_000);
+    await handle.connection.close?.();
+  });
+
+  it("keeps a file transfer alive until the reader cancels it", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    const canceled = Promise.withResolvers<void>();
+    const cancel = vi.fn(() => canceled.promise);
+    sessionSandbox.readFile.mockResolvedValue(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+        },
+        cancel,
+      }),
+    );
+    const stream = await handle.connection.readFile({ path: "/workspace/large" });
+    if (!(stream instanceof ReadableStream)) throw new Error("Expected a file stream");
+    await vi.advanceTimersByTimeAsync(65 * 60_000);
+    const session = sessionSandbox.currentSession();
+    expect(session.startedAt.getTime() + session.timeout).toBeGreaterThan(Date.now());
+    const canceling = stream.cancel();
+    expect(cancel).toHaveBeenCalledOnce();
+    const calls = session.extendTimeout.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(session.extendTimeout).toHaveBeenCalledTimes(calls);
+    canceled.resolve();
+    await canceling;
+    await handle.connection.close?.();
+  });
+
+  it("aborts renewal before stopping compute and waits for stop before reusing the handle", async () => {
+    const { handle, sessionSandbox, finished, process } = await runningCommand();
+    let renewalSignal: AbortSignal | undefined;
+    sessionSandbox.currentSession().extendTimeout.mockImplementationOnce((_duration, options) => {
+      renewalSignal = options?.signal;
+      return new Promise((_resolve, reject) => {
+        renewalSignal?.addEventListener("abort", () => reject(renewalSignal?.reason), {
+          once: true,
+        });
+      });
+    });
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(renewalSignal?.aborted).toBe(false);
+    const stopped = Promise.withResolvers<void>();
+    sessionSandbox.stop.mockImplementationOnce(async () => {
+      expect(renewalSignal?.aborted).toBe(true);
+      await stopped.promise;
+    });
+    const stopping = handle.connection.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    const reading = handle.sandbox.readTextFile({ path: "missing" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sessionSandbox.readFile).not.toHaveBeenCalled();
+    stopped.resolve();
+    await stopping;
+    expect(await reading).toBeNull();
+    finished.resolve({ exitCode: 0 });
+    await process.wait();
+    await handle.connection.close?.();
   });
 });
