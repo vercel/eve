@@ -1,5 +1,49 @@
 # eve
 
+## 1.1.0
+
+Released 2026-11-18 · [Compare with 1.0.2](https://github.com/vercel/eve/compare/eve%401.0.2...eve%401.1.0)
+
+### Features
+
+- `defineModel({ id, auth, create })` from `eve/models` gives a model a connection-style `auth`: eve resolves the credential before each model call with a connection's principal rules, opens the same sign-in as a connection when the caller has none, continues the same turn after the callback, retries a rejected token once before it asks again, and fails a turn without a credential with `MODEL_AUTHORIZATION_FAILED`.
+  A turn also fails with `MODEL_CREDENTIAL_FAILED` when `auth` throws another error, such as an unreachable credential service, and with `MODEL_CREATE_FAILED` when `create` throws. ([#6555](https://github.com/vercel/eve/pull/6555))
+- Channel event handlers can pass work the turn doesn't depend on to `ctx.waitUntil(task)`, and the Slack channel uses it so its status updates no longer delay each model call.
+  Handlers still block the turn by default. eve waits for `waitUntil` work before the step that ran the handler ends, and inside a model call before that call ends, including when the turn is cancelled. It logs a rejection instead of failing the turn, stops waiting after 30 seconds with a warning, and warns about a `waitUntil` call made after the step ended. A cancelled turn now also keeps the channel state its handlers left.
+  `ChannelEventContext` gains a `waitUntil` member, as values eve passes into your code can in a minor release. A test fixture that builds the context by hand to call a handler directly needs to add one, for example `waitUntil: () => {}`. ([#6529](https://github.com/vercel/eve/pull/6529))
+- `eve dev --no-ui` now prints `[DEV] ready at <url>` as its last startup line, once the agent is compiled and the server accepts requests, so scripts and coding agents can wait for it instead of sleeping for a fixed time.
+  The line replaces `[DEV] server listening at <url>`, which `eve dev` already printed at the same moment. Scripts that match the old text need to match `ready at` instead. `eve start` still prints `server listening at`. The CLI reference documents the ready line, the non-zero exit when startup fails, and how to stop the server by its process ID. ([#6578](https://github.com/vercel/eve/pull/6578))
+- The MCP channel's `agent_get` now reports the same progress as Slack's typing indicator in `statusMessage`: the agent's latest reasoning heading or sentence, `Thinking...`, or `Writing a reply...`, when no tool call is running.
+  Thanks @pranavmital for the feedback on #5311. ([#6567](https://github.com/vercel/eve/pull/6567))
+- eve now stops a session's sandbox once the session has been idle for 5 minutes, so a short turn no longer pays for a sandbox that runs until the provider's own timeout.
+  Set `idleTimeoutMs` on the sandbox environment to choose the window. `0` stops the sandbox as soon as the session goes idle, and `idleTimeoutMs: false` restores the previous behavior, where only the provider's own timeout stops it. Vercel Sandbox and Docker stop idle sandboxes, and `DefaultSandbox.environment()` takes the option at its top level. eve never starts or resumes a sandbox in order to stop it. Files persist, the next turn that uses the sandbox resumes it, and processes still running in the sandbox end with the stop. That includes a process your `defineSandbox()` definition started, such as a local server: resuming the sandbox doesn't run the definition again, so start it again from the tool that needs it, or set `idleTimeoutMs: false`. A command that the `bash` tool left running ends the same way, and never writes its exit file. On Docker, a session's container now stops after the window instead of running until the eve server stops.
+  A `turn.settled` hook that calls `ctx.getSandbox()` and `stop()` to limit sandbox cost is no longer needed. Remove it, because opening the sandbox to stop it resumes or creates the sandbox on turns that never used it.
+  Custom sandbox providers can implement the new optional `onSessionIdle(ctx, state, { signal })` method to stop compute without starting it. eve aborts `signal` if the call takes longer than 120 seconds. A provider without it behaves as before. eve reserves `idleTimeoutMs`, as it does `prepare`, and a provider's `environment()` doesn't receive it. ([#6560](https://github.com/vercel/eve/pull/6560))
+- Every `eve` command starts faster: reading `.eve/provider.json` at startup no longer loads eve's project setup and scaffolding modules. ([#6595](https://github.com/vercel/eve/pull/6595))
+- `ClientSession.send()` and `respond()` open the delivery's stream as the request goes out, so `delivery.stream()` and `delivery.result()` get their first events a round trip sooner. ([#6431](https://github.com/vercel/eve/pull/6431))
+- Requests and turn steps no longer re-read and re-validate the agent's compile metadata each time they look up the compiled agent.
+  eve now remembers the version key for each installed bundle, and for compiled output on disk while its compile metadata file is unchanged. ([#6584](https://github.com/vercel/eve/pull/6584))
+- `eve build` no longer evaluates every authored module a second time to prepare sandbox templates.
+  Sandbox prewarm now reuses the modules that compilation already evaluated from one shared bundle, so build memory and time stay flat as an agent gains tools and subagents instead of growing with each module that imports shared code. Sandbox template keys are unchanged, so existing templates are reused. ([#6571](https://github.com/vercel/eve/pull/6571))
+- Subagent turn steps now reuse the subagent's compiled definition instead of rebuilding it each step.
+  Before, eve created a new compiled bundle for a subagent on every lookup, so it set up the subagent's definitions again on every step. It now keeps one bundle for each subagent until the agent's compiled output changes. ([#6585](https://github.com/vercel/eve/pull/6585))
+- On Vercel, the first stream line of each reply now reaches the client up to 10 ms sooner, because eve no longer holds it in a 10 ms flush window.
+  eve now uses the Workflow SDK default, which sends the first chunk of an idle stream at once and batches the chunks that arrive while a write is in flight. To get the old window back, set `WORKFLOW_STREAM_FLUSH_INTERVAL_MS=10`. ([#6583](https://github.com/vercel/eve/pull/6583))
+
+### Bug Fixes
+
+- Fix `useEveAgent` crashing with React error #185 ("Maximum update depth exceeded") when a live session opens its stream behind the tail, such as after `send()`, and more than ~50 of the session's earlier lines arrive at once.
+  The store now publishes that catch-up when its stream reaches the tail instead of once per historical line, as `resume()` already did since #3866. Events after the tail still publish as they arrive, and `onEvent` and `onSessionChange` still run for every event. ([#6538](https://github.com/vercel/eve/pull/6538))
+- Prevent concurrent Docker sandbox template builds from racing and retry transient model catalog requests during compilation. ([#6608](https://github.com/vercel/eve/pull/6608))
+- Stop reporting a completed sign-in as failed when the call it resumes fails before its tool runs.
+  When a call that waited on a sign-in can no longer run (its stored input no longer matches the tool's schema, the tool changed or went away, or the policy now refuses it), the sign-in now settles as accepted instead of failed. Channels no longer show messages such as ":x: Plain authorization failed (The approved input is no longer valid…)" for a sign-in the person finished. The call's own error result still tells the model why it didn't run. ([#6154](https://github.com/vercel/eve/pull/6154))
+- Vercel sandbox timeouts are now extended while eve runs commands or transfers files, so active work can continue beyond the initial timeout.
+  The default remains 30 minutes. Renewal ends when the operation finishes or its execution scope closes; idle-stop behavior and detached background jobs are unchanged. Vercel's maximum session duration still applies. ([#6603](https://github.com/vercel/eve/pull/6603))
+- Web Chat stops offering a question's or approval's buttons once answering it reports that the session is no longer active. ([#6608](https://github.com/vercel/eve/pull/6608))
+- Update the bundled Workflow runtime and worlds to the Workflow 5.6.1 release, which stores the local world in one SQLite database.
+  The local world used by `eve dev` and by `eve start` without a configured world now keeps its runs, queue state, and streams in `.eve/.workflow-data/world.db` instead of one JSON file per entity. Each event and the run, step, wait, and hook changes it makes now commit together, so a process killed mid-write no longer leaves a run half-written. Run data written by earlier eve versions is not migrated, so sessions that were in progress before the upgrade cannot resume. The old `runs`, `events`, `steps`, `hooks`, `waits`, `streams`, `snapshots`, and `.locks` directories stay in place unread and can be deleted.
+  `eve start` now uses the local world's own queue authentication and restart recovery. Deliveries to the workflow route must carry the key the world keeps in `.eve/.workflow-data/queue-auth-key`, `eve start` refuses to start with `WORKFLOW_QUEUE_AUTH=off`, and recovery also re-arms the timers of runs that were sleeping. `eve logs` reads the local world without replacing that key, and a store written by a newer eve version now asks you to upgrade eve. ([#6561](https://github.com/vercel/eve/pull/6561))
+
 ## 1.0.2
 
 Released 2026-11-17 · [Compare with 1.0.1](https://github.com/vercel/eve/compare/eve%401.0.1...eve%401.0.2)
