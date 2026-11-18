@@ -49,13 +49,33 @@ export const OPENCODE_GLOBAL_CONFIG = `${JSON.stringify({
 export const EVE_CANARY_PREFIX = "/usr/local/lib/eve-benchmark";
 
 /**
+ * Installs the canary and records the user agent npm gives the commands it runs. `npx` and
+ * `npm run` set `npm_config_user_agent`, and `eve init` picks the new project's package manager
+ * from it: without it, an empty directory scaffolds with pnpm, unlike the npm-based setup and
+ * the `npx eve init` users the benchmark stands in for.
+ */
+export function eveCanaryInstall(packageSpec: string, prefix = EVE_CANARY_PREFIX): string {
+  return [
+    `mkdir -p ${prefix}`,
+    `npm install --prefix ${prefix} --no-save --no-package-lock --no-audit --no-fund --allow-remote=all ${shellQuote(packageSpec)}`,
+    eveUserAgentCapture(prefix),
+  ].join(" && ");
+}
+
+export function eveUserAgentCapture(prefix = EVE_CANARY_PREFIX): string {
+  return `cd ${prefix} && npm exec -c 'printf %s "$npm_config_user_agent"' > user-agent && test -s user-agent`;
+}
+
+/**
  * The `eve` on PATH. Inside a project it runs that project's installed binary, the way a
  * user's `eve` resolves; anywhere else, such as `eve init` in an empty workspace, it runs the
  * canary installed during setup. Running `npx --package=<tarball>` here instead re-resolved the
  * remote tarball on every call and charged several seconds to the model each time (7.8 s vs
- * 0.6 s for `--help` at p50).
+ * 0.6 s for `--help` at p50). Both paths get npm's user agent, as they did through npx.
  */
 export const EVE_WRAPPER = `#!/bin/sh
+[ -n "$npm_config_user_agent" ] || npm_config_user_agent=$(cat ${EVE_CANARY_PREFIX}/user-agent)
+export npm_config_user_agent
 dir=$PWD
 while :; do
   if [ -x "$dir/node_modules/.bin/eve" ]; then exec "$dir/node_modules/.bin/eve" "$@"; fi
@@ -83,11 +103,7 @@ export function createNativeAuthoringSetup(options: {
       "rm -f .eve-authoring-bootstrap.json CASE.ts package.json package-lock.json PROMPT.md",
       "fixture cleanup",
     );
-    await run(
-      sandbox,
-      `mkdir -p ${EVE_CANARY_PREFIX} && npm install --prefix ${EVE_CANARY_PREFIX} --no-save --no-package-lock --no-audit --no-fund --allow-remote=all ${shellQuote(options.packageSpec)}`,
-      "eve canary install",
-    );
+    await run(sandbox, eveCanaryInstall(options.packageSpec), "eve canary install");
     await sandbox.writeFiles({ "/usr/local/bin/eve": EVE_WRAPPER });
     await run(sandbox, "chmod +x /usr/local/bin/eve", "eve wrapper");
 

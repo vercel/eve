@@ -17,8 +17,12 @@ const {
   EVE_CANARY_PREFIX,
   EVE_WRAPPER,
   createNativeAuthoringSetup,
+  eveUserAgentCapture,
   setupsFor,
 } = await jiti.import(new URL("./native-authoring-setup.ts", import.meta.url).pathname);
+const { packageManagerFromUserAgent } = await jiti.import(
+  new URL("../../../packages/eve/src/setup/package-manager.ts", import.meta.url).pathname,
+);
 const { loadAuthoringCase } = await jiti.import(
   new URL("./load-authoring-case.ts", import.meta.url).pathname,
 );
@@ -63,7 +67,7 @@ test("bootstraps the selected source before a native agent starts", async () => 
   assert.match(commands[0].args[1], /rm -f \.eve-authoring-bootstrap\.json/u);
   assert.match(
     commands[1].args[1],
-    /npm install --prefix \/usr\/local\/lib\/eve-benchmark .*pkg\.eve\.dev\/commit\/eve\.tgz/u,
+    /npm install --prefix \/usr\/local\/lib\/eve-benchmark .*pkg\.eve\.dev\/commit\/eve\.tgz.* > user-agent/u,
   );
   assert.deepEqual(Object.keys(writes[0]), ["/usr/local/bin/eve"]);
   assert.equal(writes[0]["/usr/local/bin/eve"], EVE_WRAPPER);
@@ -85,7 +89,7 @@ test("bootstraps the selected source before a native agent starts", async () => 
   assert.match(writes[1]["/workspace/agent/lib/inventory-openapi.ts"], /getStock/u);
 });
 
-test("runs a project's installed eve, and the setup's canary outside one", (t) => {
+test("runs a project's installed eve, and the setup's canary outside one, as npm would", (t) => {
   const root = mkdtempSync(join(tmpdir(), "eve-wrapper-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const executable = (path, body) => {
@@ -96,20 +100,39 @@ test("runs a project's installed eve, and the setup's canary outside one", (t) =
   const canary = join(root, "canary");
   const wrapper = join(root, "bin", "eve");
   executable(wrapper, EVE_WRAPPER.replaceAll(EVE_CANARY_PREFIX, canary));
-  executable(join(canary, "node_modules", ".bin", "eve"), '#!/bin/sh\necho "canary $*"\n');
+  executable(
+    join(canary, "node_modules", ".bin", "eve"),
+    '#!/bin/sh\necho "canary $*|$npm_config_user_agent"\n',
+  );
   const project = join(root, "workspace", "wayfinder");
-  executable(join(project, "node_modules", ".bin", "eve"), '#!/bin/sh\necho "local $*"\n');
+  executable(
+    join(project, "node_modules", ".bin", "eve"),
+    '#!/bin/sh\necho "local $*|$npm_config_user_agent"\n',
+  );
   mkdirSync(join(project, "agent"));
-  const eve = (cwd) =>
-    execFileSync(wrapper, ["build", "--help"], {
+  // The real capture, against the npm running this test.
+  execFileSync("bash", ["-c", eveUserAgentCapture(canary)], {
+    env: { PATH: process.env.PATH, HOME: process.env.HOME },
+  });
+  const eve = (cwd, env = {}) => {
+    const [binary, userAgent] = execFileSync(wrapper, ["build", "--help"], {
       cwd,
-      env: { PATH: "/usr/bin:/bin" },
+      env: { PATH: "/usr/bin:/bin", ...env },
       encoding: "utf8",
-    }).trim();
+    })
+      .trim()
+      .split("|");
+    // `eve init` scaffolds an empty directory with the package manager this names.
+    return [binary, packageManagerFromUserAgent(userAgent)];
+  };
 
-  assert.equal(eve(project), "local build --help");
-  assert.equal(eve(join(project, "agent")), "local build --help");
-  assert.equal(eve(join(root, "workspace")), "canary build --help");
+  assert.deepEqual(eve(project), ["local build --help", "npm"]);
+  assert.deepEqual(eve(join(project, "agent")), ["local build --help", "npm"]);
+  assert.deepEqual(eve(join(root, "workspace")), ["canary build --help", "npm"]);
+  assert.deepEqual(eve(join(root, "workspace"), { npm_config_user_agent: "pnpm/11.0.0" }), [
+    "canary build --help",
+    "pnpm",
+  ]);
 });
 
 test("builds an empty-workspace case without sandbox preparation when it opts out", async () => {
