@@ -114,8 +114,13 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
     experimental_onDecisionModelCallEnd: native.telemetry.experimental_onDecisionModelCallEnd.bind(
       native.telemetry,
     ),
-    experimental_onStreamTranscriptionStart:
-      native.telemetry.experimental_onStreamTranscriptionStart.bind(native.telemetry),
+    experimental_onStreamTranscriptionStart(event) {
+      native.telemetry.experimental_onStreamTranscriptionStart({
+        ...event,
+        recordInputs: false,
+        recordOutputs: false,
+      });
+    },
     experimental_onStreamTranscriptionEnd:
       native.telemetry.experimental_onStreamTranscriptionEnd.bind(native.telemetry),
     async onStart(event: Event<"onStart">) {

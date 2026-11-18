@@ -8,13 +8,14 @@ import {
 import {
   APICallError,
   embed,
+  experimental_streamTranscribe,
   generateText,
   streamText,
   registerTelemetry,
   ToolLoopAgent,
   tool,
 } from "ai";
-import { MockEmbeddingModelV3, MockLanguageModelV3 } from "ai/test";
+import { MockEmbeddingModelV3, MockLanguageModelV3, MockTranscriptionModelV4 } from "ai/test";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentRun, otelTelemetry } from "@vercel/agent-runs";
@@ -474,6 +475,65 @@ describe("AI SDK adapter registration", () => {
       await run.shutdown();
     }
   });
+  it.each([undefined, { recordInputs: true, recordOutputs: true }])(
+    "keeps globally registered streaming transcription metadata-only with SDK settings %j",
+    async (telemetry) => {
+      const { exporter, provider, run } = recording();
+      trace.setGlobalTracerProvider(provider);
+      registerTelemetry(aiSdkTelemetry(run));
+      try {
+        const result = experimental_streamTranscribe({
+          model: new MockTranscriptionModelV4({
+            modelId: "transcription",
+            doStream: async () => ({
+              stream: new ReadableStream({
+                start(controller) {
+                  controller.enqueue({ type: "stream-start", warnings: [] });
+                  controller.enqueue({ type: "transcript-delta", delta: "Private transcript" });
+                  controller.enqueue({
+                    type: "finish",
+                    text: "Private transcript",
+                    segments: [{ text: "Private transcript", startSecond: 0, endSecond: 1 }],
+                  });
+                  controller.close();
+                },
+              }),
+            }),
+          }),
+          audio: new ReadableStream({
+            start(controller) {
+              controller.close();
+            },
+          }),
+          inputAudioFormat: { type: "audio/pcm", rate: 24000 },
+          telemetry,
+        });
+        const deltas: string[] = [];
+        for await (const part of result.fullStream) {
+          if (part.type === "transcript-delta") deltas.push(part.delta);
+        }
+        expect(deltas).toEqual(["Private transcript"]);
+        expect(await result.text).toBe("Private transcript");
+        const spans = exporter.getFinishedSpans();
+        expect(spans).toHaveLength(1);
+        expect(spans[0]!.attributes).toMatchObject({
+          "gen_ai.operation.name": "ai.streamTranscribe",
+          "gen_ai.request.model": "transcription",
+          "gen_ai.request.stream": true,
+        });
+        expect(spans[0]!.attributes["ai.response.text"]).toBeUndefined();
+        expect(spans[0]!.attributes["gen_ai.output.messages"]).toBeUndefined();
+        expect(
+          JSON.stringify(
+            spans.map((span) => ({ attributes: span.attributes, events: span.events })),
+          ),
+        ).not.toContain("Private transcript");
+      } finally {
+        await run.shutdown();
+      }
+    },
+  );
+
   it("preserves native instrumentation for operations not grouped into Agent Runs yet", async () => {
     const { exporter, provider } = recording();
     trace.setGlobalTracerProvider(provider);
