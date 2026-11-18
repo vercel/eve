@@ -87,6 +87,11 @@
       "import": "./dist/src/svelte/index.js",
       "default": "./dist/src/svelte/index.js"
     },
+    "./solid": {
+      "types": "./dist/src/solid/index.d.ts",
+      "import": "./dist/src/solid/index.js",
+      "default": "./dist/src/solid/index.js"
+    },
     "./next": {
       "types": "./dist/src/public/next/index.d.ts",
       "import": "./dist/src/public/next/index.js",
@@ -708,6 +713,7 @@
     "react-test-renderer": "19.3.1",
     "run": "2.1.12",
     "semver": "7.8.6",
+    "solid-js": "2.0.1",
     "svelte": "^5.57.3",
     "vite": "^8.3.8",
     "vitest": "catalog:",
@@ -727,6 +733,7 @@
     "just-bash": "^3.6.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
+    "solid-js": "^2.0.0",
     "svelte": "^5.0.0",
     "vite": "^8.3.3",
     "vue": "^3.5.0"
@@ -742,6 +749,9 @@
       "optional": true
     },
     "react": {
+      "optional": true
+    },
+    "solid-js": {
       "optional": true
     },
     "svelte": {

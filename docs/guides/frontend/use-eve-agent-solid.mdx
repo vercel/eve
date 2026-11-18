@@ -1,0 +1,171 @@
+---
+title: "useEveAgent (Solid)"
+description: "Use the eve Solid binding and its Solid-specific reactive interface."
+---
+
+`useEveAgent()` from `eve/solid` exposes the shared eve frontend client as Solid accessors and methods. It requires Solid 2 (`solid-js` 2). See the [frontend overview](/docs/guides/frontend) for session behavior, messages, human input, authorization, callbacks, and persistence.
+
+## Register the Vite plugin
+
+A Solid 2 app is a Vite app, so register the [`eveVite()` plugin](./vite) to mount the agent routes on the application origin. For a server-rendered app, also add `nitro()` from `nitro/vite`. On Vercel, Nitro writes the app's Build Output, and `eveVite()` adds the agent routes to it:
+
+```ts title="vite.config.ts"
+import solid from "@solidjs/vite-plugin";
+import { eveVite } from "eve/vite";
+import { nitro } from "nitro/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [solid({ start: true, ssr: true }), nitro(), eveVite()],
+});
+```
+
+## Basic usage
+
+Call the binding once for a conversation and call its accessors to read state:
+
+```tsx title="src/App.tsx"
+import { useEveAgent } from "eve/solid";
+import { createSignal, For } from "solid-js";
+
+export default function App() {
+  const agent = useEveAgent();
+  const [message, setMessage] = createSignal("");
+  const isInputDisabled = () => agent.status() !== "idle";
+
+  async function handleSubmit() {
+    const text = message().trim();
+    if (!text || isInputDisabled()) return;
+    setMessage("");
+    await agent.send(text);
+  }
+
+  return (
+    <>
+      <For each={agent.messages()}>
+        {(item) => (
+          <p>
+            {item.role}: {JSON.stringify(item.parts)}
+          </p>
+        )}
+      </For>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSubmit();
+        }}
+      >
+        <input
+          value={message()}
+          onInput={(event) => setMessage(event.currentTarget.value)}
+          disabled={isInputDisabled()}
+        />
+        <button type="submit" disabled={isInputDisabled()}>
+          Send
+        </button>
+      </form>
+    </>
+  );
+}
+```
+
+## What it returns
+
+The state fields are Solid accessors; the commands are ordinary methods:
+
+| Property                                                                                            | Solid shape                                 |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `messages`, `agents`                                                                                | Accessors for the snapshot fields           |
+| `view`                                                                                              | `Accessor<SessionView>`                     |
+| `status`                                                                                            | `Accessor<UseEveAgentStatus>`               |
+| `error`                                                                                             | `Accessor<Error \| undefined>`              |
+| `events`                                                                                            | `Accessor<readonly SessionStreamEvent[]>`   |
+| `session`                                                                                           | `Accessor<ClientSessionState \| undefined>` |
+| `send`, `respond`, `prewarm`, `resume`, `follow`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                     |
+
+Call the accessors in JSX, `createMemo`, or `createEffect` to track them. Destructuring keeps reactivity because each state value is an accessor. The [`useEveAgent` reference](./use-eve-agent#returned-state) describes what each value and command does.
+
+## Server rendering
+
+During server rendering, the accessors return the initial state, built from `initialEvents` and `initialSession` when you pass them. The binding sends no requests on the server. In the browser, it connects once the component mounts and disconnects when the component unmounts.
+
+## Send a message
+
+Call `agent.send(text)` for text or pass content parts for attachments. The API and streaming behavior match the [sending reference](./use-eve-agent#sending). `send()` and `respond()` resolve with a `Delivery` receipt when the server accepts the request, before the agent finishes. Read the receipt's `sessionId` and `deliveryId`, or use its [`stream()` and `result()` reads](../client/messages#reusable-delivery-reads).
+
+## Human-in-the-loop prompts
+
+Read requests from the shared `view` and answer them with `respond()`. A request stays open until `interaction.settled`, even after you submit an answer.
+
+```tsx
+import { openInteractions } from "eve/events";
+import { useEveAgent } from "eve/solid";
+import { createMemo, For } from "solid-js";
+
+export function PendingRequests() {
+  const agent = useEveAgent();
+  const pendingRequests = createMemo(() =>
+    openInteractions(agent.view()).filter(
+      (item) => item.request.kind !== "sign-in" && item.answer === undefined,
+    ),
+  );
+
+  return (
+    <For each={pendingRequests()}>
+      {(item) => (
+        <fieldset disabled={agent.status() === "resuming"}>
+          <legend>{item.request.prompt}</legend>
+          <For each={item.request.options ?? []}>
+            {(option) => (
+              <button
+                type="button"
+                onClick={() =>
+                  void agent.respond([{ interactionId: item.interactionId, optionId: option.id }])
+                }
+              >
+                {option.label}
+              </button>
+            )}
+          </For>
+        </fieldset>
+      )}
+    </For>
+  );
+}
+```
+
+See [Human-in-the-loop prompts](/docs/guides/frontend#human-in-the-loop-prompts) for request semantics and rendering guidance.
+
+<a id="cancel-reset-and-resume" />
+
+## Cancel, end, and resume
+
+Pass `prewarm: true` to create the session on mount and after `newSession()`. Omit it to create the session on the first send. The binding keeps the session stream open across turns. See [Prewarming](./use-eve-agent#prewarming) for creation and failure behavior, and [Stream lifetime](./use-eve-agent#stream-lifetime) for connection behavior.
+
+Call `agent.cancel()` to stop the turn on the server; the binding stays attached until the turn ends. Offer it while `activeTurn(agent.view())` from `eve/events` returns a turn, because `agent.status()` reports outstanding work and is `"idle"` while a turn waits only on a person. Unmounting the component only disconnects its local stream, and the turn keeps running on the server.
+
+Call `agent.newSession()` to clear local state and start a new session; `agent.end()` instead ends the session on the server.
+
+Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow a turn that is still running. During catch-up, `agent.status()` is `"resuming"`. Keep the restored conversation visible, and disable submission until it changes to `"idle"` or `"busy"`. Failures appear in the separate `error` accessor. Call `agent.resume()` directly to control restoration imperatively. See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for the persistence contract and [Cancelling](./use-eve-agent#cancelling) for cancellation behavior.
+
+## Custom host and credentials
+
+Pass `baseUrl`, `auth`, or `headers` to the binding, as with the other frontend bindings. See [Custom hosts and headers](/docs/guides/frontend#custom-hosts-and-headers).
+
+## Attach page context per turn
+
+Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add context before every turn. See [Attach page context per turn](/docs/guides/frontend#attach-page-context-per-turn).
+
+## Lifecycle callbacks
+
+Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` to react to events, errors, finished turns, and session changes. See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for when each one fires and how optimistic messages behave.
+
+## Derive your own state
+
+Use `agent.view()` and selectors from `eve/events` for session state, and `agent.messages()` for rendering. See [Session views & selectors](/docs/concepts/session-views-and-selectors) for the shared queries. In Solid, call `agent.view()` inside `createMemo` to keep selector results reactive.
+
+## What to read next
+
+- [Vite](./vite): register the `eveVite()` plugin and mount the eve runtime.
+- [Frontend overview](/docs/guides/frontend): use the shared frontend API.
+- [Sessions, runs, and streaming](../../concepts/sessions-runs-and-streaming): understand the underlying session protocol.

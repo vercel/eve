@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
+import { createEffect, createRoot } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { effectScope } from "vue";
 
@@ -17,6 +18,7 @@ import {
   localObservationKey,
 } from "#protocol/descendant-observation.js";
 import { useEveAgent as useReactAgent, type UseEveAgentReturn } from "#react/use-eve-agent.js";
+import { useEveAgent as useSolidAgent } from "#solid/use-eve-agent.js";
 import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
 import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
 
@@ -118,6 +120,24 @@ const bindings: Record<string, () => Mounted> = {
     return {
       data: () => ({ messages: binding.messages.value }),
       dispose: () => scope.stop(),
+      finished,
+      send: (message) => binding.send(message),
+    };
+  },
+  solid() {
+    vi.stubGlobal("window", {});
+    const finished = vi.fn();
+    let rendered: Pick<ConversationState, "messages"> = { messages: [] };
+    const { binding, dispose } = createRoot((dispose) => {
+      const binding = useSolidAgent({ baseUrl: "https://eve.test", onFinish: finished });
+      createEffect(binding.messages, (messages) => {
+        rendered = { messages };
+      });
+      return { binding, dispose };
+    });
+    return {
+      data: () => rendered,
+      dispose,
       finished,
       send: (message) => binding.send(message),
     };
@@ -293,5 +313,39 @@ describe("the React binding", () => {
     );
     expect(helpers?.session?.sessionId).toBe("session_1");
     await act(async () => renderer?.unmount());
+  });
+});
+
+describe("the Solid binding", () => {
+  function mountResumed() {
+    return createRoot((dispose) => ({
+      binding: useSolidAgent({
+        baseUrl: "https://eve.test",
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        resume: true,
+      }),
+      dispose,
+    }));
+  }
+
+  it("resumes an attached session once mounted in the browser, and stops when disposed", async () => {
+    vi.stubGlobal("window", {});
+    const server = agent();
+    const { dispose } = mountResumed();
+
+    await vi.waitFor(() => expect(server.reading).toBe(1));
+    dispose();
+    await vi.waitFor(() => expect(server.reading).toBe(0));
+  });
+
+  it("renders its initial state during server rendering without reading the session", async () => {
+    agent();
+    const { binding, dispose } = mountResumed();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(binding.session()?.sessionId).toBe("session_1");
+    expect(binding.status()).toBe("idle");
+    dispose();
   });
 });

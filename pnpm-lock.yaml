@@ -774,6 +774,34 @@ importers:
         specifier: 3.3.14
         version: 3.3.14(typescript@6.0.3)
 
+  apps/frameworks/solid:
+    dependencies:
+      '@solidjs/web':
+        specifier: 2.0.1
+        version: 2.0.1(solid-js@2.0.1)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      nitro:
+        specifier: 3.0.261103-rc
+        version: 3.0.261103-rc
+      solid-js:
+        specifier: 2.0.1
+        version: 2.0.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
+    devDependencies:
+      '@solidjs/vite-plugin':
+        specifier: 3.0.1
+        version: 3.0.1(@babel/core@7.29.7(supports-color@10.2.2))(@solidjs/web@2.0.1(solid-js@2.0.1))(solid-js@2.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      vite:
+        specifier: ^8.3.8
+        version: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+
   apps/frameworks/sveltekit:
     dependencies:
       '@sveltejs/adapter-vercel':
@@ -1999,7 +2027,7 @@ importers:
         version: 2.9.0
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c))
+        version: 2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))
       '@vercel/detect-agent':
         specifier: 1.2.7
         version: 1.2.7
@@ -2108,6 +2136,9 @@ importers:
       semver:
         specifier: 7.8.6
         version: 7.8.6
+      solid-js:
+        specifier: 2.0.1
+        version: 2.0.1
       svelte:
         specifier: ^5.57.3
         version: 5.57.3(@typescript-eslint/types@8.70.0)
@@ -2408,6 +2439,10 @@ packages:
   '@alloc/quick-lru@5.3.0':
     resolution: {integrity: sha512-U4+70Pc5ZS9osnCBCE5Jha/ciHM+Yp+CNMNC/7HvYbNRk1Ldd+f7qO65W5qfhu/TCv+/ozljlXXe9Nj8419DMA==}
     engines: {node: '>=10'}
+
+  '@ampproject/remapping@2.3.0':
+    resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
+    engines: {node: '>=6.0.0'}
 
   '@antfu/install-pkg@2.1.0':
     resolution: {integrity: sha512-sdg9NxU3zR4Mnawfbc/x6GB5Wf17WYud5qOuEuxXjaKpYpMkISSJEjItGebXJ2bQ4DIcly4NYH23mtkGJjvKUw==}
@@ -2969,6 +3004,9 @@ packages:
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
 
+  '@emnapi/core@1.11.3':
+    resolution: {integrity: sha512-zLpS5asjEb7lq8jYLq37N6XKaE41DIexlY1rF/z4/tIl3wo13Sqm28fRyfIsKZD+NZ8mM5RoKkpW/rBcuoSZSg==}
+
   '@emnapi/core@2.0.0-beta.2':
     resolution: {integrity: sha512-MzCVoWtcg4Pm2B3je5mMvYMvj3MmBKw+fU7vbsJc9/iT8ip6/eYIHo/Dsm/mr+wsHB6SEyJDuxB09Yy6r/8+4A==}
 
@@ -2983,6 +3021,9 @@ packages:
 
   '@emnapi/wasi-threads@1.2.1':
     resolution: {integrity: sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==}
+
+  '@emnapi/wasi-threads@1.2.3':
+    resolution: {integrity: sha512-ELEBe8PsLvvJ6QMr0zLt8ffvOHW/dc1m3CEzNMg7aJUv3bMaoDtw2TXyDAwkYBuroxxuHEwhRTLJSe5sya547g==}
 
   '@emnapi/wasi-threads@2.2.0':
     resolution: {integrity: sha512-JP7OYH38Q7+pyTAe14raZHLQIK7BDKbdwji+Xi3pcd/6QkJYQH3SX4wu6EplGrGJWRepoNzedfm0G3B9Z4e9Rw==}
@@ -6876,6 +6917,71 @@ packages:
 
   '@socket.io/component-emitter@3.1.2':
     resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
+
+  '@solidjs/compiler-darwin-arm64@2.0.0':
+    resolution: {integrity: sha512-pPHERRXgCcsfCsaC8sgK94uVlp4WGUcHTfMeBiAfme2amQ7vFn7dpjSD3TIVKY4jeYQTKjIKOYP0c5mqIR1LeA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@solidjs/compiler-darwin-x64@2.0.0':
+    resolution: {integrity: sha512-Ndwy+pQs8v6BIfaAbQ+weu9HGBTM40HFCyu0XV2qX7U5XC+o+3fc4O6+8ZZyUzl+qvT6XU+wh2bQ6MI2lV+KBQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@solidjs/compiler-linux-arm64-gnu@2.0.0':
+    resolution: {integrity: sha512-H/R9SUmuqd4P/IuuXTlRM1LhgUWe2EjLP3iMUo+L4IO1rmOSqfMUZp9h52eQnDsOdoIZCaKsw+b0qC5WooxDlg==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@solidjs/compiler-linux-x64-gnu@2.0.0':
+    resolution: {integrity: sha512-gafr9+2bP2sv2hRAvDgzab0mpQi4MiyWrie9bfYjadsK7qZKJBeMzEQCLNd4dTYlgirCj6Frzu2pfET7+ZUyNQ==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@solidjs/compiler-wasm32-wasi@2.0.0':
+    resolution: {integrity: sha512-JnF21DJ/jx5fghYKIB6ANihHMM4aWg4JFe5pFLGDvqSeURZJdJGjwyyxOv3siEMUdkBzVGHXotTsviTcRyB5hQ==}
+    engines: {node: '>=14.0.0'}
+
+  '@solidjs/compiler-win32-x64-msvc@2.0.0':
+    resolution: {integrity: sha512-RkiUXt/LmJ1lk1fECa/iDVGCOv3UiwW5ocZgkhpayUviTSrceFjFHhiM9sFXq0at3kHI7Z8awN6zTaF5IStDAQ==}
+    cpu: [x64]
+    os: [win32]
+
+  '@solidjs/compiler@2.0.0':
+    resolution: {integrity: sha512-Spgqz1+eojQ2pDl4yajnajIjX/kSusjTK/6mC6Fm7sAZ3YBI0yP4/epRR1hV08TU3YAH4xLBmZ6wjb1zC134Sw==}
+
+  '@solidjs/signals@2.0.1':
+    resolution: {integrity: sha512-nTdIk7UgGLwATg0wCT/wH/G62aWYjGol2AnqdrN4qVyV7snYTnYoesgJ/G7xRkO34mAr3tayt0cu1+k/dt0lmA==}
+    engines: {node: '>=22.12.0'}
+
+  '@solidjs/vite-plugin@3.0.1':
+    resolution: {integrity: sha512-dyRU4LJXhzEEgtF32AtUdjqaUuMVYTVLQvhYlT6HcYBvf10yIVmKgW9cg42b5YDxkl6BgAJ9o0OjUnAy3qKb9A==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@babel/core': ^7.23.3 || ^8.0.0
+      '@solidjs/babel-plugin': ^2.0.0
+      '@solidjs/start-devtools': ^1.0.0-next.2
+      '@solidjs/web': ^2.0.0
+      '@testing-library/jest-dom': ^5.16.6 || ^5.17.0 || ^6.0.0 || ^7.0.0
+      solid-js: ^2.0.0
+      vite: ^8.0.0 || ^9.0.0
+    peerDependenciesMeta:
+      '@babel/core':
+        optional: true
+      '@solidjs/babel-plugin':
+        optional: true
+      '@solidjs/start-devtools':
+        optional: true
+      '@testing-library/jest-dom':
+        optional: true
+
+  '@solidjs/web@2.0.1':
+    resolution: {integrity: sha512-o7spK20IEMk0bA+lVeULfTQPD9Oyb/VLS9gv5BNQdHIxFWBRFNlHf1ofF0z9b2uA3pLlRtYh+5/USk3fSTdsjQ==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      solid-js: ^2.0.1
 
   '@spectrum-ts/core@10.0.0':
     resolution: {integrity: sha512-HtlpDKkgsJJcXx+lmQS53pGI7Uk9GSK4oTyNzUgafymrGsk5F0VhdlEWJTqQvnM74G9WaGzFPcAiPzmoCUBkoQ==}
@@ -11470,6 +11576,10 @@ packages:
     resolution: {integrity: sha512-mfcwb6IzQyOKTs84CQMrOwW4gQcaTOAWJ0zzJCl2WSPDrWk/OzDaImWFH3djXhb24g4eudZfLRozAvPGw4d9hQ==}
     engines: {node: '>= 0.4'}
 
+  is-what@4.1.16:
+    resolution: {integrity: sha512-ZhMwEosbFJkA0YhFnNDgTM4ZxDRsS6HqTo7qsZM08fehyRYIYa0yHu5R6mgo1n/8MgaPBXiPimPD77baVFYg+A==}
+    engines: {node: '>=12.13'}
+
   is-wsl@2.2.0:
     resolution: {integrity: sha512-fKzAra0rGJUUBwGBgNkHZuToZcn+TtXHpeCgmkMJMMYx1sQDYaCSyjJBSCa2nH1DGm7s3n1oBnohoVTBaN7Lww==}
     engines: {node: '>=8'}
@@ -12065,6 +12175,10 @@ packages:
 
   memoize-one@5.2.1:
     resolution: {integrity: sha512-zYiwtZUcYyXKo/np96AGZAckk+FWWsUdJ3cHGGmld7+AhvcWmQyGCYUh1hc4Q/pkOhb65dQR/pqCyK0cOaHz4Q==}
+
+  merge-anything@5.1.7:
+    resolution: {integrity: sha512-eRtbOb1N5iyH0tkQDAoQ4Ipsp/5qSR79Dzrz8hEPxRX10RWWR/iQXdoKmBSRCThY1Fh5EhISDtpSc93fpxUniQ==}
+    engines: {node: '>=12.13'}
 
   merge-descriptors@2.0.0:
     resolution: {integrity: sha512-Snk314V5ayFLhp3fkUREub6WtjBfPdCPY1Ln8/8munuLuiYhsABgBVWsozAG+MWMbVEvcdcpbi9R7ww22l9Q3g==}
@@ -13783,11 +13897,11 @@ packages:
     resolution: {integrity: sha512-k3CMsaIvvdSwm8oLB4MXSl0wH2/cwlH7xGcnRd2DaeRmBkbzYmyT8j0tsX60DwD1eRwHTpNpH8ljKu9oUT1MeQ==}
     engines: {node: '>=20.0.0'}
 
-  seroval-plugins@1.6.8:
-    resolution: {integrity: sha512-N7mWAMydj89EnYTHtRpS3LBrAz3J9O6oVrqpuXuvlAHfAUG8WEKqtbAd7SBiJNY5NfCAFhSdyAh7wI4Shjqy4g==}
-    engines: {node: '>=10'}
+  seroval-plugins@1.8.0:
+    resolution: {integrity: sha512-96vBb12rDvPPwdKUgWw1op3fGq8AVBFOr0IllbnM72yR5J9WWXF18cQ4g1XfDO7HCyh2dt70P3XdtyRayP8FWg==}
+    engines: {node: '>=20'}
     peerDependencies:
-      seroval: ^1.0
+      seroval: ^1.8.0
 
   seroval@1.8.1:
     resolution: {integrity: sha512-7z9x1flFYfZBz+LfDkXNfm5UIhZJ/97ASaV8Q1wctoVkeqVfv+tLPsWebeMXBNw6XprvwxDE5wC5Ylqmr+iSrA==}
@@ -13931,6 +14045,10 @@ packages:
   socks@2.8.10:
     resolution: {integrity: sha512-e0VyvkVTwVYViNovRkZ9aodhxVlyoMn7eJhVUPxZ+eK9P/7CBkxvvsBOHqFPEH416726W8tLXXXjKwqgTErrCQ==}
     engines: {node: '>= 10.0.0', npm: '>= 3.0.0'}
+
+  solid-js@2.0.1:
+    resolution: {integrity: sha512-5bBwRCblIZ672y2H2aB5KIOfeP/N+acx1YoCjNCWYFc4ZI/Y7y7n/6N1kei8AgWmcJJQ1m5SV90rs3V8CPAnYQ==}
+    engines: {node: '>=22.12.0'}
 
   sonner@2.0.8:
     resolution: {integrity: sha512-UM/ByIoFra8yzV75n1o0Puu0bw5U/9UNnDacrJNspekBewIfsQ3D6ez1nvlWpt7aTsO6rujQtifBpycwIivqlg==}
@@ -15493,6 +15611,11 @@ snapshots:
 
   '@alloc/quick-lru@5.3.0': {}
 
+  '@ampproject/remapping@2.3.0':
+    dependencies:
+      '@jridgewell/gen-mapping': 0.3.13
+      '@jridgewell/trace-mapping': 0.3.31
+
   '@antfu/install-pkg@2.1.0':
     dependencies:
       package-manager-detector: 1.9.0
@@ -16307,6 +16430,12 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
+  '@emnapi/core@1.11.3':
+    dependencies:
+      '@emnapi/wasi-threads': 1.2.3
+      tslib: 2.8.1
+    optional: true
+
   '@emnapi/core@2.0.0-beta.2':
     dependencies:
       '@emnapi/wasi-threads': 2.2.0
@@ -16329,6 +16458,11 @@ snapshots:
     optional: true
 
   '@emnapi/wasi-threads@1.2.1':
+    dependencies:
+      tslib: 2.8.1
+    optional: true
+
+  '@emnapi/wasi-threads@1.2.3':
     dependencies:
       tslib: 2.8.1
     optional: true
@@ -17324,6 +17458,13 @@ snapshots:
     dependencies:
       '@emnapi/core': 1.10.0
       '@emnapi/runtime': 1.10.0
+      '@tybys/wasm-util': 0.10.4
+    optional: true
+
+  '@napi-rs/wasm-runtime@1.2.6(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)':
+    dependencies:
+      '@emnapi/core': 1.11.3
+      '@emnapi/runtime': 1.11.3
       '@tybys/wasm-util': 0.10.4
     optional: true
 
@@ -20227,6 +20368,59 @@ snapshots:
 
   '@socket.io/component-emitter@3.1.2': {}
 
+  '@solidjs/compiler-darwin-arm64@2.0.0':
+    optional: true
+
+  '@solidjs/compiler-darwin-x64@2.0.0':
+    optional: true
+
+  '@solidjs/compiler-linux-arm64-gnu@2.0.0':
+    optional: true
+
+  '@solidjs/compiler-linux-x64-gnu@2.0.0':
+    optional: true
+
+  '@solidjs/compiler-wasm32-wasi@2.0.0':
+    dependencies:
+      '@emnapi/core': 1.11.3
+      '@emnapi/runtime': 1.11.3
+      '@napi-rs/wasm-runtime': 1.2.6(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)
+    optional: true
+
+  '@solidjs/compiler-win32-x64-msvc@2.0.0':
+    optional: true
+
+  '@solidjs/compiler@2.0.0':
+    optionalDependencies:
+      '@solidjs/compiler-darwin-arm64': 2.0.0
+      '@solidjs/compiler-darwin-x64': 2.0.0
+      '@solidjs/compiler-linux-arm64-gnu': 2.0.0
+      '@solidjs/compiler-linux-x64-gnu': 2.0.0
+      '@solidjs/compiler-wasm32-wasi': 2.0.0
+      '@solidjs/compiler-win32-x64-msvc': 2.0.0
+
+  '@solidjs/signals@2.0.1': {}
+
+  '@solidjs/vite-plugin@3.0.1(@babel/core@7.29.7(supports-color@10.2.2))(@solidjs/web@2.0.1(solid-js@2.0.1))(solid-js@2.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
+    dependencies:
+      '@ampproject/remapping': 2.3.0
+      '@solidjs/compiler': 2.0.0
+      '@solidjs/web': 2.0.1(solid-js@2.0.1)
+      magic-string: 0.30.21
+      merge-anything: 5.1.7
+      solid-js: 2.0.1
+      vite: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+      vitefu: 1.1.3(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+    optionalDependencies:
+      '@babel/core': 7.29.7(supports-color@10.2.2)
+
+  '@solidjs/web@2.0.1(solid-js@2.0.1)':
+    dependencies:
+      csstype: 3.2.3
+      seroval: 1.8.1
+      seroval-plugins: 1.8.0(seroval@1.8.1)
+      solid-js: 2.0.1
+
   '@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@7.0.2)':
     dependencies:
       '@photon-ai/otel': 3.8.1(supports-color@10.2.2)(typescript@7.0.2)
@@ -20627,7 +20821,7 @@ snapshots:
       '@tanstack/history': 1.162.5
       cookie-es: 3.1.1
       seroval: 1.8.1
-      seroval-plugins: 1.6.8(seroval@1.8.1)
+      seroval-plugins: 1.8.0(seroval@1.8.1)
 
   '@tanstack/router-generator@1.168.0(supports-color@10.2.2)':
     dependencies:
@@ -21546,6 +21740,16 @@ snapshots:
       better-auth: 1.7.19(@opentelemetry/api@1.9.1)(@tanstack/react-start@1.169.5(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.3.2)(rollup@4.68.2)(supports-color@10.2.2)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(drizzle-orm@0.45.4(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.41.0)(kysely@0.29.8)(pg@8.23.1)(sql.js@1.14.2))(next@16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(svelte@5.57.3(@typescript-eslint/types@8.70.0))(vitest@5.1.0(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(vue@3.5.45(typescript@7.0.2))
       eve: link:packages/eve
 
+  '@vercel/connect@2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))':
+    dependencies:
+      '@vercel/oidc': 4.0.9
+    optionalDependencies:
+      '@ai-sdk/mcp': 2.0.99(zod@4.6.7)
+      '@auth/core': 0.41.3
+      '@chat-adapter/slack': 4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7)
+      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7)
+      ai: 7.0.172(zod@4.6.7)
+
   '@vercel/connect@2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(c6ed61ca3eb42548ab2f364a96ff6a94))(eve@packages+eve)':
     dependencies:
       '@vercel/oidc': 4.0.9
@@ -21557,17 +21761,6 @@ snapshots:
       ai: 7.0.172(zod@4.6.7)
       better-auth: 1.7.19(c6ed61ca3eb42548ab2f364a96ff6a94)
       eve: link:packages/eve
-
-  '@vercel/connect@2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c))':
-    dependencies:
-      '@vercel/oidc': 4.0.9
-    optionalDependencies:
-      '@ai-sdk/mcp': 2.0.99(zod@4.6.7)
-      '@auth/core': 0.41.3
-      '@chat-adapter/slack': 4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7)
-      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7)
-      ai: 7.0.172(zod@4.6.7)
-      better-auth: 1.7.19(ffe7520ccc6ea076d06aab563aa3b80c)
 
   '@vercel/detect-agent@1.2.5': {}
 
@@ -22586,40 +22779,6 @@ snapshots:
       vue: 3.5.45(typescript@6.0.3)
     transitivePeerDependencies:
       - '@opentelemetry/api'
-
-  better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c):
-    dependencies:
-      '@better-auth/core': 1.7.19(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.9.1)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5)
-      '@better-auth/drizzle-adapter': 1.7.19(@better-auth/core@1.7.19(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.9.1)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(drizzle-orm@0.45.4(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.41.0)(kysely@0.29.8)(pg@8.23.1)(sql.js@1.14.2))
-      '@better-auth/kysely-adapter': 1.7.19(@better-auth/core@1.7.19(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.9.1)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(kysely@0.29.8)
-      '@better-auth/memory-adapter': 1.7.19(@better-auth/core@1.7.19(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.9.1)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5))(@better-auth/utils@0.5.1)
-      '@better-auth/mongo-adapter': 1.7.19(@better-auth/core@1.7.19(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.9.1)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5))(@better-auth/utils@0.5.1)
-      '@better-auth/prisma-adapter': 1.7.19(@better-auth/core@1.7.19(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.9.1)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5))(@better-auth/utils@0.5.1)
-      '@better-auth/telemetry': 1.7.19(@better-auth/core@1.7.19(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.9.1)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)
-      '@better-auth/utils': 0.5.1
-      '@better-fetch/fetch': 1.3.3
-      '@noble/ciphers': 2.4.0
-      '@noble/hashes': 2.4.0
-      better-call: 1.4.5(zod@4.6.7)
-      defu: 6.1.7
-      jose: 6.2.17
-      kysely: 0.29.8
-      nanostores: 1.5.5
-      zod: 4.6.7
-    optionalDependencies:
-      '@sveltejs/kit': 2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.3(@typescript-eslint/types@8.70.0))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(svelte@5.57.3(@typescript-eslint/types@8.70.0))(typescript@7.0.2)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-      '@tanstack/react-start': 1.169.5(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.3.2)(rollup@4.68.2)(supports-color@10.2.2)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-      drizzle-orm: 0.45.4(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.41.0)(kysely@0.29.8)(pg@8.23.1)(sql.js@1.14.2)
-      next: 16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      pg: 8.23.1
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
-      svelte: 5.57.3(@typescript-eslint/types@8.70.0)
-      vitest: 5.1.0(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-      vue: 3.5.45(typescript@7.0.2)
-    transitivePeerDependencies:
-      - '@opentelemetry/api'
-    optional: true
 
   better-call@1.4.5(zod@4.6.7):
     dependencies:
@@ -25669,6 +25828,8 @@ snapshots:
       call-bound: 1.0.4
       get-intrinsic: 1.3.0
 
+  is-what@4.1.16: {}
+
   is-wsl@2.2.0:
     dependencies:
       is-docker: 2.2.1
@@ -26366,6 +26527,10 @@ snapshots:
   media-typer@1.1.1: {}
 
   memoize-one@5.2.1: {}
+
+  merge-anything@5.1.7:
+    dependencies:
+      is-what: 4.1.16
 
   merge-descriptors@2.0.0: {}
 
@@ -28880,7 +29045,7 @@ snapshots:
 
   serialize-javascript@7.1.1: {}
 
-  seroval-plugins@1.6.8(seroval@1.8.1):
+  seroval-plugins@1.8.0(seroval@1.8.1):
     dependencies:
       seroval: 1.8.1
 
@@ -29134,6 +29299,12 @@ snapshots:
     dependencies:
       ip-address: 10.7.2
       smart-buffer: 4.2.0
+
+  solid-js@2.0.1:
+    dependencies:
+      '@solidjs/signals': 2.0.1
+      seroval: 1.8.1
+      seroval-plugins: 1.8.0(seroval@1.8.1)
 
   sonner@2.0.8(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:

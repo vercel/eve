@@ -97,5 +97,16 @@ minimumReleaseAgeExclude:
   - "@stripe/link-integrations-eve@0.5.0"
   - "@stripe/link-sdk@3.1.0"
   - "claude-mem@15.18.1"
+  - "solid-js@2.0.1"
+  - "@solidjs/signals@2.0.1"
+  - "@solidjs/web@2.0.1"
+  - "@solidjs/vite-plugin@3.0.1"
+  - "@solidjs/compiler@2.0.0"
+  - "@solidjs/compiler-darwin-arm64@2.0.0"
+  - "@solidjs/compiler-darwin-x64@2.0.0"
+  - "@solidjs/compiler-linux-arm64-gnu@2.0.0"
+  - "@solidjs/compiler-linux-x64-gnu@2.0.0"
+  - "@solidjs/compiler-wasm32-wasi@2.0.0"
+  - "@solidjs/compiler-win32-x64-msvc@2.0.0"
 patchedDependencies:
   "@vercel/geistdocs@2.14.2": patches/@vercel__geistdocs@2.14.2.patch

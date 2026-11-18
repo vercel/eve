@@ -5,6 +5,7 @@ These apps verify eve's frontend framework integrations and act as runnable exam
 - `framework-next` covers `eve/next` and `withEve()`.
 - `framework-next-multi-agent` covers `withEve()` workspace discovery and named `useEveAgent({ agent })` calls.
 - `framework-nuxt` covers the `eve/nuxt` module.
+- `framework-solid` covers `eve/solid` and `eveVite()` with Solid 2 SSR start mode and `nitro()`.
 - `framework-sveltekit` covers the `eve/sveltekit` Vite plugin.
 - `framework-tanstack` covers the `eve/tanstack` Vite plugin.
 - `framework-vite` covers the `eve/vite` Vite plugin.

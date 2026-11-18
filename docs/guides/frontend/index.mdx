@@ -3,7 +3,7 @@ title: "Frontend Frameworks"
 description: "Put an eve agent behind a browser chat UI with useEveAgent."
 ---
 
-`useEveAgent` connects a browser UI to an eve agent. It starts a session, sends messages, and streams the agent's reply into state you can render. This page uses React; [Vue](/docs/guides/frontend/use-eve-agent-vue) and [Svelte](/docs/guides/frontend/use-eve-agent-svelte) work the same way.
+`useEveAgent` connects a browser UI to an eve agent. It starts a session, sends messages, and streams the agent's reply into state you can render. This page uses React; [Vue](/docs/guides/frontend/use-eve-agent-vue), [Svelte](/docs/guides/frontend/use-eve-agent-svelte), and [Solid](/docs/guides/frontend/use-eve-agent-solid) work the same way.
 
 ## How it works
 
@@ -324,6 +324,7 @@ const support = useEveAgent({ agent: "support" });
 | Nuxt           | [`eve/nuxt` module](/docs/guides/frontend/nuxt)          | [`useEveAgent` (Vue)](/docs/guides/frontend/use-eve-agent-vue)       |
 | SvelteKit      | [`eveSvelteKit` plugin](/docs/guides/frontend/sveltekit) | [`useEveAgent` (Svelte)](/docs/guides/frontend/use-eve-agent-svelte) |
 | TanStack Start | [`eveTanStack` plugin](/docs/guides/frontend/tanstack)   | [`useEveAgent` (React)](#build-a-basic-chat)                         |
+| Solid          | [`eveVite` plugin](/docs/guides/frontend/vite)           | [`useEveAgent` (Solid)](/docs/guides/frontend/use-eve-agent-solid)   |
 | Other Vite     | [`eveVite` plugin](/docs/guides/frontend/vite)           | [`useEveAgent` (React)](#build-a-basic-chat)                         |
 | Any React      | same-origin or `baseUrl`                                 | [`useEveAgent` (React)](#build-a-basic-chat)                         |
 
