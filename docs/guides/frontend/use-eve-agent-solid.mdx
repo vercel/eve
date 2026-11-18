@@ -22,7 +22,7 @@ export default defineConfig({
 
 ## Basic usage
 
-Call the binding once for a conversation and call its accessors to read state:
+Call the binding once for a conversation, inside a component or `createRoot()`, and call its accessors to read state. Without a reactive owner, such as at module level, it throws. To share one conversation across components, create it in a context provider or inside `createRoot()`.
 
 ```tsx title="src/App.tsx"
 import { useEveAgent } from "eve/solid";

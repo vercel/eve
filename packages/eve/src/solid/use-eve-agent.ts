@@ -1,6 +1,6 @@
 import type { Delivery } from "#shared/delivery.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { createMemo, createSignal, onSettled, type Accessor } from "solid-js";
+import { createMemo, createSignal, getOwner, onSettled, type Accessor } from "solid-js";
 import type { MessageContent } from "#shared/message-content.js";
 
 import {
@@ -167,13 +167,19 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
  *
  * Returns accessors for the conversation (`messages`, `agents`, `view`) and for `error`,
  * `events`, `session`, and `status`, plus `prewarm`, `send`, `respond`, `resume`, `cancel`,
- * `newSession`, and `end`. Configuration is read once; remount to change it. In the browser,
+ * `newSession`, and `end`. Call it inside a component or `createRoot()`; it throws without a
+ * reactive owner. Configuration is read once; remount to change it. In the browser,
  * the binding connects once the component settles and disconnects when its owner is disposed.
  * During server rendering the accessors return the initial state and nothing connects.
  */
 export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
     throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
+  }
+  if (getOwner() === null) {
+    throw new Error(
+      "useEveAgent() must run inside a component or createRoot(). To share one conversation, create it inside createRoot() or a context provider.",
+    );
   }
   const store = new SessionStore({
     auth: options.auth,
@@ -201,6 +207,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
   if ("window" in globalThis)
     onSettled(() => {
       const unsubscribe = store.subscribe(() => setSnapshot(store.snapshot));
+      setSnapshot(store.snapshot);
       attachSessionStore(store);
       if (options.resume) void store.resume().catch(() => {});
 

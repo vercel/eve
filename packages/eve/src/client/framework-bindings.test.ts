@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
-import { createEffect, createRoot } from "solid-js";
+import { createEffect, createRoot, flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { effectScope } from "vue";
 
@@ -338,7 +338,33 @@ describe("the Solid binding", () => {
     await vi.waitFor(() => expect(server.reading).toBe(0));
   });
 
-  it("renders its initial state during server rendering without reading the session", async () => {
+  it("shows a message sent before the component settles", () => {
+    vi.stubGlobal("window", {});
+    agent();
+    let rendered: readonly string[] = [];
+    const { dispose } = createRoot((dispose) => {
+      const binding = useSolidAgent({ baseUrl: "https://eve.test" });
+      void binding.send("Weather?").catch(() => {});
+      createEffect(binding.messages, (messages) => {
+        rendered = messages.map((message) => message.role);
+      });
+      return { dispose };
+    });
+
+    flush();
+    expect(rendered).toEqual(["user"]);
+    dispose();
+  });
+
+  it("throws a precise error without a reactive owner, in the browser and on the server", () => {
+    const message =
+      "useEveAgent() must run inside a component or createRoot(). To share one conversation, create it inside createRoot() or a context provider.";
+    expect(() => useSolidAgent()).toThrow(message);
+    vi.stubGlobal("window", {});
+    expect(() => useSolidAgent()).toThrow(message);
+  });
+
+  it("does not connect without a window", async () => {
     agent();
     const { binding, dispose } = mountResumed();
 

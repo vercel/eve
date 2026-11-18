@@ -111,6 +111,8 @@ function Chat() {
   option: `resume` and `prewarm` update the store synchronously, and Solid 2 rejects signal writes
   in an owned scope (`REACTIVE_WRITE_IN_OWNED_SCOPE`). During start-mode SSR the accessors return
   the initial snapshot and nothing attaches.
+- Throws without a reactive owner, such as at module level, because nothing would dispose the
+  attached store.
 - `solid-js` `^2.0.0` becomes an optional peer dependency.
 
 ### 4. No `eveSolid()` plugin
