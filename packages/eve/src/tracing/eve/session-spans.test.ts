@@ -599,7 +599,7 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
-  it("names the task and child session an agent call delegated to, including a continuation", async () => {
+  it("names the task and child session an agent call delegated to, across later lines", async () => {
     const { commit, spans } = session(() => ({
       emit: true,
       recordInputs: false,
@@ -611,57 +611,34 @@ describe("a session's spans, from its committed lines", () => {
         scope: run,
         type: "call.requested",
       }) as SessionEvent;
-    const started = (callId: string, taskId?: string) =>
+    const started = (callId: string, taskId: string) =>
+      ({ data: { callId, taskId }, scope: run, type: "call.started" }) as SessionEvent;
+    const opened = (callId: string, sessionId: string) =>
       ({
-        data: taskId === undefined ? { callId } : { callId, taskId },
-        scope: run,
-        type: "call.started",
+        data: { name: "billing", owner: { callId }, sessionId, stream: "s" },
+        type: "child.opened",
+      }) as SessionEvent;
+    const sent = (callId: string, sessionId: string) =>
+      ({
+        data: { callId, childDeliveryId: `d_${callId}`, sessionId },
+        type: "child.sent",
       }) as SessionEvent;
     await commit(...opening);
     await commit(agentCall("call_start", "billing", true), started("call_start", "task_1"));
-    await commit(
-      {
-        data: {
-          kind: "agent",
-          name: "billing",
-          startedBy: { callId: "call_start" },
-          taskId: "task_1",
-        },
-        scope: run,
-        type: "task.started",
-      } as SessionEvent,
-      {
-        data: {
-          name: "billing",
-          owner: { taskId: "task_1" },
-          sessionId: "child_billing",
-          stream: "s",
-        },
-        type: "child.opened",
-      } as SessionEvent,
-    );
+    await commit(opened("call_start", "child_billing"), sent("call_start", "child_billing"));
+    await commit(requested("call_lookup", "lookup"));
     await commit(settled("call_start", { outcome: "completed", output: "started" }));
     await commit(agentCall("call_again", "billing", true), started("call_again", "task_1"));
-    await commit({
-      data: { callId: "call_again", childDeliveryId: "d_1", sessionId: "child_billing" },
-      type: "child.sent",
-    } as SessionEvent);
+    await commit(sent("call_again", "child_billing"));
+    await commit(settled("call_lookup", { outcome: "completed", output: "found" }));
     await commit(settled("call_again", { outcome: "completed", output: "sent" }));
-    await commit(agentCall("call_local", "researcher", false), started("call_local"));
-    await commit({
-      data: {
-        name: "researcher",
-        owner: { callId: "call_local" },
-        sessionId: "child_local",
-        stream: "s",
-      },
-      type: "child.opened",
-    } as SessionEvent);
-    await commit(settled("call_local", { outcome: "completed", output: "done" }));
+    await commit(agentCall("call_moved", "billing", true), started("call_moved", "task_1"));
+    await commit(opened("call_moved", "child_billing_2"), sent("call_moved", "child_billing_2"));
+    await commit(settled("call_moved", { outcome: "completed", output: "sent" }));
     await commit(turnSettled({ outcome: "completed" }));
 
     const calls = (await spans())
-      .filter((span) => span.name.startsWith("execute_tool "))
+      .filter((span) => span.attributes["agent.action.kind"] === "remote-agent-call")
       .map((span) => [
         span.attributes["gen_ai.tool.call.id"],
         span.attributes["agent.task.id"],
@@ -671,7 +648,7 @@ describe("a session's spans, from its committed lines", () => {
       expect.arrayContaining([
         ["call_start", "task_1", "child_billing"],
         ["call_again", "task_1", "child_billing"],
-        ["call_local", undefined, "child_local"],
+        ["call_moved", "task_1", "child_billing_2"],
       ]),
     );
     expect(calls).toHaveLength(3);
