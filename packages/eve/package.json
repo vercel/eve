@@ -676,7 +676,6 @@
     "@vercel/oidc": "4.0.9",
     "@vercel/otel": "catalog:",
     "@vercel/queue": "0.11.0",
-    "@vercel/routing-utils": "6.6.1",
     "@vercel/sandbox": "catalog:",
     "@vercel/schedules": "0.0.3",
     "@vercel/sdk": "1.28.63",

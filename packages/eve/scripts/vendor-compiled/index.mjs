@@ -26,7 +26,6 @@ import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
 import vercelQueue from "./@vercel/queue.mjs";
-import vercelRoutingUtils from "./@vercel/routing-utils.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
 import vercelSdk from "./@vercel/sdk.mjs";
 import vercelSchedules from "./@vercel/schedules.mjs";
@@ -103,7 +102,6 @@ export const MODULES = [
   vercelOidc,
   vercelOtel,
   vercelQueue,
-  vercelRoutingUtils,
   vercelSandbox,
   vercelSdk,
   vercelSchedules,
