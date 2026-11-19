@@ -69,8 +69,8 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
 - **Claiming.** A claim watch claims one ready task per task event, or acks without a turn when none is
   ready. The session holds the claim in channel state, never in metadata, and renews it while turns
   run, once less than a third of the lease is left: at turn and call boundaries, and on a 30-second
-  timer, one per claim, while the session's in-process tool calls run. Subagent and workflow calls run outside the step, so they
-  aren't covered. A task tool names the settlement and the channel performs it when a call from a settle tool
+  timer, one per claim, while the session's in-process tool calls run. Subagent and workflow calls run
+  outside the step, so eve renews the claim in full when one starts. A task tool names the settlement and the channel performs it when a call from a settle tool
   settles, keeping the claim only when the board is briefly unavailable. A reply or the agent's
   own check-in in a held task's thread goes to that task's session. The claiming watch labels the task
   `eve-claim-watch=<id>`, so when two of the agent's claim watches cover a thread, only the one that
@@ -82,7 +82,7 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
 
 - Registration is still runtime state that a second `board()` mount in the same project overwrites.
   Namespaced registrations, or watchers declared at deploy time, would remove that.
-- A subagent or workflow call longer than the one-hour lease can lose a claim, because nothing
+- A subagent or workflow call longer than the one-hour lease loses its claim, because nothing
   renews it while the parent session waits.
 - `vb` in the sandbox waits for eve's sandbox network policy to support `response` rules.
 - There is no e2e eval: e2e can't start a board without an external service.

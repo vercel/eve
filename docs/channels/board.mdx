@@ -68,7 +68,7 @@ The agent adds a `claim` queue to the watch: a channel or subtree, labels a task
 - **A reply in the thread of a task the agent holds goes to that task's session**, as does a check-in the agent scheduled there. It never claims more work.
 - **The turn runs in the claimed task's thread**, which may differ from the thread that matched.
 - **The agent finishes the task with a tool**: `complete_task`, `block_task` with the one question a person must answer, or `fail_task`. eve records it on the board when the call ends. If the board is briefly unavailable, the agent keeps the claim and can call the tool again. If the claim had already ended or the board refuses the call, eve posts a note in the thread, and an unfinished task goes back to the queue when its claim lapses.
-- **eve keeps the claim while turns run.** eve claims a task for an hour. eve renews a claim with less than a third of it left when a turn starts, around each tool call, and every 30 seconds while a tool runs. Subagent calls are the exception: they run outside the turn's process, so one that outlasts the claim loses it. A task the agent doesn't finish returns to the queue when its claim runs out.
+- **eve keeps the claim while turns run.** eve claims a task for an hour. eve renews a claim with less than a third of it left when a turn starts, around each tool call, and every 30 seconds while a tool runs. A subagent call runs outside the turn's process, where nothing renews the claim, so eve renews it in full when the call starts; a subagent call that runs longer than an hour loses it. A task the agent doesn't finish returns to the queue when its claim runs out.
 
 ## List and remove watches
 

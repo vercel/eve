@@ -8,6 +8,7 @@ import {
   createBoardChannel,
   endRenewal,
   keepBoardClaim,
+  renewBoardClaim,
   renewDuringCall,
   settleAfterCall,
   type BoardChannelState,
@@ -201,6 +202,20 @@ test("a settlement the board refuses drops the claim and says so in the thread",
   assert.equal(state.task, null);
   assert.equal(notes.length, 1);
   assert.match(notes[0]!, /The board refused to mark task/u);
+});
+
+test("a subagent call starts with a fresh lease, however much of the old one is left", async () => {
+  const { as, calls } = await startBoard();
+  const { state, task } = await claimedTask(as, 3600);
+  const justAboveDue = new Date(Date.now() + 1_201_000).toISOString();
+  state.task = { ...state.task!, until: justAboveDue };
+
+  await keepBoardClaim(client(), state);
+  assert.equal(renewalsOf(calls, task.id), 0);
+  await renewBoardClaim(client(), state);
+
+  assert.equal(renewalsOf(calls, task.id), 1);
+  assert.ok(Date.parse(state.task!.until) - Date.now() > 3_500_000);
 });
 
 test("a claim near the end of its lease is renewed", async () => {

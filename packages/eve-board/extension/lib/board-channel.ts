@@ -261,6 +261,8 @@ export function createBoardChannel(
       async "call.started"(event, ctx) {
         if (event.data.taskId === undefined) {
           renewDuringCall(deployment, ctx.channel.state, event.data.callId);
+        } else {
+          await renewBoardClaim(deployment(), ctx.channel.state);
         }
       },
       async "call.settled"(event, ctx) {
@@ -560,8 +562,15 @@ export function settlementOf(
 }
 
 export async function keepBoardClaim(client: BoardClient, state: BoardChannelState): Promise<void> {
+  if (state.task != null && claimDue(state.task)) await renewBoardClaim(client, state);
+}
+
+export async function renewBoardClaim(
+  client: BoardClient,
+  state: BoardChannelState,
+): Promise<void> {
   const claim = state.task;
-  if (claim == null || !claimDue(claim)) return;
+  if (claim == null) return;
   state.task = await renewClaim(client, claim);
   if (state.task === null) stopRenewal(claim.token);
 }
