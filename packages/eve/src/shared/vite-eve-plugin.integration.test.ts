@@ -185,6 +185,14 @@ describe("createEveVitePlugin", () => {
     expect(resolveSharedEveDevServerMock).not.toHaveBeenCalled();
   });
 
+  it("declares buildApp only for Vercel builds so other plugins can own local builds", () => {
+    vi.stubEnv("VERCEL", "");
+    expect(createEveVitePlugin({ host, options: {} })).not.toHaveProperty("buildApp");
+
+    vi.stubEnv("VERCEL", "1");
+    expect(createEveVitePlugin({ host, options: {} })).toHaveProperty("buildApp.order", "post");
+  });
+
   it("merges the generated eve service into the user's Nitro Vercel config", async () => {
     vi.stubEnv("VERCEL", "1");
     const root = await createAgentProject();
