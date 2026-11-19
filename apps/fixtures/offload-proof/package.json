@@ -1,0 +1,15 @@
+{
+  "name": "offload-proof",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare-data": "node server/prepare.mjs",
+    "mcp": "node server/mcp-server.mjs",
+    "eval": "eve eval"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  }
+}
