@@ -1,0 +1,1 @@
+ALTER TABLE "shoppers" ADD COLUMN "agent_name" text DEFAULT 'evey' NOT NULL;

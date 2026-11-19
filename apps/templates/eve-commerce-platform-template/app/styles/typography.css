@@ -1,0 +1,36 @@
+@utility type-product-title {
+  @apply text-4xl font-semibold tracking-tight;
+}
+@utility type-page-title {
+  @apply text-2xl font-semibold tracking-tight;
+}
+@utility type-section-title {
+  @apply text-lg font-semibold tracking-tight;
+}
+@utility type-card-title {
+  @apply text-base font-medium;
+}
+@utility type-label {
+  @apply text-sm font-medium;
+}
+@utility type-body {
+  @apply text-base leading-relaxed;
+}
+@utility type-supporting-body {
+  @apply text-sm leading-normal;
+}
+@utility type-caption {
+  @apply text-xs leading-normal;
+}
+@utility type-input {
+  @apply text-base md:text-sm;
+}
+@utility type-mono {
+  @apply font-mono text-sm;
+}
+@utility type-compact-code {
+  @apply font-mono text-xs;
+}
+@utility type-numeric {
+  font-variant-numeric: tabular-nums;
+}
