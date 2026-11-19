@@ -1,5 +1,9 @@
-import extension from "../extension.ts";
-import { defineBoardFailTaskTool } from "../lib/tools.ts";
+import { defineDynamic } from "eve/tools";
 
-/** Gives up on the task the session claimed, with why. */
-export default defineBoardFailTaskTool(() => extension.config);
+import extension from "../extension.ts";
+import { defineBoardFailTaskTool, holdsTask } from "../lib/tools.ts";
+
+/** Gives up on the task the session claimed, with why. Offered only while the session holds a task. */
+export default defineDynamic((ctx) =>
+  holdsTask(ctx) ? defineBoardFailTaskTool(() => extension.config) : null,
+);

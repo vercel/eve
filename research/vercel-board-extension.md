@@ -26,6 +26,10 @@ OIDC credentials. `@eve/board` is a published package: its default export is the
 - **`can` bounds the model, not the bookkeeping.** The board refuses registration, matches, and acks
   to a handle narrowed with `can`, so eve's own registration, records, lock, pulls, and claim
   settlement use the deployment's handle, and the watch tools enforce `can` on every tail and queue.
+- **A lean tool list.** `read`, `reply`, `post`, and `react` are in every request; the settle tools
+  are a dynamic tool offered only while the session holds a claim; the rest are deferred behind
+  `eve__search`, and an always-on instruction names them. The channel shows typing on every turn
+  and call, so there is no typing tool.
 - **One generic wake route.** `POST /board/wake` pulls matches, reads each watch's record, and
   dispatches. It never lists watchers or registers.
 - **A package, not core.** The package needs no change to eve and supports eve 1.0.0 and later. A

@@ -127,27 +127,30 @@ The other board tools also work against your team's board with your `vercel logi
 
 ## Board tools
 
-| Tool              | What it does                                                                                                               |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `watch`           | Creates a watch from a `vb tail` expression and instructions, optionally claiming tasks from a queue.                      |
-| `watches`         | Lists the agent's watches, with their instructions on request.                                                             |
-| `unwatch`         | Removes a watch by its ID.                                                                                                 |
-| `channels`        | Lists the channels the agent can read.                                                                                     |
-| `read`            | Reads a whole thread by any message ID in it or by a Slack or GitHub link the board synced, or lists threads with filters. |
-| `post`            | Starts a thread in a channel, with optional labels and files from the sandbox.                                             |
-| `reply`           | Replies in a thread by any message ID in it, optionally with files from the sandbox.                                       |
-| `note`            | Keeps a reply on the board only, in the session's thread by default.                                                       |
-| `react`           | Adds or removes a reaction, such as `eyes`.                                                                                |
-| `label`           | Sets or unsets labels; labels on a thread's root apply to the whole thread.                                                |
-| `typing`          | Shows a short status, such as `Running the tests`, in the thread's synced platform threads.                                |
-| `schedule`        | Schedules a message in a thread, once or on a repeat, that wakes the agent when it posts.                                  |
-| `cancel_schedule` | Cancels a scheduled message.                                                                                               |
-| `create_task`     | Creates a task on the queue, with routing labels and the tasks it waits for.                                               |
-| `complete_task`   | Completes the task the session claimed, with the result.                                                                   |
-| `block_task`      | Holds the task the session claimed for a person, with the question they must answer.                                       |
-| `fail_task`       | Gives up on the task the session claimed, with why.                                                                        |
+`read`, `reply`, `post`, and `react` are in every request. The task tools are offered only while the session holds a claimed task. The rest are deferred: the agent finds them with `eve__search` when it needs them, and an always-on instruction names them so it knows to look.
 
-A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox. Everything posted can reach the platforms the board syncs, so narrow the tools with `can`, or add an approval through an override if writes need a gate.
+| Tool              | Offered              | What it does                                                                                                                                                               |
+| ----------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`            | Always               | Reads a thread by any message ID in it or a Slack or GitHub link, or a channel's threads. A channel read returns a `cursor` for only what's new, and `older` to page back. |
+| `reply`           | Always               | Replies in a thread. With `after`, it posts only if nothing landed after the message the agent last read.                                                                  |
+| `post`            | Always               | Starts a thread in a channel, with optional labels and files from the sandbox.                                                                                             |
+| `react`           | Always               | Adds or removes a reaction, such as `eyes`.                                                                                                                                |
+| `complete_task`   | While holding a task | Completes the task the session claimed, with the result.                                                                                                                   |
+| `block_task`      | While holding a task | Holds the task for a person, with the question they must answer.                                                                                                           |
+| `fail_task`       | While holding a task | Gives up on the task, with why.                                                                                                                                            |
+| `watch`           | Deferred             | Creates a watch from a `vb tail` expression and instructions, optionally claiming tasks from a queue.                                                                      |
+| `watches`         | Deferred             | Lists the agent's watches, with their instructions on request.                                                                                                             |
+| `unwatch`         | Deferred             | Removes a watch by its ID.                                                                                                                                                 |
+| `schedule`        | Deferred             | Schedules a message in a thread, once or on a repeat, that wakes the agent when it posts.                                                                                  |
+| `schedules`       | Deferred             | Lists pending scheduled messages, in the session's thread by default.                                                                                                      |
+| `cancel_schedule` | Deferred             | Cancels a scheduled message.                                                                                                                                               |
+| `note`            | Deferred             | Keeps a reply on the board only, in the session's thread by default.                                                                                                       |
+| `label`           | Deferred             | Sets or unsets labels, optionally only while other labels hold, as `if`.                                                                                                   |
+| `channels`        | Deferred             | Lists the channels the agent can read.                                                                                                                                     |
+| `actors`          | Deferred             | Lists people and agents with their handles, to mention them or name a task owner.                                                                                          |
+| `create_task`     | Deferred             | Creates a task on the queue, with routing labels and the tasks it waits for.                                                                                               |
+
+The channel shows typing in the thread's synced platform threads on every turn and tool call, with the call's label, such as `Running the tests`, as the status. A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox. A board error's message includes the board's hint for what to do next. Everything posted can reach the platforms the board syncs, so narrow the tools with `can`, or add an approval through an override if writes need a gate.
 
 ## Proactive sessions
 

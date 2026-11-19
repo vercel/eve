@@ -1,5 +1,9 @@
-import extension from "../extension.ts";
-import { defineBoardCompleteTaskTool } from "../lib/tools.ts";
+import { defineDynamic } from "eve/tools";
 
-/** Completes the task the session claimed, with the result. */
-export default defineBoardCompleteTaskTool(() => extension.config);
+import extension from "../extension.ts";
+import { defineBoardCompleteTaskTool, holdsTask } from "../lib/tools.ts";
+
+/** Completes the task the session claimed, with the result. Offered only while the session holds a task. */
+export default defineDynamic((ctx) =>
+  holdsTask(ctx) ? defineBoardCompleteTaskTool(() => extension.config) : null,
+);

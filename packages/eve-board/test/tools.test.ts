@@ -11,9 +11,18 @@ import {
   defineBoardPostTool,
   defineBoardReadTool,
   defineBoardReplyTool,
+  defineBoardActorsTool,
+  defineBoardBlockTaskTool,
+  defineBoardCancelScheduleTool,
+  defineBoardReactTool,
   defineBoardScheduleTool,
-  defineBoardTypingTool,
+  defineBoardSchedulesTool,
+  defineBoardUnwatchTool,
+  defineBoardWatchesTool,
+  defineBoardWatchTool,
+  holdsTask,
 } from "../extension/lib/tools.ts";
+import { withHints } from "../extension/lib/client.ts";
 import { runTool, startBoard } from "./helpers.ts";
 
 const settings = () => ({ profile: "helper" });
@@ -74,10 +83,6 @@ test("a reply attaches files from the sandbox and warns about mentions that noti
   assert.deepEqual(mention.unknownMentions, ["nobody"]);
   assert.match(mention.warning, /@nobody matched no one/u);
 
-  assert.deepEqual(
-    await run(defineBoardTypingTool(settings), { id: root.id, status: "Checking" }, "call-5"),
-    { ok: true },
-  );
   const thread = await run(defineBoardReadTool(settings), { id: root.id }, "call-6");
   assert.equal(thread.replies.length, 2);
 });
@@ -138,4 +143,139 @@ test("task tools create a task, and settle tools name the claim the session hold
     run(defineBoardCompleteTaskTool(settings), {}, "c5"),
     /This session holds no board task/u,
   );
+});
+
+test("read pages a channel by its cursor, and reads only the replies after a message", async () => {
+  await startBoard();
+  const post = defineBoardPostTool(settings);
+  const read = defineBoardReadTool(settings);
+  await run(post, { channel: "dev", text: "First" }, "p1");
+  const first = await run(read, { channel: "dev" }, "r1");
+  assert.deepEqual(
+    first.threads.map((thread: { message: { text: string } }) => thread.message.text),
+    ["First"],
+  );
+  await run(post, { channel: "dev", text: "Second" }, "p2");
+  const since = await run(read, { after: first.cursor, channel: "dev" }, "r2");
+  assert.deepEqual(
+    since.threads.map((thread: { message: { text: string } }) => thread.message.text),
+    ["Second"],
+  );
+
+  const root = await run(post, { channel: "dev", text: "Thread" }, "p3");
+  const reply = defineBoardReplyTool(settings);
+  const one = await run(reply, { id: root.id, text: "One" }, "p4");
+  await run(reply, { id: root.id, text: "Two" }, "p5");
+  const newer = await run(read, { after: one.id, id: root.id }, "r3");
+  assert.deepEqual(
+    newer.replies.map((message: { text: string }) => message.text),
+    ["Two"],
+  );
+  await assert.rejects(run(read, {}, "r4"), /Pass `id`, `link`, or `channel`/u);
+});
+
+test("a reply with `after` refuses when the thread moved on, and a label change checks its condition", async () => {
+  await startBoard();
+  const root = await run(defineBoardPostTool(settings), { channel: "dev", text: "Ship it?" }, "p1");
+  const reply = defineBoardReplyTool(settings);
+  const answer = await run(reply, { id: root.id, text: "Tests pass." }, "p2");
+  await assert.rejects(run(reply, { after: root.id, id: root.id, text: "Shipping." }, "p3"), {
+    code: "newer_message",
+  });
+  await run(reply, { after: answer.id, id: root.id, text: "Shipping." }, "p4");
+
+  const label = defineBoardLabelTool(settings);
+  await run(label, { id: root.id, set: { status: "open" } }, "l1");
+  await assert.rejects(
+    run(label, { id: root.id, if: { status: "closed" }, set: { status: "done" } }, "l2"),
+  );
+  await run(label, { id: root.id, if: { status: "open" }, set: { status: "done" } }, "l3");
+  const thread = await run(defineBoardReadTool(settings), { id: root.id }, "r1");
+  assert.equal(thread.message.labels.status, "done");
+});
+
+test("schedules lists the session's check-ins, and actors finds handles to mention", async () => {
+  const { as } = await startBoard();
+  const root = await run(defineBoardPostTool(settings), { channel: "dev", text: "CI" }, "p1");
+  const thread = { boardThread: root.id };
+  const scheduled = await run(
+    defineBoardScheduleTool(settings),
+    { in: "1h", text: "Check CI." },
+    "s1",
+    thread,
+  );
+  const listed = await run(defineBoardSchedulesTool(settings), {}, "s2", thread);
+  assert.deepEqual(
+    listed.schedules.map((schedule: { id: string }) => schedule.id),
+    [scheduled.id],
+  );
+
+  await as("alice", "/messages", { channel: "dev", text: "Hi." });
+  const found = await run(defineBoardActorsTool(settings), { search: "ali" }, "a1");
+  assert.deepEqual(
+    found.actors.map((actor: { handle: string }) => actor.handle),
+    ["alice"],
+  );
+});
+
+test("rare tools are deferred, and task tools are offered only while the session holds a task", () => {
+  const deferred = (tool: unknown) => (tool as { deferred?: boolean }).deferred === true;
+  for (const define of [
+    defineBoardNoteTool,
+    defineBoardLabelTool,
+    defineBoardScheduleTool,
+    defineBoardCancelScheduleTool,
+    defineBoardSchedulesTool,
+    defineBoardChannelsTool,
+    defineBoardActorsTool,
+    defineBoardCreateTaskTool,
+    defineBoardWatchTool,
+    defineBoardWatchesTool,
+    defineBoardUnwatchTool,
+  ]) {
+    assert.equal(deferred(define(settings)), true, define.name);
+  }
+  for (const define of [
+    defineBoardReadTool,
+    defineBoardReplyTool,
+    defineBoardPostTool,
+    defineBoardReactTool,
+    defineBoardCompleteTaskTool,
+    defineBoardBlockTaskTool,
+    defineBoardFailTaskTool,
+  ]) {
+    assert.equal(deferred(define(settings)), false, define.name);
+  }
+  const until = new Date(Date.now() + 60_000).toISOString();
+  assert.equal(holdsTask({ channel: { metadata: { boardTask: { id: "7", until } } } }), true);
+  assert.equal(holdsTask({ channel: { metadata: { boardTask: null } } }), false);
+  assert.equal(holdsTask({}), false);
+});
+
+test("board errors carry the board's hint in their message and keep their code", async () => {
+  const failure = () =>
+    Object.assign(new Error("The task is claimed."), {
+      code: "task_claimed",
+      hint: "Claim another with `claim --ready`.",
+    });
+  const handle = withHints({
+    async claim() {
+      throw failure();
+    },
+    tasks: {
+      held() {
+        return {
+          async renew() {
+            throw failure();
+          },
+        };
+      },
+    },
+  });
+  for (const act of [() => handle.claim(), () => handle.tasks.held().renew()]) {
+    await assert.rejects(act(), {
+      code: "task_claimed",
+      message: "The task is claimed. Claim another with `claim --ready`.",
+    });
+  }
 });

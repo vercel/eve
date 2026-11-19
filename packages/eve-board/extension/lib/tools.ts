@@ -101,6 +101,11 @@ function heldClaim(ctx: ToolContext): { readonly id: string; readonly until: str
   return { id: task.id, until: task.until };
 }
 
+export function holdsTask(ctx: { readonly channel?: { readonly metadata?: unknown } }): boolean {
+  const task = metadataOf(ctx as ToolContext).boardTask;
+  return typeof task === "object" && task !== null;
+}
+
 function settle(
   ctx: ToolContext,
   settled: "completed" | "failed" | "blocked",
@@ -206,6 +211,7 @@ function requireContent(text: string | undefined, attach: readonly string[] | un
 /** Lists the board's channels. */
 export function defineBoardChannelsTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description: "List the board's channels you can read.",
     inputSchema: z.object({}),
     async execute() {
@@ -218,7 +224,7 @@ export function defineBoardChannelsTool(settings: Settings) {
 export function defineBoardReadTool(settings: Settings) {
   return defineTool({
     description:
-      "Read the board. Pass `id` to read a whole thread by any message in it, `link` to read the thread a Slack or GitHub link points to, or filters to list threads, newest activity first. Read a discussion before joining it. A task's state and holder show on its root.",
+      "Read the board. Pass `id` for a whole thread by any message in it, `link` for the thread a Slack or GitHub link points to, or `channel` for its threads, newest activity first. A channel read returns a `cursor`: pass it back as `after` to see only threads with activity since, or pass `older` as `before` to page back. The board has no search, so read the channel something would be in. Read a discussion before joining it. A task's state and holder show on its root.",
     inputSchema: z.object({
       id: messageId.optional(),
       link: z
@@ -228,18 +234,30 @@ export function defineBoardReadTool(settings: Settings) {
         .describe("A link to a message on a platform the board syncs, such as a Slack permalink."),
       channel: z.string().min(1).optional().describe("A channel path, or `prefix/` for a subtree."),
       label: z.array(z.string().min(1)).optional().describe("`key` or `key=value` filters."),
-      by: z.string().min(1).optional().describe("An author's handle."),
-      mentions: z.string().min(1).optional().describe("A mentioned handle."),
-      text: z.string().min(1).optional().describe("Text the thread contains."),
-      limit: z.number().int().min(1).max(50).optional(),
+      after: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "With `channel`, a `cursor` an earlier read returned; with `id`, a message ID, to read only the replies after it.",
+        ),
+      before: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("With `channel`, the `older` an earlier read returned."),
+      limit: z.number().int().min(1).max(100).optional(),
     }),
-    async execute({ id, link, ...query }) {
+    async execute({ id, link, after, ...query }) {
       const board = client(settings);
-      if (id !== undefined) return summarizeThread(await board.thread(id));
+      if (id !== undefined) return summarizeThread(await board.thread(id, { after }));
       if (link !== undefined) return summarizeThread(await board.linked(link));
-      const threads = await board.threads({ ...query, limit: query.limit ?? 20 });
+      if (query.channel === undefined) throw new Error("Pass `id`, `link`, or `channel`.");
+      const page = await board.threadsPage({ ...query, after, limit: query.limit ?? 20 });
       return {
-        threads: threads.map((thread) => ({
+        cursor: page.cursor,
+        older: page.older,
+        threads: page.threads.map((thread) => ({
           last: thread.last === null ? null : summarize(thread.last),
           message: summarize(thread.message),
           replies: thread.replies,
@@ -282,6 +300,13 @@ export function defineBoardReplyTool(settings: Settings) {
       id: messageId,
       text,
       attach,
+      after: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "The last message you read in the thread. In a busy thread, the reply posts only if nothing landed after it; otherwise it fails with `newer_message`, so read what's new and decide again.",
+        ),
       noSync: z
         .boolean()
         .optional()
@@ -301,6 +326,7 @@ export function defineBoardReplyTool(settings: Settings) {
 /** Keeps a note in a thread, on the board only. */
 export function defineBoardNoteTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description:
       "Keep a working note in a board thread: a reply that stays on the board and never reaches synced Slack, GitHub, or Linear threads. Use it for detail the team can read on the board, such as what you tried. Defaults to this session's thread.",
     inputSchema: z.object({
@@ -339,31 +365,22 @@ export function defineBoardReactTool(settings: Settings) {
 /** Sets or unsets labels on a thread. */
 export function defineBoardLabelTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description:
       "Set or unset labels on a board message; labels on a thread's root apply to the whole thread. Use them to mark state others filter on, such as `status=done`. Labels under `board.` are the board's own.",
     inputSchema: z.object({
       id: z.string().min(1).describe("The message ID."),
       set: z.record(z.string(), z.string()).optional(),
       unset: z.array(z.string()).optional(),
+      if: z
+        .record(z.string(), z.string().nullable())
+        .optional()
+        .describe(
+          "Change only while the message has these labels now, such as `{ status: 'open' }`; `null` means the label must be unset. Use it when others may change the same labels.",
+        ),
     }),
-    async execute({ id, set, unset }) {
-      await client(settings).label(id, { set, unset });
-      return { ok: true };
-    },
-  });
-}
-
-/** Shows what the agent is doing in a thread. */
-export function defineBoardTypingTool(settings: Settings) {
-  return defineTool({
-    description:
-      "Show that you're working in a board thread, with a short status such as `Running the tests`. It shows in the thread's synced platform threads, such as in place of Typing… in Slack, and writes nothing to the board.",
-    inputSchema: z.object({
-      id: messageId,
-      status: z.string().min(1).max(50).optional(),
-    }),
-    async execute({ id, status }) {
-      await client(settings).typing(id, status);
+    async execute({ id, set, unset, if: conditions }) {
+      await client(settings).label(id, { if: conditions, set, unset });
       return { ok: true };
     },
   });
@@ -372,6 +389,7 @@ export function defineBoardTypingTool(settings: Settings) {
 /** Schedules a message that wakes the agent later. */
 export function defineBoardScheduleTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description:
       "Schedule a message in a board thread for later, as yourself: it wakes you there when it posts, so you can come back to something that takes time, such as a CI run. Write it for a reader who remembers nothing: what to check and what comes next. Defaults to this session's thread, and to staying off synced platforms. Pass `in` or `at` for once, or `every` with `times` or `until` for a repeat.",
     inputSchema: z.object({
@@ -400,6 +418,7 @@ export function defineBoardScheduleTool(settings: Settings) {
 /** Cancels a scheduled message. */
 export function defineBoardCancelScheduleTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description:
       "Cancel a scheduled board message by its ID, such as once what it checks on has happened.",
     inputSchema: z.object({ id: z.string().min(1).describe("The schedule's ID.") }),
@@ -409,9 +428,58 @@ export function defineBoardCancelScheduleTool(settings: Settings) {
   });
 }
 
+/** Lists pending scheduled messages. */
+export function defineBoardSchedulesTool(settings: Settings) {
+  return defineTool({
+    deferred: true,
+    description:
+      "List pending scheduled board messages: in a thread by any message in it, in a channel, or, with neither, the ones you scheduled. Defaults to this session's thread.",
+    inputSchema: z.object({
+      id: messageId.optional(),
+      channel: z.string().min(1).optional(),
+    }),
+    async execute({ id, channel }, ctx) {
+      const board = client(settings);
+      const re = id ?? (channel === undefined ? currentThread(ctx) : undefined);
+      const schedules = await board.schedules(
+        re !== undefined
+          ? { re }
+          : channel !== undefined
+            ? { channel }
+            : { by: (await board.me()).actor },
+      );
+      return { schedules };
+    },
+  });
+}
+
+/** Lists the board's actors, to mention them. */
+export function defineBoardActorsTool(settings: Settings) {
+  return defineTool({
+    deferred: true,
+    description:
+      "List people and agents on the board with their handles, to mention them as `@handle`, or to name a task owner by `id`. Pass `search` to narrow by handle or name.",
+    inputSchema: z.object({
+      search: z.string().min(1).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    }),
+    async execute({ search, limit }) {
+      const needle = search?.toLowerCase();
+      const actors = (await client(settings).actors()).filter(
+        (actor) =>
+          needle === undefined ||
+          actor.handle.toLowerCase().includes(needle) ||
+          actor.name.toLowerCase().includes(needle),
+      );
+      return { actors: actors.slice(0, limit ?? 50), total: actors.length };
+    },
+  });
+}
+
 /** Creates a task on the board's queue. */
 export function defineBoardCreateTaskTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description: `Create a task on the board's queue: a thread whose root is the brief for whoever claims it, any agent or person. Write the brief for a stranger: what to do, what's out of scope, and how to tell it's done. ${SHARED}`,
     inputSchema: z.object({
       channel: z.string().min(1).describe("The channel the queue is in."),
@@ -433,7 +501,6 @@ export function defineBoardCreateTaskTool(settings: Settings) {
   });
 }
 
-/** Completes the task this session holds. */
 export function defineBoardCompleteTaskTool(_settings: Settings) {
   return defineTool({
     description:
@@ -445,7 +512,6 @@ export function defineBoardCompleteTaskTool(_settings: Settings) {
   });
 }
 
-/** Fails the task this session holds. */
 export function defineBoardFailTaskTool(_settings: Settings) {
   return defineTool({
     description:
@@ -457,7 +523,6 @@ export function defineBoardFailTaskTool(_settings: Settings) {
   });
 }
 
-/** Holds the task this session holds for a person. */
 export function defineBoardBlockTaskTool(_settings: Settings) {
   return defineTool({
     description:
@@ -517,6 +582,7 @@ const queue = z
 /** Creates a watch: the board wakes the agent with these instructions when the tail matches. */
 export function defineBoardWatchTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description:
       "Watch the board: from now on, every event the tail matches wakes you in that board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Returns the watch's ID.",
     inputSchema: z.object({
@@ -559,6 +625,7 @@ export function defineBoardWatchTool(settings: Settings) {
 /** Lists the agent's watches. */
 export function defineBoardWatchesTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description:
       "List your board watches: each one's ID and what it matches, and with `details`, what it does.",
     inputSchema: z.object({
@@ -580,6 +647,7 @@ export function defineBoardWatchesTool(settings: Settings) {
 /** Removes a watch. */
 export function defineBoardUnwatchTool(settings: Settings) {
   return defineTool({
+    deferred: true,
     description:
       "Stop a board watch by its ID: it no longer wakes you, and your other watches keep running.",
     inputSchema: z.object({ id: z.string().min(1).max(100) }),

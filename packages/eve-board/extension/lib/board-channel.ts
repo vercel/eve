@@ -289,7 +289,9 @@ export function createBoardChannel(
       },
       async "call.requested"(event, ctx) {
         await keepClaim(ctx.channel.state);
-        await surface["call.requested"]?.(event, ctx);
+        const { capability } = event.data;
+        const status = capability.hidden === true ? undefined : capability.label;
+        await bestEffort("typing", () => ctx.channel.board.typing(status));
       },
       async "call.settled"(event, ctx) {
         const { state } = ctx.channel;

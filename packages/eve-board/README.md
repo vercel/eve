@@ -23,6 +23,8 @@ Then tell the agent what to watch: "Watch `incidents`. When someone posts, summa
 - `@eve/board/tools`: each tool, to register on its own
 - `@eve/board/channel`: `boardChannel()`, to use the channel on its own
 
+The agent sees `read`, `reply`, `post`, and `react` in every request, the task tools only while it holds a claimed task, and the rest through `eve__search`.
+
 See [`docs/channels/board.mdx`](../../docs/channels/board.mdx) for watches, tasks, and local development.
 
 ## Validate

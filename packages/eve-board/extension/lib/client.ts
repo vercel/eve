@@ -89,11 +89,23 @@ export interface BoardChannelSummary {
 
 export interface BoardThreadsQuery {
   readonly channel?: string;
-  readonly by?: string;
-  readonly mentions?: string;
   readonly label?: readonly string[];
-  readonly text?: string;
+  readonly after?: string;
+  readonly before?: string;
   readonly limit?: number;
+}
+
+export interface BoardThreadsPage {
+  readonly threads: readonly BoardThreadSummary[];
+  readonly cursor: string;
+  readonly older: string | null;
+}
+
+export interface BoardActorSummary {
+  readonly id: string;
+  readonly handle: string;
+  readonly name: string;
+  readonly kind: string;
 }
 
 /** Options for a new thread or a reply. */
@@ -106,6 +118,8 @@ export interface BoardPostOptions {
   readonly id?: string;
   /** Attachment IDs from {@link BoardClient.upload}, at most 10. `text` may be empty with them. */
   readonly attachments?: readonly string[];
+  /** Post only if nothing landed in the thread after this message; otherwise the board refuses with `newer_message`. */
+  readonly after?: string;
 }
 
 export interface BoardScheduleOptions {
@@ -239,12 +253,23 @@ export interface BoardClient {
   react(id: string, emoji: string, options?: { readonly remove?: boolean }): Promise<void>;
   label(
     id: string,
-    change: { readonly set?: Record<string, string>; readonly unset?: readonly string[] },
+    change: {
+      readonly set?: Record<string, string>;
+      readonly unset?: readonly string[];
+      readonly if?: Readonly<Record<string, string | null>>;
+    },
   ): Promise<void>;
   typing(id: string, status?: string): Promise<void>;
-  thread(id: string): Promise<BoardThread>;
+  thread(id: string, range?: { readonly after?: string }): Promise<BoardThread>;
   linked(url: string): Promise<BoardThread>;
   threads(query?: BoardThreadsQuery): Promise<readonly BoardThreadSummary[]>;
+  threadsPage(query?: BoardThreadsQuery): Promise<BoardThreadsPage>;
+  schedules(query?: {
+    readonly re?: string;
+    readonly channel?: string;
+    readonly by?: string;
+  }): Promise<readonly BoardSchedule[]>;
+  actors(): Promise<readonly BoardActorSummary[]>;
   channels(): Promise<readonly BoardChannelSummary[]>;
   download(attachmentId: string): Promise<Response>;
   schedule(
@@ -342,9 +367,8 @@ function baseHandle(target: BoardTarget): BoardHandle {
 
 export function createBoardClient(target: BoardTarget): BoardClient {
   const base = baseHandle(target);
-  const handle = base.as(
-    target.profile,
-    target.can === undefined ? undefined : { can: target.can as never },
+  const handle = withHints(
+    base.as(target.profile, target.can === undefined ? undefined : { can: target.can as never }),
   );
   const meKey = `${handleKey(target)}\n${target.profile}\n${JSON.stringify(target.can ?? null)}`;
 
@@ -370,6 +394,22 @@ export function createBoardClient(target: BoardTarget): BoardClient {
         )),
     };
   };
+
+  async function threadsPage(query: BoardThreadsQuery = {}): Promise<BoardThreadsPage> {
+    const page = await handle.threads({
+      ...query,
+      ...(query.label !== undefined && { label: [...query.label] }),
+    } as never);
+    return {
+      cursor: page.cursor,
+      older: page.older ?? null,
+      threads: page.threads.map((summary) => ({
+        last: summary.last === null ? null : messageOf(summary.last),
+        message: messageOf(summary.message),
+        replies: summary.replies,
+      })),
+    };
+  }
 
   return {
     profile: target.profile,
@@ -430,22 +470,28 @@ export function createBoardClient(target: BoardTarget): BoardClient {
       await handle.label(id, {
         ...(change.set !== undefined && { set: change.set }),
         ...(change.unset !== undefined && { unset: [...change.unset] }),
+        ...(change.if !== undefined && { if: { ...change.if } }),
       });
     },
     async typing(id, status) {
       await handle.typing(id, status === undefined ? undefined : status.slice(0, 50));
     },
-    thread: async (id) => threadOf(await handle.thread(id)),
+    thread: async (id, range = {}) =>
+      threadOf(await handle.thread(id, range.after === undefined ? {} : { after: range.after })),
     linked: async (url) => threadOf(await handle.linked(url)),
     async threads(query = {}) {
-      const page = await handle.threads({
-        ...query,
-        ...(query.label !== undefined && { label: [...query.label] }),
-      } as never);
-      return page.threads.map((summary) => ({
-        last: summary.last === null ? null : messageOf(summary.last),
-        message: messageOf(summary.message),
-        replies: summary.replies,
+      return (await threadsPage(query)).threads;
+    },
+    threadsPage,
+    async schedules(query = {}) {
+      return (await handle.schedules({ ...query })).map(scheduleOf);
+    },
+    async actors() {
+      return (await handle.actors()).map((actor) => ({
+        handle: actor.handle,
+        id: actor.id,
+        kind: actor.kind,
+        name: actor.name,
       }));
     },
     channels: async () =>
@@ -514,7 +560,34 @@ function postOf(post: BoardPostOptions) {
     ...(post.noSync !== undefined && { noSync: post.noSync }),
     ...(post.id !== undefined && { id: post.id }),
     ...(post.attachments !== undefined && { attachments: [...post.attachments] }),
+    ...(post.after !== undefined && { after: post.after }),
   };
+}
+
+export function withHints<T extends object>(target: T): T {
+  return new Proxy(target, {
+    get(object, key) {
+      const value = Reflect.get(object, key);
+      if (typeof value === "function") {
+        return (...args: unknown[]) => {
+          const result: unknown = Reflect.apply(value, object, args);
+          if (result instanceof Promise)
+            return result.catch((error: unknown) => Promise.reject(hinted(error)));
+          return typeof result === "object" && result !== null ? withHints(result) : result;
+        };
+      }
+      return typeof value === "object" && value !== null ? withHints(value) : value;
+    },
+  });
+}
+
+function hinted(error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const hint = (error as { readonly hint?: unknown }).hint;
+  if (typeof hint === "string" && hint.length > 0 && !error.message.includes(hint)) {
+    error.message = `${error.message} ${hint}`;
+  }
+  return error;
 }
 
 function messageOf(view: MessageView): BoardMessage {
