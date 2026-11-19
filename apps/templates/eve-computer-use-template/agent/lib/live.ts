@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import { runAgentBrowser } from "@agent-browser/eve/sandbox";
+import { Sandbox } from "@vercel/sandbox";
 import { startComputerUse } from "eve/extensions/computer-use/sandbox";
 import type { ToolContext } from "eve/tools";
 
@@ -6,58 +9,50 @@ import { environment } from "../sandbox";
 import { BROWSER_SESSION } from "./devices";
 import {
   BROWSER_STREAM_PORT,
+  DESKTOP_STREAM_PORT,
   RELAY_PORT,
   RELAY_TOKEN_FILE,
-  RELAY_VERSION,
   type LiveDevice,
 } from "./live-config";
-import { RELAY_SOURCE } from "./live-sources";
+import RELAY_SOURCE from "./live-relay.cjs?raw";
 
-/**
- * screen-relay's engine. Any listen address other than 127.0.0.1 makes it require a token, so it
- * listens on another loopback address: only the relay, which reads the token, reaches it.
- */
-const DESKTOP_STREAM_HOST = "127.0.0.2";
-const DESKTOP_STREAM_PORT = 3601;
-/** Where screen-relay keeps the default session's token, in the sandbox user's state directory. */
-const DESKTOP_TOKEN_FILE = "$HOME/.local/state/screen-relay/default/token";
 /** The display eve's computer-use extension draws the desktop on. */
 const DESKTOP_DISPLAY = ":99";
 
 const RELAY_PATH = "/tmp/live-relay.cjs";
+/** A sandbox running a relay from other source restarts it. */
+const RELAY_VERSION = createHash("sha256").update(RELAY_SOURCE).digest("hex").slice(0, 16);
 
 /** A stopped sandbox resumes without its processes, so recheck the streams this often. */
 const RECHECK_MS = 30_000;
 const checked = new Map<string, number>();
 
 /**
- * Start a device's live stream and the relay in front of it, and return the sandbox's name. The
- * web app's /api/live route finds the sandbox from that name in the session's own tool results,
- * then reads the relay's token from it; neither the token nor the relay's address reaches the
- * browser or the model.
+ * Start a device's live stream. The web app's /api/live route finds the sandbox by the session it
+ * belongs to, then connects viewers to the stream; no credential reaches the model.
  */
-export async function startLive(ctx: ToolContext, device: LiveDevice): Promise<string> {
+export async function startLive(ctx: ToolContext, device: LiveDevice): Promise<void> {
   const sandbox = await ctx.getSandbox(environment);
   const key = `${sandbox.name}:${device}`;
-  if (Date.now() - (checked.get(key) ?? 0) < RECHECK_MS) return sandbox.name;
+  if (Date.now() - (checked.get(key) ?? 0) < RECHECK_MS) return;
 
-  await ensureRelay(sandbox);
-  if (device === "browser") await ensureBrowserStream(ctx);
-  else await ensureDesktopStream(sandbox);
+  if (device === "browser") {
+    await ensureRelay(sandbox);
+    await ensureBrowserStream(ctx);
+  } else {
+    await ensureDesktopStream(sandbox);
+  }
   checked.set(key, Date.now());
-  return sandbox.name;
 }
 
-/** The sandbox's name once its live stream runs, or nothing; the screenshot still shows the screen. */
-export async function startLiveIfAvailable(
-  ctx: ToolContext,
-  device: LiveDevice,
-): Promise<string | undefined> {
+/** Whether the device's live stream runs; without it, the screenshot still shows the screen. */
+export async function startLiveIfAvailable(ctx: ToolContext, device: LiveDevice): Promise<boolean> {
   try {
-    return await startLive(ctx, device);
+    await startLive(ctx, device);
+    return true;
   } catch (error) {
     console.warn(`The ${device} live view is unavailable:`, error);
-    return undefined;
+    return false;
   }
 }
 
@@ -85,7 +80,7 @@ async function ensureRelay(sandbox: LiveSandbox): Promise<void> {
   });
   await start(
     sandbox,
-    `setsid -f node ${RELAY_PATH} ${RELAY_PORT} ${BROWSER_STREAM_PORT} ${DESKTOP_STREAM_HOST} ${DESKTOP_STREAM_PORT} "${DESKTOP_TOKEN_FILE}" ${RELAY_TOKEN_FILE} ${RELAY_VERSION} ${BROWSER_SESSION} >/tmp/live-relay.log 2>&1`,
+    `setsid -f node ${RELAY_PATH} ${RELAY_PORT} ${BROWSER_STREAM_PORT} ${RELAY_TOKEN_FILE} ${RELAY_VERSION} ${BROWSER_SESSION} >/tmp/live-relay.log 2>&1`,
   );
   for (let attempt = 0; attempt < 50; attempt++) {
     if (await current()) return;
@@ -102,9 +97,7 @@ async function ensureBrowserStream(ctx: ToolContext): Promise<void> {
   const status = await runAgentBrowser<{ data?: { enabled?: boolean; port?: number } }>(
     ctx,
     ["stream", "status"],
-    {
-      session: BROWSER_SESSION,
-    },
+    { session: BROWSER_SESSION },
   );
   const stream = status.json?.data;
   if (stream?.enabled && stream.port === BROWSER_STREAM_PORT) return;
@@ -113,36 +106,44 @@ async function ensureBrowserStream(ctx: ToolContext): Promise<void> {
   const enabled = await runAgentBrowser(
     ctx,
     ["stream", "enable", "--port", String(BROWSER_STREAM_PORT)],
-    {
-      session: BROWSER_SESSION,
-    },
+    { session: BROWSER_SESSION },
   );
   if (enabled.exitCode !== 0)
     throw new Error(`Starting the browser stream failed: ${enabled.stderr.slice(-500)}`);
 }
 
 /**
- * screen-relay attached to the computer-use display. It stops when that display does, as after
- * the sandbox resumes, so a session that isn't answering is replaced. The display starts here if
- * it isn't running yet, so the live view can show the desktop before the first action finishes.
+ * screen-relay attached to the computer-use display, serving its own public sandbox port behind
+ * the TLS proxy Vercel Sandbox puts in front of it, as screen-relay's remote access guide
+ * describes: it accepts only that host and requires its token. It stops when the display does,
+ * as after the sandbox resumes, so a session that isn't healthy is replaced. The display starts
+ * here if it isn't running yet, so the live view can show it before the first action finishes.
  */
 async function ensureDesktopStream(sandbox: LiveSandbox): Promise<void> {
-  const up = await sandbox.run({
-    command: [
-      `curl -sf --connect-to 127.0.0.1:${DESKTOP_STREAM_PORT}:${DESKTOP_STREAM_HOST}:${DESKTOP_STREAM_PORT}`,
-      `-H "Authorization: Bearer $(cat "${DESKTOP_TOKEN_FILE}")"`,
-      `http://127.0.0.1:${DESKTOP_STREAM_PORT}/capabilities >/dev/null`,
-    ].join(" "),
-  });
-  if (up.exitCode === 0) return;
+  const origin = (await Sandbox.get({ name: sandbox.name })).domain(DESKTOP_STREAM_PORT);
+  const status = await sandbox.run({ command: "screen-relay status --json" });
+  if (status.exitCode === 0 && healthy(status.stdout, origin)) return;
   await startComputerUse(sandbox);
   await start(
     sandbox,
     [
       "screen-relay down >/dev/null 2>&1 || true",
-      `screen-relay up -d --backend x11 --display ${DESKTOP_DISPLAY} --desktop none --bind ${DESKTOP_STREAM_HOST} --port ${DESKTOP_STREAM_PORT}`,
+      `screen-relay up -d --backend x11 --display ${DESKTOP_DISPLAY} --desktop none --port ${DESKTOP_STREAM_PORT} --public ${origin}`,
     ].join("\n"),
   );
+}
+
+function healthy(statusJson: string, origin: string): boolean {
+  try {
+    const { session } = JSON.parse(statusJson) as {
+      session?: { running?: boolean; url?: string; capabilities?: unknown };
+    };
+    return (
+      session?.running === true && session.capabilities !== undefined && session.url === origin
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function start(sandbox: LiveSandbox, command: string): Promise<void> {

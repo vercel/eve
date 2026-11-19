@@ -17,6 +17,9 @@ importers:
       '@ui-sdk/react':
         specifier: 0.1.0-beta.10
         version: 0.1.0-beta.10(@types/react@19.2.18)(@ui-sdk/core@0.1.0-beta.10)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@upstash/redis':
+        specifier: 1.38.2
+        version: 1.38.2
       '@vercel/functions':
         specifier: 3.10.5
         version: 3.10.5(ws@8.22.0)
@@ -591,6 +594,9 @@ packages:
       '@types/react':
         optional: true
 
+  '@upstash/redis@1.38.2':
+    resolution: {integrity: sha512-RZ+JaRCVIS+ZTGnjOnDMr+/0aqDxsBb5rV6aW+Pys4SGELwr5lwE3UbLHRCHqMQ5Ulxj0b/CFBHfbmE175Otog==}
+
   '@vercel/cli-config@0.3.1':
     resolution: {integrity: sha512-sISbygqlFXYb8qfPu/+2Cf/A8IjrlAuZePdag3EDQr2PRA455s7UZtl9Ro674CWsB/saBRmz3jEkw0YsQs8OoQ==}
 
@@ -1084,6 +1090,9 @@ packages:
     resolution: {integrity: sha512-8iAasVS4wUx0gPLjH8Xtz2PeDzTSiy8QiLGu2DT3X5GU+egFEQhpnbtkehbAwjvDcxIERmCYcysiODFmE3Ud0Q==}
     engines: {node: '>=18'}
 
+  uncrypto@0.1.3:
+    resolution: {integrity: sha512-Ql87qFHB3s/De2ClA9e0gsnS6zXG27SkTiSJwjCc9MebbfapQfuPzumMIUMi38ezPZVNFcHI9sUIepeQfw8J8Q==}
+
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
@@ -1473,6 +1482,10 @@ snapshots:
       react-dom: 19.2.8(react@19.2.8)
     optionalDependencies:
       '@types/react': 19.2.18
+
+  '@upstash/redis@1.38.2':
+    dependencies:
+      uncrypto: 0.1.3
 
   '@vercel/cli-config@0.3.1':
     dependencies:
@@ -1950,6 +1963,8 @@ snapshots:
       '@typescript/typescript-win32-x64': 7.0.2
 
   uint8array-extras@1.6.0: {}
+
+  uncrypto@0.1.3: {}
 
   undici-types@8.3.0: {}
 

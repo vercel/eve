@@ -1,10 +1,16 @@
 /**
- * Where the live view's relay listens in the sandbox, shared by the agent, which starts it, and
- * the web app's /api/live route, which connects to it. See agent/lib/live.ts.
+ * Where the live streams listen in the sandbox, shared by the agent, which starts them, and the
+ * web app's /api/live route, which connects viewers to them. See agent/lib/live.ts.
  */
 
-/** The sandbox's one public port, opened in agent/sandbox.ts. Only the relay listens on it. */
+/** The browser's relay, on a public sandbox port opened in agent/sandbox.ts. */
 export const RELAY_PORT = 3600;
+
+/**
+ * screen-relay's own public port for the desktop, opened in agent/sandbox.ts. It requires its
+ * token, which never leaves the server; viewers connect with a single-use ticket instead.
+ */
+export const DESKTOP_STREAM_PORT = 3601;
 
 /** agent-browser's stream, which the relay forwards to. agent/sandbox.ts pins every session to it. */
 export const BROWSER_STREAM_PORT = 3602;
@@ -12,15 +18,9 @@ export const BROWSER_STREAM_PORT = 3602;
 /** The relay writes its token here; only code holding Vercel project credentials can read it. */
 export const RELAY_TOKEN_FILE = "/tmp/live-relay.json";
 
-/** Bump when RELAY_SOURCE changes, so sandboxes running an older relay restart it. */
-export const RELAY_VERSION = "7";
-
 export type LiveDevice = "browser" | "desktop";
 
-/**
- * The prefix of each device's tools, from the extension mounts in agent/extensions/. The /api/live
- * route trusts a screen only from these tools, so no other tool's output can name a sandbox.
- */
+/** The prefix of each device's tools, from the extension mounts in agent/extensions/. */
 export const DEVICE_TOOL_PREFIX: Record<LiveDevice, string> = {
   browser: "browser__",
   desktop: "computer__",
@@ -46,4 +46,34 @@ export function addressBarUrl(typed: string): string | null {
   } catch {
     return null;
   }
+}
+
+export type Control =
+  | { readonly type: "history"; readonly action: HistoryAction }
+  | { readonly type: "open"; readonly url: string }
+  | { readonly type: "invalid" };
+
+/**
+ * The browser's own controls, which agent-browser's stream has no messages for:
+ * `{ "type": "history", "action": "back" }` from the back, forward, and reload buttons, and
+ * `{ "type": "open", "url": "…" }` from the address bar. Null for any other message, which goes
+ * to the sandbox; a malformed control is dropped, never forwarded.
+ */
+export function controlMessage(text: string): Control | null {
+  if (!text.includes('"history"') && !text.includes('"open"')) return null;
+  let message: { type?: unknown; action?: unknown; url?: unknown };
+  try {
+    message = JSON.parse(text) as typeof message;
+  } catch {
+    return null;
+  }
+  if (message.type === "history") {
+    const action = HISTORY_ACTIONS.find((candidate) => candidate === message.action);
+    return action === undefined ? { type: "invalid" } : { type: "history", action };
+  }
+  if (message.type === "open") {
+    const url = typeof message.url === "string" ? addressBarUrl(message.url) : null;
+    return url === null ? { type: "invalid" } : { type: "open", url };
+  }
+  return null;
 }

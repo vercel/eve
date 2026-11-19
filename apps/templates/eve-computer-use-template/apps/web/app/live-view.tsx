@@ -426,7 +426,11 @@ export function LiveView({
             onMouseUp={onMouseButton("mouseReleased")}
             onPaste={onPaste}
             ref={surface}
-            style={{ aspectRatio: String(ratio) }}
+            style={{
+              aspectRatio: String(ratio),
+              // While you drive the desktop, the pointer takes the shape the desktop gives it.
+              ...(driving && stream.cursor !== null ? { cursor: stream.cursor } : {}),
+            }}
             tabIndex={0}
           >
             {/* Kept mounted so frames can draw before it shows; `.frame` would override `hidden`. */}

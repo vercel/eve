@@ -1,32 +1,27 @@
 import { Sandbox } from "@vercel/sandbox";
 import { Client } from "eve/client";
-import type { SessionStreamEvent } from "eve/client";
 
 import {
-  DEVICE_TOOL_PREFIX,
+  DESKTOP_STREAM_PORT,
   RELAY_PORT,
   RELAY_TOKEN_FILE,
-  type LiveDevice,
 } from "../../../../../agent/lib/live-config";
 
-/**
- * How far back from the session's tail each read starts, in stream lines; 0 reads it all. Every
- * device action records the sandbox, so the first window almost always finds it, and a long
- * session isn't replayed, screenshots and all, each time a viewer connects.
- */
-const SEARCH_WINDOWS = [-256, -4096, 0];
-
 export interface Relay {
-  /** The relay's WebSocket origin, on the sandbox's public port. Never sent to the browser. */
+  /** The browser relay's WebSocket origin, on the sandbox's public port. Never sent to the browser. */
   readonly origin: string;
   readonly token: string;
 }
 
-/**
- * Only the caller's own credentials, so eve's channel auth decides whether they may read the
- * session. The route has already refused pages on other sites, whose `Origin` `localDev()` can't
- * see through this server.
- */
+/** A single-use way into the desktop's stream, for the caller's browser to connect directly. */
+export interface DesktopTicket {
+  /** screen-relay's `/stream` on its public sandbox port. */
+  readonly url: string;
+  /** Offer as the `ticket.<ticket>` subprotocol beside `nsl1`; it opens one connection within 60s. */
+  readonly ticket: string;
+}
+
+/** Only the caller's own credentials, so eve's channel auth decides whether they may read the session. */
 function callerHeaders(request: Request): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const name of ["authorization", "cookie"]) {
@@ -37,43 +32,41 @@ function callerHeaders(request: Request): Record<string, string> {
 }
 
 /**
- * The relay for a device's live stream in an eve session, if the caller may read that session.
- * The session is the authority: it must authorize the caller, and its device tools' results say
- * which sandbox runs the stream. Code in a sandbox can shape those results, so the sandbox must
- * also carry the `sessionId` tag eve gives each session's sandbox when it creates it: a viewer
- * only ever reaches the sandbox of a session they can already read.
+ * The sandbox of an eve session, if the caller may read that session. eve's channel auth decides
+ * the first part, through the session's own stream; eve itself tags each session's sandbox with
+ * the session's ID when it creates it, which decides the second. Nothing in the session's
+ * history, which code in the sandbox can shape, is trusted to name the sandbox.
  */
-export async function findRelay(
-  request: Request,
-  sessionId: string,
-  device: LiveDevice,
-): Promise<Relay | null> {
+export async function findSandbox(request: Request, sessionId: string): Promise<Sandbox | null> {
   const eveUrl = process.env.EVE_URL;
   if (eveUrl === undefined)
     throw new Error("EVE_URL is not set; it comes from the web service's binding in vercel.ts.");
   const session = new Client({ baseUrl: eveUrl, headers: callerHeaders(request) }).sessions.attach(
     sessionId,
   );
-  const signal = AbortSignal.timeout(15_000);
-  let name: string | undefined;
   try {
-    for (const startIndex of SEARCH_WINDOWS) {
-      // Each read stops at the session's current tail. Without retries, a session the caller
-      // can't read fails at once instead of being retried as if it might appear.
-      const events: SessionStreamEvent[] = [];
-      const stream = session.stream({ startIndex, follow: false, reconnect: false, signal });
-      for await (const event of stream) events.push(event);
-      name = latestSandbox(events, device);
-      // A window that reaches back to the session's start has read all of it.
-      if (name !== undefined || events[0]?.type === "session.started") break;
-    }
+    // One event from the tail is enough to know the caller may read the session. Without
+    // retries, a session the caller can't read fails at once.
+    const stream = session.stream({
+      startIndex: -1,
+      follow: false,
+      reconnect: false,
+      signal: AbortSignal.timeout(15_000),
+    });
+    for await (const _event of stream) break;
   } catch {
     // Unauthorized, unknown, or unreachable: all read as "no stream" to the caller.
     return null;
   }
+  const { sandboxes } = await Sandbox.list({ tags: { sessionId } });
+  const name = sandboxes.find((sandbox) => sandbox.status === "running")?.name;
   if (name === undefined) return null;
   const sandbox = await Sandbox.get({ name });
-  if (sandbox.tags?.sessionId !== sessionId) return null;
+  return sandbox.tags?.sessionId === sessionId ? sandbox : null;
+}
+
+/** The browser's relay in `sandbox`, with the token it wrote there. */
+export async function browserRelay(sandbox: Sandbox): Promise<Relay | null> {
   const file = await sandbox.readFileToBuffer({ path: RELAY_TOKEN_FILE });
   if (file === null) return null;
   const { token } = JSON.parse(file.toString("utf8")) as { token: string };
@@ -81,39 +74,27 @@ export async function findRelay(
 }
 
 /**
- * The sandbox the session's latest live stream for `device` runs in, from that device's own
- * tools: the `screen` of a completed call, or the `live` a running call reports before it acts.
- * A call requested before `events` began is skipped; a wider window finds it.
+ * A ticket into the desktop's stream in `sandbox`. screen-relay's own token stays here: it asks
+ * screen-relay for a ticket with it, as screen-relay's remote access guide describes for custom
+ * viewers, and only the ticket goes to the browser.
  */
-function latestSandbox(
-  events: readonly SessionStreamEvent[],
-  device: LiveDevice,
-): string | undefined {
-  const deviceCalls = new Set<string>();
-  for (const event of events) {
-    if (event.type !== "call.requested") continue;
-    const { callId, capability } = event.data;
-    if (capability.kind === "tool" && capability.name.startsWith(DEVICE_TOOL_PREFIX[device]))
-      deviceCalls.add(callId);
-  }
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]!;
-    let reported: unknown;
-    if (event.type === "call.progress") {
-      if (deviceCalls.has(event.data.callId)) reported = field(event.data.output, "live");
-    } else if (event.type === "call.settled" && event.data.outcome === "completed") {
-      if (deviceCalls.has(event.data.callId)) reported = field(event.data.output, "screen");
-    }
-    if (reported === undefined) continue;
-    const reportedDevice = field(reported, "device");
-    const sandbox = field(reported, "sandbox");
-    if (reportedDevice === device && typeof sandbox === "string") return sandbox;
-  }
-  return undefined;
-}
-
-function field(value: unknown, key: string): unknown {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)[key]
-    : undefined;
+export async function desktopTicket(sandbox: Sandbox): Promise<DesktopTicket | null> {
+  const status = await sandbox.runCommand({
+    cmd: "screen-relay",
+    args: ["status", "--json", "--show-token"],
+  });
+  if (status.exitCode !== 0) return null;
+  const token = (JSON.parse(await status.stdout()) as { session?: { token?: unknown } }).session
+    ?.token;
+  if (typeof token !== "string") return null;
+  const origin = sandbox.domain(DESKTOP_STREAM_PORT);
+  const response = await fetch(`${origin}/tickets`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) return null;
+  const { ticket } = (await response.json()) as { ticket?: unknown };
+  if (typeof ticket !== "string") return null;
+  return { url: `${origin.replace(/^http/, "ws")}/stream`, ticket };
 }

@@ -30,10 +30,10 @@ export default defineTool<ComputerUseInput, DeviceOutput & Record<string, unknow
   },
   async *execute(input, ctx) {
     const early = await startLiveIfAvailable(ctx, "desktop");
-    if (early !== undefined) yield { live: { device: "desktop", sandbox: early } };
+    if (early) yield { live: { device: "desktop" } };
     const output = (await computer_use.execute(input, ctx)) as ComputerUseOutput;
-    const liveSandbox = early ?? (await startLiveIfAvailable(ctx, "desktop"));
-    yield { ...output, screen: await captureDesktop(ctx, output.screenshot, liveSandbox) };
+    if (!early) await startLiveIfAvailable(ctx, "desktop");
+    yield { ...output, screen: await captureDesktop(ctx, output.screenshot) };
   },
   toModelOutput: desktopModelOutput,
 });

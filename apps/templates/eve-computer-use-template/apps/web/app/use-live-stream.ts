@@ -17,6 +17,8 @@ export interface LiveStreamState {
   readonly viewport: Size | null;
   /** Pixel size of the last frame drawn, which sets the view's shape. */
   readonly frame: Size | null;
+  /** The desktop's cursor as a CSS `cursor` value, for Take Over; null for the page's own. */
+  readonly cursor: string | null;
 }
 
 type ServerMessage =
@@ -29,12 +31,14 @@ const INITIAL: LiveStreamState = {
   url: null,
   viewport: null,
   frame: null,
+  cursor: null,
 };
 
 /**
  * Draw a sandbox device's live stream on `canvas`, and send it input. The browser speaks
- * agent-browser's JSON stream protocol; the desktop is screen-relay's H.264 stream, which
- * `DesktopStream` decodes and sends input to in the same message shapes.
+ * agent-browser's JSON stream protocol through the app's /api/live WebSocket. The desktop is
+ * screen-relay's H.264 stream, which the page opens directly with a single-use ticket from
+ * /api/live; `DesktopStream` decodes it and sends input to it in the same message shapes.
  */
 export function useLiveStream(
   canvas: React.RefObject<HTMLCanvasElement | null>,
@@ -62,9 +66,24 @@ export function useLiveStream(
       return;
     }
 
-    function connect() {
+    const reconnect = () => {
+      if (!disposed) retry = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 8000));
+    };
+
+    async function connect() {
       if (disposed) return;
-      const ws = new WebSocket(url!);
+      let ws: WebSocket;
+      if (desktop) {
+        const ticket = await desktopTicket(url!);
+        if (disposed) return;
+        if (ticket === null) {
+          update({ connection: "offline" });
+          return reconnect();
+        }
+        ws = new WebSocket(ticket.url, ["nsl1", `ticket.${ticket.ticket}`]);
+      } else {
+        ws = new WebSocket(url!);
+      }
       socket.current = ws;
       const desktopStream = desktop
         ? new DesktopStream(
@@ -79,6 +98,7 @@ export function useLiveStream(
                   : { ...current, frame, viewport: frame },
               );
             },
+            (cursor) => update({ cursor }),
           )
         : null;
       desktopRef.current = desktopStream;
@@ -94,7 +114,7 @@ export function useLiveStream(
         }
         if (disposed) return;
         update({ connection: "offline" });
-        retry = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 8000));
+        reconnect();
       };
       ws.onmessage = (event) => {
         if (desktopStream !== null) {
@@ -127,7 +147,7 @@ export function useLiveStream(
       };
     }
 
-    connect();
+    void connect();
     return () => {
       disposed = true;
       clearTimeout(retry);
@@ -146,6 +166,20 @@ export function useLiveStream(
   }, []);
 
   return { ...state, send };
+}
+
+/** A ticket into the desktop's stream from /api/live, or null when it has none yet. */
+async function desktopTicket(url: string): Promise<{ url: string; ticket: string } | null> {
+  try {
+    const response = await fetch(url, { method: "POST" });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { url?: unknown; ticket?: unknown };
+    return typeof body.url === "string" && typeof body.ticket === "string"
+      ? { url: body.url, ticket: body.ticket }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function paint(canvas: HTMLCanvasElement | null, src: string): Promise<Size | undefined> {

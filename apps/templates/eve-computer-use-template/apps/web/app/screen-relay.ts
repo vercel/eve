@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * The desktop's live view: a client for screen-relay's `/stream` WebSocket, which the /api/live
- * route proxies. Frames arrive as H.264 and are decoded with WebCodecs; Take Over input goes back
- * as screen-relay input records. See https://github.com/vercel-labs/screen-relay/blob/main/PROTOCOL.md.
+ * The desktop's live view: a client for screen-relay's `/stream` WebSocket, which the page opens
+ * with a ticket from the /api/live route. Frames arrive as H.264 and are decoded with WebCodecs;
+ * the desktop's cursor image arrives beside them; Take Over input goes back as screen-relay input
+ * records. See https://github.com/vercel-labs/screen-relay/blob/main/PROTOCOL.md.
  */
 
 const HEADER_BYTES = 20;
@@ -14,7 +15,9 @@ const KEYFRAME = 1;
 /** Coordinates in input records run from 0 to this across the desktop. */
 const COORDINATE_MAX = 65535;
 
-const MESSAGE = { frame: 1, ack: 2, input: 3 } as const;
+const MESSAGE = { frame: 1, ack: 2, input: 3, cursor: 6 } as const;
+/** A cursor message's width, height, and hotspot, before its pixels. */
+const CURSOR_HEADER_BYTES = 8;
 const INPUT = {
   keyDown: 1,
   keyUp: 2,
@@ -66,6 +69,8 @@ export class DesktopStream {
     private readonly socket: WebSocket,
     private readonly canvas: () => HTMLCanvasElement | null,
     private readonly onFrame: (size: Size) => void,
+    /** The desktop's cursor as a CSS `cursor` value, or null for the page's own arrow. */
+    private readonly onCursor: (cursor: string | null) => void,
   ) {
     socket.binaryType = "arraybuffer";
   }
@@ -75,6 +80,7 @@ export class DesktopStream {
     const view = new DataView(data);
     if (view.getUint32(0) !== MAGIC || view.getUint8(4) !== VERSION) return;
     if (view.getUint32(16) !== data.byteLength - HEADER_BYTES) return;
+    if (view.getUint8(5) === MESSAGE.cursor) return this.cursor(view);
     if (view.getUint8(5) !== MESSAGE.frame || data.byteLength < HEADER_BYTES + 12) return;
 
     const generation = view.getUint32(8);
@@ -114,6 +120,29 @@ export class DesktopStream {
     if (this.decoder !== null && this.decoder.state !== "closed") this.decoder.close();
     this.decoder = null;
     this.pending = [];
+  }
+
+  /** Width, height, and hotspot, then straight-alpha RGBA rows; all zero restores the arrow. */
+  private cursor(view: DataView): void {
+    if (view.byteLength < HEADER_BYTES + CURSOR_HEADER_BYTES) return;
+    const width = view.getUint16(HEADER_BYTES);
+    const height = view.getUint16(HEADER_BYTES + 2);
+    if (width === 0 || height === 0) return this.onCursor(null);
+    const pixels = Uint8ClampedArray.from(
+      new Uint8Array(
+        view.buffer,
+        HEADER_BYTES + CURSOR_HEADER_BYTES,
+        view.byteLength - HEADER_BYTES - CURSOR_HEADER_BYTES,
+      ),
+    );
+    if (pixels.length !== width * height * 4) return;
+    const image = document.createElement("canvas");
+    image.width = width;
+    image.height = height;
+    image.getContext("2d")?.putImageData(new ImageData(pixels, width, height), 0, 0);
+    const x = view.getUint16(HEADER_BYTES + 4);
+    const y = view.getUint16(HEADER_BYTES + 6);
+    this.onCursor(`url(${image.toDataURL()}) ${x} ${y}, auto`);
   }
 
   private configure(unit: Uint8Array, size: Size): void {

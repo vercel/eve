@@ -18,14 +18,17 @@
     "allowJs": true,
     "incremental": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "next-env.d.ts",
     ".next/types/**/*.ts",
     "../../agent/**/*.ts",
+    "../../agent/**/*.cjs",
     "app/**/*.ts",
     "app/**/*.tsx",
+    "lib/**/*.ts",
     "../../evals/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],

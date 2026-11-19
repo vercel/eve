@@ -25,7 +25,7 @@ export default defineTool<
   },
   async *execute({ app }, ctx) {
     const early = await startLiveIfAvailable(ctx, "desktop");
-    if (early !== undefined) yield { live: { device: "desktop", sandbox: early } };
+    if (early) yield { live: { device: "desktop" } };
 
     const sandbox = await ctx.getSandbox();
     await startComputerUse(sandbox);
@@ -53,12 +53,8 @@ export default defineTool<
     const shot = (await computer_use.execute({ request: { action: "screenshot" } }, ctx)) as {
       readonly screenshot: string;
     } & Record<string, unknown>;
-    const liveSandbox = early ?? (await startLiveIfAvailable(ctx, "desktop"));
-    yield {
-      opened: app,
-      ...shot,
-      screen: await captureDesktop(ctx, shot.screenshot, liveSandbox),
-    };
+    if (!early) await startLiveIfAvailable(ctx, "desktop");
+    yield { opened: app, ...shot, screen: await captureDesktop(ctx, shot.screenshot) };
   },
   toModelOutput: desktopModelOutput,
 });

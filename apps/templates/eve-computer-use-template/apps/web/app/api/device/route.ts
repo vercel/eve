@@ -1,6 +1,8 @@
 import { experimental_decide as decide } from "ai";
 
-import { authorize, isSameOrigin } from "../caller";
+import { getViewer } from "../../../lib/session";
+import { enforceRateLimit, RateLimitError } from "../../../lib/rate-limit";
+import { isSameOrigin } from "../caller";
 
 import {
   DEFAULT_DEVICE,
@@ -15,6 +17,8 @@ export const dynamic = "force-dynamic";
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TASK_LENGTH = 4000;
 const DECIDE_TIMEOUT_MS = 10_000;
+/** Each viewer's Auto decisions an hour, when Upstash is configured; see lib/rate-limit.ts. */
+const DECISIONS_PER_HOUR = 120;
 /** Baseten's 9B decision model, through Vercel AI Gateway. */
 const DECISION_MODEL = "baseten/elephant-1";
 
@@ -28,14 +32,24 @@ const DECISION_MODEL = "baseten/elephant-1";
 export async function POST(request: Request) {
   if (!isSameOrigin(request))
     return Response.json({ error: "Cross-site requests are refused." }, { status: 403 });
-  if (!authorize(request))
+  // Each decision is a model call billed to the project, so only a signed-in viewer gets one,
+  // and, with Upstash configured, only so many an hour.
+  const viewer = getViewer(request.headers);
+  if (viewer === null) return Response.json({ error: "Sign in first." }, { status: 401 });
+  try {
+    await enforceRateLimit({
+      key: viewer.id,
+      limit: DECISIONS_PER_HOUR,
+      prefix: "device",
+      windowSeconds: 60 * 60,
+    });
+  } catch (error) {
+    if (!(error instanceof RateLimitError)) throw error;
     return Response.json(
-      {
-        error:
-          "Auth is not configured. Replace authorize() in apps/web/app/api/caller.ts with your app's auth provider.",
-      },
-      { status: 401 },
+      { error: error.message },
+      { headers: { "retry-after": String(error.retryAfter) }, status: 429 },
     );
+  }
   const length = Number(request.headers.get("content-length") ?? "0");
   if (!Number.isFinite(length) || length > MAX_BODY_BYTES)
     return Response.json({ error: "The task is too long." }, { status: 413 });

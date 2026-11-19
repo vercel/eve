@@ -4,10 +4,10 @@ import { defineSandbox, type SandboxSession } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
 import { DESKTOP_APPS } from "./lib/desktop-apps";
-import { BROWSER_STREAM_PORT, RELAY_PORT } from "./lib/live-config";
+import { BROWSER_STREAM_PORT, DESKTOP_STREAM_PORT, RELAY_PORT } from "./lib/live-config";
 
 /** The screen-relay release that streams the desktop to the live view; see agent/lib/live.ts. */
-const SCREEN_RELAY_VERSION = "0.1.0";
+const SCREEN_RELAY_VERSION = "0.1.2";
 
 // Every chat gets its own Vercel Sandbox, during development too, in the project `eve link`
 // connected. The headless Chrome and the Linux desktop run in it side by side. eve installs both,
@@ -66,8 +66,9 @@ async function installScreenRelay(sandbox: Pick<SandboxSession, "run">): Promise
 
 export default defineSandbox(() =>
   environment.open({
-    // The live view's relay; see agent/lib/live.ts. Ports apply when the sandbox is created.
-    ports: [RELAY_PORT],
+    // The live streams: the browser's relay and screen-relay; see agent/lib/live.ts. Ports apply
+    // when the sandbox is created.
+    ports: [RELAY_PORT, DESKTOP_STREAM_PORT],
     env: {
       // Every agent-browser daemon streams where the relay forwards, including one that starts
       // after the last exited, instead of on a port of its own.

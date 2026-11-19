@@ -11,28 +11,22 @@ import { startLiveIfAvailable } from "./live";
 import type { LiveDevice } from "./live-config";
 
 /**
- * What the live view shows after a call: an image of the screen, the page's URL for a browser,
- * and where its live stream runs. The model never sees it; see `withScreen`.
+ * What the live view shows after a call: an image of the screen, and the page's URL for a
+ * browser. The model never sees it; see `withScreen`.
  */
 export interface Screen {
   /** Which device the image is of: a browser page, or the whole Linux screen. */
   readonly device: "browser" | "desktop";
   readonly imageDataUrl: string;
   readonly url?: string;
-  /**
-   * The sandbox the device's live stream runs in, once it does. Not a credential: the web app's
-   * /api/live route authorizes the viewer against the session before it connects.
-   */
-  readonly sandbox?: string;
 }
 
 /**
- * Where a device's live stream runs, yielded as progress before the device acts, so the live
- * view connects while the first action is still running. Like `Screen.sandbox`, not a credential.
+ * That a device's live stream runs, yielded as progress before the device acts, so the live view
+ * connects while the first action is still running.
  */
 export interface LiveStart {
   readonly device: LiveDevice;
-  readonly sandbox: string;
 }
 
 /** What a device tool reports: `live` while it works, then its output with a `screen`. */
@@ -59,8 +53,7 @@ export function withScreen<TInput>(
     // The wrapped output adds `screen`, so the tool's own output schema no longer describes it.
     outputSchema: undefined,
     async *execute(input, ctx) {
-      const sandbox = await startLiveIfAvailable(ctx, "browser");
-      if (sandbox !== undefined) yield { live: { device: "browser", sandbox } };
+      if (await startLiveIfAvailable(ctx, "browser")) yield { live: { device: "browser" } };
       const output = await tool.execute(input, ctx);
       const screen = await capture(ctx, output).catch(() => undefined);
       yield { ...(isObject(output) ? output : { result: output }), screen };
@@ -85,15 +78,13 @@ export async function captureBrowser(ctx: ToolContext): Promise<Screen | undefin
   const page = (await Promise.resolve(get.execute({ property: "url" }, ctx)).catch(() => null)) as {
     url?: string;
   } | null;
-  const sandbox = await startLiveIfAvailable(ctx, "browser");
-  return { device: "browser", imageDataUrl: shot.imageDataUrl, url: page?.url, sandbox };
+  return { device: "browser", imageDataUrl: shot.imageDataUrl, url: page?.url };
 }
 
 /** The desktop after an action, from the PNG computer_use saved in the sandbox. */
 export async function captureDesktop(
   ctx: ToolContext,
   screenshotPath: string,
-  sandbox: string | undefined,
 ): Promise<Screen | undefined> {
   const session = await ctx.getSandbox();
   const bytes = await Promise.resolve(session.readBinaryFile({ path: screenshotPath })).catch(
@@ -103,7 +94,6 @@ export async function captureDesktop(
   return {
     device: "desktop",
     imageDataUrl: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`,
-    sandbox,
   };
 }
 

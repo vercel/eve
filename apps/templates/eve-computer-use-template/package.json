@@ -14,12 +14,14 @@
     "dev:eve": "eve dev",
     "dev:all": "vercel dev --local --listen 127.0.0.1:3000",
     "dev:web": "next dev apps/web",
+    "test": "node --test agent/lib/*.test.ts apps/web/lib/*.test.ts",
     "typecheck": "tsc -p apps/web/tsconfig.json"
   },
   "dependencies": {
     "@agent-browser/eve": "0.40.0",
     "@ui-sdk/core": "0.1.0-beta.10",
     "@ui-sdk/react": "0.1.0-beta.10",
+    "@upstash/redis": "1.38.2",
     "@vercel/functions": "3.10.5",
     "@vercel/sandbox": "3.9.0",
     "ai": "7.0.137",

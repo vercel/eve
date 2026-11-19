@@ -28,12 +28,3 @@ export function isSameOrigin(request: Request): boolean {
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-/**
- * Who may call the app's own API routes that don't go through an eve session, like Auto mode's
- * /api/device. Like `placeholderAuth()` in agent/channels/eve.ts, it refuses every production
- * request until you replace it with the same auth provider as the agent's channel.
- */
-export function authorize(_request: Request): boolean {
-  return process.env.VERCEL_ENV !== "production";
-}

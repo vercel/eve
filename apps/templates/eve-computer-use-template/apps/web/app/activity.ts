@@ -71,9 +71,7 @@ export function hasLiveStream(
   device: "browser" | "desktop",
 ): boolean {
   return activities.some(
-    (activity) =>
-      activity.live?.device === device ||
-      (activity.screen?.device === device && activity.screen.sandbox !== undefined),
+    (activity) => activity.live?.device === device || activity.screen?.device === device,
   );
 }
 
@@ -86,8 +84,8 @@ function deviceOf(name: string): LiveDevice | undefined {
 function liveOf(output: unknown): LiveStart | undefined {
   if (typeof output !== "object" || output === null) return undefined;
   const { live } = output as { live?: Partial<LiveStart> };
-  return typeof live?.device === "string" && typeof live.sandbox === "string"
-    ? (live as LiveStart)
+  return live?.device === "browser" || live?.device === "desktop"
+    ? { device: live.device }
     : undefined;
 }
 

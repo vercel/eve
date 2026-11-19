@@ -1,39 +1,39 @@
 import { upgradeWebSocket } from "@vercel/functions";
 import WebSocket from "ws";
 
-import {
-  addressBarUrl,
-  HISTORY_ACTIONS,
-  type HistoryAction,
-  type LiveDevice,
-} from "../../../../../agent/lib/live-config";
+import { controlMessage, type Control } from "../../../../../agent/lib/live-config";
+import { getViewer } from "../../../lib/session";
 import { isSameOrigin } from "../caller";
-import { findRelay, type Relay } from "./relay";
+import { browserRelay, desktopTicket, findSandbox, type Relay } from "./relay";
 
 export const dynamic = "force-dynamic";
 
 /** Input sent before the sandbox side opens is held, up to this many messages. */
 const MAX_PENDING = 100;
 
+function sessionParam(request: Request): string | null {
+  const session = new URL(request.url).searchParams.get("session");
+  return session === null || session.length === 0 || session.length > 512 ? null : session;
+}
+
 /**
- * The live view's WebSocket: `/api/live?session=<eve session>&device=browser|desktop`. It checks
- * that the caller may read the session, then relays frames out and input in between the browser
- * and the sandbox. The browser never learns the sandbox's address or the relay's token.
+ * The browser's live view: `GET /api/live?session=<eve session>` as a WebSocket. It checks that
+ * the caller may read the session, then relays frames out and input in between the page and
+ * agent-browser's stream in the session's sandbox. The page never learns the sandbox's address or
+ * the relay's token.
  */
 export async function GET(request: Request) {
-  const params = new URL(request.url).searchParams;
-  const session = params.get("session");
-  const device = params.get("device");
-  if (session === null || session.length === 0 || session.length > 512 || !isDevice(device)) {
-    return new Response("Expected ?session=<id>&device=browser|desktop", { status: 400 });
-  }
+  const session = sessionParam(request);
+  if (session === null) return new Response("Expected ?session=<id>", { status: 400 });
 
   let relay: Relay | null = null;
   try {
-    if (isSameOrigin(request)) relay = await findRelay(request, session, device);
+    if (isSameOrigin(request) && getViewer(request.headers) !== null) {
+      const sandbox = await findSandbox(request, session);
+      relay = sandbox === null ? null : await browserRelay(sandbox);
+    }
   } catch (error) {
     console.error("Finding the live view relay failed:", error);
-    relay = null;
   }
   // Authorized before anything is sent. A refused WebSocket is accepted and closed with a policy
   // code rather than answered with an HTTP error, which the client can't read anyway and which
@@ -44,39 +44,32 @@ export async function GET(request: Request) {
 
   return upgradeWebSocket(
     (client) => {
-      const query = `token=${encodeURIComponent(token)}`;
-      // The desktop is screen-relay's binary `nsl1` stream; the browser's is agent-browser's JSON.
-      const upstream =
-        device === "desktop"
-          ? new WebSocket(`${origin}/desktop?${query}`, ["nsl1"])
-          : new WebSocket(`${origin}/browser?${query}&maxFps=24`);
-      const pending: { data: Buffer; binary: boolean }[] = [];
+      const upstream = new WebSocket(
+        `${origin}/browser?token=${encodeURIComponent(token)}&maxFps=24`,
+      );
+      const pending: string[] = [];
       const closeBoth = () => {
         client.close();
         upstream.close();
       };
 
       upstream.on("open", () => {
-        for (const { data, binary } of pending.splice(0)) upstream.send(data, { binary });
+        for (const text of pending.splice(0)) upstream.send(text);
       });
       upstream.on("message", (data, isBinary) => client.send(data, { binary: isBinary }));
       upstream.on("close", closeBoth);
       upstream.on("error", closeBoth);
 
-      client.on("message", (raw, isBinary) => {
-        const data = Buffer.isBuffer(raw)
-          ? raw
-          : Buffer.concat(Array.isArray(raw) ? raw : [Buffer.from(raw)]);
-        if (!isBinary) {
-          const control = controlMessage(data.toString());
-          if (control !== null) {
-            if (device === "browser") void runControl(relay, control);
-            return;
-          }
+      client.on("message", (raw) => {
+        const text = raw.toString();
+        const control = controlMessage(text);
+        if (control !== null) {
+          void runControl(relay, control);
+          return;
         }
-        if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary });
+        if (upstream.readyState === WebSocket.OPEN) upstream.send(text);
         else if (upstream.readyState === WebSocket.CONNECTING && pending.length < MAX_PENDING)
-          pending.push({ data, binary: isBinary });
+          pending.push(text);
       });
       client.on("close", closeBoth);
       client.on("error", closeBoth);
@@ -86,38 +79,26 @@ export async function GET(request: Request) {
   );
 }
 
-function isDevice(value: string | null): value is LiveDevice {
-  return value === "browser" || value === "desktop";
-}
-
-type Control =
-  | { readonly type: "history"; readonly action: HistoryAction }
-  | { readonly type: "open"; readonly url: string }
-  | { readonly type: "invalid" };
-
 /**
- * The browser's own controls, which agent-browser's stream has no messages for:
- * `{ "type": "history", "action": "back" }` from the back, forward, and reload buttons, and
- * `{ "type": "open", "url": "…" }` from the address bar. Null for any other message, which goes
- * to the sandbox; a malformed control is dropped, never forwarded.
+ * The desktop's live view: `POST /api/live?session=<eve session>` answers
+ * `{ "url": "wss://…/stream", "ticket": "…" }` when the caller may read the session. The page
+ * connects to screen-relay with the ticket, which opens one connection within 60 seconds.
  */
-function controlMessage(text: string): Control | null {
-  if (!text.includes('"history"') && !text.includes('"open"')) return null;
-  let message: { type?: unknown; action?: unknown; url?: unknown };
+export async function POST(request: Request) {
+  const session = sessionParam(request);
+  if (session === null) return Response.json({ error: "Expected ?session=<id>" }, { status: 400 });
+  if (!isSameOrigin(request))
+    return Response.json({ error: "Cross-site requests are refused." }, { status: 403 });
+  if (getViewer(request.headers) === null)
+    return Response.json({ error: "Sign in first." }, { status: 401 });
   try {
-    message = JSON.parse(text) as typeof message;
-  } catch {
-    return null;
+    const sandbox = await findSandbox(request, session);
+    const ticket = sandbox === null ? null : await desktopTicket(sandbox);
+    if (ticket !== null) return Response.json(ticket, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    console.error("Issuing a desktop stream ticket failed:", error);
   }
-  if (message.type === "history") {
-    const action = HISTORY_ACTIONS.find((candidate) => candidate === message.action);
-    return action === undefined ? { type: "invalid" } : { type: "history", action };
-  }
-  if (message.type === "open") {
-    const url = typeof message.url === "string" ? addressBarUrl(message.url) : null;
-    return url === null ? { type: "invalid" } : { type: "open", url };
-  }
-  return null;
+  return Response.json({ error: "No live view for this session." }, { status: 404 });
 }
 
 /** The relay runs these with agent-browser in the sandbox. */
