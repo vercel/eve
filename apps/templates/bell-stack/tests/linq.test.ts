@@ -111,7 +111,8 @@ async function deliver(
     invokeTool: unsupported,
     params: {},
     requestIp: null,
-    publish: async () => false,
+    // Spread so the fixture typechecks against the pinned release, which has no `publish`, and the packed eve, which requires it.
+    ...{ publish: async () => false },
     waitUntil: (task) => {
       tasks.push(task);
     },
