@@ -429,7 +429,7 @@ export function LiveView({
             style={{
               aspectRatio: String(ratio),
               // While you drive the desktop, the pointer takes the shape the desktop gives it.
-              ...(driving && stream.cursor !== null ? { cursor: stream.cursor } : {}),
+              cursor: driving && stream.cursor !== null ? stream.cursor : undefined,
             }}
             tabIndex={0}
           >
