@@ -14,6 +14,7 @@ const SCENARIO_TIMEOUT_MS = 180_000;
 const APP = {
   name: "schedule-dry-run",
   installDependencies: true,
+  dependencies: { zod: "4.5.4" },
   files: {
     "agent/agent.ts": `import { defineAgent } from "eve";
 export default defineAgent({ model: "openai/gpt-5.4" });
@@ -46,6 +47,21 @@ export default defineChannel({
   },
 });
 `,
+    "agent/schedules/requests.ts": `import { defineDynamicSchedules } from "eve/experimental/schedules";
+import { z } from "zod";
+import digest from "../channels/digest";
+export default defineDynamicSchedules({
+  inputSchema: z.object({ task: z.string() }).strict(),
+  tool: false,
+  async auth({ principal }) {
+    await fetch(process.env.WAREHOUSE_URL + "/v1/members/" + principal.principalId);
+    return principal.principalId === "mallory" ? null : { attributes: { team: "revenue" } };
+  },
+  async run({ payload, to }) {
+    await to(digest, { channelId: "C0TEAM" }).send("Do this now: " + payload.task);
+  },
+});
+`,
     "agent/schedules/weekly-summary.ts": `import { defineSchedule } from "eve/schedules";
 import digest from "../channels/digest";
 export default defineSchedule({
@@ -63,7 +79,7 @@ export default defineSchedule({
   },
 };
 
-describe("eve schedule run --dry-run and eve info --as", () => {
+describe("eve schedule run --dry-run and eve send --dry-run", () => {
   let app: Awaited<ReturnType<typeof materializeScenarioApp>>;
   let warehouse: Server;
   let warehouseUrl: string;
@@ -129,18 +145,84 @@ describe("eve schedule run --dry-run and eve info --as", () => {
   );
 
   it(
-    "lists the gated tool for a finance user and hides it for the schedule",
+    "runs a dynamic schedule as the creator auth() resolves, without the creator's groups",
     async () => {
-      const finance = JSON.parse(
-        (await eve(["info", "--as", "user:groups=finance", "--json"])).stdout,
-      );
-      const schedule = JSON.parse((await eve(["info", "--as", "schedule", "--json"])).stdout);
+      const { stdout } = await eve([
+        "schedule",
+        "run",
+        "requests",
+        "--dry-run",
+        "--payload",
+        JSON.stringify({ task: "Summarize Q3" }),
+        "--as",
+        "user:id=alice:authenticator=sso",
+        "--json",
+      ]);
+      const result = JSON.parse(stdout);
+      const resolved = {
+        attributes: { team: "revenue" },
+        authenticator: "sso",
+        principalId: "alice",
+        principalType: "user",
+      };
 
-      expect(finance.as.tools.map((tool: { name: string }) => tool.name)).toEqual(
+      expect(result).toMatchObject({ error: null, kind: "dynamic", creator: { auth: resolved } });
+      expect(result.deliveries).toHaveLength(1);
+      expect(result.deliveries[0]).toMatchObject({
+        auth: resolved,
+        message: "Do this now: Summarize Q3",
+        target: { channelId: "C0TEAM" },
+      });
+      expect(result.deliveries[0].turn.hiddenTools).toContainEqual(
+        expect.objectContaining({
+          name: "revenue_forecast",
+          reason: "defineDynamic returned undefined for principalType user",
+        }),
+      );
+      expect(result.fetches).toEqual([{ method: "GET", url: `${warehouseUrl}/v1/members/alice` }]);
+
+      const denied = await eve([
+        "schedule",
+        "run",
+        "requests",
+        "--dry-run",
+        "--payload",
+        JSON.stringify({ task: "Summarize Q3" }),
+        "--as",
+        "user:id=mallory",
+        "--json",
+      ]).then(
+        () => undefined,
+        (error: { code?: number; stdout?: string }) => error,
+      );
+      expect(denied?.code).toBe(1);
+      expect(JSON.parse(denied!.stdout!)).toMatchObject({
+        creator: { auth: null },
+        deliveries: [],
+        error: expect.stringContaining('"auth" returned null'),
+      });
+      expect(warehouseRequests).toEqual([]);
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "previews a sent message: the gated tool for a finance user, hidden for an anonymous caller",
+    async () => {
+      const send = async (as: string) =>
+        JSON.parse(
+          (await eve(["send", "What's the Q3 forecast?", "--dry-run", "--as", as, "--json"]))
+            .stdout,
+        );
+      const finance = await send("user:groups=finance");
+      const anonymous = await send("anonymous");
+
+      expect(finance.turn.tools.map((tool: { name: string }) => tool.name)).toEqual(
         expect.arrayContaining(["lookup_account", "revenue_forecast"]),
       );
-      expect(finance.as.hiddenTools).toEqual([]);
-      expect(schedule.as.hiddenTools.map((tool: { name: string }) => tool.name)).toEqual([
+      expect(finance.turn.hiddenTools).toEqual([]);
+      expect(anonymous.turn.auth).toBeNull();
+      expect(anonymous.turn.hiddenTools.map((tool: { name: string }) => tool.name)).toEqual([
         "revenue_forecast",
       ]);
     },

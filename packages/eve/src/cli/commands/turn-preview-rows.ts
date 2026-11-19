@@ -1,5 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import type { CliRow } from "#cli/ui/output.js";
+import { createCliTheme, renderCliSection, type CliRow } from "#cli/ui/output.js";
+import type { DryRunFetch } from "#services/dry-run.js";
 import type { TurnPreview } from "#services/turn-preview.js";
 
 export function renderTurnPreviewRows(preview: TurnPreview): CliRow[] {
@@ -53,7 +54,23 @@ export function renderTurnPreviewInstructions(preview: TurnPreview): string {
 
 export function formatAuth(auth: SessionAuthContext | null): string {
   if (auth === null) return "anonymous";
-  const groups = auth.attributes.groups;
-  const groupList = groups === undefined ? "" : ` groups=${[groups].flat().join(",")}`;
-  return `${auth.principalType} ${auth.principalId} (authenticator ${auth.authenticator})${groupList}`;
+  const attributes = Object.entries(auth.attributes)
+    .map(([key, value]) => ` ${key}=${[value].flat().join(",")}`)
+    .join("");
+  return `${auth.principalType} ${auth.principalId} (authenticator ${auth.authenticator})${attributes}`;
+}
+
+export function renderFetches(fetches: readonly DryRunFetch[]): string {
+  return renderCliSection(createCliTheme(), {
+    rows: [
+      {
+        label: "Fetches",
+        value:
+          fetches.length === 0
+            ? "none"
+            : fetches.map((request) => `${request.method} ${request.url}`).join("\n"),
+      },
+    ],
+    title: "Network (answered with {} instead of sent)",
+  });
 }

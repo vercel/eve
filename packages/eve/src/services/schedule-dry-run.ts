@@ -6,18 +6,27 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
-import { compileAgent } from "#compiler/compile-agent.js";
 import { levenshteinSimilarity } from "#evals/expect/levenshtein.js";
-import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type { ScheduleRunHandler } from "#public/definitions/schedule.js";
+import type {
+  DynamicSchedulesDefinition,
+  SchedulePrincipalReference,
+} from "#public/schedules/subscription.js";
+import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import {
   loadResolvedCompiledSchedules,
   loadScheduleRun,
 } from "#runtime/schedules/resolve-schedule.js";
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { declared } from "#runtime/types.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { previewTurn, type TurnPreview } from "#services/turn-preview.js";
+import { loadDryRunApp, withRecordedFetch, type DryRunFetch } from "#services/dry-run.js";
+import {
+  principalAuth,
+  previewTurn,
+  type PreviewPrincipal,
+  type TurnPreview,
+} from "#services/turn-preview.js";
 
 export interface ScheduleDryRunDelivery {
   readonly channel: string;
@@ -27,15 +36,16 @@ export interface ScheduleDryRunDelivery {
   readonly turn: TurnPreview;
 }
 
-export interface ScheduleDryRunFetch {
-  readonly method: string;
-  readonly url: string;
-}
-
 export interface ScheduleDryRun {
   readonly schedule: string;
+  readonly kind: "static" | "dynamic";
+  readonly creator: {
+    readonly principal: SchedulePrincipalReference;
+    readonly auth: SessionAuthContext | null;
+  } | null;
   readonly deliveries: readonly ScheduleDryRunDelivery[];
-  readonly fetches: readonly ScheduleDryRunFetch[];
+  readonly fetches: readonly DryRunFetch[];
+  readonly controls: readonly ("disable" | "delete")[];
   readonly error: string | null;
 }
 
@@ -65,38 +75,91 @@ export class UnknownScheduleError extends Error {
 export async function dryRunSchedule(input: {
   readonly appRoot: string;
   readonly schedule: string;
+  readonly payload?: unknown;
+  readonly principal?: PreviewPrincipal;
 }): Promise<ScheduleDryRun> {
-  const compiled = await compileAgent({ startPath: input.appRoot });
-  const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(
-    compiled.project.appRoot,
-  );
+  const { bundle, compiledArtifactsSource, manifest } = await loadDryRunApp(input.appRoot);
   const schedules = await loadResolvedCompiledSchedules({ compiledArtifactsSource });
+  const collections = declared(bundle.resolvedAgent, "schedules");
   const schedule = schedules.find((candidate) => candidate.name === input.schedule);
-  if (schedule === undefined) {
-    throw new UnknownScheduleError(
-      input.schedule,
-      schedules.map((candidate) => candidate.name),
-    );
+  const collection = collections.find((candidate) => candidate.name === input.schedule);
+  if (schedule === undefined && collection === undefined) {
+    throw new UnknownScheduleError(input.schedule, [
+      ...schedules.map((candidate) => candidate.name),
+      ...collections.map((candidate) => candidate.name),
+    ]);
   }
-  const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
-  const run = schedule.hasRun ? await loadScheduleRun(schedule, bundle.moduleMap) : undefined;
 
-  const fetches: ScheduleDryRunFetch[] = [];
+  const fetches: DryRunFetch[] = [];
   const runs = new Map<string, RunInput>();
   const targets = new Map<string, unknown>();
+  const controls: ("disable" | "delete")[] = [];
+  let creator: ScheduleDryRun["creator"] = null;
   const dispatcher = new ScheduleDispatcher({
     channels: bundle.graph.root.channels,
     runtime: recordingRuntime(runs),
   });
 
-  return await withRecordedFetch(fetches, async () => {
-    let error: string | null = null;
-    try {
-      const result = await dispatcher.trigger({
+  let dispatch: () => Promise<{ readonly waitUntilTasks: readonly Promise<unknown>[] }>;
+  if (schedule !== undefined) {
+    if (input.payload !== undefined || input.principal !== undefined) {
+      throw new Error(
+        `--payload and --as apply only to dynamic schedules. "${schedule.name}" is a defineSchedule() schedule, and its handler chooses the auth it sends with.`,
+      );
+    }
+    const run = schedule.hasRun ? await loadScheduleRun(schedule, bundle.moduleMap) : undefined;
+    dispatch = () =>
+      dispatcher.trigger({
         markdown: schedule.markdown,
         run: run === undefined ? undefined : recordTargets(run, targets),
         scheduleId: schedule.name,
       });
+  } else {
+    const name = collection!.name;
+    if (input.payload === undefined || input.principal === undefined) {
+      throw new Error(
+        `"${name}" is a dynamic schedule (defineDynamicSchedules), so a dry run needs the stored payload and the creator: pass --payload '<json>' and --as, such as --as user:id=alice.`,
+      );
+    }
+    const principal = creatorReference(input.principal);
+    creator = { auth: null, principal };
+    const application =
+      manifest.scheduleCollections?.find((candidate) => candidate.name === name)?.application ??
+      name;
+    const definition = recordCollection(collection!.definition, targets, (auth) => {
+      creator = { auth, principal };
+    });
+    dispatch = () =>
+      dispatcher.triggerCollection({
+        collectionId: name,
+        definition,
+        occurrence: {
+          collection: name,
+          executionId: "dry-run-occurrence",
+          name: "dry-run",
+          scheduleId: "dry-run",
+          scheduledAt: new Date().toISOString(),
+        },
+        payload: createScheduleCollectionPayload({
+          application,
+          collection: name,
+          envelope: { payload: input.payload, principal, scope: principal.principalId, version: 3 },
+        }),
+        schedule: {
+          async delete() {
+            controls.push("delete");
+          },
+          async disable() {
+            controls.push("disable");
+          },
+        },
+      });
+  }
+
+  return await withRecordedFetch(fetches, async () => {
+    let error: string | null = null;
+    try {
+      const result = await dispatch();
       await Promise.all(result.waitUntilTasks);
     } catch (thrown) {
       error = toErrorMessage(thrown);
@@ -111,25 +174,77 @@ export async function dryRunSchedule(input: {
         turn: await previewTurn({ bundle, run: started }),
       });
     }
-    return { deliveries, error, fetches, schedule: schedule.name };
+    return {
+      controls,
+      creator,
+      deliveries,
+      error,
+      fetches,
+      kind: schedule === undefined ? "dynamic" : "static",
+      schedule: input.schedule,
+    };
   });
 }
 
+function creatorReference(principal: PreviewPrincipal): SchedulePrincipalReference {
+  if (principal.kind === "user" && principal.groups.length > 0) {
+    throw new Error(
+      "A dynamic schedule's creator has no groups of its own: its auth() returns the attributes each run gets. Drop groups= from --as.",
+    );
+  }
+  const auth = principalAuth(principal);
+  if (auth === null) {
+    throw new Error(
+      "A dynamic schedule always has a creator. Use --as user:id=<name> or another principal.",
+    );
+  }
+  return {
+    authenticator: auth.authenticator,
+    principalId: auth.principalId,
+    type: auth.principalType,
+    ...(auth.issuer !== undefined && { issuer: auth.issuer }),
+    ...(auth.subject !== undefined && { subject: auth.subject }),
+  };
+}
+
+function recordCollection(
+  definition: DynamicSchedulesDefinition<any, any, any>,
+  targets: Map<string, unknown>,
+  resolved: (auth: SessionAuthContext) => void,
+): DynamicSchedulesDefinition<any, any, any> {
+  return {
+    ...definition,
+    run: (args) => {
+      resolved(args.auth);
+      return definition.run({ ...args, to: recordTo(args.to, targets) });
+    },
+  };
+}
+
 function recordTargets(run: ScheduleRunHandler, targets: Map<string, unknown>): ScheduleRunHandler {
-  return (args) =>
-    run({
-      ...args,
-      to: (channel, target) => {
-        const destination = args.to(channel, target);
-        return {
-          async send(message, options) {
-            const delivery = await destination.send(message, options);
-            targets.set(delivery.sessionId, target);
-            return delivery;
-          },
-        };
+  return (args) => run({ ...args, to: recordTo(args.to, targets) });
+}
+
+interface SendHandle {
+  // oxlint-disable-next-line typescript/no-explicit-any -- static and dynamic schedules send different options.
+  send(message: any, options?: any): Promise<{ readonly sessionId: string }>;
+}
+
+// oxlint-disable-next-line typescript/no-explicit-any -- static and dynamic schedules take different channels.
+function recordTo<T extends (channel: any, target: any) => SendHandle>(
+  to: T,
+  targets: Map<string, unknown>,
+): T {
+  return ((channel: unknown, target: unknown) => {
+    const destination = to(channel, target);
+    return {
+      async send(message: unknown, options?: unknown) {
+        const delivery = await destination.send(message, options);
+        targets.set(delivery.sessionId, target);
+        return delivery;
       },
-    });
+    };
+  }) as T;
 }
 
 function recordingRuntime(runs: Map<string, RunInput>): Runtime {
@@ -162,23 +277,6 @@ function recordingRuntime(runs: Map<string, RunInput>): Runtime {
       return undefined;
     },
   };
-}
-
-async function withRecordedFetch<T>(
-  fetches: ScheduleDryRunFetch[],
-  fn: () => Promise<T>,
-): Promise<T> {
-  const original = globalThis.fetch;
-  globalThis.fetch = async (resource, init) => {
-    const request = new Request(resource, init);
-    fetches.push({ method: request.method, url: request.url });
-    return Response.json({});
-  };
-  try {
-    return await fn();
-  } finally {
-    globalThis.fetch = original;
-  }
 }
 
 function closestName(name: string, candidates: readonly string[]): string | undefined {

@@ -141,6 +141,7 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["registry:view", "registry:view"],
   ["schedule", "schedule"],
   ["schedule:run", "schedule:run"],
+  ["send", "send"],
   ["set", "set"],
   ["set:model", "set:model"],
   ["start", "start"],

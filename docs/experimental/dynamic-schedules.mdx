@@ -253,6 +253,18 @@ Under `vc dev`, local queue errors appear in the dev server logs and retry after
 
 Import `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to configure the Vercel endpoint explicitly. Import the in-memory provider from `eve/experimental/schedules/testing` for code-driven tests.
 
+### Preview a run
+
+To see what one occurrence would do without creating a schedule, pass the payload and the creator to a dry run:
+
+```sh
+eve schedule run requests --dry-run \
+  --payload '{"task":"Summarize Q3","destination":"team-channel"}' \
+  --as user:id=alice:authenticator=slack
+```
+
+eve validates the payload, runs `auth()` for the creator, and runs `run()` with the auth it resolved. Each `to(channel, target).send(...)` is recorded instead of starting a session, each `fetch` is recorded and answered with `{}`, and no model is called. For each delivery, eve prints the auth and the tools that session's first turn would see. A tool that checks attributes `auth()` doesn't return, such as `groups`, shows as hidden there. When `auth()` returns `null`, the dry run reports the occurrence failure and exits with code 1. See the [CLI reference](../reference/cli#eve-schedule-run) for every option.
+
 ### Create a provider for your use case
 
 Create a provider when your application needs a different scheduling backend, storage system, or deployment environment. Implement `ScheduleProvider` from `eve/experimental/schedules` and pass it as `provider` to `defineDynamicSchedules`.

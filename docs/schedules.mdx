@@ -153,7 +153,7 @@ Use it to catch tools a scheduled turn can't see. A `defineDynamic()` tool that 
 Hidden Tools  revenue_forecast (tools/revenue_forecast.ts): defineDynamic returned undefined for principalType runtime
 ```
 
-Either let the tool resolve for the app principal (check [`isScheduleAuth`](#detect-the-app-principal)), or fetch the data in the handler and put it in the message. `eve info --as schedule` lists the same tools without running the handler. Add `--json` to either command for machine-readable output; see the [CLI reference](./reference/cli#eve-schedule-run).
+Either let the tool resolve for the app principal (check [`isScheduleAuth`](#detect-the-app-principal)), or fetch the data in the handler and put it in the message. `eve send "<message>" --dry-run --as schedule` lists the same tools without running the handler. Add `--json` to either command for machine-readable output; see the [CLI reference](./reference/cli#eve-schedule-run). For dynamic schedules, see [Preview a run](./experimental/dynamic-schedules#preview-a-run).
 
 ### Dispatch route
 

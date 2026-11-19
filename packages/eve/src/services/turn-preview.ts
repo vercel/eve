@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { ModelMessage } from "ai";
 
+import { LOCAL_DEV_SESSION_AUTH_CONTEXT } from "#channel/auth/definitions.js";
 import { HTTP_ADAPTER } from "#channel/http.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_APP_AUTH } from "#channel/schedule.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
@@ -17,11 +18,7 @@ import { buildRunContext } from "#execution/runtime-context.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { compiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
-import {
-  getCompiledRuntimeAgentBundle,
-  type CompiledRuntimeAgentBundle,
-} from "#runtime/sessions/compiled-agent-cache.js";
-import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
+import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedDefinition, ResolvedDynamicDefinition } from "#runtime/types.js";
 import { toErrorMessage } from "#shared/errors.js";
 
@@ -232,6 +229,7 @@ function describeEmpty(value: unknown): string {
 
 export type PreviewPrincipal =
   | { readonly kind: "anonymous" }
+  | { readonly kind: "local-dev" }
   | { readonly kind: "schedule" }
   | {
       readonly kind: "user";
@@ -240,11 +238,13 @@ export type PreviewPrincipal =
       readonly id?: string;
     };
 
-const PRINCIPAL_SYNTAX = "schedule | anonymous | user[:groups=a,b][:authenticator=name][:id=name]";
+const PRINCIPAL_SYNTAX =
+  "local-dev | schedule | anonymous | user[:groups=a,b][:authenticator=name][:id=name]";
 
 export function parsePreviewPrincipal(value: string): PreviewPrincipal {
   const [kind, ...fields] = value.trim().split(":");
-  if ((kind === "schedule" || kind === "anonymous") && fields.length === 0) return { kind };
+  if ((kind === "schedule" || kind === "anonymous" || kind === "local-dev") && fields.length === 0)
+    return { kind };
   if (kind !== "user") {
     throw new Error(`Unknown principal "${value}". Use ${PRINCIPAL_SYNTAX}.`);
   }
@@ -267,37 +267,38 @@ export function parsePreviewPrincipal(value: string): PreviewPrincipal {
   return principal;
 }
 
-export function previewRunFor(principal: PreviewPrincipal): RunInput {
+export function principalAuth(principal: PreviewPrincipal): SessionAuthContext | null {
+  switch (principal.kind) {
+    case "anonymous":
+      return null;
+    case "local-dev":
+      return LOCAL_DEV_SESSION_AUTH_CONTEXT;
+    case "schedule":
+      return SCHEDULE_APP_AUTH;
+    case "user":
+      return {
+        attributes: principal.groups.length === 0 ? {} : { groups: principal.groups },
+        authenticator: principal.authenticator ?? "eve-preview",
+        principalId: principal.id ?? "eve-preview:user",
+        principalType: "user",
+      };
+  }
+}
+
+export function previewRunFor(principal: PreviewPrincipal, message?: string): RunInput {
+  const input = message === undefined ? {} : { message };
   if (principal.kind === "schedule") {
     return {
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       capabilities: { requestInput: false },
-      input: {},
+      input,
     };
   }
   return {
     adapter: HTTP_ADAPTER,
-    auth:
-      principal.kind === "anonymous"
-        ? null
-        : {
-            attributes: { groups: principal.groups },
-            authenticator: principal.authenticator ?? "eve-info",
-            principalId: principal.id ?? "eve-info:user",
-            principalType: "user",
-          },
+    auth: principalAuth(principal),
     capabilities: { requestInput: true },
-    input: {},
+    input,
   };
-}
-
-export async function previewAppTurn(
-  appRoot: string,
-  principal: PreviewPrincipal,
-): Promise<TurnPreview> {
-  const bundle = await getCompiledRuntimeAgentBundle({
-    compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(appRoot),
-  });
-  return await previewTurn({ bundle, run: previewRunFor(principal) });
 }

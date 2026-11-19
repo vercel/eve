@@ -6,11 +6,6 @@ import type {
 } from "#compiler/manifest.js";
 import type { JsonObject } from "#shared/json.js";
 import { type CliRow, createCliTheme, renderCliSection } from "#cli/ui/output.js";
-import {
-  renderTurnPreviewInstructions,
-  renderTurnPreviewRows,
-} from "#cli/commands/turn-preview-rows.js";
-import type { TurnPreview } from "#services/turn-preview.js";
 
 interface CliInfoLogger {
   log(message: string): void;
@@ -18,11 +13,6 @@ interface CliInfoLogger {
 
 export interface PrintApplicationInfoOptions {
   json?: boolean;
-  as?: string;
-}
-
-export interface ApplicationInfoAsJson extends TurnPreview {
-  readonly principal: string;
 }
 
 export interface ApplicationInfoJson {
@@ -153,44 +143,13 @@ export async function printApplicationInfo(
   options: PrintApplicationInfoOptions = {},
 ): Promise<void> {
   const inspection = await inspectApplication(appRoot);
-  const as = options.as === undefined ? undefined : await previewAs(inspection, options.as);
 
   if (options.json) {
-    const info = buildApplicationInfoJson(inspection);
-    logger.log(JSON.stringify(as === undefined ? info : { ...info, as }, null, 2));
+    logger.log(JSON.stringify(buildApplicationInfoJson(inspection), null, 2));
     return;
   }
 
   logger.log(renderApplicationInfo(inspection));
-  if (as !== undefined) {
-    const theme = createCliTheme();
-    logger.log(
-      [
-        "",
-        renderCliSection(theme, { rows: renderTurnPreviewRows(as), title: `As ${as.principal}` }),
-        "",
-        renderCliSection(theme, {
-          rows: [{ label: "Instructions", value: renderTurnPreviewInstructions(as) || "none" }],
-          title: `Instructions as ${as.principal}`,
-        }),
-      ].join("\n"),
-    );
-  }
-}
-
-async function previewAs(
-  inspection: ApplicationInspection,
-  value: string,
-): Promise<ApplicationInfoAsJson> {
-  const { parsePreviewPrincipal, previewAppTurn } = await import("#services/turn-preview.js");
-  const principal = parsePreviewPrincipal(value);
-  const compiledState = inspection.compiledState;
-  if (compiledState === null || compiledState.metadata.status === "failed") {
-    throw new Error(
-      "eve info --as needs an app that compiles. Run `eve info` to see its diagnostics.",
-    );
-  }
-  return { principal: value, ...(await previewAppTurn(compiledState.project.appRoot, principal)) };
 }
 
 export function renderApplicationInfo(inspection: ApplicationInspection): string {

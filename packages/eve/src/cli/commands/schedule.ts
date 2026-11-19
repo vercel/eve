@@ -1,6 +1,7 @@
 import { Client } from "#client/index.js";
 import {
   formatAuth,
+  renderFetches,
   renderTurnPreviewInstructions,
   renderTurnPreviewRows,
 } from "#cli/commands/turn-preview-rows.js";
@@ -14,8 +15,10 @@ interface ScheduleCommandLogger {
 }
 
 export interface ScheduleRunOptions {
+  readonly as?: string;
   readonly dryRun?: boolean;
   readonly json?: boolean;
+  readonly payload?: string;
 }
 
 export interface ScheduleRunJson {
@@ -34,10 +37,21 @@ export async function runScheduleRunCommand(
   startHost?: StartHost,
 ): Promise<void> {
   if (options.dryRun === true) {
-    const result = await dryRunSchedule({ appRoot, schedule });
+    const { parsePreviewPrincipal } = await import("#services/turn-preview.js");
+    const result = await dryRunSchedule({
+      appRoot,
+      payload: options.payload === undefined ? undefined : parsePayload(options.payload),
+      principal: options.as === undefined ? undefined : parsePreviewPrincipal(options.as),
+      schedule,
+    });
     logger.log(options.json === true ? JSON.stringify(result, null, 2) : renderDryRun(result));
     if (result.error !== null) process.exitCode = 1;
     return;
+  }
+  if (options.payload !== undefined || options.as !== undefined) {
+    throw new Error(
+      "--payload and --as need --dry-run. A real run fires a dynamic schedule from what it stored, through its client's invoke().",
+    );
   }
 
   const create =
@@ -55,7 +69,13 @@ export async function runScheduleRunCommand(
       readonly sessionIds?: readonly string[];
     };
     if (response.status === 404 && body.availableScheduleIds !== undefined) {
-      throw new UnknownScheduleError(schedule, body.availableScheduleIds);
+      const dynamic = await dynamicScheduleNames(handle.appRoot);
+      if (dynamic.includes(schedule)) {
+        throw new Error(
+          `"${schedule}" is a dynamic schedule (defineDynamicSchedules), which fires from the schedules users and the agent create. Fire a stored one with invoke() from schedules(definition), or preview a run with --dry-run --payload '<json>' --as <creator>.`,
+        );
+      }
+      throw new UnknownScheduleError(schedule, [...body.availableScheduleIds, ...dynamic]);
     }
     if (!response.ok) {
       throw new Error(
@@ -89,6 +109,28 @@ export async function runScheduleRunCommand(
   }
 }
 
+function parsePayload(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new Error(
+      `--payload must be JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+async function dynamicScheduleNames(appRoot: string): Promise<string[]> {
+  const [{ loadCompiledManifest }, { createDiskRuntimeCompiledArtifactsSource }] =
+    await Promise.all([
+      import("#runtime/loaders/manifest.js"),
+      import("#runtime/compiled-artifacts-source.js"),
+    ]);
+  const manifest = await loadCompiledManifest({
+    compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+  });
+  return (manifest.scheduleCollections ?? []).map((collection) => collection.name);
+}
+
 async function untilSettled(client: Client, sessionId: string): Promise<void> {
   for await (const event of client.sessions.attach(sessionId).stream()) {
     if (
@@ -113,6 +155,25 @@ function renderDryRun(result: Awaited<ReturnType<typeof dryRunSchedule>>): strin
       tone: result.deliveries.length === 0 ? "warning" : "default",
       value: String(result.deliveries.length),
     },
+    ...(result.creator === null
+      ? []
+      : [
+          {
+            label: "Creator",
+            value: `${result.creator.principal.type} ${result.creator.principal.principalId} (authenticator ${result.creator.principal.authenticator})`,
+          },
+          {
+            label: "Creator Auth",
+            tone: result.creator.auth === null ? ("danger" as const) : ("default" as const),
+            value:
+              result.creator.auth === null
+                ? "not resolved; the run didn't start"
+                : `${formatAuth(result.creator.auth)}, as auth() resolved it`,
+          },
+        ]),
+    ...(result.controls.length === 0
+      ? []
+      : [{ label: "Schedule Calls", value: result.controls.join(", ") }]),
     ...(result.error === null
       ? []
       : [{ label: "Error", tone: "danger" as const, value: result.error }]),
@@ -141,20 +202,7 @@ function renderDryRun(result: Awaited<ReturnType<typeof dryRunSchedule>>): strin
       }),
     );
   });
-  sections.push(
-    renderCliSection(theme, {
-      rows: [
-        {
-          label: "Fetches",
-          value:
-            result.fetches.length === 0
-              ? "none"
-              : result.fetches.map((request) => `${request.method} ${request.url}`).join("\n"),
-        },
-      ],
-      title: "Network (answered with {} instead of sent)",
-    }),
-  );
+  sections.push(renderFetches(result.fetches));
   return sections.join("\n\n");
 }
 
