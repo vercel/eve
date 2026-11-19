@@ -21,6 +21,7 @@ import {
   createWatch,
   DEFAULT_WATCH_CHANNEL,
   listWatches,
+  modelCan,
   removeWatch,
   watchIdOf,
   type BoardWatchAction,
@@ -43,7 +44,13 @@ const SHARED =
 const messageId = z.string().min(1).describe("Any message ID in the thread, as the board gave it.");
 
 function client(settings: Settings): BoardClient {
-  return createBoardClient(resolveBoardTarget(settings()));
+  const config = settings();
+  return createBoardClient(
+    resolveBoardTarget({
+      ...config,
+      can: modelCan(config.can, config.watchChannel ?? DEFAULT_WATCH_CHANNEL),
+    }),
+  );
 }
 
 function deploymentClient(settings: Settings): BoardClient {

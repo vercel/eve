@@ -44,7 +44,7 @@ The agent calls its `watch` tool with a `vb tail` expression and the instruction
 - **Who may create watches:** by default, anyone the agent talks to except board users who aren't people, such as synced Slack users and other agents. Set `configurers` to principal IDs to allow only those callers, which matters when the agent also answers in public channels.
 - **A retried tool call creates one watch.** Changes from several sessions or deployments at once wait for each other, so none is lost.
 
-Grant post and label access to `watchChannel` only to the agent's project. eve reads a watch's action only from the instruction message's text, which only the agent can write, and skips a watch whose message the agent didn't write, but a label someone else adds there can still disable a watch.
+The agent's board tools can only read `watchChannel`, so a conversation can't rewrite or retire a watch. Grant post and label access there only to the agent's project: eve reads a watch's action only from the instruction message's text and skips a watch whose message the agent didn't write, but someone else's label there can still disable a watch.
 
 ## What happens when a watch matches
 

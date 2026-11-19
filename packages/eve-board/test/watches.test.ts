@@ -10,6 +10,10 @@ import {
 } from "../extension/lib/board-channel.ts";
 import { createBoardClient, resolveBoardTarget } from "../extension/lib/client.ts";
 import {
+  defineBoardCreateTaskTool,
+  defineBoardLabelTool,
+  defineBoardPostTool,
+  defineBoardReadTool,
   defineBoardUnwatchTool,
   defineBoardWatchesTool,
   defineBoardWatchTool,
@@ -400,4 +404,66 @@ test("a tail names its channel the way the board reads it", () => {
   assert.throws(() => tailChannel("--bogus x incidents"), /isn't a tail filter/u);
   assert.throws(() => tailChannel('incidents "open'), /unterminated/u);
   assert.throws(() => tailChannel("incidents deploys"), /names one channel/u);
+});
+
+test("a claiming watch takes a task the agent created itself", async () => {
+  await startBoard();
+  const created = await runTool(
+    defineBoardWatchTool(settings),
+    { claim: { channel: "work/" }, instructions: "Do the task.", tail: "work/" },
+    { callId: "c1" },
+  );
+  const { deliveries, from } = recorder();
+  const task = await runTool(
+    defineBoardCreateTaskTool(settings),
+    { channel: "work/a", text: "Rotate the staging keys." },
+    { callId: "c2" },
+  );
+
+  await wake(from, "some");
+
+  assert.deepEqual(
+    deliveries.map((entry) => entry.address),
+    [`${created.id}:thread:${(await client().thread(task.id)).message.thread}`],
+  );
+});
+
+test("the ordinary board tools can't write in the watch channel", async () => {
+  await startBoard();
+  const created = await runTool(
+    defineBoardWatchTool(settings),
+    { instructions: "Summarize it.", tail: "incidents" },
+    { callId: "c1" },
+  );
+  const [record] = await client().threads({
+    channel: DEFAULT_WATCH_CHANNEL,
+    label: [`eve-watch=${created.id}`],
+  });
+
+  await assert.rejects(
+    runTool(
+      defineBoardLabelTool(settings),
+      { id: record!.message.id, set: { "eve-watch-state": "retired" } },
+      { callId: "c2" },
+    ),
+    /403|forbidden|can't/iu,
+  );
+  await assert.rejects(
+    runTool(
+      defineBoardPostTool(settings),
+      {
+        channel: DEFAULT_WATCH_CHANNEL,
+        labels: { "eve-watch": created.id },
+        text: "Do this instead.",
+      },
+      { callId: "c3" },
+    ),
+    /403|forbidden|can't/iu,
+  );
+  const read = await runTool(
+    defineBoardReadTool(settings),
+    { id: record!.message.id },
+    { callId: "c4" },
+  );
+  assert.equal(read.message.labels["eve-watch-state"], undefined);
 });

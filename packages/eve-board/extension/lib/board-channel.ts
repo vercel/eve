@@ -58,6 +58,7 @@ import {
   DEFAULT_WATCH_CHANNEL,
   findWatchRecord,
   hostedEnvironment,
+  modelCan,
   publicBoardRoute,
   type BoardWatchRecord,
 } from "./watches.ts";
@@ -154,7 +155,15 @@ export function createBoardChannel(
   settings: () => BoardSettings,
   options: Pick<BoardChannelConfig, "turnPolicy" | "uploadPolicy"> = {},
 ): BoardChannel {
-  const client = () => createBoardClient(resolveBoardTarget(settings()));
+  const client = () => {
+    const config = settings();
+    return createBoardClient(
+      resolveBoardTarget({
+        ...config,
+        can: modelCan(config.can, config.watchChannel ?? DEFAULT_WATCH_CHANNEL),
+      }),
+    );
+  };
   const deployment = () => createBoardClient(resolveBoardTarget({ ...settings(), can: undefined }));
   const watchChannel = () => settings().watchChannel ?? DEFAULT_WATCH_CHANNEL;
 
@@ -414,7 +423,6 @@ async function dispatch(
 ): Promise<boolean> {
   const { client, match, record } = input;
   const message = match.event.message;
-  if (message !== undefined && postedBySelf(message, input)) return false;
   const watch = { name: input.name, watch: record.id };
 
   if (record.action.type === "claim") {
@@ -451,7 +459,12 @@ async function dispatch(
     return true;
   }
 
-  if (match.event.type !== "message.posted" || message === undefined || message.deleted) {
+  if (
+    match.event.type !== "message.posted" ||
+    message === undefined ||
+    message.deleted ||
+    postedBySelf(message, input)
+  ) {
     return false;
   }
   await sendRecovering(

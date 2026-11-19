@@ -8,6 +8,7 @@ import {
   type BoardClient,
   type BoardDiscovery,
   type BoardMessage,
+  type BoardPermission,
   type BoardRegistration,
   type BoardRegistrationInput,
 } from "./client.ts";
@@ -189,6 +190,17 @@ function allows(can: BoardCan | undefined, channel: string, permission: string):
     ([pattern, grant]) =>
       covers(pattern, channel) && (grant === "all" || grant.includes(permission)),
   );
+}
+
+export function modelCan(can: BoardCan | undefined, watchChannel: string): BoardCan {
+  const grants: Record<string, "all" | readonly BoardPermission[]> =
+    can === undefined || can === "all"
+      ? { "*": "all" }
+      : Array.isArray(can)
+        ? { "*": can as readonly BoardPermission[] }
+        : { ...(can as Record<string, "all" | readonly BoardPermission[]>) };
+  grants[watchChannel] = allows(can, watchChannel, "read") ? ["read"] : [];
+  return grants;
 }
 
 export function checkWatchScope(input: {
