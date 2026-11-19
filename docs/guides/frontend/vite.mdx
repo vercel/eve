@@ -3,7 +3,7 @@ title: "Vite"
 description: "Run eve agents alongside any Vite app with the eveVite plugin."
 ---
 
-`eve/vite` runs eve agents next to any Vite app. The `eveVite()` plugin proxies the agent routes on the Vite dev and preview servers, and adds the agents as Vercel services when the app deploys to Vercel. [`useEveAgent`](/docs/guides/frontend) from `eve/react` finds the mounted routes on its own, so you configure no CORS or URL env vars.
+`eve/vite` runs eve agents next to any Vite app. The `eveVite()` plugin proxies the agent routes on the Vite dev and preview servers, and adds the agents as Vercel services when the app deploys to Vercel. The [`useEveAgent`](/docs/guides/frontend) bindings for React, Vue, and Svelte find the mounted routes on their own, so you configure no CORS or URL env vars.
 
 Use the framework integration when there is one: [Next.js](./nextjs), [Nuxt](./nuxt), [SvelteKit](./sveltekit), or [TanStack Start](./tanstack). Use `eveVite()` for other Vite apps.
 
@@ -50,8 +50,8 @@ All fields are optional.
 
 ## Dev vs deploy topology
 
-- **Local dev and `vite preview`.** The plugin starts an eve dev server for each agent and proxies its routes to it, so the browser talks only to the Vite origin. A workspace member's route drops its name on the way, because each server serves `/eve/v1/*`. The plugin uses the server named by `EVE_BASE_URL` when set. A server the plugin starts stops when the Vite server closes. Any tool that loads `vite.config.ts` in serve mode, such as Vitest, starts or reuses these servers, so keep `eveVite()` out of a separate test config. Apps that Nitro serves in development get the same proxies as Nitro route rules. Nitro's preview server answers every request itself, so `vite preview` on a Nitro-served app adds no eve proxy and starts no eve dev server. Preview an agent with your own eve server and `EVE_BASE_URL`, or run the app in development.
-- **Vercel.** The app and its agents deploy as a single project. After the build, the plugin adds each agent as an eve [service](https://vercel.com/docs/services) in the `.vercel/output` that the app's framework or adapter wrote, and routes its transport requests to it before filesystem routing. The app serves everything else, and no `vercel.json` is required. A plain Vite app has no adapter that writes `.vercel/output` during `vite build`, so in that case the build fails until you compose the agents in `vercel.ts` with `withEve`. By default, each generated service runs the installed eve binary from the agent root. When the agents need their own build step, set `eveBuildCommand`:
+- **Local dev and `vite preview`.** The plugin starts an eve dev server for each agent and proxies its routes to it, so the browser talks only to the Vite origin. A workspace member's route drops its name on the way, because each server serves `/eve/v1/*`. The plugin uses the server named by `EVE_BASE_URL` when set. A server the plugin starts stops when the Vite server closes. Any tool that loads `vite.config.ts` in serve mode, such as Vitest, starts or reuses these servers, so keep `eveVite()` out of a separate test config. Apps that Nitro serves in development get the same proxies as Nitro route rules. Nitro's preview server answers every request itself, so `vite preview` on a Nitro-served app adds no eve proxy and starts no eve dev server. To use the agents there, pass an eve server's URL to `useEveAgent` as `baseUrl`, as on other hosts, or run the app in development.
+- **Vercel.** The app and its agents deploy as a single project. After the build, the plugin adds each agent as an eve [service](https://vercel.com/docs/services) in the `.vercel/output` that the app's framework, adapter, or Nitro wrote, and routes its transport requests to it before filesystem routing. The app serves everything else, and no `vercel.json` is required. When nothing writes `.vercel/output`, see [Single-page apps on Vercel](#single-page-apps-on-vercel). By default, each generated service runs the installed eve binary from the agent root. When the agents need their own build step, set `eveBuildCommand`:
 
   ```ts
   eveVite({ eveBuildCommand: "npm run build:eve" });
@@ -66,6 +66,15 @@ All fields are optional.
   ```
 
   See [Self-host eve](../deployment/self-hosting) for running the eve service.
+
+### Single-page apps on Vercel
+
+When no framework, adapter, or Nitro writes `.vercel/output`, `eveVite()` writes it from the client build:
+
+- Files are served under `base` when it is an absolute path, otherwise at the root.
+- Unmatched paths under `base` serve its `index.html`, unless `appType` is `"mpa"`.
+- The client build needs a root `index.html`. Without one, the build fails as server-rendered; install the `nitro` package and add `nitro()` from `nitro/vite`, or use an adapter that writes `.vercel/output`.
+- Vercel doesn't apply `rewrites`, `redirects`, `headers`, `routes`, `cleanUrls`, or `trailingSlash` from `vercel.json` to this output, so any of them fails the build, as does a `vercel.ts` without `withEve`. Delete a catch-all rewrite to `index.html`, or move routing, including that rewrite, to a `vercel.ts` with `withEve`, where the plugin writes nothing.
 
 ## Managing Vercel services yourself
 

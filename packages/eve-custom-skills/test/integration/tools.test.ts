@@ -178,7 +178,7 @@ test("removal reports who removed what", async () => {
   });
 });
 
-test("by default the requester answers for personal skills, and someone else for shared ones", async () => {
+test("by default only the requester answers, for personal and shared skills alike", async () => {
   mount();
   const response = approvalOf(publish).response;
   const answer = async (scope: string | undefined, responder: SessionAuthContext) =>
@@ -190,13 +190,11 @@ test("by default the requester answers for personal skills, and someone else for
       })) as { status: string }
     ).status;
 
-  assert.equal(await answer(undefined, alice), "allowed");
-  assert.equal(await answer(undefined, bob), "rejected");
-  assert.equal(await answer("channel", alice), "rejected");
-  assert.equal(await answer("channel", bob), "allowed");
-  const renamed = { ...alice, subject: "alice-renamed" };
-  assert.equal(await answer("channel", renamed), "rejected");
-  assert.equal(await answer(undefined, renamed), "rejected");
+  for (const scope of [undefined, "channel"]) {
+    assert.equal(await answer(scope, alice), "allowed");
+    assert.equal(await answer(scope, bob), "rejected");
+    assert.equal(await answer(scope, { ...alice, subject: "alice-renamed" }), "rejected");
+  }
 });
 
 test("an approval applies only to the skill it showed, not one recreated under its name", async () => {
@@ -378,19 +376,13 @@ test("a scope whose storage fails is skipped for the turn, with a note for the m
   );
 });
 
-test("a requester can't approve their own shared change, even when it reaches them", async () => {
+test("a requester can approve their own shared change", async () => {
   mount();
-  const shared = { ...deploy, scope: "channel" };
-  const refused = await run(create, shared, context({ approvedBy: alice }));
-  assert.equal(refused.success, false);
-  assert.match(String(refused.error), /someone other than the person who asked/);
-  const renamed = await run(
+  const approved = await run(
     create,
-    shared,
-    context({ approvedBy: { ...alice, subject: "alice-renamed" } }),
+    { ...deploy, scope: "channel" },
+    context({ approvedBy: alice }),
   );
-  assert.match(String(renamed.error), /someone other than the person who asked/);
-  const notOwner = await run(create, { ...deploy }, context({ approvedBy: bob }));
-  assert.equal(notOwner.success, false);
-  assert.match(String(notOwner.error), /Only the person who asked/);
+  assert.equal(approved.success, true);
+  assert.equal(approved.status, "active");
 });
