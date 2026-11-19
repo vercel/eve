@@ -423,8 +423,24 @@ const PLANTED_BUGS: readonly PlantedBug[] = [
   },
 ];
 
-const CONTROLS: readonly { readonly id: string; readonly files?: Record<string, string> }[] = [
+const CONTROLS: readonly {
+  readonly id: string;
+  readonly files?: Record<string, string>;
+  readonly scripts?: Record<string, string>;
+}[] = [
   { id: "the baseline agent" },
+  {
+    id: "a web frontend with src/agent.ts and src/tools/ built on eve/client",
+    files: {
+      "src/agent.ts": `import { Client } from "eve/client";\nexport const agent = new Client({ baseUrl: "/" });\n`,
+      "src/tools/format.ts": `import type { Client } from "eve/client";\nexport type AgentClient = Client;\n`,
+    },
+  },
+  {
+    id: "a Next.js app that runs the agent as its own process",
+    files: { "next.config.ts": "const nextConfig = {};\nexport default nextConfig;\n" },
+    scripts: { build: "next build && eve build", start: "next start & eve start" },
+  },
   {
     id: "a Zod root union of objects, which eve sends with type object",
     files: {

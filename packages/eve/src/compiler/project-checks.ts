@@ -20,14 +20,22 @@ const NEXT_CONFIG_FILE_NAMES = [
 
 const AGENT_SOURCE_DIRECTORY_NAMES = ["channels", "connections", "skills", "subagents", "tools"];
 
+const AUTHORING_IMPORT =
+  /from\s+["']eve(?:\/(?:channels|connections|hooks|instructions|memory|sandbox|schedules|skills|tools)(?:\/[^"']*)?)?["']/;
+
+const EVE_COMMAND = /(?:^|[\s;&|])eve\s+(?:build|dev|start)\b/;
+
 export async function diagnoseProject(
   manifest: CompiledAgentManifest,
 ): Promise<CompilerDiagnostic[]> {
   const appRoot = manifest.appRoot;
   const entries = await readDirectoryNames(appRoot);
+  const scripts = await readPackageScripts(appRoot);
   return [
-    ...(await diagnoseBuildScript(appRoot)),
-    ...(await diagnoseNextConfig(appRoot, entries)),
+    ...diagnoseBuildScript(appRoot, scripts.build),
+    ...(Object.values(scripts).some((script) => EVE_COMMAND.test(script))
+      ? []
+      : await diagnoseNextConfig(appRoot, entries)),
     ...(entries.has("src") && join(appRoot, "src") !== manifest.agentRoot
       ? await diagnoseAgentFilesInSrc(appRoot, manifest.agentRoot)
       : []),
@@ -43,12 +51,21 @@ function warning(code: string, message: string, sourcePath: string): CompilerDia
   };
 }
 
-async function diagnoseBuildScript(appRoot: string): Promise<CompilerDiagnostic[]> {
-  const packageJsonPath = join(appRoot, "package.json");
-  const build = await readFile(packageJsonPath, "utf8")
-    .then((text) => (JSON.parse(text) as { scripts?: { build?: unknown } }).scripts?.build)
+async function readPackageScripts(appRoot: string): Promise<Record<string, string>> {
+  const scripts = await readFile(join(appRoot, "package.json"), "utf8")
+    .then((text) => (JSON.parse(text) as { scripts?: unknown }).scripts)
     .catch(() => undefined);
-  if (typeof build !== "string") return [];
+  if (typeof scripts !== "object" || scripts === null) return {};
+  return Object.fromEntries(
+    Object.entries(scripts).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+function diagnoseBuildScript(appRoot: string, build: string | undefined): CompilerDiagnostic[] {
+  const packageJsonPath = join(appRoot, "package.json");
+  if (build === undefined) return [];
   const commands = build.split(/&&|\|\||;/).map((command) => command.trim());
   if (commands.length === 0 || !commands.every((command) => /^tsc(?:\s|$)/.test(command))) {
     return [];
@@ -73,7 +90,7 @@ async function diagnoseNextConfig(
   return [
     warning(
       PROJECT_NEXT_CONFIG_MISSING_WITH_EVE,
-      `${configName} doesn't wrap its config in withEve() from "eve/next", so next dev and next build won't serve the agent. Export withEve(nextConfig) instead.`,
+      `${configName} doesn't wrap its config in withEve() from "eve/next", and no package.json script runs eve, so nothing serves the agent. Export withEve(nextConfig), or run the agent on its own with eve build and eve start.`,
       configPath,
     ),
   ];
@@ -86,13 +103,17 @@ async function diagnoseAgentFilesInSrc(
   const srcPath = join(appRoot, "src");
   const found: string[] = [];
   for (const entry of await readdir(srcPath, { withFileTypes: true }).catch(() => [])) {
-    if (entry.isFile() && getSupportedModuleBaseName(entry.name) === "agent") {
+    if (
+      entry.isFile() &&
+      getSupportedModuleBaseName(entry.name) === "agent" &&
+      AUTHORING_IMPORT.test(await readFile(join(srcPath, entry.name), "utf8"))
+    ) {
       found.push(`src/${entry.name}`);
     }
     if (
       entry.isDirectory() &&
       AGENT_SOURCE_DIRECTORY_NAMES.includes(entry.name) &&
-      (await importsEve(join(srcPath, entry.name)))
+      (await importsEveAuthoring(join(srcPath, entry.name)))
     ) {
       found.push(`src/${entry.name}/`);
     }
@@ -107,11 +128,11 @@ async function diagnoseAgentFilesInSrc(
   ];
 }
 
-async function importsEve(directoryPath: string): Promise<boolean> {
+async function importsEveAuthoring(directoryPath: string): Promise<boolean> {
   for (const entry of await readdir(directoryPath, { withFileTypes: true }).catch(() => [])) {
     if (!entry.isFile() || getSupportedModuleBaseName(entry.name) === null) continue;
     const source = await readFile(join(directoryPath, entry.name), "utf8");
-    if (/from\s+["']eve(?:\/[^"']*)?["']/.test(source)) return true;
+    if (AUTHORING_IMPORT.test(source)) return true;
   }
   return false;
 }

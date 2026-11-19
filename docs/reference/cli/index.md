@@ -146,7 +146,7 @@ Besides discovery problems, the compile reports:
 - tool `inputSchema` values whose root isn't `type: "object"`, which model providers reject
 - a workflow tool that calls `ctx.agent("name")` for an agent it can't reach
 - a connection `approval` that compares `toolName` to a name the connection never produces, such as one missing the `<connection>__` prefix or an operation outside `operations.allow`
-- warnings for likely setup mistakes: a misspelled agent directory such as `tool/`, agent files under `src/`, a `build` script that runs only `tsc`, and a `next.config` without `withEve()`
+- warnings for likely setup mistakes: a misspelled agent directory such as `tool/`, agent files under `src/`, a `build` script that runs only `tsc`, and a `next.config` without `withEve()` when no `package.json` script runs eve
 
 ### JSON output
 
