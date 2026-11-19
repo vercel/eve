@@ -179,7 +179,7 @@ it("starts a binding carrying the event, the derived key, ttl and principal", as
   expect(executionPrincipal).toEqual(expect.any(String));
 });
 
-it("validates the input and derives the key emit derives, ignoring string case", async () => {
+it("validates the input and derives the key emit derives, comparing strings exactly", async () => {
   await subscribeAs("s1", "rui", {
     subscription: {
       channel: "github",
@@ -194,9 +194,10 @@ it("validates the input and derives the key emit derives, ignoring string case",
     ([binding]) => binding as SubscriptionBinding & { source: { key: string; input: unknown } },
   );
   expect(upper!.source.input).toEqual({ owner: "Vercel", pull: 7 });
-  expect(upper!.source.key).toBe(lower!.source.key);
-  expect(upper!.source.key).toBe(channelEventKey("checks_finished", { owner: "vercel", pull: 7 }));
-  expect(upper!.id).toBe(lower!.id);
+  expect(upper!.source.key).toBe(channelEventKey("checks_finished", { owner: "Vercel", pull: 7 }));
+  expect(lower!.source.key).toBe(channelEventKey("checks_finished", { owner: "vercel", pull: 7 }));
+  expect(upper!.source.key).not.toBe(lower!.source.key);
+  expect(upper!.id).not.toBe(lower!.id);
 
   await expect(
     subscribeAs("s1", "rui", {

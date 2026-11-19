@@ -38,8 +38,9 @@ export interface ChannelEventSubscription {
   readonly description: string;
   /**
    * JSON Schema of the input the model passes. The input is what identifies the thing watched:
-   * a route's `emit` reaches the subscriptions whose input equals the input it passes, and string
-   * values compare without regard to case.
+   * a route's `emit` reaches the subscriptions whose input equals the input it passes, compared
+   * exactly. Constrain a case-insensitive value, such as with a lowercase `pattern`, and pass it
+   * in that case from `emit`.
    */
   readonly inputSchema: JsonObject;
   /**

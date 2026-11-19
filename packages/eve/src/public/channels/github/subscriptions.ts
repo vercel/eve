@@ -21,12 +21,22 @@ import type {
 const COMMENT_BODY_LIMIT = 4_000;
 const PASSING_CONCLUSIONS = new Set(["neutral", "skipped", "success"]);
 
+const LOWERCASE = "^[^A-Z]+$";
+
 const INPUT_SCHEMA: JsonObject = {
   additionalProperties: false,
   properties: {
-    owner: { description: "Repository owner, such as `vercel`.", type: "string" },
+    owner: {
+      description: "Repository owner in lowercase, such as `vercel`.",
+      pattern: LOWERCASE,
+      type: "string",
+    },
     pull: { description: "Pull request number.", minimum: 1, type: "integer" },
-    repo: { description: "Repository name, such as `eve`.", type: "string" },
+    repo: {
+      description: "Repository name in lowercase, such as `eve`.",
+      pattern: LOWERCASE,
+      type: "string",
+    },
   },
   required: ["owner", "repo", "pull"],
   type: "object",
@@ -148,7 +158,7 @@ async function emitChecksFinished(input: {
   const notPassed = PASSING_CONCLUSIONS.has(conclusion)
     ? []
     : await listCheckRunsThatDidNotPass({ ...input, suiteId: suite.checkSuiteId });
-  const { owner, name: repo } = event.repository;
+  const { owner, repo } = lowercaseRepository(event.repository);
 
   await Promise.all(
     suite.pullRequests.map((pull) =>
@@ -169,6 +179,10 @@ async function emitChecksFinished(input: {
       ),
     ),
   );
+}
+
+function lowercaseRepository(repository: { readonly owner: string; readonly name: string }) {
+  return { owner: repository.owner.toLowerCase(), repo: repository.name.toLowerCase() };
 }
 
 async function listCheckRunsThatDidNotPass(input: {
@@ -206,7 +220,7 @@ async function emitPullRequestComment(input: {
 
   const { body, author, htmlUrl } = event.comment;
   if (isIgnoredInboundComment(body, author, await input.botName())) return;
-  const { owner, name: repo } = event.repository;
+  const { owner, repo } = lowercaseRepository(event.repository);
   await emit(
     "pr_comment",
     { owner, repo, pull },

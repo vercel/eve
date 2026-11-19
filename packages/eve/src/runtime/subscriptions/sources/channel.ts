@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { createAttachSessionFn } from "#channel/session.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import {
   requireCompiledBundle,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
+import { retireSubscriptionOwner } from "#runtime/subscriptions/owner.js";
 import type {
   ChannelSubscriptionSource,
   SubscriptionBinding,
@@ -74,12 +76,17 @@ export const channelSource: SubscriptionSourceRuntime = {
         requestId: event.id,
       },
     );
-    await attach(binding.sessionId).send(message, {
-      auth: binding.auth,
-      turnPolicy: "queue",
-      idempotencyKey: `eve:subscription:${createHash("sha256")
-        .update(`${binding.id}:${event.id}`)
-        .digest("hex")}`,
-    });
+    try {
+      await attach(binding.sessionId).send(message, {
+        auth: binding.auth,
+        turnPolicy: "queue",
+        idempotencyKey: `eve:subscription:${createHash("sha256")
+          .update(`${binding.id}:${event.id}`)
+          .digest("hex")}`,
+      });
+    } catch (error) {
+      if (!SessionNotActiveError.is(error) || error.retryable) throw error;
+      await retireSubscriptionOwner(binding.id);
+    }
   },
 };

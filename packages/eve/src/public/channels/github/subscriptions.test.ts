@@ -164,6 +164,17 @@ describe("GitHub channel subscriptions", () => {
     ).toEqual(["checks_finished"]);
   });
 
+  it("asks for owner and repo in lowercase, so a subscription's input matches what GitHub emits", async () => {
+    const { defineJsonSchema } = await import("#tools/schema.js");
+    const validate = defineJsonSchema(
+      githubChannelSubscriptions(ALL_EVENTS)!.pr_comment!.inputSchema,
+    )["~standard"].validate;
+
+    expect((await validate({ owner: "vercel", repo: "eve", pull: 7 })).issues).toBeUndefined();
+    expect((await validate({ owner: "Vercel", repo: "eve", pull: 7 })).issues).toBeDefined();
+    expect((await validate({ owner: "vercel", repo: "Eve", pull: 7 })).issues).toBeDefined();
+  });
+
   it("does not emit or call the API for a check suite when only pr_comment is enabled", async () => {
     const fetchMock = vi.fn();
     const emit = await deliver({
@@ -242,7 +253,7 @@ describe("GitHub channel subscriptions", () => {
     expect(emit).toHaveBeenCalledTimes(2);
     expect(emit).toHaveBeenCalledWith(
       "checks_finished",
-      { owner: "Vercel", repo: "Eve", pull: 7 },
+      { owner: "vercel", repo: "eve", pull: 7 },
       {
         id: "delivery-1:checks_finished:7",
         data: {
@@ -258,12 +269,12 @@ describe("GitHub channel subscriptions", () => {
     expect(emit.mock.calls.map(([name, input, event]) => [name, input, event.id])).toEqual([
       [
         "checks_finished",
-        { owner: "Vercel", repo: "Eve", pull: 7 },
+        { owner: "vercel", repo: "eve", pull: 7 },
         "delivery-1:checks_finished:7",
       ],
       [
         "checks_finished",
-        { owner: "Vercel", repo: "Eve", pull: 9 },
+        { owner: "vercel", repo: "eve", pull: 9 },
         "delivery-1:checks_finished:9",
       ],
     ]);
@@ -322,7 +333,7 @@ describe("GitHub channel subscriptions", () => {
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith(
       "pr_comment",
-      { owner: "Vercel", repo: "Eve", pull: 7 },
+      { owner: "vercel", repo: "eve", pull: 7 },
       {
         id: "delivery-1:pr_comment:501",
         data: {

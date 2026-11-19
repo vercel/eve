@@ -141,7 +141,7 @@ export default githubChannel({
 });
 ```
 
-Subscriptions need no hooks: they work whether or not you define `onCheckSuite` or `onComment`, and they never open a GitHub session. Subscribe the GitHub App to `check_suite`, `issue_comment`, and `pull_request_review_comment`. GitHub's repeated deliveries of the same webhook reach the subscriber once. Owner and repository names match without regard to case. Several sessions can subscribe to the same pull request, and each hears every occurrence.
+Subscriptions need no hooks: they work whether or not you define `onCheckSuite` or `onComment`, and they never open a GitHub session. Subscribe the GitHub App to `check_suite`, `issue_comment`, and `pull_request_review_comment`. GitHub's repeated deliveries of the same webhook reach the subscriber once. GitHub treats owner and repository names as case-insensitive, so subscribe with them in lowercase. Several sessions can subscribe to the same pull request, and each hears every occurrence.
 
 ## Access the repository
 

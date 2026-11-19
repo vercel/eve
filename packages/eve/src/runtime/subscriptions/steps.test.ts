@@ -201,6 +201,23 @@ it("sends nothing once the channel no longer declares the subscribed event", asy
   expect(mocks.send).not.toHaveBeenCalled();
 });
 
+it("retires the subscription when its session has ended, and fails a send that may be retried", async () => {
+  const { SessionNotActiveError } = await import("#channel/session-not-active-error.js");
+  mocks.hooks.add(subscriptionHookToken("binding-1"));
+  mocks.send.mockRejectedValueOnce(new SessionNotActiveError());
+
+  await dispatchSubscriptionStep(delivery("e1"));
+
+  expect(mocks.resumeHook).toHaveBeenCalledWith(subscriptionHookToken("binding-1"), {
+    kind: "retire",
+  });
+
+  mocks.resumeHook.mockClear();
+  mocks.send.mockRejectedValueOnce(new SessionNotActiveError({ retryable: true }));
+  await expect(dispatchSubscriptionStep(delivery("e2"))).rejects.toThrow("not ready");
+  expect(mocks.resumeHook).not.toHaveBeenCalled();
+});
+
 it("hands the event to each owner hook and reports the owners that ended", async () => {
   mocks.hooks.add(subscriptionHookToken("a"));
   mocks.hooks.add(subscriptionHookToken("b"));
