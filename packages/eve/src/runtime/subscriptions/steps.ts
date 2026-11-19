@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import {
@@ -173,7 +174,9 @@ export async function dispatchSubscriptionStep(input: SubscriptionDeliveryInput)
   const { binding, event } = input;
   const ctx = await deserializeContext(input.serializedContext);
   ctx.setVirtualContext(AuthKey, binding.auth);
-  await subscriptionSource(binding.source.kind).deliver({ ctx, binding, event });
+  await contextStorage.run(ctx, () =>
+    subscriptionSource(binding.source.kind).deliver({ ctx, binding, event }),
+  );
 }
 
 export async function closeSubscriptionStep(input: {
@@ -184,11 +187,13 @@ export async function closeSubscriptionStep(input: {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
   ctx.setVirtualContext(AuthKey, input.binding.auth);
-  return subscriptionSource(input.binding.source.kind).close({
-    ctx,
-    binding: input.binding,
-    opened: input.opened,
-  });
+  return contextStorage.run(ctx, () =>
+    subscriptionSource(input.binding.source.kind).close({
+      ctx,
+      binding: input.binding,
+      opened: input.opened,
+    }),
+  );
 }
 
 /** Resumes the run holding a key, returning its run id, or undefined when no run holds the key. */

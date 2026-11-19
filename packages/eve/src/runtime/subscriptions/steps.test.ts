@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
@@ -179,6 +179,18 @@ it("sends the event's data as JSON when the channel has no onEvent", async () =>
   await dispatchSubscriptionStep(delivery("e1", { pull: 7 }));
   expect(mocks.send).toHaveBeenCalledTimes(1);
   expect(mocks.send.mock.calls[0]![0]).toBe(JSON.stringify({ pull: 7 }));
+});
+
+it("runs onEvent inside the subscriber's context", async () => {
+  let seen: unknown;
+  useSubscriptions({
+    onEvent: () => {
+      seen = contextStorage.getStore()?.get(AuthKey);
+      return "Checks finished";
+    },
+  });
+  await dispatchSubscriptionStep(delivery("e1"));
+  expect(seen).toEqual(subscriberAuth);
 });
 
 it("sends nothing when onEvent returns undefined", async () => {
