@@ -14,9 +14,18 @@ export function FieldGroup({ children }: { readonly children: ReactNode }) {
   return <div className="flex w-full flex-col gap-5">{children}</div>;
 }
 
-export function FieldError({ children }: { readonly children: ReactNode }) {
+export function FieldError({
+  children,
+  tone = "error",
+}: {
+  readonly children: ReactNode;
+  readonly tone?: "error" | "warning";
+}) {
   return children ? (
-    <p role="alert" className="type-supporting-body text-destructive">
+    <p
+      role={tone === "error" ? "alert" : "status"}
+      className={`type-supporting-body ${tone === "error" ? "text-destructive" : "text-warning"}`}
+    >
       {children}
     </p>
   ) : null;

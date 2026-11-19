@@ -55,7 +55,9 @@ export function PhoneOtpAuthForm({ callbackUrl }: { readonly callbackUrl: string
       </p>
       <FieldGroup>
         <PhoneNumberField />
-        <FieldError>
+        <FieldError
+          tone={error?.kind === "text-first" && error.linqPhoneNumber ? "warning" : "error"}
+        >
           {error?.kind === "text-first" ? (
             <TextFirstInstructions phoneNumber={error.linqPhoneNumber} />
           ) : (
