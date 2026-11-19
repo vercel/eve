@@ -272,7 +272,7 @@ overrides:
   '@vercel/connect>eve': workspace:*
 
 patchedDependencies:
-  '@vercel/geistdocs@2.14.2': 21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4
+  '@vercel/geistdocs@2.16.0': 21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4
 
 importers:
 
@@ -349,8 +349,8 @@ importers:
         specifier: 2.0.1
         version: 2.0.1(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.3(@typescript-eslint/types@8.70.0))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(svelte@5.57.3(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(next@16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(nuxt@4.6.4(ef9f455d2ace6a42f366dae8af2024af))(react@19.3.1)(svelte@5.57.3(@typescript-eslint/types@8.70.0))(vue@3.5.45(typescript@6.0.3))
       '@vercel/geistdocs':
-        specifier: 2.14.2
-        version: 2.14.2(patch_hash=21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4)(e2220fc4d2a6ce398c05e3203cce3bb0)
+        specifier: 2.16.0
+        version: 2.16.0(patch_hash=21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4)(e2220fc4d2a6ce398c05e3203cce3bb0)
       '@vercel/speed-insights':
         specifier: 2.1.0
         version: 2.1.0(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.3(@typescript-eslint/types@8.70.0))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(svelte@5.57.3(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(next@16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(nuxt@4.6.4(ef9f455d2ace6a42f366dae8af2024af))(react@19.3.1)(svelte@5.57.3(@typescript-eslint/types@8.70.0))(vue@3.5.45(typescript@6.0.3))
@@ -5040,6 +5040,9 @@ packages:
   '@photon-ai/proto@0.2.4':
     resolution: {integrity: sha512-DQANEp0gHvtwqpMGEF0ufa0hs1nniRdsSuo0Q/TG6GoL1WjC5tp59tHFSLUeIm6fvnAuRjREsGzURz3+/69g7g==}
 
+  '@pierre/highlights@0.5.1':
+    resolution: {integrity: sha512-c2WF6sgwgKdxXU6FpWDLWUYHRca/cJy+3QJkWAqYqEAFxqlPf8eSH0ehHcFFjKBmT+9KBl9H7q6z7HMRU7+m6g==}
+
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
@@ -6760,12 +6763,18 @@ packages:
     resolution: {integrity: sha512-wMvZ3DGdnhCwtpeFbwKybSGfCcP52bZX77jMKgZvupmirgyA5KRLlkeQXkI2RGHIaD8TX2iWe2wcIEjjqzg2FQ==}
     engines: {node: '>=20.18.1'}
 
+  '@shikijs/core@3.19.0':
+    resolution: {integrity: sha512-L7SrRibU7ZoYi1/TrZsJOFAnnHyLTE1SwHG1yNWjZIVCqjOEmCSuK2ZO9thnRbJG6TOkPp+Z963JmpCNw5nzvA==}
+
   '@shikijs/core@3.23.0':
     resolution: {integrity: sha512-NSWQz0riNb67xthdm5br6lAkvpDJRTgB36fxlo37ZzM2yq0PQFFzbd8psqC2XMPgCzo1fW6cVi18+ArJ44wqgA==}
 
   '@shikijs/core@4.6.0':
     resolution: {integrity: sha512-bfd4OKgvoyXYiYmMRuleA656P4V7M/Du9lcTl38Ngm6KszMj7bq4J1IGZwSYR4c95Tv5UQALtYNWUwaI9UT3xw==}
     engines: {node: '>=20'}
+
+  '@shikijs/engine-javascript@3.19.0':
+    resolution: {integrity: sha512-ZfWJNm2VMhKkQIKT9qXbs76RRcT0SF/CAvEz0+RkpUDAoDaCx0uFdCGzSRiD9gSlhm6AHkjdieOBJMaO2eC1rQ==}
 
   '@shikijs/engine-javascript@3.23.0':
     resolution: {integrity: sha512-aHt9eiGFobmWR5uqJUViySI1bHMqrAgamWE1TYSUoftkAeCCAiGawPMwM+VCadylQtF4V3VNOZ5LmfItH5f3yA==}
@@ -6774,12 +6783,18 @@ packages:
     resolution: {integrity: sha512-K0oqxFoL+kEMdz89mHLFO15Tsbv3kFZ6WR1cXZKMvLSc+oqaM00A6pyga1qSeXB22dP0tTiSApRcGBaKWsEccg==}
     engines: {node: '>=20'}
 
+  '@shikijs/engine-oniguruma@3.19.0':
+    resolution: {integrity: sha512-1hRxtYIJfJSZeM5ivbUXv9hcJP3PWRo5prG/V2sWwiubUKTa+7P62d2qxCW8jiVFX4pgRHhnHNp+qeR7Xl+6kg==}
+
   '@shikijs/engine-oniguruma@3.23.0':
     resolution: {integrity: sha512-1nWINwKXxKKLqPibT5f4pAFLej9oZzQTsby8942OTlsJzOBZ0MWKiwzMsd+jhzu8YPCHAswGnnN1YtQfirL35g==}
 
   '@shikijs/engine-oniguruma@4.6.0':
     resolution: {integrity: sha512-aggd6Q7SuJOXNnsUbfG2XesxBJKBMAw/PDTUo9PyRjMaaJJ2dNrI+q0C+25ARXAK9yLHAlwxc9oRT2u68YKZ7w==}
     engines: {node: '>=20'}
+
+  '@shikijs/langs@3.19.0':
+    resolution: {integrity: sha512-dBMFzzg1QiXqCVQ5ONc0z2ebyoi5BKz+MtfByLm0o5/nbUu3Iz8uaTCa5uzGiscQKm7lVShfZHU1+OG3t5hgwg==}
 
   '@shikijs/langs@3.23.0':
     resolution: {integrity: sha512-2Ep4W3Re5aB1/62RSYQInK9mM3HsLeB91cHqznAJMuylqjzNVAVCMnNWRHFtcNHXsoNRayP9z1qj4Sq3nMqYXg==}
@@ -6792,8 +6807,14 @@ packages:
     resolution: {integrity: sha512-c54+TQEo9ToqgfL/AU8FpjnV09+GA9Oa7M5ROkkXteZfp5XzpAJGXjjvZQFQioJOwm/w/6Z3lIzQstAkl8coag==}
     engines: {node: '>=20'}
 
+  '@shikijs/rehype@3.19.0':
+    resolution: {integrity: sha512-pzp/JVxrTd95HgMimHgYb9lCGSzVYEp1BweWUprFAEgGOF15d9IyX+IVW/+1Z5ZxdT9IUUF27UbC5YdA5oCzjw==}
+
   '@shikijs/rehype@3.23.0':
     resolution: {integrity: sha512-GepKJxXHbXFfAkiZZZ+4V7x71Lw3s0ALYmydUxJRdvpKjSx9FOMSaunv6WRLFBXR6qjYerUq1YZQno+2gLEPwA==}
+
+  '@shikijs/themes@3.19.0':
+    resolution: {integrity: sha512-H36qw+oh91Y0s6OlFfdSuQ0Ld+5CgB/VE6gNPK+Hk4VRbVG/XQgkjnt4KzfnnoO6tZPtKJKHPjwebOCfjd6F8A==}
 
   '@shikijs/themes@3.23.0':
     resolution: {integrity: sha512-5qySYa1ZgAT18HR/ypENL9cUSGOeI2x+4IvYJu4JgVJdizn6kG4ia5Q1jDEOi7gTbN4RbuYtmHh0W3eccOrjMA==}
@@ -6804,6 +6825,9 @@ packages:
 
   '@shikijs/transformers@3.23.0':
     resolution: {integrity: sha512-F9msZVxdF+krQNSdQ4V+Ja5QemeAoTQ2jxt7nJCwhDsdF1JWS3KxIQXA3lQbyKwS3J61oHRUSv4jYWv3CkaKTQ==}
+
+  '@shikijs/types@3.19.0':
+    resolution: {integrity: sha512-Z2hdeEQlzuntf/BZpFG8a+Fsw9UVXdML7w0o3TgSXV3yNESGon+bs9ITkQb3Ki7zxoXOOu5oJWqZ2uto06V9iQ==}
 
   '@shikijs/types@3.23.0':
     resolution: {integrity: sha512-3JZ5HXOZfYjsYSk0yPwBrkupyYSLpAE26Qc0HLghhZNGTZg/SKxXIIgoxOpmmeQP0RRSDJTk1/vPfw9tbw+jSQ==}
@@ -8069,6 +8093,10 @@ packages:
     resolution: {integrity: sha512-5tWaC9V+u4SHcSMKBz9FQb3Dhl/1A2lQ6QqHovu8uQeb8dTyjEevpJMANm/uQEn/usYB63fpdjWYjkJ8/bGtjA==}
     engines: {node: '>=14'}
 
+  '@vercel/firewall@1.2.6':
+    resolution: {integrity: sha512-89ybsa2rnVNdw6RI3jGOVvqUJaBj6Umm4IagC1o3PKtr/MXxBKOLek+yyUgF0csA0O5W+dzcpdIhKxVXhgVVtA==}
+    engines: {node: '>= 20'}
+
   '@vercel/functions@1.6.0':
     resolution: {integrity: sha512-R6FKQrYT5MZs5IE1SqeCJWxMuBdHawFcCZboKKw8p7s+6/mcd55Gx6tWmyKnQTyrSEA04NH73Tc9CbqpEle8RA==}
     engines: {node: '>= 16'}
@@ -8090,8 +8118,8 @@ packages:
       ws:
         optional: true
 
-  '@vercel/geistdocs@2.14.2':
-    resolution: {integrity: sha512-sv3esx5lrxdlKUhglawW9NXVTY704pNrFYbkraGkNHJtGMCVlglPu2FSXgN5rr55qqE+5Qq7jVBpSJ9IQojhPw==}
+  '@vercel/geistdocs@2.16.0':
+    resolution: {integrity: sha512-jVeJemPAcaaz73n5GxKBgO/7jT9xihnGXwA0k4wLziS/adM7tldSrpOUxVcbEA/Fh0kZYFjMLy0r5DEbVuRZvA==}
     hasBin: true
     peerDependencies:
       next: ^16.3.3
@@ -10601,20 +10629,6 @@ packages:
   fraction.js@5.3.4:
     resolution: {integrity: sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ==}
 
-  framer-motion@12.43.0:
-    resolution: {integrity: sha512-1eaL3RvR/kAlbG7UYcpMptEyzPoENO0c6w7ZnB3/hh2vSAz/6uGAFn6fdoqTBguNstf3MsFhJHsD/0DHiclG+g==}
-    peerDependencies:
-      '@emotion/is-prop-valid': '*'
-      react: ^18.0.0 || ^19.0.0
-      react-dom: ^18.0.0 || ^19.0.0
-    peerDependenciesMeta:
-      '@emotion/is-prop-valid':
-        optional: true
-      react:
-        optional: true
-      react-dom:
-        optional: true
-
   fresh@0.5.2:
     resolution: {integrity: sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q==}
     engines: {node: '>= 0.6'}
@@ -12392,26 +12406,6 @@ packages:
   module-details-from-path@1.0.4:
     resolution: {integrity: sha512-EGWKgxALGMgzvxYF1UyGTy0HXX/2vHLkw6+NvDKW2jypWbHpjQuj4UMcqQWXHERJhVGKikolT06G3bcKe4fi7w==}
 
-  motion-dom@12.43.0:
-    resolution: {integrity: sha512-azKON4d9S65PEoFUiQTMTgPheEmzf2QngdRc50AKfJp9Q9mmcBVw22c8eMq9k8kxOFHdL7+WZY7N/5F/lwiDag==}
-
-  motion-utils@12.39.0:
-    resolution: {integrity: sha512-8nadJAJjTtqRkmRF36FoJTrywK9nnFmnPwnSMyxaOCU7GDjN9RTMJIxx9De8ErM+vpPhMccr/6fo5WciyQLnMQ==}
-
-  motion@12.43.0:
-    resolution: {integrity: sha512-BQgQbSa9Hn3/mtbib0MK53y6JSANa+YKUKlaYnWzAVDH424RYQ5LVpV3pNiWH00BA2z4ojsSdMzqT7g2FQwjuQ==}
-    peerDependencies:
-      '@emotion/is-prop-valid': '*'
-      react: ^18.0.0 || ^19.0.0
-      react-dom: ^18.0.0 || ^19.0.0
-    peerDependenciesMeta:
-      '@emotion/is-prop-valid':
-        optional: true
-      react:
-        optional: true
-      react-dom:
-        optional: true
-
   mrmime@2.0.1:
     resolution: {integrity: sha512-Y3wQdFg2Va6etvQ5I82yUhGdsKrcYox6p7FfL1LbK2J4V01F9TGlepTIhnK24t7koZibmg82KGglhA1XK5IsLQ==}
     engines: {node: '>=10'}
@@ -13847,6 +13841,9 @@ packages:
   shell-quote@1.11.0:
     resolution: {integrity: sha512-JdxDPD0DBTyu08pq0kPC0xSNet/qsU07qT6IsX1AS8oO2ICNRY4ldNa8OAI6PuwAH8tG3lxEhbqmyp4Dw4036g==}
     engines: {node: '>= 0.4'}
+
+  shiki@3.19.0:
+    resolution: {integrity: sha512-77VJr3OR/VUZzPiStyRhADmO2jApMM0V2b1qf0RpfWya8Zr1PeZev5AEpPGAAKWdiYUtcZGBE4F5QvJml1PvWA==}
 
   shiki@3.23.0:
     resolution: {integrity: sha512-55Dj73uq9ZXL5zyeRPzHQsK7Nbyt6Y10k5s7OjuFZGMhpp4r/rsLBH0o/0fstIzX1Lep9VxefWljK/SKCzygIA==}
@@ -18440,6 +18437,8 @@ snapshots:
       '@bufbuild/protobuf': 2.15.0
       nice-grpc-common: 2.0.4
 
+  '@pierre/highlights@0.5.1': {}
+
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
@@ -20047,6 +20046,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@shikijs/core@3.19.0':
+    dependencies:
+      '@shikijs/types': 3.19.0
+      '@shikijs/vscode-textmate': 10.1.0
+      '@types/hast': 3.0.5
+      hast-util-to-html: 9.0.6
+
   '@shikijs/core@3.23.0':
     dependencies:
       '@shikijs/types': 3.23.0
@@ -20062,6 +20068,12 @@ snapshots:
       '@types/hast': 3.0.5
       hast-util-to-html: 9.0.6
 
+  '@shikijs/engine-javascript@3.19.0':
+    dependencies:
+      '@shikijs/types': 3.19.0
+      '@shikijs/vscode-textmate': 10.1.0
+      oniguruma-to-es: 4.3.6
+
   '@shikijs/engine-javascript@3.23.0':
     dependencies:
       '@shikijs/types': 3.23.0
@@ -20074,6 +20086,11 @@ snapshots:
       '@shikijs/vscode-textmate': 10.1.0
       oniguruma-to-es: 4.3.6
 
+  '@shikijs/engine-oniguruma@3.19.0':
+    dependencies:
+      '@shikijs/types': 3.19.0
+      '@shikijs/vscode-textmate': 10.1.0
+
   '@shikijs/engine-oniguruma@3.23.0':
     dependencies:
       '@shikijs/types': 3.23.0
@@ -20083,6 +20100,10 @@ snapshots:
     dependencies:
       '@shikijs/types': 4.6.0
       '@shikijs/vscode-textmate': 10.1.0
+
+  '@shikijs/langs@3.19.0':
+    dependencies:
+      '@shikijs/types': 3.19.0
 
   '@shikijs/langs@3.23.0':
     dependencies:
@@ -20098,6 +20119,15 @@ snapshots:
       '@shikijs/vscode-textmate': 10.1.0
       '@types/hast': 3.0.5
 
+  '@shikijs/rehype@3.19.0':
+    dependencies:
+      '@shikijs/types': 3.19.0
+      '@types/hast': 3.0.5
+      hast-util-to-string: 3.0.1
+      shiki: 3.19.0
+      unified: 11.0.5
+      unist-util-visit: 5.1.0
+
   '@shikijs/rehype@3.23.0':
     dependencies:
       '@shikijs/types': 3.23.0
@@ -20106,6 +20136,10 @@ snapshots:
       shiki: 3.23.0
       unified: 11.0.5
       unist-util-visit: 5.1.0
+
+  '@shikijs/themes@3.19.0':
+    dependencies:
+      '@shikijs/types': 3.19.0
 
   '@shikijs/themes@3.23.0':
     dependencies:
@@ -20119,6 +20153,11 @@ snapshots:
     dependencies:
       '@shikijs/core': 3.23.0
       '@shikijs/types': 3.23.0
+
+  '@shikijs/types@3.19.0':
+    dependencies:
+      '@shikijs/vscode-textmate': 10.1.0
+      '@types/hast': 3.0.5
 
   '@shikijs/types@3.23.0':
     dependencies:
@@ -21573,6 +21612,8 @@ snapshots:
 
   '@vercel/detect-agent@1.2.7': {}
 
+  '@vercel/firewall@1.2.6': {}
+
   '@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.88)':
     optionalDependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.88
@@ -21584,17 +21625,20 @@ snapshots:
       '@aws-sdk/credential-provider-web-identity': 3.972.88
       ws: 8.22.2(bufferutil@4.1.0)
 
-  '@vercel/geistdocs@2.14.2(patch_hash=21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4)(e2220fc4d2a6ce398c05e3203cce3bb0)':
+  '@vercel/geistdocs@2.16.0(patch_hash=21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4)(e2220fc4d2a6ce398c05e3203cce3bb0)':
     dependencies:
       '@ai-sdk/react': 3.0.288(react@19.3.1)(zod@4.6.7)
       '@clack/prompts': 0.11.0
       '@modelcontextprotocol/server': 2.4.0
       '@next/env': 16.3.3
       '@orama/tokenizers': 3.1.18
+      '@pierre/highlights': 0.5.1
+      '@shikijs/rehype': 3.19.0
       '@streamdown/cjk': 1.0.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.3(supports-color@10.2.2))(react@19.3.1)(supports-color@10.2.2)(unified@11.0.5)
       '@types/mdx': 2.0.14
       '@types/react': 19.3.0
       '@vercel/agent-readability': 0.7.0(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.3(@typescript-eslint/types@8.70.0))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(svelte@5.57.3(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(@vercel/functions@3.11.1(@aws-sdk/credential-provider-web-identity@3.972.88)(ws@8.22.2(bufferutil@4.1.0)))(h3@1.15.11)(next@16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))
+      '@vercel/firewall': 1.2.6
       '@vercel/oidc': 3.8.8
       ai: 6.0.301(zod@4.6.7)
       class-variance-authority: 0.7.1
@@ -21608,7 +21652,6 @@ snapshots:
       glob: 11.1.0
       mcp-handler: 2.2.0(@modelcontextprotocol/server@2.4.0)(next@16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))
       mermaid: 11.17.2
-      motion: 12.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       next: 16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       next-themes: 0.4.6(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       phase: 0.5.4(react@19.3.1)
@@ -21622,6 +21665,7 @@ snapshots:
       remark-mdx: 3.1.1(supports-color@10.2.2)
       remark-parse: 11.0.0(supports-color@10.2.2)
       remark-stringify: 11.0.0
+      shiki: 3.19.0
       sonner: 2.0.8(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       streamdown: 2.7.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(supports-color@10.2.2)
       tailwind-merge: 3.7.0
@@ -21634,7 +21678,6 @@ snapshots:
       vaul: 1.1.2(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       zod: 4.6.7
     transitivePeerDependencies:
-      - '@emotion/is-prop-valid'
       - '@fumadocs/mdx-remote'
       - '@mixedbread/sdk'
       - '@orama/core'
@@ -24610,15 +24653,6 @@ snapshots:
 
   fraction.js@5.3.4: {}
 
-  framer-motion@12.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
-    dependencies:
-      motion-dom: 12.43.0
-      motion-utils: 12.39.0
-      tslib: 2.8.1
-    optionalDependencies:
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
-
   fresh@0.5.2: {}
 
   fresh@2.0.0: {}
@@ -26964,20 +26998,6 @@ snapshots:
 
   module-details-from-path@1.0.4: {}
 
-  motion-dom@12.43.0:
-    dependencies:
-      motion-utils: 12.39.0
-
-  motion-utils@12.39.0: {}
-
-  motion@12.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
-    dependencies:
-      framer-motion: 12.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      tslib: 2.8.1
-    optionalDependencies:
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
-
   mrmime@2.0.1: {}
 
   ms@2.0.0: {}
@@ -29012,6 +29032,17 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   shell-quote@1.11.0: {}
+
+  shiki@3.19.0:
+    dependencies:
+      '@shikijs/core': 3.19.0
+      '@shikijs/engine-javascript': 3.19.0
+      '@shikijs/engine-oniguruma': 3.19.0
+      '@shikijs/langs': 3.19.0
+      '@shikijs/themes': 3.19.0
+      '@shikijs/types': 3.19.0
+      '@shikijs/vscode-textmate': 10.1.0
+      '@types/hast': 3.0.5
 
   shiki@3.23.0:
     dependencies:

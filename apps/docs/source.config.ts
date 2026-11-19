@@ -1,5 +1,5 @@
 import {
-  geistShikiTheme,
+  defineGeistdocsSourceConfig,
   geistdocsFrontmatterSchema,
   geistdocsMetaSchema,
 } from "@vercel/geistdocs/source-config";
@@ -54,18 +54,11 @@ export const docs = defineDocs({
 const lastModifiedVersionControl: LastModifiedPluginOptions["versionControl"] =
   process.env.VERCEL === "1" ? async () => null : "git";
 
-// Keep the Geistdocs source defaults inline so Vercel builds can avoid the
-// git-backed last-modified lookup when the deployment checkout is shallow.
+// Keep the package highlighter and eve's shallow-checkout-safe last-modified lookup.
 export default defineConfig({
   mdxOptions: {
+    ...defineGeistdocsSourceConfig().mdxOptions,
     remarkPlugins: [remarkMdxMermaid, remarkNormalizeCodeLang, remarkComponentMarkdown],
-    rehypeCodeOptions: {
-      themes: {
-        light: geistShikiTheme,
-        dark: geistShikiTheme,
-      },
-      defaultColor: "light",
-    },
   },
   plugins: [lastModified({ versionControl: lastModifiedVersionControl })],
 });
