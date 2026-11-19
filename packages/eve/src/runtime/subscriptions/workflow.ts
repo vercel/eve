@@ -1,16 +1,16 @@
 import { createHook, sleep, type HookOptions } from "#compiled/@workflow/core/index.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import { parseJsonObject } from "#shared/json.js";
-import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
-import { connectionEventHookToken } from "#runtime/connections/events/path.js";
-import type { EventBinding } from "#runtime/connections/events/state.js";
-import { dispatchConnectionEventStep } from "#runtime/connections/events/dispatch-step.js";
+import type { ConnectionEventPayload } from "#runtime/subscriptions/delivery.js";
+import { connectionEventHookToken } from "#runtime/subscriptions/path.js";
+import type { EventBinding } from "#runtime/subscriptions/state.js";
+import { dispatchConnectionEventStep } from "#runtime/subscriptions/dispatch-step.js";
 import {
   openConnectionEventStep,
   publishConnectionEventOutcomeStep,
   startConnectionEventDeliveryStep,
   unsubscribeConnectionEventStep,
-} from "#runtime/connections/events/lifecycle-step.js";
+} from "#runtime/subscriptions/lifecycle-step.js";
 
 export type ConnectionEventWatchMessage =
   | { readonly kind: "retire" }

@@ -7,7 +7,7 @@ const { verify, start, load } = vi.hoisted(() => ({
   start: vi.fn(),
   load: vi.fn(),
 }));
-vi.mock("#runtime/connections/events/owner.js", () => ({
+vi.mock("#runtime/subscriptions/owner.js", () => ({
   startConnectionEventDelivery: start,
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({

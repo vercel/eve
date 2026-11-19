@@ -4,9 +4,9 @@ import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createAttachSessionFn } from "#channel/session.js";
-import type { EventBinding } from "#runtime/connections/events/state.js";
-import { retireConnectionEventOwner } from "#runtime/connections/events/owner.js";
-import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
+import type { EventBinding } from "#runtime/subscriptions/state.js";
+import { retireConnectionEventOwner } from "#runtime/subscriptions/owner.js";
+import type { ConnectionEventPayload } from "#runtime/subscriptions/delivery.js";
 import {
   principalKey,
   resolveConnectionPrincipalFromAuth,
