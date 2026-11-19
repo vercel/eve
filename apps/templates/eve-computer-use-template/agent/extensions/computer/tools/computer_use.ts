@@ -32,7 +32,9 @@ export default defineTool<ComputerUseInput, DeviceOutput & Record<string, unknow
     const early = await startLiveIfAvailable(ctx, "desktop");
     if (early) yield { live: { device: "desktop" } };
     const output = (await computer_use.execute(input, ctx)) as ComputerUseOutput;
-    if (!early) await startLiveIfAvailable(ctx, "desktop");
+    // screen-relay keeps the size the display had when it started, so a resize restarts it.
+    const resized = input.request.action === "set_desktop_size";
+    if (!early || resized) await startLiveIfAvailable(ctx, "desktop", { recheck: resized });
     yield { ...output, screen: await captureDesktop(ctx, output.screenshot) };
   },
   toModelOutput: desktopModelOutput,

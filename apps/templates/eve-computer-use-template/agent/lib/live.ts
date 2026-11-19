@@ -31,10 +31,14 @@ const checked = new Map<string, number>();
  * Start a device's live stream. The web app's /api/live route finds the sandbox by the session it
  * belongs to, then connects viewers to the stream; no credential reaches the model.
  */
-export async function startLive(ctx: ToolContext, device: LiveDevice): Promise<void> {
+export async function startLive(
+  ctx: ToolContext,
+  device: LiveDevice,
+  { recheck = false }: LiveOptions = {},
+): Promise<void> {
   const sandbox = await ctx.getSandbox(environment);
   const key = `${sandbox.name}:${device}`;
-  if (Date.now() - (checked.get(key) ?? 0) < RECHECK_MS) return;
+  if (!recheck && Date.now() - (checked.get(key) ?? 0) < RECHECK_MS) return;
 
   if (device === "browser") {
     await ensureRelay(sandbox);
@@ -45,10 +49,19 @@ export async function startLive(ctx: ToolContext, device: LiveDevice): Promise<v
   checked.set(key, Date.now());
 }
 
+export interface LiveOptions {
+  /** Check the stream now even if it was checked lately, as after the desktop changed size. */
+  readonly recheck?: boolean;
+}
+
 /** Whether the device's live stream runs; without it, the screenshot still shows the screen. */
-export async function startLiveIfAvailable(ctx: ToolContext, device: LiveDevice): Promise<boolean> {
+export async function startLiveIfAvailable(
+  ctx: ToolContext,
+  device: LiveDevice,
+  options?: LiveOptions,
+): Promise<boolean> {
   try {
-    await startLive(ctx, device);
+    await startLive(ctx, device, options);
     return true;
   } catch (error) {
     console.warn(`The ${device} live view is unavailable:`, error);
@@ -116,13 +129,21 @@ async function ensureBrowserStream(ctx: ToolContext): Promise<void> {
  * screen-relay attached to the computer-use display, serving its own public sandbox port behind
  * the TLS proxy Vercel Sandbox puts in front of it, as screen-relay's remote access guide
  * describes: it accepts only that host and requires its token. It stops when the display does,
- * as after the sandbox resumes, so a session that isn't healthy is replaced. The display starts
- * here if it isn't running yet, so the live view can show it before the first action finishes.
+ * as after the sandbox resumes, and it keeps the display's size from when it started, so a
+ * session that isn't healthy, or whose size the display no longer has, is replaced. The display
+ * starts here if it isn't running yet, so the live view can show it before the first action
+ * finishes.
  */
 async function ensureDesktopStream(sandbox: LiveSandbox): Promise<void> {
   const origin = (await Sandbox.get({ name: sandbox.name })).domain(DESKTOP_STREAM_PORT);
-  const status = await sandbox.run({ command: "screen-relay status --json" });
-  if (status.exitCode === 0 && healthy(status.stdout, origin)) return;
+  const status = await sandbox.run({
+    command: [
+      "screen-relay status --json",
+      `DISPLAY=${DESKTOP_DISPLAY} xdpyinfo 2>/dev/null | awk '/dimensions:/ { print $2; exit }'`,
+    ].join("; echo; "),
+  });
+  const [statusJson = "", displaySize = ""] = status.stdout.split("\n").filter(Boolean);
+  if (healthy(statusJson, origin, displaySize.trim())) return;
   await startComputerUse(sandbox);
   await start(
     sandbox,
@@ -133,13 +154,16 @@ async function ensureDesktopStream(sandbox: LiveSandbox): Promise<void> {
   );
 }
 
-function healthy(statusJson: string, origin: string): boolean {
+function healthy(statusJson: string, origin: string, displaySize: string): boolean {
   try {
     const { session } = JSON.parse(statusJson) as {
-      session?: { running?: boolean; url?: string; capabilities?: unknown };
+      session?: { running?: boolean; url?: string; resolution?: string; capabilities?: unknown };
     };
     return (
-      session?.running === true && session.capabilities !== undefined && session.url === origin
+      session?.running === true &&
+      session.capabilities !== undefined &&
+      session.url === origin &&
+      session.resolution === displaySize
     );
   } catch {
     return false;
