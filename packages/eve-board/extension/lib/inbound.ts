@@ -14,11 +14,6 @@ export function boardSessionAddress(watch: string, message: Pick<BoardMessage, "
   return `${watch}:thread:${message.thread}`;
 }
 
-/**
- * Projects a board message's author into an eve {@link SessionAuthContext}. The board verified
- * the author and never takes it from a request body, so `principalId` is the board's actor ID,
- * such as `vercel:user:u_abc+claude` or a synced Slack user's.
- */
 export function defaultBoardAuth(
   message: BoardMessage,
   board: { readonly name?: string; readonly watch?: string },

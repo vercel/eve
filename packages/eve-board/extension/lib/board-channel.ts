@@ -25,19 +25,15 @@ import {
 
 import {
   BOARD_TEXT_LIMIT,
+  boardAllows,
   boardErrorCode,
-  createBoardClient,
-  resolveBoardTarget,
   type BoardCan,
   type BoardClaim,
-  type BoardClaimedTask,
   type BoardClient,
-  type BoardHeldClaim,
   type BoardMatch,
   type BoardMessage,
   type BoardPostOptions,
   type BoardSettings,
-  type BoardThread,
 } from "./client.ts";
 import {
   boardMessageContent,
@@ -52,19 +48,18 @@ import {
 } from "./inbound.ts";
 import {
   BOARD_WAKE_ROUTE,
+  boardClients,
   BoardWatchConfigError,
   checkQueueScope,
-  CLAIM_LEASE_SECONDS,
   coversChannel,
-  DEFAULT_WATCH_CHANNEL,
-  allows,
   findWatchRecord,
-  modelCan,
   type BoardWatchRecord,
 } from "./watches.ts";
 
 const log = createLogger("board.channel");
 
+const CLAIM_LEASE_SECONDS = 3600;
+const RENEW_EVERY_MS = 30_000;
 const MAX_PULLS_PER_WAKE = 20;
 const MATCHES_PER_PULL = 10;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -87,44 +82,23 @@ export interface BoardChannelState extends PromptQueueState {
   readonly threadId: string | null;
   /** The watch whose match started the session. */
   readonly watch?: string | null;
-  /** The message the current turn answers: `react()` targets it by default. */
-  messageId: string | null;
   /** The task this session claimed, renewed while it works; `null` once it's settled or lost. */
-  task?: BoardHeldClaim | null;
+  task?: BoardClaim | null;
   /** Whether the current turn answers a board-only message, so its automatic replies stay off synced platforms. */
   noSync?: boolean;
   pendingSignIns?: Record<string, string>;
 }
 
-/** One board thread, as event handlers act on it. */
 export interface BoardThreadHandle {
-  /** The thread's root message ID. */
-  readonly threadId: string;
-  /** Replies in the thread as the configured profile. */
   reply(input: string | BoardPostOptions): Promise<BoardMessage>;
-  /** Reacts to a message in the thread: the current turn's message by default. */
-  react(
-    emoji: string,
-    options?: { readonly messageId?: string; readonly remove?: boolean },
-  ): Promise<void>;
-  /** Shows typing in the thread's synced platform threads; Slack shows `status`. */
   typing(status?: string): Promise<void>;
-  /** Sets or unsets labels on the thread's root. */
-  label(change: {
-    readonly set?: Record<string, string>;
-    readonly unset?: readonly string[];
-  }): Promise<void>;
-  /** Reads the whole thread. */
-  read(): Promise<BoardThread>;
 }
 
-/** Channel-owned context rebuilt from persisted state. */
 export interface BoardChannelContext {
   readonly board: BoardThreadHandle;
   state: BoardChannelState;
 }
 
-/** Event-handler context, including continuation routing. */
 export interface BoardEventContext extends BoardChannelContext, ChannelContinuationOps {}
 
 /**
@@ -140,7 +114,7 @@ export type BoardReceiveTarget =
     };
 
 /** Configuration for {@link boardChannel}. */
-export interface BoardChannelConfig extends BoardSettings {
+export interface BoardChannelConfig extends Omit<BoardSettings, "configurers"> {
   readonly turnPolicy?: TurnPolicy;
   /** Size and media-type limits for attachments eve downloads from the board. */
   readonly uploadPolicy?: UploadPolicyInput;
@@ -164,17 +138,7 @@ export function createBoardChannel(
   settings: () => BoardSettings,
   options: Pick<BoardChannelConfig, "turnPolicy" | "uploadPolicy"> = {},
 ): BoardChannel {
-  const client = () => {
-    const config = settings();
-    return createBoardClient(
-      resolveBoardTarget({
-        ...config,
-        can: modelCan(config.can, config.watchChannel ?? DEFAULT_WATCH_CHANNEL),
-      }),
-    );
-  };
-  const deployment = () => createBoardClient(resolveBoardTarget({ ...settings(), can: undefined }));
-
+  const deployment = () => boardClients(settings()).deployment;
   const keepClaim = (state: BoardChannelState) => keepBoardClaim(deployment(), state);
 
   let draining: { again: boolean } | undefined;
@@ -211,23 +175,22 @@ export function createBoardChannel(
 
   const channel = defineChannel<BoardChannelState, BoardChannelContext, BoardReceiveTarget>({
     turnPolicy: options.turnPolicy,
-    state: { channel: null, messageId: null, task: null, threadId: null },
+    state: { channel: null, task: null, threadId: null },
 
     context(state) {
-      return { board: threadHandle(client(), state.threadId ?? "", state), state };
+      return { board: threadHandle(boardClients(settings()).model, state), state };
     },
 
     metadata(state) {
       return {
         boardChannel: state.channel,
-        boardTask: state.task == null ? null : { id: state.task.id, until: state.task.until },
+        boardTask: state.task == null ? null : { id: state.task.taskId, until: state.task.until },
         boardThread: state.threadId,
         boardWatch: state.watch ?? null,
       };
     },
 
     deliver(payload, ctx) {
-      if (payload.state?.messageId != null) ctx.state.messageId = payload.state.messageId;
       if (payload.state?.task !== undefined) ctx.state.task = payload.state.task;
       if (payload.state?.noSync !== undefined) ctx.state.noSync = payload.state.noSync;
     },
@@ -243,7 +206,7 @@ export function createBoardChannel(
     ],
 
     async receive({ message, target, ...send }, { from }) {
-      const board = client();
+      const board = boardClients(settings()).model;
       let root: BoardMessage;
       if ("thread" in target) {
         root = (await board.thread(target.thread)).message;
@@ -259,14 +222,18 @@ export function createBoardChannel(
       }
       return await sendRecovering(from(boardSessionAddress(board.profile, root)), message, {
         ...send,
-        state: { channel: root.channel, messageId: root.id, noSync: false, threadId: root.id },
+        state: { channel: root.channel, noSync: false, threadId: root.id },
       });
     },
 
     fetchFile(url) {
       const policy = options.uploadPolicy;
       if (policy === "disabled") return Promise.resolve(null);
-      return fetchBoardAttachment(url, client(), policy?.maxBytes ?? DEFAULT_MAX_UPLOAD_BYTES);
+      return fetchBoardAttachment(
+        url,
+        boardClients(settings()).model,
+        policy?.maxBytes ?? DEFAULT_MAX_UPLOAD_BYTES,
+      );
     },
     uploadPolicy: options.uploadPolicy,
 
@@ -301,13 +268,15 @@ export function createBoardChannel(
   return channel;
 }
 
-interface DrainInput {
+interface Wake {
   readonly can?: BoardCan;
-  readonly client: BoardClient;
-  readonly claimer: BoardClient;
+  readonly deployment: BoardClient;
+  readonly model: BoardClient;
   readonly from: ChannelFrom<BoardChannelState>;
   readonly name: string | undefined;
-  readonly watchChannel: () => string;
+  readonly self: { readonly actor: string };
+  readonly watchChannel: string;
+  recordOf(id: string): Promise<BoardWatchRecord>;
 }
 
 export async function drainMatches(options: {
@@ -316,224 +285,149 @@ export async function drainMatches(options: {
   readonly wait?: number;
 }): Promise<number> {
   const { settings } = options;
-  const watchChannel = settings.watchChannel ?? DEFAULT_WATCH_CHANNEL;
-  const client = createBoardClient(resolveBoardTarget({ ...settings, can: undefined }));
-  const input: DrainInput = {
+  const { deployment, model, watchChannel } = boardClients(settings);
+  const self = await deployment.me();
+  const records = new Map<string, Promise<BoardWatchRecord>>();
+  const wake: Wake = {
     can: settings.can,
-    claimer: createBoardClient(
-      resolveBoardTarget({ ...settings, can: modelCan(settings.can, watchChannel) }),
-    ),
-    client,
+    deployment,
     from: options.from,
+    model,
     name: settings.name,
-    watchChannel: () => watchChannel,
+    recordOf(id) {
+      let record = records.get(id);
+      if (record === undefined) {
+        record = findWatchRecord({ client: deployment, id, self, watchChannel });
+        records.set(id, record);
+      }
+      return record;
+    },
+    self,
+    watchChannel,
   };
   const wait = options.wait ?? 0;
-  const self = await client.me();
-  const records = new Map<string, Promise<BoardWatchRecord>>();
-  const recordOf = (id: string) => {
-    let record = records.get(id);
-    if (record === undefined) {
-      record = findWatchRecord({ client, id, self, watchChannel: input.watchChannel() });
-      records.set(id, record);
-    }
-    return record;
-  };
-
   let dispatched = 0;
   for (let pull = 0; pull < MAX_PULLS_PER_WAKE; pull += 1) {
-    const matches = await client.matches({
-      limit: MATCHES_PER_PULL,
-      wait,
-    });
-    for (const match of matches) {
-      if (await handleMatch({ ...input, match, recordOf, self })) dispatched += 1;
-    }
+    const matches = await deployment.matches({ limit: MATCHES_PER_PULL, wait });
+    for (const match of matches) if (await handleMatch(wake, match)) dispatched += 1;
     if (wait > 0 || matches.length === 0) break;
   }
   return dispatched;
 }
 
-async function handleMatch(
-  input: DrainInput & {
-    readonly match: BoardMatch;
-    readonly self: { readonly principal: string; readonly actor: string };
-    recordOf(id: string): Promise<BoardWatchRecord>;
-  },
-): Promise<boolean> {
-  const { client, match } = input;
+async function handleMatch(wake: Wake, match: BoardMatch): Promise<boolean> {
+  const { deployment } = wake;
   try {
-    const record = await input.recordOf(match.watcher);
+    const record = await wake.recordOf(match.watcher);
     if (record.retired) {
-      await client.ack(match, { skip: true });
+      await deployment.ack(match, { skip: true });
       return false;
     }
     if (record.action.type === "claim") {
       try {
-        checkQueueScope(record.action.queue, {
-          can: input.can,
-          watchChannel: input.watchChannel(),
-        });
+        checkQueueScope(record.action.queue, wake);
       } catch (error) {
         throw new BoardWatchConfigError(
           `Board watch ${record.id} claims outside this agent's scope: ${(error as Error).message}`,
         );
       }
     }
-    const dispatched = await dispatch({ ...input, record });
-    await client.ack(match);
+    const dispatched = await dispatch(wake, match, record);
+    await deployment.ack(match);
     return dispatched;
   } catch (error) {
-    const outcome =
-      error instanceof BoardWatchConfigError
-        ? (log.warn(error.message, { match: match.id }), { skip: true })
-        : {
-            error: `eve couldn't dispatch this match (error id ${logError("board match failed", error, { match: match.id })})`,
-          };
-    await client
+    const misconfigured = error instanceof BoardWatchConfigError;
+    if (misconfigured) log.warn(error.message, { match: match.id });
+    const outcome = misconfigured
+      ? { skip: true }
+      : {
+          error: `eve couldn't dispatch this match (error id ${logError("board match failed", error, { match: match.id })})`,
+        };
+    await deployment
       .ack(match, outcome)
       .catch((ackError) => logError("board ack failed", ackError, { match: match.id }));
     return false;
   }
 }
 
-async function dispatch(
-  input: DrainInput & {
-    readonly match: BoardMatch;
-    readonly record: BoardWatchRecord;
-    readonly self: { readonly principal: string; readonly actor: string };
-  },
-): Promise<boolean> {
-  const { client, match, record } = input;
-  const message = match.event.message;
-  const watch = { name: input.name, watch: record.id };
-  if (message !== undefined && coversChannel(input.watchChannel(), message.channel)) return false;
+async function dispatch(wake: Wake, match: BoardMatch, record: BoardWatchRecord): Promise<boolean> {
+  const { can, deployment, self } = wake;
+  const posted = match.event.message;
+  if (posted !== undefined && coversChannel(wake.watchChannel, posted.channel)) return false;
+  const start = (
+    message: BoardMessage,
+    context: string,
+    idempotencyKey: string,
+    task?: BoardClaim,
+  ) =>
+    sendRecovering(
+      wake.from(boardSessionAddress(record.id, message)),
+      boardMessageContent(message),
+      {
+        auth: defaultBoardAuth(message, { name: wake.name, watch: record.id }),
+        context: [formatWatchContext(record), context],
+        idempotencyKey,
+        state: {
+          channel: message.channel,
+          noSync: message.noSync,
+          threadId: boardThreadId(message),
+          watch: record.id,
+          ...(task !== undefined && { task }),
+        },
+      },
+    );
 
-  if (record.action.type === "claim") {
-    if (match.event.type === "message.posted") {
-      return message === undefined ? false : await followUp({ ...input, message });
-    }
-    if (!CLAIM_EVENTS.has(match.event.type)) return false;
-    const { queue } = record.action;
-    const claim = await input.claimer.claimReady({ ...queue, lease: CLAIM_LEASE_SECONDS });
-    if (claim === null) return false;
-    const { task } = claim;
-    if (!allows(input.can, task.channel, "read") || !allows(input.can, task.channel, "label")) {
-      await client.held(claim).release();
-      log.warn("board watch claimed a task outside the agent's read scope; released it", {
-        task: task.id,
+  if (match.event.type === "message.posted") {
+    if (posted === undefined || posted.deleted) return false;
+    if (posted.by.actor === self.actor && posted.schedule === undefined) return false;
+    if (!boardAllows(can, posted.channel, "read")) {
+      log.warn("board watch matched a channel outside the agent's read scope; skipped it", {
+        channel: posted.channel,
         watch: record.id,
       });
       return false;
     }
-    try {
-      await client.label(task.id, { set: { [CLAIM_WATCH_LABEL]: record.id } });
-      await sendRecovering(
-        input.from(boardSessionAddress(record.id, task)),
-        boardMessageContent(task),
-        {
-          auth: defaultBoardAuth(task, watch),
-          context: [formatWatchContext(record), formatTaskContext(claim)],
-          idempotencyKey: `board:task:${claim.taskId}:${claim.epoch}`,
-          state: {
-            channel: task.channel,
-            messageId: task.id,
-            noSync: task.noSync,
-            task: heldClaimOf(claim),
-            threadId: task.id,
-            watch: record.id,
-          },
-        },
-      );
-    } catch (error) {
-      await client
-        .held(claim)
-        .release()
-        .catch((releaseError) =>
-          logError("board task release failed", releaseError, { task: claim.taskId }),
-        );
-      throw error;
+    if (record.action.type !== "claim") {
+      await start(posted, formatBoardContext(posted), `board:${match.id}`);
+      return true;
     }
+    if (posted.re === null) return false;
+    const root = (await deployment.thread(posted.re)).message;
+    const held = root.task?.claim;
+    if (held?.actor !== self.actor || Date.parse(held.until) <= Date.now()) return false;
+    if (root.labels[CLAIM_WATCH_LABEL] !== record.id) return false;
+    await start(posted, formatTaskFollowUpContext(posted), `board:${match.id}`);
     return true;
   }
 
-  if (
-    match.event.type !== "message.posted" ||
-    message === undefined ||
-    message.deleted ||
-    postedBySelf(message, input)
-  ) {
-    return false;
-  }
-  if (!allows(input.can, message.channel, "read")) {
-    log.warn("board watch matched a channel outside the agent's read scope; skipped it", {
-      channel: message.channel,
+  if (record.action.type !== "claim" || !CLAIM_EVENTS.has(match.event.type)) return false;
+  const claimed = await wake.model.claimReady({
+    ...record.action.queue,
+    lease: CLAIM_LEASE_SECONDS,
+  });
+  if (claimed === null) return false;
+  const { task, ...claim } = claimed;
+  if (!boardAllows(can, task.channel, "read") || !boardAllows(can, task.channel, "label")) {
+    await deployment.held(claim).release();
+    log.warn("board watch claimed a task outside the agent's read scope; released it", {
+      task: task.id,
       watch: record.id,
     });
     return false;
   }
-  await sendRecovering(
-    input.from(boardSessionAddress(record.id, message)),
-    boardMessageContent(message),
-    {
-      auth: defaultBoardAuth(message, watch),
-      context: [formatWatchContext(record), formatBoardContext(message)],
-      idempotencyKey: `board:${match.id}`,
-      state: {
-        channel: message.channel,
-        messageId: message.id,
-        noSync: message.noSync,
-        threadId: boardThreadId(message),
-        watch: record.id,
-      },
-    },
-  );
+  try {
+    await deployment.label(task.id, { set: { [CLAIM_WATCH_LABEL]: record.id } });
+    await start(task, formatTaskContext(claimed), `board:task:${task.id}:${claim.epoch}`, claim);
+  } catch (error) {
+    await deployment
+      .held(claim)
+      .release()
+      .catch((releaseError) =>
+        logError("board task release failed", releaseError, { task: task.id }),
+      );
+    throw error;
+  }
   return true;
-}
-
-async function followUp(
-  input: DrainInput & {
-    readonly match: BoardMatch;
-    readonly message: BoardMessage;
-    readonly record: BoardWatchRecord;
-    readonly self: { readonly principal: string; readonly actor: string };
-  },
-): Promise<boolean> {
-  const { client, match, message, record } = input;
-  if (message.re === null || message.deleted || postedBySelf(message, input)) return false;
-  const root = (await client.thread(message.re)).message;
-  const claim = root.task?.claim;
-  if (claim?.actor !== input.self.actor || Date.parse(claim.until) <= Date.now()) return false;
-  if (root.labels[CLAIM_WATCH_LABEL] !== record.id) return false;
-  if (!allows(input.can, message.channel, "read")) return false;
-  await sendRecovering(
-    input.from(boardSessionAddress(record.id, root)),
-    boardMessageContent(message),
-    {
-      auth: defaultBoardAuth(message, { name: input.name, watch: record.id }),
-      context: [formatWatchContext(record), formatTaskFollowUpContext(message)],
-      idempotencyKey: `board:${match.id}`,
-      state: {
-        channel: message.channel,
-        messageId: message.id,
-        noSync: message.noSync,
-        threadId: root.id,
-        watch: record.id,
-      },
-    },
-  );
-  return true;
-}
-
-function postedBySelf(
-  message: BoardMessage,
-  input: { readonly client: BoardClient; readonly self: { readonly principal: string } },
-): boolean {
-  return (
-    message.by.principal === input.self.principal &&
-    message.by.profile === input.client.profile &&
-    message.schedule === undefined
-  );
 }
 
 async function sendRecovering(
@@ -553,60 +447,38 @@ async function sendRecovering(
   }
 }
 
-export function heldClaimOf(claim: BoardClaimedTask): BoardHeldClaim {
-  return {
-    epoch: claim.epoch,
-    id: claim.taskId,
-    lease: CLAIM_LEASE_SECONDS,
-    token: claim.token,
-    until: claim.until,
-  };
-}
-
 function temporaryBoardFailure(error: unknown): boolean {
   const status = (error as { readonly status?: unknown } | null)?.status;
   return typeof status !== "number" || status === 429 || status >= 500;
 }
 
-function boardClaimOf(claim: BoardHeldClaim): BoardClaim {
-  return { epoch: claim.epoch, taskId: claim.id, token: claim.token, until: claim.until };
+function claimDue(claim: BoardClaim, now = Date.now()): boolean {
+  return Date.parse(claim.until) - now < (CLAIM_LEASE_SECONDS * 1000) / 3;
 }
 
-function claimDue(claim: BoardHeldClaim, now = Date.now()): boolean {
-  return Date.parse(claim.until) - now < (claim.lease * 1000) / 3;
-}
-
-async function renewClaim(
-  client: BoardClient,
-  claim: BoardHeldClaim,
-): Promise<BoardHeldClaim | null> {
+async function renewClaim(client: BoardClient, claim: BoardClaim): Promise<BoardClaim | null> {
   try {
-    const renewed = await client.held(boardClaimOf(claim)).renew(claim.lease);
-    return { ...claim, epoch: renewed.epoch, token: renewed.token, until: renewed.until };
+    return { ...claim, until: await client.held(claim).renew(CLAIM_LEASE_SECONDS) };
   } catch (error) {
     if (boardErrorCode(error) === "claim_lost") {
       log.warn("board task claim was lost; the agent no longer holds the task", {
-        task: claim.id,
+        task: claim.taskId,
       });
       return null;
     }
-    logError("board task renewal failed", error, { task: claim.id });
+    logError("board task renewal failed", error, { task: claim.taskId });
     return claim;
   }
 }
 
-const RENEW_EVERY_MS = 30_000;
-
 interface ClaimRenewal {
   readonly calls: Set<string>;
-  claim: BoardHeldClaim | null;
+  claim: BoardClaim | null;
   renewing: boolean;
   timer?: ReturnType<typeof setInterval>;
 }
 
 const renewals = new Map<string, ClaimRenewal>();
-
-const renewalKey = (claim: BoardHeldClaim) => claim.token;
 
 export function renewDuringCall(
   client: () => BoardClient,
@@ -616,7 +488,7 @@ export function renewDuringCall(
 ): void {
   const claim = state.task;
   if (claim == null) return;
-  const running = renewals.get(renewalKey(claim));
+  const running = renewals.get(claim.token);
   if (running !== undefined) {
     running.calls.add(callId);
     return;
@@ -633,20 +505,22 @@ export function renewDuringCall(
     if (renewal.claim === null) clearInterval(renewal.timer);
   }, everyMs);
   renewal.timer.unref?.();
-  renewals.set(renewalKey(claim), renewal);
+  renewals.set(claim.token, renewal);
+}
+
+function stopRenewal(token: string): void {
+  clearInterval(renewals.get(token)?.timer);
+  renewals.delete(token);
 }
 
 export function endRenewal(state: BoardChannelState, callId?: string): void {
-  const claim = state.task;
-  if (claim == null) return;
-  const key = renewalKey(claim);
-  const renewal = renewals.get(key);
-  if (renewal === undefined) return;
+  const token = state.task?.token;
+  const renewal = token === undefined ? undefined : renewals.get(token);
+  if (token === undefined || renewal === undefined) return;
   if (callId !== undefined) renewal.calls.delete(callId);
-  state.task = renewal.claim === null ? null : { ...claim, until: renewal.claim.until };
-  if (callId !== undefined && renewal.calls.size > 0 && renewal.claim !== null) return;
-  clearInterval(renewal.timer);
-  renewals.delete(key);
+  state.task = renewal.claim;
+  if (callId === undefined || renewal.calls.size === 0 || renewal.claim === null)
+    stopRenewal(token);
 }
 
 export interface BoardSettlement {
@@ -675,6 +549,7 @@ export async function keepBoardClaim(client: BoardClient, state: BoardChannelSta
   const claim = state.task;
   if (claim == null || !claimDue(claim)) return;
   state.task = await renewClaim(client, claim);
+  if (state.task === null) stopRenewal(claim.token);
 }
 
 export async function settleAfterCall(
@@ -688,14 +563,17 @@ export async function settleAfterCall(
   const observed = view === undefined ? undefined : callOf(view, call.callId);
   const settlement =
     claim != null && call.outcome === "completed" && observed !== undefined
-      ? settlementOf(call.output, claim.id, observed)
+      ? settlementOf(call.output, claim.taskId, observed)
       : undefined;
   if (claim == null || settlement === undefined) {
     await keepBoardClaim(client, state);
     return;
   }
   const { problem, retry } = await settleClaim(client, claim, settlement);
-  if (!retry) state.task = null;
+  if (!retry) {
+    state.task = null;
+    stopRenewal(claim.token);
+  }
   if (problem !== undefined) {
     await bestEffort(
       "note",
@@ -706,10 +584,10 @@ export async function settleAfterCall(
 
 export async function settleClaim(
   client: BoardClient,
-  claim: BoardHeldClaim,
+  claim: BoardClaim,
   settlement: BoardSettlement,
 ): Promise<{ readonly problem?: string; readonly retry: boolean }> {
-  const held = client.held(boardClaimOf(claim));
+  const held = client.held(claim);
   try {
     if (settlement.settled === "completed") await held.complete(settlement.result);
     else if (settlement.settled === "failed") await held.fail(settlement.reason ?? "Failed.");
@@ -718,19 +596,19 @@ export async function settleClaim(
   } catch (error) {
     if (boardErrorCode(error) === "claim_lost") {
       return {
-        problem: `eve couldn't mark task #${claim.id} ${settlement.settled}: its claim ended before the agent settled it.`,
+        problem: `eve couldn't mark task #${claim.taskId} ${settlement.settled}: its claim ended before the agent settled it.`,
         retry: false,
       };
     }
-    const id = logError("board task settlement failed", error, { task: claim.id });
+    const id = logError("board task settlement failed", error, { task: claim.taskId });
     if (!temporaryBoardFailure(error)) {
       return {
-        problem: `The board refused to mark task #${claim.id} ${settlement.settled} (error id ${id}). Its claim lapses on its own, and the task goes back to the queue.`,
+        problem: `The board refused to mark task #${claim.taskId} ${settlement.settled} (error id ${id}). Its claim lapses on its own, and the task goes back to the queue.`,
         retry: false,
       };
     }
     return {
-      problem: `eve couldn't mark task #${claim.id} ${settlement.settled} on the board. Call the task tool again to retry.`,
+      problem: `eve couldn't mark task #${claim.taskId} ${settlement.settled} on the board. Call the task tool again to retry.`,
       retry: true,
     };
   }
@@ -738,23 +616,16 @@ export async function settleClaim(
 
 function threadHandle(
   client: BoardClient,
-  threadId: string,
-  state: { readonly messageId: string | null; readonly noSync?: boolean },
+  state: Pick<BoardChannelState, "threadId" | "noSync">,
 ): BoardThreadHandle {
+  const threadId = state.threadId ?? "";
   return {
-    threadId,
     reply: (post) =>
       client.reply(
         threadId,
         typeof post === "string" ? { noSync: state.noSync === true, text: post } : post,
       ),
-    async react(emoji, options = {}) {
-      const target = options.messageId ?? state.messageId ?? threadId;
-      await client.react(target, emoji, { remove: options.remove });
-    },
     typing: (status) => client.typing(threadId, status),
-    label: (change) => client.label(threadId, change),
-    read: () => client.thread(threadId),
   };
 }
 

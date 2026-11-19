@@ -59,8 +59,8 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
   back with the wake path, branch, and sync entries unchanged. They hold an in-process lock and a
   claim on a lock task in the watch channel, so sessions and replicas never drop each other's
   watchers.
-- **Handling a match.** A missing, duplicated, or foreign record acks the match with a
-  configuration error; a retired one is skipped. The agent's own posts are skipped unless a schedule
+- **Handling a match.** A match whose record is missing, duplicated, foreign, or retired is
+  skipped, with a logged warning unless the record is retired. The agent's own posts are skipped unless a schedule
   posted them. The match ID is the idempotency key, and the match is acked once eve accepts it.
 - **Scope.** `can` is checked with the board's own precedence (exact channel, then the longest
   subtree, then `*`) on every delivered message and claimed task, not only when a watch is created.

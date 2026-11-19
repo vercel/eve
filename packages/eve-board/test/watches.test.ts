@@ -9,11 +9,7 @@ import {
   settlementOf,
   type BoardChannelState,
 } from "../extension/lib/board-channel.ts";
-import {
-  BOARD_TEXT_LIMIT,
-  createBoardClient,
-  resolveBoardTarget,
-} from "../extension/lib/client.ts";
+import { BOARD_TEXT_LIMIT, createBoardClient } from "../extension/lib/client.ts";
 import {
   defineBoardCreateTaskTool,
   defineBoardLabelTool,
@@ -35,7 +31,7 @@ import {
 import { accepts, EVE_PRINCIPAL, fakeFrom, recorder, runTool, startBoard } from "./helpers.ts";
 
 const settings = () => ({ profile: "helper" });
-const client = () => createBoardClient(resolveBoardTarget(settings()));
+const client = () => createBoardClient(settings());
 
 async function wake(from: ChannelFrom<BoardChannelState>, expect: "some" | "none") {
   if (expect === "none") await new Promise((resolve) => setTimeout(resolve, 200));
@@ -111,7 +107,6 @@ test("a watch the agent creates wakes one turn with its stored instructions, and
   assert.match(delivery!.options.context![0]!, new RegExp(incidents.instructions, "u"));
   assert.deepEqual(delivery!.options.state, {
     channel: "incidents",
-    messageId: posted.id,
     noSync: false,
     threadId: posted.id,
     watch: first.id,
@@ -169,7 +164,7 @@ test("a claiming watch claims a ready task and dispatches to the task's thread",
   assert.equal(delivery!.address, `${created.id}:thread:${task.thread}`);
   assert.equal(delivery!.message, "Fix the flaky test.");
   assert.match(delivery!.options.idempotencyKey!, new RegExp(`^board:task:${task.id}:1$`, "u"));
-  assert.equal(delivery!.options.state?.task?.id, task.id);
+  assert.equal(delivery!.options.state?.task?.taskId, task.id);
   const leased = Date.parse(delivery!.options.state!.task!.until) - Date.now();
   assert.ok(leased > 3_500_000, `the claim holds for ${leased} ms, not an hour`);
   const { message } = await client().thread(task.id);
@@ -379,13 +374,7 @@ test("the channel settles the claim a task tool named, and says when the claim a
   const task = (await as("alice", "/tasks", { channel: "work/a", text: "Fix it." })).task;
   const board = client();
   const claim = await board.claim(task.id, 60);
-  const held = {
-    epoch: claim.epoch,
-    id: task.id,
-    lease: 60,
-    token: claim.token,
-    until: claim.until,
-  };
+  const { task: _root, ...held } = claim;
 
   assert.deepEqual(
     await settleClaim(board, held, { result: "Done.", settled: "completed", task: task.id }),

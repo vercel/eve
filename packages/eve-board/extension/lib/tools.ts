@@ -1,18 +1,15 @@
 import { createHash } from "node:crypto";
 
-import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
-import { defineTool } from "eve/tools";
+import { defineTool, type ToolContext } from "eve/tools";
 import { z } from "zod";
 
 import {
   BOARD_HOLD_KIND_PATTERN,
   BOARD_TASK_NOTE_LIMIT,
   BOARD_TEXT_LIMIT,
-  BOARD_WATCHER_ID_PATTERN,
+  BOARD_NAME_PATTERN,
   BOARD_UPLOAD_LIMIT,
-  createBoardClient,
-  resolveBoardTarget,
   type BoardClient,
   type BoardMessage,
   type BoardSettings,
@@ -20,11 +17,10 @@ import {
   type BoardWrittenMessage,
 } from "./client.ts";
 import {
+  boardClients,
   checkWatchScope,
   createWatch,
-  DEFAULT_WATCH_CHANNEL,
   listWatches,
-  modelCan,
   removeWatch,
   watchIdOf,
   type BoardWatchAction,
@@ -32,47 +28,21 @@ import {
 
 type Settings = () => BoardSettings;
 
-interface ToolContext {
-  readonly callId: string;
-  readonly session: {
-    readonly id: string;
-    readonly auth?: { readonly current: SessionAuthContext | null };
-  };
-  readonly channel?: { readonly metadata?: unknown };
-}
-
 const SHARED =
   "Board channels are shared with the team, and a channel may sync to Slack, GitHub, or Linear, so everything posted there can reach people outside the board.";
 
 const messageId = z.string().min(1).describe("Any message ID in the thread, as the board gave it.");
 
 function client(settings: Settings): BoardClient {
-  const config = settings();
-  return createBoardClient(
-    resolveBoardTarget({
-      ...config,
-      can: modelCan(config.can, config.watchChannel ?? DEFAULT_WATCH_CHANNEL),
-    }),
-  );
-}
-
-function deploymentClient(settings: Settings): BoardClient {
-  return createBoardClient(resolveBoardTarget({ ...settings(), can: undefined }));
+  return boardClients(settings()).model;
 }
 
 function postId(ctx: ToolContext) {
   return createHash("sha256").update(`${ctx.session.id}:${ctx.callId}`).digest("hex");
 }
 
-function metadataOf(ctx: ToolContext): Readonly<Record<string, unknown>> {
-  const metadata = ctx.channel?.metadata;
-  return typeof metadata === "object" && metadata !== null
-    ? (metadata as Record<string, unknown>)
-    : {};
-}
-
 function currentThread(ctx: ToolContext): string | undefined {
-  const thread = metadataOf(ctx).boardThread;
+  const thread = ctx.channel.metadata.boardThread;
   return typeof thread === "string" && thread.length > 0 ? thread : undefined;
 }
 
@@ -84,14 +54,15 @@ function threadOrCurrent(id: string | undefined, ctx: ToolContext): string {
   return thread;
 }
 
-function heldClaim(ctx: ToolContext): { readonly id: string; readonly until: string } {
-  const task = metadataOf(ctx).boardTask as { id?: unknown; until?: unknown } | null | undefined;
-  if (
-    typeof task !== "object" ||
-    task === null ||
-    typeof task.id !== "string" ||
-    typeof task.until !== "string"
-  ) {
+type Held = { readonly id: string; readonly until: string } | null | undefined;
+
+export function holdsTask(ctx: Pick<ToolContext, "channel">): boolean {
+  return (ctx.channel.metadata.boardTask as Held) != null;
+}
+
+function heldClaim(ctx: ToolContext): string {
+  const task = ctx.channel.metadata.boardTask as Held;
+  if (task == null) {
     throw new Error(
       "This session holds no board task: settle tools work only in a session that claimed one.",
     );
@@ -101,12 +72,7 @@ function heldClaim(ctx: ToolContext): { readonly id: string; readonly until: str
       `You no longer hold board task #${task.id}: its claim ran out. Stop working on it.`,
     );
   }
-  return { id: task.id, until: task.until };
-}
-
-export function holdsTask(ctx: { readonly channel?: { readonly metadata?: unknown } }): boolean {
-  const task = metadataOf(ctx as ToolContext).boardTask;
-  return typeof task === "object" && task !== null;
+  return task.id;
 }
 
 function settle(
@@ -114,7 +80,7 @@ function settle(
   settled: "completed" | "failed" | "blocked",
   details: { readonly result?: string; readonly reason?: string; readonly kind?: string },
 ) {
-  return { settled, task: heldClaim(ctx).id, ...details };
+  return { settled, task: heldClaim(ctx), ...details };
 }
 
 const attach = z
@@ -131,23 +97,6 @@ const text = z
   .optional()
   .describe("Markdown. May be left out when attaching files.");
 
-const TYPES: Readonly<Record<string, string>> = {
-  avif: "image/avif",
-  csv: "text/csv",
-  gif: "image/gif",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  json: "application/json",
-  log: "text/plain",
-  md: "text/markdown",
-  mp4: "video/mp4",
-  pdf: "application/pdf",
-  png: "image/png",
-  txt: "text/plain",
-  webm: "video/webm",
-  webp: "image/webp",
-};
-
 async function uploadFiles(
   board: BoardClient,
   paths: readonly string[] | undefined,
@@ -163,7 +112,7 @@ async function uploadFiles(
       throw new Error(`${path} is over 4 MB, the most a board attachment can be.`);
     }
     const name = path.split("/").pop() || "file";
-    files.push({ data, name, type: TYPES[name.split(".").pop()?.toLowerCase() ?? ""] });
+    files.push({ data, name });
   }
   const ids = [];
   for (const file of files) ids.push((await board.upload(file)).id);
@@ -174,7 +123,6 @@ function written(message: BoardWrittenMessage) {
   return {
     ...summarize(message),
     ...(message.unknownMentions !== undefined && {
-      unknownMentions: message.unknownMentions,
       warning: `${message.unknownMentions.map((handle) => `@${handle}`).join(", ")} matched no one on the board, so it stayed plain text and notified no one.`,
     }),
   };
@@ -298,9 +246,9 @@ export function defineBoardPostTool(settings: Settings) {
 /** Replies in a thread. */
 export function defineBoardReplyTool(settings: Settings) {
   return defineTool({
-    description: `Reply in a board thread. When a board discussion started this session, your final message is already posted there as your reply: use this tool for other threads, to attach files, or for progress on a task you hold. ${SHARED}`,
+    description: `Reply in a board thread. When a board discussion started this session, your final message is already posted there as your reply: use this tool for other threads, to attach files, or for progress on a task you hold. Defaults to this session's thread. ${SHARED}`,
     inputSchema: z.object({
-      id: messageId,
+      id: messageId.optional(),
       text,
       attach,
       after: z
@@ -320,7 +268,12 @@ export function defineBoardReplyTool(settings: Settings) {
       const board = client(settings);
       const attachments = await uploadFiles(board, attach, ctx.getSandbox);
       return written(
-        await board.reply(id, { ...post, attachments, id: postId(ctx), text: text ?? "" }),
+        await board.reply(threadOrCurrent(id, ctx), {
+          ...post,
+          attachments,
+          id: postId(ctx),
+          text: text ?? "",
+        }),
       );
     },
   });
@@ -413,7 +366,7 @@ export function defineBoardScheduleTool(settings: Settings) {
         { re: threadOrCurrent(id, ctx) },
         { ...timing, noSync: sync !== true },
       );
-      return { id: schedule.id, next: schedule.next, thread: schedule.re };
+      return { id: schedule.id, next: schedule.next, re: schedule.re };
     },
   });
 }
@@ -436,7 +389,7 @@ export function defineBoardSchedulesTool(settings: Settings) {
   return defineTool({
     deferred: true,
     description:
-      "List pending scheduled board messages: in a thread by any message in it, in a channel, or, with neither, the ones you scheduled. Defaults to this session's thread.",
+      "List pending scheduled board messages in a thread, by any message in it, or in a channel. Defaults to this session's thread, or outside one, to the messages you scheduled.",
     inputSchema: z.object({
       id: messageId.optional(),
       channel: z.string().min(1).optional(),
@@ -504,7 +457,7 @@ export function defineBoardCreateTaskTool(settings: Settings) {
   });
 }
 
-export function defineBoardCompleteTaskTool(_settings: Settings) {
+export function defineBoardCompleteTaskTool() {
   return defineTool({
     description:
       "Complete the board task you hold, with the result: what you did and the proof, such as a pull request link. Call it once the brief's check passes, as your last step.",
@@ -515,7 +468,7 @@ export function defineBoardCompleteTaskTool(_settings: Settings) {
   });
 }
 
-export function defineBoardFailTaskTool(_settings: Settings) {
+export function defineBoardFailTaskTool() {
   return defineTool({
     description:
       "Give up on the board task you hold, with why. Its owner can reopen it. Use it when the task can't be done as briefed.",
@@ -526,7 +479,7 @@ export function defineBoardFailTaskTool(_settings: Settings) {
   });
 }
 
-export function defineBoardBlockTaskTool(_settings: Settings) {
+export function defineBoardBlockTaskTool() {
   return defineTool({
     description:
       "Hold the board task you hold for a person, with the one question they must answer: ask it in the thread with your recommendation first. Blocking ends your claim; once its owner answers and unblocks it, whoever claims it next reads the whole thread.",
@@ -607,13 +560,13 @@ export function defineBoardWatchTool(settings: Settings) {
     async execute({ tail, instructions, claim }, ctx) {
       assertConfigurer(settings, ctx);
       const config = settings();
-      const watchChannel = config.watchChannel ?? DEFAULT_WATCH_CHANNEL;
+      const { deployment, watchChannel } = boardClients(config);
       const action: BoardWatchAction =
         claim === undefined ? { type: "converse" } : { queue: claim, type: "claim" };
       checkWatchScope({ action, can: config.can, tail, watchChannel });
       const watch = await createWatch({
         action,
-        client: deploymentClient(settings),
+        client: deployment,
         id: watchIdOf(ctx.session.id, ctx.callId),
         instructions,
         tail: tail.trim(),
@@ -635,13 +588,9 @@ export function defineBoardWatchesTool(settings: Settings) {
     }),
     async execute({ details }, ctx) {
       assertConfigurer(settings, ctx);
-      const config = settings();
+      const { deployment, watchChannel } = boardClients(settings());
       return {
-        watches: await listWatches({
-          client: deploymentClient(settings),
-          details: details === true,
-          watchChannel: config.watchChannel ?? DEFAULT_WATCH_CHANNEL,
-        }),
+        watches: await listWatches({ client: deployment, details: details === true, watchChannel }),
       };
     },
   });
@@ -654,19 +603,12 @@ export function defineBoardUnwatchTool(settings: Settings) {
     description:
       "Stop a board watch by its ID: it no longer wakes you, and your other watches keep running.",
     inputSchema: z.object({
-      id: z
-        .string()
-        .regex(BOARD_WATCHER_ID_PATTERN)
-        .describe("The watch's ID, such as `w-7k3p2q`."),
+      id: z.string().regex(BOARD_NAME_PATTERN).describe("The watch's ID, such as `w-7k3p2q`."),
     }),
     async execute({ id }, ctx) {
       assertConfigurer(settings, ctx);
-      const config = settings();
-      return await removeWatch({
-        client: deploymentClient(settings),
-        id,
-        watchChannel: config.watchChannel ?? DEFAULT_WATCH_CHANNEL,
-      });
+      const { deployment, watchChannel } = boardClients(settings());
+      return await removeWatch({ client: deployment, id, watchChannel });
     },
   });
 }

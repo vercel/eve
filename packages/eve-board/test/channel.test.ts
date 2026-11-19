@@ -7,18 +7,17 @@ import { emptySessionView, foldEvents } from "eve/events";
 import {
   createBoardChannel,
   endRenewal,
-  heldClaimOf,
   keepBoardClaim,
   renewDuringCall,
   settleAfterCall,
   type BoardChannelState,
 } from "../extension/lib/board-channel.ts";
-import { createBoardClient, resolveBoardTarget } from "../extension/lib/client.ts";
+import { createBoardClient } from "../extension/lib/client.ts";
 import { createWatch, DEFAULT_WATCH_CHANNEL } from "../extension/lib/watches.ts";
 import { recorder, startBoard } from "./helpers.ts";
 
 const settings = () => ({ profile: "helper" });
-const client = () => createBoardClient(resolveBoardTarget(settings()));
+const client = () => createBoardClient(settings());
 
 interface CompiledBoardChannel {
   readonly routes: readonly {
@@ -48,7 +47,6 @@ const compiled = () => compiledOf(createBoardChannel(settings));
 
 const emptyState = (): BoardChannelState => ({
   channel: null,
-  messageId: null,
   task: null,
   threadId: null,
 });
@@ -74,12 +72,8 @@ async function claimedTask(
     lease,
   });
   assert.ok(claim !== null);
-  const state: BoardChannelState = {
-    channel: "work/a",
-    messageId: task.id,
-    task: heldClaimOf(claim),
-    threadId: task.id,
-  };
+  const { task: _root, ...held } = claim;
+  const state: BoardChannelState = { channel: "work/a", task: held, threadId: task.id };
   return { state, task };
 }
 
@@ -140,15 +134,14 @@ test("deliver records the turn's message and claim, and metadata never carries t
   await channel.adapter.deliver(
     {
       state: {
-        messageId: "m-2",
         noSync: true,
-        task: { epoch: 1, id: "t-1", lease: 300, token: "claim-token-123", until },
+        task: { epoch: 1, taskId: "t-1", token: "claim-token-123", until },
       },
     },
     ctx,
   );
 
-  assert.deepEqual([state.messageId, state.noSync, state.task?.id], ["m-2", true, "t-1"]);
+  assert.deepEqual([state.noSync, state.task?.taskId], [true, "t-1"]);
   const metadata = channel.adapter.instrumentation.metadata(state);
   assert.deepEqual(metadata.boardTask, { id: "t-1", until });
   assert.doesNotMatch(JSON.stringify(metadata), /claim-token-123/u);
@@ -270,9 +263,7 @@ test("a lost claim stops renewing and clears the session's claim when the call s
   const { state, task } = await claimedTask(as);
   const tick = fakeIntervals(t);
   const claim = state.task!;
-  await client()
-    .held({ epoch: claim.epoch, taskId: claim.id, token: claim.token, until: claim.until })
-    .release();
+  await client().held(claim).release();
 
   renewDuringCall(client, state, "c-1");
   await tick();
@@ -280,6 +271,32 @@ test("a lost claim stops renewing and clears the session's claim when the call s
   assert.equal(renewalsOf(calls, task.id), 1);
   endRenewal(state, "c-1");
   assert.equal(state.task, null);
+});
+
+test("settling the task while another call runs stops renewing its claim", async (t) => {
+  const { as, calls } = await startBoard({ leaseCap: 300 });
+  const { state, task } = await claimedTask(as);
+  const tick = fakeIntervals(t);
+  const { board } = noteRecorder();
+
+  renewDuringCall(client, state, "c-long");
+  renewDuringCall(client, state, "c-done");
+  endRenewal(state, "c-done");
+  await settleAfterCall(
+    client(),
+    { board, state },
+    viewWithCall("c-done", "board__complete_task"),
+    {
+      callId: "c-done",
+      outcome: "completed",
+      output: { result: "Done.", settled: "completed", task: task.id },
+    },
+  );
+  await tick();
+  endRenewal(state, "c-long");
+
+  assert.equal(state.task, null);
+  assert.equal(renewalsOf(calls, task.id), 0);
 });
 
 test("the end of a turn stops renewing even with a call still open", async (t) => {

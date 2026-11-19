@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 
 import {
   BOARD_CHANNEL_SELECTOR,
-  BOARD_MAX_LEASE_SECONDS,
   BOARD_TEXT_LIMIT,
-  BOARD_WATCHER_ID_PATTERN,
+  BOARD_NAME_PATTERN,
   boardAllows,
   boardErrorCode,
+  createBoardClient,
   type BoardCan,
   type BoardClaimedTask,
   type BoardClient,
@@ -15,10 +15,11 @@ import {
   type BoardPermission,
   type BoardRegistration,
   type BoardRegistrationInput,
+  type BoardSettings,
 } from "./client.ts";
 
 export const DEFAULT_WATCH_CHANNEL = "eve-config/watches";
-export const BOARD_ROUTE_BASE = "/board";
+const BOARD_ROUTE_BASE = "/board";
 export const BOARD_WAKE_ROUTE = `${BOARD_ROUTE_BASE}/wake`;
 export const MAX_WATCHES = 32;
 
@@ -28,21 +29,16 @@ const LOCK_LABEL = "eve-lock";
 const LOCK_LEASE_SECONDS = 30;
 const LOCK_WAIT_MS = 30_000;
 
-type Env = Readonly<Record<string, string | undefined>>;
-
-/** Which ready tasks a claiming watch takes: a channel or `prefix/` subtree, labels, and owners by principal ID. */
 export interface BoardQueue {
   readonly channel: string;
   readonly label?: Readonly<Record<string, string>>;
   readonly from?: readonly string[];
 }
 
-/** What a watch does when it matches: start a turn on the matching thread, or claim a ready task first. */
 export type BoardWatchAction =
   | { readonly type: "converse" }
   | { readonly type: "claim"; readonly queue: BoardQueue };
 
-/** A watch: what it matches, and, when its instructions were read, what it does. */
 export interface BoardWatch {
   readonly id: string;
   readonly tail: string;
@@ -66,17 +62,6 @@ export class BoardWatchConfigError extends Error {
 export function watchIdOf(sessionId: string, callId: string): string {
   const digest = createHash("sha256").update(`${sessionId}:${callId}`).digest();
   return `w-${digest.readBigUInt64BE().toString(36).padStart(6, "0").slice(0, 6)}`;
-}
-
-export function publicBoardRoute(route: string, env: Env = process.env): string {
-  const prefix = env.EVE_PUBLIC_ROUTE_PREFIX?.trim().replace(/\/+$/u, "") ?? "";
-  if (prefix.length === 0) return route;
-  return `${prefix.startsWith("/") ? prefix : `/${prefix}`}${route}`;
-}
-
-export function hostedEnvironment(env: Env = process.env): "production" | "preview" | undefined {
-  const target = env.VERCEL_ENV;
-  return target === "production" || target === "preview" ? target : undefined;
 }
 
 const TAIL_FLAGS: Readonly<Record<string, "string" | "strings" | "boolean">> = {
@@ -187,8 +172,6 @@ function overlaps(a: string, b: string): boolean {
   return coversChannel(a, b) || coversChannel(b, a);
 }
 
-export const allows = boardAllows;
-
 function assertChannelSelector(channel: string): void {
   if (!BOARD_CHANNEL_SELECTOR.test(channel)) {
     throw new Error(
@@ -198,20 +181,29 @@ function assertChannelSelector(channel: string): void {
 }
 
 export function assertWatchId(id: string): void {
-  if (!BOARD_WATCHER_ID_PATTERN.test(id)) {
+  if (!BOARD_NAME_PATTERN.test(id)) {
     throw new Error(`"${id}" isn't a board watch ID: watch IDs look like "w-7k3p2q".`);
   }
 }
 
-export function modelCan(can: BoardCan | undefined, watchChannel: string): BoardCan {
+function modelCan(can: BoardCan | undefined, watchChannel: string): BoardCan {
   const grants: Record<string, "all" | readonly BoardPermission[]> =
     can === undefined || can === "all"
       ? { "*": "all" }
       : Array.isArray(can)
         ? { "*": can as readonly BoardPermission[] }
         : { ...(can as Record<string, "all" | readonly BoardPermission[]>) };
-  grants[watchChannel] = allows(can, watchChannel, "read") ? ["read"] : [];
+  grants[watchChannel] = boardAllows(can, watchChannel, "read") ? ["read"] : [];
   return grants;
+}
+
+export function boardClients(settings: BoardSettings) {
+  const watchChannel = settings.watchChannel ?? DEFAULT_WATCH_CHANNEL;
+  return {
+    deployment: createBoardClient(settings),
+    model: createBoardClient(settings, modelCan(settings.can, watchChannel)),
+    watchChannel,
+  };
 }
 
 export function checkWatchScope(input: {
@@ -232,7 +224,7 @@ export function checkWatchScope(input: {
       `A watch can't cover "${input.watchChannel}", where watch instructions are kept: choose a channel outside it.`,
     );
   }
-  if (!allows(input.can, channel, "read")) {
+  if (!boardAllows(input.can, channel, "read")) {
     throw new Error(`This agent may not read "${channel}" on the board, so it can't watch it.`);
   }
   if (input.action.type === "claim") checkQueueScope(input.action.queue, input);
@@ -246,7 +238,7 @@ export function checkQueueScope(
   if (overlaps(queue.channel, input.watchChannel)) {
     throw new Error(`A watch can't claim tasks in "${input.watchChannel}".`);
   }
-  if (!allows(input.can, queue.channel, "label")) {
+  if (!boardAllows(input.can, queue.channel, "label")) {
     throw new Error(`This agent may not claim tasks in "${queue.channel}" on the board.`);
   }
   for (const owner of queue.from ?? []) {
@@ -308,7 +300,7 @@ export async function findWatchRecord(input: {
   readonly client: BoardClient;
   readonly watchChannel: string;
   readonly id: string;
-  readonly self: { readonly principal: string };
+  readonly self: { readonly actor: string };
 }): Promise<BoardWatchRecord> {
   const { client, id } = input;
   const messages = await recordMessages(client, input.watchChannel, id);
@@ -323,7 +315,7 @@ export async function findWatchRecord(input: {
     );
   }
   const message = messages[0]!;
-  if (message.by.principal !== input.self.principal || message.by.profile !== client.profile) {
+  if (message.by.actor !== input.self.actor) {
     throw new BoardWatchConfigError(
       `Board watch ${id}'s instructions were written by ${message.by.actor}, not by this agent.`,
     );
@@ -338,13 +330,14 @@ export async function findWatchRecord(input: {
   };
 }
 
-export function registrationWhere(
+function registrationWhere(
   discovery: Pick<BoardDiscovery, "wake_by_path">,
-  env: Env = process.env,
 ): Omit<BoardRegistrationInput, "watch"> {
-  const environment = hostedEnvironment(env);
-  if (environment === undefined) return { url: null };
-  const base = publicBoardRoute(BOARD_ROUTE_BASE, env);
+  const { env } = process;
+  const environment = env.VERCEL_ENV;
+  if (environment !== "production" && environment !== "preview") return { url: null };
+  const prefix = env.EVE_PUBLIC_ROUTE_PREFIX?.trim().replace(/\/+$/u, "") ?? "";
+  const base = `${prefix === "" || prefix.startsWith("/") ? prefix : `/${prefix}`}${BOARD_ROUTE_BASE}`;
   if (discovery.wake_by_path === true) {
     return {
       branch: environment === "preview" ? (env.VERCEL_GIT_COMMIT_REF ?? null) : null,
@@ -360,10 +353,6 @@ export function registrationWhere(
     );
   }
   return { url: `https://${host}${base}` };
-}
-
-function whereOf(held: BoardRegistration): Omit<BoardRegistrationInput, "watch"> {
-  return held.path ? { branch: held.branch ?? null, path: held.path } : { url: held.url ?? null };
 }
 
 export async function heldRegistration(
@@ -413,8 +402,8 @@ async function lockTask(client: BoardClient, watchChannel: string): Promise<stri
     })
   )
     .map((summary) => summary.message)
-    .filter((message) => message.by.principal === self.principal && !message.deleted);
-  const lock = found.find((message) => message.by.profile === client.profile);
+    .filter((message) => !message.deleted);
+  const lock = found.find((message) => message.by.actor === self.actor);
   if (lock !== undefined) {
     const state = lock.task?.state;
     if (state !== "ready" && state !== "claimed") {
@@ -454,7 +443,6 @@ async function claimLock(client: BoardClient, taskId: string): Promise<BoardClai
 async function updateRegistration(input: {
   readonly client: BoardClient;
   readonly watchChannel: string;
-  readonly env?: Env;
   change(watch: Record<string, { readonly tail: string }>): boolean;
 }): Promise<BoardRegistration | undefined> {
   const { client } = input;
@@ -462,10 +450,11 @@ async function updateRegistration(input: {
     const held = await heldRegistration(client);
     const watch = { ...held?.watch };
     if (!input.change(watch)) return held;
-    const where =
-      held === undefined ? registrationWhere(await client.discovery(), input.env) : whereOf(held);
     try {
-      return await client.register({ ...where, sync: held?.sync, watch });
+      return await client.register({
+        ...(held ?? registrationWhere(await client.discovery())),
+        watch,
+      });
     } catch (error) {
       if (boardErrorCode(error) !== "watchers_need_project") throw error;
       throw new Error(
@@ -483,7 +472,6 @@ export async function createWatch(input: {
   readonly tail: string;
   readonly instructions: string;
   readonly action: BoardWatchAction;
-  readonly env?: Env;
 }): Promise<BoardWatch> {
   const { action, client, id, tail } = input;
   const text = watchRecordText(id, action, input.instructions);
@@ -505,7 +493,6 @@ export async function createWatch(input: {
   try {
     await updateRegistration({
       client,
-      env: input.env,
       watchChannel: input.watchChannel,
       change(watch) {
         if (watch[id] === undefined && Object.keys(watch).length >= MAX_WATCHES) {
@@ -572,14 +559,12 @@ export async function removeWatch(input: {
   readonly client: BoardClient;
   readonly watchChannel: string;
   readonly id: string;
-  readonly env?: Env;
 }): Promise<{ readonly id: string; readonly removed: boolean }> {
   const { client, id } = input;
   assertWatchId(id);
   let removed = false;
   await updateRegistration({
     client,
-    env: input.env,
     watchChannel: input.watchChannel,
     change(watch) {
       removed = watch[id] !== undefined;
@@ -589,10 +574,8 @@ export async function removeWatch(input: {
   });
   const self = await client.me();
   for (const message of await recordMessages(client, input.watchChannel, id)) {
-    if (message.by.principal !== self.principal || message.by.profile !== client.profile) continue;
+    if (message.by.actor !== self.actor) continue;
     await client.label(message.id, { set: { [STATE_LABEL]: "retired" } });
   }
   return { id, removed };
 }
-
-export const CLAIM_LEASE_SECONDS = BOARD_MAX_LEASE_SECONDS;

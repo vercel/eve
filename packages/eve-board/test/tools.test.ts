@@ -80,14 +80,13 @@ test("a reply attaches files from the sandbox and warns about mentions that noti
   );
 
   const mention = await run(reply, { id: root.id, text: "Done, @nobody" }, "call-4");
-  assert.deepEqual(mention.unknownMentions, ["nobody"]);
   assert.match(mention.warning, /@nobody matched no one/u);
 
   const thread = await run(defineBoardReadTool(settings), { id: root.id }, "call-6");
   assert.equal(thread.replies.length, 2);
 });
 
-test("notes and schedules default to the session's own thread", async () => {
+test("replies, notes, and schedules default to the session's own thread", async () => {
   await startBoard();
   const root = await run(defineBoardPostTool(settings), { channel: "dev", text: "Ship it" }, "c1");
   const session = { boardThread: root.id };
@@ -99,13 +98,15 @@ test("notes and schedules default to the session's own thread", async () => {
     session,
   );
   assert.equal(note.re, root.id);
+  const reply = await run(defineBoardReplyTool(settings), { text: "Deployed." }, "c5", session);
+  assert.equal(reply.re, root.id);
   const schedule = await run(
     defineBoardScheduleTool(settings),
     { in: "5m", text: "Check CI for the deploy." },
     "c3",
     session,
   );
-  assert.equal(schedule.thread, root.id);
+  assert.equal(schedule.re, root.id);
   assert.ok(schedule.next);
 
   await assert.rejects(
@@ -126,21 +127,22 @@ test("task tools create a task, and settle tools name the claim the session hold
   const until = new Date(Date.now() + 60_000).toISOString();
   const held = { boardTask: { id: created.id, until } };
   assert.deepEqual(
-    await run(defineBoardCompleteTaskTool(settings), { result: "Looks right." }, "c2", held),
+    await run(defineBoardCompleteTaskTool(), { result: "Looks right." }, "c2", held),
     { result: "Looks right.", settled: "completed", task: created.id },
   );
-  assert.deepEqual(
-    await run(defineBoardFailTaskTool(settings), { reason: "Too late." }, "c3", held),
-    { reason: "Too late.", settled: "failed", task: created.id },
-  );
+  assert.deepEqual(await run(defineBoardFailTaskTool(), { reason: "Too late." }, "c3", held), {
+    reason: "Too late.",
+    settled: "failed",
+    task: created.id,
+  });
   await assert.rejects(
-    run(defineBoardFailTaskTool(settings), { reason: "Too late." }, "c4", {
+    run(defineBoardFailTaskTool(), { reason: "Too late." }, "c4", {
       boardTask: { id: created.id, until: new Date(Date.now() - 1_000).toISOString() },
     }),
     /You no longer hold board task/u,
   );
   await assert.rejects(
-    run(defineBoardCompleteTaskTool(settings), {}, "c5"),
+    run(defineBoardCompleteTaskTool(), {}, "c5"),
     /This session holds no board task/u,
   );
 });
@@ -247,9 +249,12 @@ test("rare tools are deferred, and task tools are offered only while the session
     assert.equal(deferred(define(settings)), false, define.name);
   }
   const until = new Date(Date.now() + 60_000).toISOString();
-  assert.equal(holdsTask({ channel: { metadata: { boardTask: { id: "7", until } } } }), true);
-  assert.equal(holdsTask({ channel: { metadata: { boardTask: null } } }), false);
-  assert.equal(holdsTask({}), false);
+  assert.equal(
+    holdsTask({ channel: { kind: "unknown", metadata: { boardTask: { id: "7", until } } } }),
+    true,
+  );
+  assert.equal(holdsTask({ channel: { kind: "unknown", metadata: { boardTask: null } } }), false);
+  assert.equal(holdsTask({ channel: { kind: "unknown", metadata: {} } }), false);
 });
 
 test("board errors carry the board's hint in their message and keep their code", async () => {
@@ -281,20 +286,15 @@ test("board errors carry the board's hint in their message and keep their code",
 });
 
 test("the task tools accept only results, reasons, and hold kinds the board stores", () => {
-  const settings = () => ({});
-
-  assert.equal(accepts(defineBoardCompleteTaskTool(settings), { result: "x".repeat(1_000) }), true);
+  assert.equal(accepts(defineBoardCompleteTaskTool(), { result: "x".repeat(1_000) }), true);
+  assert.equal(accepts(defineBoardCompleteTaskTool(), { result: "x".repeat(1_001) }), false);
+  assert.equal(accepts(defineBoardFailTaskTool(), { reason: "x".repeat(1_001) }), false);
   assert.equal(
-    accepts(defineBoardCompleteTaskTool(settings), { result: "x".repeat(1_001) }),
-    false,
-  );
-  assert.equal(accepts(defineBoardFailTaskTool(settings), { reason: "x".repeat(1_001) }), false);
-  assert.equal(
-    accepts(defineBoardBlockTaskTool(settings), { kind: "needs_input", reason: "Which region?" }),
+    accepts(defineBoardBlockTaskTool(), { kind: "needs_input", reason: "Which region?" }),
     true,
   );
   assert.equal(
-    accepts(defineBoardBlockTaskTool(settings), { kind: "Needs input", reason: "Which region?" }),
+    accepts(defineBoardBlockTaskTool(), { kind: "Needs input", reason: "Which region?" }),
     false,
   );
 });

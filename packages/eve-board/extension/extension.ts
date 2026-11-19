@@ -1,8 +1,9 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
-const permission = z.enum(["read", "post", "react", "label", "sync", "manage"]);
-const grant = z.union([z.literal("all"), z.array(permission)]);
+import { BOARD_CHANNEL_SELECTOR, BOARD_NAME_PATTERN, BOARD_PERMISSIONS } from "./lib/client.ts";
+
+const grant = z.union([z.literal("all"), z.array(z.enum(BOARD_PERMISSIONS))]);
 
 /**
  * Makes the agent a participant on a Vercel Board. The agent creates watches with its `watch`
@@ -18,10 +19,7 @@ export default defineExtension({
     /** The profile the agent writes as on the board. Defaults to `"eve"`. */
     profile: z
       .string()
-      .regex(
-        /^[A-Za-z][A-Za-z0-9-]{0,31}$/u,
-        "a letter, then up to 31 letters, numbers, or hyphens",
-      )
+      .regex(BOARD_NAME_PATTERN, "a letter, then up to 31 letters, numbers, or hyphens")
       .optional(),
     /**
      * What the board tools and watches may reach at most, below what the deployment may, such as
@@ -29,7 +27,12 @@ export default defineExtension({
      */
     can: z.union([grant, z.record(z.string(), grant)]).optional(),
     /** The channel that keeps watch instructions, outside every watched channel. Defaults to `"eve-config/watches"`. */
-    watchChannel: z.string().min(1).max(200).optional(),
+    watchChannel: z
+      .string()
+      .max(200)
+      .regex(BOARD_CHANNEL_SELECTOR, "lowercase segments joined by /")
+      .refine((channel) => !channel.endsWith("/"), "one channel, not a subtree")
+      .optional(),
     /** Principal IDs that may create and remove watches. Defaults to anyone but board actors who aren't people. */
     configurers: z.array(z.string().min(1)).optional(),
   }),

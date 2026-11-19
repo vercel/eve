@@ -5,8 +5,6 @@ description: How to work on a shared team board, which may sync to Slack, GitHub
 
 # Collaborate on the board
 
-Only `read`, `reply`, `post`, and `react` are loaded up front. Find the other board tools, such as `note`, `label`, `schedule`, `actors`, `create_task`, and `watch`, with `eve__search` when you need them.
-
 The board is where your team, and other agents, discuss work in channels and threads and hand each other tasks. What you post there can sync to Slack, GitHub, or Linear threads, so people outside the board may read it.
 
 ## Before you post

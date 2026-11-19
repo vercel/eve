@@ -8,23 +8,18 @@ import {
 } from "@vercel/board";
 import { compileAccess, type Can } from "@vercel/board/access";
 
-/** Who wrote a board message, as the board verified it. */
 export interface BoardAuthor {
-  /** The actor ID: `principal` or `principal+profile`, such as `vercel:user:u_abc+claude`. */
   readonly actor: string;
   readonly principal: string;
   readonly profile: string | null;
 }
 
-/** A board actor's display details. */
 export interface BoardActor {
-  /** `person`, `external` (a synced platform user), `agent`, `deployment`, or `workflow`. */
   readonly kind: string;
   readonly handle: string;
   readonly name: string;
 }
 
-/** A file attached to a board message. */
 export interface BoardAttachment {
   readonly id: string;
   readonly name: string;
@@ -32,27 +27,20 @@ export interface BoardAttachment {
   readonly size: number;
 }
 
-/** The state the board keeps on a thread that is a task. */
 export interface BoardTaskState {
-  /** `waiting`, `ready`, `claimed`, `blocked`, `completed`, `failed`, or `canceled`. */
   readonly state: string;
-  /** The principal that made the thread a task. */
   readonly owner: string;
-  /** Who holds it, until when. A claim whose `until` has passed is over. */
   readonly claim: { readonly actor: string; readonly until: string } | null;
   readonly blocked: { readonly kind: string | null; readonly reason: string } | null;
   readonly result: string | null;
   readonly reason: string | null;
 }
 
-/** A board message, as the board returns it. */
 export interface BoardMessage {
   readonly id: string;
   readonly channel: string;
   readonly text: string;
-  /** The thread's root message ID, or `null` for a root. */
   readonly re: string | null;
-  /** The thread's key, unique across boards and store resets, unlike message IDs. */
   readonly thread: string;
   readonly labels: Readonly<Record<string, string>>;
   readonly by: BoardAuthor;
@@ -60,11 +48,8 @@ export interface BoardMessage {
   readonly attachments: readonly BoardAttachment[];
   readonly createdAt: string;
   readonly deleted: boolean;
-  /** Kept on the board: it never reached synced Slack, GitHub, or Linear threads. */
   readonly noSync: boolean;
-  /** Set when a schedule posted it. */
   readonly schedule?: { readonly id: string; readonly n: number };
-  /** Set on a root that is a task. */
   readonly task?: BoardTaskState;
 }
 
@@ -72,7 +57,6 @@ export interface BoardWrittenMessage extends BoardMessage {
   readonly unknownMentions?: readonly string[];
 }
 
-/** A whole thread: its root and every reply. */
 export interface BoardThread {
   readonly message: BoardMessage;
   readonly replies: readonly BoardMessage[];
@@ -109,17 +93,12 @@ export interface BoardActorSummary {
   readonly kind: string;
 }
 
-/** Options for a new thread or a reply. */
 export interface BoardPostOptions {
   readonly text: string;
   readonly labels?: Readonly<Record<string, string>>;
-  /** Keep the message on the board: it doesn't reach synced Slack, GitHub, or Linear threads. */
   readonly noSync?: boolean;
-  /** An idempotency key: the same `id` from the same profile never posts twice. */
   readonly id?: string;
-  /** Attachment IDs from {@link BoardClient.upload}, at most 10. `text` may be empty with them. */
   readonly attachments?: readonly string[];
-  /** Post only if nothing landed in the thread after this message; otherwise the board refuses with `newer_message`. */
   readonly after?: string;
 }
 
@@ -154,7 +133,7 @@ export interface BoardClaimedTask extends BoardClaim {
 }
 
 export interface BoardHeldTask {
-  renew(lease?: number): Promise<BoardClaim>;
+  renew(lease?: number): Promise<string>;
   release(): Promise<void>;
   complete(result?: string): Promise<void>;
   fail(reason: string): Promise<void>;
@@ -220,15 +199,10 @@ export type BoardCan =
   | readonly BoardPermission[]
   | Readonly<Record<string, "all" | readonly BoardPermission[]>>;
 
-/** A permission on a board channel. */
-export type BoardPermission = "read" | "post" | "react" | "label" | "sync" | "manage";
+export const BOARD_PERMISSIONS = ["read", "post", "react", "label", "sync", "manage"] as const;
 
-export interface BoardTarget {
-  readonly name?: string;
-  readonly team?: string;
-  readonly profile: string;
-  readonly can?: BoardCan;
-}
+/** A permission on a board channel. */
+export type BoardPermission = (typeof BOARD_PERMISSIONS)[number];
 
 export interface BoardClient {
   readonly profile: string;
@@ -300,44 +274,13 @@ export interface BoardSettings {
   readonly configurers?: readonly string[];
 }
 
-/** A task claim a session holds: what renews and settles it. */
-export interface BoardHeldClaim {
-  readonly id: string;
-  readonly epoch: number;
-  readonly token: string;
-  readonly until: string;
-  readonly lease: number;
-}
-
-export const BOARD_MAX_LEASE_SECONDS = 3600;
 export const BOARD_TEXT_LIMIT = 10_000;
 export const BOARD_UPLOAD_LIMIT = 4 * 1024 * 1024;
-export const BOARD_PROFILE_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
-export const BOARD_WATCHER_ID_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
+export const BOARD_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
 export const BOARD_CHANNEL_SELECTOR = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*\/?$/u;
 export const BOARD_TASK_NOTE_LIMIT = 1_000;
 export const BOARD_HOLD_KIND_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
 export const DEFAULT_BOARD_PROFILE = "eve";
-
-export function resolveBoardTarget(config: {
-  readonly name?: string;
-  readonly team?: string;
-  readonly profile?: string;
-  readonly can?: BoardCan;
-}): BoardTarget {
-  const profile = config.profile ?? DEFAULT_BOARD_PROFILE;
-  if (!BOARD_PROFILE_PATTERN.test(profile)) {
-    throw new Error(
-      `Board profile "${profile}" is invalid: use a letter, then up to 31 letters, numbers, or hyphens.`,
-    );
-  }
-  return {
-    profile: profile.toLowerCase(),
-    ...(config.name !== undefined && { name: config.name }),
-    ...(config.team !== undefined && { team: config.team }),
-    ...(config.can !== undefined && { can: config.can }),
-  };
-}
 
 export function boardAllows(
   can: BoardCan | undefined,
@@ -359,47 +302,41 @@ export function boardErrorCode(error: unknown): string | undefined {
 const handles = new Map<string, BoardHandle>();
 const principals = new Map<string, Promise<{ principal: string; actor: string }>>();
 
-function handleKey(target: BoardTarget): string {
+type BoardRef = Pick<BoardSettings, "name" | "team" | "profile">;
+
+function handleKey({ name, team }: BoardRef): string {
   return JSON.stringify([
-    target.name ?? null,
-    target.team ?? null,
+    name ?? null,
+    team ?? null,
     process.env.BOARD_URL?.trim() || null,
     process.env.BOARD_TOKEN ?? null,
   ]);
 }
 
-function baseHandle(target: BoardTarget): BoardHandle {
-  const key = handleKey(target);
-  let handle = handles.get(key);
-  if (handle === undefined) {
-    handle = boardHandle({
-      ...(target.name !== undefined && { name: target.name }),
-      ...(target.team !== undefined && { team: target.team }),
-    });
-    handles.set(key, handle);
+export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient {
+  const profile = (board.profile ?? DEFAULT_BOARD_PROFILE).toLowerCase();
+  if (!BOARD_NAME_PATTERN.test(profile)) {
+    throw new Error(
+      `Board profile "${board.profile}" is invalid: use a letter, then up to 31 letters, numbers, or hyphens.`,
+    );
   }
-  return handle;
-}
-
-export function createBoardClient(target: BoardTarget): BoardClient {
-  const base = baseHandle(target);
-  const handle = withHints(
-    base.as(target.profile, target.can === undefined ? undefined : { can: target.can as never }),
-  );
-  const meKey = `${handleKey(target)}\n${target.profile}\n${JSON.stringify(target.can ?? null)}`;
+  const key = handleKey(board);
+  let base = handles.get(key);
+  if (base === undefined) {
+    const { name, team } = board;
+    base = boardHandle({
+      ...(name !== undefined && { name }),
+      ...(team !== undefined && { team }),
+    });
+    handles.set(key, base);
+  }
+  const handle = withHints(base.as(profile, can === undefined ? undefined : { can: can as never }));
+  const meKey = `${key}\n${profile}`;
 
   const held = (claim: BoardClaim): BoardHeldTask => {
     const task = handle.tasks.held(claim.taskId, { epoch: claim.epoch, token: claim.token });
     return {
-      async renew(lease) {
-        const renewed = await task.renew(lease);
-        return {
-          epoch: renewed.epoch,
-          taskId: claim.taskId,
-          token: renewed.token,
-          until: renewed.until,
-        };
-      },
+      renew: async (lease) => (await task.renew(lease)).until,
       release: async () => void (await task.release()),
       complete: async (result) => void (await task.complete(result)),
       fail: async (reason) => void (await task.fail(reason)),
@@ -428,7 +365,7 @@ export function createBoardClient(target: BoardTarget): BoardClient {
   }
 
   return {
-    profile: target.profile,
+    profile,
     discovery: async () => await handle.discovery(),
     me: () => {
       let me = principals.get(meKey);
@@ -536,25 +473,10 @@ export function createBoardClient(target: BoardTarget): BoardClient {
         ...(query.from !== undefined && query.from.length > 0 && { from: [...query.from] }),
         ...(query.lease !== undefined && { lease: query.lease }),
       });
-      if (claim === null) return null;
-      return {
-        epoch: claim.epoch,
-        task: messageOf(claim.task),
-        taskId: claim.task.id,
-        token: claim.token,
-        until: claim.until,
-      };
+      return claim === null ? null : claimedOf(claim);
     },
-    async claim(taskId, lease) {
-      const claim = await handle.tasks.claim(taskId, lease === undefined ? {} : { lease });
-      return {
-        epoch: claim.epoch,
-        task: messageOf(claim.task),
-        taskId: claim.task.id,
-        token: claim.token,
-        until: claim.until,
-      };
-    },
+    claim: async (taskId, lease) =>
+      claimedOf(await handle.tasks.claim(taskId, lease === undefined ? {} : { lease })),
     held,
     async createTask(channel, task) {
       const created = await handle.tasks.create(channel, {
@@ -567,6 +489,16 @@ export function createBoardClient(target: BoardTarget): BoardClient {
       return messageOf(created.task);
     },
   };
+}
+
+function claimedOf(claim: {
+  readonly epoch: number;
+  readonly token: string;
+  readonly until: string;
+  readonly task: MessageView;
+}): BoardClaimedTask {
+  const { epoch, token, until } = claim;
+  return { epoch, task: messageOf(claim.task), taskId: claim.task.id, token, until };
 }
 
 function postOf(post: BoardPostOptions) {
