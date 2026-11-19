@@ -38,7 +38,7 @@ catalog:
   "@ai-sdk/google": "^4.0.120"
   "@ai-sdk/mcp": "^2.0.99"
   "@ai-sdk/openai": "^4.0.117"
-  "@ai-sdk/otel": "^1.0.172"
+  "@ai-sdk/otel": "^1.0.177"
   "@ai-sdk/provider": "^4.0.38"
   "@ai-sdk/provider-utils": "^5.0.81"
   "@opentelemetry/context-async-hooks": "2.12.1"
