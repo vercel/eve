@@ -12,10 +12,15 @@ test("without Redis, each instance still stops a caller past the limit", async (
   await enforceRateLimit({ ...options, key: "5.6.7.8" });
 });
 
-test("a released reservation frees its slot", async () => {
-  const { countInWindow, releaseInWindow } = await import("./rate-limit.ts");
+test("a release takes the count back from its own window, even after the next one began", async (t) => {
+  const { countInWindow } = await import("./rate-limit.ts");
   const options = { key: "9.9.9.9", prefix: "test-release", windowSeconds: 60 };
-  assert.equal(await countInWindow(options), 1);
-  await releaseInWindow(options);
-  assert.equal(await countInWindow(options), 1);
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+  const first = await countInWindow(options);
+  assert.equal(first.count, 1);
+  t.mock.timers.setTime(61_000);
+  const next = await countInWindow(options);
+  assert.equal(next.count, 1);
+  await first.release();
+  assert.equal((await countInWindow(options)).count, 2);
 });

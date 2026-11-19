@@ -66,36 +66,46 @@ function windowKey(options: WindowOptions, now: number) {
   return { windowId, key: `rate:${options.prefix}:${options.key}:${windowId}` };
 }
 
-/** Adds one to a window's counter and returns the new count. */
-export async function countInWindow(options: WindowOptions): Promise<number> {
+/** A counted attempt: the window's new count, and a way to take it back from that same window. */
+export interface Reservation {
+  readonly count: number;
+  release(): Promise<void>;
+}
+
+/**
+ * Adds one to the current window's counter. `release` takes it back from that window, even if a
+ * new window has begun since, so a late release never erases a count from the next one.
+ */
+export async function countInWindow(options: WindowOptions): Promise<Reservation> {
   const client = getRedis();
   const { windowId, key } = windowKey(options, Math.floor(Date.now() / 1000));
   if (client) {
     const count = await client.incr(key);
     if (count === 1) await client.expire(key, options.windowSeconds);
-    return count;
+    return {
+      count,
+      release: async () => {
+        // Re-apply the expiry, so a key that expired meanwhile doesn't linger at -1.
+        await client.decr(key);
+        await client.expire(key, options.windowSeconds);
+      },
+    };
   }
   for (const existing of local.keys()) {
     if (existing.startsWith(`rate:${options.prefix}:`) && !existing.endsWith(`:${windowId}`))
       local.delete(existing);
   }
-  return countLocally(key);
-}
-
-/** Takes one back from a window's counter, as when an attempt it reserved turned out fine. */
-export async function releaseInWindow(options: WindowOptions): Promise<void> {
-  const client = getRedis();
-  const { key } = windowKey(options, Math.floor(Date.now() / 1000));
-  if (client) {
-    await client.decr(key);
-    return;
-  }
-  const count = local.get(key);
-  if (count !== undefined) local.set(key, Math.max(count - 1, 0));
+  return {
+    count: countLocally(key),
+    release: async () => {
+      const count = local.get(key);
+      if (count !== undefined) local.set(key, Math.max(count - 1, 0));
+    },
+  };
 }
 
 export async function enforceRateLimit(options: LimitOptions) {
-  const count = await countInWindow(options);
+  const { count } = await countInWindow(options);
   if (count > options.limit) {
     const now = Math.floor(Date.now() / 1000);
     throw new RateLimitError(options.windowSeconds - (now % options.windowSeconds));
