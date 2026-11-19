@@ -1,0 +1,14 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test:integration": {
+      "dependsOn": ["eve#build"]
+    },
+    "test:scenario": {
+      "dependsOn": ["build"]
+    },
+    "typecheck": {
+      "dependsOn": ["eve#build"]
+    }
+  }
+}

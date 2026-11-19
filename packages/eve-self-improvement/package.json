@@ -1,0 +1,103 @@
+{
+  "name": "@eve/self-improvement",
+  "version": "0.0.0",
+  "description": "Evidence-backed self-improvement for eve agents on Vercel",
+  "keywords": [
+    "eve",
+    "eve-extension",
+    "self-improvement",
+    "vercel"
+  ],
+  "homepage": "https://eve.dev/docs/extensions/self-improvement",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/eve.git",
+    "directory": "packages/eve-self-improvement"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./core": {
+      "eve-source": "./api/core.ts",
+      "types": "./dist/portable/api/core.d.ts",
+      "default": "./dist/portable/api/core.js"
+    },
+    "./telemetry": {
+      "eve-source": "./api/telemetry.ts",
+      "types": "./dist/portable/api/telemetry.d.ts",
+      "default": "./dist/portable/api/telemetry.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "eve extension build && tsc -p tsconfig.api.json && node scripts/bundle-blob.mjs && node ../../scripts/copy-package-license.mjs .",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run test:integration",
+    "test:integration": "node --import tsx --test \"test/integration/*.test.ts\"",
+    "test:scenario": "node scripts/verify-consumer.mjs",
+    "test:runtime": "node scripts/verify-runtime.mjs",
+    "test:blob": "node scripts/verify-blob.mjs"
+  },
+  "dependencies": {
+    "@vercel/oidc": "4.0.9",
+    "@vercel/sandbox": "3.6.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "@types/node": "catalog:",
+    "@types/pg": "8.23.1",
+    "@vercel/blob": "2.9.0",
+    "esbuild": "0.28.2",
+    "eve": "workspace:*",
+    "pg": "8.23.1",
+    "tsx": "4.23.15",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "@vercel/blob": "*",
+    "eve": ">=1.1.0",
+    "pg": "^8.23.1"
+  },
+  "peerDependenciesMeta": {
+    "@vercel/blob": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension",
+      "externalDependencies": [
+        "pg",
+        "@vercel/sandbox"
+      ]
+    }
+  }
+}

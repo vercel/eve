@@ -76,3 +76,6 @@ Thumbs.db
 .vercel
 .env*.local
 .env*
+
+packages/eve-self-improvement/LICENSE
+packages/eve-self-improvement/NOTICE
