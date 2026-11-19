@@ -8,7 +8,7 @@ import {
   createBoardChannel,
   endRenewal,
   keepBoardClaim,
-  renewBoardClaim,
+  renewBeforeTask,
   renewDuringCall,
   settleAfterCall,
   type BoardChannelState,
@@ -204,18 +204,22 @@ test("a settlement the board refuses drops the claim and says so in the thread",
   assert.match(notes[0]!, /The board refused to mark task/u);
 });
 
-test("a subagent call starts with a fresh lease, however much of the old one is left", async () => {
+test("subagent calls renew the claim in full, once a minute however many start together", async () => {
   const { as, calls } = await startBoard();
   const { state, task } = await claimedTask(as, 3600);
-  const justAboveDue = new Date(Date.now() + 1_201_000).toISOString();
-  state.task = { ...state.task!, until: justAboveDue };
+  const leftFor = (ms: number) => new Date(Date.now() + ms).toISOString();
 
+  state.task = { ...state.task!, until: leftFor(1_201_000) };
   await keepBoardClaim(client(), state);
   assert.equal(renewalsOf(calls, task.id), 0);
-  await renewBoardClaim(client(), state);
 
+  for (let call = 0; call < 10; call += 1) await renewBeforeTask(client(), state);
   assert.equal(renewalsOf(calls, task.id), 1);
   assert.ok(Date.parse(state.task!.until) - Date.now() > 3_500_000);
+
+  state.task = { ...state.task!, until: leftFor(3_600_000 - 61_000) };
+  await renewBeforeTask(client(), state);
+  assert.equal(renewalsOf(calls, task.id), 2);
 });
 
 test("a claim near the end of its lease is renewed", async () => {

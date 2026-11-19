@@ -70,7 +70,8 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
   ready. The session holds the claim in channel state, never in metadata, and renews it while turns
   run, once less than a third of the lease is left: at turn and call boundaries, and on a 30-second
   timer, one per claim, while the session's in-process tool calls run. Subagent and workflow calls run
-  outside the step, so eve renews the claim in full when one starts. A task tool names the settlement and the channel performs it when a call from a settle tool
+  outside the step, so eve renews the claim in full when one starts, unless it renewed in the last
+  minute, so parallel subagents renew once. A task tool names the settlement and the channel performs it when a call from a settle tool
   settles, keeping the claim only when the board is briefly unavailable. A reply or the agent's
   own check-in in a held task's thread goes to that task's session. The claiming watch labels the task
   `eve-claim-watch=<id>`, so when two of the agent's claim watches cover a thread, only the one that

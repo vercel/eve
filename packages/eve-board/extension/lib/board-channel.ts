@@ -59,6 +59,7 @@ const log = createLogger("board.channel");
 
 const CLAIM_LEASE_SECONDS = 3600;
 const RENEW_EVERY_MS = 30_000;
+const RECENT_RENEWAL_MS = 60_000;
 const MAX_PULLS_PER_WAKE = 20;
 const MATCHES_PER_PULL = 10;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -262,7 +263,7 @@ export function createBoardChannel(
         if (event.data.taskId === undefined) {
           renewDuringCall(deployment, ctx.channel.state, event.data.callId);
         } else {
-          await renewBoardClaim(deployment(), ctx.channel.state);
+          await renewBeforeTask(deployment(), ctx.channel.state);
         }
       },
       async "call.settled"(event, ctx) {
@@ -472,6 +473,10 @@ function claimDue(claim: BoardClaim, now = Date.now()): boolean {
   return Date.parse(claim.until) - now < (CLAIM_LEASE_SECONDS * 1000) / 3;
 }
 
+function renewedRecently(claim: BoardClaim, now = Date.now()): boolean {
+  return Date.parse(claim.until) - now > CLAIM_LEASE_SECONDS * 1000 - RECENT_RENEWAL_MS;
+}
+
 async function renewClaim(client: BoardClient, claim: BoardClaim): Promise<BoardClaim | null> {
   try {
     return { ...claim, until: await client.held(claim).renew(CLAIM_LEASE_SECONDS) };
@@ -565,10 +570,14 @@ export async function keepBoardClaim(client: BoardClient, state: BoardChannelSta
   if (state.task != null && claimDue(state.task)) await renewBoardClaim(client, state);
 }
 
-export async function renewBoardClaim(
+export async function renewBeforeTask(
   client: BoardClient,
   state: BoardChannelState,
 ): Promise<void> {
+  if (state.task != null && !renewedRecently(state.task)) await renewBoardClaim(client, state);
+}
+
+async function renewBoardClaim(client: BoardClient, state: BoardChannelState): Promise<void> {
   const claim = state.task;
   if (claim == null) return;
   state.task = await renewClaim(client, claim);
