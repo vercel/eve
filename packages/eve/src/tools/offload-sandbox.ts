@@ -1,18 +1,11 @@
-import { loadContext } from "#context/container.js";
-import { ContextKey } from "#context/key.js";
-import { createLogger } from "#internal/logging.js";
 import { isObject } from "#shared/guards.js";
 import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
-
-const log = createLogger("tools.offload-sandbox");
 
 const RESULTS_DIRECTORY = "/tmp/.eve/tool-results";
 const BYTES_PER_TOKEN = 4;
 const SHAPE_LIMIT = 400;
 const TEXT_PREVIEW_LINES = 20;
 const TEXT_PREVIEW_LINE_LIMIT = 200;
-
-const WarnedKey = new ContextKey<boolean>("eve.offloadSandbox.warned");
 
 /** Options for {@link offloadSandbox}. */
 export interface OffloadSandboxOptions<TOutput> {
@@ -69,7 +62,10 @@ export function offloadSandbox<TOutput = unknown>(
     }
     const sandbox = await ctx.getSandbox();
     if (sandbox === undefined) {
-      warnOnce(ctx.toolName, maxOutputTokens);
+      ctx.warnOnce(
+        "offloadSandbox.no-sandbox",
+        `offloadSandbox could not save the result of ${ctx.toolName}: the agent has no sandbox, so the model gets the whole result.`,
+      );
       return projected;
     }
     const file = serialize(output);
@@ -179,14 +175,4 @@ function keyList(keys: readonly string[]): string {
     listed.push(key);
   }
   return listed.length === total ? listed.join(", ") : `${listed.join(", ")}, ... (${total} keys)`;
-}
-
-function warnOnce(toolName: string, maxOutputTokens: number): void {
-  const context = loadContext();
-  if (context.get(WarnedKey) === true) return;
-  context.set(WarnedKey, true);
-  log.warn(
-    `offloadSandbox could not save the result of ${toolName}: the agent has no sandbox, so the model gets the whole result.`,
-    { maxOutputTokens, toolName },
-  );
 }

@@ -154,7 +154,7 @@ export default defineTool({
 - Error results and results with image or file parts are never written.
 - The file lasts as long as the sandbox. If the sandbox is replaced, the model has to run the tool again.
 
-To offload a built-in tool's result, spread the exported definition and set `toModelOutput`, as in [Built-in tools](../concepts/built-in-tools). Built-in tools such as `web_fetch` and `grep` cut long output inside `execute`, so `offloadSandbox` sees the shortened result. For a connection, set [`toolCall.toModelOutput`](../connections/mcp#control-result-size).
+To offload a built-in tool's result, spread the exported definition and set `toModelOutput`, as in [Built-in tools](/docs/concepts/built-in-tools). Built-in tools such as `web_fetch` and `grep` cut long output inside `execute`, so `offloadSandbox` sees the shortened result. For a connection, set [`toolCall.toModelOutput`](/docs/connections/mcp#control-result-size).
 
 ### Send images to the model with content parts
 

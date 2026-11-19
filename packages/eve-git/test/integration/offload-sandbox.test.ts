@@ -57,6 +57,7 @@ test("offloadSandbox spread over the gh tool saves the output that gh cut to 100
     toolName: "gh",
     getSandbox: async () => sandbox,
     defaultModelOutput: (value: unknown) => ({ type: "json", value }),
+    warnOnce: () => {},
   } as Parameters<NonNullable<typeof gh.toModelOutput>>[1]);
 
   assert.equal(written.length, 1);
