@@ -7,7 +7,7 @@ import {
   PASSWORD_SESSION_MAX_AGE,
   verifyAppPassword,
 } from "../../../../lib/password-auth";
-import { countInWindow, readWindow } from "../../../../lib/rate-limit";
+import { countInWindow, releaseInWindow } from "../../../../lib/rate-limit";
 import { getAuthMode } from "../../../../lib/setup";
 
 /**
@@ -38,7 +38,9 @@ export async function POST(request: Request) {
     prefix: "login-failures",
     windowSeconds: FAILURE_WINDOW_SECONDS,
   };
-  if ((await readWindow(failures)) >= FAILURES_PER_ADDRESS) {
+  // Each attempt reserves a failure before the password is checked, atomically, so requests sent
+  // at once can't all slip under the limit; a correct password gives its reservation back.
+  if ((await countInWindow(failures)) > FAILURES_PER_ADDRESS) {
     const now = Math.floor(Date.now() / 1000);
     return NextResponse.json(
       { error: "Too many wrong passwords. Try again later." },
@@ -51,10 +53,9 @@ export async function POST(request: Request) {
 
   const body = (await request.json().catch(() => null)) as { password?: unknown } | null;
   const password = typeof body?.password === "string" ? body.password : "";
-  if (!verifyAppPassword(password)) {
-    await countInWindow(failures);
+  if (!verifyAppPassword(password))
     return NextResponse.json({ error: "Incorrect password." }, { status: 401 });
-  }
+  await releaseInWindow(failures);
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set(PASSWORD_SESSION_COOKIE_NAME, createPasswordSessionToken(), {

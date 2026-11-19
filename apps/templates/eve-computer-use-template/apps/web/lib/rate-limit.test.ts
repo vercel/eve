@@ -11,3 +11,11 @@ test("without Redis, each instance still stops a caller past the limit", async (
   await assert.rejects(enforceRateLimit(options), RateLimitError);
   await enforceRateLimit({ ...options, key: "5.6.7.8" });
 });
+
+test("a released reservation frees its slot", async () => {
+  const { countInWindow, releaseInWindow } = await import("./rate-limit.ts");
+  const options = { key: "9.9.9.9", prefix: "test-release", windowSeconds: 60 };
+  assert.equal(await countInWindow(options), 1);
+  await releaseInWindow(options);
+  assert.equal(await countInWindow(options), 1);
+});

@@ -82,12 +82,16 @@ export async function countInWindow(options: WindowOptions): Promise<number> {
   return countLocally(key);
 }
 
-/** A window's counter, without adding to it. */
-export async function readWindow(options: WindowOptions): Promise<number> {
+/** Takes one back from a window's counter, as when an attempt it reserved turned out fine. */
+export async function releaseInWindow(options: WindowOptions): Promise<void> {
   const client = getRedis();
   const { key } = windowKey(options, Math.floor(Date.now() / 1000));
-  if (client) return Number((await client.get<number>(key)) ?? 0);
-  return local.get(key) ?? 0;
+  if (client) {
+    await client.decr(key);
+    return;
+  }
+  const count = local.get(key);
+  if (count !== undefined) local.set(key, Math.max(count - 1, 0));
 }
 
 export async function enforceRateLimit(options: LimitOptions) {
