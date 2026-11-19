@@ -78,9 +78,13 @@ export async function resolveEveAgentDevServer(
   });
 }
 
+export interface VercelJsonFile {
+  readonly config: VercelServicesConfig;
+  readonly path: string;
+}
+
 export interface VercelProjectConfig {
-  readonly vercelJson: VercelServicesConfig;
-  readonly vercelJsonPath: string;
+  readonly vercelJsonFiles: readonly VercelJsonFile[];
   readonly vercelTsPath: string | undefined;
 }
 
@@ -138,9 +142,12 @@ export async function addEveVercelServices(
     );
   }
 
+  const hostFile = { config: hostConfig, path: hostConfigPath };
   const config = await readConfig({
-    vercelJson: rootConfig,
-    vercelJsonPath: rootConfigPath,
+    vercelJsonFiles:
+      rootConfigPath === hostConfigPath
+        ? [hostFile]
+        : [hostFile, { config: rootConfig, path: rootConfigPath }],
     vercelTsPath,
   });
   const assembled = assembleEveVercelServices({

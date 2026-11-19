@@ -80,14 +80,16 @@ async function buildForVercel(
       environments: Record<string, { config: { build: { outDir: string } }; isBuilt: boolean }>;
     }) => Promise<void>;
   };
-  const outDir = build.outDir ?? "dist";
+  const outDir = build.ssr ? "server" : (build.outDir ?? "dist");
   await buildApp.handler({
     config: {
       appType: build.appType ?? "spa",
       base: build.base ?? "/",
       build: { outDir, ssr: build.ssr ?? false },
     },
-    environments: { client: { config: { build: { outDir } }, isBuilt: true } },
+    environments: {
+      [build.ssr ? "ssr" : "client"]: { config: { build: { outDir } }, isBuilt: true },
+    },
   });
 }
 
@@ -235,28 +237,29 @@ describe("createEveVitePlugin", () => {
     expect(createEveVitePlugin({ host, options: {} })).toHaveProperty("buildApp.order", "post");
   });
 
-  it.each<{ appType: AppType; error: RegExp; files: Record<string, string> }>([
-    {
-      appType: "spa",
-      error: /renders on a server \(.*dist has no index\.html\).*Add nitro\(\) from "nitro\/vite"/,
-      files: { "assets/entry.js": "" },
-    },
-    {
-      appType: "custom",
-      error: /renders on a server \(appType is "custom"\).*Add nitro\(\) from "nitro\/vite"/,
-      files: { "index.html": "<!doctype html>\n" },
-    },
-    {
-      appType: "mpa",
-      error: /dist has no root index\.html.*Add a root index\.html to the multi-page app/,
-      files: { "about.html": "<!doctype html>\n" },
-    },
-  ])("refuses static output for appType $appType without a deployable index.html", async (row) => {
+  it("asks for a root index.html or a server adapter when the client build has none", async () => {
     const root = await createAgentProject();
-    await writeClientBuild(root, row.files);
+    await writeClientBuild(root, { "assets/entry.js": "" });
 
-    await expect(buildForVercel(root, { appType: row.appType })).rejects.toThrow(row.error);
+    await expect(buildForVercel(root)).rejects.toThrow(
+      /no root index\.html in .*dist.*A static app must build index\.html.*nitro\(\) from "nitro\/vite"/,
+    );
     expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
+  });
+
+  it.each<{ appType: AppType; fallback: boolean }>([
+    { appType: "custom", fallback: true },
+    { appType: "mpa", fallback: false },
+  ])("writes static output for appType $appType with a root index.html", async (row) => {
+    const root = await createAgentProject();
+    await writeClientBuild(root, { "index.html": "<!doctype html>\n" });
+
+    await buildForVercel(root, { appType: row.appType });
+
+    expect(existsSync(join(root, ".vercel", "output", "static", "index.html"))).toBe(true);
+    expect((await readOutputRoutes(root)).at(-1)).toEqual(
+      row.fallback ? { dest: "/index.html", src: "^\\/(.*)$" } : { handle: "filesystem" },
+    );
   });
 
   it("mounts the static output and SPA fallback under an absolute base", async () => {
@@ -270,7 +273,7 @@ describe("createEveVitePlugin", () => {
     expect(existsSync(join(staticRoot, "app", "assets", "app.js"))).toBe(true);
     expect((await readOutputRoutes(root)).slice(-2)).toEqual([
       { handle: "filesystem" },
-      { dest: "/app/index.html", src: "/app/(.*)" },
+      { dest: "/app/index.html", src: "^\\/app\\/(.*)$" },
     ]);
   });
 
@@ -287,7 +290,7 @@ describe("createEveVitePlugin", () => {
 
     expect(await readdir(join(root, outDir, "assets"))).toEqual(["app.js"]);
     expect((await readOutputRoutes(root)).slice(-1)).toEqual([
-      { dest: "/index.html", src: "/(.*)" },
+      { dest: "/index.html", src: "^\\/(.*)$" },
     ]);
   });
 
@@ -309,7 +312,7 @@ describe("createEveVitePlugin", () => {
     await buildForVercel(root);
 
     await expect(buildForVercel(root, { ssr: true })).rejects.toThrow(
-      /renders on a server \(this is an SSR build\)/,
+      /no root index\.html in .*server/,
     );
 
     await writeClientBuild(root, { "assets/new.js": "", "index.html": "<!doctype html>\n" });
@@ -339,26 +342,42 @@ describe("createEveVitePlugin", () => {
     expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
   });
 
-  it.each(["app root", "linked project root"])(
-    "names the vercel.json routing fields at the %s that a static Build Output would drop",
-    async (location) => {
-      const projectRoot = await createTemporaryDirectory("eve-vite-plugin-");
-      const appRoot = location === "app root" ? projectRoot : join(projectRoot, "web");
-      await mkdir(join(appRoot, "agent"), { recursive: true });
-      await mkdir(join(projectRoot, ".vercel"), { recursive: true });
-      await writeFile(join(projectRoot, ".vercel", "project.json"), "{}");
-      await writeFile(
-        join(projectRoot, "vercel.json"),
-        JSON.stringify({ cleanUrls: true, rewrites: [{ source: "/a", destination: "/b" }] }),
-      );
-      await writeClientBuild(appRoot, { "index.html": "<!doctype html>\n" });
-
-      await expect(buildForVercel(appRoot)).rejects.toThrow(
-        `${join(projectRoot, "vercel.json")} defines rewrites, cleanUrls`,
-      );
-      expect(existsSync(join(appRoot, ".vercel", "output"))).toBe(false);
+  it.each([
+    { app: { headers: [] }, expected: ["web/vercel.json defines headers"], root: undefined },
+    {
+      app: undefined,
+      expected: ["/vercel.json defines rewrites, cleanUrls"],
+      root: { cleanUrls: true, rewrites: [{ destination: "/index.html", source: "/(.*)" }] },
     },
-  );
+    {
+      app: { headers: [] },
+      expected: ["web/vercel.json defines headers and ", "/vercel.json defines rewrites"],
+      root: { rewrites: [{ destination: "/index.html", source: "/(.*)" }] },
+    },
+  ])("names each vercel.json routing field a static Build Output would drop", async (row) => {
+    const projectRoot = await createTemporaryDirectory("eve-vite-plugin-");
+    const appRoot = join(projectRoot, "web");
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await mkdir(join(projectRoot, ".vercel"), { recursive: true });
+    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}");
+    for (const [directory, config] of [
+      [appRoot, row.app],
+      [projectRoot, row.root],
+    ] as const) {
+      if (config !== undefined) {
+        await writeFile(join(directory, "vercel.json"), JSON.stringify(config));
+      }
+    }
+    await writeClientBuild(appRoot, { "index.html": "<!doctype html>\n" });
+
+    const build = buildForVercel(appRoot);
+
+    await expect(build).rejects.toThrow(/delete its catch-all rewrite to index\.html/);
+    for (const message of row.expected) {
+      await expect(build).rejects.toThrow(message);
+    }
+    expect(existsSync(join(appRoot, ".vercel", "output"))).toBe(false);
+  });
 
   it("merges the generated eve service into the user's Nitro Vercel config", async () => {
     vi.stubEnv("VERCEL", "1");

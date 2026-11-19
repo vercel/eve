@@ -4,6 +4,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { Plugin, PluginOption, ProxyOptions, UserConfig, ViteBuilder } from "vite";
 
+import { escapeRegex } from "#internal/bundler/filters.js";
 import {
   parseVercelServicesConfig,
   type VercelServicesConfig,
@@ -107,44 +108,29 @@ export function createEveVitePlugin(input: {
   let nitroModuleInstalled = false;
   let nitroServesPreview = false;
 
-  function staticOutputError(reason: string, fix: string): Error {
-    return new Error(
-      `The eve ${host.label} plugin cannot deploy this app to Vercel as static files because ${reason}, and no framework or adapter wrote .vercel/output. ${fix}, use a framework or adapter that writes .vercel/output during vite build, or compose eve in vercel.ts with withEve from "eve/vercel".`,
-    );
-  }
-
   async function writeStaticVercelOutput(
     builder: ViteBuilder,
     project: VercelProjectConfig,
   ): Promise<VercelServicesConfig> {
-    const addNitro = `Add nitro() from "nitro/vite" to the plugins in vite.config.ts`;
-    if (builder.config.appType === "custom") {
-      throw staticOutputError(`it renders on a server (appType is "custom")`, addNitro);
-    }
-    if (builder.config.build.ssr) {
-      throw staticOutputError("it renders on a server (this is an SSR build)", addNitro);
-    }
     const client = builder.environments.client ?? builder;
     const clientOutDir = resolve(viteRoot, client.config.build.outDir);
     if ((await readOptionalFile(join(clientOutDir, "index.html"))) === undefined) {
-      throw builder.config.appType === "mpa"
-        ? staticOutputError(
-            `${clientOutDir} has no root index.html`,
-            "Add a root index.html to the multi-page app",
-          )
-        : staticOutputError(`it renders on a server (${clientOutDir} has no index.html)`, addNitro);
+      throw new Error(
+        `The eve ${host.label} plugin found no root index.html in ${clientOutDir} and no .vercel/output from a framework or adapter, so it cannot deploy this app to Vercel. A static app must build index.html into build.outDir. A server-rendered app needs nitro() from "nitro/vite" (with the nitro package installed) or an adapter that writes .vercel/output during vite build. You can also compose eve in vercel.ts with withEve from "eve/vercel".`,
+      );
     }
     if (project.vercelTsPath !== undefined) {
       throw new Error(
         `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelTsPath} configures the project, and Vercel does not apply its routing to a Build Output. Compose eve in vercel.ts with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
-    const routingFields = VERCEL_JSON_ROUTING_FIELDS.filter(
-      (field) => project.vercelJson[field] !== undefined,
-    );
-    if (routingFields.length > 0) {
+    const routingProblems = project.vercelJsonFiles.flatMap(({ config, path }) => {
+      const fields = VERCEL_JSON_ROUTING_FIELDS.filter((field) => config[field] !== undefined);
+      return fields.length > 0 ? [`${path} defines ${fields.join(", ")}`] : [];
+    });
+    if (routingProblems.length > 0) {
       throw new Error(
-        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelJsonPath} defines ${routingFields.join(", ")}, which Vercel does not apply to a Build Output. Move that configuration to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
+        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${routingProblems.join(" and ")}, which Vercel does not apply to a Build Output. A single-page app can delete its catch-all rewrite to index.html, because eveVite() already serves index.html for unmatched paths. Move other routing to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
     const base = builder.config.base.startsWith("/") ? builder.config.base : "/";
@@ -163,9 +149,9 @@ export function createEveVitePlugin(input: {
     return {
       routes: [
         { handle: "filesystem" },
-        ...(builder.config.appType === "spa"
-          ? [{ src: `${base}(.*)`, dest: `${base}index.html` }]
-          : []),
+        ...(builder.config.appType === "mpa"
+          ? []
+          : [{ src: `^${escapeRegex(base)}(.*)$`, dest: `${base}index.html` }]),
       ],
       version: 3,
     };

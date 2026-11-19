@@ -17,7 +17,8 @@ export type { EveVitePluginOptions };
  * route rules.
  *
  * On Vercel builds, adds each agent as a sibling Vercel service in the
- * `.vercel/output` the app's framework, adapter, or Nitro writes, and routes
+ * `.vercel/output` the app's framework, adapter, or Nitro writes, or in a
+ * static output it writes from the client build when none does, and routes
  * its transport requests before the app's own routing. A `vercel.json` with
  * services, or a `vercel.ts` that composes `withEve` from `eve/vercel`, owns
  * the services instead.

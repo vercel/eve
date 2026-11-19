@@ -65,7 +65,7 @@ describe("framework-vite build", () => {
     expect(config.routes).toEqual([
       { destination: { service: "eve", type: "service" }, src: "^/eve/v1/(.*)$" },
       { handle: "filesystem" },
-      { dest: "/index.html", src: "/(.*)" },
+      { dest: "/index.html", src: "^\\/(.*)$" },
     ]);
     expect(config.services.eve).toEqual(
       expect.objectContaining({ framework: "eve", root: ".eve/vercel-services/eve" }),
