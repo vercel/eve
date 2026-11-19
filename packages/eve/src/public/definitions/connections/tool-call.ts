@@ -32,7 +32,7 @@ export interface ConnectionToolCallDefinition {
    * Controls what the model sees as the result of a connection tool call.
    * Receives the tool's result and returns the model-facing output. Hooks and
    * channels still get the full result on `call.settled`. Use
-   * `offloadSandbox` from `eve/tools` to keep a large result in a sandbox file.
+   * `offloadContent` from `eve/tools` to keep a large result in a sandbox file.
    * Defaults to `ctx.defaultModelOutput`.
    */
   readonly toModelOutput?: (

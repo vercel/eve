@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SandboxSession } from "eve/sandbox";
-import { defineTool, offloadSandbox } from "eve/tools";
+import { defineTool, offloadContent } from "eve/tools";
 
 import { defineGhTool } from "../../extension/lib/gh-tool.ts";
 import { executeGitHubShell, type GitHubShellInput } from "../../extension/lib/github-shell.ts";
@@ -19,7 +19,7 @@ const READ: GitHubShellInput = {
   repository: "vercel/internal-agents",
 };
 
-test("offloadSandbox spread over the gh tool saves the output that gh cut to 100 KB", async () => {
+test("offloadContent spread over the gh tool saves the output that gh cut to 100 KB", async () => {
   const written: { content: string; path: string }[] = [];
   const stdout = Array.from(
     { length: 3_000 },
@@ -50,7 +50,7 @@ test("offloadSandbox spread over the gh tool saves the output that gh cut to 100
 
   const gh = defineTool({
     ...defineGhTool(() => CONFIG),
-    toModelOutput: offloadSandbox({ maxOutputTokens: 2_000 }),
+    toModelOutput: offloadContent({ maxBytes: 8_000 }),
   });
   const result = await gh.toModelOutput?.(output, {
     callId: "call-1",

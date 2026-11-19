@@ -13,7 +13,7 @@ import {
   type ToolModelOutput,
   type ToolModelOutputContext,
 } from "#tools/model-output.js";
-import { offloadSandbox } from "#tools/offload-sandbox.js";
+import { offloadContent } from "#tools/offload-content.js";
 
 function fakeSandbox() {
   const { access, files } = mockSandbox();
@@ -34,10 +34,10 @@ const issues = Array.from({ length: 50 }, (_, index) => ({
 }));
 const big = JSON.stringify(issues);
 
-describe("offloadSandbox", () => {
-  it("returns the default projection when the result is under budget", async () => {
+describe("offloadContent", () => {
+  it("returns the default projection when the result is under the limit", async () => {
     const { access, files } = fakeSandbox();
-    const toModelOutput = offloadSandbox({ maxOutputTokens: 100_000 });
+    const toModelOutput = offloadContent({ maxBytes: 400_000 });
     const result = await inContext(access, () =>
       toModelOutput(issues, toolModelOutputContext("list_issues", "call_1")),
     );
@@ -45,9 +45,9 @@ describe("offloadSandbox", () => {
     expect(files.size).toBe(0);
   });
 
-  it("writes the raw output to the sandbox and returns a note when over budget", async () => {
+  it("writes the raw output to the sandbox and returns a note when over the limit", async () => {
     const { access, files } = fakeSandbox();
-    const toModelOutput = offloadSandbox({ maxOutputTokens: 1_000 });
+    const toModelOutput = offloadContent({ maxBytes: 4_000 });
     const result = await inContext(access, () =>
       toModelOutput(issues, toolModelOutputContext("github__list_issues", "call_abc")),
     );
@@ -59,7 +59,7 @@ describe("offloadSandbox", () => {
       value: [
         "The result of github__list_issues was saved to",
         path,
-        `(${bytes.toLocaleString("en-US")} bytes, about ${Math.ceil(bytes / 4).toLocaleString("en-US")} tokens).`,
+        `(${bytes.toLocaleString("en-US")} bytes).`,
         "It is a JSON array of 50 items. The first item is an object with the keys: body, number, state, title.",
         "Read parts of it with jq, head or read_file.",
       ].join("\n"),
@@ -70,7 +70,7 @@ describe("offloadSandbox", () => {
     const { access, files } = fakeSandbox();
     const text = Array.from({ length: 400 }, (_, index) => `line ${index}`).join("\n");
     const result = (await inContext(access, () =>
-      offloadSandbox({ maxOutputTokens: 100 })(text, toolModelOutputContext("web_fetch", "call/1")),
+      offloadContent({ maxBytes: 400 })(text, toolModelOutputContext("web_fetch", "call/1")),
     )) as { value: string };
     expect(files.get("/tmp/.eve/tool-results/web_fetch-call_1.txt")).toBe(text);
     expect(result.value).toContain("line 19\n");
@@ -83,7 +83,7 @@ describe("offloadSandbox", () => {
       Array.from({ length: 200 }, (_, index) => [`field_number_${index}`, "x".repeat(20)]),
     );
     const result = (await inContext(access, () =>
-      offloadSandbox({ maxOutputTokens: 100 })(wide, toolModelOutputContext("t", "c")),
+      offloadContent({ maxBytes: 400 })(wide, toolModelOutputContext("t", "c")),
     )) as { value: string };
     expect(result.value).toContain("It is a JSON object with the keys: field_number_0,");
     expect(result.value).toContain("... (200 keys).");
@@ -92,7 +92,7 @@ describe("offloadSandbox", () => {
 
   it("returns the projection unchanged and warns once per session without a sandbox", async () => {
     const { records } = captureLogRecords();
-    const toModelOutput = offloadSandbox({ maxOutputTokens: 100 });
+    const toModelOutput = offloadContent({ maxBytes: 400 });
     await inContext(undefined, async () => {
       expect(await toModelOutput(issues, toolModelOutputContext("t", "call_1"))).toEqual({
         type: "json",
@@ -130,7 +130,7 @@ describe("offloadSandbox", () => {
     },
   ])("returns the projection unchanged and warns once when $name", async ({ message, sandbox }) => {
     const { records } = captureLogRecords();
-    const toModelOutput = offloadSandbox({ maxOutputTokens: 100 });
+    const toModelOutput = offloadContent({ maxBytes: 400 });
     const ctx = {
       ...toolModelOutputContext("create_issue", "call_1"),
       ...sandbox,
@@ -148,7 +148,7 @@ describe("offloadSandbox", () => {
     const { access, files } = fakeSandbox();
     const summary = vi.fn((output: typeof issues) => toolOutput.text(`${output.length} issues`));
     const small = await inContext(access, () =>
-      offloadSandbox({ maxOutputTokens: 100, toModelOutput: summary })(
+      offloadContent({ maxBytes: 400, toModelOutput: summary })(
         issues,
         toolModelOutputContext("t", "call_1"),
       ),
@@ -157,8 +157,8 @@ describe("offloadSandbox", () => {
     expect(files.size).toBe(0);
 
     const expanded = await inContext(access, () =>
-      offloadSandbox({
-        maxOutputTokens: 100,
+      offloadContent({
+        maxBytes: 400,
         toModelOutput: (output: typeof issues) => toolOutput.text(JSON.stringify(output, null, 2)),
       })(issues, toolModelOutputContext("t", "call_2")),
     );
@@ -170,7 +170,7 @@ describe("offloadSandbox", () => {
     const { access, files } = fakeSandbox();
     const run = (projected: ToolModelOutput) =>
       inContext(access, () =>
-        offloadSandbox({ maxOutputTokens: 10, toModelOutput: () => projected })(
+        offloadContent({ maxBytes: 40, toModelOutput: () => projected })(
           issues,
           toolModelOutputContext("t", "call_1"),
         ),
@@ -185,9 +185,61 @@ describe("offloadSandbox", () => {
     expect(files.size).toBe(0);
   });
 
-  it("rejects a budget that is not a positive integer", () => {
-    expect(() => offloadSandbox({ maxOutputTokens: 0 })).toThrow("positive integer");
-    expect(() => offloadSandbox({ maxOutputTokens: 1.5 })).toThrow("positive integer");
+  it("offloads a result over 20,000 bytes by default", async () => {
+    const { access, files } = fakeSandbox();
+    const toModelOutput = offloadContent();
+    const small = "x".repeat(20_000);
+    const large = "x".repeat(20_001);
+    await inContext(access, async () => {
+      expect(await toModelOutput(small, toolModelOutputContext("t", "small"))).toEqual({
+        type: "text",
+        value: small,
+      });
+      expect(await toModelOutput(large, toolModelOutputContext("t", "large"))).toMatchObject({
+        type: "text",
+        value: expect.stringContaining("/tmp/.eve/tool-results/t-large.txt"),
+      });
+    });
+    expect([...files.keys()]).toEqual(["/tmp/.eve/tool-results/t-large.txt"]);
+  });
+
+  it("sends only a description when ifNotSaved is description and there is no sandbox", async () => {
+    const { records } = captureLogRecords();
+    const toModelOutput = offloadContent({ maxBytes: 400, ifNotSaved: "description" });
+    const result = (await inContext(undefined, () =>
+      toModelOutput(issues, toolModelOutputContext("list_issues", "call_1")),
+    )) as { type: string; value: string };
+    expect(result.type).toBe("text");
+    expect(result.value).toBe(
+      [
+        `The result of list_issues is ${Buffer.byteLength(big).toLocaleString("en-US")} bytes and could not be saved, so only this description is shown.`,
+        "It is a JSON array of 50 items. The first item is an object with the keys: body, number, state, title.",
+      ].join("\n"),
+    );
+    expect(records.filter((record) => record.level === "warn")).toHaveLength(1);
+  });
+
+  it("sends only a description when ifNotSaved is description and the write fails", async () => {
+    captureLogRecords();
+    const ctx = {
+      ...toolModelOutputContext("list_issues", "call_1"),
+      getSandbox: async () => ({
+        ...mockSandbox().session,
+        writeTextFile: async () => {
+          throw new Error("disk full");
+        },
+      }),
+    } satisfies ToolModelOutputContext;
+    const result = (await inContext(undefined, () =>
+      offloadContent({ maxBytes: 400, ifNotSaved: "description" })(issues, ctx),
+    )) as { value: string };
+    expect(result.value).toContain("could not be saved");
+    expect(result.value).not.toContain("Issue 1");
+  });
+
+  it("rejects a limit that is not a positive integer", () => {
+    expect(() => offloadContent({ maxBytes: 0 })).toThrow("positive integer");
+    expect(() => offloadContent({ maxBytes: 4.5 })).toThrow("positive integer");
   });
 });
 
@@ -196,7 +248,7 @@ describe("toolCallModelOutput with a toModelOutput", () => {
     const { access, files } = fakeSandbox();
     const definition = {
       name: "list_issues",
-      toModelOutput: offloadSandbox({ maxOutputTokens: 1_000 }),
+      toModelOutput: offloadContent({ maxBytes: 4_000 }),
     };
     const result = await inContext(access, () => toolCallModelOutput(definition, issues, "call_9"));
     expect(files.has("/tmp/.eve/tool-results/list_issues-call_9.json")).toBe(true);

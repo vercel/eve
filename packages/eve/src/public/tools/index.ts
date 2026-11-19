@@ -15,7 +15,7 @@ export {
 } from "#tools/definition.js";
 export { defineDynamic } from "#tools/dynamic.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
-export { offloadSandbox, type OffloadSandboxOptions } from "#tools/offload-sandbox.js";
+export { offloadContent, type OffloadContentOptions } from "#tools/offload-content.js";
 export type {
   DynamicContext,
   DynamicKey,

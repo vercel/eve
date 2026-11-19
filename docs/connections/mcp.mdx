@@ -162,16 +162,16 @@ When a remote tool returns more than the model needs, narrow the result at the s
 
 If you don't control the server, replace that operation with an authored tool that calls an equivalent upstream API. The authored tool can store the full payload outside model context and return only the needed fields through `toModelOutput`. Hide the original with [`tools.block`](#tool-filters) so the model doesn't see duplicate tools.
 
-To keep a large result out of the model's context without changing the server, set `toolCall.toModelOutput` to [`offloadSandbox`](../tools#keep-large-results-out-of-context-with-offloadsandbox). A result over the budget goes to a file in the sandbox, and the model gets the file's path and shape:
+To keep a large result out of the model's context without changing the server, set `toolCall.toModelOutput` to [`offloadContent`](../tools#keep-large-results-out-of-context-with-offloadcontent). A result over 20,000 bytes goes to a file in the sandbox, and the model gets the file's path and shape:
 
 ```ts title="agent/connections/github.ts"
 import { defineMcpClientConnection } from "eve/connections";
-import { offloadSandbox } from "eve/tools";
+import { offloadContent } from "eve/tools";
 
 export default defineMcpClientConnection({
   url: "https://api.githubcopilot.com/mcp/",
   description: "GitHub issues and pull requests.",
-  toolCall: { toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 }) },
+  toolCall: { toModelOutput: offloadContent() },
 });
 ```
 

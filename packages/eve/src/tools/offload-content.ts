@@ -2,19 +2,32 @@ import { isObject } from "#shared/guards.js";
 import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
 
 const RESULTS_DIRECTORY = "/tmp/.eve/tool-results";
-const BYTES_PER_TOKEN = 4;
 const SHAPE_LIMIT = 400;
 const TEXT_PREVIEW_LINES = 20;
 const TEXT_PREVIEW_LINE_LIMIT = 200;
 
-/** Options for {@link offloadSandbox}. */
-export interface OffloadSandboxOptions<TOutput> {
+const DEFAULT_MAX_BYTES = 20_000;
+
+/** Options for {@link offloadContent}. */
+export interface OffloadContentOptions<TOutput> {
   /**
-   * Largest result, in estimated tokens (UTF-8 bytes divided by 4), that
-   * goes to the model as it is. A larger result is written to a sandbox file
-   * and the model gets a short note with the file's path.
+   * Largest result, in UTF-8 bytes, that goes to the model as it is. A larger
+   * result is written to a sandbox file and the model gets a short note with
+   * the file's path. Defaults to 20,000 bytes, about 5,000 tokens.
    */
-  readonly maxOutputTokens: number;
+  readonly maxBytes?: number;
+  /**
+   * What the model gets when a result is over `maxBytes` and cannot be saved,
+   * because there is no sandbox that keeps files after the call or opening the
+   * sandbox or writing the file fails. eve logs one warning per session either
+   * way.
+   *
+   * - `"full"` sends the whole result, so nothing is lost and the context may
+   *   grow. This is the default.
+   * - `"description"` sends only its size, shape and first lines, so the context
+   *   stays small and the rest of the result is gone.
+   */
+  readonly ifNotSaved?: "full" | "description";
   /**
    * Projects the output before its size is checked. Defaults to
    * `ctx.defaultModelOutput`, which is what the model sees without a
@@ -28,29 +41,28 @@ export interface OffloadSandboxOptions<TOutput> {
 
 /**
  * Builds a `toModelOutput` that keeps a large tool result out of the model's
- * context. A result over `maxOutputTokens` is written to a file under
+ * context. A result over `maxBytes` is written to a file under
  * `/tmp/.eve/tool-results/` in the session's sandbox, and the model gets the
  * file's path and a one-line description of its shape, so it can read parts
  * of it with `jq`, `head` or `read_file`.
  *
- * The file holds the tool's raw output. When there is no sandbox to keep it in,
- * or opening the sandbox or writing the file fails, the result goes to the
- * model unchanged, and eve logs one warning per session. Error results
- * and results with file parts are never written.
+ * The file holds the tool's raw output. When the result cannot be saved,
+ * `ifNotSaved` decides what the model gets. Error results and results with
+ * file parts are never written.
  *
  * ```ts
  * defineMcpClientConnection({
  *   url,
- *   toolCall: { toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 }) },
+ *   toolCall: { toModelOutput: offloadContent() },
  * });
  * ```
  */
-export function offloadSandbox<TOutput = unknown>(
-  options: OffloadSandboxOptions<TOutput>,
+export function offloadContent<TOutput = unknown>(
+  options: OffloadContentOptions<TOutput> = {},
 ): (output: TOutput, ctx: ToolModelOutputContext) => Promise<ToolModelOutput> {
-  const { maxOutputTokens } = options;
-  if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1) {
-    throw new TypeError("offloadSandbox: maxOutputTokens must be a positive integer.");
+  const { maxBytes = DEFAULT_MAX_BYTES, ifNotSaved = "full" } = options;
+  if (!Number.isInteger(maxBytes) || maxBytes < 1) {
+    throw new TypeError("offloadContent: maxBytes must be a positive integer.");
   }
   return async (output, ctx) => {
     const projected =
@@ -58,27 +70,34 @@ export function offloadSandbox<TOutput = unknown>(
         ? ctx.defaultModelOutput(output)
         : await options.toModelOutput(output, ctx);
     const size = projectedBytes(projected);
-    if (size === undefined || Math.ceil(size / BYTES_PER_TOKEN) <= maxOutputTokens) {
+    if (size === undefined || size <= maxBytes) {
       return projected;
     }
     const file = serialize(output);
     const path = `${RESULTS_DIRECTORY}/${fileStem(ctx)}.${file.extension}`;
+    const notSaved = (): ToolModelOutput =>
+      ifNotSaved === "full"
+        ? projected
+        : {
+            type: "text",
+            value: offloadNote({ file, output, path: undefined, toolName: ctx.toolName }),
+          };
     try {
       const sandbox = await ctx.getSandbox();
       if (sandbox === undefined) {
         ctx.warnOnce(
-          "offloadSandbox.no-sandbox",
-          `offloadSandbox did not save the result of ${ctx.toolName}: there is no sandbox that keeps files after the call (the agent has none, or the tool was invoked without a tool-session key), so the model gets the whole result.`,
+          "offloadContent.no-sandbox",
+          `offloadContent did not save the result of ${ctx.toolName}: there is no sandbox that keeps files after the call (the agent has none, or the tool was invoked without a tool-session key), so the model gets ${ifNotSaved === "full" ? "the whole result" : "only a description of it"}.`,
         );
-        return projected;
+        return notSaved();
       }
       await sandbox.writeTextFile({ content: file.text, path });
     } catch (error) {
       ctx.warnOnce(
-        "offloadSandbox.save-failed",
-        `offloadSandbox could not save the result of ${ctx.toolName}, so the model gets the whole result: ${error instanceof Error ? error.message : String(error)}`,
+        "offloadContent.save-failed",
+        `offloadContent could not save the result of ${ctx.toolName}, so the model gets ${ifNotSaved === "full" ? "the whole result" : "only a description of it"}: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return projected;
+      return notSaved();
     }
     return {
       type: "text",
@@ -124,16 +143,22 @@ function fileStem(ctx: ToolModelOutputContext): string {
 function offloadNote(input: {
   readonly file: SerializedResult;
   readonly output: unknown;
-  readonly path: string;
+  readonly path: string | undefined;
   readonly toolName: string;
 }): string {
   const { file, path, toolName } = input;
-  const tokens = Math.ceil(file.bytes / BYTES_PER_TOKEN);
+  const size = `${file.bytes.toLocaleString("en-US")} bytes`;
   const shape = file.extension === "txt" ? textPreview(file.text) : jsonShape(input.output);
+  if (path === undefined) {
+    return [
+      `The result of ${toolName} is ${size} and could not be saved, so only this description is shown.`,
+      shape,
+    ].join("\n");
+  }
   return [
     `The result of ${toolName} was saved to`,
     path,
-    `(${file.bytes.toLocaleString("en-US")} bytes, about ${tokens.toLocaleString("en-US")} tokens).`,
+    `(${size}).`,
     shape,
     "Read parts of it with jq, head or read_file.",
   ].join("\n");

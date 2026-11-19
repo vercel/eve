@@ -48,7 +48,7 @@ Define every connection with `defineMcpClientConnection` or `defineOpenAPIConnec
 | `approval`                              | Calls run without approval | `never()`, `once()`, `always()`, `auto()`, or your own policy.                                                    |
 | `instanceKey`                           | None                       | A stable, non-secret account or tenant ID. Required on authenticated [dynamic connections](#dynamic-connections). |
 | `toolCall.providedArguments`            | None                       | Arguments your app supplies. eve removes them from the model's input schema.                                      |
-| `toolCall.toModelOutput`                | Full result                | Changes what the model sees of each tool result, for example with `offloadSandbox`.                               |
+| `toolCall.toModelOutput`                | Full result                | Changes what the model sees of each tool result, for example with `offloadContent`.                               |
 | `tools` (MCP) or `operations` (OpenAPI) | Every tool or operation    | A filter with exactly one of `allow` or `block`.                                                                  |
 
 ## MCP connections

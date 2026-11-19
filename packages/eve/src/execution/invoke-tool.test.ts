@@ -18,7 +18,7 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider.js";
 import type { ToolContext } from "#tools/definition.js";
-import { offloadSandbox } from "#tools/offload-sandbox.js";
+import { offloadContent } from "#tools/offload-content.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
@@ -504,7 +504,7 @@ describe("invokeTool", () => {
     const runtime = runtimeWith(
       [
         tool("dump", () => big, {
-          toModelOutput: offloadSandbox({ maxOutputTokens: 10 }),
+          toModelOutput: offloadContent({ maxBytes: 40 }),
         }),
       ],
       registry,

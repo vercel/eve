@@ -5,7 +5,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { offloadSandbox } from "#tools/offload-sandbox.js";
+import { offloadContent } from "#tools/offload-content.js";
 import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 import { resolveProvidedArguments } from "#runtime/connections/provided-arguments.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
@@ -322,7 +322,7 @@ describe("connection tool model output", () => {
 
   it("offloads a large result when the connection sets toolCall.toModelOutput", async () => {
     const { files, output } = await modelOutput({
-      toModelOutput: offloadSandbox({ maxOutputTokens: 1_000 }),
+      toModelOutput: offloadContent({ maxBytes: 4_000 }),
     });
     expect(output.type).toBe("text");
     expect((output as { value: string }).value).toContain(

@@ -8,7 +8,7 @@ last_updated: "2026-11-19"
 
 > **AI status:** Written entirely by AI; human review pending.
 
-Large tool results (an MCP call returning 680 KB of JSON is about 190,000 tokens) fill the context window and are re-sent on every later model call in the turn. This doc proposes `offloadSandbox`, a `toModelOutput` helper that writes a result over a token budget to a sandbox file and gives the model a short note it can follow up on with jq. Code references are to `vercel/eve` `main` at `dfc71e3`.
+Large tool results (an MCP call returning 680 KB of JSON is about 190,000 tokens) fill the context window and are re-sent on every later model call in the turn. This doc proposes `offloadContent`, a `toModelOutput` helper that writes a result over a size limit (20,000 bytes by default) to a sandbox file and gives the model a short note it can follow up on with jq. Code references are to `vercel/eve` `main` at `dfc71e3`.
 
 ## The measurement
 
@@ -42,33 +42,33 @@ Built-in tools handle size themselves, with the limits in `execution/sandbox/tru
 ### Configuration
 
 ```ts
-import { offloadSandbox } from "eve/tools";
+import { offloadContent } from "eve/tools";
 
 defineMcpClientConnection({
   url,
-  toolCall: { toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 }) },
+  toolCall: { toModelOutput: offloadContent() },
 });
 
 defineTool({
   ...webFetch,
-  toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 }),
+  toModelOutput: offloadContent(),
 });
 ```
 
 - `ToolDefinition.toModelOutput` (`tools/definition.ts:313`) becomes `(output: TOutput, ctx: ToolModelOutputContext) => ToolModelOutput | Promise<ToolModelOutput>`. `ctx` carries `getSandbox`, `callId`, `toolName` and `defaultModelOutput`. `getSandbox()` resolves `undefined` when the agent has no sandbox, and `defaultModelOutput(output)` is the projection eve applies when a tool sets no `toModelOutput`, which is `connectionToolModelOutput` for a connection tool. Existing one-argument functions keep working.
 - `ConnectionToolCallDefinition` (`public/definitions/connections/tool-call.ts:27-30`) gains the same `toModelOutput`, so `defineMcpClientConnection` and `defineOpenAPIConnection` both get it. It receives the connection tool's raw result.
-- `offloadSandbox({ maxOutputTokens, toModelOutput? })` returns a `toModelOutput` function. The optional inner `toModelOutput` is applied first, and the budget is checked on its result. Left out, the raw value goes to the model under the budget. For `web_fetch`, `gh`, `grep` and `glob` that is the right result, because over the budget their cut is replaced by the file. For a connection, `ctx.defaultModelOutput` is eve's own `connectionToolModelOutput`. Size is the projected output, estimated as UTF-8 bytes / 4.
+- `offloadContent({ maxBytes?, ifNotSaved?, toModelOutput? })` returns a `toModelOutput` function. `maxBytes` defaults to 20,000 (about 5,000 tokens). The optional inner `toModelOutput` is applied first, and the limit is checked on its result in UTF-8 bytes. Left out, the raw value goes to the model under the limit. For `web_fetch`, `gh`, `grep` and `glob` that is the right result, because over the limit their cut is replaced by the file. For a connection, `ctx.defaultModelOutput` is eve's own `connectionToolModelOutput`.
 - Built-in and extension tools are overridden by spreading the exported definition into `defineTool` (`docs/concepts/built-in-tools.md:58-72`), so they need no new option.
 
-### Past the budget, with or without a sandbox
+### Past the limit, with or without a sandbox
 
 - With a sandbox: eve writes the file described below and the model gets the note.
-- Without a sandbox: `offloadSandbox` returns the inner projection unchanged and logs one warning per session. eve never cuts a result to fit.
+- Without a sandbox, or when opening it or writing the file fails: `ifNotSaved` decides, and eve logs one warning per session. `"full"` (the default) returns the inner projection unchanged. `"description"` returns only the size, shape and first lines. eve never cuts a result to fit unless the author picks `"description"`.
 - Where the result is kept is the helper's choice. A Blob helper can come later with the same shape; it also needs a way for the model to read the result back, so it is out of scope.
 
 ### Built-in and extension tools that cut inside `execute`
 
-These cut their result before `toModelOutput` runs, so `offloadSandbox` would only see the cut copy. PR 2 moves each cut into the tool's default `toModelOutput`:
+These cut their result before `toModelOutput` runs, so `offloadContent` would only see the cut copy. PR 2 moves each cut into the tool's default `toModelOutput`:
 
 - `web_fetch`: `truncateHead` at 50 KB, rest dropped (`execution/web-fetch/execute.ts:89`).
 - `gh` in `eve-git`: keeps the last `MAX_OUTPUT_BYTES = 100_000` (`eve-git/extension/lib/github-shell.ts:150,517-522`).
@@ -98,7 +98,7 @@ The shape line is computed, not a raw preview: the top-level type, the array len
 
 ### Where the code changes
 
-- `toolCallModelOutput` (`harness/tool-call-io.ts:69-96`) is where every result becomes model output. It passes `ctx` to `toModelOutput`, built from the running context with `loadContext()` and `SandboxKey`, as `execution/invoke-tool.ts:172` does. `offloadSandbox` writes with `SandboxSession.writeTextFile` (`shared/sandbox-session.ts:100-112`).
+- `toolCallModelOutput` (`harness/tool-call-io.ts:69-96`) is where every result becomes model output. It passes `ctx` to `toModelOutput`, built from the running context with `loadContext()` and `SandboxKey`, as `execution/invoke-tool.ts:172` does. `offloadContent` writes with `SandboxSession.writeTextFile` (`shared/sandbox-session.ts:100-112`).
 - `connectionEntry` (`execution/catalog/connection-entry.ts:61-78`) uses the connection's `toolCall.toModelOutput` when set, wrapping `connectionToolModelOutput`.
 - The full value stays on the call's settled event (`action.result`), so channels, hooks and traces still see it. History stores only the note, which keeps the prompt cache stable.
 
@@ -110,8 +110,8 @@ The shape line is computed, not a raw preview: the top-level type, the array len
 
 ## Alternatives
 
-- A default token cap (eve issue #5924, closed PR #6252). It loses data, and the maintainers closed it as a product decision.
-- A `maxOutputTokens` option on `defineTool` and connections. It fixed one behavior in config; a `toModelOutput` helper does the same and leaves room for other helpers. It also resolves eve issues #6277 and #905, which ask for `toModelOutput` on connections.
+- A default token cap on every tool (eve issue #5924, closed PR #6252). It loses data, and the maintainers closed it as a product decision. `offloadContent` has a default `maxBytes`, but only a tool that sets it is affected, and the result is saved rather than cut.
+- A size option on `defineTool` and connections. It fixed one behavior in config; a `toModelOutput` helper does the same and leaves room for other helpers. It also resolves eve issues #6277 and #905, which ask for `toModelOutput` on connections.
 - A `resultFile` option naming the mechanism. It modeled how eve stores the overflow rather than the budget itself.
 - Reading the full output back from the session stream with a new `expand_tool_result` tool (eve issue #1040). Works without a sandbox, but the model pages through text instead of running jq.
 - A per-call flag on `eve__tool`. It only reaches deferred catalog tools (MCP and OpenAPI), so it can't be the one mechanism for all tools. The budget covers the same need for every tool.
@@ -128,4 +128,4 @@ The shape line is computed, not a raw preview: the top-level type, the array len
 
 ## Real-path test
 
-Two agents with a sandbox: one with an MCP connection to a test server whose tool returns the 680 KB issues JSON, one with an authored `defineTool` that returns the same JSON, both with `toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 })`. The test passes when the model's next request carries the note (under 300 tokens) rather than the JSON, the file exists in the sandbox with identical bytes, and the model answers "how many of these issues are open?" correctly by running jq. Before the change, the same request carries about 190,000 tokens of tool result. A third case runs the authored tool on an agent with no sandbox and checks the model gets the full result unchanged and the warning is logged. A fourth case overrides `web_fetch` with `offloadSandbox` on a page over 50 KB and checks the file holds the whole page.
+Two agents with a sandbox: one with an MCP connection to a test server whose tool returns the 680 KB issues JSON, one with an authored `defineTool` that returns the same JSON, both with `toModelOutput: offloadContent()`. The test passes when the model's next request carries the note (under 300 tokens) rather than the JSON, the file exists in the sandbox with identical bytes, and the model answers "how many of these issues are open?" correctly by running jq. Before the change, the same request carries about 190,000 tokens of tool result. A third case runs the authored tool on an agent with no sandbox and checks the model gets the full result unchanged and the warning is logged. A fourth case overrides `web_fetch` with `offloadContent` on a page over 50 KB and checks the file holds the whole page.

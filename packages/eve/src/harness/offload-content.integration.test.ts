@@ -15,7 +15,7 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { defineTool } from "#tools/definition.js";
-import { offloadSandbox } from "#tools/offload-sandbox.js";
+import { offloadContent } from "#tools/offload-content.js";
 import { webFetch } from "#tools/provided/web-fetch.js";
 
 vi.mock("#execution/web-fetch/request.js", () => ({ requestPublicUrl: vi.fn() }));
@@ -92,7 +92,7 @@ function approxTokens(text: string): number {
   return Math.ceil(Buffer.byteLength(text) / 4);
 }
 
-describe("offloadSandbox on a real turn", () => {
+describe("offloadContent on a real turn", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -155,7 +155,7 @@ describe("offloadSandbox on a real turn", () => {
             description: "List the repository's issues.",
             execute: async () => ISSUES,
             inputSchema: {},
-            toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 }),
+            toModelOutput: offloadContent({ maxBytes: 80_000 }),
           }),
         ),
         readerTool(read),
@@ -201,7 +201,7 @@ describe("offloadSandbox on a real turn", () => {
       modules: [
         mod(
           "tools/web_fetch.ts",
-          defineTool({ ...webFetch, toModelOutput: offloadSandbox({ maxOutputTokens: 2_000 }) }),
+          defineTool({ ...webFetch, toModelOutput: offloadContent({ maxBytes: 8_000 }) }),
         ),
         readerTool(read),
       ],
@@ -249,7 +249,7 @@ describe("offloadSandbox on a real turn", () => {
           "connections/issues.ts",
           defineMcpClientConnection({
             description: "Repository issues.",
-            toolCall: { toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 }) },
+            toolCall: { toModelOutput: offloadContent({ maxBytes: 80_000 }) },
             url: "https://issues.example.com/mcp",
           }),
         ),
