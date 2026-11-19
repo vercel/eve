@@ -88,6 +88,3 @@ No `eveSolid()` plugin: `eveVite()` covers dev, preview, and Vercel for every st
   `framework-fixtures` smoke project.
 - Docs: `docs/guides/frontend/use-eve-agent-solid.mdx`, plus Solid in the frontend hub,
   `useEveAgent` reference, TanStack Start guide, and integrations data.
-
-The workspace's `minimumReleaseAge` of two days blocks the Solid 2 packages until
-2026-11-20 11:32 UTC, so this PR adds exact-version `minimumReleaseAgeExclude` entries for them.
