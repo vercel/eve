@@ -1,4 +1,7 @@
-import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
+import {
+  COMPILE_TOOL_INPUT_SCHEMA_INVALID,
+  type CompilerDiagnostic,
+} from "#compiler/diagnostics.js";
 import {
   ROOT_COMPILED_AGENT_NODE_ID,
   type CompiledAgentManifest,
@@ -22,11 +25,8 @@ import {
 import { closestName } from "#shared/closest-name.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { findModelInputSchemaProblem } from "#tools/model-input-schema-problem.js";
-import { findJsonSchemaValidatorProblem } from "#tools/schema.js";
 
 export const COMPILE_APPROVAL_TOOL_NAME_UNKNOWN = "compile/approval-tool-name-unknown";
-
-export const COMPILE_TOOL_INPUT_SCHEMA_INVALID = "compile/tool-input-schema-invalid";
 
 export const COMPILE_WORKFLOW_AGENT_TARGET_UNKNOWN = "compile/workflow-agent-target-unknown";
 
@@ -43,19 +43,6 @@ interface ConnectionApprovalScan {
   readonly operations?: { readonly list: "allow" | "block"; readonly names: readonly string[] };
 }
 
-function findToolInputSchemaProblem(
-  tool: CompiledToolDefinition,
-  binding: CompiledModuleBinding | undefined,
-): string | undefined {
-  if (tool.modelInputSchema === undefined) return undefined;
-  const modelProblem = findModelInputSchemaProblem(tool.modelInputSchema);
-  if (modelProblem !== undefined || binding?.owner.kind !== "application") return modelProblem;
-  const validatorProblem = findJsonSchemaValidatorProblem(tool.modelInputSchema);
-  return validatorProblem === undefined
-    ? undefined
-    : `${validatorProblem}, so eve can't validate the tool's input.`;
-}
-
 export async function diagnoseAuthoredSources(
   manifest: CompiledAgentManifest,
 ): Promise<CompilerDiagnostic[]> {
@@ -63,7 +50,10 @@ export async function diagnoseAuthoredSources(
   for (const scope of agentNodeScopes(manifest)) {
     for (const tool of scope.tools) {
       const binding = scope.bindings[tool.sourceId];
-      const schemaProblem = findToolInputSchemaProblem(tool, binding);
+      const schemaProblem =
+        tool.modelInputSchema === undefined
+          ? undefined
+          : findModelInputSchemaProblem(tool.modelInputSchema);
       if (schemaProblem !== undefined) {
         diagnostics.push({
           code: COMPILE_TOOL_INPUT_SCHEMA_INVALID,
