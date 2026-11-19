@@ -20,8 +20,8 @@ importers:
         specifier: 0.47.1
         version: 0.47.1
       '@onkernel/browser-loop':
-        specifier: 0.12.0
-        version: 0.12.0(@aws-sdk/credential-provider-node@3.972.97)(@earendil-works/pi-agent-core@0.83.0(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(ws@8.23.0)(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(@smithy/signature-v4@5.7.5)(@types/node@24.13.3)(ws@8.23.0)(zod@4.6.7)
+        specifier: 0.12.1
+        version: 0.12.1(@aws-sdk/credential-provider-node@3.972.97)(@earendil-works/pi-agent-core@0.83.0(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(ws@8.23.0)(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(@smithy/signature-v4@5.7.5)(@types/node@24.13.3)(ws@8.23.0)(zod@4.6.7)
       '@onkernel/sdk':
         specifier: ^0.96.0
         version: 0.96.0
@@ -1066,8 +1066,8 @@ packages:
   '@nodable/entities@3.1.0':
     resolution: {integrity: sha512-LsS/DjHr+uDM647Gru/cA8+J3a3HfhttwCKLyuoyN7yXTFCxKBtSgMQBvrW9yNPa2/zDRUNuGPaH5QUFoa4arQ==}
 
-  '@onkernel/browser-loop@0.12.0':
-    resolution: {integrity: sha512-M4Rx9uuR2nqOO7cu4qDe9h5QZu1J0h0Er6MR+BE2c7OUDEhQ4AyUB70XIt2/D/qtJbjB2AYnCMdnJHGfKbUcZg==}
+  '@onkernel/browser-loop@0.12.1':
+    resolution: {integrity: sha512-H+DyBchdvjkgt9UnmKcVdv+U+tbieVUf/xUI8WaoXeJh2uWyMJrYhP4uoqEm8HeFgwfI7Rq0kwGnATDrz+LdIQ==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
       '@earendil-works/pi-agent-core': 0.83.0
@@ -1075,9 +1075,6 @@ packages:
     peerDependenciesMeta:
       '@earendil-works/pi-coding-agent':
         optional: true
-
-  '@onkernel/sdk@0.49.0':
-    resolution: {integrity: sha512-nsq5OfkaNKxRTCdXQF8BSTj/Wl0iBIqyWoI/ATgQt15pV+59E22MsZ+IHPiVwwb33tXLtnOqUe5ffOxm7l3GHg==}
 
   '@onkernel/sdk@0.96.0':
     resolution: {integrity: sha512-x23psMiKLsHA2CSuvvyHkcxVx/d5UN3PynloVWf4Fgy3Qt9pYotIXb7DEidXJBFYfIodNBMuHl9wPguK3r6Zow==}
@@ -3991,11 +3988,11 @@ snapshots:
 
   '@nodable/entities@3.1.0': {}
 
-  '@onkernel/browser-loop@0.12.0(@aws-sdk/credential-provider-node@3.972.97)(@earendil-works/pi-agent-core@0.83.0(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(ws@8.23.0)(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(@smithy/signature-v4@5.7.5)(@types/node@24.13.3)(ws@8.23.0)(zod@4.6.7)':
+  '@onkernel/browser-loop@0.12.1(@aws-sdk/credential-provider-node@3.972.97)(@earendil-works/pi-agent-core@0.83.0(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(ws@8.23.0)(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(@smithy/signature-v4@5.7.5)(@types/node@24.13.3)(ws@8.23.0)(zod@4.6.7)':
     dependencies:
       '@earendil-works/pi-agent-core': 0.83.0(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(ws@8.23.0)(zod@4.6.7)
       '@earendil-works/pi-ai': 0.83.0(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(ws@8.23.0)(zod@4.6.7)
-      '@onkernel/sdk': 0.49.0
+      '@onkernel/sdk': 0.96.0
       openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)(zod@4.6.7)
       sharp: 0.35.5(@types/node@24.13.3)
       typebox: 1.3.7
@@ -4010,8 +4007,6 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
-
-  '@onkernel/sdk@0.49.0': {}
 
   '@onkernel/sdk@0.96.0': {}
 

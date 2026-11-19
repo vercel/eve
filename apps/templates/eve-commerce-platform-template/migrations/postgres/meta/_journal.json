@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1795025442741,
+      "when": 1795112654023,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1795034573800,
-      "tag": "0001_agent-name",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1795036391466,
-      "tag": "0002_shopping-watches",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1795105812714,
-      "tag": "0003_sign-in-and-linq-ownership",
       "breakpoints": true
     }
   ]

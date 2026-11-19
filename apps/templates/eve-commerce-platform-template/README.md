@@ -13,7 +13,7 @@ Text evey what you need. It finds products, builds a cart with [Agentcard](https
 3. Open your deployment and sign in with your phone number. If prompted, text the number shown and then request your sign-in code again. Once signed in, send the line a direct message: “Find me two packs of AA batteries.”
 4. To receive purchase updates, add `https://<your-deployment>/agentcard/webhooks` in the Agentcard dashboard. Set `AGENTCARD_WEBHOOK_SECRET` in Vercel to the endpoint's signing secret and redeploy.
 
-The app reads the line’s number from Linq. Set `LINQ_PHONE_NUMBER` only to override it. Shopping happens in iMessage. See the [deployment guide](docs/deployment.md) for preview isolation, upgrade notes, and the before-sharing checklist.
+The app reads the line’s number from Linq. Set `LINQ_PHONE_NUMBER` only to override it. Shopping happens in iMessage. See the [deployment guide](docs/deployment.md) for preview isolation and the before-sharing checklist.
 
 Text a public product link and ask for a USD price target or an in-stock alert. A watch checks about hourly for 30 days and sends one alert, then stops. Watches never place orders.
 

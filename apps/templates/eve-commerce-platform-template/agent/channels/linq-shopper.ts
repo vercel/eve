@@ -20,8 +20,6 @@ const unavailableReplyTargetSchema = z.object({
 
 type LinqMessageContent = Parameters<LinqAPIV3["chats"]["messages"]["send"]>[1]["message"];
 
-// The file stem gives this channel a new continuation namespace. Do not
-// resume legacy Linq sessions whose threads were not bound to a shopper.
 export default linqChannel({
   route: "/eve/v1/linq",
   credentials: linqCredentials,

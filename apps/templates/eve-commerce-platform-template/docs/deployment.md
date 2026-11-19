@@ -30,20 +30,6 @@ outside Vercel, run `pnpm db:migrate`, then `pnpm build` and
 This does not replace Vercel Connect for the template’s production iMessage
 flow. Use `EVEY_LOCAL_PHONE_AUTH=1 pnpm dev` only for loopback development.
 
-## Upgrading an existing deployment
-
-Migration `0003` adds the sign-in send quota and persistent Linq chat ownership.
-The public Linq trigger URL is unchanged. The first inbound message after the
-upgrade starts a new eve conversation rather than attaching to old, unbound
-history. Previously pending purchase updates without a verified destination
-are not forwarded. Finish active checkouts before upgrading a live line.
-
-A claimed Linq chat stays bound to its first verified shopper. When provisioning
-a new identity, use a fresh provider chat or line instead of deleting the
-binding to reuse old history. Phone numbers are the sign-in credential; phone
-recycling and account recovery require an operator policy before onboarding
-real shoppers.
-
 ## Before sharing
 
 1. Confirm the published repo is accessible to the intended audience. If sharing
@@ -60,4 +46,4 @@ real shoppers.
    images can only be accessed by their owner.
 4. Set provider usage limits and alerting before inviting shoppers. Explain how
    saved details can be shared with the model for requested tasks and set a policy
-   for data retention, account recovery, and removal.
+   for data retention, account recovery, phone-number recycling, and removal.

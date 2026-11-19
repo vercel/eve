@@ -14,6 +14,12 @@ CREATE TABLE "auth_account" (
 	"updatedAt" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "auth_phone_code_limits" (
+	"recipient_key" text PRIMARY KEY NOT NULL,
+	"sends" integer NOT NULL,
+	"window_ends_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "auth_session" (
 	"id" text PRIMARY KEY NOT NULL,
 	"expiresAt" timestamp with time zone NOT NULL,
@@ -77,6 +83,11 @@ CREATE TABLE "browser_sessions" (
 	"worker_session_id" text
 );
 --> statement-breakpoint
+CREATE TABLE "linq_thread_owners" (
+	"chat_id" text PRIMARY KEY NOT NULL,
+	"shopper_id" text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "agentcard_orders" (
 	"shopper_id" text NOT NULL,
 	"order_id" text NOT NULL,
@@ -87,52 +98,25 @@ CREATE TABLE "agentcard_orders" (
 	CONSTRAINT "agentcard_orders_pkey" PRIMARY KEY("shopper_id","order_id")
 );
 --> statement-breakpoint
-CREATE TABLE "schedule_runs" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"schedule_id" uuid NOT NULL,
-	"scheduled_for" timestamp (3) with time zone NOT NULL,
-	"status" text DEFAULT 'queued' NOT NULL,
-	"worker_session_id" text,
-	"deferred_completion_turn_id" text,
-	"pending_input_requests" jsonb,
-	"outcome" jsonb,
-	"report_status" text DEFAULT 'not_ready' NOT NULL,
-	"report_sequence" integer DEFAULT 0 NOT NULL,
-	"attempts" integer DEFAULT 0 NOT NULL,
-	"retry_at" timestamp (3) with time zone,
-	"lease_token" uuid,
-	"lease_expires_at" timestamp (3) with time zone,
-	"report_lease_token" uuid,
-	"report_lease_expires_at" timestamp (3) with time zone,
-	"last_error" text,
-	"started_at" timestamp (3) with time zone,
-	"completed_at" timestamp (3) with time zone,
-	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "schedule_runs_status_check" CHECK ("schedule_runs"."status" IN ('queued', 'running', 'waiting_for_input', 'completed', 'dead_letter')),
-	CONSTRAINT "schedule_runs_report_status_check" CHECK ("schedule_runs"."report_status" IN ('not_ready', 'not_needed', 'pending', 'queued', 'delivered', 'suppressed'))
-);
---> statement-breakpoint
-CREATE TABLE "schedules" (
+CREATE TABLE "shopping_watches" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"shopper_id" text NOT NULL,
-	"prompt" text NOT NULL,
-	"conversation_channel" text NOT NULL,
-	"conversation_id" text NOT NULL,
-	"reply_anchor_message_id" text,
-	"timing" jsonb NOT NULL,
-	"missed_run_policy" text DEFAULT 'run_latest' NOT NULL,
+	"thread_id" text NOT NULL,
+	"product_url" text NOT NULL,
+	"product_name" text NOT NULL,
+	"kind" text NOT NULL,
+	"target_usd_cents" integer,
 	"status" text DEFAULT 'active' NOT NULL,
-	"next_run_at" timestamp (3) with time zone,
-	"last_run_at" timestamp (3) with time zone,
-	"last_error" text,
-	"revision" integer DEFAULT 0 NOT NULL,
-	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "schedules_conversation_channel_check" CHECK ("schedules"."conversation_channel" IN ('linq', 'local')),
-	CONSTRAINT "schedules_conversation_id_check" CHECK ("schedules"."conversation_id" <> ''),
-	CONSTRAINT "schedules_missed_run_policy_check" CHECK ("schedules"."missed_run_policy" IN ('skip', 'run_latest', 'catch_up')),
-	CONSTRAINT "schedules_status_check" CHECK ("schedules"."status" IN ('active', 'paused', 'completed', 'deleted'))
+	"next_check_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"last_check" text,
+	"alert_text" text,
+	"lease_token" uuid,
+	"lease_expires_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "shopping_watches_kind_check" CHECK (("shopping_watches"."kind" = 'price' AND "shopping_watches"."target_usd_cents" IS NOT NULL AND "shopping_watches"."target_usd_cents" > 0) OR ("shopping_watches"."kind" = 'restock' AND "shopping_watches"."target_usd_cents" IS NULL)),
+	CONSTRAINT "shopping_watches_status_check" CHECK ("shopping_watches"."status" IN ('active', 'ready_to_notify', 'notified', 'stopped', 'expired')),
+	CONSTRAINT "shopping_watches_alert_check" CHECK ("shopping_watches"."status" NOT IN ('ready_to_notify', 'notified') OR "shopping_watches"."alert_text" IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE "agent_sessions" (
@@ -144,6 +128,7 @@ CREATE TABLE "agent_sessions" (
 --> statement-breakpoint
 CREATE TABLE "shoppers" (
 	"id" text PRIMARY KEY NOT NULL,
+	"agent_name" text DEFAULT 'evey' NOT NULL,
 	"model_id" text,
 	"first_name" text,
 	"last_name" text,
@@ -178,8 +163,7 @@ ALTER TABLE "auth_session" ADD CONSTRAINT "auth_session_userId_auth_user_id_fk" 
 ALTER TABLE "browser_images" ADD CONSTRAINT "browser_images_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "browser_sessions" ADD CONSTRAINT "browser_sessions_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agentcard_orders" ADD CONSTRAINT "agentcard_orders_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "schedule_runs" ADD CONSTRAINT "schedule_runs_schedule_id_schedules_id_fk" FOREIGN KEY ("schedule_id") REFERENCES "public"."schedules"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "schedules" ADD CONSTRAINT "schedules_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "shopping_watches" ADD CONSTRAINT "shopping_watches_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_sessions" ADD CONSTRAINT "agent_sessions_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workstreams" ADD CONSTRAINT "workstreams_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "auth_account_user_idx" ON "auth_account" USING btree ("userId");--> statement-breakpoint
@@ -187,11 +171,8 @@ CREATE INDEX "auth_session_user_idx" ON "auth_session" USING btree ("userId");--
 CREATE INDEX "auth_verification_identifier_idx" ON "auth_verification" USING btree ("identifier");--> statement-breakpoint
 CREATE UNIQUE INDEX "browser_images_shopper_operation_idx" ON "browser_images" USING btree ("shopper_id","idempotency_key");--> statement-breakpoint
 CREATE INDEX "browser_sessions_shopper_idx" ON "browser_sessions" USING btree ("shopper_id","created_at" DESC NULLS FIRST);--> statement-breakpoint
-CREATE UNIQUE INDEX "schedule_runs_occurrence_idx" ON "schedule_runs" USING btree ("schedule_id","scheduled_for");--> statement-breakpoint
-CREATE INDEX "schedule_runs_ready_idx" ON "schedule_runs" USING btree ("status","retry_at" NULLS FIRST);--> statement-breakpoint
-CREATE INDEX "schedule_runs_report_idx" ON "schedule_runs" USING btree ("report_status","updated_at");--> statement-breakpoint
-CREATE INDEX "schedules_due_idx" ON "schedules" USING btree ("next_run_at") WHERE "schedules"."status" = 'active' AND "schedules"."next_run_at" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX "schedules_shopper_conversation_idx" ON "schedules" USING btree ("shopper_id","conversation_channel","conversation_id","next_run_at");--> statement-breakpoint
+CREATE INDEX "shopping_watches_shopper_idx" ON "shopping_watches" USING btree ("shopper_id","created_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "shopping_watches_due_idx" ON "shopping_watches" USING btree ("next_check_at") WHERE "shopping_watches"."status" IN ('active', 'ready_to_notify');--> statement-breakpoint
 CREATE INDEX "agent_sessions_shopper_idx" ON "agent_sessions" USING btree ("shopper_id");--> statement-breakpoint
 CREATE INDEX "agent_sessions_latest_delivery_idx" ON "agent_sessions" USING btree ("shopper_id","last_delivery_at" DESC NULLS FIRST,"session_id" DESC NULLS FIRST) WHERE "agent_sessions"."last_delivery_at" is not null;--> statement-breakpoint
 CREATE INDEX "workstreams_recent_idx" ON "workstreams" USING btree ("shopper_id","scope_key","updated_at" DESC NULLS FIRST,"id") WHERE "workstreams"."content" is not null;

@@ -1,5 +1,5 @@
 {
-  "id": "5b31cc76-01c4-4b5a-bbe6-29c3d7f8a21f",
+  "id": "3bf86900-4a0f-4cc6-b44e-b169a49cda5f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -116,6 +116,37 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_phone_code_limits": {
+      "name": "auth_phone_code_limits",
+      "schema": "",
+      "columns": {
+        "recipient_key": {
+          "name": "recipient_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sends": {
+          "name": "sends",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "window_ends_at": {
+          "name": "window_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -584,6 +615,31 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.linq_thread_owners": {
+      "name": "linq_thread_owners",
+      "schema": "",
+      "columns": {
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "shopper_id": {
+          "name": "shopper_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.agentcard_orders": {
       "name": "agentcard_orders",
       "schema": "",
@@ -649,237 +705,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.schedule_runs": {
-      "name": "schedule_runs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "schedule_id": {
-          "name": "schedule_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scheduled_for": {
-          "name": "scheduled_for",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "worker_session_id": {
-          "name": "worker_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "deferred_completion_turn_id": {
-          "name": "deferred_completion_turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pending_input_requests": {
-          "name": "pending_input_requests",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "report_status": {
-          "name": "report_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'not_ready'"
-        },
-        "report_sequence": {
-          "name": "report_sequence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "retry_at": {
-          "name": "retry_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "lease_token": {
-          "name": "lease_token",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "lease_expires_at": {
-          "name": "lease_expires_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "report_lease_token": {
-          "name": "report_lease_token",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "report_lease_expires_at": {
-          "name": "report_lease_expires_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "schedule_runs_occurrence_idx": {
-          "name": "schedule_runs_occurrence_idx",
-          "columns": [
-            {
-              "expression": "schedule_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "scheduled_for",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "schedule_runs_ready_idx": {
-          "name": "schedule_runs_ready_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "retry_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "first"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "schedule_runs_report_idx": {
-          "name": "schedule_runs_report_idx",
-          "columns": [
-            {
-              "expression": "report_status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "updated_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "schedule_runs_schedule_id_schedules_id_fk": {
-          "name": "schedule_runs_schedule_id_schedules_id_fk",
-          "tableFrom": "schedule_runs",
-          "tableTo": "schedules",
-          "columnsFrom": ["schedule_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "schedule_runs_status_check": {
-          "name": "schedule_runs_status_check",
-          "value": "\"schedule_runs\".\"status\" IN ('queued', 'running', 'waiting_for_input', 'completed', 'dead_letter')"
-        },
-        "schedule_runs_report_status_check": {
-          "name": "schedule_runs_report_status_check",
-          "value": "\"schedule_runs\".\"report_status\" IN ('not_ready', 'not_needed', 'pending', 'queued', 'delivered', 'suppressed')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.schedules": {
-      "name": "schedules",
+    "public.shopping_watches": {
+      "name": "shopping_watches",
       "schema": "",
       "columns": {
         "id": {
@@ -895,42 +722,35 @@
           "primaryKey": false,
           "notNull": true
         },
-        "prompt": {
-          "name": "prompt",
+        "thread_id": {
+          "name": "thread_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "conversation_channel": {
-          "name": "conversation_channel",
+        "product_url": {
+          "name": "product_url",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "conversation_id": {
-          "name": "conversation_id",
+        "product_name": {
+          "name": "product_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "reply_anchor_message_id": {
-          "name": "reply_anchor_message_id",
+        "kind": {
+          "name": "kind",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_usd_cents": {
+          "name": "target_usd_cents",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
-        },
-        "timing": {
-          "name": "timing",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "missed_run_policy": {
-          "name": "missed_run_policy",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'run_latest'"
         },
         "status": {
           "name": "status",
@@ -939,65 +759,54 @@
           "notNull": true,
           "default": "'active'"
         },
-        "next_run_at": {
-          "name": "next_run_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_run_at": {
-          "name": "last_run_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (3) with time zone",
+        "next_check_at": {
+          "name": "next_check_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp (3) with time zone",
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_check": {
+          "name": "last_check",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alert_text": {
+          "name": "alert_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
       "indexes": {
-        "schedules_due_idx": {
-          "name": "schedules_due_idx",
-          "columns": [
-            {
-              "expression": "next_run_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"schedules\".\"status\" = 'active' AND \"schedules\".\"next_run_at\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "schedules_shopper_conversation_idx": {
-          "name": "schedules_shopper_conversation_idx",
+        "shopping_watches_shopper_idx": {
+          "name": "shopping_watches_shopper_idx",
           "columns": [
             {
               "expression": "shopper_id",
@@ -1006,21 +815,9 @@
               "nulls": "last"
             },
             {
-              "expression": "conversation_channel",
+              "expression": "created_at",
               "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_run_at",
-              "isExpression": false,
-              "asc": true,
+              "asc": false,
               "nulls": "last"
             }
           ],
@@ -1028,12 +825,28 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "shopping_watches_due_idx": {
+          "name": "shopping_watches_due_idx",
+          "columns": [
+            {
+              "expression": "next_check_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"shopping_watches\".\"status\" IN ('active', 'ready_to_notify')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
-        "schedules_shopper_id_shoppers_id_fk": {
-          "name": "schedules_shopper_id_shoppers_id_fk",
-          "tableFrom": "schedules",
+        "shopping_watches_shopper_id_shoppers_id_fk": {
+          "name": "shopping_watches_shopper_id_shoppers_id_fk",
+          "tableFrom": "shopping_watches",
           "tableTo": "shoppers",
           "columnsFrom": ["shopper_id"],
           "columnsTo": ["id"],
@@ -1045,21 +858,17 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "schedules_conversation_channel_check": {
-          "name": "schedules_conversation_channel_check",
-          "value": "\"schedules\".\"conversation_channel\" IN ('linq', 'local')"
+        "shopping_watches_kind_check": {
+          "name": "shopping_watches_kind_check",
+          "value": "(\"shopping_watches\".\"kind\" = 'price' AND \"shopping_watches\".\"target_usd_cents\" IS NOT NULL AND \"shopping_watches\".\"target_usd_cents\" > 0) OR (\"shopping_watches\".\"kind\" = 'restock' AND \"shopping_watches\".\"target_usd_cents\" IS NULL)"
         },
-        "schedules_conversation_id_check": {
-          "name": "schedules_conversation_id_check",
-          "value": "\"schedules\".\"conversation_id\" <> ''"
+        "shopping_watches_status_check": {
+          "name": "shopping_watches_status_check",
+          "value": "\"shopping_watches\".\"status\" IN ('active', 'ready_to_notify', 'notified', 'stopped', 'expired')"
         },
-        "schedules_missed_run_policy_check": {
-          "name": "schedules_missed_run_policy_check",
-          "value": "\"schedules\".\"missed_run_policy\" IN ('skip', 'run_latest', 'catch_up')"
-        },
-        "schedules_status_check": {
-          "name": "schedules_status_check",
-          "value": "\"schedules\".\"status\" IN ('active', 'paused', 'completed', 'deleted')"
+        "shopping_watches_alert_check": {
+          "name": "shopping_watches_alert_check",
+          "value": "\"shopping_watches\".\"status\" NOT IN ('ready_to_notify', 'notified') OR \"shopping_watches\".\"alert_text\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -1165,6 +974,13 @@
           "type": "text",
           "primaryKey": true,
           "notNull": true
+        },
+        "agent_name": {
+          "name": "agent_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'evey'"
         },
         "model_id": {
           "name": "model_id",

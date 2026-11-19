@@ -24,7 +24,7 @@
   "dependencies": {
     "@agent-cards/commerce-sdk": "0.23.2",
     "@linqapp/sdk": "0.47.1",
-    "@onkernel/browser-loop": "0.12.0",
+    "@onkernel/browser-loop": "0.12.1",
     "@onkernel/sdk": "^0.96.0",
     "@opentelemetry/api": "^1.9.1",
     "@t3-oss/env-nextjs": "0.13.11",
