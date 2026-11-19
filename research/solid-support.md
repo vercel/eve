@@ -89,8 +89,3 @@ No `eveSolid()` plugin: `eveVite()` covers dev, preview, and Vercel for every st
 
 The workspace's `minimumReleaseAge` of two days blocks the Solid 2 packages until
 2026-11-20 11:32 UTC, so this PR adds exact-version `minimumReleaseAgeExclude` entries for them.
-
-## Open questions
-
-- Does Vercel use a Build Output that `vite build` writes for a project on the Vite framework
-  preset? The #6620 preview deploy settles it before merge.

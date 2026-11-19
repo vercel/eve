@@ -10,7 +10,7 @@ description: "Use the eve Solid binding and its Solid-specific reactive interfac
 Your project needs an eve agent directory next to the app. If you don't have one, start from [Getting started](../../getting-started). Install eve, Solid, and Vite:
 
 ```bash
-npm install eve solid-js @solidjs/web
+npm install eve ai solid-js @solidjs/web
 npm install -D vite @solidjs/vite-plugin
 ```
 
@@ -161,19 +161,21 @@ export function PendingRequests() {
   );
 
   return (
-    <For each={pendingRequests()}>
+    <For each={pendingRequests()} keyed={(item) => item.interactionId}>
       {(item) => (
         <fieldset disabled={agent.status() === "resuming"}>
-          <legend>{item.request.prompt}</legend>
-          <For each={item.request.options ?? []}>
+          <legend>{item().request.prompt}</legend>
+          <For each={item().request.options ?? []} keyed={(option) => option.id}>
             {(option) => (
               <button
                 type="button"
                 onClick={() =>
-                  void agent.respond([{ interactionId: item.interactionId, optionId: option.id }])
+                  void agent.respond([
+                    { interactionId: item().interactionId, optionId: option().id },
+                  ])
                 }
               >
-                {option.label}
+                {option().label}
               </button>
             )}
           </For>
