@@ -91,31 +91,30 @@ export default githubChannel({
 
 Subscribe the GitHub App to each event you handle, such as `issues` or `check_suite`. A CI turn replies on the first pull request in `pullRequests`, so return `null` when the list is empty.
 
-## Let a session subscribe to a pull request
+## Let a session subscribe to GitHub events
 
-A session can ask to hear about one pull request without starting a GitHub turn. Nothing is subscribable until you list the events in `subscriptions`:
+A session can ask to hear about GitHub events without starting a GitHub turn. Every webhook event the App receives is subscribable, but nothing is delivered until you set `onEvent`. It runs for each subscription and each event, and decides whether the session receives it:
 
 ```ts title="agent/channels/github.ts"
 import { githubChannel } from "eve/channels/github";
 
+const ALLOWED_EVENTS = ["check_suite.completed", "issue_comment.created"];
+
 export default githubChannel({
   botName: "my-agent",
-  subscriptions: { checks_finished: true, pr_comment: true },
+  onEvent: ({ event }) => ALLOWED_EVENTS.includes(event.name),
 });
 ```
 
-| Event             | Delivered when                                                                    |
-| ----------------- | --------------------------------------------------------------------------------- |
-| `checks_finished` | A check suite completes on the pull request, once for each app that ran one.      |
-| `pr_comment`      | Someone who is not a bot creates a comment or review comment on the pull request. |
+An event is named after its webhook event and, when the payload has an `action`, that action: `check_suite.completed`, `issue_comment.created`, `pull_request.closed`, `push`. `onEvent` returns `true` to send the event's payload as the message, a string to send that message instead, or `false` to drop it. It also receives `event.data` (the `payload`, the `sender`, the `repository` and the `pullRequests` the event concerns) and the `subscription`, so it can filter on any of them.
 
-Only the events you list are offered to the model, and the channel ignores the webhooks of the others. The model subscribes with the `subscribe` tool, passing the channel, the event, and the pull request in `input`:
+The model subscribes with the `subscribe` tool, passing the channel, the event name, and what to watch in `input`. `{ owner, repo }` hears the event for every pull request and issue in the repository. Adding `pull` hears only the events about that pull request, including the check suites that ran on it:
 
 ```json
 {
   "subscription": {
     "channel": "github",
-    "event": "checks_finished",
+    "event": "check_suite.completed",
     "input": { "owner": "acme", "repo": "web", "pull": 42 }
   },
   "ttlMs": 3600000
@@ -124,24 +123,9 @@ Only the events you list are offered to the model, and the channel ignores the w
 
 `ttlMs` is an integer from `60000` (1 minute) to `31536000000` (365 days), or `null` to watch until stopped. `get_subscription` and `stop_subscription` take the `id` that `subscribe` returned.
 
-Each occurrence arrives in the subscribing session as a queued message. It waits for the current turn to finish, and the next turn runs under the auth the session had when it subscribed, never under the GitHub user who triggered the event. A failed suite names each check run that did not pass. Comment text is written by a GitHub user, so the message tells the model to treat it as information and not as an instruction.
+Each event arrives in the subscribing session as a queued message. It waits for the current turn to finish, and the next turn runs under the auth the session had when it subscribed, never under the GitHub user who triggered the event. The default message carries the payload, cut at 8,000 characters, and tells the model to treat its text as information and not as an instruction. For a failed check suite the payload names the suite and its conclusion, so the model reads the failing check runs through the GitHub API.
 
-To change the message a session receives for an event, give that event an `onEvent` in place of `true`. It receives the occurrence in `event.data` and the subscription, and returns the message text, or `undefined` to drop the occurrence:
-
-```ts title="agent/channels/github.ts"
-export default githubChannel({
-  botName: "my-agent",
-  subscriptions: {
-    checks_finished: {
-      onEvent: ({ event }) =>
-        event.data.conclusion === "success" ? undefined : `CI failed on ${event.data.pullRequest}.`,
-    },
-    pr_comment: true,
-  },
-});
-```
-
-Subscriptions need no hooks: they work whether or not you define `onCheckSuite` or `onComment`, and they never open a GitHub session. Subscribe the GitHub App to `check_suite`, `issue_comment`, and `pull_request_review_comment`. GitHub's repeated deliveries of the same webhook reach the subscriber once. GitHub treats owner and repository names as case-insensitive, so subscribe with them in lowercase. Several sessions can subscribe to the same pull request, and each hears every occurrence.
+Subscriptions need no hooks: they work whether or not you define `onCheckSuite` or `onComment`, and they never open a GitHub session. Subscribe the GitHub App to each webhook event you offer. A delivery sent by the channel's own bot is skipped, so a bot never wakes itself. GitHub's repeated deliveries of the same webhook reach the subscriber once. GitHub treats owner and repository names as case-insensitive, so subscribe with them in lowercase. Several sessions can subscribe to the same event, and each hears every occurrence.
 
 ## Access the repository
 

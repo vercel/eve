@@ -17,7 +17,7 @@ export interface ConnectionSubscriptionSource {
   readonly request: Omit<ManagedEventSubscribeInput, "idempotencyKey" | "options">;
 }
 
-/** A channel's subscription to one declared event, addressed by the key `channelEventKey` derives. */
+/** A channel's subscription to one event name and scope, addressed by the key `channelEventKey` derives. */
 export interface ChannelSubscriptionSource {
   readonly kind: "channel";
   readonly name: string;

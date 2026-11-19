@@ -13,6 +13,7 @@ import type {
 } from "#runtime/subscriptions/state.js";
 import type { SubscriptionSourceRuntime } from "#runtime/subscriptions/sources/types.js";
 import type { ChannelEvent, ChannelSubscription } from "#shared/channel-subscriptions.js";
+import { parseJsonObject } from "#shared/json.js";
 
 function channelOf(binding: SubscriptionBinding): ChannelSubscriptionSource {
   if (binding.source.kind !== "channel")
@@ -22,7 +23,7 @@ function channelOf(binding: SubscriptionBinding): ChannelSubscriptionSource {
 
 function declarationOf(bundle: CompiledBundle, source: ChannelSubscriptionSource) {
   return bundle.resolvedAgent.channels.find((channel) => channel.name === source.name)?.definition
-    ?.subscriptions?.[source.event];
+    ?.subscriptions;
 }
 
 function subscriptionOf(binding: SubscriptionBinding): ChannelSubscription {
@@ -56,17 +57,19 @@ export const channelSource: SubscriptionSourceRuntime = {
     const bundle = requireCompiledBundle(ctx);
     const declaration = declarationOf(bundle, source);
     if (declaration === undefined) return;
-    const channelEvent = event as ChannelEvent;
-    const message =
-      declaration.onEvent === undefined
-        ? JSON.stringify(channelEvent.data)
-        : await declaration.onEvent({
-            auth: binding.auth,
-            sessionId: binding.sessionId,
-            event: channelEvent,
-            subscription: subscriptionOf(binding),
-          });
-    if (message === undefined) return;
+    const channelEvent: ChannelEvent = {
+      id: event.id,
+      name: source.event,
+      data: parseJsonObject(event.data),
+    };
+    const decision = await declaration.onEvent({
+      auth: binding.auth,
+      sessionId: binding.sessionId,
+      event: channelEvent,
+      subscription: subscriptionOf(binding),
+    });
+    if (decision === undefined || decision === false) return;
+    const message = decision === true ? JSON.stringify(channelEvent.data) : decision;
     const attach = createAttachSessionFn(
       createWorkflowRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
       {

@@ -425,7 +425,7 @@ function ciConversation(pullRequests: readonly number[]): GitHubConversationRef 
   };
 }
 
-function decodePayload(body: string, contentType: string | undefined): JsonObject {
+export function decodePayload(body: string, contentType: string | undefined): JsonObject {
   if (contentType?.includes("application/x-www-form-urlencoded") === true) {
     const payload = new URLSearchParams(body).get("payload") ?? "";
     return parseJsonObject(JSON.parse(payload) as unknown);

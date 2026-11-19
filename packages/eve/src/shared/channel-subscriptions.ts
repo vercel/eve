@@ -2,20 +2,25 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 
 /** One occurrence a route hands to {@link EmitChannelEventFn}. */
-export interface ChannelEvent {
+export interface ChannelOccurrence {
   /** Identifies the occurrence, so a redelivery of it reaches each subscriber once. */
   readonly id: string;
   /** What the occurrence carries. `onEvent` turns it into the message the subscriber receives. */
   readonly data: JsonObject;
 }
 
+/** One occurrence as `onEvent` sees it, with the name the subscriber watched it under. */
+export interface ChannelEvent extends ChannelOccurrence {
+  readonly name: string;
+}
+
 /** What one session asked for, as `onEvent` sees it. */
 export interface ChannelSubscription {
   readonly id: string;
   readonly channelName: string;
-  /** The name the channel declared the event under, such as `checks_finished`. */
+  /** The event name the session subscribed to, such as `check_suite.completed`. */
   readonly event: string;
-  /** What the model passed to `subscribe`, already validated against the event's `inputSchema`. */
+  /** What the model passed to `subscribe`, already validated against `inputSchema`. */
   readonly input: JsonObject;
   readonly sessionId: string;
 }
@@ -28,43 +33,46 @@ export interface ChannelSubscriber {
 }
 
 /**
- * One event a channel lets a session subscribe to. The channel's author decides which events are
- * eligible by declaring them. The model calls the `subscribe` tool with the event's name and
- * `input`; eve holds the subscription, delivers each occurrence the channel's routes `emit` for
- * the same event and input, and ends it when the session stops it or its lifetime runs out.
+ * What `onEvent` decides for one subscription and one occurrence. A string is the message the
+ * subscribing session receives. `true` sends the occurrence's data as the message. `false` or
+ * nothing drops the occurrence for that subscription.
  */
-export interface ChannelEventSubscription {
-  /** What the event reports, written for the model that decides whether to subscribe. */
+export type ChannelEventDecision = string | boolean | undefined;
+
+/**
+ * What a channel lets a session subscribe to. Any event name can be subscribed to; the channel's
+ * `onEvent` decides, for each subscription and each occurrence, whether and how it is delivered.
+ * The model calls the `subscribe` tool with an event name and an `input` naming the scope it
+ * watches; eve holds the subscription, delivers each occurrence the channel's routes `emit` for
+ * the same event name and scope, and ends it when the session stops it or its lifetime runs out.
+ */
+export interface ChannelSubscriptions {
+  /** What the channel reports and how its event names are written, for the model deciding to subscribe. */
   readonly description: string;
   /**
-   * JSON Schema of the input the model passes. The input is what identifies the thing watched:
-   * a route's `emit` reaches the subscriptions whose input equals the input it passes, compared
-   * exactly. Constrain a case-insensitive value, such as with a lowercase `pattern`, and pass it
-   * in that case from `emit`.
+   * JSON Schema of the scope the model passes with an event name. A route's `emit` reaches the
+   * subscriptions whose scope equals the scope it passes, compared exactly. Constrain a
+   * case-insensitive value, such as with a lowercase `pattern`, and pass it in that case from `emit`.
    */
   readonly inputSchema: JsonObject;
   /**
-   * Runs once per subscription for each occurrence, as the subscriber. Returns the message the
-   * subscribing session receives, queued behind a running turn, or nothing to drop the occurrence.
-   * Without it the session receives the occurrence's data as JSON.
+   * Runs once per subscription for each occurrence, as the subscriber. Filter on `event.name`,
+   * `event.data` or the subscription here. A message is queued behind a running turn.
    */
-  readonly onEvent?: (
+  readonly onEvent: (
     input: ChannelSubscriber & {
       readonly event: ChannelEvent;
       readonly subscription: ChannelSubscription;
     },
-  ) => string | undefined | Promise<string | undefined>;
+  ) => ChannelEventDecision | Promise<ChannelEventDecision>;
 }
 
-/** The events a channel makes eligible for subscription, by event name. */
-export type ChannelSubscriptions = Readonly<Record<string, ChannelEventSubscription>>;
-
 /**
- * Hands one occurrence of `event` to every subscription whose input equals `input`. Resolves
- * `true` when at least one subscription holds it and `false` when nobody is subscribed.
+ * Hands one occurrence of the event `event` to every subscription whose scope equals `input`.
+ * Resolves `true` when at least one subscription holds it and `false` when nobody is subscribed.
  */
 export type EmitChannelEventFn = (
   event: string,
   input: JsonObject,
-  occurrence: ChannelEvent,
+  occurrence: ChannelOccurrence,
 ) => Promise<boolean>;

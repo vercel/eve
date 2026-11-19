@@ -49,11 +49,11 @@ const slackSchema = {
 
 const channelsOf = (...entries: readonly [string, unknown][]) =>
   entries.map(([name, subscriptions]) => ({ name, definition: { subscriptions } })) as never;
-const checksFinished = {
+const github = {
   description: "Watch a pull request until its checks finish.",
   inputSchema: githubSchema,
+  onEvent: () => true,
 };
-const github = { checks_finished: checksFinished };
 const channels = channelsOf(["github", github]);
 
 const authOf = (id: string) =>
@@ -80,7 +80,6 @@ const call = (name: string, input: unknown) => {
   return tool.execute(input, {});
 };
 
-const githubInput = { owner: "vercel", pull: 7 };
 const subscribeInput = {
   subscription: {
     channel: "github",
@@ -118,29 +117,31 @@ it("offers subscribe, get and stop, or nothing when no channel has subscriptions
   expect(channelSubscriptionTools([{ name: "slack", definition: {} }] as never)).toBeNull();
 });
 
-it("gives the subscribe schema one anyOf entry per declared event", () => {
+it("gives the subscribe schema one anyOf entry per channel with subscriptions", () => {
   const two = channelsOf(
     ["github", github],
-    ["slack", { thread_replied: { description: "Watch a thread.", inputSchema: slackSchema } }],
+    ["slack", { description: "Watch a thread.", inputSchema: slackSchema, onEvent: () => true }],
     ["email", undefined],
-    ["empty", {}],
+    ["empty", undefined],
   );
-  const tool = channelSubscriptionTools(two)!.subscribe as unknown as { inputSchema: never };
+  const tool = channelSubscriptionTools(two)!.subscribe as unknown as {
+    description: string;
+    inputSchema: never;
+  };
   const parsed = serializeInputSchema(tool.inputSchema) as unknown as {
     properties: { subscription: { anyOf: { properties: Record<string, unknown> }[] } };
   };
   const entries = parsed.properties.subscription.anyOf;
-  expect(entries).toHaveLength(2);
   expect(entries.map((entry) => entry.properties.channel)).toEqual([
     { const: "github" },
     { const: "slack" },
   ]);
-  expect(entries.map((entry) => entry.properties.event)).toEqual([
-    { const: "checks_finished" },
-    { const: "thread_replied" },
-  ]);
   expect(entries[0]!.properties.input).toEqual(githubSchema);
   expect(entries[1]!.properties.input).toEqual(slackSchema);
+  expect(tool.description).toContain(
+    "Channel github: Watch a pull request until its checks finish.",
+  );
+  expect(tool.description).toContain("Channel slack: Watch a thread.");
 });
 
 it("starts a binding carrying the event, the derived key, ttl and principal", async () => {
@@ -204,48 +205,8 @@ it("validates the input and derives the key emit derives, comparing strings exac
       subscription: { channel: "github", event: "checks_finished", input: { owner: "v" } },
       ttlMs: null,
     }),
-  ).rejects.toThrow("does not match the event's schema");
+  ).rejects.toThrow("does not match the channel's schema");
   expect(host.start).toHaveBeenCalledTimes(2);
-});
-
-it("offers one anyOf branch per event of a channel and refuses an event it does not declare", async () => {
-  const two = channelsOf([
-    "github",
-    {
-      checks_finished: checksFinished,
-      pull_merged: { description: "Watch a merge.", inputSchema: githubSchema },
-    },
-  ]);
-  const tools = channelSubscriptionTools(two)!;
-  const subscribeTool = tools.subscribe as unknown as {
-    description: string;
-    inputSchema: never;
-    execute(input: unknown, options: object): Promise<unknown>;
-  };
-  const parsed = serializeInputSchema(subscribeTool.inputSchema) as unknown as {
-    properties: { subscription: { anyOf: { properties: Record<string, unknown> }[] } };
-  };
-  expect(parsed.properties.subscription.anyOf.map((entry) => entry.properties.event)).toEqual([
-    { const: "checks_finished" },
-    { const: "pull_merged" },
-  ]);
-  expect(subscribeTool.description).toContain(
-    "github.checks_finished: Watch a pull request until its checks finish.",
-  );
-  expect(subscribeTool.description).toContain("github.pull_merged: Watch a merge.");
-
-  await expect(
-    inSession("s1", authOf("rui"), () =>
-      subscribeTool.execute(
-        {
-          subscription: { channel: "github", event: "pull_closed", input: githubInput },
-          ttlMs: null,
-        },
-        {},
-      ),
-    ),
-  ).rejects.toThrow('Channel "github" offers no subscription to "pull_closed".');
-  expect(host.start).not.toHaveBeenCalled();
 });
 
 it("refuses a channel that offers no subscriptions", async () => {
@@ -254,7 +215,7 @@ it("refuses a channel that offers no subscriptions", async () => {
       subscription: { channel: "slack", event: "checks_finished", input: {} },
       ttlMs: null,
     }),
-  ).rejects.toThrow('Channel "slack" offers no subscription to "checks_finished".');
+  ).rejects.toThrow('Channel "slack" offers no subscriptions.');
   expect(host.start).not.toHaveBeenCalled();
 });
 

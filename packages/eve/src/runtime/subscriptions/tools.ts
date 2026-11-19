@@ -10,7 +10,7 @@ import type {
 } from "#runtime/subscriptions/state.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import type { ChannelEventSubscription } from "#shared/channel-subscriptions.js";
+import type { ChannelSubscriptions } from "#shared/channel-subscriptions.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineTool } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
@@ -24,8 +24,7 @@ export const STOP_TOOL = "stop_subscription";
 
 interface OfferedSubscription {
   readonly channelName: string;
-  readonly event: string;
-  readonly declaration: ChannelEventSubscription;
+  readonly declaration: ChannelSubscriptions;
 }
 
 interface SubscribeInput {
@@ -39,7 +38,7 @@ interface SubscribeInput {
 
 /**
  * The model-facing tools for what the agent's channels let a session subscribe to: one `subscribe`
- * whose input is the union of every declared event's own input, plus get and stop for subscriptions the
+ * whose input is the union of every channel's own scope, plus get and stop for subscriptions the
  * caller holds. Returns `null` when no channel offers subscriptions.
  */
 export function channelSubscriptionTools(
@@ -49,25 +48,22 @@ export function channelSubscriptionTools(
   if (offered.length === 0) return null;
   return {
     [SUBSCRIBE_TOOL]: defineTool({
-      description: `Subscribe this conversation to something a channel reports later. Each occurrence reaches this conversation as a queued message, after the current turn, for ttlMs milliseconds or until stopped. Set ttlMs to null to watch until stopped. Subscribing again with the same input returns the existing subscription.\n\n${offered
-        .map(
-          ({ channelName, event, declaration }) =>
-            `${channelName}.${event}: ${declaration.description}`,
-        )
-        .join("\n")}`,
+      description: `Subscribe this conversation to something a channel reports later. Each occurrence reaches this conversation as a queued message, after the current turn, for ttlMs milliseconds or until stopped. Set ttlMs to null to watch until stopped. Subscribing again with the same event and input returns the existing subscription.\n\n${offered
+        .map(({ channelName, declaration }) => `Channel ${channelName}: ${declaration.description}`)
+        .join("\n\n")}`,
       inputSchema: defineJsonSchema<SubscribeInput>({
         type: "object",
         additionalProperties: false,
         required: ["subscription", "ttlMs"],
         properties: {
           subscription: {
-            anyOf: offered.map(({ channelName, event, declaration }) => ({
+            anyOf: offered.map(({ channelName, declaration }) => ({
               type: "object",
               additionalProperties: false,
               required: ["channel", "event", "input"],
               properties: {
                 channel: { const: channelName },
-                event: { const: event },
+                event: { type: "string", minLength: 1, description: "The event name to watch." },
                 input: declaration.inputSchema,
               },
             })),
@@ -112,11 +108,10 @@ function offeredSubscriptions(
   const seen = new Set<string>();
   const offered: OfferedSubscription[] = [];
   for (const channel of channels) {
-    const subscriptions = channel.definition?.subscriptions;
-    if (subscriptions === undefined || seen.has(channel.name)) continue;
+    const declaration = channel.definition?.subscriptions;
+    if (declaration === undefined || seen.has(channel.name)) continue;
     seen.add(channel.name);
-    for (const [event, declaration] of Object.entries(subscriptions))
-      offered.push({ channelName: channel.name, event, declaration });
+    offered.push({ channelName: channel.name, declaration });
   }
   return offered;
 }
@@ -159,17 +154,14 @@ async function subscribe(
   const { ctx, auth, sessionId, executionPrincipal } = scope();
   const host = owners();
   const { channel: channelName, event, input: eventInput } = input.subscription;
-  const entry = offered.find(
-    (candidate) => candidate.channelName === channelName && candidate.event === event,
-  );
-  if (entry === undefined)
-    throw new Error(`Channel "${channelName}" offers no subscription to "${event}".`);
+  const entry = offered.find((candidate) => candidate.channelName === channelName);
+  if (entry === undefined) throw new Error(`Channel "${channelName}" offers no subscriptions.`);
   const validated = await defineJsonSchema(entry.declaration.inputSchema)["~standard"].validate(
     eventInput,
   );
   if (validated.issues !== undefined)
     throw new Error(
-      `Subscription input does not match the event's schema: ${validated.issues.map(({ message }) => message).join("; ")}`,
+      `Subscription input does not match the channel's schema: ${validated.issues.map(({ message }) => message).join("; ")}`,
     );
   const subscriptionInput = parseJsonObject(validated.value);
   const key = channelEventKey(event, subscriptionInput);

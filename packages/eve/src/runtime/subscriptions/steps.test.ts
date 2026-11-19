@@ -92,7 +92,13 @@ const useDeclared = (subscriptions: object | undefined, auth: SessionAuthContext
 const useSubscriptions = (
   declaration: object | undefined,
   auth: SessionAuthContext | null = null,
-) => useDeclared(declaration === undefined ? undefined : { checks_finished: declaration }, auth);
+) =>
+  useDeclared(
+    declaration === undefined
+      ? undefined
+      : { description: "d", inputSchema: {}, onEvent: () => true, ...declaration },
+    auth,
+  );
 const delivery = (id: string, data: Record<string, unknown> = { id }) => ({
   binding,
   serializedContext: {},
@@ -136,7 +142,7 @@ it("sends onEvent's message queued, as the subscriber, with an idempotency key p
   expect(onEvent).toHaveBeenCalledWith({
     auth: subscriberAuth,
     sessionId: "session-1",
-    event: { id: "e1", data: { ok: true } },
+    event: { id: "e1", name: "checks_finished", data: { ok: true } },
     subscription: {
       id: "binding-1",
       channelName: "github",
@@ -174,8 +180,8 @@ it("sends under the subscriber's auth even when the event names another principa
   expect((mocks.context.current as ContextContainer).get(AuthKey)).toEqual(subscriberAuth);
 });
 
-it("sends the event's data as JSON when the channel has no onEvent", async () => {
-  useSubscriptions({});
+it("sends the event's data as JSON when onEvent returns true", async () => {
+  useSubscriptions({ onEvent: () => true });
   await dispatchSubscriptionStep(delivery("e1", { pull: 7 }));
   expect(mocks.send).toHaveBeenCalledTimes(1);
   expect(mocks.send.mock.calls[0]![0]).toBe(JSON.stringify({ pull: 7 }));
@@ -193,8 +199,14 @@ it("runs onEvent inside the subscriber's context", async () => {
   expect(seen).toEqual(subscriberAuth);
 });
 
-it("sends nothing when onEvent returns undefined", async () => {
-  useSubscriptions({ onEvent: () => undefined });
+it.each([undefined, false])("sends nothing when onEvent returns %s", async (decision) => {
+  useSubscriptions({ onEvent: () => decision });
+  await dispatchSubscriptionStep(delivery("e1"));
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("lets onEvent filter by event name", async () => {
+  useSubscriptions({ onEvent: ({ event }: { event: { name: string } }) => event.name === "other" });
   await dispatchSubscriptionStep(delivery("e1"));
   expect(mocks.send).not.toHaveBeenCalled();
 });
@@ -202,14 +214,6 @@ it("sends nothing when onEvent returns undefined", async () => {
 it("sends nothing once the channel no longer has subscriptions", async () => {
   useSubscriptions(undefined);
   await dispatchSubscriptionStep(delivery("e1"));
-  expect(mocks.send).not.toHaveBeenCalled();
-});
-
-it("sends nothing once the channel no longer declares the subscribed event", async () => {
-  const onEvent = vi.fn(() => "Checks finished");
-  useDeclared({ pull_merged: { onEvent } });
-  await dispatchSubscriptionStep(delivery("e1"));
-  expect(onEvent).not.toHaveBeenCalled();
   expect(mocks.send).not.toHaveBeenCalled();
 });
 

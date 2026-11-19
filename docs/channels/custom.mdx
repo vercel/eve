@@ -421,29 +421,30 @@ See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage
 
 ## Let sessions subscribe to events
 
-A channel can let a session ask to hear about something later, such as a build finishing. Declare each event the channel offers under `subscriptions`, and call `emit` from a route when the event happens:
+A channel can let a session ask to hear about something later, such as a build finishing. Set `subscriptions` to describe what a session can watch and to decide what it receives, and call `emit` from a route for every occurrence:
 
 ```ts title="agent/channels/builds.ts"
 import { defineChannel, POST } from "eve/channels";
 
+const ALLOWED_EVENTS = ["build.finished", "build.failed"];
+
 export default defineChannel({
   subscriptions: {
-    build_finished: {
-      description: "A build of a project finished.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["project"],
-        properties: { project: { type: "string" } },
-      },
-      onEvent: ({ event }) => `Build ${event.id} finished: ${String(event.data.status)}.`,
+    description: "Builds of a project. `event` is `build.<status>`, such as `build.finished`.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["project"],
+      properties: { project: { type: "string" } },
     },
+    onEvent: ({ event }) =>
+      ALLOWED_EVENTS.includes(event.name) ? `Build ${event.id}: ${event.name}.` : false,
   },
   routes: [
     POST("/builds", async (req, { emit }) => {
       const build = await req.json();
       await emit(
-        "build_finished",
+        `build.${build.status}`,
         { project: build.project },
         { id: build.id, data: { status: build.status } },
       );
@@ -453,11 +454,11 @@ export default defineChannel({
 });
 ```
 
-eve gives the model `subscribe`, `get_subscription` and `stop_subscription`. `subscribe` lists each declared event as `<channel>.<event>: <description>`, and takes the channel, the event, that event's `inputSchema` and a `ttlMs`. A subscription lives in a durable workflow run that outlasts the turn that created it.
+eve gives the model `subscribe`, `get_subscription` and `stop_subscription`. `subscribe` shows the channel's `description` and takes the channel, an event name, the channel's `inputSchema` and a `ttlMs`. A subscription lives in a durable workflow run that outlasts the turn that created it.
 
-- Each entry in `subscriptions` is an event the model may subscribe to. The `description` tells the model what the event reports, and `inputSchema` is the JSON Schema of the input that identifies what to watch. eve validates the model's input against it before it starts the subscription.
-- `emit(event, input, { id, data })` reaches every session subscribed to that `event` with an equal `input`. Input values match exactly, so `{ project: "Web" }` and `{ project: "web" }` are different subscriptions; normalize the case in `emit` and constrain it in the event's `inputSchema`. `id` identifies the occurrence, so emitting the same one again reaches each subscriber once. It resolves `true` when a subscription holds the event and input.
-- `onEvent` runs once per subscription for each occurrence, as the subscriber, and returns the message the session receives, or nothing to drop the occurrence. Without it the session receives the occurrence's `data` as JSON.
+- Any event name can be subscribed to. The `description` tells the model how the channel names events, and `inputSchema` is the JSON Schema of the `input` that says what to watch, such as a repository. eve validates the model's input against it before it starts the subscription.
+- `emit(event, input, { id, data })` reaches every session subscribed to that `event` name with an equal `input`. Input values match exactly, so `{ project: "Web" }` and `{ project: "web" }` are different subscriptions; normalize the case in `emit` and constrain it in `inputSchema`. A route can emit one occurrence under several inputs, such as a repository and a pull request. `id` identifies the occurrence, so emitting the same one again reaches each subscriber once. It resolves `true` when a subscription holds the event and input.
+- `onEvent` runs once per subscription for each occurrence, as the subscriber. It receives `event` (`id`, `name` and `data`) and the `subscription`. Filter there: return a string to send that message, `true` to send the occurrence's `data` as JSON, or `false` or nothing to drop it. Without `subscriptions` the channel offers nothing to subscribe to.
 - The message is queued in the subscribing session and runs under the auth it had when it subscribed. The caller of the route never supplies it.
 
 ## Cross-channel hand-off
