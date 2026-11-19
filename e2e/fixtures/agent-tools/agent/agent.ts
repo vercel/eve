@@ -94,6 +94,21 @@ const base = e2eAgentConfig({
       }
       return "Schema validation checked.";
     }
+    if (request.lastUserMessage?.includes("`big_report`")) {
+      const report = request.toolResults.find((result) => result.name === "big_report");
+      if (report === undefined) return { toolCalls: [{ name: "big_report", input: {} }] };
+      const note =
+        typeof report.output === "string" ? report.output : JSON.stringify(report.output);
+      const path = /(\/tmp\/\.eve\/tool-results\/\S+)/u.exec(note)?.[1] ?? "";
+      const counted = request.toolResults.find((result) => result.name === "bash");
+      if (counted === undefined) {
+        return {
+          toolCalls: [{ name: "bash", input: { command: `grep -o '"id"' ${path} | wc -l` } }],
+        };
+      }
+      const count = String(counted.output).trim().split("\n")[0];
+      return `${count} rows, saved to ${path}; rows inline: ${note.includes("row-399")}`;
+    }
     return `Mock reply: ${request.lastUserMessage ?? ""}`;
   },
 });
