@@ -34,11 +34,11 @@ export function defaultBoardAuth(
     issuer: "vercel-board",
     principalId: message.by.actor,
     principalType: PERSON_KINDS.has(kind) ? "user" : "service",
-    subject: message.author?.handle ?? message.by.actor,
+    subject: authorOf(message),
   };
 }
 
-function authorOf(message: BoardMessage): string {
+export function authorOf(message: BoardMessage): string {
   return message.author?.handle ?? message.by.actor;
 }
 

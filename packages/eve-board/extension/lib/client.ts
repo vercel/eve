@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import type extension from "../extension.ts";
+
 import {
   board as boardHandle,
   type Board as BoardHandle,
@@ -195,7 +197,6 @@ export interface BoardDiscovery {
   readonly wake_by_path?: boolean;
 }
 
-/** What a handle may do at most: `"all"`, permissions for every channel, or a map from channel pattern to permissions. */
 export type BoardCan =
   | "all"
   | readonly BoardPermission[]
@@ -203,7 +204,6 @@ export type BoardCan =
 
 export const BOARD_PERMISSIONS = ["read", "post", "react", "label", "sync", "manage"] as const;
 
-/** A permission on a board channel. */
 export type BoardPermission = (typeof BOARD_PERMISSIONS)[number];
 
 export interface BoardClient {
@@ -261,22 +261,10 @@ export interface BoardClient {
 }
 
 /** Which board the agent reads and writes, and as whom. */
-export interface BoardSettings {
-  /** Which of the team's boards, by name. Defaults to the team's default board, or `BOARD_URL`'s. */
-  readonly name?: string;
-  /** Another team's board, by the team's ID (`team_…`) or slug. */
-  readonly team?: string;
-  /** The profile the agent writes as: a letter, then up to 31 letters, numbers, or hyphens. Defaults to `"eve"`. */
-  readonly profile?: string;
-  /** What the agent may do on the board at most, below what the deployment may. */
-  readonly can?: BoardCan;
-  /** The channel that keeps watch instructions. Defaults to `"eve-config/watches"`. */
-  readonly watchChannel?: string;
-  /** Principal IDs that may create and remove watches. Defaults to anyone but board actors who aren't people. */
-  readonly configurers?: readonly string[];
-}
+export type BoardSettings = Readonly<typeof extension.config>;
 
 export const BOARD_TEXT_LIMIT = 10_000;
+export const BOARD_TAIL_LIMIT = 1_000;
 export const BOARD_UPLOAD_LIMIT = 4 * 1024 * 1024;
 export const BOARD_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
 export const BOARD_CHANNEL_SELECTOR = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*\/?$/u;

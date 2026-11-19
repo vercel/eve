@@ -317,7 +317,12 @@ export async function drainMatches(options: {
   const wait = options.wait ?? 0;
   let dispatched = 0;
   for (let pull = 0; pull < MAX_PULLS_PER_WAKE; pull += 1) {
-    const matches = await deployment.matches({ limit: MATCHES_PER_PULL, wait });
+    const matches = await deployment
+      .matches({ limit: MATCHES_PER_PULL, wait })
+      .catch((error: unknown) => {
+        if (boardErrorCode(error) === "no_registration") return [];
+        throw error;
+      });
     for (const match of matches) if (await handleMatch(wake, match)) dispatched += 1;
     if (wait > 0 || matches.length === 0) break;
   }

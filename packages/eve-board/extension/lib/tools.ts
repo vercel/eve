@@ -26,6 +26,7 @@ import {
   watchIdOf,
   type BoardWatchAction,
 } from "./watches.ts";
+import { authorOf } from "./inbound.ts";
 
 type Settings = () => BoardSettings;
 
@@ -137,7 +138,7 @@ function summarizeThread(thread: BoardThread) {
 function summarize(message: BoardMessage) {
   return {
     attachments: message.attachments.map((attachment) => attachment.name),
-    author: message.author?.handle ?? message.by.actor,
+    author: authorOf(message),
     channel: message.channel,
     createdAt: message.createdAt,
     id: message.id,
@@ -499,6 +500,12 @@ export function defineBoardBlockTaskTool() {
   });
 }
 
+function configuring(settings: Settings, ctx: ToolContext) {
+  assertConfigurer(settings, ctx);
+  const config = settings();
+  return { config, ...boardClients(config) };
+}
+
 function assertConfigurer(settings: Settings, ctx: ToolContext): void {
   const caller = ctx.session.auth?.current ?? null;
   const allowed = settings().configurers;
@@ -553,12 +560,6 @@ export function defineBoardWatchTool(settings: Settings) {
         .max(10)
         .optional()
         .describe("Labels a message must have: `key`, or `key=value`."),
-      mentions: z
-        .string()
-        .min(1)
-        .max(200)
-        .optional()
-        .describe("Only messages that mention this handle, such as `@ada`, or `me` for you."),
       by: z
         .string()
         .min(1)
@@ -581,9 +582,7 @@ export function defineBoardWatchTool(settings: Settings) {
       claim: queue.optional(),
     }),
     async execute({ instructions, claim, ...filter }, ctx) {
-      assertConfigurer(settings, ctx);
-      const config = settings();
-      const { deployment, watchChannel } = boardClients(config);
+      const { config, deployment, watchChannel } = configuring(settings, ctx);
       const action: BoardWatchAction =
         claim === undefined ? { type: "converse" } : { queue: claim, type: "claim" };
       checkWatchScope({ action, can: config.can, channel: filter.channel, watchChannel });
@@ -610,8 +609,7 @@ export function defineBoardWatchesTool(settings: Settings) {
       details: z.boolean().optional().describe("Also read each watch's instructions and action."),
     }),
     async execute({ details }, ctx) {
-      assertConfigurer(settings, ctx);
-      const { deployment, watchChannel } = boardClients(settings());
+      const { deployment, watchChannel } = configuring(settings, ctx);
       return {
         watches: await listWatches({ client: deployment, details: details === true, watchChannel }),
       };
@@ -629,8 +627,7 @@ export function defineBoardUnwatchTool(settings: Settings) {
       id: z.string().regex(BOARD_NAME_PATTERN).describe("The watch's ID, such as `w-7k3p2q`."),
     }),
     async execute({ id }, ctx) {
-      assertConfigurer(settings, ctx);
-      const { deployment, watchChannel } = boardClients(settings());
+      const { deployment, watchChannel } = configuring(settings, ctx);
       return await removeWatch({ client: deployment, id, watchChannel });
     },
   });

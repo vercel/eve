@@ -39,7 +39,7 @@ Tell the agent what to watch and what to do:
 
 The agent calls its `watch` tool with the channel to watch and the instructions, and answers with the watch's ID, such as `w-7k3p2q`. The watch survives the conversation, cold starts, and redeploys.
 
-- **A watch names one channel**, or a `prefix/` subtree, and can narrow it to messages with given labels, mentions, author, or words. It must stay inside `can` and outside `watchChannel`.
+- **A watch names one channel**, or a `prefix/` subtree, and can narrow it to messages with given labels, author, or words. It must stay inside `can` and outside `watchChannel`.
 - **The board keeps everything a watch needs.** Your project's watcher registration holds what each watch matches, and a board-only message in `watchChannel`, labeled with the watch's ID, holds what it does. The agent uses no other storage.
 - **Who may create, list, and remove watches:** by default, anyone the agent talks to except board users who aren't people, such as synced Slack users and other agents. Set `configurers` to principal IDs to allow only those callers, which matters when the agent also answers in public channels.
 - **A retried tool call creates one watch.** Changes from several sessions or deployments at once wait for each other, so none is lost.
@@ -86,9 +86,9 @@ Board threads are shared and often synced to a Slack channel, so the channel nev
 
 ## Use the channel or tools alone
 
-The extension is where the board is configured. The channel from `@eve/board/channel` and the tools from `@eve/board/tools` read its settings, and use the defaults when it isn't mounted: the default board, the `"eve"` profile, the deployment's access, and `"eve-config/watches"`.
+The extension is where the board is configured, and only its own channel and tools use those settings. The channel from `@eve/board/channel` and the tools from `@eve/board/tools`, registered in your agent's own files, use the defaults: the default board, the `"eve"` profile, the deployment's access, and `"eve-config/watches"`. Use them instead of the extension, not beside it.
 
-Register the channel yourself, instead of mounting the extension, to set its `turnPolicy` or `uploadPolicy`:
+Register the channel yourself to set its `turnPolicy` or `uploadPolicy`:
 
 ```ts title="agent/channels/board.ts"
 import { boardChannel } from "@eve/board/channel";
@@ -152,7 +152,7 @@ The other board tools also work against your team's board with your `vercel logi
 | `actors`          | Deferred             | Lists people and agents with their handles, to mention them or name a task owner.                                                                                          |
 | `create_task`     | Deferred             | Creates a task on the queue, with routing labels and the tasks it waits for.                                                                                               |
 
-The channel shows typing in the thread's synced platform threads on every turn and tool call, with the call's label, such as `Running the tests`, as the status. A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox. A board error's message includes the board's hint for what to do next. Everything posted can reach the platforms the board syncs, so narrow the tools with `can`, or add an approval through an override if writes need a gate.
+The channel shows typing in the thread's synced platform threads on every turn and tool call, with the call's label, such as `Running the tests`, as the status. A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox. A board error's message includes the board's hint for what to do next. Everything posted can reach the platforms the board syncs, so narrow the tools with `can`.
 
 ## Proactive sessions
 
@@ -184,7 +184,7 @@ Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue
 | What you see                                                                          | What to do                                                                                                                                     |
 | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | The `watch` tool says Vercel's board takes watches only from a deployment             | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                                              |
-| A watch never wakes the agent                                                         | Ask the agent to list its watches with details, and check that the tail names the channel where people post.                                   |
+| A watch never wakes the agent                                                         | Ask the agent to list its watches with details, and check that it watches the channel where people post.                                       |
 | eve logs that a watch's instruction record is missing, duplicated, or not the agent's | Remove the watch and create it again. eve skips that watch's matches until then.                                                               |
 | A claiming watch never starts a turn                                                  | Add the task's owner to the queue by principal ID, because the agent takes only its own project's tasks without it.                            |
 | A watch never wakes `eve dev`                                                         | Call `POST /board/wake` after the matching post, as in [Local development](#local-development), because a local board can't wake your machine. |

@@ -811,3 +811,29 @@ test("watch instructions too long to store are refused before anything is writte
     [],
   );
 });
+
+test("watch filters too long for the board are refused before anything is written", async () => {
+  const { calls } = await startBoard();
+  const label = Array.from({ length: 6 }, (_, index) => `${"k".repeat(180)}${index}=v`);
+
+  await assert.rejects(
+    runTool(
+      defineBoardWatchTool(settings),
+      { channel: "incidents", instructions: "Summarize it.", label },
+      { callId: "c1" },
+    ),
+    /too long for the board: shorten them by \d+ characters/u,
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.startsWith("POST")),
+    [],
+  );
+});
+
+test("a wake before any watch is registered drains nothing", async () => {
+  await startBoard();
+  const { deliveries, from } = recorder();
+
+  assert.equal(await drainMatches({ from, settings: settings() }), 0);
+  assert.deepEqual(deliveries, []);
+});

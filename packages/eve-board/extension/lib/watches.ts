@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   BOARD_CHANNEL_SELECTOR,
+  BOARD_TAIL_LIMIT,
   BOARD_TEXT_LIMIT,
   BOARD_NAME_PATTERN,
   boardAllows,
@@ -67,20 +68,18 @@ export function watchIdOf(sessionId: string, callId: string): string {
 export interface BoardWatchFilter {
   readonly channel: string;
   readonly label?: readonly string[];
-  readonly mentions?: string;
   readonly by?: string;
   readonly text?: string;
 }
 
 const quoted = (value: string) => `"${value.replace(/["\\]/gu, "\\$&")}"`;
 
-export function tailOf({ channel, label = [], ...filters }: BoardWatchFilter): string {
+export function tailOf({ channel, label = [], by, text }: BoardWatchFilter): string {
   return [
     channel,
     ...label.map((value) => `--label=${quoted(value)}`),
-    ...Object.entries(filters).flatMap(([name, value]) =>
-      value === undefined ? [] : [`--${name}=${quoted(value)}`],
-    ),
+    ...(by === undefined ? [] : [`--by=${quoted(by)}`]),
+    ...(text === undefined ? [] : [`--text=${quoted(text)}`]),
   ].join(" ");
 }
 
@@ -208,17 +207,22 @@ function parseRecord(id: string, text: string) {
   return { action: action!, instructions: text.slice(0, header!.index).trim() };
 }
 
-async function recordMessages(
+async function labeledRoots(
+  client: BoardClient,
+  watchChannel: string,
+  label: string,
+  limit: number,
+): Promise<BoardMessage[]> {
+  const found = await client.threads({ channel: watchChannel, label: [label], limit });
+  return found.map((summary) => summary.message).filter((message) => !message.deleted);
+}
+
+function recordMessages(
   client: BoardClient,
   watchChannel: string,
   id: string,
 ): Promise<BoardMessage[]> {
-  const found = await client.threads({
-    channel: watchChannel,
-    label: [`${WATCH_LABEL}=${id}`],
-    limit: 2,
-  });
-  return found.map((summary) => summary.message).filter((message) => !message.deleted);
+  return labeledRoots(client, watchChannel, `${WATCH_LABEL}=${id}`, 2);
 }
 
 export async function findWatchRecord(input: {
@@ -319,15 +323,7 @@ async function withRegistrationLock<T>(
 
 async function lockTask(client: BoardClient, watchChannel: string): Promise<string> {
   const self = await client.me();
-  const found = (
-    await client.threads({
-      channel: watchChannel,
-      label: [`${LOCK_LABEL}=registration`],
-      limit: 20,
-    })
-  )
-    .map((summary) => summary.message)
-    .filter((message) => !message.deleted);
+  const found = await labeledRoots(client, watchChannel, `${LOCK_LABEL}=registration`, 20);
   const lock = found.find((message) => message.by.actor === self.actor);
   if (lock !== undefined) {
     const state = lock.task?.state;
@@ -353,13 +349,13 @@ async function claimLock(client: BoardClient, taskId: string): Promise<BoardClai
     try {
       return await client.claim(taskId, LOCK_LEASE_SECONDS);
     } catch (error) {
+      if (boardErrorCode(error) !== "task_claimed") throw error;
       if (Date.now() >= deadline) {
         throw new Error(
           "Another change to this agent's board watches is still running. Try again in a minute.",
           { cause: error },
         );
       }
-      if (boardErrorCode(error) === "not_found") throw error;
       await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 600));
     }
   }
@@ -403,6 +399,11 @@ export async function createWatch(input: {
   if (text.length > BOARD_TEXT_LIMIT) {
     throw new Error(
       `These watch instructions are too long to store: shorten them by ${text.length - BOARD_TEXT_LIMIT} characters.`,
+    );
+  }
+  if (tail.length > BOARD_TAIL_LIMIT) {
+    throw new Error(
+      `This watch's filters are too long for the board: shorten them by ${tail.length - BOARD_TAIL_LIMIT} characters.`,
     );
   }
   const held = await heldRegistration(client);

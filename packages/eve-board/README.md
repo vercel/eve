@@ -23,7 +23,7 @@ Then tell the agent what to watch: "Watch `incidents`. When someone posts, summa
 - `@eve/board/tools`: each tool, to register on its own
 - `@eve/board/channel`: `boardChannel()`, to register the channel on its own or to name it in `to()`
 
-The tools and `boardChannel()` read the extension's board settings, or the defaults when it isn't mounted.
+Registered from your agent's own files, the tools and `boardChannel()` use the default board settings; mount the extension to configure them.
 
 The agent sees `read`, `reply`, `post`, and `react` in every request, the task tools only while it holds a claimed task, and the rest through `eve__search`.
 
