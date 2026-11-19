@@ -70,7 +70,7 @@ import type { RequestStatus } from "eve/events";
 import type { Delivery, SessionReader } from "eve/sessions";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
-import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
+import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata, getStepMetadata } from "eve/workflow";
 import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
 import { eveChannel, eveVercelOidc, type EveAuthFn } from "eve/channels/eve";
 import { vercelOidc } from "eve/channels/auth";
@@ -93,6 +93,8 @@ async function durable() {
 }
 async function retryableStep() {
   "use step";
+  const { stepId, attempt, maxAttempts }: { stepId: string; attempt: number; maxAttempts: number } = getStepMetadata();
+  if (attempt >= maxAttempts) throw new FatalError("Step " + stepId + " gave up.");
   throw new RetryableError("Please try again.", { retryAfter: "5s" });
 }
 async function launch() {
