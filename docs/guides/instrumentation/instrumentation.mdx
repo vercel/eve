@@ -114,7 +114,7 @@ Return `{ emit: false }` to skip the trace for this file, or `{ emit: true, reco
 | Preview or production | `public`               | Inputs and outputs |
 | Preview or production | `private` or `unknown` | Metadata only      |
 
-Inputs include model prompts, tool arguments, call labels (which can contain input-derived text), channel input, and user responses. Outputs include model responses, tool results, requests for user input, model provider metadata, and error details. Content that isn't recorded is absent from the event.
+Inputs include model prompts, tool arguments, call labels (which can contain input-derived text), channel input, and user responses. Outputs include model responses, tool results, requests for user input, model provider metadata, and error details. Content that isn't recorded is absent from the event. A failed `session.ended`, `turn.settled`, `model.retried`, `model.settled`, or `call.settled` still carries `errorCode`, eve's code for the failure such as `MODEL_CALL_FAILED`, because it is metadata rather than content. OTel spans record the same code as `error.type`.
 
 The channel sets the audience once, when it creates the session. The audience controls content capture, not access. See [Audience](/docs/channels#audience) for how the channel picks `public`, `private`, or `unknown`.
 
