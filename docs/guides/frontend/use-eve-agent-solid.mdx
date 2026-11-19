@@ -39,6 +39,8 @@ export default defineConfig({
 });
 ```
 
+Before you deploy, configure auth in `agent/channels/eve.ts`. Until then, production browser requests get `401`. See [Authenticate browser requests](/docs/guides/frontend#authenticate-browser-requests).
+
 ## Basic usage
 
 Call the binding once for a conversation and call its accessors to read state:
