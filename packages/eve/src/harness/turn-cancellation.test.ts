@@ -5,7 +5,42 @@ import {
   SessionLimitDeclinedError,
   throwIfTurnAborted,
   TurnCancelledError,
+  withTurnCancellationReason,
 } from "#harness/turn-cancellation.js";
+
+describe("withTurnCancellationReason", () => {
+  it("stays live until its source aborts", () => {
+    const source = new AbortController();
+    const signal = withTurnCancellationReason(source.signal);
+    expect(signal.aborted).toBe(false);
+
+    source.abort(new TurnCancelledError("stopped by Alice"));
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("keeps a cancellation reason as-is", () => {
+    const reason = new TurnCancelledError();
+    const source = new AbortController();
+    const signal = withTurnCancellationReason(source.signal);
+
+    source.abort(reason);
+    expect(signal.reason).toBe(reason);
+  });
+
+  it("restores the cancellation a workflow step boundary dropped", () => {
+    const source = new AbortController();
+    const signal = withTurnCancellationReason(source.signal);
+
+    source.abort();
+    expect(signal.reason).toBeInstanceOf(TurnCancelledError);
+  });
+
+  it("aborts at once when its source already has", () => {
+    const source = new AbortController();
+    source.abort();
+    expect(withTurnCancellationReason(source.signal).reason).toBeInstanceOf(TurnCancelledError);
+  });
+});
 
 describe("TurnCancelledError", () => {
   it("carries the stable name and a default message", () => {

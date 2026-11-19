@@ -28,6 +28,15 @@ export function isTurnCancellation(error: unknown): boolean {
   return false;
 }
 
+export function withTurnCancellationReason(signal: AbortSignal): AbortSignal {
+  const controller = new AbortController();
+  const abort = () =>
+    controller.abort(isTurnCancellation(signal.reason) ? signal.reason : new TurnCancelledError());
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}
+
 export function throwIfTurnAborted(abortSignal: AbortSignal | undefined): void {
   if (abortSignal?.aborted !== true) {
     return;

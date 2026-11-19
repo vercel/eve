@@ -44,6 +44,7 @@ import {
   isTurnCancellation,
   throwIfTurnAborted,
   TurnCancelledError,
+  withTurnCancellationReason,
 } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { isBetweenTurns, storedProjection, turnPosition } from "#harness/session-machine/view.js";
@@ -321,7 +322,7 @@ async function runSessionStepBody(
   const abortSignal =
     input.abortSignal === undefined
       ? hookCancellation.signal
-      : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
+      : AbortSignal.any([withTurnCancellationReason(input.abortSignal), hookCancellation.signal]);
   try {
     const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
     const sessionUsageLimit = agent.settings.limits?.sessionUsage;

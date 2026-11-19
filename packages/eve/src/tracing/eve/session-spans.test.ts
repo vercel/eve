@@ -21,6 +21,7 @@ import {
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHooks,
@@ -674,6 +675,36 @@ describe("a session's spans, from its committed lines", () => {
     ]);
     const failed = exported.find((span) => span.name === "execute_tool weather");
     expect(failed?.attributes["error.type"]).toBe("TOOL_FAILED");
+  });
+
+  it("records no exception for a tool the turn's cancellation stops", async () => {
+    const scopes = new Map<string, InstrumentationScope>();
+    const { commit, runTool, spans } = session(undefined, undefined, undefined, undefined, [
+      {
+        name: "scopes",
+        events: { "call.requested": (event) => void scopes.set(event.callId, event.scope) },
+      },
+    ]);
+    await commit(...opening);
+    await commit(requested("call_weather", "weather"));
+    const cancelled = new TurnCancelledError();
+    await expect(
+      runTool(
+        {
+          callId: "call_weather",
+          idempotencyKey: "tool:call_weather",
+          scope: scopes.get("call_weather")!,
+          toolName: "weather",
+          type: "tool.call",
+        },
+        () => Promise.reject(cancelled),
+      ),
+    ).rejects.toBe(cancelled);
+    await commit(turnSettled({ outcome: "cancelled" }));
+
+    const tool = (await spans()).find((span) => span.name === "execute_tool weather");
+    expect(tool?.attributes["agent.action.outcome"]).toBe("cancelled");
+    expect(tool?.events.map((event) => event.name)).not.toContain("exception");
   });
 
   it("exports a compaction's summary call during a turn as a model span under the turn", async () => {
