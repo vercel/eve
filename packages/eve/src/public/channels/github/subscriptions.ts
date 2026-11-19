@@ -1,5 +1,9 @@
 import { callGitHubApi, type GitHubApiOptions } from "#public/channels/github/api.js";
-import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
+import type {
+  GitHubBotNameResolver,
+  GitHubChannelCredentials,
+} from "#public/channels/github/auth.js";
+import { isIgnoredInboundComment } from "#public/channels/github/dispatch.js";
 import type {
   GitHubCheckSuiteWebhookEvent,
   GitHubInboundEvent,
@@ -43,7 +47,7 @@ export const GITHUB_SUBSCRIBABLE_EVENTS: Readonly<
   },
   pr_comment: {
     description:
-      "A new comment or review comment on the pull request, from anyone who can comment on it.",
+      "A new comment or review comment on the pull request, from anyone who can comment on it except bots.",
     inputSchema: INPUT_SCHEMA,
     onEvent: ({ event }) => describePullRequestComment(event.data),
   },
@@ -113,6 +117,7 @@ function describePullRequestComment(data: JsonObject): string {
 export async function emitGitHubSubscriptionEvents(input: {
   readonly api?: GitHubApiOptions;
   readonly credentials?: GitHubChannelCredentials;
+  readonly botName: GitHubBotNameResolver;
   readonly event: GitHubInboundEvent;
   readonly emit: EmitChannelEventFn;
   readonly enabled: ReadonlySet<GitHubSubscribableEvent>;
@@ -126,7 +131,7 @@ export async function emitGitHubSubscriptionEvents(input: {
     enabled.has("pr_comment") &&
     (event.kind === "issue_comment" || event.kind === "pull_request_review_comment")
   )
-    return emitPullRequestComment({ event, emit });
+    return emitPullRequestComment({ botName: input.botName, event, emit });
 }
 
 async function emitChecksFinished(input: {
@@ -191,6 +196,7 @@ async function listCheckRunsThatDidNotPass(input: {
 }
 
 async function emitPullRequestComment(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly event: GitHubIssueCommentEvent | GitHubPullRequestReviewCommentEvent;
   readonly emit: EmitChannelEventFn;
 }): Promise<void> {
@@ -199,6 +205,7 @@ async function emitPullRequestComment(input: {
   if (event.action !== "created" || pull === null) return;
 
   const { body, author, htmlUrl } = event.comment;
+  if (isIgnoredInboundComment(body, author, await input.botName())) return;
   const { owner, name: repo } = event.repository;
   await emit(
     "pr_comment",

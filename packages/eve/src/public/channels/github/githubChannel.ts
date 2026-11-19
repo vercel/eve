@@ -312,6 +312,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
             waitUntil(
               emitGitHubSubscriptionEvents({
                 api: config.api,
+                botName,
                 credentials: config.credentials,
                 enabled: subscribable,
                 event,

@@ -92,6 +92,7 @@ const world = vi.hoisted(() => {
     publishOwner: vi.fn(async (runId: string) => {
       world.publishedOwners.push(runId);
     }),
+    publishOutcome: vi.fn(async (_outcome: unknown) => {}),
     join: vi.fn(async (_input: unknown) => {}),
     leave: vi.fn(async (_input: unknown) => {}),
     close: vi.fn(async (_input: unknown): Promise<"pending" | "done"> => "done"),
@@ -127,6 +128,10 @@ vi.mock("#runtime/subscriptions/steps.js", () => ({
   openSubscriptionStep: async (input: unknown) => {
     world.calls.push("open");
     return await world.open(input);
+  },
+  publishOpenOutcomeStep: async (outcome: unknown) => {
+    world.calls.push("publish");
+    await world.publishOutcome(outcome);
   },
   publishSubscriptionOwnerStep: world.publishOwner,
   startSubscriptionDeliveryStep: world.start,
@@ -172,6 +177,7 @@ beforeEach(() => {
   for (const fn of [
     world.open,
     world.publishOwner,
+    world.publishOutcome,
     world.join,
     world.leave,
     world.start,
@@ -192,7 +198,24 @@ it("claims the hook for its binding, opens, then joins the key the source opened
   expect(world.owners.get(ownerToken)!.metadata).toEqual(binding);
   expect(world.open).toHaveBeenCalledWith({ binding, serializedContext });
   expect(world.join).toHaveBeenCalledExactlyOnceWith({ binding, key });
-  expect(world.calls).toEqual(["open", "join"]);
+  expect(world.calls).toEqual(["open", "join", "publish"]);
+
+  world.resume(ownerToken, { kind: "retire" });
+  await run;
+});
+
+it("reports a subscription as opened only after it has joined its key", async () => {
+  const order: string[] = [];
+  world.join.mockImplementationOnce(async () => {
+    order.push("joined");
+  });
+  world.publishOutcome.mockImplementationOnce(async () => {
+    order.push("published");
+  });
+  const run = subscriptionWorkflow({ binding, serializedContext });
+  await vi.waitFor(() => expect(world.publishOutcome).toHaveBeenCalled());
+  expect(order).toEqual(["joined", "published"]);
+  expect(world.publishOutcome).toHaveBeenCalledExactlyOnceWith(opened());
 
   world.resume(ownerToken, { kind: "retire" });
   await run;
@@ -216,7 +239,7 @@ it("leaves its key, then closes, when it is retired", async () => {
   world.resume(ownerToken, { kind: "retire" });
   await run;
 
-  expect(world.calls).toEqual(["open", "join", "leave", "close"]);
+  expect(world.calls).toEqual(["open", "join", "publish", "leave", "close"]);
   expect(world.leave).toHaveBeenCalledExactlyOnceWith({ binding, key });
   expect(world.close).toHaveBeenCalledExactlyOnceWith({
     binding,
@@ -236,7 +259,7 @@ it("ends at the expiry the source reported, then leaves and closes", async () =>
   world.expire();
   await run;
 
-  expect(world.calls).toEqual(["open", "join", "leave", "close"]);
+  expect(world.calls).toEqual(["open", "join", "publish", "leave", "close"]);
   expect(world.start).not.toHaveBeenCalled();
 });
 
@@ -292,6 +315,10 @@ it("disposes its hook and ends without joining when the source refuses to open",
   expect(world.owners.has(ownerToken)).toBe(false);
   expect(world.hooks.at(-1)!.disposed).toBe(true);
   expect(world.join).not.toHaveBeenCalled();
+  expect(world.publishOutcome).toHaveBeenCalledExactlyOnceWith({
+    error: "Unauthorized",
+    status: 401,
+  });
   expect(world.leave).not.toHaveBeenCalled();
   expect(world.close).not.toHaveBeenCalled();
 });

@@ -9,6 +9,7 @@ import {
   joinKeyStep,
   leaveKeyStep,
   openSubscriptionStep,
+  publishOpenOutcomeStep,
   publishSubscriptionOwnerStep,
   startSubscriptionDeliveryStep,
   type SubscriptionDeliveryInput,
@@ -50,11 +51,13 @@ export async function subscriptionWorkflow(input: {
   }
   const outcome = await openSubscriptionStep({ serializedContext, binding });
   if ("error" in outcome) {
+    await publishOpenOutcomeStep(outcome);
     await disposeHook(hook);
     return;
   }
   const { opened } = outcome;
   await joinKeyStep({ binding, key: opened.key });
+  await publishOpenOutcomeStep(outcome);
   const expiry = opened.expiresAt === null ? undefined : sleep(new Date(opened.expiresAt));
   while (true) {
     const message = await (expiry === undefined ? hook : Promise.race([hook, expiry]));

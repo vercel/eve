@@ -104,10 +104,10 @@ export default githubChannel({
 });
 ```
 
-| Event             | Delivered when                                                               |
-| ----------------- | ---------------------------------------------------------------------------- |
-| `checks_finished` | A check suite completes on the pull request, once for each app that ran one. |
-| `pr_comment`      | Someone creates a comment or review comment on the pull request.             |
+| Event             | Delivered when                                                                    |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `checks_finished` | A check suite completes on the pull request, once for each app that ran one.      |
+| `pr_comment`      | Someone who is not a bot creates a comment or review comment on the pull request. |
 
 Only the events you list are offered to the model, and the channel ignores the webhooks of the others. The model subscribes with the `subscribe` tool, passing the channel, the event, and the pull request in `input`:
 

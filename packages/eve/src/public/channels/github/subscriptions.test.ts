@@ -185,6 +185,21 @@ describe("GitHub channel subscriptions", () => {
     expect(emit).not.toHaveBeenCalled();
   });
 
+  it("does not emit comments from bots or marked as the channel's own", async () => {
+    const fromBot = commentPayload("status update");
+    (fromBot.comment as { user: unknown }).user = { id: 3, login: "ci-helper[bot]", type: "Bot" };
+    expect(await deliver({ body: fromBot, event: "issue_comment" })).not.toHaveBeenCalled();
+    expect(
+      await deliver({
+        body: commentPayload("done\n<!-- eve:github:progress -->"),
+        event: "issue_comment",
+      }),
+    ).not.toHaveBeenCalled();
+    expect(
+      await deliver({ body: commentPayload("a human comment"), event: "issue_comment" }),
+    ).toHaveBeenCalledOnce();
+  });
+
   it("lets the author's onEvent replace the default message", async () => {
     const config: GitHubSubscriptionsConfig = {
       checks_finished: { onEvent: ({ event }) => `custom ${String(event.data.conclusion)}` },

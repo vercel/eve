@@ -46,13 +46,20 @@ export async function openSubscriptionStep(input: {
   const idempotencyKey = createHash("sha256")
     .update(JSON.stringify([binding.id, getWorkflowMetadata().workflowRunId]))
     .digest("hex");
-  const outcome = await subscriptionSource(binding.source.kind).open({
+  return await subscriptionSource(binding.source.kind).open({
     ctx: await deserializeContext(input.serializedContext),
     binding,
     idempotencyKey,
   });
+}
+
+/**
+ * Tells whoever is waiting on the subscription how opening went. A success is published only once
+ * the subscription has joined its key, so an event emitted after a reported success reaches it.
+ */
+export async function publishOpenOutcomeStep(outcome: OpenOutcome): Promise<void> {
+  "use step";
   await publishOutcome(outcome);
-  return outcome;
 }
 
 export async function publishSubscriptionOwnerStep(ownerRunId: string): Promise<void> {
