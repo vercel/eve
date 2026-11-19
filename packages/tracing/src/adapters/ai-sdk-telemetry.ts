@@ -1,6 +1,8 @@
 import { context, trace, ProxyTracerProvider, createContextKey } from "@opentelemetry/api";
 import { registerOTel } from "@vercel/otel";
+import { currentCapture } from "../capture.js";
 import { intersectCapture } from "../core/activation.js";
+import { currentAgentHandoff } from "../core/delegation.js";
 import { runTelemetry } from "../core/run-telemetry.js";
 import type { RunIdentity } from "../core/types.js";
 import type { Operation } from "../operations.js";
@@ -63,6 +65,24 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
   );
   const generations = new Map<string, Generation>();
 
+  function activeGeneration(): ActiveGeneration | undefined {
+    return context.active().getValue(ACTIVE_GENERATION) as ActiveGeneration | undefined;
+  }
+
+  function turnOverrides(callId: string) {
+    return typeof options.turn === "function" ? options.turn({ callId }) : options.turn;
+  }
+
+  function emitsNativeSpans(callId: string): boolean {
+    return (
+      turnOverrides(callId)?.capture?.emit !== false &&
+      activeGeneration()?.operation.capture.emit !== false &&
+      backend?.telemetry.active()?.capture.emit !== false &&
+      currentCapture()?.emit !== false &&
+      currentAgentHandoff()?.capture.emit !== false
+    );
+  }
+
   function executeInGeneration<T>(
     state: Generation,
     operation: Operation,
@@ -110,7 +130,9 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
     onEmbedEnd: native.telemetry.onEmbedEnd.bind(native.telemetry),
     onRerankStart: native.telemetry.onRerankStart.bind(native.telemetry),
     onRerankEnd: native.telemetry.onRerankEnd.bind(native.telemetry),
-    experimental_onDecideStart: native.telemetry.experimental_onDecideStart.bind(native.telemetry),
+    experimental_onDecideStart(event) {
+      if (emitsNativeSpans(event.callId)) native.telemetry.experimental_onDecideStart(event);
+    },
     experimental_onDecideEnd: native.telemetry.experimental_onDecideEnd.bind(native.telemetry),
     experimental_onDecisionModelCallStart:
       native.telemetry.experimental_onDecisionModelCallStart.bind(native.telemetry),
@@ -118,6 +140,7 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
       native.telemetry,
     ),
     experimental_onStreamTranscriptionStart(event) {
+      if (!emitsNativeSpans(event.callId)) return;
       native.telemetry.experimental_onStreamTranscriptionStart({
         ...event,
         recordInputs: false,
@@ -128,20 +151,18 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
       native.telemetry.experimental_onStreamTranscriptionEnd.bind(native.telemetry),
     async onStart(event: Event<"onStart">) {
       if (!["ai.generateText", "ai.streamText", "ai.harness"].includes(event.operationId)) {
-        native.telemetry.onStart({ ...event, recordInputs: false, recordOutputs: false });
+        if (emitsNativeSpans(event.callId))
+          native.telemetry.onStart({ ...event, recordInputs: false, recordOutputs: false });
         return;
       }
-      const inherited = context.active().getValue(ACTIVE_GENERATION) as
-        | ActiveGeneration
-        | undefined;
+      const inherited = activeGeneration();
       const active = backend?.telemetry.active();
-      const overrides =
-        typeof options.turn === "function" ? options.turn({ callId: event.callId }) : options.turn;
-      const identity = {
-        conversationId: inherited?.identity.conversationId ?? event.callId,
-        runId: event.callId,
-        turnId: event.callId,
-        ...overrides?.identity,
+      const overrides = turnOverrides(event.callId);
+      const identity: RunIdentity = {
+        conversationId:
+          overrides?.identity?.conversationId ?? inherited?.identity.conversationId ?? event.callId,
+        runId: overrides?.identity?.runId ?? event.callId,
+        turnId: overrides?.identity?.turnId ?? event.callId,
       };
       const owner = inherited?.operation.reference ?? active?.reference;
       const host = backend?.telemetry.activeSpan?.();

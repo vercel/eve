@@ -18,8 +18,15 @@ import {
 import { MockEmbeddingModelV3, MockLanguageModelV3, MockTranscriptionModelV4 } from "ai/test";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAgentRun, otelTelemetry } from "@vercel/agent-runs";
+import {
+  AgentSpanIdGenerator,
+  createAgentRun,
+  otelTelemetry,
+  type TraceCheckpointer,
+  type TraceSnapshot,
+} from "@vercel/agent-runs";
 import { aiSdkTelemetry } from "@vercel/agent-runs/ai-sdk";
+import { withCapture } from "@vercel/agent-runs/otel";
 
 const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
@@ -36,11 +43,15 @@ function model(modelId: string) {
     },
   });
 }
-function recording() {
+function recording(checkpointer?: TraceCheckpointer) {
   const exporter = new InMemorySpanExporter();
-  const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
+  const idGenerator = checkpointer === undefined ? undefined : new AgentSpanIdGenerator();
+  const provider = new BasicTracerProvider({
+    idGenerator,
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
   context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
-  const run = createAgentRun({ telemetry: otelTelemetry({ provider }) });
+  const run = createAgentRun({ telemetry: otelTelemetry({ provider, idGenerator }), checkpointer });
   return { exporter, run, provider };
 }
 function transcribe(telemetry?: { recordInputs: boolean; recordOutputs: boolean }) {
@@ -178,6 +189,51 @@ describe("AI SDK adapter registration", () => {
       await run.shutdown();
     }
   });
+  it("keeps parallel durable calls with partial identities in separate traces", async () => {
+    const checkpoints = new Map<string, TraceSnapshot>();
+    const { exporter, run } = recording({
+      get: (key) => checkpoints.get(key),
+      set: (key, value) => void checkpoints.set(key, value),
+      delete: (key) => void checkpoints.delete(key),
+    });
+    const conversations = ["alice", "bob"];
+    const ready = Promise.withResolvers<void>();
+    let started = 0;
+    try {
+      await Promise.all(
+        conversations.map((conversationId) =>
+          generateText({
+            model: model(conversationId),
+            prompt: "Hello",
+            onLanguageModelCallStart: async () => {
+              if (++started === conversations.length) ready.resolve();
+              await ready.promise;
+            },
+            telemetry: {
+              integrations: [
+                aiSdkTelemetry(run, {
+                  turn: { identity: { conversationId, runId: undefined, turnId: undefined } },
+                }),
+              ],
+            },
+          }),
+        ),
+      );
+      const spans = exporter.getFinishedSpans().filter((span) => span.name.startsWith("chat "));
+      const identities = spans.map((span) => [
+        span.name,
+        span.attributes["gen_ai.conversation.id"],
+      ]);
+      expect(identities.sort()).toEqual([
+        ["chat alice", "alice"],
+        ["chat bob", "bob"],
+      ]);
+      expect(new Set(spans.map((span) => span.spanContext().traceId)).size).toBe(2);
+    } finally {
+      await run.shutdown();
+    }
+  });
+
   it("reuses the configured provider and preserves independent observers", async () => {
     const { exporter, provider } = recording();
     trace.setGlobalTracerProvider(provider);
@@ -588,6 +644,31 @@ describe("AI SDK adapter registration", () => {
       await run.shutdown();
     }
   });
+
+  it.each(["turn options", "active capture"] as const)(
+    "skips native-only spans when emission is disabled by %s",
+    async (source) => {
+      const { exporter, run } = recording();
+      const disabled = { emit: false, recordInputs: false, recordOutputs: false };
+      const turn = vi.fn(() => ({
+        capture: source === "turn options" ? disabled : { ...disabled, emit: true },
+      }));
+      registerTelemetry(aiSdkTelemetry(run, { turn }));
+      const execute = async () => {
+        expect(await transcribe().text).toBe("Private transcript");
+        expect((await embedding()).embedding).toEqual([1, 2, 3]);
+      };
+      try {
+        if (source === "active capture")
+          await context.with(withCapture(context.active(), disabled), execute);
+        else await execute();
+        expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual([]);
+        expect(turn).toHaveBeenCalledTimes(2);
+      } finally {
+        await run.shutdown();
+      }
+    },
+  );
 
   it("drops native-only spans when the run's telemetry cannot record them", async () => {
     const global = globalRecording();
