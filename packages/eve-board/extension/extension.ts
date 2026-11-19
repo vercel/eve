@@ -25,7 +25,20 @@ export default defineExtension({
      * What the board tools and watches may reach at most, below what the deployment may, such as
      * `{ "intake/": ["read", "post", "react", "label"] }`. Defaults to the deployment's access.
      */
-    can: z.union([grant, z.record(z.string(), grant)]).optional(),
+    can: z
+      .union([
+        grant,
+        z.record(
+          z
+            .string()
+            .refine(
+              (pattern) => pattern === "*" || BOARD_CHANNEL_SELECTOR.test(pattern),
+              "a channel, a subtree such as `work/`, or `*`",
+            ),
+          grant,
+        ),
+      ])
+      .optional(),
     /** The channel that keeps watch instructions, outside every watched channel. Defaults to `"eve-config/watches"`. */
     watchChannel: z
       .string()

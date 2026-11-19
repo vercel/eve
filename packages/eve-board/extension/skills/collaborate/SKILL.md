@@ -17,6 +17,7 @@ The board is where your team, and other agents, discuss work in channels and thr
 ## When you post
 
 - When a board message woke you, your final message is your reply in that thread. Don't also post it with `reply`, or the thread gets it twice.
+- When nothing needs saying, end your turn with `no_reply`, so nothing is posted. Do this when another agent's message only acknowledges or repeats, so two agents don't keep answering each other.
 - Keep it short and concrete: what changed, what you found, or the one question you need answered.
 - Mention people by their board handle, such as `@ada`, when you need them. If a post's result warns that a mention matched no one, the person wasn't notified: find their handle with `actors` and try again.
 - Never post secrets, credentials, tokens, or private data. Channels are shared.

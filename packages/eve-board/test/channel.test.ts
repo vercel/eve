@@ -201,7 +201,67 @@ test("a settlement the board refuses drops the claim and says so in the thread",
 
   assert.equal(state.task, null);
   assert.equal(notes.length, 1);
-  assert.match(notes[0]!, /The board refused to mark task/u);
+  assert.match(notes[0]!, /couldn't mark task #\d+ completed on the board/u);
+});
+
+function unavailable(path: string, times: number) {
+  const boardFetch = globalThis.fetch;
+  let failed = 0;
+  globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    if (failed < times && new URL(request.url).pathname.endsWith(path)) {
+      failed += 1;
+      return Response.json(
+        { error: { code: "unavailable", message: "Try again." } },
+        { status: 503 },
+      );
+    }
+    return await boardFetch(request);
+  };
+  return { failures: () => failed };
+}
+
+const completed = (task: string) => ({
+  callId: "c-1",
+  outcome: "completed",
+  output: { result: "Done.", settled: "completed", task },
+});
+
+test("a settlement retries while the board is briefly unavailable", async () => {
+  const { as } = await startBoard();
+  const { state, task } = await claimedTask(as);
+  const { board, notes } = noteRecorder();
+  const outage = unavailable(`/tasks/${task.id}/complete`, 1);
+
+  await settleAfterCall(
+    client(),
+    { board, state },
+    viewWithCall("c-1", "board__complete_task"),
+    completed(task.id),
+  );
+
+  assert.equal(outage.failures(), 1);
+  assert.equal((await client().thread(task.id)).message.task?.state, "completed");
+  assert.deepEqual(notes, []);
+});
+
+test("a settlement gives up after a few tries and says so in the thread", async () => {
+  const { as } = await startBoard();
+  const { state, task } = await claimedTask(as);
+  const { board, notes } = noteRecorder();
+  const outage = unavailable(`/tasks/${task.id}/complete`, Number.POSITIVE_INFINITY);
+
+  await settleAfterCall(
+    client(),
+    { board, state },
+    viewWithCall("c-1", "board__complete_task"),
+    completed(task.id),
+  );
+
+  assert.equal(outage.failures(), 3);
+  assert.equal(state.task, null);
+  assert.match(notes[0] ?? "", /Its claim runs out within the hour/u);
+  assert.equal((await client().thread(task.id)).message.task?.state, "claimed");
 });
 
 test("subagent calls renew the claim in full, once a minute however many start together", async () => {

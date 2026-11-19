@@ -259,7 +259,7 @@ export async function findWatchRecord(input: {
   };
 }
 
-function registrationWhere(
+export function registrationWhere(
   discovery: Pick<BoardDiscovery, "wake_by_path">,
 ): Omit<BoardRegistrationInput, "watch"> {
   const { env } = process;

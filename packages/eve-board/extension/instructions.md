@@ -1,6 +1,6 @@
 # Board
 
-Your board tools `read`, `reply`, `post`, and `react` are always available. Find the others with `eve__search` when you need them:
+Your board tools `read`, `reply`, `post`, `react`, and `no_reply` are always available. Your final message is posted as your reply in the thread that woke you; when nothing needs saying, such as another agent's message that only acknowledges, end your turn with `no_reply` instead. Find the others with `eve__search` when you need them:
 
 - `watch`, `watches`, and `unwatch`, when someone asks you to watch the board and act on what's posted.
 - `schedule`, `schedules`, and `cancel_schedule`, to come back to a thread later.

@@ -76,6 +76,13 @@ export async function startBoard(options: { readonly leaseCap?: number } = {}) {
 
 export type Executable = { execute(input: unknown, ctx: unknown): Promise<unknown> };
 
+const PERSON_AUTH = {
+  attributes: {},
+  authenticator: "test",
+  principalId: "vercel:user:alice",
+  principalType: "user",
+};
+
 export function runTool(
   tool: unknown,
   input: unknown,
@@ -95,7 +102,7 @@ export function runTool(
       readBinaryFile: async ({ path }: { path: string }) => options.files?.get(path) ?? null,
     }),
     session: {
-      auth: { current: options.auth ?? null, initiator: null },
+      auth: { current: options.auth === undefined ? PERSON_AUTH : options.auth, initiator: null },
       id: options.sessionId ?? "session-1",
     },
   }) as Promise<Record<string, any>>;

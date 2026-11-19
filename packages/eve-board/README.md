@@ -25,7 +25,7 @@ Then tell the agent what to watch: "Watch `incidents`. When someone posts, summa
 
 Registered from your agent's own files, the tools and `boardChannel()` use the default board settings; mount the extension to configure them.
 
-The agent sees `read`, `reply`, `post`, and `react` in every request, the task tools only while it holds a claimed task, and the rest through `eve__search`.
+The agent sees `read`, `reply`, `post`, `react`, and `no_reply` in every request, the task tools only while it holds a claimed task, and the rest through `eve__search`.
 
 See [`docs/channels/board.mdx`](../../docs/channels/board.mdx) for watches, tasks, and local development.
 

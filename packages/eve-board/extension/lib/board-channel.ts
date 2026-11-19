@@ -60,6 +60,8 @@ const log = createLogger("board.channel");
 const CLAIM_LEASE_SECONDS = 3600;
 const RENEW_EVERY_MS = 30_000;
 const RECENT_RENEWAL_MS = 60_000;
+const SETTLE_ATTEMPTS = 3;
+const SETTLE_BACKOFF_MS = 500;
 const MAX_PULLS_PER_WAKE = 20;
 const MATCHES_PER_PULL = 10;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -505,7 +507,6 @@ export function renewDuringCall(
   client: () => BoardClient,
   state: BoardChannelState,
   callId: string,
-  everyMs = RENEW_EVERY_MS,
 ): void {
   const claim = state.task;
   if (claim == null) return;
@@ -524,7 +525,7 @@ export function renewDuringCall(
       renewal.renewing = false;
     }
     if (renewal.claim === null) clearInterval(renewal.timer);
-  }, everyMs);
+  }, RENEW_EVERY_MS);
   renewal.timer.unref?.();
   renewals.set(claim.token, renewal);
 }
@@ -601,11 +602,9 @@ export async function settleAfterCall(
     await keepBoardClaim(client, state);
     return;
   }
-  const { problem, retry } = await settleClaim(client, claim, settlement);
-  if (!retry) {
-    state.task = null;
-    stopRenewal(claim.token);
-  }
+  const { problem } = await settleClaim(client, claim, settlement);
+  state.task = null;
+  stopRenewal(claim.token);
   if (problem !== undefined) {
     await bestEffort(
       "note",
@@ -618,31 +617,29 @@ export async function settleClaim(
   client: BoardClient,
   claim: BoardClaim,
   settlement: BoardSettlement,
-): Promise<{ readonly problem?: string; readonly retry: boolean }> {
+): Promise<{ readonly problem?: string }> {
   const held = client.held(claim);
-  try {
-    if (settlement.settled === "completed") await held.complete(settlement.result);
-    else if (settlement.settled === "failed") await held.fail(settlement.reason ?? "Failed.");
-    else await held.block(settlement.reason ?? "Needs a person.", { kind: settlement.kind });
-    return { retry: false };
-  } catch (error) {
-    if (boardErrorCode(error) === "claim_lost") {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      if (settlement.settled === "completed") await held.complete(settlement.result);
+      else if (settlement.settled === "failed") await held.fail(settlement.reason ?? "Failed.");
+      else await held.block(settlement.reason ?? "Needs a person.", { kind: settlement.kind });
+      return {};
+    } catch (error) {
+      if (boardErrorCode(error) === "claim_lost") {
+        return {
+          problem: `eve couldn't mark task #${claim.taskId} ${settlement.settled}: its claim ended before the agent settled it.`,
+        };
+      }
+      const id = logError("board task settlement failed", error, { task: claim.taskId, attempt });
+      if (temporaryBoardFailure(error) && attempt < SETTLE_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * SETTLE_BACKOFF_MS));
+        continue;
+      }
       return {
-        problem: `eve couldn't mark task #${claim.taskId} ${settlement.settled}: its claim ended before the agent settled it.`,
-        retry: false,
+        problem: `eve couldn't mark task #${claim.taskId} ${settlement.settled} on the board (error id ${id}). Its claim runs out within the hour, and the task goes back to the queue.`,
       };
     }
-    const id = logError("board task settlement failed", error, { task: claim.taskId });
-    if (!temporaryBoardFailure(error)) {
-      return {
-        problem: `The board refused to mark task #${claim.taskId} ${settlement.settled} (error id ${id}). Its claim lapses on its own, and the task goes back to the queue.`,
-        retry: false,
-      };
-    }
-    return {
-      problem: `eve couldn't mark task #${claim.taskId} ${settlement.settled} on the board. Call the task tool again to retry.`,
-      retry: true,
-    };
   }
 }
 

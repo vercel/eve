@@ -28,7 +28,7 @@ board settings outside the extension.
   to a handle narrowed with `can`, so eve's own registration, records, lock, pulls, and claim
   settlement use the deployment's handle, and the watch tools enforce `can` on every tail and queue.
   Claims go through the narrowed handle, so the board never offers a task outside `can`.
-- **A lean tool list.** `read`, `reply`, `post`, and `react` are in every request; the settle tools
+- **A lean tool list.** `read`, `reply`, `post`, `react`, and eve's `no_reply` are in every request; the settle tools
   are a dynamic tool offered only while the session holds a claim; the rest are deferred behind
   `eve__search`, and an always-on instruction names them. The channel shows typing on every turn
   and call, so there is no typing tool.
@@ -53,7 +53,7 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
 ## Semantics
 
 - **Creating a watch.** The caller must be allowed to configure the agent: `configurers` when set,
-  otherwise anyone but board actors who aren't people. The watch names one channel inside `can` and
+  otherwise any signed-in caller but board actors who aren't people. The watch names one channel inside `can` and
   outside the watch channel, with optional label, author, and text filters that eve writes as
   the registration's tail. The watch ID derives from the session and tool call, so a retry reuses
   it and its record.
@@ -72,7 +72,7 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
   timer, one per claim, while the session's in-process tool calls run. Subagent and workflow calls run
   outside the step, so eve renews the claim in full when one starts, unless it renewed in the last
   minute, so parallel subagents renew once. A task tool names the settlement and the channel performs it when a call from a settle tool
-  settles, keeping the claim only when the board is briefly unavailable. A reply or the agent's
+  settles, retrying a few times while the board is briefly unavailable. A reply or the agent's
   own check-in in a held task's thread goes to that task's session. The claiming watch labels the task
   `eve-claim-watch=<id>`, so when two of the agent's claim watches cover a thread, only the one that
   holds the task takes its replies. A claim whose hand-off fails is

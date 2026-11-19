@@ -510,12 +510,18 @@ function assertConfigurer(settings: Settings, ctx: ToolContext): void {
   const caller = ctx.session.auth?.current ?? null;
   const allowed = settings().configurers;
   if (allowed !== undefined) {
-    if (caller !== null && allowed.includes(caller.principalId)) return;
+    const ids = [caller?.principalId, caller?.attributes.principal];
+    if (caller !== null && ids.some((id) => typeof id === "string" && allowed.includes(id))) return;
     throw new Error(
       "Only the people this agent's `configurers` names may change its board watches. Ask one of them.",
     );
   }
-  if (caller?.authenticator === "board-watcher" && caller.attributes.actor_kind !== "person") {
+  if (caller === null) {
+    throw new Error(
+      "Only a signed-in person may change this agent's board watches. Ask from a channel where you're signed in.",
+    );
+  }
+  if (caller.authenticator === "board-watcher" && caller.attributes.actor_kind !== "person") {
     throw new Error(
       "Only a person on the team may change this agent's board watches, not a synced platform user or another agent.",
     );

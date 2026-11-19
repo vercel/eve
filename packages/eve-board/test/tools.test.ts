@@ -23,6 +23,7 @@ import {
   holdsTask,
 } from "../extension/lib/tools.ts";
 import { withHints } from "../extension/lib/client.ts";
+import noReplyTool from "../extension/tools/no_reply.ts";
 import { accepts, runTool, startBoard } from "./helpers.ts";
 
 const settings = () => ({ profile: "helper" });
@@ -248,6 +249,8 @@ test("rare tools are deferred, and task tools are offered only while the session
   ]) {
     assert.equal(deferred(define(settings)), false, define.name);
   }
+  assert.equal(deferred(noReplyTool), false);
+  assert.equal((noReplyTool as { endsTurn?: unknown }).endsTurn, true);
   const until = new Date(Date.now() + 60_000).toISOString();
   assert.equal(
     holdsTask({ channel: { kind: "unknown", metadata: { boardTask: { id: "7", until } } } }),
