@@ -5,7 +5,6 @@ import {
   approvalCard,
   defaultSkillApproval,
   defaultSkillResponse,
-  requireDefaultResponder,
 } from "../../extension/lib/approval.ts";
 import type { SkillApprovalRequest, SkillScope } from "../../extension/lib/types.ts";
 
@@ -110,47 +109,23 @@ test("a shared change whose card can't show it in full is refused", async () => 
   assert.equal(await defaultSkillApproval(request({ targets: [target(2_000, 5_000)] })), "allow");
 });
 
-test("a shared change needs someone other than the requester to approve it", async () => {
-  const alice = { attributes: {}, authenticator: "a", principalId: "alice", principalType: "user" };
-  const bob = { ...alice, principalId: "bob" };
-  const answer = async (shared: boolean, responder: typeof alice) =>
-    (await defaultSkillResponse(async () => shared)({
-      request: { principal: alice },
-      response: { principal: responder },
-    } as never)) as { status: string };
-
-  assert.equal((await answer(false, alice)).status, "allowed");
-  assert.equal((await answer(false, bob)).status, "rejected");
-  assert.equal((await answer(true, alice)).status, "rejected");
-  assert.equal((await answer(true, bob)).status, "allowed");
-});
-
-test("a changed subject isn't a second person for shared skills, nor the owner of personal ones", () => {
-  const before = {
+test("only the requester approves, for personal and shared skills alike", async () => {
+  const alice = {
     attributes: {},
     authenticator: "github",
     principalId: "github:42",
     principalType: "user",
     subject: "alice",
   };
-  const renamed = { ...before, subject: "alice-renamed" };
-  for (const check of [
-    () => requireDefaultResponder(channel, before, renamed),
-    () => requireDefaultResponder(personal, before, renamed),
-  ]) {
-    assert.throws(check);
-  }
-  assert.doesNotThrow(() => requireDefaultResponder(personal, before, { ...before }));
-  assert.doesNotThrow(() =>
-    requireDefaultResponder(channel, before, { ...before, principalId: "github:7" }),
-  );
-});
+  const answer = async (responder: typeof alice) =>
+    (
+      (await defaultSkillResponse({
+        request: { principal: alice },
+        response: { principal: responder },
+      } as never)) as { status: string }
+    ).status;
 
-test("the approver is checked again against the scope the change really targets", () => {
-  const alice = { attributes: {}, authenticator: "a", principalId: "alice", principalType: "user" };
-  const bob = { ...alice, principalId: "bob" };
-  assert.doesNotThrow(() => requireDefaultResponder(personal, alice, alice));
-  assert.throws(() => requireDefaultResponder(personal, alice, bob), /Only the person who asked/);
-  assert.throws(() => requireDefaultResponder(channel, alice, alice), /someone other than/);
-  assert.doesNotThrow(() => requireDefaultResponder(channel, alice, bob));
+  assert.equal(await answer({ ...alice }), "allowed");
+  assert.equal(await answer({ ...alice, principalId: "github:7" }), "rejected");
+  assert.equal(await answer({ ...alice, subject: "alice-renamed" }), "rejected");
 });

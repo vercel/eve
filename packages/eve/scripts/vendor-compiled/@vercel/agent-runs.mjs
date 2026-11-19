@@ -22,6 +22,7 @@ const copyDeclarations = createDeclarationCopier({
       .sort()
       .map((file) => ({ source: file, output: file })),
   rewrites: {
+    "@ai-sdk/otel": { kind: "vendored", compiledPath: "@ai-sdk/otel" },
     "@opentelemetry/api": { kind: "vendored", compiledPath: "@opentelemetry/api" },
     ai: { kind: "external" },
   },

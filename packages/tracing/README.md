@@ -40,7 +40,8 @@ const run = createAgentRun({ telemetry: otelTelemetry({ provider }) });
 On Vercel, `otelTelemetry()` adds `vercel.session_id` from `agent.run.id` so
 Agent Runs can find a run's spans. A `mapping` you pass replaces that default.
 
-Omit `telemetry` to use the global provider. Your provider owns exporters,
+Omit `telemetry` to use the global provider. The AI SDK adapter below can initialize
+it; otherwise the host configures it. Your provider owns exporters,
 sampling, and context propagation. Install its context manager before
 concurrent work. `forceFlush()` and `shutdown()` call the telemetry's lifecycle
 methods, which default to the provider's. Other backends implement
@@ -163,25 +164,37 @@ failure.
 
 ## AI SDK
 
-`aiSdkTelemetry` is an AI SDK telemetry integration. It records each
-`generateText`, `streamText`, or agent call as a turn, with its steps, model
-calls, and tool executions, and runs model calls and tools inside their spans.
+Install the AI SDK if it is not already installed:
 
-```ts
-import { aiSdkTelemetry } from "@vercel/agent-runs/ai-sdk";
-
-await generateText({
-  model,
-  prompt,
-  telemetry: {
-    integrations: [aiSdkTelemetry(run, { turn: { agentName: "support", identity, sequence: 0 } })],
-  },
-});
+```sh
+pnpm add ai
 ```
 
-Pass a function as `turn` to choose the turn per call. `modelUsage` and
-`modelContent` convert AI SDK payloads for hosts that record model calls
-themselves. The entrypoint has an optional peer dependency on `ai`.
+The adapter's OpenTelemetry dependencies are installed automatically.
+
+```ts
+import { registerTelemetry } from "ai";
+import { createAgentRun } from "@vercel/agent-runs";
+import { aiSdkTelemetry } from "@vercel/agent-runs/ai-sdk";
+
+const run = createAgentRun({});
+registerTelemetry(aiSdkTelemetry(run));
+```
+
+`generateText`, `streamText`, `ToolLoopAgent`, and `HarnessAgent` calls record a
+turn, its steps, model calls, and tools. IDs are generated automatically. Nested
+calls inherit conversation identity and nest under the invoking model or tool;
+parallel calls stay isolated. Consume streams to finish their spans, or cancel
+with an abort signal. The internal native integration enriches the same spans;
+registering the adapter alone produces one span tree.
+
+Each top-level call starts a new run. To group runs into a conversation, set
+`turn.identity.conversationId`.
+
+Prompts and outputs are excluded by default. Use `turn.capture` to include them.
+
+On Vercel, traces use your project's tracing settings. For a custom collector,
+set `OTEL_EXPORTER_OTLP_*`. Call `run.forceFlush()` before a script exits.
 
 ## Delegation
 
