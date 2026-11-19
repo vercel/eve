@@ -606,7 +606,7 @@ interface ClaimRenewal {
 
 const renewals = new Map<string, ClaimRenewal>();
 
-const renewalKey = (claim: BoardHeldClaim) => `${claim.id}:${claim.epoch}`;
+const renewalKey = (claim: BoardHeldClaim) => claim.token;
 
 export function renewDuringCall(
   client: () => BoardClient,
@@ -623,7 +623,7 @@ export function renewDuringCall(
   }
   const renewal: ClaimRenewal = { calls: new Set([callId]), claim, renewing: false };
   renewal.timer = setInterval(async () => {
-    if (renewal.renewing || renewal.claim === null) return;
+    if (renewal.renewing || renewal.claim === null || !claimDue(renewal.claim)) return;
     renewal.renewing = true;
     try {
       renewal.claim = await renewClaim(client(), renewal.claim);

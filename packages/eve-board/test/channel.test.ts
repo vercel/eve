@@ -63,12 +63,15 @@ function viewWithCall(callId: string, name: string) {
   ] as never);
 }
 
-async function claimedTask(as: (person: string, path: string, body?: unknown) => Promise<any>) {
+async function claimedTask(
+  as: (person: string, path: string, body?: unknown) => Promise<any>,
+  lease = 300,
+) {
   const task = (await as("alice", "/tasks", { channel: "work/a", text: "Fix the limiter." })).task;
   const claim = await client().claimReady({
     channel: "work/",
     from: ["vercel:user:alice"],
-    lease: 300,
+    lease,
   });
   assert.ok(claim !== null);
   const state: BoardChannelState = {
@@ -230,8 +233,8 @@ function fakeIntervals(t: { after(fn: () => void): void }) {
 const renewalsOf = (calls: readonly string[], task: string) =>
   calls.filter((call) => call === `POST /tasks/${task}/renew`).length;
 
-test("a running call renews its claim every 30 seconds, with one timer for parallel calls", async (t) => {
-  const { as, calls } = await startBoard();
+test("on a board that caps leases at five minutes, a running call renews every 30 seconds, with one timer for parallel calls", async (t) => {
+  const { as, calls } = await startBoard({ leaseCap: 300 });
   const { state, task } = await claimedTask(as);
   const tick = fakeIntervals(t);
   const leased = state.task!.until;
@@ -249,8 +252,21 @@ test("a running call renews its claim every 30 seconds, with one timer for paral
   assert.equal(renewalsOf(calls, task.id), 2);
 });
 
-test("a lost claim stops renewing and clears the session's claim when the call settles", async (t) => {
+test("a running call leaves a claim with most of its lease left alone", async (t) => {
   const { as, calls } = await startBoard();
+  const { state, task } = await claimedTask(as, 3600);
+  const tick = fakeIntervals(t);
+
+  renewDuringCall(client, state, "c-1");
+  await tick();
+  await tick();
+  endRenewal(state, "c-1");
+
+  assert.equal(renewalsOf(calls, task.id), 0);
+});
+
+test("a lost claim stops renewing and clears the session's claim when the call settles", async (t) => {
+  const { as, calls } = await startBoard({ leaseCap: 300 });
   const { state, task } = await claimedTask(as);
   const tick = fakeIntervals(t);
   const claim = state.task!;

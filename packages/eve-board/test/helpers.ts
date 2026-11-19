@@ -19,7 +19,7 @@ afterEach(() => {
   delete process.env.BOARD_TOKEN;
 });
 
-export async function startBoard() {
+export async function startBoard(options: { readonly leaseCap?: number } = {}) {
   boards += 1;
   const url = `https://board-${boards}.test/api/board`;
   const team = board({
@@ -56,10 +56,20 @@ export async function startBoard() {
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     if (!request.url.startsWith(url)) return await realFetch(request);
-    calls.push(
-      `${request.method} ${new URL(request.url).pathname.slice(new URL(url).pathname.length)}`,
+    const path = new URL(request.url).pathname.slice(new URL(url).pathname.length);
+    calls.push(`${request.method} ${path}`);
+    if (options.leaseCap === undefined || !/^\/tasks\/(?:claim|[^/]+\/renew)$/u.test(path)) {
+      return await team.fetch(request);
+    }
+    const body = (await request.json()) as { lease?: number };
+    const lease = Math.min(body.lease ?? options.leaseCap, options.leaseCap);
+    return await team.fetch(
+      new Request(request.url, {
+        body: JSON.stringify({ ...body, lease }),
+        headers: request.headers,
+        method: request.method,
+      }),
     );
-    return await team.fetch(request);
   };
   return { as, calls };
 }
