@@ -10,10 +10,10 @@
     "build": "pnpm build:eve && pnpm build:web",
     "build:eve": "eve build",
     "build:web": "next build --turbopack apps/web",
-    "dev": "next dev apps/web",
+    "dev": "next dev apps/web -H 127.0.0.1",
     "dev:eve": "eve dev",
     "dev:all": "vercel dev --local --listen 127.0.0.1:3000",
-    "dev:web": "next dev apps/web",
+    "dev:web": "next dev apps/web -H 127.0.0.1",
     "test": "node --test agent/lib/*.test.ts apps/web/lib/*.test.ts",
     "typecheck": "tsc -p apps/web/tsconfig.json"
   },

@@ -10,10 +10,13 @@ import { enforceRateLimit, RateLimitError } from "../../../../lib/rate-limit";
 import { getAuthMode } from "../../../../lib/setup";
 import { isSameOrigin } from "../../../../lib/origin";
 
-/** Sign-in attempts each caller may make in a window, and all callers together in an hour. */
+/**
+ * Sign-in attempts each caller may make in a window. There's no shared cap across callers, which
+ * anyone could use up to lock out the right password; the password's minimum length, and a
+ * Vercel Firewall rule if you add one, bound guessing from many addresses.
+ */
 const ATTEMPTS_PER_CALLER = 10;
 const CALLER_WINDOW_SECONDS = 15 * 60;
-const ATTEMPTS_PER_DEPLOYMENT = 300;
 
 /**
  * The caller's address as Vercel's proxy, or `vercel dev`, reports it; both overwrite any value
@@ -37,12 +40,6 @@ export async function POST(request: Request) {
       limit: ATTEMPTS_PER_CALLER,
       prefix: "login",
       windowSeconds: CALLER_WINDOW_SECONDS,
-    });
-    await enforceRateLimit({
-      key: "all",
-      limit: ATTEMPTS_PER_DEPLOYMENT,
-      prefix: "login-all",
-      windowSeconds: 60 * 60,
     });
   } catch (error) {
     if (!(error instanceof RateLimitError)) throw error;
