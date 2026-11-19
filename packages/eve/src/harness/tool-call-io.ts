@@ -12,6 +12,7 @@ import {
   defaultToolModelOutput,
   normalizeToolModelOutput,
   toolModelOutputContext,
+  type ToolModelOutputContextOptions,
   type ToolModelOutputValue,
 } from "#harness/tool-model-output.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -75,6 +76,7 @@ export async function toolCallModelOutput(
   definition: Pick<HarnessToolDefinition, "name" | "toModelOutput">,
   output: unknown,
   toolCallId: string,
+  contextOptions?: ToolModelOutputContextOptions,
 ): Promise<ToolModelOutputValue> {
   return await observeToolOutput(definition.name, [{ callId: toolCallId }], async () => {
     if (isAuthorizationPendingModelOutput(output)) {
@@ -84,7 +86,7 @@ export async function toolCallModelOutput(
       return normalizeToolModelOutput({
         output: await definition.toModelOutput(
           output,
-          toolModelOutputContext(definition.name, toolCallId),
+          toolModelOutputContext(definition.name, toolCallId, contextOptions),
         ),
         toolCallId,
         toolName: definition.name,

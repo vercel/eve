@@ -28,11 +28,25 @@ type ToolModelOutputValuePart =
       readonly filename?: string;
     };
 
-export function toolModelOutputContext(toolName: string, callId: string): ToolModelOutputContext {
+export interface ToolModelOutputContextOptions {
+  /**
+   * False when the call's sandbox ends with the call, so a file written to it
+   * would be gone before the caller reads the result.
+   */
+  readonly sandboxOutlivesCall?: boolean;
+}
+
+export function toolModelOutputContext(
+  toolName: string,
+  callId: string,
+  options: ToolModelOutputContextOptions = {},
+): ToolModelOutputContext {
+  const sandboxOutlivesCall = options.sandboxOutlivesCall ?? true;
   return {
     callId,
     defaultModelOutput: defaultToolModelOutput,
-    getSandbox: async () => (await loadContext().get(SandboxKey)?.get()) ?? undefined,
+    getSandbox: async () =>
+      sandboxOutlivesCall ? ((await loadContext().get(SandboxKey)?.get()) ?? undefined) : undefined,
     toolName,
     warnOnce: (id, message) => {
       const context = loadContext();

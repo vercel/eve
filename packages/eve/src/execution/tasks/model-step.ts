@@ -177,12 +177,13 @@ async function projectOutput(
   outputContext: ToolModelOutputContextFactory,
 ): Promise<string> {
   if (definition?.toModelOutput === undefined) return renderModelOutputText(result.output);
+  const callId = result.calls?.[0]?.callId ?? taskId;
   return await observeToolOutput(
     tool,
     result.calls ?? [],
     async () =>
       renderModelOutputText(
-        await definition.toModelOutput!(result.output, outputContext(tool, taskId)),
+        await definition.toModelOutput!(result.output, outputContext(tool, callId)),
       ),
     () => renderModelOutputText(result.output),
   );

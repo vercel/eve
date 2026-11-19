@@ -33,8 +33,9 @@ export interface OffloadSandboxOptions<TOutput> {
  * file's path and a one-line description of its shape, so it can read parts
  * of it with `jq`, `head` or `read_file`.
  *
- * The file holds the tool's raw output. Without a sandbox the result goes to
- * the model unchanged, and eve logs one warning per session. Error results
+ * The file holds the tool's raw output. When there is no sandbox to keep it in,
+ * or opening the sandbox or writing the file fails, the result goes to the
+ * model unchanged, and eve logs one warning per session. Error results
  * and results with file parts are never written.
  *
  * ```ts
@@ -60,17 +61,25 @@ export function offloadSandbox<TOutput = unknown>(
     if (size === undefined || Math.ceil(size / BYTES_PER_TOKEN) <= maxOutputTokens) {
       return projected;
     }
-    const sandbox = await ctx.getSandbox();
-    if (sandbox === undefined) {
+    const file = serialize(output);
+    const path = `${RESULTS_DIRECTORY}/${fileStem(ctx)}.${file.extension}`;
+    try {
+      const sandbox = await ctx.getSandbox();
+      if (sandbox === undefined) {
+        ctx.warnOnce(
+          "offloadSandbox.no-sandbox",
+          `offloadSandbox did not save the result of ${ctx.toolName}: there is no sandbox that keeps files after the call (the agent has none, or the tool was invoked without a tool-session key), so the model gets the whole result.`,
+        );
+        return projected;
+      }
+      await sandbox.writeTextFile({ content: file.text, path });
+    } catch (error) {
       ctx.warnOnce(
-        "offloadSandbox.no-sandbox",
-        `offloadSandbox could not save the result of ${ctx.toolName}: the agent has no sandbox, so the model gets the whole result.`,
+        "offloadSandbox.save-failed",
+        `offloadSandbox could not save the result of ${ctx.toolName}, so the model gets the whole result: ${error instanceof Error ? error.message : String(error)}`,
       );
       return projected;
     }
-    const file = serialize(output);
-    const path = `${RESULTS_DIRECTORY}/${fileStem(ctx)}.${file.extension}`;
-    await sandbox.writeTextFile({ content: file.text, path });
     return {
       type: "text",
       value: offloadNote({ file, output, path, toolName: ctx.toolName }),

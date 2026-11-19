@@ -1,8 +1,14 @@
 import type { TextStreamPart, ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 
-import { commitCallEntry, taskSystemMessages } from "#execution/tasks/model-step.js";
-import { readTaskTable } from "#execution/tasks/table.js";
+import {
+  appendTaskContext,
+  commitCallEntry,
+  taskSystemMessages,
+} from "#execution/tasks/model-step.js";
+import { readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { toolModelOutputContext } from "#harness/tool-model-output.js";
 import { emitStreamContent } from "#harness/emission.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -106,5 +112,45 @@ describe("taskSystemMessages", () => {
 
   it("says nothing about tasks when the session offers none", () => {
     expect(taskSystemMessages(false, false)).toEqual([]);
+  });
+});
+
+describe("task results projected by toModelOutput", () => {
+  it("gives each reply of a resumable task its own call id", async () => {
+    const calls = (callId: string) => [{ callId, turnId: "turn_0" }];
+    const table = writeTaskTable(session, {
+      tasks: [
+        {
+          calls: [],
+          id: "lookup-1",
+          kind: "tool",
+          name: "lookup",
+          results: [
+            { calls: calls("call-a"), output: "first", status: "completed" },
+            { calls: calls("call-b"), output: "second", status: "completed" },
+          ],
+          resumable: true,
+        },
+      ],
+    });
+    const seen: string[] = [];
+    const definition = {
+      description: "lookup",
+      inputSchema: { type: "object" },
+      name: "lookup",
+      toModelOutput: (output: unknown, ctx: { readonly callId: string }) => {
+        seen.push(ctx.callId);
+        return { type: "text", value: String(output) };
+      },
+    } as unknown as HarnessToolDefinition;
+
+    await appendTaskContext({
+      messages: [],
+      outputContext: toolModelOutputContext,
+      session: table,
+      tools: new Map([["lookup", definition]]),
+    });
+
+    expect(seen).toEqual(["call-a", "call-b"]);
   });
 });

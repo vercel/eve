@@ -476,7 +476,6 @@ describe("Parallel public research", () => {
       defaultModelOutput: (value) => ({ type: "json", value }),
       getSandbox: async () => undefined,
       warnOnce: () => {},
-      warnOnce: () => {},
       toolName: "web_search",
     };
     expect(search.toModelOutput!(output, modelOutputContext)).toEqual({

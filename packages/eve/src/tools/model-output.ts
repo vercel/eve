@@ -54,7 +54,8 @@ export interface ToolModelOutputContext {
   readonly toolName: string;
   /**
    * The session's sandbox, started on first use, or `undefined` when the
-   * agent has no sandbox. Unlike `ctx.getSandbox()` in `execute`, it never
+   * agent has no sandbox or the call's sandbox ends with the call (a tool
+   * invoked without a tool-session key). Unlike `ctx.getSandbox()` in `execute`, it never
    * throws for a missing sandbox.
    */
   getSandbox(): Promise<SandboxSession | undefined>;

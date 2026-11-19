@@ -150,7 +150,7 @@ export default defineTool({
 `maxOutputTokens` is a budget in estimated tokens, counted as UTF-8 bytes divided by 4. A result within the budget reaches the model unchanged. A larger result is written, as the tool returned it, to `/tmp/.eve/tool-results/<tool name>-<call id>.json` (`.txt` for a string). The model sees the path, the size, a one-line description of the shape, and a hint to read parts of the file with `jq`, `head` or `read_file`. Channels and hooks still get the full output on `call.settled`.
 
 - To shrink the result first, pass `toModelOutput`. `offloadSandbox` applies it and checks the size of its output.
-- With no sandbox, the model gets the whole result and eve logs one warning per session. eve never cuts a result to fit.
+- With no sandbox, or when opening the sandbox or writing the file fails, the model gets the whole result and eve logs one warning per session. A tool invoked through MCP without a tool-session key has no sandbox that outlives the call, so it is never offloaded. eve never cuts a result to fit.
 - Error results and results with image or file parts are never written.
 - The file lasts as long as the sandbox. If the sandbox is replaced, the model has to run the tool again.
 

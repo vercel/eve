@@ -7,7 +7,12 @@ import { toolModelOutputContext } from "#harness/tool-model-output.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { toolOutput, toolOutputPart, type ToolModelOutput } from "#tools/model-output.js";
+import {
+  toolOutput,
+  toolOutputPart,
+  type ToolModelOutput,
+  type ToolModelOutputContext,
+} from "#tools/model-output.js";
 import { offloadSandbox } from "#tools/offload-sandbox.js";
 
 function fakeSandbox() {
@@ -99,6 +104,44 @@ describe("offloadSandbox", () => {
       });
     });
     expect(records.filter((record) => record.level === "warn")).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      name: "the sandbox fails to open",
+      sandbox: {
+        getSandbox: async () => {
+          throw new Error("cold start failed");
+        },
+      },
+      message: "cold start failed",
+    },
+    {
+      name: "the write fails",
+      sandbox: {
+        getSandbox: async () => ({
+          ...mockSandbox().session,
+          writeTextFile: async () => {
+            throw new Error("disk full");
+          },
+        }),
+      },
+      message: "disk full",
+    },
+  ])("returns the projection unchanged and warns once when $name", async ({ message, sandbox }) => {
+    const { records } = captureLogRecords();
+    const toModelOutput = offloadSandbox({ maxOutputTokens: 100 });
+    const ctx = {
+      ...toolModelOutputContext("create_issue", "call_1"),
+      ...sandbox,
+    } satisfies ToolModelOutputContext;
+    await inContext(undefined, async () => {
+      expect(await toModelOutput(issues, ctx)).toEqual({ type: "json", value: issues });
+      expect(await toModelOutput(issues, ctx)).toEqual({ type: "json", value: issues });
+    });
+    const warnings = records.filter((record) => record.level === "warn");
+    expect(warnings).toHaveLength(1);
+    expect(JSON.stringify(warnings[0])).toContain(message);
   });
 
   it("applies the inner toModelOutput first and checks the size of its result", async () => {
