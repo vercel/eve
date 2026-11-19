@@ -67,7 +67,9 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
   ready. The session holds the claim in channel state, never in metadata, and renews it while turns
   run. A task tool names the settlement and the channel performs it when a call from a settle tool
   settles, keeping the claim when the board refuses for a retryable reason. A reply or the agent's
-  own check-in in a held task's thread goes to that task's session. A claim whose hand-off fails is
+  own check-in in a held task's thread goes to that task's session. The claiming watch labels the task
+  `eve-claim-watch=<id>`, so when two of the agent's claim watches cover a thread, only the one that
+  holds the task takes its replies. A claim whose hand-off fails is
   released, and an unsettled claim lapses back to the queue. A turn answering a board-only message
   keeps its automatic replies board-only.
 

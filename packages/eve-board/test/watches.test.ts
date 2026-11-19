@@ -609,3 +609,52 @@ test("a board-only message keeps the turn's automatic replies board-only", async
 
   assert.equal(deliveries[0]!.options.state?.noSync, true);
 });
+
+test("with two claim watches covering a task, a reply reaches only the watch that claimed it", async () => {
+  const { as } = await startBoard();
+  const watch = defineBoardWatchTool(settings);
+  const any = await runTool(
+    watch,
+    {
+      claim: { channel: "work/", from: ["vercel:user:alice"] },
+      instructions: "Do any task.",
+      tail: "work/",
+    },
+    { callId: "c1" },
+  );
+  const review = await runTool(
+    watch,
+    {
+      claim: { channel: "work/", from: ["vercel:user:alice"], label: { role: "review" } },
+      instructions: "Review the change.",
+      tail: "work/ --label role=review",
+    },
+    { callId: "c2" },
+  );
+  const { deliveries, from } = recorder();
+  const task = (
+    await as("alice", "/tasks", {
+      channel: "work/a",
+      labels: { role: "review" },
+      text: "Review the limiter.",
+    })
+  ).task;
+  await wakeUntil(from, () => deliveries.length > 0);
+  await wake(from, "none");
+
+  assert.equal(deliveries.length, 1);
+  const holder = deliveries[0]!.options.state?.watch;
+  assert.ok(holder === any.id || holder === review.id);
+  const { message } = await client().thread(task.id);
+  assert.equal(message.task?.state, "claimed");
+  assert.equal(message.labels["eve-claim-watch"], holder);
+
+  await as("alice", "/messages", { re: task.id, text: "Check the burst limit too." });
+  await wakeUntil(from, () => deliveries.length > 1);
+  await wake(from, "none");
+
+  assert.deepEqual(
+    deliveries.slice(1).map((entry) => [entry.address, entry.message]),
+    [[`${holder}:thread:${task.thread}`, "Check the burst limit too."]],
+  );
+});

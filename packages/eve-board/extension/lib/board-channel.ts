@@ -68,6 +68,7 @@ const MAX_PULLS_PER_WAKE = 20;
 const MATCHES_PER_PULL = 10;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const SETTLEMENTS = new Set(["completed", "failed", "blocked"]);
+const CLAIM_WATCH_LABEL = "eve-claim-watch";
 const CLAIM_EVENTS = new Set([
   "task.assigned",
   "task.created",
@@ -428,6 +429,7 @@ async function dispatch(
       return false;
     }
     try {
+      await client.label(task.id, { set: { [CLAIM_WATCH_LABEL]: record.id } });
       await sendRecovering(
         input.from(boardSessionAddress(record.id, task)),
         boardMessageContent(task),
@@ -504,6 +506,7 @@ async function followUp(
   const root = (await client.thread(message.re)).message;
   const claim = root.task?.claim;
   if (claim?.actor !== input.self.actor || Date.parse(claim.until) <= Date.now()) return false;
+  if (root.labels[CLAIM_WATCH_LABEL] !== record.id) return false;
   if (!allows(input.can, message.channel, "read")) return false;
   await sendRecovering(
     input.from(boardSessionAddress(record.id, root)),
