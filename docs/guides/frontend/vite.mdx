@@ -3,9 +3,9 @@ title: "Vite"
 description: "Run eve agents alongside any Vite app with the eveVite plugin."
 ---
 
-`eve/vite` runs eve agents next to any Vite app. The `eveVite()` plugin proxies the agent routes on the Vite dev and preview servers, and adds the agents as Vercel services when the app deploys to Vercel. The [`useEveAgent`](/docs/guides/frontend) bindings for React, Vue, and Svelte find the mounted routes on their own, so you configure no CORS or URL env vars.
+`eve/vite` runs eve agents next to any Vite app. The `eveVite()` plugin proxies the agent routes on the Vite dev and preview servers, and adds the agents as Vercel services when the app deploys to Vercel. The [`useEveAgent`](/docs/guides/frontend) bindings for React, Vue, Svelte, and [Solid](./use-eve-agent-solid) find the mounted routes on their own, so you configure no CORS or URL env vars.
 
-Use the framework integration when there is one: [Next.js](./nextjs), [Nuxt](./nuxt), [SvelteKit](./sveltekit), or [TanStack Start](./tanstack). Use `eveVite()` for other Vite apps, including Solid 2 apps with [`useEveAgent` from `eve/solid`](./use-eve-agent-solid). A server-rendered Solid app deploys to Vercel with `nitro()` from `nitro/vite`.
+Use the framework integration when there is one: [Next.js](./nextjs), [Nuxt](./nuxt), [SvelteKit](./sveltekit), or [TanStack Start](./tanstack). Use `eveVite()` for other Vite apps, including Solid 2: a client-rendered Solid app deploys as a [single-page app](#single-page-apps-on-vercel), and a server-rendered one adds `nitro()` from `nitro/vite`.
 
 ## Prerequisites
 
