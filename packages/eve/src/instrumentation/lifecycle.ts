@@ -459,6 +459,8 @@ export interface InstrumentationCallSettledEvent {
   readonly completedAtMs?: number;
   /** The task the call started or continued, when it runs as one. */
   readonly taskId?: string;
+  /** The call that started that task; the call's own `callId` when it started it. */
+  readonly taskStartedByCallId?: string;
   /** How long the tool's `execute` ran, in milliseconds, when the publisher measured it. */
   readonly durationMs?: number;
   readonly idempotencyKey: string;

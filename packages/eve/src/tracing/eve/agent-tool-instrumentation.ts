@@ -157,7 +157,11 @@ export function createAgentToolInstrumentation(input: {
     try {
       const tool = await resumeTool(input.tracing, state);
       const failed = event.outcome !== "completed";
-      if (event.taskId !== undefined) tool?.attributes({ "agent.task.id": event.taskId });
+      const task: Record<string, string> = {};
+      if (event.taskId !== undefined) task["agent.task.id"] = event.taskId;
+      if (event.taskStartedByCallId !== undefined)
+        task["agent.task.started_by_call.id"] = event.taskStartedByCallId;
+      tool?.attributes(task);
       await tool?.complete({
         outcome: event.outcome === "interrupted" ? "cancelled" : event.outcome,
         failed,

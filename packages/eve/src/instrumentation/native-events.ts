@@ -319,6 +319,8 @@ function instrumentationEventsOf(
           scope,
           type: "call.settled",
           taskId: row?.taskId,
+          taskStartedByCallId:
+            row?.taskId === undefined ? undefined : line.view?.tasks[row.taskId]?.startedBy.callId,
           usage: row?.usage,
         },
       ];

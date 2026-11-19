@@ -624,7 +624,16 @@ describe("a session's spans, from its committed lines", () => {
         type: "child.sent",
       }) as SessionEvent;
     await commit(...opening);
-    await commit(agentCall("call_start"), started("call_start"));
+    await commit(agentCall("call_start"), started("call_start"), {
+      data: {
+        kind: "agent",
+        name: "billing",
+        startedBy: { callId: "call_start" },
+        taskId: "task_1",
+      },
+      scope: run,
+      type: "task.started",
+    } as SessionEvent);
     await commit(
       {
         data: {
@@ -647,10 +656,14 @@ describe("a session's spans, from its committed lines", () => {
     expect(
       exported
         .filter((span) => span.attributes["agent.action.kind"] === "remote-agent-call")
-        .map((span) => [span.attributes["gen_ai.tool.call.id"], span.attributes["agent.task.id"]]),
+        .map((span) => [
+          span.attributes["gen_ai.tool.call.id"],
+          span.attributes["agent.task.id"],
+          span.attributes["agent.task.started_by_call.id"],
+        ]),
     ).toEqual([
-      ["call_start", "task_1"],
-      ["call_again", "task_1"],
+      ["call_start", "task_1", "call_start"],
+      ["call_again", "task_1", "call_start"],
     ]);
     expect(JSON.stringify(exported.map((span) => span.attributes))).not.toContain("child_billing");
   });
