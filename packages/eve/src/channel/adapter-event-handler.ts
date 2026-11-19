@@ -12,8 +12,6 @@ import {
   withChannelDeliverySpan,
 } from "#tracing/eve/channel-delivery-span.js";
 
-// Kept out of #channel/adapter.js: the delivery span reaches the runtime channel
-// registry, which imports adapter modules and would form an import cycle.
 const log = createLogger("channel.adapter");
 
 export async function callAdapterEventHandler(
