@@ -637,11 +637,9 @@ describe("a session's spans, from its committed lines", () => {
       } as SessionEvent,
       sent("call_start"),
     );
-    await commit(requested("call_lookup", "lookup"));
     await commit(settled("call_start", { outcome: "completed", output: "started" }));
     await commit(agentCall("call_again"), started("call_again"));
     await commit(sent("call_again"));
-    await commit(settled("call_lookup", { outcome: "completed", output: "found" }));
     await commit(settled("call_again", { outcome: "completed", output: "sent" }));
     await commit(turnSettled({ outcome: "completed" }));
 

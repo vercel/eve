@@ -306,12 +306,10 @@ function instrumentationEventsOf(
                 code: event.data.error.code,
                 name: event.data.error.name ?? "Error",
               });
-      const taskId = row?.taskId;
       return [
         {
           acceptedAtMs: line.settledAtMs?.[callId],
           cause: event.data.cause,
-          taskId,
           error: line.capturesOutputs ? error : undefined,
           errorCode: event.data.error?.code,
           idempotencyKey,
@@ -320,6 +318,7 @@ function instrumentationEventsOf(
           output: line.capturesOutputs ? output : undefined,
           scope,
           type: "call.settled",
+          taskId: row?.taskId,
           usage: row?.usage,
         },
       ];
