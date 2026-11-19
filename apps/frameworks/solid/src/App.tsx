@@ -24,14 +24,14 @@ function ToolBlock(props: {
         {(interaction) => (
           <div>
             <p>{interaction().request?.prompt}</p>
-            <For each={interaction().request?.options ?? []}>
+            <For each={interaction().request?.options ?? []} keyed={(option) => option.id}>
               {(option) => (
                 <button
                   disabled={!props.canRespond}
-                  onClick={() => props.onRespond(interaction().interactionId, option.id)}
+                  onClick={() => props.onRespond(interaction().interactionId, option().id)}
                   type="button"
                 >
-                  {option.label}
+                  {option().label}
                 </button>
               )}
             </For>
@@ -86,7 +86,13 @@ export default function App() {
         <span>{agent.status()}</span>
       </header>
 
-      <Show when={agent.error()}>{(error) => <p class="error">{error().message}</p>}</Show>
+      <Show when={agent.error()}>
+        {(error) => (
+          <p class="error" role="alert">
+            {error().message}
+          </p>
+        )}
+      </Show>
 
       <Show
         when={agent.messages().length > 0}
@@ -95,12 +101,12 @@ export default function App() {
         }
       >
         <div class="messages">
-          <For each={agent.messages()}>
+          <For each={agent.messages()} keyed={(message) => message.id}>
             {(message) => (
-              <div class="message" data-role={message.role}>
-                <For each={message.parts}>
+              <div class="message" data-role={message().role}>
+                <For each={message().parts} keyed={false}>
                   {(part) => (
-                    <PartView canRespond={!isInputDisabled()} onRespond={respond} part={part} />
+                    <PartView canRespond={!isInputDisabled()} onRespond={respond} part={part()} />
                   )}
                 </For>
               </div>

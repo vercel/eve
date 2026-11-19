@@ -445,7 +445,7 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 - **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
 - **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
 - **TanStack Start.** Add the \`eveTanStack()\` Vite plugin to \`vite.config.ts\` next to \`nitro()\`, then call \`useEveAgent()\` from \`eve/react\`. See the [TanStack Start guide](/docs/guides/frontend/tanstack).
-- **Solid.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/solid\`. A server-rendered Solid 2 app also adds \`nitro()\` from \`nitro/vite\` to deploy to Vercel. See the [Solid guide](/docs/guides/frontend/use-eve-agent-solid).
+- **Solid.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/solid\`. A client-rendered Solid 2 app deploys to Vercel with \`eveVite()\` alone; a server-rendered one also adds \`nitro()\` from \`nitro/vite\`. See the [Solid guide](/docs/guides/frontend/use-eve-agent-solid).
 - **Other Vite apps.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`. See the [Vite guide](/docs/guides/frontend/vite).
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`baseUrl\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,

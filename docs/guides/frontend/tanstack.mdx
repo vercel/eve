@@ -150,7 +150,7 @@ function Chat() {
 
 The browser still needs a production authentication policy. See [Authenticate browser requests](/docs/guides/frontend#authenticate-browser-requests) for the default policy, which rejects unverified requests, and for channel configuration.
 
-eve ships hook bindings for React, Vue, and Svelte. A TanStack Start app that uses Solid can mount the agent with this plugin and call it through the [Client SDK](/docs/guides/client).
+eve ships hook bindings for React, Vue, Svelte, and Solid 2. A TanStack Start app that uses Solid 2 can call the agent with [`useEveAgent` from `eve/solid`](./use-eve-agent-solid); on Solid 1, call it through the [Client SDK](/docs/guides/client).
 
 ## Dev vs deploy topology
 
