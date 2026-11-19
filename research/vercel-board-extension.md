@@ -12,7 +12,8 @@ last_updated: "2026-11-19"
 kept in Vercel's API. A project takes part by registering **watchers** (`vb tail` expressions);
 the board wakes the project when one matches, and the project pulls what matched with its own
 OIDC credentials. `@eve/board` is a published package: its default export is the extension, and
-`@eve/board/extension`, `@eve/board/tools`, and `@eve/board/channel` export each part.
+`@eve/board/tools` and `@eve/board/channel` export the tools and the channel, which read the
+extension's board settings.
 
 ## Decisions
 
@@ -52,8 +53,9 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
 ## Semantics
 
 - **Creating a watch.** The caller must be allowed to configure the agent: `configurers` when set,
-  otherwise anyone but board actors who aren't people. The tail names one channel inside `can` and
-  outside the watch channel. The watch ID derives from the session and tool call, so a retry reuses
+  otherwise anyone but board actors who aren't people. The watch names one channel inside `can` and
+  outside the watch channel, with optional label, mention, author, and text filters that eve
+  writes as the registration's tail. The watch ID derives from the session and tool call, so a retry reuses
   it and its record.
 - **Registration changes** read the deployment's registration, change one watcher, and write it
   back with the wake path, branch, and sync entries unchanged. They hold an in-process lock and a

@@ -26,7 +26,7 @@ import {
   heldRegistration,
   listWatches,
   removeWatch,
-  tailChannel,
+  tailOf,
 } from "../extension/lib/watches.ts";
 import { accepts, EVE_PRINCIPAL, fakeFrom, recorder, runTool, startBoard } from "./helpers.ts";
 
@@ -58,7 +58,7 @@ test("a watch the agent creates wakes one turn with its stored instructions, and
 
   const incidents = {
     instructions: "Summarize the impact and ask who's leading the response.",
-    tail: "incidents",
+    channel: "incidents",
   };
   const first = await runTool(watch, incidents, { callId: "c1", sessionId: "session-a" });
   const retried = await runTool(watch, incidents, { callId: "c1", sessionId: "session-a" });
@@ -66,7 +66,7 @@ test("a watch the agent creates wakes one turn with its stored instructions, and
   assert.equal(retried.id, first.id);
   const second = await runTool(
     watch,
-    { instructions: "Note the version that shipped.", tail: "deploys" },
+    { instructions: "Note the version that shipped.", channel: "deploys" },
     { callId: "c1", sessionId: "session-b" },
   );
   assert.notEqual(second.id, first.id);
@@ -149,7 +149,7 @@ test("a claiming watch claims a ready task and dispatches to the task's thread",
     {
       claim: { channel: "work/", from: ["vercel:user:alice"] },
       instructions: "Fix what the task describes, then complete it.",
-      tail: "work/",
+      channel: "work/",
     },
     { callId: "c1" },
   );
@@ -180,22 +180,19 @@ test("the watch tool refuses tails outside the agent's scope and callers who may
   }));
   const instructions = "Summarize it.";
 
+  assert.equal(accepts(watch, { instructions, mentions: "@helper" }), false);
   await assert.rejects(
-    runTool(watch, { instructions, tail: "--mentions @helper" }, { callId: "c1" }),
-    /must name the channel it watches/u,
-  );
-  await assert.rejects(
-    runTool(watch, { instructions, tail: "eve-config/" }, { callId: "c2" }),
+    runTool(watch, { instructions, channel: "eve-config/" }, { callId: "c2" }),
     /can't cover "eve-config\/watches"/u,
   );
   await assert.rejects(
-    runTool(watch, { instructions, tail: "payroll" }, { callId: "c3" }),
+    runTool(watch, { instructions, channel: "payroll" }, { callId: "c3" }),
     /may not read "payroll"/u,
   );
   await assert.rejects(
     runTool(
       watch,
-      { instructions, tail: "incidents/web" },
+      { instructions, channel: "incidents/web" },
       {
         auth: { attributes: { actor_kind: "external" }, authenticator: "board-watcher" },
         callId: "c4",
@@ -204,15 +201,11 @@ test("the watch tool refuses tails outside the agent's scope and callers who may
     /Only a person on the team/u,
   );
   await assert.rejects(
-    runTool(watch, { instructions, tail: '""' }, { callId: "c5" }),
-    /must name the channel it watches/u,
+    runTool(watch, { channel: "", instructions }, { callId: "c5" }),
+    /"" isn't a board channel/u,
   );
   await assert.rejects(
-    runTool(watch, { instructions, tail: "incidents --constructor x" }, { callId: "c6" }),
-    /--constructor isn't a tail filter/u,
-  );
-  await assert.rejects(
-    runTool(watch, { instructions, tail: "Incidents" }, { callId: "c7" }),
+    runTool(watch, { instructions, channel: "Incidents" }, { callId: "c7" }),
     /"Incidents" isn't a board channel/u,
   );
   await assert.rejects(
@@ -268,7 +261,7 @@ test("a match the session couldn't take is delivered again with the same idempot
   const { as } = await startBoard();
   await runTool(
     defineBoardWatchTool(settings),
-    { instructions: "Summarize it.", tail: "incidents" },
+    { instructions: "Summarize it.", channel: "incidents" },
     { callId: "c1" },
   );
   const keys: string[] = [];
@@ -305,7 +298,7 @@ test("a watch works when `can` narrows the agent's tools", async () => {
   });
   const created = await runTool(
     defineBoardWatchTool(narrowed),
-    { instructions: "Summarize it.", tail: "incidents" },
+    { instructions: "Summarize it.", channel: "incidents" },
     { callId: "c1" },
   );
   const { deliveries, from } = recorder();
@@ -328,12 +321,12 @@ test("labels on a watch's instruction record don't change what the watch does", 
   const watch = defineBoardWatchTool(settings);
   const incidents = await runTool(
     watch,
-    { instructions: "Summarize incidents.", tail: "incidents" },
+    { instructions: "Summarize incidents.", channel: "incidents" },
     { callId: "c1" },
   );
   const deploys = await runTool(
     watch,
-    { instructions: "Note deploys.", tail: "deploys" },
+    { instructions: "Note deploys.", channel: "deploys" },
     { callId: "c2" },
   );
   const recordOf = async (id: string) =>
@@ -388,26 +381,43 @@ test("the channel settles the claim a task tool named, and says when the claim a
   );
 });
 
-test("a tail names its channel the way the board reads it", () => {
-  assert.equal(tailChannel("--all incidents"), "incidents");
-  assert.equal(tailChannel('--text "a b" incidents --label kind=bug'), "incidents");
-  assert.equal(tailChannel("--mentions incidents"), "incidents");
-  assert.equal(tailChannel("--mentions @helper incidents"), "incidents");
+test("a watch's filters reach the board as it reads them, quotes and spaces included", async () => {
+  const { as } = await startBoard();
+  assert.equal(tailOf({ channel: "incidents" }), "incidents");
   assert.equal(
-    tailChannel('--text \\"x" incidents --all " eve-config/watches'),
-    "eve-config/watches",
+    tailOf({ channel: "work/", label: ["sev=1"], text: 'deploy "failed"' }),
+    'work/ --label="sev=1" --text="deploy \\"failed\\""',
   );
-  assert.equal(tailChannel("--label kind=bug"), undefined);
-  assert.throws(() => tailChannel("--bogus x incidents"), /isn't a tail filter/u);
-  assert.throws(() => tailChannel('incidents "open'), /unterminated/u);
-  assert.throws(() => tailChannel("incidents deploys"), /names one channel/u);
+  const created = await runTool(
+    defineBoardWatchTool(settings),
+    {
+      channel: "incidents",
+      instructions: "Page the on-call.",
+      label: ["sev=1"],
+      text: 'deploy "failed"',
+    },
+    { callId: "c1" },
+  );
+  const { deliveries, from } = recorder();
+  const post = async (labels: Record<string, string>, text: string) =>
+    (await as("alice", "/messages", { channel: "incidents", labels, text })).message;
+  await post({ sev: "2" }, 'The deploy "failed" again.');
+  await post({ sev: "1" }, "The deploy is slow.");
+  const matching = await post({ sev: "1" }, 'The deploy "failed" again.');
+  await wakeUntil(from, () => deliveries.length > 0);
+  await wake(from, "none");
+
+  assert.deepEqual(
+    deliveries.map((entry) => entry.address),
+    [`${created.id}:thread:${matching.thread}`],
+  );
 });
 
 test("a claiming watch takes a task the agent created itself", async () => {
   await startBoard();
   const created = await runTool(
     defineBoardWatchTool(settings),
-    { claim: { channel: "work/" }, instructions: "Do the task.", tail: "work/" },
+    { claim: { channel: "work/" }, instructions: "Do the task.", channel: "work/" },
     { callId: "c1" },
   );
   const { deliveries, from } = recorder();
@@ -429,7 +439,7 @@ test("the ordinary board tools can't write in the watch channel", async () => {
   await startBoard();
   const created = await runTool(
     defineBoardWatchTool(settings),
-    { instructions: "Summarize it.", tail: "incidents" },
+    { instructions: "Summarize it.", channel: "incidents" },
     { callId: "c1" },
   );
   const [record] = await client().threads({
@@ -469,7 +479,7 @@ test("a watch delivers nothing from channels a narrower `can` no longer lets the
   const { as } = await startBoard();
   await runTool(
     defineBoardWatchTool(settings),
-    { instructions: "Summarize it.", tail: "private/" },
+    { instructions: "Summarize it.", channel: "private/" },
     { callId: "c1" },
   );
   const { deliveries, from } = recorder();
@@ -491,7 +501,7 @@ test("a reply in a task the agent holds reaches that task's session instead of c
     {
       claim: { channel: "work/", from: ["vercel:user:alice"] },
       instructions: "Do the task.",
-      tail: "work/",
+      channel: "work/",
     },
     { callId: "c1" },
   );
@@ -539,7 +549,7 @@ test("a nested exclusion in `can` wins over a broader read grant", async () => {
   const { as } = await startBoard();
   const created = await runTool(
     defineBoardWatchTool(settings),
-    { instructions: "Summarize it.", tail: "team/" },
+    { instructions: "Summarize it.", channel: "team/" },
     { callId: "c1" },
   );
   await assert.rejects(
@@ -548,7 +558,7 @@ test("a nested exclusion in `can` wins over a broader read grant", async () => {
         can: { "*": ["read"], "team/": [] } as const,
         profile: "helper",
       })),
-      { instructions: "Summarize it.", tail: "team/" },
+      { instructions: "Summarize it.", channel: "team/" },
       { callId: "c2" },
     ),
     /may not read "team\/"/u,
@@ -580,7 +590,7 @@ test("a board-only message keeps the turn's automatic replies board-only", async
   const { as } = await startBoard();
   await runTool(
     defineBoardWatchTool(settings),
-    { instructions: "Check CI.", tail: "builds" },
+    { instructions: "Check CI.", channel: "builds" },
     { callId: "c1" },
   );
   const { deliveries, from } = recorder();
@@ -599,7 +609,7 @@ test("with two claim watches covering a task, a reply reaches only the watch tha
     {
       claim: { channel: "work/", from: ["vercel:user:alice"] },
       instructions: "Do any task.",
-      tail: "work/",
+      channel: "work/",
     },
     { callId: "c1" },
   );
@@ -608,7 +618,8 @@ test("with two claim watches covering a task, a reply reaches only the watch tha
     {
       claim: { channel: "work/", from: ["vercel:user:alice"], label: { role: "review" } },
       instructions: "Review the change.",
-      tail: "work/ --label role=review",
+      channel: "work/",
+      label: ["role=review"],
     },
     { callId: "c2" },
   );
@@ -675,7 +686,7 @@ test("a profile with capital letters still runs its watches", async () => {
   const upper = () => ({ profile: "Helper" });
   await runTool(
     defineBoardWatchTool(upper),
-    { instructions: "Summarize it.", tail: "incidents" },
+    { instructions: "Summarize it.", channel: "incidents" },
     { callId: "c1" },
   );
   const { deliveries, from } = recorder();

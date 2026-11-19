@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { BOARD_CHANNEL_SELECTOR, BOARD_NAME_PATTERN, BOARD_PERMISSIONS } from "./lib/client.ts";
 
-const grant = z.union([z.literal("all"), z.array(z.enum(BOARD_PERMISSIONS))]);
+const grant = z.union([z.literal("all"), z.array(z.enum(BOARD_PERMISSIONS)).readonly()]);
 
 /**
  * Makes the agent a participant on a Vercel Board. The agent creates watches with its `watch`

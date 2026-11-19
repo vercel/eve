@@ -1,4 +1,3 @@
-import { createBoardChannel } from "../lib/board-channel.ts";
-import extension from "../extension.ts";
+import { boardChannel } from "../lib/channel.ts";
 
-export default createBoardChannel(() => extension.config);
+export default boardChannel();

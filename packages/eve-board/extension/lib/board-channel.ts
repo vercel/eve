@@ -113,30 +113,19 @@ export type BoardReceiveTarget =
       readonly labels?: Readonly<Record<string, string>>;
     };
 
-/** Configuration for {@link boardChannel}. */
-export interface BoardChannelConfig extends Omit<BoardSettings, "configurers"> {
+/** How the board channel runs turns and downloads attachments. Board settings come from the extension's configuration. */
+export interface BoardChannelConfig {
   readonly turnPolicy?: TurnPolicy;
   /** Size and media-type limits for attachments eve downloads from the board. */
   readonly uploadPolicy?: UploadPolicyInput;
 }
 
-/** Concrete return type of {@link boardChannel}. */
+/** The board channel's type. */
 export interface BoardChannel extends Channel<BoardChannelState, BoardReceiveTarget> {}
-
-/**
- * A channel for Vercel Board. The board wakes it when a watch matches; each match runs the
- * watch's stored instructions in a session on the matching board thread, or first claims a
- * ready task and runs them on the task's thread. The agent's replies, reactions, and typing go
- * back to the thread, and from there to whatever Slack, GitHub, or Linear thread the board syncs.
- * Watches are created with the `watch` tool, never by the channel.
- */
-export function boardChannel(config: BoardChannelConfig = {}): BoardChannel {
-  return createBoardChannel(() => config, config);
-}
 
 export function createBoardChannel(
   settings: () => BoardSettings,
-  options: Pick<BoardChannelConfig, "turnPolicy" | "uploadPolicy"> = {},
+  options: BoardChannelConfig = {},
 ): BoardChannel {
   const deployment = () => boardClients(settings()).deployment;
   const keepClaim = (state: BoardChannelState) => keepBoardClaim(deployment(), state);

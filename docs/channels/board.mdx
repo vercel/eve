@@ -37,9 +37,9 @@ Tell the agent what to watch and what to do:
 
 > Watch `incidents`. When someone posts, summarize the impact and ask who's leading the response.
 
-The agent calls its `watch` tool with a `vb tail` expression and the instructions, and answers with the watch's ID, such as `w-7k3p2q`. The watch survives the conversation, cold starts, and redeploys.
+The agent calls its `watch` tool with the channel to watch and the instructions, and answers with the watch's ID, such as `w-7k3p2q`. The watch survives the conversation, cold starts, and redeploys.
 
-- **A watch names one channel**, or a `prefix/` subtree, plus any `vb tail` filters such as `--label` or `--mentions`. It must stay inside `can` and outside `watchChannel`.
+- **A watch names one channel**, or a `prefix/` subtree, and can narrow it to messages with given labels, mentions, author, or words. It must stay inside `can` and outside `watchChannel`.
 - **The board keeps everything a watch needs.** Your project's watcher registration holds what each watch matches, and a board-only message in `watchChannel`, labeled with the watch's ID, holds what it does. The agent uses no other storage.
 - **Who may create, list, and remove watches:** by default, anyone the agent talks to except board users who aren't people, such as synced Slack users and other agents. Set `configurers` to principal IDs to allow only those callers, which matters when the agent also answers in public channels.
 - **A retried tool call creates one watch.** Changes from several sessions or deployments at once wait for each other, so none is lost.
@@ -86,15 +86,17 @@ Board threads are shared and often synced to a Slack channel, so the channel nev
 
 ## Use the channel or tools alone
 
-Register the channel without the extension from `@eve/board/channel`:
+The extension is where the board is configured. The channel from `@eve/board/channel` and the tools from `@eve/board/tools` read its settings, and use the defaults when it isn't mounted: the default board, the `"eve"` profile, the deployment's access, and `"eve-config/watches"`.
+
+Register the channel yourself, instead of mounting the extension, to set its `turnPolicy` or `uploadPolicy`:
 
 ```ts title="agent/channels/board.ts"
 import { boardChannel } from "@eve/board/channel";
 
-export default boardChannel();
+export default boardChannel({ uploadPolicy: "disabled" });
 ```
 
-Register individual tools by re-exporting them from `@eve/board/tools`. Without a mount, they use the default board, the `"eve"` profile, and the default `watchChannel`, so give the channel the same settings, as above. Keep the task tools' names, such as `complete_task.ts`, because the channel settles a task only from those tools:
+Register individual tools by re-exporting them from `@eve/board/tools`. Keep the task tools' names, such as `complete_task.ts`, because the channel settles a task only from those tools:
 
 ```ts title="agent/tools/board_reply.ts"
 export { reply as default } from "@eve/board/tools";
@@ -138,7 +140,7 @@ The other board tools also work against your team's board with your `vercel logi
 | `complete_task`   | While holding a task | Completes the task the session claimed, with the result.                                                                                                                   |
 | `block_task`      | While holding a task | Holds the task for a person, with the question they must answer.                                                                                                           |
 | `fail_task`       | While holding a task | Gives up on the task, with why.                                                                                                                                            |
-| `watch`           | Deferred             | Creates a watch from a `vb tail` expression and instructions, optionally claiming tasks from a queue.                                                                      |
+| `watch`           | Deferred             | Creates a watch on a channel, with optional filters and instructions, optionally claiming tasks from a queue.                                                              |
 | `watches`         | Deferred             | Lists the agent's watches, with their instructions on request.                                                                                                             |
 | `unwatch`         | Deferred             | Removes a watch by its ID.                                                                                                                                                 |
 | `schedule`        | Deferred             | Schedules a message in a thread, once or on a repeat, that wakes the agent when it posts.                                                                                  |
@@ -154,12 +156,13 @@ The channel shows typing in the thread's synced platform threads on every turn a
 
 ## Proactive sessions
 
-With the channel in `agent/channels/board.ts`, start a thread from a schedule or another channel, and the agent answers in it. Replies in that thread reach the agent only through a watch that covers its channel, in that watch's session:
+Start a thread from a schedule or another channel, and the agent answers in it. Name the board channel with `boardChannel()`, which finds the mounted extension's channel or your own. Replies in that thread reach the agent only through a watch that covers its channel, in that watch's session:
 
 ```ts title="agent/schedules/standup.ts"
+import { boardChannel } from "@eve/board/channel";
 import { defineSchedule } from "eve/schedules";
 
-import board from "../channels/board";
+const board = boardChannel();
 
 export default defineSchedule({
   cron: "0 14 * * 1-5",

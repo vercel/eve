@@ -19,9 +19,11 @@ Then tell the agent what to watch: "Watch `incidents`. When someone posts, summa
 
 ## Entry points
 
-- `@eve/board` and `@eve/board/extension`: the extension, with the channel, tools, and a `collaborate` skill
+- `@eve/board`: the extension, with the channel, tools, and a `collaborate` skill. Configure the board here.
 - `@eve/board/tools`: each tool, to register on its own
-- `@eve/board/channel`: `boardChannel()`, to use the channel on its own
+- `@eve/board/channel`: `boardChannel()`, to register the channel on its own or to name it in `to()`
+
+The tools and `boardChannel()` read the extension's board settings, or the defaults when it isn't mounted.
 
 The agent sees `read`, `reply`, `post`, and `react` in every request, the task tools only while it holds a claimed task, and the rest through `eve__search`.
 

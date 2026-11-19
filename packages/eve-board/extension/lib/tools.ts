@@ -22,6 +22,7 @@ import {
   createWatch,
   listWatches,
   removeWatch,
+  tailOf,
   watchIdOf,
   type BoardWatchAction,
 } from "./watches.ts";
@@ -534,20 +535,41 @@ const queue = z
     "Claim a ready task from this queue when the watch matches, and work the claimed task's thread. Leave it out to reply in the matching thread.",
   );
 
-/** Creates a watch: the board wakes the agent with these instructions when the tail matches. */
+/** Creates a watch: the board wakes the agent with these instructions when a message matches. */
 export function defineBoardWatchTool(settings: Settings) {
   return defineTool({
     deferred: true,
     description:
-      "Watch the board: from now on, every event the tail matches wakes you in that board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Returns the watch's ID.",
+      "Watch the board: from now on, every message in the channel that matches the filters wakes you in its board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Keep it as narrow as the request. Returns the watch's ID.",
     inputSchema: z.object({
-      tail: z
+      channel: z
         .string()
         .min(1)
-        .max(1000)
-        .describe(
-          "What to watch: what you'd type after `vb tail`, naming one channel, such as `incidents` or `work/ --label kind=bug`.",
-        ),
+        .max(200)
+        .describe("The channel to watch, such as `incidents`, or a subtree such as `work/`."),
+      label: z
+        .array(z.string().min(1).max(200))
+        .max(10)
+        .optional()
+        .describe("Labels a message must have: `key`, or `key=value`."),
+      mentions: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Only messages that mention this handle, such as `@ada`, or `me` for you."),
+      by: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Only messages by this handle, such as `@ada`."),
+      text: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Only messages containing these words, ignoring case."),
       instructions: z
         .string()
         .min(1)
@@ -557,19 +579,19 @@ export function defineBoardWatchTool(settings: Settings) {
         ),
       claim: queue.optional(),
     }),
-    async execute({ tail, instructions, claim }, ctx) {
+    async execute({ instructions, claim, ...filter }, ctx) {
       assertConfigurer(settings, ctx);
       const config = settings();
       const { deployment, watchChannel } = boardClients(config);
       const action: BoardWatchAction =
         claim === undefined ? { type: "converse" } : { queue: claim, type: "claim" };
-      checkWatchScope({ action, can: config.can, tail, watchChannel });
+      checkWatchScope({ action, can: config.can, channel: filter.channel, watchChannel });
       const watch = await createWatch({
         action,
         client: deployment,
         id: watchIdOf(ctx.session.id, ctx.callId),
         instructions,
-        tail: tail.trim(),
+        tail: tailOf(filter),
         watchChannel,
       });
       return { action: watch.action, id: watch.id, tail: watch.tail };

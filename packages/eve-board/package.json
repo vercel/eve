@@ -30,17 +30,13 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.mjs"
     },
-    "./extension": {
-      "types": "./dist/extension/extension.d.ts",
-      "default": "./dist/extension/extension.mjs"
-    },
     "./tools": {
       "types": "./dist/tools/index.d.ts",
       "default": "./dist/tools/index.mjs"
     },
     "./channel": {
-      "types": "./dist/channel/channel.d.ts",
-      "default": "./dist/channel/channel.js"
+      "types": "./dist/extension/lib/channel.d.ts",
+      "default": "./dist/extension/lib/channel.mjs"
     },
     "./package.json": "./package.json"
   },
@@ -48,7 +44,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "eve extension build && tsc -p tsconfig.channel.json && node ../../scripts/copy-package-license.mjs .",
+    "build": "eve extension build && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:integration",
     "test:integration": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc"

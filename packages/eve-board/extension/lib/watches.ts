@@ -64,94 +64,24 @@ export function watchIdOf(sessionId: string, callId: string): string {
   return `w-${digest.readBigUInt64BE().toString(36).padStart(6, "0").slice(0, 6)}`;
 }
 
-const TAIL_FLAGS: Readonly<Record<string, "string" | "strings" | "boolean">> = {
-  all: "boolean",
-  by: "string",
-  label: "strings",
-  mentions: "string",
-  re: "string",
-  source: "string",
-  text: "string",
-};
-
-export function tailChannel(tail: string): string | undefined {
-  const args = withMentions(words(tail));
-  const positionals: string[] = [];
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i]!;
-    if (arg === "--") {
-      positionals.push(...args.slice(i + 1));
-      break;
-    }
-    if (!arg.startsWith("-") || arg === "-") {
-      positionals.push(arg);
-      continue;
-    }
-    const eq = arg.indexOf("=");
-    const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : null;
-    const type = name !== null && Object.hasOwn(TAIL_FLAGS, name) ? TAIL_FLAGS[name] : undefined;
-    if (type === undefined) {
-      throw new Error(`${name === null ? arg.slice(0, 2) : `--${name}`} isn't a tail filter.`);
-    }
-    if (type === "boolean") {
-      if (eq !== -1) throw new Error(`--${name} takes no value.`);
-      continue;
-    }
-    if (eq !== -1) continue;
-    const next = args[i + 1];
-    if (next === undefined || (next.length > 1 && next.startsWith("-"))) {
-      throw new Error(`--${name} needs a value.`);
-    }
-    i += 1;
-  }
-  if (positionals.length > 1) {
-    throw new Error(`A watch's tail names one channel; this one names ${positionals.join(", ")}.`);
-  }
-  return positionals[0];
+export interface BoardWatchFilter {
+  readonly channel: string;
+  readonly label?: readonly string[];
+  readonly mentions?: string;
+  readonly by?: string;
+  readonly text?: string;
 }
 
-function withMentions(args: readonly string[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i]!;
-    if (arg === "--") {
-      out.push(...args.slice(i));
-      break;
-    }
-    const next = args[i + 1];
-    if (arg !== "--mentions") out.push(arg);
-    else if (next !== undefined && !next.startsWith("-") && (next === "me" || next.includes("@"))) {
-      out.push(`--mentions=${next}`);
-      i += 1;
-    } else out.push("--mentions=me");
-  }
-  return out;
-}
+const quoted = (value: string) => `"${value.replace(/["\\]/gu, "\\$&")}"`;
 
-function words(expression: string): string[] {
-  const out: string[] = [];
-  let word: string | null = null;
-  let quote: '"' | "'" | null = null;
-  for (let i = 0; i < expression.length; i += 1) {
-    const char = expression[i]!;
-    if (quote !== null) {
-      if (char === quote) quote = null;
-      else if (char === "\\" && quote === '"' && i + 1 < expression.length) {
-        word = `${word ?? ""}${expression[++i]!}`;
-      } else word = `${word ?? ""}${char}`;
-    } else if (/\s/u.test(char)) {
-      if (word !== null) out.push(word);
-      word = null;
-    } else if (char === '"' || char === "'") {
-      quote = char;
-      word ??= "";
-    } else if (char === "\\" && i + 1 < expression.length) {
-      word = `${word ?? ""}${expression[++i]!}`;
-    } else word = `${word ?? ""}${char}`;
-  }
-  if (quote !== null) throw new Error(`The tail has an unterminated ${quote}.`);
-  if (word !== null) out.push(word);
-  return out;
+export function tailOf({ channel, label = [], ...filters }: BoardWatchFilter): string {
+  return [
+    channel,
+    ...label.map((value) => `--label=${quoted(value)}`),
+    ...Object.entries(filters).flatMap(([name, value]) =>
+      value === undefined ? [] : [`--${name}=${quoted(value)}`],
+    ),
+  ].join(" ");
 }
 
 function selectorOf(channel: string) {
@@ -207,17 +137,12 @@ export function boardClients(settings: BoardSettings) {
 }
 
 export function checkWatchScope(input: {
-  readonly tail: string;
+  readonly channel: string;
   readonly action: BoardWatchAction;
   readonly can?: BoardCan;
   readonly watchChannel: string;
 }): void {
-  const channel = tailChannel(input.tail);
-  if (channel === undefined || channel.length === 0) {
-    throw new Error(
-      `A watch's tail must name the channel it watches, such as "incidents" or "work/", so it never matches the watch records in "${input.watchChannel}".`,
-    );
-  }
+  const { channel } = input;
   assertChannelSelector(channel);
   if (overlaps(channel, input.watchChannel)) {
     throw new Error(
