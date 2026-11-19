@@ -333,6 +333,7 @@ function unexpectedRouteContext() {
     params: { sessionId: "session/one" },
     readSkill: unexpectedRouteRequest,
     requestIp: null,
+    publish: async () => false,
     resolveSession: unexpectedRouteRequest,
     to: unexpectedRouteRequest,
     waitUntil: unexpectedRouteRequest,

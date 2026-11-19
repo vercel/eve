@@ -111,6 +111,7 @@ async function deliver(
     invokeTool: unsupported,
     params: {},
     requestIp: null,
+    publish: async () => false,
     waitUntil: (task) => {
       tasks.push(task);
     },
