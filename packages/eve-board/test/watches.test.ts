@@ -467,3 +467,25 @@ test("the ordinary board tools can't write in the watch channel", async () => {
   );
   assert.equal(read.message.labels["eve-watch-state"], undefined);
 });
+
+test("a watch delivers nothing from channels a narrower `can` no longer lets the agent read", async () => {
+  const { as } = await startBoard();
+  await runTool(
+    defineBoardWatchTool(settings),
+    { instructions: "Summarize it.", tail: "private/" },
+    { callId: "c1" },
+  );
+  const { deliveries, from } = recorder();
+  await as("alice", "/messages", { channel: "private/hr", text: "Salary bands." });
+
+  await drainMatches({
+    can: { "public/": ["read", "post"] },
+    client: client(),
+    from,
+    name: undefined,
+    poll: true,
+    watchChannel: () => DEFAULT_WATCH_CHANNEL,
+  });
+
+  assert.deepEqual(deliveries, []);
+});

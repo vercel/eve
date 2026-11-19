@@ -183,7 +183,7 @@ function overlaps(a: string, b: string): boolean {
   return covers(a, b) || covers(b, a);
 }
 
-function allows(can: BoardCan | undefined, channel: string, permission: string): boolean {
+export function allows(can: BoardCan | undefined, channel: string, permission: string): boolean {
   if (can === undefined || can === "all") return true;
   if (Array.isArray(can)) return can.includes(permission as never);
   return Object.entries(can as Record<string, "all" | readonly string[]>).some(

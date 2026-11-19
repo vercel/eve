@@ -56,6 +56,7 @@ import {
   checkQueueScope,
   CLAIM_LEASE_SECONDS,
   DEFAULT_WATCH_CHANNEL,
+  allows,
   findWatchRecord,
   hostedEnvironment,
   modelCan,
@@ -430,6 +431,14 @@ async function dispatch(
     const claim = await client.claimReady({ ...queue, lease: CLAIM_LEASE_SECONDS });
     if (claim === null) return false;
     const { task } = claim;
+    if (!allows(input.can, task.channel, "read")) {
+      await client.held(claim).release();
+      log.warn("board watch claimed a task outside the agent's read scope; released it", {
+        task: task.id,
+        watch: record.id,
+      });
+      return false;
+    }
     try {
       await sendRecovering(
         input.from(boardSessionAddress(record.id, task)),
@@ -465,6 +474,13 @@ async function dispatch(
     message.deleted ||
     postedBySelf(message, input)
   ) {
+    return false;
+  }
+  if (!allows(input.can, message.channel, "read")) {
+    log.warn("board watch matched a channel outside the agent's read scope; skipped it", {
+      channel: message.channel,
+      watch: record.id,
+    });
     return false;
   }
   await sendRecovering(
