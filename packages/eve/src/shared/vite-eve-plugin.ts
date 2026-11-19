@@ -108,15 +108,25 @@ export function createEveVitePlugin(input: {
   let nitroModuleInstalled = false;
   let nitroServesPreview = false;
 
+  function serverRenderedError(found: string, staticFix = ""): Error {
+    return new Error(
+      `The eve ${host.label} plugin found ${found} and no .vercel/output from a framework or adapter, so it cannot deploy this app to Vercel. ${staticFix}A server-rendered app needs nitro() from "nitro/vite" (with the nitro package installed) or an adapter that writes .vercel/output during vite build. You can also compose eve in vercel.ts with withEve from "eve/vercel".`,
+    );
+  }
+
   async function writeStaticVercelOutput(
     builder: ViteBuilder,
     project: VercelProjectConfig,
   ): Promise<VercelServicesConfig> {
+    if (builder.config.build.ssr) {
+      throw serverRenderedError("an SSR build (vite build --ssr)");
+    }
     const client = builder.environments.client ?? builder;
     const clientOutDir = resolve(viteRoot, client.config.build.outDir);
     if ((await readOptionalFile(join(clientOutDir, "index.html"))) === undefined) {
-      throw new Error(
-        `The eve ${host.label} plugin found no root index.html in ${clientOutDir} and no .vercel/output from a framework or adapter, so it cannot deploy this app to Vercel. A static app must build index.html into build.outDir. A server-rendered app needs nitro() from "nitro/vite" (with the nitro package installed) or an adapter that writes .vercel/output during vite build. You can also compose eve in vercel.ts with withEve from "eve/vercel".`,
+      throw serverRenderedError(
+        `no root index.html in ${clientOutDir}`,
+        "A static app must build index.html into build.outDir. ",
       );
     }
     if (project.vercelTsPath !== undefined) {
@@ -124,13 +134,16 @@ export function createEveVitePlugin(input: {
         `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelTsPath} configures the project, and Vercel does not apply its routing to a Build Output. Compose eve in vercel.ts with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
-    const routingProblems = project.vercelJsonFiles.flatMap(({ config, path }) => {
-      const fields = VERCEL_JSON_ROUTING_FIELDS.filter((field) => config[field] !== undefined);
-      return fields.length > 0 ? [`${path} defines ${fields.join(", ")}`] : [];
-    });
+    const routingProblems = project.vercelJsonFiles
+      .map(({ config, path }) => ({
+        fields: VERCEL_JSON_ROUTING_FIELDS.filter((field) => config[field] !== undefined),
+        path,
+      }))
+      .filter(({ fields }) => fields.length > 0);
     if (routingProblems.length > 0) {
+      const definesRewrites = routingProblems.some(({ fields }) => fields.includes("rewrites"));
       throw new Error(
-        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${routingProblems.join(" and ")}, which Vercel does not apply to a Build Output. A single-page app can delete its catch-all rewrite to index.html, because eveVite() already serves index.html for unmatched paths. Move other routing to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
+        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${routingProblems.map(({ fields, path }) => `${path} defines ${fields.join(", ")}`).join(" and ")}, which Vercel does not apply to a Build Output. ${definesRewrites ? "A single-page app can delete its catch-all rewrite to index.html, because eveVite() already serves index.html for unmatched paths. Move other routing" : "Move that routing"} to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
     const base = builder.config.base.startsWith("/") ? builder.config.base : "/";

@@ -80,7 +80,7 @@ async function buildForVercel(
       environments: Record<string, { config: { build: { outDir: string } }; isBuilt: boolean }>;
     }) => Promise<void>;
   };
-  const outDir = build.ssr ? "server" : (build.outDir ?? "dist");
+  const outDir = build.outDir ?? (build.ssr ? "server" : "dist");
   await buildApp.handler({
     config: {
       appType: build.appType ?? "spa",
@@ -305,15 +305,23 @@ describe("createEveVitePlugin", () => {
     expect(existsSync(join(root, outDir, "index.html"))).toBe(true);
   });
 
+  it("refuses an SSR build whose outDir still holds a client index.html", async () => {
+    const root = await createAgentProject();
+    await writeClientBuild(root, { "index.html": "<!doctype html>\n" });
+
+    await expect(buildForVercel(root, { outDir: "dist", ssr: true })).rejects.toThrow(
+      /found an SSR build \(vite build --ssr\).*nitro\(\) from "nitro\/vite"/,
+    );
+    expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
+  });
+
   it("regenerates the static output it wrote and leaves adapter output alone", async () => {
     const root = await createAgentProject();
     const staticRoot = join(root, ".vercel", "output", "static");
     await writeClientBuild(root, { "assets/old.js": "", "index.html": "<!doctype html>\n" });
     await buildForVercel(root);
 
-    await expect(buildForVercel(root, { ssr: true })).rejects.toThrow(
-      /no root index\.html in .*server/,
-    );
+    await expect(buildForVercel(root, { ssr: true })).rejects.toThrow(/found an SSR build/);
 
     await writeClientBuild(root, { "assets/new.js": "", "index.html": "<!doctype html>\n" });
     await buildForVercel(root);
@@ -343,15 +351,17 @@ describe("createEveVitePlugin", () => {
   });
 
   it.each([
-    { app: { headers: [] }, expected: ["web/vercel.json defines headers"], root: undefined },
+    { app: { headers: [] }, expected: { app: "headers" }, rewriteHint: false, root: undefined },
     {
       app: undefined,
-      expected: ["/vercel.json defines rewrites, cleanUrls"],
+      expected: { root: "rewrites, cleanUrls" },
+      rewriteHint: true,
       root: { cleanUrls: true, rewrites: [{ destination: "/index.html", source: "/(.*)" }] },
     },
     {
       app: { headers: [] },
-      expected: ["web/vercel.json defines headers and ", "/vercel.json defines rewrites"],
+      expected: { app: "headers", root: "rewrites" },
+      rewriteHint: true,
       root: { rewrites: [{ destination: "/index.html", source: "/(.*)" }] },
     },
   ])("names each vercel.json routing field a static Build Output would drop", async (row) => {
@@ -370,12 +380,20 @@ describe("createEveVitePlugin", () => {
     }
     await writeClientBuild(appRoot, { "index.html": "<!doctype html>\n" });
 
-    const build = buildForVercel(appRoot);
+    const error = await buildForVercel(appRoot).then(
+      () => undefined,
+      (reason: unknown) => (reason instanceof Error ? reason.message : String(reason)),
+    );
 
-    await expect(build).rejects.toThrow(/delete its catch-all rewrite to index\.html/);
-    for (const message of row.expected) {
-      await expect(build).rejects.toThrow(message);
+    for (const [directory, fields] of [
+      [appRoot, row.expected.app],
+      [projectRoot, row.expected.root],
+    ] as const) {
+      if (fields !== undefined) {
+        expect(error).toContain(`${join(directory, "vercel.json")} defines ${fields}`);
+      }
     }
+    expect(error?.includes("delete its catch-all rewrite to index.html")).toBe(row.rewriteHint);
     expect(existsSync(join(appRoot, ".vercel", "output"))).toBe(false);
   });
 
