@@ -11,7 +11,6 @@ import {
   defineBoardPostTool,
   defineBoardReactTool,
   defineBoardReadTool,
-  defineBoardReleaseTaskTool,
   defineBoardReplyTool,
   defineBoardScheduleTool,
   defineBoardTypingTool,
@@ -47,5 +46,3 @@ export const complete_task = defineBoardCompleteTaskTool(settings);
 export const fail_task = defineBoardFailTaskTool(settings);
 /** Holds the task the session holds for a person. */
 export const block_task = defineBoardBlockTaskTool(settings);
-/** Gives back the task the session holds. */
-export const release_task = defineBoardReleaseTaskTool(settings);

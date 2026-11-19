@@ -305,7 +305,6 @@ describe("mounted extension via authored-source loader", () => {
       "board__post",
       "board__react",
       "board__read",
-      "board__release_task",
       "board__reply",
       "board__schedule",
       "board__typing",

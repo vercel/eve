@@ -53,7 +53,7 @@ export default board({
   worker: {
     channel: "work/",
     label: { role: "review" },
-    from: ["<planner actor id>"],
+    from: ["<planner principal id>"],
     concurrency: 2,
   },
   can: { "work/": "all", "questions/": ["read", "post", "react", "label"] },
@@ -69,7 +69,9 @@ export default board({
   board's atomic ready-claim until the profile holds `concurrency`. Without `from`, only the
   deployment's own tasks are taken. The session address comes from the claimed task, and the
   delivery's idempotency key from the task and its claim epoch. A claim whose hand-off fails is
-  released.
+  kept until its lease lapses, so a failing delivery retries at most once a lease instead of
+  looping through release and re-claim. There is no model-facing release: the oldest ready task
+  is what the next pass claims, so a release would come straight back.
 - **Holding a claim.** The claim (`epoch`, `token`, `until`) lives in the session's channel state
   and its metadata, where the task tools read it; the model never sees it. eve renews a claim with
   less than a third of its lease left at turn start and around each tool call. A tool result of
@@ -81,6 +83,11 @@ export default board({
   through a task tool.
 
 ## Known gaps
+
+- A worker can't wait across turns, such as for CI: a turn that ends holding the claim blocks the
+  task. Resuming a task when the agent's own scheduled check-in lands would close this.
+- Stable entry points sit on a 0.x private protocol, and there is no e2e eval yet: e2e can't start
+  a board without an external service.
 
 - A single tool call longer than the lease (at most five minutes) can lose the claim; renewal
   isn't durable across a long call or a paused turn.

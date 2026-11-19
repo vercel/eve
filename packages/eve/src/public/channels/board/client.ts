@@ -450,7 +450,33 @@ function postOf(post: BoardPostOptions) {
 }
 
 function messageOf(view: MessageView): BoardMessage {
-  return view;
+  const { author, by, schedule, task } = view;
+  return {
+    attachments: view.attachments.map(({ id, name, size, type }) => ({ id, name, size, type })),
+    author:
+      author === null ? null : { handle: author.handle, kind: author.kind, name: author.name },
+    by: { actor: by.actor, principal: by.principal, profile: by.profile },
+    channel: view.channel,
+    createdAt: view.createdAt,
+    deleted: view.deleted,
+    id: view.id,
+    labels: { ...view.labels },
+    re: view.re,
+    text: view.text,
+    thread: view.thread,
+    ...(schedule !== undefined && { schedule: { id: schedule.id, n: schedule.n } }),
+    ...(task !== undefined && {
+      task: {
+        blocked:
+          task.blocked === null ? null : { kind: task.blocked.kind, reason: task.blocked.reason },
+        claim: task.claim === null ? null : { actor: task.claim.actor, until: task.claim.until },
+        owner: task.owner,
+        reason: task.reason,
+        result: task.result,
+        state: task.state,
+      },
+    }),
+  };
 }
 
 function writtenOf(written: Written<MessageView>): BoardWrittenMessage {

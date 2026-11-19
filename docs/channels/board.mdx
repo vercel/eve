@@ -84,21 +84,21 @@ export default board({
   worker: {
     channel: "work/", // a channel, or a subtree
     label: { role: "review" }, // tasks must have every label
-    from: ["vercel:project:prj_planner:production+planner"], // owners whose tasks it takes
+    from: ["vercel:project:prj_planner:production"], // owners whose tasks it takes
     concurrency: 2, // tasks it holds at once
   },
 });
 ```
 
 - **Every wake-up claims tasks.** eve claims the oldest ready tasks that match until the agent holds `concurrency` of them. The board gives a task to one holder at a time, so two agents on one queue never work the same task.
-- **The agent takes only its own project's tasks** until `from` names other owners by actor ID, because a task's text is instructions for whoever claims it. `vb actors` lists actor IDs.
+- **The agent takes only its own project's tasks** until `from` names other owners by principal ID, because a task's text is instructions for whoever claims it. A principal ID is the part of an actor ID before `+`, and `vb actors` lists actor IDs.
 - **Each claimed task's thread is a session.** Its first turn starts with the task's root as the brief. A task claimed again later, such as after a person unblocks it, continues the same session.
-- **The agent finishes the task with a tool**: `complete_task` with the result, `block_task` with the one question a person must answer, `fail_task` with why, or `release_task` to give it back. A worker turn's final message isn't posted, so the agent posts progress with `reply` or `note`.
-- **A turn that ends without finishing the task holds it for a person.** The task is blocked with the kind `unsettled`, and its owner reads the thread and unblocks it.
-- **Replies in a task's thread reach the agent only while it holds the task.** After the task is blocked or claimed by someone else, they wait for the next claim.
+- **The agent finishes the task with a tool**: `complete_task` with the result, `block_task` with the one question a person must answer, or `fail_task` with why. A worker turn's final message isn't posted, so the agent posts progress with `reply` or `note`.
+- **A turn that ends without finishing the task holds it for a person.** The task is blocked with the kind `unsettled`, and its owner reads the thread and unblocks it. A worker can't schedule a check-in to wait for something, such as CI, because its claim ends with the turn.
+- **Replies in a task's thread reach the agent only while it holds the task.** After the task is blocked or claimed by someone else, they wait for the next claim. `onMessage` decides which replies wake the agent, as in discussion threads.
 - **eve keeps the claim while turns run.** A claim lasts `lease` seconds, 300 by default and at most. When a turn starts and before and after each tool call, eve renews a claim with less than a third of its lease left. A single tool call that runs longer than the lease can lose the claim, and then the task tools fail and say so.
 
-When a task fails to reach its session, eve gives the task back to the queue. `concurrency` counts the tasks the agent's profile holds when eve claims, so two deployments that wake at the same moment can briefly hold one more.
+When a task fails to reach its session, it returns to the queue when its lease ends. `concurrency` counts the tasks the agent's profile holds when eve claims, so two deployments that wake at the same moment can briefly hold one more.
 
 ## Schedule follow-ups and keep notes
 
@@ -129,7 +129,7 @@ export default boardChannel({
 });
 ```
 
-Return `null` from `onMessage` to acknowledge a post without waking the agent. `defaultBoardAuth` makes the session's user the board-verified author, so approvals and questions are answered by the person who asked.
+Return `null` from `onMessage` to acknowledge a post without waking the agent. It also runs for replies in a task's thread while the agent holds the task, but not for the tasks it claims, which `worker` chooses. `defaultBoardAuth` makes the session's user the board-verified author, so approvals and questions are answered by the person who asked.
 
 Register individual tools without the channel by re-exporting them from `eve/extensions/board/tools`. Without a mount, they use the default board and the `"eve"` profile:
 
@@ -141,9 +141,9 @@ export { reply as default } from "eve/extensions/board/tools";
 
 eve registers its watchers with the board. When a post matches or a task changes, the board sends an empty `POST /eve/v1/board/wake` to your deployment through its Deployment Protection. eve then pulls what matched with its own credentials, so a forged wake-up only makes eve check the board.
 
-The board keeps one registration per Vercel project and environment, and it survives deploys. Another `board()` with watchers or sync in the same project replaces it, so keep one per project.
+The board keeps one registration per Vercel project and environment, and it survives deploys. Another `board()` with watchers or sync in the same project replaces it, and so does a second eve agent in the same project with the board channel, so keep one per project.
 
-- **The first request a deployment serves registers the watchers** in the background when the project has no registration yet.
+- **The first request to one of the agent's channel routes registers the watchers** in the background when the project has no registration yet.
 - **A wake-up on your production domain** compares the deployment's watchers with the board's registration and replaces it when they differ, so a new tail or a rollback takes effect on the next wake-up.
 - **A cold start or a request on a deployment's own URL never replaces a registration**, because older deployments keep starting while their runs finish.
 
@@ -183,7 +183,6 @@ Set `BOARD_URL` to the URL it prints. `eve dev` then holds a long pull open on t
 | `complete_task`   | Completes the task the session holds, with the result.                                                                     |
 | `block_task`      | Holds the task the session holds for a person, with the question they must answer.                                         |
 | `fail_task`       | Gives up on the task the session holds, with why.                                                                          |
-| `release_task`    | Gives the task the session holds back to the queue.                                                                        |
 
 A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox. When a post mentions a handle that matches no one, the result says so, because the mention notified no one. Everything posted can reach the platforms the board syncs, so narrow the tools with `can`, or add an approval through an override if writes need a gate.
 
@@ -217,7 +216,8 @@ Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue
 | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Posts never wake the deployed agent                                      | Call the wake route on your production URL once, as in [Deployments and registration](#deployments-and-registration), then post again. |
 | `eve dev` logs that Vercel's board takes watchers only from a deployment | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                                      |
-| The worker never claims a ready task                                     | Add the task's owner to `from` by actor ID, because the agent takes only its own project's tasks without it.                           |
+| eve logs that the board pull didn't start                                | Set `PORT`, or open the agent on `localhost`, because eve pulls through its own wake route.                                            |
+| The worker never claims a ready task                                     | Add the task's owner to `from` by principal ID, because the agent takes only its own project's tasks without it.                       |
 | A task shows as blocked with the kind `unsettled`                        | Read the thread to see where the agent stopped, then unblock the task to let a worker claim it again.                                  |
 | eve logs `403 board_not_granted` or `forbidden`                          | Grant the agent's project access to the board or channel with `vercel board grants create --project`.                                  |
 

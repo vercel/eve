@@ -1,4 +1,4 @@
-import { createLogger, logError } from "#internal/logging.js";
+import { createLogger } from "#internal/logging.js";
 import {
   BOARD_MAX_LEASE_SECONDS,
   boardErrorCode,
@@ -26,8 +26,9 @@ export interface BoardWorker {
   /** Labels a task must have, such as `{ role: "review" }`. */
   readonly label?: Readonly<Record<string, string>>;
   /**
-   * Owners, by actor ID, whose tasks the agent may take, such as a planner's. Without them it
-   * takes only tasks its own deployment created: a task's text is instructions to whoever claims it.
+   * Owners, by principal ID, whose tasks the agent may take, such as a planner deployment's
+   * `vercel:project:prj_abc:production`. Without them it takes only tasks its own deployment
+   * created: a task's text is instructions to whoever claims it.
    */
   readonly from?: readonly string[];
   /** How many tasks the agent holds at once. Defaults to 1. */
@@ -72,6 +73,13 @@ export function resolveBoardWorker(worker: BoardWorker): ResolvedBoardWorker {
     if (!LABEL_KEY.test(key) || !LABEL_VALUE.test(value)) {
       throw new Error(
         `Board worker label ${key}=${value} is invalid: use a key and value without spaces or quotes.`,
+      );
+    }
+  }
+  for (const owner of worker.from ?? []) {
+    if (owner.includes("+") || !owner.includes(":")) {
+      throw new Error(
+        `Board worker from "${owner}" is invalid: name a task owner by principal ID, such as "vercel:project:prj_abc:production", the part of an actor ID before "+".`,
       );
     }
   }
@@ -148,17 +156,7 @@ async function claimUpToCapacity(input: {
       lease: worker.lease,
     });
     if (claim === null) break;
-    try {
-      await input.deliver(claim);
-    } catch (error) {
-      await client
-        .held(claim)
-        .release()
-        .catch((releaseError) =>
-          logError(log, "board task release failed", releaseError, { task: claim.taskId }),
-        );
-      throw error;
-    }
+    await input.deliver(claim);
     started += 1;
   }
   return started;

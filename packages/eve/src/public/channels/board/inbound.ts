@@ -67,7 +67,7 @@ export function formatTaskContext(claim: BoardClaimedTask): string {
   return [
     `You hold board task #${claim.task.id} in channel "${claim.task.channel}", posted by @${authorOf(claim.task)}. Its root message is the brief.`,
     "Read the whole thread with the board read tool first: it holds earlier attempts, questions, and answers.",
-    "Your final message reaches nobody. Post progress with the board reply or note tools, then settle the task before you stop: complete_task with the result, block_task with the one question a person must answer, fail_task with why, or release_task to give it back.",
+    "Your final message reaches nobody. Post progress with the board reply or note tools, then settle the task before you stop: complete_task with the result, block_task with the one question a person must answer, or fail_task with why. To wait for something, such as CI, block the task and say what to check: your claim ends with the turn.",
     "A turn that ends without settling the task holds it for a person.",
   ].join(" ");
 }

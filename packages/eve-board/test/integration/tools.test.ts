@@ -8,11 +8,11 @@ import {
   defineBoardChannelsTool,
   defineBoardCompleteTaskTool,
   defineBoardCreateTaskTool,
+  defineBoardFailTaskTool,
   defineBoardLabelTool,
   defineBoardNoteTool,
   defineBoardPostTool,
   defineBoardReadTool,
-  defineBoardReleaseTaskTool,
   defineBoardReplyTool,
   defineBoardScheduleTool,
   defineBoardTypingTool,
@@ -201,7 +201,7 @@ test("task tools create a task and settle the claim the session holds", async ()
   assert.equal(thread.message.task.result, "Looks right.");
 
   await assert.rejects(
-    run(defineBoardReleaseTaskTool(settings), {}, "c4", held),
+    run(defineBoardFailTaskTool(settings), { reason: "Too late." }, "c4", held),
     /You no longer hold board task/u,
   );
   await assert.rejects(

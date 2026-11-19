@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { ChannelSendOptions } from "#channel/channel-operations.js";
-import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import {
+  getChannelStartHook,
+  isCompiledChannel,
+  type CompiledChannel,
+} from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -23,6 +27,7 @@ import {
   type BoardEventContext,
 } from "#public/channels/board/boardChannel.js";
 import { createBoardClient } from "#public/channels/board/client.js";
+import { defaultBoardAuth } from "#public/channels/board/inbound.js";
 import { heldClaimOf } from "#public/channels/board/worker.js";
 import type { MessageContent } from "#shared/message-content.js";
 
@@ -309,21 +314,58 @@ describe("boardChannel against @vercel/board", () => {
     expect((await harness.board.thread(other!.id)).message.task?.state).toBe("ready");
   });
 
-  it("gives a claimed task back when its session won't take it", async () => {
+  it("asks onMessage which replies in a task it holds wake the agent", async () => {
+    const harness = await boardHarness({
+      onMessage: (message, { watcher }) =>
+        message.by.principal === "vercel:user:alice"
+          ? { auth: defaultBoardAuth(message, { watcher }), context: ["From the owner."] }
+          : null,
+      worker: { channel: "work/", from: ["vercel:user:alice"] },
+    });
+    let held: { id: string } | undefined;
+    harness.board.beforePull(async () => {
+      held = await harness.board.createTask("alice", { channel: "work/a", text: "Yours." });
+    });
+    await harness.pull();
+    harness.board.beforePull(async () => {
+      await harness.board.post("bob", { re: held!.id, text: "Skip the tests." });
+      await harness.board.post("alice", { re: held!.id, text: "Use the staging database." });
+    });
+
+    for (let pull = 0; pull < 5 && harness.deliveries.length < 2; pull += 1) await harness.pull();
+
+    expect(harness.deliveries.map((delivery) => delivery.message)).toEqual([
+      "Yours.",
+      "Use the staging database.",
+    ]);
+    expect(harness.deliveries[1]!.context?.at(-1)).toBe("From the owner.");
+  });
+
+  it("keeps a claim its session won't take until the lease ends, instead of claiming it again", async () => {
+    let attempts = 0;
     const harness = await boardHarness(
       { worker: { channel: "work/", from: ["vercel:user:alice"] } },
       (address) => {
-        if (address.startsWith("worker:")) throw new Error("the session is unavailable");
+        if (!address.startsWith("worker:")) return;
+        attempts += 1;
+        throw new Error("the session is unavailable");
       },
     );
     let task: { id: string } | undefined;
     harness.board.beforePull(async () => {
       task = await harness.board.createTask("alice", { channel: "work/a", text: "Fix it." });
     });
-
+    await harness.pull();
+    harness.board.beforePull(async () => {
+      await harness.board.post("alice", { channel: "work/a", text: "Anyone free?" });
+    });
     await harness.pull();
 
-    expect((await harness.board.thread(task!.id)).message.task?.state).toBe("ready");
+    expect(attempts).toBe(1);
+    expect((await harness.board.thread(task!.id)).message.task).toMatchObject({
+      claim: { actor: harness.board.eveActor() },
+      state: "claimed",
+    });
   });
 
   it("renews a claim near its end, and holds for a person a task its turn left unsettled", async () => {
@@ -404,5 +446,34 @@ describe("boardChannel against @vercel/board", () => {
 
     const { replies } = await board.thread(root.id);
     expect(replies.map((reply) => reply.text)).toEqual(["Yes, it's live."]);
+  });
+
+  it("stops polling locally once the wake route has nothing registered", async () => {
+    await testBoard();
+    const hook = getChannelStartHook(boardChannel({ tail: "dev" }));
+    if (hook === undefined) throw new Error("Expected a start hook.");
+    const wakes: string[] = [];
+    vi.stubEnv("PORT", "3999");
+    const routed = globalThis.fetch;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (!request.url.endsWith("/eve/v1/board/wake")) return await routed(input, init);
+      wakes.push(request.url);
+      return Response.json({ ignored: true, ok: true });
+    }) as typeof fetch;
+    try {
+      const started: Promise<unknown>[] = [];
+      hook({
+        request: new Request("http://agent.example.com/"),
+        waitUntil: (task) => void started.push(task),
+      });
+      await Promise.all(started);
+      await vi.waitFor(() => expect(wakes).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(wakes).toEqual(["http://localhost:3999/eve/v1/board/wake"]);
+    } finally {
+      globalThis.fetch = routed;
+      vi.unstubAllEnvs();
+    }
   });
 });

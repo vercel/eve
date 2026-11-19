@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { splitBoardText } from "#public/channels/board/boardChannel.js";
 import {
   desiredRegistration,
   reachedOnWakeHost,
@@ -95,12 +94,5 @@ describe("reachedOnWakeHost", () => {
     },
   ])("$name", ({ host, env, expected }) => {
     expect(reachedOnWakeHost(wake(host), env)).toBe(expected);
-  });
-});
-
-describe("splitBoardText", () => {
-  it("never splits a surrogate pair across messages", () => {
-    const chunks = splitBoardText(`${"a".repeat(9)}😀b`, 10);
-    expect(chunks).toEqual(["a".repeat(9), "😀b"]);
   });
 });

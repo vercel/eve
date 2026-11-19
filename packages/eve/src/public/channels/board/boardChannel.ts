@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { setChannelStartHook } from "#channel/compiled-channel.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type {
@@ -74,6 +76,7 @@ export const BOARD_TEXT_LIMIT = 10_000;
 export const BOARD_PROFILE_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
 const BOARD_POLL_HEADER = "x-eve-board-poll";
 const MAX_PULLS_PER_WAKE = 20;
+const MIN_POLL_INTERVAL_MS = 1_000;
 const MATCHES_PER_PULL = 10;
 const POLL_WAIT_SECONDS = 25;
 const MAX_WATCHERS = 32;
@@ -292,6 +295,28 @@ export function createBoardChannel(
 
   const chosen: BoardChannelEvents = { ...createDefaultEvents(), ...config.events };
 
+  let draining: { again: boolean } | undefined;
+  const coalesced = (drain: () => Promise<number>): Promise<number> | undefined => {
+    if (draining !== undefined) {
+      draining.again = true;
+      return undefined;
+    }
+    const current = { again: false };
+    draining = current;
+    return (async () => {
+      let dispatched = 0;
+      try {
+        do {
+          current.again = false;
+          dispatched += await drain();
+        } while (current.again);
+      } finally {
+        draining = undefined;
+      }
+      return dispatched;
+    })();
+  };
+
   const channel = defineChannel<BoardChannelState, BoardChannelContext, BoardReceiveTarget>({
     turnPolicy: config.turnPolicy,
     state: initialState(),
@@ -321,18 +346,23 @@ export function createBoardChannel(
         if (watcher === undefined) return Response.json({ ignored: true, ok: true });
         const poll =
           hostedEnvironment() === undefined && request.headers.get(BOARD_POLL_HEADER) === "1";
-        const wake = drainMatches({
-          client: client(),
-          config,
-          from,
-          overwrite: poll || reachedOnWakeHost(request),
-          poll,
-          settings: { ...resolved, watcher },
-        });
+        const drain = () =>
+          drainMatches({
+            client: client(),
+            config,
+            from,
+            overwrite: poll || reachedOnWakeHost(request),
+            poll,
+            settings: { ...resolved, watcher },
+          });
         if (!poll) {
-          waitUntil(wake.catch((error) => logError(log, "board wake-up failed", error)));
+          const wake = coalesced(drain);
+          if (wake !== undefined) {
+            waitUntil(wake.catch((error) => logError(log, "board wake-up failed", error)));
+          }
           return Response.json({ ok: true }, { status: 202 });
         }
+        const wake = drain();
         try {
           return Response.json({ dispatched: await wake, ok: true });
         } catch (error) {
@@ -357,7 +387,11 @@ export function createBoardChannel(
             "boardChannel().receive needs target.text to start a thread in a channel.",
           );
         }
-        root = await board.post(target.channel, { labels: target.labels, text: target.text });
+        root = await board.post(target.channel, {
+          id: send.idempotencyKey === undefined ? undefined : postIdOf(send.idempotencyKey),
+          labels: target.labels,
+          text: target.text,
+        });
       } else {
         throw new Error(
           "boardChannel().receive needs target.thread, or target.channel and target.text.",
@@ -426,10 +460,14 @@ export function createBoardChannel(
       }).catch((error) => logError(log, "board registration failed", error)),
     );
     if (hostedEnvironment() === undefined) {
-      startLocalPoller(
-        `${new URL(request.url).origin}${publicBoardRoute(BOARD_WAKE_ROUTE)}`,
-        resolved,
-      );
+      const origin = localOrigin(request);
+      if (origin === undefined) {
+        log.warn(
+          "board pull didn't start: set PORT, or open the agent on localhost, so eve can reach its own wake route",
+        );
+      } else {
+        startLocalPoller(`${origin}${publicBoardRoute(BOARD_WAKE_ROUTE)}`, resolved);
+      }
     }
   });
 
@@ -468,13 +506,13 @@ export function resolveBoardSettings(config: BoardChannelSettings): BoardSetting
       );
     }
   }
+  if (watchers[BOARD_WORKER_WATCHER] !== undefined) {
+    throw new Error(
+      `Board watcher "${BOARD_WORKER_WATCHER}" is reserved for task claims: rename the watcher, or with \`tail\`, choose another profile.`,
+    );
+  }
   const worker = config.worker === undefined ? undefined : resolveBoardWorker(config.worker);
   if (worker !== undefined) {
-    if (watchers[BOARD_WORKER_WATCHER] !== undefined) {
-      throw new Error(
-        `Board watcher "${BOARD_WORKER_WATCHER}" is taken by the worker: rename the watcher.`,
-      );
-    }
     watchers[BOARD_WORKER_WATCHER] = { context: worker.context, tail: worker.tail };
   }
   const names = Object.keys(watchers);
@@ -649,19 +687,11 @@ async function handleWatcherMatch(
     readonly self: { readonly principal: string };
   },
 ): Promise<boolean> {
-  const { client, match, settings } = input;
+  const { match, settings } = input;
   const message = match.event.message;
   if (match.event.type !== "message.posted" || !postedByOthers(message, input)) return false;
   const threadId = boardThreadId(message);
-  const board = { name: settings.target.name, watcher: match.watcher };
-  const onMessage =
-    input.config.onMessage ??
-    ((posted: BoardMessage): BoardInboundResult => ({ auth: defaultBoardAuth(posted, board) }));
-  const result = await onMessage(message, {
-    board: threadHandle(client, threadId, { messageId: message.id }),
-    name: settings.target.name,
-    watcher: match.watcher,
-  });
+  const result = await inboundOf(input, message, threadId, match.watcher);
   if (result === null) return false;
   await sendRecovering(
     input.from(boardSessionAddress(match.watcher, message)),
@@ -698,13 +728,18 @@ async function handleWorkerMatch(
   }
   const claim = (await client.thread(message.re)).message.task?.claim;
   if (claim?.actor !== input.self.actor || Date.parse(claim.until) <= Date.now()) return false;
-  const board = { name: settings.target.name, watcher: BOARD_WORKER_WATCHER };
+  const result = await inboundOf(input, message, message.re, BOARD_WORKER_WATCHER);
+  if (result === null) return false;
   await sendRecovering(
     input.from(boardSessionAddress(BOARD_WORKER_WATCHER, message)),
     boardMessageContent(message),
     {
-      auth: defaultBoardAuth(message, board),
-      context: [formatTaskFollowUpContext(message), ...(settings.worker?.context ?? [])],
+      auth: result.auth,
+      context: [
+        formatTaskFollowUpContext(message),
+        ...(settings.worker?.context ?? []),
+        ...(result.context ?? []),
+      ],
       idempotencyKey: `board:${match.id}`,
       state: {
         channel: message.channel,
@@ -715,6 +750,36 @@ async function handleWorkerMatch(
     },
   );
   return true;
+}
+
+async function inboundOf(
+  input: DrainInput,
+  message: BoardMessage,
+  threadId: string,
+  watcher: string,
+): Promise<BoardInboundResult | null> {
+  const name = input.settings.target.name;
+  if (input.config.onMessage === undefined) {
+    return { auth: defaultBoardAuth(message, { name, watcher }) };
+  }
+  return await input.config.onMessage(message, {
+    board: threadHandle(input.client, threadId, { messageId: message.id }),
+    name,
+    watcher,
+  });
+}
+
+function postIdOf(idempotencyKey: string): string {
+  return `eve-${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32)}`;
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function localOrigin(request: Request): string | undefined {
+  const port = Number(process.env.PORT);
+  if (Number.isInteger(port) && port > 0 && port < 65_536) return `http://localhost:${port}`;
+  const url = new URL(request.url);
+  return LOOPBACK_HOSTS.has(url.hostname) ? url.origin : undefined;
 }
 
 function threadHandle(
@@ -821,15 +886,18 @@ function startLocalPoller(wakeUrl: string, settings: BoardSettings): void {
 async function pollLoop(wakeUrl: string, signal: AbortSignal): Promise<void> {
   let failures = 0;
   while (!signal.aborted) {
+    const startedAt = Date.now();
     try {
       const response = await fetch(wakeUrl, {
         headers: { [BOARD_POLL_HEADER]: "1" },
         method: "POST",
         signal,
       });
-      await response.body?.cancel();
+      const answer = (await response.json().catch(() => null)) as { ignored?: unknown } | null;
       if (!response.ok) throw new Error(`the wake route answered ${response.status}`);
+      if (answer?.ignored === true) return;
       failures = 0;
+      await sleep(MIN_POLL_INTERVAL_MS - (Date.now() - startedAt), signal);
     } catch (error) {
       if (signal.aborted) return;
       failures += 1;

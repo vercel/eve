@@ -84,7 +84,7 @@ function heldClaim(ctx: ToolContext): BoardHeldClaim {
 async function settle<T>(
   settings: Settings,
   ctx: ToolContext,
-  settled: "completed" | "failed" | "blocked" | "released",
+  settled: "completed" | "failed" | "blocked",
   act: (held: ReturnType<BoardClient["held"]>) => Promise<T>,
 ) {
   const claim = heldClaim(ctx);
@@ -100,7 +100,7 @@ async function settle<T>(
   } catch (error) {
     if ((error as { readonly code?: unknown } | null)?.code !== "claim_lost") throw error;
     throw new Error(
-      `You no longer hold board task #${claim.id}: its claim ended, because its lease ran out or it was released or held. Stop working on it.`,
+      `You no longer hold board task #${claim.id}: its claim ended, because its lease ran out or it was held. Stop working on it.`,
       { cause: error },
     );
   }
@@ -471,18 +471,6 @@ export function defineBoardBlockTaskTool(settings: Settings) {
     }),
     async execute({ reason, kind }, ctx) {
       return await settle(settings, ctx, "blocked", (held) => held.block(reason, { kind }));
-    },
-  });
-}
-
-/** Gives back the task this session holds. */
-export function defineBoardReleaseTaskTool(settings: Settings) {
-  return defineTool({
-    description:
-      "Give the board task you hold back to the queue, unsettled, for another worker to claim, such as when it needs access you don't have.",
-    inputSchema: z.object({}),
-    async execute(_input, ctx) {
-      return await settle(settings, ctx, "released", (held) => held.release());
     },
   });
 }
