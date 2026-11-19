@@ -170,6 +170,8 @@ test("a claiming watch claims a ready task and dispatches to the task's thread",
   assert.equal(delivery!.message, "Fix the flaky test.");
   assert.match(delivery!.options.idempotencyKey!, new RegExp(`^board:task:${task.id}:1$`, "u"));
   assert.equal(delivery!.options.state?.task?.id, task.id);
+  const leased = Date.parse(delivery!.options.state!.task!.until) - Date.now();
+  assert.ok(leased > 3_500_000, `the claim holds for ${leased} ms, not an hour`);
   const { message } = await client().thread(task.id);
   assert.equal(message.task?.state, "claimed");
   assert.equal(message.task?.claim?.actor, `${EVE_PRINCIPAL}+helper`);

@@ -309,7 +309,7 @@ export interface BoardHeldClaim {
   readonly lease: number;
 }
 
-export const BOARD_MAX_LEASE_SECONDS = 300;
+export const BOARD_MAX_LEASE_SECONDS = 3600;
 export const BOARD_TEXT_LIMIT = 10_000;
 export const BOARD_UPLOAD_LIMIT = 4 * 1024 * 1024;
 export const BOARD_PROFILE_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;

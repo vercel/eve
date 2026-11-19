@@ -80,6 +80,7 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
 
 - Registration is still runtime state that a second `board()` mount in the same project overwrites.
   Namespaced registrations, or watchers declared at deploy time, would remove that.
-- A single tool call longer than the five-minute lease can lose a claim.
+- A subagent or workflow call longer than the one-hour lease can lose a claim, because nothing
+  renews it while the parent session waits.
 - `vb` in the sandbox waits for eve's sandbox network policy to support `response` rules.
 - There is no e2e eval: e2e can't start a board without an external service.
