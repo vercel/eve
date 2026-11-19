@@ -59,7 +59,7 @@ interface CliRuntimeDependencies {
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
-    options?: { json?: boolean },
+    options?: { as?: string; json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
   runEvalCommand(
@@ -354,10 +354,33 @@ export function createCliProgram(
       await runTraceListCommand(logger, applicationContext.root, options);
     });
 
+  const schedule = program.command("schedule").description("Run the agent's schedules.");
+  agentCommand(schedule.command("run <name>"), applicationContext)
+    .description("Run one schedule now (on the app's eve dev server, or recorded with --dry-run).")
+    .option(
+      "--dry-run",
+      "Run the schedule in this process and record its deliveries and fetches instead of sending them; calls no model",
+    )
+    .option("--json", "Output as JSON")
+    .action(async (name: string, options: { dryRun?: boolean; json?: boolean }) => {
+      const { runScheduleRunCommand } = await import("#cli/commands/schedule.js");
+      await runScheduleRunCommand(
+        logger,
+        applicationContext.root,
+        name,
+        options,
+        runtime.startHost,
+      );
+    });
+
   agentCommand(program.command("info"), applicationContext)
     .description("Print resolved application information.")
     .option("--json", "Output as JSON")
-    .action(async (options: { json?: boolean }) => {
+    .option(
+      "--as <principal>",
+      "Show the tools a turn offers this caller: schedule, anonymous, or user[:groups=a,b]",
+    )
+    .action(async (options: { as?: string; json?: boolean }) => {
       const printApplicationInfo =
         runtime.printApplicationInfo ?? (await loadPrintApplicationInfo());
       await printApplicationInfo(logger, applicationContext.root, options);

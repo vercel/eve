@@ -15,6 +15,7 @@ The `eve` CLI scaffolds, runs, inspects, and deploys agents. Run it from the app
 | `eve remote info --url <url>`                  | Inspect an existing agent                              |
 | `eve acp [url]`                                | Serve a local or existing agent through ACP over stdio |
 | `eve info`                                     | Inspect the local application                          |
+| `eve schedule run <name> [--dry-run]`          | Run one schedule now, or record what it would do       |
 | `eve set model [model] [--reasoning <effort>]` | Change model and reasoning settings                    |
 | `eve build` / `eve start`                      | Build or serve the application                         |
 | `eve logs show [logid]` / `eve logs list`      | Inspect local diagnostic logs                          |
@@ -130,12 +131,13 @@ When setup is skipped, cancelled, or needs more input, eve prints or returns an 
 ## `eve info`
 
 ```bash
-eve info [--json]
+eve info [--json] [--as <principal>]
 ```
 
-| Flag     | Type | Default | Description  |
-| -------- | ---- | ------- | ------------ |
-| `--json` | flag | off     | Emit as JSON |
+| Flag               | Type   | Default | Description                                                                                             |
+| ------------------ | ------ | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--json`           | flag   | off     | Emit as JSON                                                                                            |
+| `--as <principal>` | string | off     | Also show the tools a turn offers this caller; see [Preview a caller's tools](#preview-a-callers-tools) |
 
 Run `eve info` first when something behaves unexpectedly. It shows which files eve found and what the agent includes, and reports discovery diagnostics without starting the dev server. Static instructions appear in source order with their `system` or `user` role; dynamic instructions are runtime-only and don't appear.
 
@@ -197,6 +199,72 @@ Each schema is the form eve sends to the model:
 ```
 
 `toolInputSchemas` covers only tools compiled from tool files. It omits provider-managed tools such as `web_search`, dynamic tools, connection tools, the runtime-generated subagent and remote agent tools, and `eve__task_wait` and `eve__task_cancel`. It also doesn't reflect transformations a model provider applies before the model reads a schema.
+
+### Preview a caller's tools
+
+`tools` lists what the agent declares. A `defineDynamic()` tool file decides at runtime, per session, whether it offers anything. `--as <principal>` evaluates the session's first turn for one kind of caller and lists the tools that turn offers:
+
+```bash
+eve info --as schedule
+eve info --as user:groups=finance,eng
+eve info --as anonymous
+```
+
+| Principal                                    | Session it evaluates                                                                                                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule`                                   | The app principal schedules pass as `appAuth` (`principalType: "runtime"`), with no one to ask                                               |
+| `user[:groups=a,b][:authenticator=x][:id=y]` | A user on the HTTP session route. `groups` sets `auth.attributes.groups`; `authenticator` defaults to `eve-info` and `id` to `eve-info:user` |
+| `anonymous`                                  | A caller with no credentials (`auth.current` is `null`) on the HTTP session route                                                            |
+
+eve evaluates every dynamic tool, instruction, and connection as it would before the turn's first model call, without calling the model. A dynamic tool file that offers nothing is listed under hidden tools with the reason, such as `defineDynamic returned undefined for principalType runtime`. A file that throws is listed there too; in a real session the error fails the turn. Code in a dynamic value runs for real, including its `fetch` calls.
+
+With `--json`, the document gains an `as` object:
+
+| Field          | Type             | Description                                                                                      |
+| -------------- | ---------------- | ------------------------------------------------------------------------------------------------ |
+| `principal`    | string           | The `--as` value                                                                                 |
+| `auth`         | object or `null` | The session auth the turn ran with                                                               |
+| `channel`      | object           | `{ name, kind }`: the channel name, or `null`, and its adapter kind such as `http` or `schedule` |
+| `tools`        | object[]         | `{ name, source, deferred }` for each tool the turn offers; `source` is the file, or `eve`       |
+| `hiddenTools`  | object[]         | `{ name, source, reason }` for each declared tool the turn doesn't offer                         |
+| `instructions` | object           | `{ system, context }`: the system prompt parts, and instructions eve adds ahead of the input     |
+| `connections`  | object[]         | `{ name, protocol }` for each connection the turn can reach                                      |
+
+## `eve schedule run`
+
+```bash
+eve schedule run <name> [--dry-run] [--json]
+```
+
+| Flag        | Type | Default | Description                                                               |
+| ----------- | ---- | ------- | ------------------------------------------------------------------------- |
+| `--dry-run` | flag | off     | Run the schedule in this process, record what it sends, and call no model |
+| `--json`    | flag | off     | Emit as JSON                                                              |
+
+Runs one schedule by name, such as `billing/sweep` for `agent/schedules/billing/sweep.ts`. Without `--dry-run`, it fires the schedule on the app's running `eve dev` server through the [dispatch route](/docs/schedules#trigger-a-schedule-while-iterating) and prints the started session IDs. With no dev server running, it starts one, and stops it once each started session finishes its turn. The sessions call the model and send to their channels.
+
+`--dry-run` compiles the app and runs the schedule's `run` handler as the app principal, as cron would, with these differences:
+
+- `to(channel, target).send(...)` runs the channel's `receive` hook, then records the session it would start instead of starting it.
+- Every `fetch` call in the process is recorded and answered with an empty JSON object (`{}`), instead of being sent. Network calls that don't use `fetch` still go out.
+- No model is called.
+
+For each recorded delivery, eve prints the channel, target, auth, and message, and then the tools, instructions, and connections the session's first turn would see, as [`eve info --as`](#preview-a-callers-tools) does. A hidden tool comes with its reason.
+
+An unknown name exits with code 1 and suggests the closest schedule name. When the handler throws, `--dry-run` reports the error with the deliveries it recorded before that, and exits with code 1.
+
+`eve schedule run <name> --dry-run --json` prints:
+
+| Field        | Type             | Description                                                                                        |
+| ------------ | ---------------- | -------------------------------------------------------------------------------------------------- |
+| `schedule`   | string           | The schedule name                                                                                  |
+| `deliveries` | object[]         | `{ channel, target, auth, message, turn }`; `turn` has the fields of `eve info --as`'s `as` object |
+| `fetches`    | object[]         | `{ method, url }` for each `fetch` the dry run answered                                            |
+| `error`      | string or `null` | What the handler threw                                                                             |
+
+Without `--dry-run`, `--json` prints `{ schedule, sessionIds, url }`.
+
+A markdown-form schedule records one delivery on the `schedule` channel with a `null` target.
 
 ## `eve build`
 
@@ -496,8 +564,8 @@ See [Evals](/docs/evals) for authoring evals.
 ## Recommended loop
 
 1. Edit files under `agent/`.
-2. `eve info` to confirm discovery or read diagnostics.
-3. `eve dev` while iterating locally.
+2. `eve info` to confirm discovery or read diagnostics, and `eve info --as <principal>` to check which tools a caller gets.
+3. `eve dev` while iterating locally. Check a schedule with `eve schedule run <name> --dry-run`.
 4. `eve build` before shipping.
 5. `eve start` to smoke-test the built output locally.
 

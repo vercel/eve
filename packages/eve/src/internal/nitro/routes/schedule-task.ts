@@ -1,7 +1,9 @@
-import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
+import { ScheduleDispatcher } from "#channel/schedule.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
-import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resolve-schedule.js";
+import {
+  loadResolvedCompiledScheduleByTaskName,
+  loadScheduleRun,
+} from "#runtime/schedules/resolve-schedule.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -72,27 +74,4 @@ export async function dispatchScheduleTaskFromArtifacts(
     scheduleId: schedule.name,
     sessionIds: result.sessions.map((session) => session.sessionId),
   };
-}
-
-async function loadScheduleRun(
-  schedule: Awaited<ReturnType<typeof loadResolvedCompiledScheduleByTaskName>>,
-  moduleMap: Awaited<ReturnType<typeof getCompiledRuntimeAgentBundle>>["moduleMap"],
-) {
-  if (schedule.sourceKind !== "module") {
-    throw new Error(
-      `Schedule "${schedule.name}" claims hasRun but is not a module-backed schedule.`,
-    );
-  }
-  const moduleSchedule = schedule as Extract<typeof schedule, { sourceKind: "module" }>;
-  const exportValue = await loadResolvedModuleExport({
-    definition: {
-      exportName: moduleSchedule.exportName,
-      logicalPath: moduleSchedule.logicalPath,
-      sourceId: moduleSchedule.sourceId,
-    },
-    kindLabel: "schedule",
-    moduleMap,
-    nodeId: undefined,
-  });
-  return expectScheduleRun(exportValue, moduleSchedule.logicalPath, moduleSchedule.exportName);
 }
