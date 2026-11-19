@@ -10,7 +10,6 @@ import type { JsonObject } from "#shared/json.js";
 
 export const CHANNEL_SENTINEL = "eve:channel" as const;
 const CHANNEL_BUILD_METADATA = Symbol.for("eve.channel.buildMetadata");
-const CHANNEL_START_HOOK = Symbol.for("eve.channel.startHook");
 const CHANNEL_INSTRUMENTATION_KIND = Symbol.for("eve.channel.instrumentationKind");
 const CHANNEL_INSTRUMENTATION_KINDS = Symbol.for("eve.channel.instrumentationKinds");
 
@@ -81,28 +80,6 @@ export function setChannelBuildMetadata(
     enumerable: true,
     value: factory,
   });
-}
-
-export interface ChannelStartContext {
-  readonly request: Request;
-  waitUntil(task: Promise<unknown>): void;
-}
-
-export type ChannelStartHook = (ctx: ChannelStartContext) => void;
-
-export function setChannelStartHook(channel: unknown, hook: ChannelStartHook): void {
-  if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
-  Object.defineProperty(channel, CHANNEL_START_HOOK, {
-    configurable: true,
-    enumerable: true,
-    value: hook,
-  });
-}
-
-export function getChannelStartHook(value: unknown): ChannelStartHook | undefined {
-  if (!isCompiledChannel(value)) return undefined;
-  const hook = Reflect.get(value, CHANNEL_START_HOOK);
-  return typeof hook === "function" ? (hook as ChannelStartHook) : undefined;
 }
 
 export function getChannelInstrumentationKind(value: unknown): string | undefined {

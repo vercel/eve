@@ -63,7 +63,7 @@
     "typescript": "catalog:"
   },
   "peerDependencies": {
-    "eve": ">=1.1.1"
+    "eve": ">=1.0.0"
   },
   "engines": {
     "node": ">=24"

@@ -61,7 +61,7 @@ async function wake(from: ChannelFrom<BoardChannelState>, expect: "some" | "none
     client: client(),
     from,
     name: undefined,
-    poll: expect === "some",
+    wait: expect === "some" ? 25 : 0,
     watchChannel: () => DEFAULT_WATCH_CHANNEL,
   });
 }
@@ -311,7 +311,7 @@ test("a watch works when `can` narrows the agent's tools", async () => {
     client: client(),
     from,
     name: undefined,
-    poll: true,
+    wait: 25,
     watchChannel: () => DEFAULT_WATCH_CHANNEL,
   });
 
@@ -483,7 +483,7 @@ test("a watch delivers nothing from channels a narrower `can` no longer lets the
     client: client(),
     from,
     name: undefined,
-    poll: true,
+    wait: 25,
     watchChannel: () => DEFAULT_WATCH_CHANNEL,
   });
 

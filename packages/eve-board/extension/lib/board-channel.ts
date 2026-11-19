@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import {
   defineChannel,
@@ -18,7 +18,6 @@ import {
   createLogger,
   postedIn,
   renderTextInteraction,
-  setChannelStartHook,
   surfaceEvents,
   type PromptQueueState,
   type SignInSurface,
@@ -58,19 +57,14 @@ import {
   DEFAULT_WATCH_CHANNEL,
   allows,
   findWatchRecord,
-  hostedEnvironment,
   modelCan,
-  publicBoardRoute,
   type BoardWatchRecord,
 } from "./watches.ts";
 
 const log = createLogger("board.channel");
 
-const BOARD_POLL_HEADER = "x-eve-board-poll";
 const MAX_PULLS_PER_WAKE = 20;
 const MATCHES_PER_PULL = 10;
-const POLL_WAIT_SECONDS = 25;
-const MIN_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const SETTLEMENTS = new Set(["completed", "failed", "blocked"]);
 
@@ -229,35 +223,20 @@ export function createBoardChannel(
     },
 
     routes: [
-      POST<BoardChannelState>(BOARD_WAKE_ROUTE, async (request, { from, waitUntil }) => {
-        const poll =
-          hostedEnvironment() === undefined &&
-          request.headers.get(BOARD_POLL_HEADER) === pollSecret();
-        const drain = () =>
+      POST<BoardChannelState>(BOARD_WAKE_ROUTE, async (_request, { from, waitUntil }) => {
+        const wake = coalesced(() =>
           drainMatches({
             can: settings().can,
             client: deployment(),
             from,
             name: settings().name,
-            poll,
             watchChannel,
-          });
-        if (!poll) {
-          const wake = coalesced(drain);
-          if (wake !== undefined) {
-            waitUntil(wake.catch((error) => logError("board wake-up failed", error)));
-          }
-          return Response.json({ ok: true }, { status: 202 });
+          }),
+        );
+        if (wake !== undefined) {
+          waitUntil(wake.catch((error) => logError("board wake-up failed", error)));
         }
-        try {
-          return Response.json({ dispatched: await drain(), ok: true });
-        } catch (error) {
-          const errorId = logError("board pull failed", error);
-          return Response.json(
-            { error: "Board pull failed.", errorId, ok: false },
-            { status: 502 },
-          );
-        }
+        return Response.json({ ok: true }, { status: 202 });
       }),
     ],
 
@@ -321,18 +300,6 @@ export function createBoardChannel(
     },
   });
 
-  setChannelStartHook(channel, ({ request }) => {
-    if (hostedEnvironment() !== undefined) return;
-    const origin = localOrigin(request);
-    if (origin === undefined) {
-      log.warn(
-        "board pull didn't start: set PORT, or open the agent on localhost, so eve can reach its own wake route",
-      );
-      return;
-    }
-    startLocalPoller(`${origin}${publicBoardRoute(BOARD_WAKE_ROUTE)}`, settings());
-  });
-
   return channel;
 }
 
@@ -341,12 +308,13 @@ interface DrainInput {
   readonly client: BoardClient;
   readonly from: ChannelFrom<BoardChannelState>;
   readonly name: string | undefined;
-  readonly poll: boolean;
+  readonly wait?: number;
   readonly watchChannel: () => string;
 }
 
 export async function drainMatches(input: DrainInput): Promise<number> {
-  const { client, poll } = input;
+  const { client } = input;
+  const wait = input.wait ?? 0;
   const self = await client.me();
   const records = new Map<string, Promise<BoardWatchRecord>>();
   const recordOf = (id: string) => {
@@ -362,12 +330,12 @@ export async function drainMatches(input: DrainInput): Promise<number> {
   for (let pull = 0; pull < MAX_PULLS_PER_WAKE; pull += 1) {
     const matches = await client.matches({
       limit: MATCHES_PER_PULL,
-      wait: poll ? POLL_WAIT_SECONDS : 0,
+      wait,
     });
     for (const match of matches) {
       if (await handleMatch({ ...input, match, recordOf, self })) dispatched += 1;
     }
-    if (poll || matches.length === 0) break;
+    if (wait > 0 || matches.length === 0) break;
   }
   return dispatched;
 }
@@ -675,74 +643,4 @@ function logError(message: string, error: unknown, fields: Record<string, unknow
 
 function postIdOf(idempotencyKey: string): string {
   return `eve-${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32)}`;
-}
-
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-function localOrigin(request: Request): string | undefined {
-  const port = Number(process.env.PORT);
-  if (Number.isInteger(port) && port > 0 && port < 65_536) return `http://localhost:${port}`;
-  const url = new URL(request.url);
-  return LOOPBACK_HOSTS.has(url.hostname) ? url.origin : undefined;
-}
-
-const POLLERS = Symbol.for("eve.board.pollers");
-const POLL_SECRET = Symbol.for("eve.board.pollSecret");
-type PollerGlobal = typeof globalThis & {
-  [POLLERS]?: Map<string, AbortController>;
-  [POLL_SECRET]?: string;
-};
-
-function pollSecret(): string {
-  return ((globalThis as PollerGlobal)[POLL_SECRET] ??= randomUUID());
-}
-
-function startLocalPoller(wakeUrl: string, settings: BoardSettings): void {
-  const pollers = ((globalThis as PollerGlobal)[POLLERS] ??= new Map());
-  const key = JSON.stringify([settings.name ?? null, settings.team ?? null, settings.profile]);
-  pollers.get(key)?.abort();
-  const controller = new AbortController();
-  pollers.set(key, controller);
-  void pollLoop(wakeUrl, controller.signal);
-}
-
-async function pollLoop(wakeUrl: string, signal: AbortSignal): Promise<void> {
-  let failures = 0;
-  while (!signal.aborted) {
-    const startedAt = Date.now();
-    try {
-      const response = await fetch(wakeUrl, {
-        headers: { [BOARD_POLL_HEADER]: pollSecret() },
-        method: "POST",
-        signal,
-      });
-      await response.body?.cancel();
-      if (!response.ok) throw new Error(`the wake route answered ${response.status}`);
-      failures = 0;
-      await sleep(MIN_POLL_INTERVAL_MS - (Date.now() - startedAt), signal);
-    } catch (error) {
-      if (signal.aborted) return;
-      failures += 1;
-      if (failures === 1) log.warn("board pull failed; retrying with backoff", { error });
-      await sleep(Math.min(30_000, 1_000 * 2 ** failures), signal);
-    }
-  }
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(
-      () => {
-        signal.removeEventListener("abort", onAbort);
-        resolve();
-      },
-      Math.max(0, ms),
-    );
-    timer.unref?.();
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

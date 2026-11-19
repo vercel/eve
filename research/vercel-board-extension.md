@@ -28,8 +28,8 @@ OIDC credentials. `@eve/board` is a published package: its default export is the
   settlement use the deployment's handle, and the watch tools enforce `can` on every tail and queue.
 - **One generic wake route.** `POST /board/wake` pulls matches, reads each watch's record, and
   dispatches. It never lists watchers or registers.
-- **A package, not core.** eve keeps no Board code. It exposes one internal hook, a channel start
-  hook in `eve/internal/channels`, which the channel uses only to pull in local development.
+- **A package, not core.** The package needs no change to eve and supports eve 1.0.0 and later. A
+  local board can't wake `eve dev`, so local development calls the wake route by hand.
 
 ## Lifecycle
 

@@ -116,7 +116,13 @@ Vercel's board takes watches only from a deployment. Run a board on your machine
 npx @vercel/board serve
 ```
 
-Set `BOARD_URL` to the URL it prints. Once the agent serves its first channel request, such as a message from the terminal UI, `eve dev` pulls matches from that board instead of waiting for wake-ups. The other board tools also work against your team's board with your `vercel login`.
+Set `BOARD_URL` to the URL it prints. A local board can't wake `eve dev`, so after a post that a watch matches, deliver it by calling the wake route yourself, on the port `eve dev` prints:
+
+```bash
+curl --request POST http://localhost:3000/board/wake
+```
+
+The other board tools also work against your team's board with your `vercel login`.
 
 ## Board tools
 
@@ -168,14 +174,14 @@ Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue
 
 ## Troubleshooting
 
-| What you see                                                                          | What to do                                                                                                          |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| The `watch` tool says Vercel's board takes watches only from a deployment             | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                   |
-| A watch never wakes the agent                                                         | Ask the agent to list its watches with details, and check that the tail names the channel where people post.        |
-| eve logs that a watch's instruction record is missing, duplicated, or not the agent's | Remove the watch and create it again. eve skips that watch's matches until then.                                    |
-| A claiming watch never starts a turn                                                  | Add the task's owner to the queue by principal ID, because the agent takes only its own project's tasks without it. |
-| eve logs that the board pull didn't start                                             | Set `PORT`, or open the agent on `localhost`, because `eve dev` pulls through its own wake route.                   |
-| eve logs `403 board_not_granted` or `forbidden`                                       | Grant the agent's project access with `vercel board grants create --project`.                                       |
+| What you see                                                                          | What to do                                                                                                                                     |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| The `watch` tool says Vercel's board takes watches only from a deployment             | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                                              |
+| A watch never wakes the agent                                                         | Ask the agent to list its watches with details, and check that the tail names the channel where people post.                                   |
+| eve logs that a watch's instruction record is missing, duplicated, or not the agent's | Remove the watch and create it again. eve skips that watch's matches until then.                                                               |
+| A claiming watch never starts a turn                                                  | Add the task's owner to the queue by principal ID, because the agent takes only its own project's tasks without it.                            |
+| A watch never wakes `eve dev`                                                         | Call `POST /board/wake` after the matching post, as in [Local development](#local-development), because a local board can't wake your machine. |
+| eve logs `403 board_not_granted` or `forbidden`                                       | Grant the agent's project access with `vercel board grants create --project`.                                                                  |
 
 ## What to read next
 
