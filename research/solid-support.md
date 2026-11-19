@@ -1,6 +1,6 @@
 ---
 issue: https://github.com/vercel/eve/pull/6621
-status: in-progress
+status: implemented
 last_updated: "2026-11-19"
 ---
 
@@ -58,13 +58,14 @@ function Chat() {
   them rather than following Solid's `create*` naming.
 - State fields are Solid accessors (`messages()`, `agents()`, `view()`, `error()`, `events()`,
   `session()`, `status()`). Each is a `createMemo` over one `createSignal(store.snapshot)`, so a
-  reader of `status()` reruns only when the status changes.
-- Subscribes and attaches the store in `onSettled`, on both server and client, and the callback's
-  cleanup unsubscribes and detaches when the owner is disposed. Solid's server `onSettled` never
+  reader of `status()` reruns only when the status changes. The signal sets `ownedWrite`, because
+  `send()` and `newSession()` publish synchronously and may run in another owned scope, such as a
+  child that reads a shared agent; Solid's dev build rejects those writes otherwise.
+- Subscribes in the component body and unsubscribes and detaches in `onCleanup`, so disposing the
+  owner stops a stream that `send()` or `resume()` opened before the component settled.
+- Attaches the store in `onSettled`, on both server and client. Solid's server `onSettled` never
   runs its callback, so nothing connects during SSR, but it still claims a hydration id: calling
-  it only in the browser shifts every later hydration key. Attaching in the component body is not
-  an option: `resume` and `prewarm` update the store synchronously, and Solid 2 rejects signal
-  writes in an owned scope (`REACTIVE_WRITE_IN_OWNED_SCOPE`).
+  it only in the browser shifts every later hydration key.
 - Throws without a reactive owner, such as at module level, because nothing would dispose the
   attached store.
 - `solid-js` `^2.0.0` becomes an optional peer dependency.
@@ -74,8 +75,9 @@ No `eveSolid()` plugin: `eveVite()` covers dev, preview, and Vercel for every st
 ## Testing and docs
 
 - Unit: Solid joins the shared case in `src/client/framework-bindings.test.ts`, asserting through a
-  `createEffect` reader. Solid cases cover `resume`, a send before the component settles, the
-  owner error, and equal hydration ids from Solid's server and browser builds. The unit config
+  `createEffect` reader. Solid cases cover `resume`, a send before the component settles, disposal
+  before it settles, the owner error, equal hydration ids from all four Solid builds, and a send
+  from another owned scope in the dev build. The unit config
   aliases `solid-js` to `dist/solid.js`, because Node's default conditions load the server build,
   where effects never run.
 - Scenario (build area, `framework-solid-build`): local SSR build emits `dist/server/server.js`,

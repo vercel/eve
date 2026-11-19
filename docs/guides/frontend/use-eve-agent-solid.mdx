@@ -3,7 +3,7 @@ title: "useEveAgent (Solid)"
 description: "Use the eve Solid binding and its Solid-specific reactive interface."
 ---
 
-`useEveAgent()` from `eve/solid` exposes the shared eve frontend client as Solid accessors and methods. It requires Solid 2 (`solid-js` 2). See the [frontend overview](/docs/guides/frontend) for session behavior, messages, human input, authorization, callbacks, and persistence.
+`useEveAgent()` from `eve/solid` exposes the shared eve frontend client as Solid accessors and methods. It requires Solid 2 (`solid-js` 2); Solid 1 apps call the agent through the [Client SDK](/docs/guides/client). With npm, a Solid 1 project that installs eve needs `"overrides": { "eve": { "solid-js": "$solid-js" } }` in `package.json`, because npm otherwise rejects eve's optional `solid-js` 2 peer. See the [frontend overview](/docs/guides/frontend) for session behavior, messages, human input, authorization, callbacks, and persistence.
 
 ## Set up a Solid app
 
