@@ -165,10 +165,14 @@ export async function failTurnForEffect(step: Step): Promise<StepResult | undefi
   return failTurn(step, new Error(reason), "HOOK_FAILED");
 }
 
-async function failTurn(step: Step, error: unknown, code: string): Promise<StepResult> {
+export async function failTurn(
+  step: Step,
+  error: unknown,
+  code: string,
+  message = toErrorMessage(error),
+): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   step.instrumentation?.recordError(error);
-  const message = toErrorMessage(error);
   const errorId = createErrorId();
   log.error("turn failed", {
     code,

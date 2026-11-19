@@ -1,6 +1,6 @@
 "use client";
 
-import { ClientError, type MessagePart } from "eve/client";
+import { SessionNotActiveError, type MessagePart } from "eve/client";
 import {
   activeTurn,
   activity,
@@ -103,7 +103,7 @@ export function AgentChat({
   // A session that ended outside eve never settles its requests, so they stay open, yet it
   // accepts no answer. Once the server says so, stop offering them.
   const sessionEnded =
-    agent.error instanceof ClientError && agent.error.code === "session_not_active";
+    SessionNotActiveError.is(agent.error) && agent.error.code === "session_not_active";
   // Answers are accepted while work runs; the server's settlement closes each request.
   const canRespond = (interactionId: string) =>
     !isResuming && !sessionEnded && interaction(agent.view, interactionId)?.status === "open";

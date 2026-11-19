@@ -11,7 +11,8 @@ import {
   type SessionView,
   type SuspendedStep,
 } from "#harness/session-machine/view.js";
-import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { SIGN_IN_DECLINED, signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { isModelSignInName } from "#models/definition.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
@@ -34,7 +35,7 @@ import {
   withdrawUnavailable,
 } from "./approvals.js";
 import { runApprovedCalls, signInReports } from "./approved-calls.js";
-import { SignInCompletedKey } from "#harness/authorization.js";
+import { getAuthorizationResults, SignInCompletedKey } from "#harness/authorization.js";
 import { publishDenial, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
@@ -67,7 +68,14 @@ export async function admitHumanInput(
 ): Promise<HumanInputIntake> {
   const { config } = step;
   const completions = config.signInCompletions ?? [];
-  if (completions.length > 0) await step.apply(completeSignIn(step.view(), { completions }));
+  if (completions.length > 0) {
+    const declined = new Set(
+      getAuthorizationResults().flatMap(({ attemptId, callback }) =>
+        attemptId !== undefined && callback.params.error === SIGN_IN_DECLINED ? [attemptId] : [],
+      ),
+    );
+    await step.apply(completeSignIn(step.view(), { completions, declined }));
+  }
   const weighed = await weighResponders(step.view(), {
     now: Date.now(),
     tools: () => toolsOf(step),
@@ -339,7 +347,17 @@ async function withdrawSteeredSignIns(
   step: Step,
   input: HarnessStepInput | undefined,
 ): Promise<HarnessStepInput | undefined> {
-  const names = [...new Set(step.view().signIns.map((challenge) => challenge.name))];
+  const names = [
+    ...new Set(
+      step
+        .view()
+        .signIns.map((challenge) =>
+          isModelSignInName(challenge.name)
+            ? (challenge.challenge.displayName ?? challenge.name)
+            : challenge.name,
+        ),
+    ),
+  ];
   if (names.length === 0) return input;
   await applyEndingSignIns(step, withdrawSignIns(step.view(), STEERED_SIGN_IN_REASON));
   return {

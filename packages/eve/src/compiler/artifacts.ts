@@ -20,7 +20,8 @@ import {
 } from "#compiler/diagnostics.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
-import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { compileAgentManifestWithModuleGraph } from "#compiler/normalize-manifest.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
 import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
@@ -66,6 +67,7 @@ interface WriteCompilerArtifactsResult {
   compiledManifest: CompiledAgentManifest;
   diagnosticsArtifact: CompilerDiagnosticsArtifact;
   metadata: CompileMetadata;
+  moduleGraph: AuthoredModuleGraph;
   moduleMapSource: string;
   paths: CompilerArtifactPaths;
 }
@@ -173,13 +175,14 @@ export async function writeCompilerArtifacts(
   if ((await modelCatalog.loadModelMetadata()).fetchedAt === null) {
     diagnostics.push(createModelMetadataUnavailableDiagnostic(paths.modelMetadataPath));
   }
+  const compiled = await compileAgentManifestWithModuleGraph(input.manifest, {
+    developmentExtensions: input.developmentExtensions,
+    diagnostics,
+    modelCatalog,
+  });
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest, {
-      developmentExtensions: input.developmentExtensions,
-      diagnostics,
-      modelCatalog,
-    }),
+    manifest: compiled.manifest,
   });
   const modelMetadata = await modelCatalog.loadModelMetadata();
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
@@ -224,6 +227,7 @@ export async function writeCompilerArtifacts(
     compiledManifest,
     diagnosticsArtifact,
     metadata,
+    moduleGraph: compiled.moduleGraph,
     moduleMapSource,
     paths,
   };

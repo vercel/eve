@@ -3,6 +3,7 @@ import { readSessionStreamTailIndex, streamSessionLines } from "#execution/sessi
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
+import { createBackgroundWork } from "#channel/background-work.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { runEffects, type RunEffectsInput } from "#definitions/kernel.js";
 import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
@@ -244,19 +245,24 @@ async function publishInSessionScope<T>(
     sessionWritable: step.sessionWritable,
   });
   try {
-    return await withContextScope(ctx, session, async (enrichedSession) => {
-      const emit =
-        instrumentation?.createHandleEvent({
-          handleEvent: publisher.publish,
-          relayed: publication.origin === "relayed",
-        }) ?? publisher.publish;
-      const result = await publication.publish(emit, enrichedSession);
-      await publisher.finish();
-      return { result, session: enrichedSession };
-    });
+    return await withContextScope(
+      ctx,
+      session,
+      async (enrichedSession) => {
+        const emit =
+          instrumentation?.createHandleEvent({
+            handleEvent: publisher.publish,
+            relayed: publication.origin === "relayed",
+          }) ?? publisher.publish;
+        const result = await publication.publish(emit, enrichedSession);
+        await publisher.finish();
+        return { result, session: enrichedSession };
+      },
+      { drain: publisher.drain },
+    );
   } finally {
     await instrumentation?.flush();
-    publisher.writer.release();
+    await publisher.release();
   }
 }
 
@@ -286,14 +292,18 @@ export interface SessionEventDispatcher {
 
 interface EventDispatcher extends SessionEventDispatcher {
   deliver(written: readonly WrittenEvent[]): Promise<void>;
+  settle(): Promise<void>;
+  close(): void;
 }
 
 export interface SessionEventPublisher {
   readonly dispatcher: SessionEventDispatcher;
-  readonly writer: SessionEventWriter;
+  readonly writer: Pick<SessionEventWriter, "close">;
   emit(publication: SessionPublication): Promise<readonly WrittenEvent[]>;
   publish(publication: SessionPublication): Promise<void>;
+  drain(): Promise<void>;
   finish(options?: { readonly announce?: boolean }): Promise<void>;
+  release(): Promise<void>;
 }
 
 export interface OrphanedLine {
@@ -457,6 +467,10 @@ export function openSessionEventPublisher(input: {
     await dispatcher.deliver(written);
     return written;
   };
+  const drain = async (): Promise<void> => {
+    await publicationTail;
+    await dispatcher.settle();
+  };
   let publicationTail: Promise<unknown> = Promise.resolve();
   const emit = (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
     const next = publicationTail.then(() => emitOne(publication));
@@ -478,12 +492,21 @@ export function openSessionEventPublisher(input: {
     writer,
     emit,
     publish,
+    drain,
     async finish(options) {
       if (before === undefined) return;
       const announced =
         options?.announce === false ? undefined : announceWaiting(before, currentView(ctx));
       before = undefined;
       if (announced !== undefined && announced.length > 0) await publish(announced);
+    },
+    async release() {
+      try {
+        await drain();
+      } finally {
+        dispatcher.close();
+        writer.release();
+      }
     },
   };
 }
@@ -497,6 +520,10 @@ function createSessionEventDispatcher(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const deliveryCtx = inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource };
   let reacting: Promise<void> = Promise.resolve();
+  const background = createBackgroundWork({ adapterKind: adapter.kind });
+  const waitUntilFor = background.waitUntilFor;
+  const saveChannelState = () =>
+    setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
   return {
     adapterCtx,
@@ -510,7 +537,13 @@ function createSessionEventDispatcher(input: {
         await callAdapterEventHandler(
           adapter,
           { facts, position: position.line },
-          { ...deliveryCtx, position, scope: undefined, view },
+          {
+            ...deliveryCtx,
+            position,
+            scope: undefined,
+            view,
+            waitUntil: waitUntilFor("committed"),
+          },
         );
       };
       for (const { event, position, progress, view } of written) {
@@ -518,11 +551,22 @@ function createSessionEventDispatcher(input: {
         if (await forwardSessionInput(ctx, event, inputSource)) continue;
         if (!progress) (line ??= { facts: [], position, view }).facts.push(event);
         const scope = "scope" in event ? event.scope : undefined;
-        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope, view });
+        const waitUntil = waitUntilFor(event.type);
+        await callAdapterEventHandler(adapter, event, {
+          ...deliveryCtx,
+          position,
+          scope,
+          view,
+          waitUntil,
+        });
       }
       await committed();
-      setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
+      saveChannelState();
     },
+    async settle() {
+      if (await background.settle()) saveChannelState();
+    },
+    close: background.close,
     react(written, options) {
       if (written.length === 0) return Promise.resolve();
       const reacted = reacting.then(() => runEffects(ctx, { ...options, written }));
@@ -627,7 +671,7 @@ export async function publishTerminalSessionEvent(input: {
       await publisher.writer.close();
     } catch {
     } finally {
-      publisher.writer.release();
+      await publisher.release();
     }
     return;
   }
@@ -661,7 +705,7 @@ export async function publishTerminalSessionEvent(input: {
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
-    publisher.writer.release();
+    await publisher.release();
     try {
       await instrumentation?.flush();
     } catch (error) {

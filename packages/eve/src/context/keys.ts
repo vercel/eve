@@ -1,4 +1,3 @@
-import type { LanguageModel } from "ai";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 
 import type {
@@ -30,6 +29,7 @@ import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 
@@ -130,7 +130,7 @@ export const ToolChannelKey = new ContextKey<{
 }>("eve.internal.toolChannel");
 
 export interface LiveDynamicModelSelection {
-  readonly model?: LanguageModel;
+  readonly model?: RuntimeModel;
   readonly reference: RuntimeModelReference;
 }
 

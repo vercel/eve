@@ -1,5 +1,9 @@
 # @vercel/agent-runs
 
+## 1.0.2
+
+Released 2026-11-18 · [Compare with 1.0.1](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.1...%40vercel%2Fagent-runs%401.0.2)
+
 ## 1.0.1
 
 Released 2026-11-16 · [Compare with 1.0.0](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0...%40vercel%2Fagent-runs%401.0.1)

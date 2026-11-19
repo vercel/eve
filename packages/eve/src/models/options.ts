@@ -1,8 +1,9 @@
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
+import { isDefinedModel } from "#models/definition.js";
 import type {
   PublicAgentDynamicModelResult,
   PublicAgentModelSelectionDefinition,
-  PublicAgentStaticModelDefinition,
+  PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 
 /** A model ID or instance, or a selection with model-specific settings. */
@@ -15,7 +16,9 @@ export type ModelOptionSelection = PublicAgentDynamicModelResult;
  */
 export type ModelOption =
   | string
-  | (PublicAgentModelSelectionDefinition & { readonly description: string });
+  | (PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> & {
+      readonly description: string;
+    });
 
 /** Model options by key. */
 export type ModelOptions = Readonly<Record<string, ModelOption>>;
@@ -30,15 +33,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStaticModel(value: unknown): value is PublicAgentStaticModelDefinition {
-  return typeof value === "string" ? value.trim().length > 0 : isRuntimeLanguageModel(value);
+function isTurnModel(value: unknown): value is PublicAgentTurnModelDefinition {
+  return typeof value === "string"
+    ? value.trim().length > 0
+    : isRuntimeLanguageModel(value) || isDefinedModel(value);
 }
 
 export function isModelSelection(value: unknown): value is ModelOptionSelection {
   return (
-    isStaticModel(value) ||
+    isTurnModel(value) ||
     (isRecord(value) &&
-      isStaticModel(value.model) &&
+      isTurnModel(value.model) &&
       (value.reasoning === undefined || isAgentReasoningDefinition(value.reasoning)) &&
       (value.modelContextWindowTokens === undefined ||
         (Number.isInteger(value.modelContextWindowTokens) &&
@@ -63,7 +68,7 @@ export function isModelOptions(value: unknown): value is ModelOptions {
 export function normalizeModelSelection(
   selection: ModelOptionSelection,
 ): PublicAgentDynamicModelResult {
-  if (typeof selection === "string" || isRuntimeLanguageModel(selection)) return selection;
+  if (!isSelectionObject(selection)) return selection;
   const { model, ...settings } = selection;
   return Object.values(settings).every((value) => value === undefined) ? model : selection;
 }
@@ -76,13 +81,22 @@ export function normalizeModelOptions(options: ModelOptions): NormalizedModelOpt
   });
 }
 
-export function selectionModel(selection: ModelOptionSelection): PublicAgentStaticModelDefinition {
-  return typeof selection === "string" || isRuntimeLanguageModel(selection)
-    ? selection
-    : selection.model;
+export function selectionModel(selection: ModelOptionSelection): PublicAgentTurnModelDefinition {
+  return isSelectionObject(selection) ? selection.model : selection;
+}
+
+function isSelectionObject(
+  selection: ModelOptionSelection,
+): selection is PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> {
+  return (
+    typeof selection !== "string" &&
+    !isRuntimeLanguageModel(selection) &&
+    !isDefinedModel(selection)
+  );
 }
 
 export function selectionLogIdentity(selection: ModelOptionSelection): string {
   const model = selectionModel(selection);
-  return typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
+  if (typeof model === "string") return model;
+  return isDefinedModel(model) ? model.id : `${model.provider}/${model.modelId}`;
 }

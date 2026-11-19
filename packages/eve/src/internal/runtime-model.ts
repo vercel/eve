@@ -1,9 +1,17 @@
 import type { LanguageModel } from "ai";
-import type { AgentReasoningDefinition, EveLanguageModel } from "#shared/agent-definition.js";
+import { isDefinedModel } from "#models/definition.js";
+import type {
+  AgentReasoningDefinition,
+  EveLanguageModel,
+  PublicAgentTurnModelDefinition,
+} from "#shared/agent-definition.js";
 
-export function formatLanguageModelGatewayId(model: string | EveLanguageModel): string {
+export function formatLanguageModelGatewayId(model: PublicAgentTurnModelDefinition): string {
   if (typeof model === "string") {
     return model;
+  }
+  if (isDefinedModel(model)) {
+    return model.id;
   }
   const provider = model.provider.split(".")[0];
   const modelId = model.modelId.replace(/^(claude-[a-z]+-\d+)-(\d+)$/, "$1.$2");

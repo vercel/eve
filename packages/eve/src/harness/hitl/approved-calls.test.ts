@@ -138,6 +138,61 @@ function signInSession(...attemptIds: string[]) {
   return { publish, settled, view };
 }
 
+it("accepts the sign-in but rejects the call when its approved input no longer validates", async () => {
+  const session = signInSession("attempt-lookup");
+  const lookup = tool(
+    "lookup",
+    vi.fn(async () => "never"),
+  );
+  const definition = {
+    ...lookup,
+    inputSchema: jsonSchema(
+      {
+        type: "object",
+        properties: { workspaceId: { type: "string" } },
+        required: ["workspaceId"],
+      },
+      { validate: () => ({ success: false, error: new Error("workspaceId is required") }) },
+    ),
+  };
+  const result = await runApprovedCalls({
+    abortSignal: undefined,
+    messages: [],
+    ...session,
+    approvals: [stoppedOn("lookup", "attempt-lookup")],
+    tools: new Map([["lookup", definition]]),
+  });
+
+  expect(lookup.execute).not.toHaveBeenCalled();
+  expect(result.settled[0]?.part.output).toEqual({
+    type: "error-text",
+    value:
+      'The approved input is no longer valid for tool "lookup". Request a new tool call and approval.',
+  });
+  expect(session.settled("attempt-lookup").map((event) => event.data)).toEqual([
+    expect.objectContaining({ outcome: "accepted" }),
+  ]);
+});
+
+it("still reports a failed sign-in when the resumed tool runs and the token exchange fails", async () => {
+  const session = signInSession("attempt-lookup");
+  const exchange = vi.fn(async () => {
+    throw new Error("token exchange failed");
+  });
+  await runApprovedCalls({
+    abortSignal: undefined,
+    messages: [],
+    ...session,
+    approvals: [stoppedOn("lookup", "attempt-lookup")],
+    tools: new Map([["lookup", tool("lookup", exchange)]]),
+  });
+
+  expect(exchange).toHaveBeenCalledOnce();
+  expect(session.settled("attempt-lookup").map((event) => event.data)).toEqual([
+    expect.objectContaining({ outcome: "failed", reason: "token exchange failed" }),
+  ]);
+});
+
 it("reports each group's sign-in while its call holds, with one reporter for the batch", async () => {
   const session = signInSession("attempt-a", "attempt-b");
   const reports = signInReports(session);

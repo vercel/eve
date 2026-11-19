@@ -733,6 +733,7 @@ const inactivePromptRules = [
     requires: ["buttons"],
     async run(conversation) {
       await pressAfterRunEnded(conversation, "approval");
+      await conversation.waitForShown(NO_LONGER_ACTIVE);
       expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} ran with no session`).toBe(0);
       await expectButtonsCleared(conversation, APPROVAL_PROMPT);
     },
@@ -743,6 +744,7 @@ const inactivePromptRules = [
     requires: ["buttons"],
     async run(conversation) {
       await pressAfterRunEnded(conversation, "question");
+      await conversation.waitForShown(NO_LONGER_ACTIVE);
       await expectButtonsCleared(conversation, PROMPT);
     },
   },

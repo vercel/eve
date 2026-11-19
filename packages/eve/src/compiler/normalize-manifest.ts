@@ -122,6 +122,16 @@ export async function compileAgentManifest(
   manifest: AgentSourceManifest,
   options: CompileAgentManifestOptions = {},
 ): Promise<CompiledAgentManifest> {
+  return (await compileAgentManifestWithModuleGraph(manifest, options)).manifest;
+}
+
+export async function compileAgentManifestWithModuleGraph(
+  manifest: AgentSourceManifest,
+  options: CompileAgentManifestOptions = {},
+): Promise<{
+  readonly manifest: CompiledAgentManifest;
+  readonly moduleGraph: AuthoredModuleGraph;
+}> {
   const registries = [frameworkAgentSourceRegistry, ...(options.sourceRegistries ?? [])];
   assertUniqueRegistryIds(registries);
   const context: ManifestCompileContext = {
@@ -135,14 +145,11 @@ export async function compileAgentManifest(
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     selection: options.developmentExtensions ?? noDevelopmentExtensions(),
   });
-  const compiler = new AgentGraphCompiler(
-    context,
-    registries,
-    diagnostics,
-    createAuthoredModuleGraph(listApplicationModulePaths(developmentExtensions.manifest), {
-      appRoot: manifest.appRoot,
-    }),
+  const moduleGraph = createAuthoredModuleGraph(
+    listApplicationModulePaths(developmentExtensions.manifest),
+    { appRoot: manifest.appRoot },
   );
+  const compiler = new AgentGraphCompiler(context, registries, diagnostics, moduleGraph);
   const root = await compiler.compileStaticNode({
     developmentExtensionCandidates: developmentExtensions.candidates,
     inheritedExternalDependencies: [],
@@ -162,7 +169,8 @@ export async function compileAgentManifest(
     subagents,
   });
   void pruneAuthoredModuleCache();
-  return compiled;
+  moduleGraph.warnIfBundledPerModule();
+  return { manifest: compiled, moduleGraph };
 }
 
 class AgentGraphCompiler {

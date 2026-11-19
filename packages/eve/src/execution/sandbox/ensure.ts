@@ -13,6 +13,7 @@ import {
   trackActiveSandboxConnection,
   untrackActiveSandboxConnection,
 } from "#execution/sandbox/active-connections.js";
+import { sandboxConnectionDisposal } from "#execution/sandbox/connection-disposal.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { isToolSessionId } from "#execution/tool-session/id.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
@@ -114,6 +115,7 @@ export async function ensureSandboxAccess(
       ? getSandboxEnvironmentRuntime(persistedOwner.environment)
       : undefined,
   );
+  const disposals = new Set<() => Promise<void>>();
   let opened: OpenedSandbox | undefined;
   let stopped: OpenedSandbox | undefined;
   let opening: Promise<OpenedSandbox> | undefined;
@@ -150,6 +152,12 @@ export async function ensureSandboxAccess(
   }
   const ownerDefinition = owningSandboxDefinition(registered);
   const ownerNodeId = registered.inheritance?.nodeId ?? input.nodeId;
+
+  async function disposeConnections(): Promise<void> {
+    const pending = [...disposals];
+    disposals.clear();
+    await Promise.all(pending.map((dispose) => dispose()));
+  }
 
   function providerContext(turnId: string): SandboxSessionContext {
     const activeSession =
@@ -336,6 +344,7 @@ export async function ensureSandboxAccess(
         throw new Error(`Sandbox "${definition.logicalPath}" must return the sandbox it opens.`);
       }
     } catch (error) {
+      await disposeConnections().catch(() => undefined);
       await opened?.close().catch(() => undefined);
       opened = undefined;
       opening = undefined;
@@ -430,6 +439,7 @@ export async function ensureSandboxAccess(
         throw new Error("Only the owning session can delete this sandbox.");
       await preparations;
       const current = await requireOpened();
+      await disposeConnections();
       await current.delete(deleteOptions);
       forgetSandbox(current.providerName);
     },
@@ -437,6 +447,7 @@ export async function ensureSandboxAccess(
       if (input.ownsSandbox === false) return;
       await preparations;
       if (requiring !== undefined) await requiring.catch(() => undefined);
+      await disposeConnections();
       await opened?.close().catch((error: unknown) => {
         log.warn("failed to close a sandbox connection at session end", {
           error,
@@ -468,6 +479,7 @@ export async function ensureSandboxAccess(
     async release() {
       await preparations;
       if (requiring !== undefined) await requiring.catch(() => undefined);
+      await disposeConnections();
       const current = forgetOpened();
       if (stopped !== undefined && tracking !== "session") {
         untrackActiveSandboxConnection({
@@ -520,10 +532,12 @@ export async function ensureSandboxAccess(
     connection: SandboxConnection<object>,
     state: SandboxJson,
   ): Promise<OpenedSandbox> {
+    const dispose = sandboxConnectionDisposal(connection);
     let session: SandboxSession;
     try {
       session = createConnectionSession(connection);
     } catch (error) {
+      await dispose?.().catch(() => undefined);
       await connection.close?.().catch((closeError: unknown) => {
         log.warn("failed to close a sandbox connection eve could not use", {
           error: closeError,
@@ -532,6 +546,7 @@ export async function ensureSandboxAccess(
       });
       throw error;
     }
+    if (dispose !== undefined) disposals.add(dispose);
     const stopCompute = shared(() => connection.stop());
     const close = once(async () => await connection.close?.());
     const current: OpenedSandbox = {
@@ -539,6 +554,7 @@ export async function ensureSandboxAccess(
       close,
       async delete(options) {
         try {
+          await dispose?.();
           await close();
         } finally {
           await provider.implementation.onSessionEnd(context, state, {

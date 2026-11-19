@@ -186,7 +186,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/instrumentation`                                                             | `defineInstrumentation`, `disableInstrumentation`, `InstrumentationEvent<K>`, lifecycle provider types            |
 | `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy, span processor, and exporter types   |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                     |
-| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`, `EveLanguageModel`                                                         |
+| [`eve/models`](../guides/decide)                                                  | `auto`, `defineModel`, `DefinedModel`, `ModelDefinition`, `EveLanguageModel`                                      |
 | `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                               |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                       |
 | [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                               |
@@ -215,7 +215,7 @@ The `exports` field in eve's `package.json` lists every entry point. `eve/experi
 
 Event union types name today's values. A release can add event types, outcomes, and request kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add) without a breaking change, so keep a default branch when you switch on them.
 
-Values eve passes into code you implement can also gain members in a minor release. Examples are a sandbox provider's `onSessionEnd()` `reason`, the provider context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values with a default branch instead of switching exhaustively.
+Values eve passes into code you implement can also gain members in a minor release. Examples are a sandbox provider's `onSessionEnd()` `reason`, the provider context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values with a default branch instead of switching exhaustively. Context objects eve passes to your handlers, such as `ChannelEventContext`, can gain required members the same way, so a test fixture that builds one by hand may need to add them.
 
 `eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose types from the `chat` package (Chat SDK v4) as part of their contract. A future breaking `chat` major can require a matching eve major release.
 

@@ -22,8 +22,8 @@ import {
   resolveAvailableProviders,
   writeProviderSelection,
   providerSettingsMatch,
-  type ProviderSettings,
 } from "#setup/provider-settings.js";
+import type { ProviderSettings } from "#shared/provider-settings.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { changeValidatedAgentModel, readAuthoredModelSelection } from "./model-source-change.js";

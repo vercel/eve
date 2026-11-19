@@ -330,6 +330,7 @@ async function buildApplicationInWorkspace(
         log(message: string) {
           console.log(message);
         },
+        moduleGraph: preparedHost.moduleGraph,
       };
       await measureBuildPhase(profiler, "sandbox.prewarm", async () => {
         if (isVercelBuild) {
