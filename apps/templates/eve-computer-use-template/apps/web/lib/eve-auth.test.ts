@@ -7,7 +7,7 @@ import { createPasswordSessionToken, PASSWORD_SESSION_COOKIE_NAME } from "./pass
 const APP = "https://computer-use.example.com";
 
 beforeEach(() => {
-  process.env.EVE_COMPUTER_USE_PASSWORD = "correct-horse-battery-1";
+  process.env.EVE_COMPUTER_USE_PASSWORD = "0ESL6BM0HXd9bMmtR7aDx0NE3QxsR8K2d5y8oFsf";
   delete process.env.VERCEL_ENV;
 });
 

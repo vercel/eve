@@ -1,31 +1,22 @@
 import { NextResponse } from "next/server";
 
+import { isSameOrigin } from "../../../../lib/origin";
 import {
   createPasswordSessionToken,
   PASSWORD_SESSION_COOKIE_NAME,
   PASSWORD_SESSION_MAX_AGE,
   verifyAppPassword,
 } from "../../../../lib/password-auth";
-import { CHALLENGE_BITS, createChallenge, verifyChallenge } from "../../../../lib/challenge";
-import {
-  countInWindow,
-  enforceRateLimit,
-  RateLimitError,
-  readWindow,
-} from "../../../../lib/rate-limit";
+import { countInWindow, readWindow } from "../../../../lib/rate-limit";
 import { getAuthMode } from "../../../../lib/setup";
-import { isSameOrigin } from "../../../../lib/origin";
 
-/** Sign-in attempts each caller may make in a window. */
-const ATTEMPTS_PER_CALLER = 10;
-const CALLER_WINDOW_SECONDS = 15 * 60;
 /**
- * Failed sign-ins across the deployment in an hour, past which every attempt first needs a
- * solved challenge (lib/challenge.ts). A hard cap here would let anyone lock out the right
- * password; the challenge instead makes guessing from many addresses cost work per guess.
+ * Wrong passwords an address may send in a window before it must wait. Only failures count, so
+ * people signing in correctly from one network never use up each other's attempts. Guessing from
+ * many addresses is bounded by the password itself, a generated secret; see lib/setup.ts.
  */
-const FAILURES_BEFORE_CHALLENGE = 300;
-const FAILURES = { key: "all", prefix: "login-failures", windowSeconds: 60 * 60 } as const;
+const FAILURES_PER_ADDRESS = 10;
+const FAILURE_WINDOW_SECONDS = 15 * 60;
 
 /**
  * The caller's address as Vercel's proxy, or `vercel dev`, reports it; both overwrite any value
@@ -42,45 +33,26 @@ export async function POST(request: Request) {
   if (request.headers.get("origin") === null || !isSameOrigin(request))
     return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
 
-  // Every attempt counts, whether or not the password turns out to be right.
-  try {
-    await enforceRateLimit({
-      key: callerAddress(request),
-      limit: ATTEMPTS_PER_CALLER,
-      prefix: "login",
-      windowSeconds: CALLER_WINDOW_SECONDS,
-    });
-  } catch (error) {
-    if (!(error instanceof RateLimitError)) throw error;
+  const failures = {
+    key: callerAddress(request),
+    prefix: "login-failures",
+    windowSeconds: FAILURE_WINDOW_SECONDS,
+  };
+  if ((await readWindow(failures)) >= FAILURES_PER_ADDRESS) {
+    const now = Math.floor(Date.now() / 1000);
     return NextResponse.json(
-      { error: "Too many sign-in attempts. Try again later." },
-      { headers: { "retry-after": String(error.retryAfter) }, status: 429 },
+      { error: "Too many wrong passwords. Try again later." },
+      {
+        headers: { "retry-after": String(FAILURE_WINDOW_SECONDS - (now % FAILURE_WINDOW_SECONDS)) },
+        status: 429,
+      },
     );
   }
 
-  const body = (await request.json().catch(() => null)) as {
-    password?: unknown;
-    challenge?: unknown;
-    solution?: unknown;
-  } | null;
-  if ((await readWindow(FAILURES)) >= FAILURES_BEFORE_CHALLENGE) {
-    const solved =
-      typeof body?.challenge === "string" &&
-      typeof body.solution === "string" &&
-      (await verifyChallenge(body.challenge, body.solution));
-    if (!solved)
-      return NextResponse.json(
-        {
-          error: "Solve the challenge to sign in.",
-          challenge: createChallenge(),
-          bits: CHALLENGE_BITS,
-        },
-        { status: 401 },
-      );
-  }
+  const body = (await request.json().catch(() => null)) as { password?: unknown } | null;
   const password = typeof body?.password === "string" ? body.password : "";
   if (!verifyAppPassword(password)) {
-    await countInWindow(FAILURES);
+    await countInWindow(failures);
     return NextResponse.json({ error: "Incorrect password." }, { status: 401 });
   }
 
