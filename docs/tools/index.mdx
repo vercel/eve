@@ -125,6 +125,37 @@ Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for 
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before you return them.
 
+`toModelOutput` also receives a second argument with the `callId`, the `toolName`, and `getSandbox()`, which resolves the session's sandbox or `undefined` when the agent has none. A function that takes only the output keeps working.
+
+### Keep large results out of context with `offloadSandbox`
+
+A tool result goes into the conversation in full, and every later model call in the turn sends it again. A 680 KB JSON result is about 190,000 tokens. `offloadSandbox` from `eve/tools` builds a `toModelOutput` that writes a result over a token budget to a file in the sandbox and gives the model a short note instead:
+
+```ts title="agent/tools/fetch_issues.ts"
+import { defineTool, offloadSandbox } from "eve/tools";
+
+export default defineTool({
+  description: "List the issues of a repository.",
+  inputSchema: { type: "object", properties: { repo: { type: "string" } }, required: ["repo"] },
+  async execute({ repo }) {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/issues?state=all&per_page=100`,
+    );
+    return await response.json();
+  },
+  toModelOutput: offloadSandbox({ maxOutputTokens: 20_000 }),
+});
+```
+
+`maxOutputTokens` is a budget in estimated tokens, counted as UTF-8 bytes divided by 4. A result within the budget reaches the model unchanged. A larger result is written, as the tool returned it, to `/tmp/.eve/tool-results/<tool name>-<call id>.json` (`.txt` for a string). The model sees the path, the size, a one-line description of the shape, and a hint to read parts of the file with `jq`, `head` or `read_file`. Channels and hooks still get the full output on `call.settled`.
+
+- To shrink the result first, pass `toModelOutput`. `offloadSandbox` applies it and checks the size of its output.
+- With no sandbox, the model gets the whole result and eve logs one warning per session. eve never cuts a result to fit.
+- Error results and results with image or file parts are never written.
+- The file lasts as long as the sandbox. If the sandbox is replaced, the model has to run the tool again.
+
+To offload a built-in tool's result, spread the exported definition and set `toModelOutput`, as in [Built-in tools](../concepts/built-in-tools). Built-in tools such as `web_fetch` and `grep` cut long output inside `execute`, so `offloadSandbox` sees the shortened result. For a connection, set [`toolCall.toModelOutput`](../connections/mcp#control-result-size).
+
 ### Send images to the model with content parts
 
 To give a vision-capable model an image, such as a screenshot or chart, return a `content` output from `toModelOutput`. Build outputs with `toolOutput` and parts with `toolOutputPart`, both from `eve/tools`:

@@ -1,3 +1,4 @@
+import { toolModelOutputContext } from "#harness/tool-model-output.js";
 import { observeToolOutput } from "#tool-stubs/execute.js";
 import type { ModelMessage, SystemModelMessage } from "ai";
 
@@ -154,13 +155,13 @@ async function toResultBlock(
   if (result.status === "failed") return { ...base, body: result.error, status: "failed" };
   return {
     ...base,
-    body: await projectOutput(record.name, result, definition),
+    body: await projectOutput(record, result, definition),
     status: "completed",
   };
 }
 
 async function projectOutput(
-  tool: string,
+  { id: taskId, name: tool }: TaskRecord,
   result: Extract<TaskResult, { status: "completed" }>,
   definition: HarnessToolDefinition | undefined,
 ): Promise<string> {
@@ -168,7 +169,10 @@ async function projectOutput(
   return await observeToolOutput(
     tool,
     result.calls ?? [],
-    async () => renderModelOutputText(await definition.toModelOutput!(result.output)),
+    async () =>
+      renderModelOutputText(
+        await definition.toModelOutput!(result.output, toolModelOutputContext(tool, taskId)),
+      ),
     () => renderModelOutputText(result.output),
   );
 }

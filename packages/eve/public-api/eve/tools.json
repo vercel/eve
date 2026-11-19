@@ -20,6 +20,7 @@
   "MatchedToolResult",
   "Memo",
   "Occurrence",
+  "OffloadSandboxOptions",
   "SessionFrame",
   "ToolAnswer",
   "ToolAskOptions",
@@ -29,6 +30,7 @@
   "ToolDefinition",
   "ToolLabelDefinition",
   "ToolModelOutput",
+  "ToolModelOutputContext",
   "ToolModelOutputPart",
   "ToolQuestion",
   "ToolResultFromFn",
@@ -47,6 +49,7 @@
   "defineTool",
   "defineWorkflowTool",
   "disableTool",
+  "offloadSandbox",
   "toolOutput",
   "toolOutputPart",
   "toolResultFrom"

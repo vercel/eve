@@ -1,3 +1,5 @@
+import type { SandboxSession } from "#shared/sandbox-session.js";
+
 /**
  * eve-owned shape for the model-facing tool result produced by
  * `toModelOutput`. Structurally compatible with the AI SDK's
@@ -40,6 +42,29 @@ export type ToolModelOutputPart =
       readonly mediaType: string;
       readonly filename?: string;
     };
+
+/**
+ * What `toModelOutput` receives beside the tool's output. Every tool call
+ * passes it, so a one-argument `toModelOutput` keeps working.
+ */
+export interface ToolModelOutputContext {
+  /** Id of the tool call whose result is being projected. */
+  readonly callId: string;
+  /** Name the model calls the tool by. */
+  readonly toolName: string;
+  /**
+   * The session's sandbox, started on first use, or `undefined` when the
+   * agent has no sandbox. Unlike `ctx.getSandbox()` in `execute`, it never
+   * throws for a missing sandbox.
+   */
+  getSandbox(): Promise<SandboxSession | undefined>;
+  /**
+   * The projection eve applies when a tool sets no `toModelOutput`: a string
+   * as text and any other value as JSON. A connection tool's default also
+   * turns MCP content blocks into text and file parts.
+   */
+  defaultModelOutput(output: unknown): ToolModelOutput;
+}
 
 /**
  * Builders for the model-facing {@link ToolModelOutput} returned by

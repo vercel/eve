@@ -3,7 +3,10 @@ import type { JSONValue } from "ai";
 import { z } from "#compiled/zod/index.js";
 import { createLogger } from "#internal/logging.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import { loadContext } from "#context/container.js";
+import { SandboxKey } from "#context/keys.js";
 import type { ToolModelOutputPart } from "#tools/definition.js";
+import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
@@ -23,6 +26,21 @@ type ToolModelOutputValuePart =
       readonly mediaType: string;
       readonly filename?: string;
     };
+
+export function toolModelOutputContext(toolName: string, callId: string): ToolModelOutputContext {
+  return {
+    callId,
+    defaultModelOutput: defaultToolModelOutput,
+    getSandbox: async () => (await loadContext().get(SandboxKey)?.get()) ?? undefined,
+    toolName,
+  };
+}
+
+export function defaultToolModelOutput(output: unknown): ToolModelOutput {
+  return typeof output === "string"
+    ? { type: "text", value: output }
+    : { type: "json", value: output ?? null };
+}
 
 const log = createLogger("harness.tool-model-output");
 
