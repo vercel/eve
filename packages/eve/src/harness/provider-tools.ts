@@ -25,6 +25,7 @@ type GatewaySchemaBackend = "browserbase" | "tako";
 const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
   web_search_20250305: WEB_SEARCH_TOOL_NAME,
   web_search: WEB_SEARCH_TOOL_NAME,
+  web_search_tool_result: WEB_SEARCH_TOOL_NAME,
   "web_search_call.action.sources": WEB_SEARCH_TOOL_NAME,
 };
 
