@@ -17,10 +17,11 @@ export interface ConnectionSubscriptionSource {
   readonly request: Omit<ManagedEventSubscribeInput, "idempotencyKey" | "options">;
 }
 
-/** A channel's subscriptions, addressed by the key the channel's `onSubscribe` returned. */
+/** A channel's subscription to one declared event, addressed by the key `channelEventKey` derives. */
 export interface ChannelSubscriptionSource {
   readonly kind: "channel";
   readonly name: string;
+  readonly event: string;
   readonly key: string;
   readonly input: JsonObject;
   readonly ttlMs: number | null;

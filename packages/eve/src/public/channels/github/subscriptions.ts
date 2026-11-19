@@ -8,56 +8,81 @@ import type {
 } from "#public/channels/github/inbound-types.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
-import type { ChannelSubscriptions, EmitChannelEventFn } from "#shared/channel-subscriptions.js";
+import type {
+  ChannelEventSubscription,
+  ChannelSubscriptions,
+  EmitChannelEventFn,
+} from "#shared/channel-subscriptions.js";
 
 const COMMENT_BODY_LIMIT = 4_000;
 const PASSING_CONCLUSIONS = new Set(["neutral", "skipped", "success"]);
-const SUBSCRIBABLE = ["checks_finished", "pr_comment"] as const;
-type Subscribable = (typeof SUBSCRIBABLE)[number];
 
 const INPUT_SCHEMA: JsonObject = {
   additionalProperties: false,
   properties: {
-    on: {
-      description:
-        "`checks_finished`: a check suite finished on the pull request. GitHub reports one suite per app (GitHub Actions, Vercel and so on), so you hear once for each app whose checks complete, with the conclusion and the check runs that did not pass. `pr_comment`: a new comment or review comment on the pull request, from anyone who can comment on it.",
-      enum: [...SUBSCRIBABLE],
-      type: "string",
-    },
     owner: { description: "Repository owner, such as `vercel`.", type: "string" },
     pull: { description: "Pull request number.", minimum: 1, type: "integer" },
     repo: { description: "Repository name, such as `eve`.", type: "string" },
   },
-  required: ["on", "owner", "repo", "pull"],
+  required: ["owner", "repo", "pull"],
   type: "object",
 };
 
-/** The key a GitHub webhook event and a subscription meet on: one pull request and one kind of event. */
-function subscriptionKey(on: Subscribable, owner: string, repo: string, pull: number): string {
-  return `${owner.toLowerCase()}/${repo.toLowerCase()}#${pull}:${on}`;
-}
+/** The events a session can subscribe to on a GitHub channel, each about one pull request. */
+export type GitHubSubscribableEvent = "checks_finished" | "pr_comment";
 
-/** What a session can subscribe to on a GitHub channel: checks finishing and new comments on a pull request. */
-export const GITHUB_CHANNEL_SUBSCRIPTIONS: ChannelSubscriptions = {
-  description: "Watch a GitHub pull request for finished checks or new comments.",
-  inputSchema: INPUT_SCHEMA,
-  onSubscribe({ input }) {
-    return {
-      key: subscriptionKey(
-        input.on as Subscribable,
-        String(input.owner),
-        String(input.repo),
-        Number(input.pull),
-      ),
-    };
+/** The events of a GitHub channel a session can subscribe to, with the default message for each. */
+export const GITHUB_SUBSCRIBABLE_EVENTS: Readonly<
+  Record<GitHubSubscribableEvent, ChannelEventSubscription>
+> = {
+  checks_finished: {
+    description:
+      "A check suite finished on the pull request. GitHub reports one suite per app (GitHub Actions, Vercel and so on), so you hear once for each app whose checks complete, with the conclusion and the check runs that did not pass.",
+    inputSchema: INPUT_SCHEMA,
+    onEvent: ({ event }) => describeChecksFinished(event.data),
   },
-  onEvent({ event }) {
-    const { data } = event;
-    if (data.kind === "checks_finished") return describeChecksFinished(data);
-    if (data.kind === "pr_comment") return describePullRequestComment(data);
-    return undefined;
+  pr_comment: {
+    description:
+      "A new comment or review comment on the pull request, from anyone who can comment on it.",
+    inputSchema: INPUT_SCHEMA,
+    onEvent: ({ event }) => describePullRequestComment(event.data),
   },
 };
+
+/**
+ * Which events a session may subscribe to. An event is eligible when its entry is `true` or an
+ * object, and an object's `onEvent` replaces the default message. Missing or `false` leaves the
+ * event out.
+ */
+export type GitHubSubscriptionsConfig = {
+  readonly [K in GitHubSubscribableEvent]?:
+    | boolean
+    | { readonly onEvent?: ChannelEventSubscription["onEvent"] };
+};
+
+/** The events a config enables. */
+export function enabledGitHubSubscriptionEvents(
+  config: GitHubSubscriptionsConfig | undefined,
+): ReadonlySet<GitHubSubscribableEvent> {
+  const names = Object.keys(GITHUB_SUBSCRIBABLE_EVENTS) as GitHubSubscribableEvent[];
+  return new Set(names.filter((name) => config?.[name] !== undefined && config[name] !== false));
+}
+
+/** The channel's `subscriptions` for a config, or `undefined` when no event is enabled. */
+export function githubChannelSubscriptions(
+  config?: GitHubSubscriptionsConfig,
+): ChannelSubscriptions | undefined {
+  const enabled = enabledGitHubSubscriptionEvents(config);
+  if (enabled.size === 0) return undefined;
+  return Object.fromEntries(
+    [...enabled].map((name) => {
+      const entry = config?.[name];
+      const onEvent = typeof entry === "object" ? entry.onEvent : undefined;
+      const event = GITHUB_SUBSCRIBABLE_EVENTS[name];
+      return [name, onEvent === undefined ? event : { ...event, onEvent }];
+    }),
+  );
+}
 
 function describeChecksFinished(data: JsonObject): string {
   const notPassed = Array.isArray(data.notPassed) ? data.notPassed : [];
@@ -81,7 +106,8 @@ function describePullRequestComment(data: JsonObject): string {
 }
 
 /**
- * Hands a GitHub webhook event to the sessions subscribed to it. Resolves once every matching
+ * Hands a GitHub webhook event to the sessions subscribed to it, for the events in `enabled`
+ * only: any other event is skipped without a GitHub lookup. Resolves once every matching
  * subscription has been given the event, and rejects if emitting or the GitHub lookup fails.
  */
 export async function emitGitHubSubscriptionEvents(input: {
@@ -89,10 +115,17 @@ export async function emitGitHubSubscriptionEvents(input: {
   readonly credentials?: GitHubChannelCredentials;
   readonly event: GitHubInboundEvent;
   readonly emit: EmitChannelEventFn;
+  readonly enabled: ReadonlySet<GitHubSubscribableEvent>;
 }): Promise<void> {
-  const { event, emit } = input;
-  if (event.kind === "check_suite") return emitChecksFinished({ ...input, event });
-  if (event.kind === "issue_comment" || event.kind === "pull_request_review_comment")
+  const { event, emit, enabled } = input;
+  if (event.kind === "check_suite") {
+    if (enabled.has("checks_finished")) return emitChecksFinished({ ...input, event });
+    return;
+  }
+  if (
+    enabled.has("pr_comment") &&
+    (event.kind === "issue_comment" || event.kind === "pull_request_review_comment")
+  )
     return emitPullRequestComment({ event, emit });
 }
 
@@ -114,17 +147,21 @@ async function emitChecksFinished(input: {
 
   await Promise.all(
     suite.pullRequests.map((pull) =>
-      emit(subscriptionKey("checks_finished", owner, repo, pull), {
-        id: `${event.delivery.id}:checks_finished:${pull}`,
-        data: {
-          kind: "checks_finished",
-          pullRequest: `${event.repository.fullName}#${pull}`,
-          app: suite.app.slug ?? "unknown app",
-          conclusion,
-          headSha: suite.headSha,
-          notPassed,
+      emit(
+        "checks_finished",
+        { owner, repo, pull },
+        {
+          id: `${event.delivery.id}:checks_finished:${pull}`,
+          data: {
+            kind: "checks_finished",
+            pullRequest: `${event.repository.fullName}#${pull}`,
+            app: suite.app.slug ?? "unknown app",
+            conclusion,
+            headSha: suite.headSha,
+            notPassed,
+          },
         },
-      }),
+      ),
     ),
   );
 }
@@ -162,15 +199,20 @@ async function emitPullRequestComment(input: {
   if (event.action !== "created" || pull === null) return;
 
   const { body, author, htmlUrl } = event.comment;
-  await emit(subscriptionKey("pr_comment", event.repository.owner, event.repository.name, pull), {
-    id: `${event.delivery.id}:pr_comment:${event.comment.id}`,
-    data: {
-      kind: "pr_comment",
-      commentKind: event.kind === "issue_comment" ? "comment" : "review comment",
-      pullRequest: `${event.repository.fullName}#${pull}`,
-      author: author?.login ?? event.sender.login,
-      url: htmlUrl ?? null,
-      body,
+  const { owner, name: repo } = event.repository;
+  await emit(
+    "pr_comment",
+    { owner, repo, pull },
+    {
+      id: `${event.delivery.id}:pr_comment:${event.comment.id}`,
+      data: {
+        kind: "pr_comment",
+        commentKind: event.kind === "issue_comment" ? "comment" : "review comment",
+        pullRequest: `${event.repository.fullName}#${pull}`,
+        author: author?.login ?? event.sender.login,
+        url: htmlUrl ?? null,
+        body,
+      },
     },
-  });
+  );
 }

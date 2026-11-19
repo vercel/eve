@@ -108,8 +108,8 @@ export interface GenericChannelDefinition<
   readonly routes: readonly RouteDefinition<TState>[];
 
   /**
-   * Events a session of this agent can subscribe to. eve gives the model subscribe, get and stop
-   * tools for them; a route delivers an occurrence with `publish`.
+   * The events a session of this agent can subscribe to, by name. eve gives the model subscribe,
+   * get and stop tools for them; a route delivers an occurrence with `emit`.
    */
   readonly subscriptions?: ChannelSubscriptions;
   receive?(

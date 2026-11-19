@@ -2,7 +2,7 @@ import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { installedDurableHost } from "#execution/hosts.js";
 import { principalOf } from "#execution/session/principal.js";
-import { channelSubscriptionId } from "#runtime/subscriptions/id.js";
+import { channelEventKey, channelSubscriptionId } from "#runtime/subscriptions/id.js";
 import type {
   ChannelSubscriptionSource,
   OpenedSubscription,
@@ -10,7 +10,7 @@ import type {
 } from "#runtime/subscriptions/state.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import type { ChannelSubscriptions } from "#shared/channel-subscriptions.js";
+import type { ChannelEventSubscription } from "#shared/channel-subscriptions.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineTool } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
@@ -22,19 +22,24 @@ export const SUBSCRIBE_TOOL = "subscribe";
 export const GET_TOOL = "get_subscription";
 export const STOP_TOOL = "stop_subscription";
 
-interface OfferedSubscriptions {
+interface OfferedSubscription {
   readonly channelName: string;
-  readonly subscriptions: ChannelSubscriptions;
+  readonly event: string;
+  readonly declaration: ChannelEventSubscription;
 }
 
 interface SubscribeInput {
-  readonly subscription: { readonly channel: string; readonly input: JsonObject };
+  readonly subscription: {
+    readonly channel: string;
+    readonly event: string;
+    readonly input: JsonObject;
+  };
   readonly ttlMs: number | null;
 }
 
 /**
  * The model-facing tools for what the agent's channels let a session subscribe to: one `subscribe`
- * whose input is the union of every channel's own input, plus get and stop for subscriptions the
+ * whose input is the union of every declared event's own input, plus get and stop for subscriptions the
  * caller holds. Returns `null` when no channel offers subscriptions.
  */
 export function channelSubscriptionTools(
@@ -45,7 +50,10 @@ export function channelSubscriptionTools(
   return {
     [SUBSCRIBE_TOOL]: defineTool({
       description: `Subscribe this conversation to something a channel reports later. Each occurrence reaches this conversation as a queued message, after the current turn, for ttlMs milliseconds or until stopped. Set ttlMs to null to watch until stopped. Subscribing again with the same input returns the existing subscription.\n\n${offered
-        .map(({ channelName, subscriptions }) => `${channelName}: ${subscriptions.description}`)
+        .map(
+          ({ channelName, event, declaration }) =>
+            `${channelName}.${event}: ${declaration.description}`,
+        )
         .join("\n")}`,
       inputSchema: defineJsonSchema<SubscribeInput>({
         type: "object",
@@ -53,11 +61,15 @@ export function channelSubscriptionTools(
         required: ["subscription", "ttlMs"],
         properties: {
           subscription: {
-            anyOf: offered.map(({ channelName, subscriptions }) => ({
+            anyOf: offered.map(({ channelName, event, declaration }) => ({
               type: "object",
               additionalProperties: false,
-              required: ["channel", "input"],
-              properties: { channel: { const: channelName }, input: subscriptions.inputSchema },
+              required: ["channel", "event", "input"],
+              properties: {
+                channel: { const: channelName },
+                event: { const: event },
+                input: declaration.inputSchema,
+              },
             })),
           },
           ttlMs: {
@@ -96,14 +108,15 @@ export function channelSubscriptionTools(
 
 function offeredSubscriptions(
   channels: readonly Pick<ResolvedChannelDefinition, "name" | "definition">[],
-): readonly OfferedSubscriptions[] {
+): readonly OfferedSubscription[] {
   const seen = new Set<string>();
-  const offered: OfferedSubscriptions[] = [];
+  const offered: OfferedSubscription[] = [];
   for (const channel of channels) {
     const subscriptions = channel.definition?.subscriptions;
     if (subscriptions === undefined || seen.has(channel.name)) continue;
     seen.add(channel.name);
-    offered.push({ channelName: channel.name, subscriptions });
+    for (const [event, declaration] of Object.entries(subscriptions))
+      offered.push({ channelName: channel.name, event, declaration });
   }
   return offered;
 }
@@ -139,33 +152,33 @@ function scope() {
 }
 
 async function subscribe(
-  offered: readonly OfferedSubscriptions[],
+  offered: readonly OfferedSubscription[],
   input: SubscribeInput,
   signal: AbortSignal | undefined,
 ): Promise<ReturnType<typeof active> | ReturnType<typeof pending>> {
   const { ctx, auth, sessionId, executionPrincipal } = scope();
   const host = owners();
-  const { channel: channelName, input: channelInput } = input.subscription;
-  const entry = offered.find((candidate) => candidate.channelName === channelName);
-  if (entry === undefined) throw new Error(`Channel "${channelName}" offers no subscriptions.`);
-  const validated = await defineJsonSchema(entry.subscriptions.inputSchema)["~standard"].validate(
-    channelInput,
+  const { channel: channelName, event, input: eventInput } = input.subscription;
+  const entry = offered.find(
+    (candidate) => candidate.channelName === channelName && candidate.event === event,
+  );
+  if (entry === undefined)
+    throw new Error(`Channel "${channelName}" offers no subscription to "${event}".`);
+  const validated = await defineJsonSchema(entry.declaration.inputSchema)["~standard"].validate(
+    eventInput,
   );
   if (validated.issues !== undefined)
     throw new Error(
-      `Subscription input does not match the channel's schema: ${validated.issues.map(({ message }) => message).join("; ")}`,
+      `Subscription input does not match the event's schema: ${validated.issues.map(({ message }) => message).join("; ")}`,
     );
   const subscriptionInput = parseJsonObject(validated.value);
-  const { key } = await entry.subscriptions.onSubscribe({
-    auth,
-    sessionId,
-    input: subscriptionInput,
-  });
+  const key = channelEventKey(event, subscriptionInput);
   const binding: SubscriptionBinding = {
     id: channelSubscriptionId({ channelName, key, sessionId, executionPrincipal }),
     source: {
       kind: "channel",
       name: channelName,
+      event,
       key,
       input: structuredClone(subscriptionInput),
       ttlMs: input.ttlMs,
@@ -200,10 +213,11 @@ function channelOf(binding: SubscriptionBinding): ChannelSubscriptionSource {
 }
 
 function active(binding: SubscriptionBinding, opened: OpenedSubscription) {
-  const { name, input } = channelOf(binding);
+  const { name, event, input } = channelOf(binding);
   return {
     id: binding.id,
     channel: name,
+    event,
     input,
     status: "active" as const,
     expiresAt: opened.expiresAt,
@@ -211,6 +225,6 @@ function active(binding: SubscriptionBinding, opened: OpenedSubscription) {
 }
 
 function pending(binding: SubscriptionBinding) {
-  const { name, input } = channelOf(binding);
-  return { id: binding.id, channel: name, input, status: "pending" as const };
+  const { name, event, input } = channelOf(binding);
+  return { id: binding.id, channel: name, event, input, status: "pending" as const };
 }

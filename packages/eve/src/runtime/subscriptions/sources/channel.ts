@@ -18,9 +18,9 @@ function channelOf(binding: SubscriptionBinding): ChannelSubscriptionSource {
   return binding.source;
 }
 
-function subscriptionsOf(bundle: CompiledBundle, channelName: string) {
-  return bundle.resolvedAgent.channels.find((channel) => channel.name === channelName)?.definition
-    ?.subscriptions;
+function declarationOf(bundle: CompiledBundle, source: ChannelSubscriptionSource) {
+  return bundle.resolvedAgent.channels.find((channel) => channel.name === source.name)?.definition
+    ?.subscriptions?.[source.event];
 }
 
 function subscriptionOf(binding: SubscriptionBinding): ChannelSubscription {
@@ -28,8 +28,8 @@ function subscriptionOf(binding: SubscriptionBinding): ChannelSubscription {
   return {
     id: binding.id,
     channelName: source.name,
+    event: source.event,
     input: source.input,
-    key: source.key,
     sessionId: binding.sessionId,
   };
 }
@@ -45,26 +45,20 @@ export const channelSource: SubscriptionSourceRuntime = {
     };
   },
 
-  async close({ ctx, binding }) {
-    const subscriptions = subscriptionsOf(requireCompiledBundle(ctx), channelOf(binding).name);
-    await subscriptions?.onUnsubscribe?.({
-      auth: binding.auth,
-      sessionId: binding.sessionId,
-      subscription: subscriptionOf(binding),
-    });
+  async close() {
     return "done";
   },
 
   async deliver({ ctx, binding, event }) {
     const source = channelOf(binding);
     const bundle = requireCompiledBundle(ctx);
-    const subscriptions = subscriptionsOf(bundle, source.name);
-    if (subscriptions === undefined) return;
+    const declaration = declarationOf(bundle, source);
+    if (declaration === undefined) return;
     const channelEvent = event as ChannelEvent;
     const message =
-      subscriptions.onEvent === undefined
+      declaration.onEvent === undefined
         ? JSON.stringify(channelEvent.data)
-        : await subscriptions.onEvent({
+        : await declaration.onEvent({
             auth: binding.auth,
             sessionId: binding.sessionId,
             event: channelEvent,

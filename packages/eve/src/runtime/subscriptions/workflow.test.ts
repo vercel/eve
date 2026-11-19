@@ -137,7 +137,14 @@ const { subscriptionWorkflow, subscriptionKeyWorkflow, subscriptionDeliveryWorkf
 
 const binding: SubscriptionBinding = {
   id: "binding-1",
-  source: { kind: "channel", name: "github", key: "vercel/eve#7", input: {}, ttlMs: null },
+  source: {
+    kind: "channel",
+    name: "github",
+    event: "checks_finished",
+    key: "vercel/eve#7",
+    input: {},
+    ttlMs: null,
+  },
   sessionId: "session-1",
   executionPrincipal: "principal-1",
   auth: null,

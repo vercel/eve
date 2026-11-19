@@ -7,8 +7,10 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import {
-  GITHUB_CHANNEL_SUBSCRIPTIONS,
+  type GitHubSubscriptionsConfig,
   emitGitHubSubscriptionEvents,
+  enabledGitHubSubscriptionEvents,
+  githubChannelSubscriptions,
 } from "#public/channels/github/subscriptions.js";
 import {
   buildGitHubBinding,
@@ -164,6 +166,12 @@ export interface GitHubChannelConfig {
   readonly progress?: GitHubProgressConfig;
   readonly pullRequestContext?: GitHubPullRequestContextConfig;
   readonly route?: string;
+  /**
+   * Which events a session may subscribe to with the `subscribe` tool, such as
+   * `{ checks_finished: true, pr_comment: true }`. Nothing is subscribable by default. An event
+   * can instead be `{ onEvent }` to replace the message the subscribing session receives.
+   */
+  readonly subscriptions?: GitHubSubscriptionsConfig;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
 
@@ -247,10 +255,12 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     ...config.events,
   };
 
+  const subscribable = enabledGitHubSubscriptionEvents(config.subscriptions);
+
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
-    subscriptions: GITHUB_CHANNEL_SUBSCRIPTIONS,
+    subscriptions: githubChannelSubscriptions(config.subscriptions),
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
@@ -298,20 +308,23 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           }
           if (event.kind === "ping") return jsonOk({ ok: true });
 
-          waitUntil(
-            emitGitHubSubscriptionEvents({
-              api: config.api,
-              credentials: config.credentials,
-              event,
-              emit,
-            }).catch((error: unknown) => {
-              logError(log, "GitHub subscription delivery failed", error, {
-                deliveryId: event.delivery.id,
-                event: event.delivery.event,
-                repository: event.repository.fullName,
-              });
-            }),
-          );
+          if (subscribable.size > 0) {
+            waitUntil(
+              emitGitHubSubscriptionEvents({
+                api: config.api,
+                credentials: config.credentials,
+                enabled: subscribable,
+                event,
+                emit,
+              }).catch((error: unknown) => {
+                logError(log, "GitHub subscription delivery failed", error, {
+                  deliveryId: event.delivery.id,
+                  event: event.delivery.event,
+                  repository: event.repository.fullName,
+                });
+              }),
+            );
+          }
 
           if (event.kind === "issue_comment" && event.action === "created") {
             waitUntil(

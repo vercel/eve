@@ -37,10 +37,9 @@ export interface RouteHandlerArgs<TState = undefined> {
    */
   params: Readonly<Record<string, string>>;
   /**
-   * Hands one occurrence to every session subscribed to `key`, the key that this channel's
-   * `subscriptions.onSubscribe` returned for them. `event.id` makes a redelivery of the same
-   * occurrence reach each subscriber once. Resolves `true` when at least one subscription holds
-   * the key.
+   * Hands one occurrence of a declared `subscriptions` event to every session subscribed to it
+   * with an equal `input`. `occurrence.id` makes a redelivery of the same occurrence reach each
+   * subscriber once. Resolves `true` when at least one subscription holds it.
    */
   readonly emit: EmitChannelEventFn;
   /** Keeps background work alive after the route returns its response. */

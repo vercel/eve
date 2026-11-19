@@ -421,42 +421,43 @@ See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage
 
 ## Let sessions subscribe to events
 
-A channel can let a session ask to hear about something later, such as a check finishing on a pull request. Declare `subscriptions` on the channel and call `emit` from a route when the thing happens:
+A channel can let a session ask to hear about something later, such as a build finishing. Declare each event the channel offers under `subscriptions`, and call `emit` from a route when the event happens:
 
 ```ts title="agent/channels/builds.ts"
 import { defineChannel, POST } from "eve/channels";
 
 export default defineChannel({
   subscriptions: {
-    description: "Watch a project for finished builds.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["project"],
-      properties: { project: { type: "string" } },
+    build_finished: {
+      description: "A build of a project finished.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["project"],
+        properties: { project: { type: "string" } },
+      },
+      onEvent: ({ event }) => `Build ${event.id} finished: ${String(event.data.status)}.`,
     },
-    onSubscribe: ({ input }) => ({ key: `project:${String(input.project).toLowerCase()}` }),
-    onEvent: ({ event }) => `Build ${event.id} finished: ${String(event.data.status)}.`,
   },
   routes: [
     POST("/builds", async (req, { emit }) => {
       const build = await req.json();
-      await emit(`project:${build.project.toLowerCase()}`, {
-        id: build.id,
-        data: { status: build.status },
-      });
+      await emit(
+        "build_finished",
+        { project: build.project },
+        { id: build.id, data: { status: build.status } },
+      );
       return Response.json({ ok: true });
     }),
   ],
 });
 ```
 
-eve gives the model `subscribe`, `get_subscription` and `stop_subscription`. `subscribe` takes the channel's `inputSchema` and a `ttlMs`. A subscription lives in a durable workflow run that outlasts the turn that created it.
+eve gives the model `subscribe`, `get_subscription` and `stop_subscription`. `subscribe` lists each declared event as `<channel>.<event>: <description>`, and takes the channel, the event, that event's `inputSchema` and a `ttlMs`. A subscription lives in a durable workflow run that outlasts the turn that created it.
 
-- `onSubscribe` runs when the model subscribes, as the subscribing session. Authorize the request there, open anything you need upstream, and return the `key` that `emit` addresses events to. Throwing refuses the subscription and the model sees the message.
-- `onUnsubscribe` runs once when a subscription ends, to close what `onSubscribe` opened.
-- `onEvent` runs once per subscription for each occurrence, as the subscriber, and returns the message the session receives, or nothing to drop the occurrence. Without it the session receives the event's `data` as JSON.
-- `emit(key, { id, data })` reaches every session subscribed to `key`. `id` identifies the occurrence, so emitting the same one again reaches each subscriber once. It resolves `true` when a subscription holds the key.
+- Each entry in `subscriptions` is an event the model may subscribe to. The `description` tells the model what the event reports, and `inputSchema` is the JSON Schema of the input that identifies what to watch. eve validates the model's input against it before it starts the subscription.
+- `emit(event, input, { id, data })` reaches every session subscribed to that `event` with an equal `input`. String values compare without regard to case, so `{ project: "Web" }` and `{ project: "web" }` reach the same subscribers. `id` identifies the occurrence, so emitting the same one again reaches each subscriber once. It resolves `true` when a subscription holds the event and input.
+- `onEvent` runs once per subscription for each occurrence, as the subscriber, and returns the message the session receives, or nothing to drop the occurrence. Without it the session receives the occurrence's `data` as JSON.
 - The message is queued in the subscribing session and runs under the auth it had when it subscribed. The caller of the route never supplies it.
 
 ## Cross-channel hand-off

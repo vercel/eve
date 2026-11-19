@@ -69,6 +69,7 @@ const binding: SubscriptionBinding = {
   source: {
     kind: "channel",
     name: "github",
+    event: "checks_finished",
     key: "vercel/eve#7",
     input: { pull: 7 },
     ttlMs: null,
@@ -82,15 +83,16 @@ const bundleWith = (subscriptions: object | undefined) => ({
   compiledArtifactsSource: { kind: "disk", appRoot: "/virtual" },
   resolvedAgent: { channels: [{ name: "github", definition: { subscriptions } }] },
 });
-const useSubscriptions = (
-  subscriptions: object | undefined,
-  auth: SessionAuthContext | null = null,
-) => {
+const useDeclared = (subscriptions: object | undefined, auth: SessionAuthContext | null = null) => {
   const ctx = new ContextContainer();
   ctx.setVirtualContext(SessionAgentKey, { compiled: bundleWith(subscriptions) } as never);
   ctx.setVirtualContext(AuthKey, auth);
   mocks.context.current = ctx;
 };
+const useSubscriptions = (
+  declaration: object | undefined,
+  auth: SessionAuthContext | null = null,
+) => useDeclared(declaration === undefined ? undefined : { checks_finished: declaration }, auth);
 const delivery = (id: string, data: Record<string, unknown> = { id }) => ({
   binding,
   serializedContext: {},
@@ -119,7 +121,7 @@ beforeEach(() => {
   });
   mocks.readFirstPublished.mockReset();
   mocks.readFirstPublished.mockResolvedValue({ kind: "value", value: { joined: true } });
-  useSubscriptions({ description: "d", inputSchema: {}, onSubscribe: () => ({ key: "k" }) });
+  useSubscriptions({ description: "d", inputSchema: {} });
 });
 
 it("sends onEvent's message queued, as the subscriber, with an idempotency key per binding and event", async () => {
@@ -138,8 +140,8 @@ it("sends onEvent's message queued, as the subscriber, with an idempotency key p
     subscription: {
       id: "binding-1",
       channelName: "github",
+      event: "checks_finished",
       input: { pull: 7 },
-      key: "vercel/eve#7",
       sessionId: "session-1",
     },
   });
@@ -188,6 +190,14 @@ it("sends nothing when onEvent returns undefined", async () => {
 it("sends nothing once the channel no longer has subscriptions", async () => {
   useSubscriptions(undefined);
   await dispatchSubscriptionStep(delivery("e1"));
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("sends nothing once the channel no longer declares the subscribed event", async () => {
+  const onEvent = vi.fn(() => "Checks finished");
+  useDeclared({ pull_merged: { onEvent } });
+  await dispatchSubscriptionStep(delivery("e1"));
+  expect(onEvent).not.toHaveBeenCalled();
   expect(mocks.send).not.toHaveBeenCalled();
 });
 

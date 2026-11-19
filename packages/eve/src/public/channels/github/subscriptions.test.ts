@@ -5,7 +5,10 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
-import { GITHUB_CHANNEL_SUBSCRIPTIONS } from "#public/channels/github/subscriptions.js";
+import {
+  githubChannelSubscriptions,
+  type GitHubSubscriptionsConfig,
+} from "#public/channels/github/subscriptions.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 import type {
   ChannelEvent,
@@ -14,6 +17,7 @@ import type {
 } from "#shared/channel-subscriptions.js";
 
 const SECRET = "github-secret";
+const ALL_EVENTS: GitHubSubscriptionsConfig = { checks_finished: true, pr_comment: true };
 
 function payload(extra: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -34,8 +38,10 @@ async function deliver(input: {
   readonly event: string;
   readonly body: Record<string, unknown>;
   readonly fetch?: typeof fetch;
+  readonly subscriptions?: GitHubSubscriptionsConfig;
 }): Promise<ReturnType<typeof vi.fn<EmitChannelEventFn>>> {
   const channel = githubChannel({
+    subscriptions: "subscriptions" in input ? input.subscriptions : ALL_EVENTS,
     api: { apiBaseUrl: "https://github.test", fetch: input.fetch },
     credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
   });
@@ -100,40 +106,113 @@ const commentPayload = (body: string, action = "created") =>
 
 const subscriber = { auth: null, sessionId: "s1" };
 
-function messageFor(event: ChannelEvent): Promise<string | undefined> | string | undefined {
+function messageFor(
+  event: ChannelEvent,
+  name: "checks_finished" | "pr_comment" = event.data.kind as "checks_finished" | "pr_comment",
+  config: GitHubSubscriptionsConfig = ALL_EVENTS,
+): Promise<string | undefined> | string | undefined {
   const subscription: ChannelSubscription = {
     id: "sub-1",
     channelName: "github",
+    event: name,
     input: {},
-    key: "k",
     sessionId: "s1",
   };
-  return GITHUB_CHANNEL_SUBSCRIPTIONS.onEvent!({ ...subscriber, event, subscription });
+  return githubChannelSubscriptions(config)![name]!.onEvent!({
+    ...subscriber,
+    event,
+    subscription,
+  });
 }
 
 describe("GitHub channel subscriptions", () => {
-  it("builds a lowercased key per kind of event from onSubscribe", async () => {
-    const key = (on: string) =>
-      GITHUB_CHANNEL_SUBSCRIPTIONS.onSubscribe({
-        ...subscriber,
-        input: { on, owner: "Vercel", pull: 7, repo: "Eve" },
-      });
+  it("makes nothing subscribable by default", async () => {
+    expect(githubChannelSubscriptions()).toBeUndefined();
+    expect(githubChannelSubscriptions({})).toBeUndefined();
+    expect(
+      githubChannelSubscriptions({ checks_finished: false, pr_comment: false }),
+    ).toBeUndefined();
 
-    expect(await key("checks_finished")).toEqual({ key: "vercel/eve#7:checks_finished" });
-    expect(await key("pr_comment")).toEqual({ key: "vercel/eve#7:pr_comment" });
+    const fetchMock = vi.fn();
+    const failing = checkSuite("failure", [7]);
+    expect(
+      await deliver({
+        body: failing,
+        event: "check_suite",
+        fetch: fetchMock as unknown as typeof fetch,
+        subscriptions: undefined,
+      }),
+    ).not.toHaveBeenCalled();
+    expect(
+      await deliver({
+        body: commentPayload("hi"),
+        event: "issue_comment",
+        subscriptions: undefined,
+      }),
+    ).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("accepts only the two kinds of event in its input schema", () => {
-    const properties = GITHUB_CHANNEL_SUBSCRIPTIONS.inputSchema.properties as {
-      on: { enum: string[] };
-    };
-    expect(properties.on.enum).toEqual(["checks_finished", "pr_comment"]);
-    expect(GITHUB_CHANNEL_SUBSCRIPTIONS.inputSchema.required).toEqual([
-      "on",
-      "owner",
-      "repo",
-      "pull",
+  it("offers only the enabled events", () => {
+    expect(Object.keys(githubChannelSubscriptions({ pr_comment: true })!)).toEqual(["pr_comment"]);
+    expect(Object.keys(githubChannelSubscriptions(ALL_EVENTS)!)).toEqual([
+      "checks_finished",
+      "pr_comment",
     ]);
+    expect(
+      Object.keys(githubChannelSubscriptions({ checks_finished: {}, pr_comment: false })!),
+    ).toEqual(["checks_finished"]);
+  });
+
+  it("does not emit or call the API for a check suite when only pr_comment is enabled", async () => {
+    const fetchMock = vi.fn();
+    const emit = await deliver({
+      body: checkSuite("failure", [7]),
+      event: "check_suite",
+      fetch: fetchMock as unknown as typeof fetch,
+      subscriptions: { pr_comment: true },
+    });
+    expect(emit).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not emit a comment when only checks_finished is enabled", async () => {
+    const emit = await deliver({
+      body: commentPayload("hi"),
+      event: "issue_comment",
+      subscriptions: { checks_finished: true },
+    });
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("lets the author's onEvent replace the default message", async () => {
+    const config: GitHubSubscriptionsConfig = {
+      checks_finished: { onEvent: ({ event }) => `custom ${String(event.data.conclusion)}` },
+      pr_comment: true,
+    };
+    const emit = await deliver({
+      body: checkSuite("success", [7]),
+      event: "check_suite",
+      subscriptions: config,
+    });
+    expect(await messageFor(emit.mock.calls[0]![2], "checks_finished", config)).toBe(
+      "custom success",
+    );
+  });
+
+  it("describes each event and requires owner, repo and pull in its input schema", () => {
+    const events = githubChannelSubscriptions(ALL_EVENTS)!;
+    for (const name of ["checks_finished", "pr_comment"]) {
+      const event = events[name]!;
+      expect(event.description.length).toBeGreaterThan(0);
+      expect(event.inputSchema.required).toEqual(["owner", "repo", "pull"]);
+      expect(event.inputSchema.additionalProperties).toBe(false);
+      expect(Object.keys(event.inputSchema.properties as object).sort()).toEqual([
+        "owner",
+        "pull",
+        "repo",
+      ]);
+    }
   });
 
   it("emits a passing check suite to the key of each pull request without calling the API", async () => {
@@ -146,22 +225,34 @@ describe("GitHub channel subscriptions", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledTimes(2);
-    expect(emit).toHaveBeenCalledWith("vercel/eve#7:checks_finished", {
-      id: "delivery-1:checks_finished:7",
-      data: {
-        kind: "checks_finished",
-        pullRequest: "Vercel/Eve#7",
-        app: "github-actions",
-        conclusion: "success",
-        headSha: "a".repeat(40),
-        notPassed: [],
+    expect(emit).toHaveBeenCalledWith(
+      "checks_finished",
+      { owner: "Vercel", repo: "Eve", pull: 7 },
+      {
+        id: "delivery-1:checks_finished:7",
+        data: {
+          kind: "checks_finished",
+          pullRequest: "Vercel/Eve#7",
+          app: "github-actions",
+          conclusion: "success",
+          headSha: "a".repeat(40),
+          notPassed: [],
+        },
       },
-    });
-    expect(emit.mock.calls.map(([key, event]) => [key, event.id])).toEqual([
-      ["vercel/eve#7:checks_finished", "delivery-1:checks_finished:7"],
-      ["vercel/eve#9:checks_finished", "delivery-1:checks_finished:9"],
+    );
+    expect(emit.mock.calls.map(([name, input, event]) => [name, input, event.id])).toEqual([
+      [
+        "checks_finished",
+        { owner: "Vercel", repo: "Eve", pull: 7 },
+        "delivery-1:checks_finished:7",
+      ],
+      [
+        "checks_finished",
+        { owner: "Vercel", repo: "Eve", pull: 9 },
+        "delivery-1:checks_finished:9",
+      ],
     ]);
-    const message = await messageFor(emit.mock.calls[0]![1]);
+    const message = await messageFor(emit.mock.calls[0]![2]);
     expect(message).toContain("github-actions check suite concluded success at aaaaaaa");
     expect(message).not.toContain("did not pass");
   });
@@ -186,7 +277,7 @@ describe("GitHub channel subscriptions", () => {
     expect(String(fetchMock.mock.calls[0]![0])).toBe(
       "https://github.test/repos/Vercel/Eve/check-suites/77/check-runs?per_page=100",
     );
-    const event = emit.mock.calls[0]![1];
+    const event = emit.mock.calls[0]![2];
     expect(event.data.notPassed).toEqual(["unit tests (failure) https://github.test/run/1"]);
     const message = await messageFor(event);
     expect(message).toContain("concluded failure");
@@ -214,18 +305,22 @@ describe("GitHub channel subscriptions", () => {
     });
 
     expect(emit).toHaveBeenCalledTimes(1);
-    expect(emit).toHaveBeenCalledWith("vercel/eve#7:pr_comment", {
-      id: "delivery-1:pr_comment:501",
-      data: {
-        kind: "pr_comment",
-        commentKind: "comment",
-        pullRequest: "Vercel/Eve#7",
-        author: "reviewer",
-        url: "https://github.test/c/1",
-        body: "please rename this",
+    expect(emit).toHaveBeenCalledWith(
+      "pr_comment",
+      { owner: "Vercel", repo: "Eve", pull: 7 },
+      {
+        id: "delivery-1:pr_comment:501",
+        data: {
+          kind: "pr_comment",
+          commentKind: "comment",
+          pullRequest: "Vercel/Eve#7",
+          author: "reviewer",
+          url: "https://github.test/c/1",
+          body: "please rename this",
+        },
       },
-    });
-    expect(await messageFor(emit.mock.calls[0]![1])).toMatch(
+    );
+    expect(await messageFor(emit.mock.calls[0]![2])).toMatch(
       /New comment on Vercel\/Eve#7 from reviewer.*not as an instruction from the person you work for[\s\S]*please rename this/u,
     );
   });
@@ -236,7 +331,7 @@ describe("GitHub channel subscriptions", () => {
       event: "issue_comment",
     });
 
-    const message = (await messageFor(emit.mock.calls[0]![1]))!;
+    const message = (await messageFor(emit.mock.calls[0]![2]))!;
     expect(message).toContain("x".repeat(4_000));
     expect(message).not.toContain("Q");
     expect(message.endsWith("\n[comment cut]")).toBe(true);

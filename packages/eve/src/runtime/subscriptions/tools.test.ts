@@ -5,7 +5,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema } from "#tools/schema.js";
-import { channelSubscriptionId } from "./id.js";
+import { channelEventKey, channelSubscriptionId } from "./id.js";
 import type { OpenedSubscription, SubscriptionBinding } from "./state.js";
 
 const host = vi.hoisted(() => ({
@@ -47,14 +47,13 @@ const slackSchema = {
   properties: { thread: { type: "string" } },
 };
 
-const onSubscribe = vi.fn();
 const channelsOf = (...entries: readonly [string, unknown][]) =>
   entries.map(([name, subscriptions]) => ({ name, definition: { subscriptions } })) as never;
-const github = {
-  description: "Watch a pull request.",
+const checksFinished = {
+  description: "Watch a pull request until its checks finish.",
   inputSchema: githubSchema,
-  onSubscribe,
 };
+const github = { checks_finished: checksFinished };
 const channels = channelsOf(["github", github]);
 
 const authOf = (id: string) =>
@@ -81,8 +80,13 @@ const call = (name: string, input: unknown) => {
   return tool.execute(input, {});
 };
 
+const githubInput = { owner: "vercel", pull: 7 };
 const subscribeInput = {
-  subscription: { channel: "github", input: { owner: "vercel", pull: 7 } },
+  subscription: {
+    channel: "github",
+    event: "checks_finished",
+    input: { owner: "vercel", pull: 7 },
+  },
   ttlMs: 120_000,
 };
 const subscribeAs = (sessionId: string, user: string, input: unknown = subscribeInput) =>
@@ -98,8 +102,6 @@ beforeEach(() => {
   host.find = undefined;
   host.start.mockReset();
   host.retire.mockReset();
-  onSubscribe.mockReset();
-  onSubscribe.mockResolvedValue({ key: "vercel/eve#7:checks_finished" });
   host.start.mockImplementation(async (binding: SubscriptionBinding) => {
     host.bindings.set(binding.id, binding);
     return opened(binding);
@@ -116,11 +118,12 @@ it("offers subscribe, get and stop, or nothing when no channel has subscriptions
   expect(channelSubscriptionTools([{ name: "slack", definition: {} }] as never)).toBeNull();
 });
 
-it("gives the subscribe schema one anyOf entry per channel with subscriptions", () => {
+it("gives the subscribe schema one anyOf entry per declared event", () => {
   const two = channelsOf(
     ["github", github],
-    ["slack", { ...github, inputSchema: slackSchema }],
+    ["slack", { thread_replied: { description: "Watch a thread.", inputSchema: slackSchema } }],
     ["email", undefined],
+    ["empty", {}],
   );
   const tool = channelSubscriptionTools(two)!.subscribe as unknown as { inputSchema: never };
   const parsed = serializeInputSchema(tool.inputSchema) as unknown as {
@@ -132,29 +135,30 @@ it("gives the subscribe schema one anyOf entry per channel with subscriptions", 
     { const: "github" },
     { const: "slack" },
   ]);
+  expect(entries.map((entry) => entry.properties.event)).toEqual([
+    { const: "checks_finished" },
+    { const: "thread_replied" },
+  ]);
   expect(entries[0]!.properties.input).toEqual(githubSchema);
   expect(entries[1]!.properties.input).toEqual(slackSchema);
 });
 
-it("runs onSubscribe as the caller and starts a binding carrying key, ttl and principal", async () => {
+it("starts a binding carrying the event, the derived key, ttl and principal", async () => {
   const result = await subscribeAs("s1", "rui");
 
-  expect(onSubscribe).toHaveBeenCalledWith({
-    auth: authOf("rui"),
-    sessionId: "s1",
-    input: { owner: "vercel", pull: 7 },
-  });
+  const key = channelEventKey("checks_finished", { owner: "vercel", pull: 7 });
   const executionPrincipal = (host.start.mock.calls[0]![0] as SubscriptionBinding)
     .executionPrincipal;
   const id = channelSubscriptionId({
     channelName: "github",
-    key: "vercel/eve#7:checks_finished",
+    key,
     sessionId: "s1",
     executionPrincipal,
   });
   expect(result).toMatchObject({
     id,
     channel: "github",
+    event: "checks_finished",
     input: { owner: "vercel", pull: 7 },
     status: "active",
     expiresAt: null,
@@ -164,7 +168,8 @@ it("runs onSubscribe as the caller and starts a binding carrying key, ttl and pr
     source: {
       kind: "channel",
       name: "github",
-      key: "vercel/eve#7:checks_finished",
+      event: "checks_finished",
+      key,
       input: { owner: "vercel", pull: 7 },
       ttlMs: 120_000,
     },
@@ -174,30 +179,81 @@ it("runs onSubscribe as the caller and starts a binding carrying key, ttl and pr
   expect(executionPrincipal).toEqual(expect.any(String));
 });
 
-it("rejects input that does not match the channel's schema before onSubscribe runs", async () => {
+it("validates the input and derives the key emit derives, ignoring string case", async () => {
+  await subscribeAs("s1", "rui", {
+    subscription: {
+      channel: "github",
+      event: "checks_finished",
+      input: { owner: "Vercel", pull: 7 },
+    },
+    ttlMs: null,
+  });
+  await subscribeAs("s1", "rui");
+
+  const [upper, lower] = host.start.mock.calls.map(
+    ([binding]) => binding as SubscriptionBinding & { source: { key: string; input: unknown } },
+  );
+  expect(upper!.source.input).toEqual({ owner: "Vercel", pull: 7 });
+  expect(upper!.source.key).toBe(lower!.source.key);
+  expect(upper!.source.key).toBe(channelEventKey("checks_finished", { owner: "vercel", pull: 7 }));
+  expect(upper!.id).toBe(lower!.id);
+
   await expect(
     subscribeAs("s1", "rui", {
-      subscription: { channel: "github", input: { owner: "v" } },
+      subscription: { channel: "github", event: "checks_finished", input: { owner: "v" } },
       ttlMs: null,
     }),
-  ).rejects.toThrow("does not match the channel's schema");
-  expect(onSubscribe).not.toHaveBeenCalled();
+  ).rejects.toThrow("does not match the event's schema");
+  expect(host.start).toHaveBeenCalledTimes(2);
+});
+
+it("offers one anyOf branch per event of a channel and refuses an event it does not declare", async () => {
+  const two = channelsOf([
+    "github",
+    {
+      checks_finished: checksFinished,
+      pull_merged: { description: "Watch a merge.", inputSchema: githubSchema },
+    },
+  ]);
+  const tools = channelSubscriptionTools(two)!;
+  const subscribeTool = tools.subscribe as unknown as {
+    description: string;
+    inputSchema: never;
+    execute(input: unknown, options: object): Promise<unknown>;
+  };
+  const parsed = serializeInputSchema(subscribeTool.inputSchema) as unknown as {
+    properties: { subscription: { anyOf: { properties: Record<string, unknown> }[] } };
+  };
+  expect(parsed.properties.subscription.anyOf.map((entry) => entry.properties.event)).toEqual([
+    { const: "checks_finished" },
+    { const: "pull_merged" },
+  ]);
+  expect(subscribeTool.description).toContain(
+    "github.checks_finished: Watch a pull request until its checks finish.",
+  );
+  expect(subscribeTool.description).toContain("github.pull_merged: Watch a merge.");
+
+  await expect(
+    inSession("s1", authOf("rui"), () =>
+      subscribeTool.execute(
+        {
+          subscription: { channel: "github", event: "pull_closed", input: githubInput },
+          ttlMs: null,
+        },
+        {},
+      ),
+    ),
+  ).rejects.toThrow('Channel "github" offers no subscription to "pull_closed".');
   expect(host.start).not.toHaveBeenCalled();
 });
 
 it("refuses a channel that offers no subscriptions", async () => {
   await expect(
     subscribeAs("s1", "rui", {
-      subscription: { channel: "slack", input: {} },
+      subscription: { channel: "slack", event: "checks_finished", input: {} },
       ttlMs: null,
     }),
-  ).rejects.toThrow('Channel "slack" offers no subscriptions.');
-  expect(onSubscribe).not.toHaveBeenCalled();
-});
-
-it("propagates the error onSubscribe throws and starts nothing", async () => {
-  onSubscribe.mockRejectedValue(new Error("not allowed on this repository"));
-  await expect(subscribeAs("s1", "rui")).rejects.toThrow("not allowed on this repository");
+  ).rejects.toThrow('Channel "slack" offers no subscription to "checks_finished".');
   expect(host.start).not.toHaveBeenCalled();
 });
 
@@ -254,6 +310,7 @@ it("reports an opened subscription as active with its expiry", async () => {
   ).resolves.toEqual({
     id,
     channel: "github",
+    event: "checks_finished",
     input: { owner: "vercel", pull: 7 },
     status: "active",
     expiresAt: "2030-01-01T00:00:00.000Z",

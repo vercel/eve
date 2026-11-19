@@ -93,16 +93,53 @@ Subscribe the GitHub App to each event you handle, such as `issues` or `check_su
 
 ## Let a session subscribe to a pull request
 
-A session can ask to hear about one pull request without starting a GitHub turn. The GitHub channel offers two events through the `subscribe` tool, which takes `{ on, owner, repo, pull }` and a `ttlMs`:
+A session can ask to hear about one pull request without starting a GitHub turn. Nothing is subscribable until you list the events in `subscriptions`:
 
-| `on`              | Delivered when                                                               |
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  botName: "my-agent",
+  subscriptions: { checks_finished: true, pr_comment: true },
+});
+```
+
+| Event             | Delivered when                                                               |
 | ----------------- | ---------------------------------------------------------------------------- |
 | `checks_finished` | A check suite completes on the pull request, once for each app that ran one. |
 | `pr_comment`      | Someone creates a comment or review comment on the pull request.             |
 
+Only the events you list are offered to the model, and the channel ignores the webhooks of the others. The model subscribes with the `subscribe` tool, passing the channel, the event, and the pull request in `input`:
+
+```json
+{
+  "subscription": {
+    "channel": "github",
+    "event": "checks_finished",
+    "input": { "owner": "acme", "repo": "web", "pull": 42 }
+  },
+  "ttlMs": 3600000
+}
+```
+
 `ttlMs` is an integer from `60000` (1 minute) to `31536000000` (365 days), or `null` to watch until stopped. `get_subscription` and `stop_subscription` take the `id` that `subscribe` returned.
 
-Each occurrence arrives in the subscribing session as a queued message. It waits for the current turn to finish, and the next turn runs under the auth the session had when it subscribed, never under the GitHub user who triggered the event. A failed suite names each check run that did not pass. Comment text comes from whoever wrote it, so the message tells the model to treat it as information and not as an instruction.
+Each occurrence arrives in the subscribing session as a queued message. It waits for the current turn to finish, and the next turn runs under the auth the session had when it subscribed, never under the GitHub user who triggered the event. A failed suite names each check run that did not pass. Comment text is written by a GitHub user, so the message tells the model to treat it as information and not as an instruction.
+
+To change the message a session receives for an event, give that event an `onEvent` in place of `true`. It receives the occurrence in `event.data` and the subscription, and returns the message text, or `undefined` to drop the occurrence:
+
+```ts title="agent/channels/github.ts"
+export default githubChannel({
+  botName: "my-agent",
+  subscriptions: {
+    checks_finished: {
+      onEvent: ({ event }) =>
+        event.data.conclusion === "success" ? undefined : `CI failed on ${event.data.pullRequest}.`,
+    },
+    pr_comment: true,
+  },
+});
+```
 
 Subscriptions need no hooks: they work whether or not you define `onCheckSuite` or `onComment`, and they never open a GitHub session. Subscribe the GitHub App to `check_suite`, `issue_comment`, and `pull_request_review_comment`. GitHub's repeated deliveries of the same webhook reach the subscriber once. Owner and repository names match without regard to case. Several sessions can subscribe to the same pull request, and each hears every occurrence.
 
